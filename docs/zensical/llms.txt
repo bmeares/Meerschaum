@@ -1,15 +1,17 @@
 # Meerschaum Documentation
 
-> Craft elegant data pipes with Meerschaum.
+> Incremental data pipelines in SQL and Python.
 
 ## Home
-- [Home](https://meerschaum.io/): Want to use Meerschaum in your code? Check out the <a href="https://docs.meerschaum.io">package documentation</a>!
+- [Keep your data flowing.](https://meerschaum.io/): Turn a query or a Python function into a Pipe. Sync new data, connect your transformations, and see what happened — from your terminal, Python, or the web.
 
 ## Get Started
-- [🛠️ Setup](https://meerschaum.io/get-started/): Run Meerschaum commands with mrsm (or python -m meerschaum if ~/.local/bin/ isn't in your PATH).
-- [🏗️ Building a Pipe](https://meerschaum.io/get-started/bootstrap/): Pipes fetch and sync data from connectors. For this example, we will be using the connector plugin:noaa from the data plugin noaa. Type the commands below to bootstrap an example pipe.
-- [📦️ Compose Projects](https://meerschaum.io/get-started/compose-projects/): Now that you've got the idea behind pipes, let's write our own plugins and put together a project using <a href="/reference/compose">Meerschaum Compose</a>.
-- [🖥️ Web Console](https://meerschaum.io/get-started/start-api/): You can use Meerschaum from its web interface. From within a mrsm shell, type to commands below to see how:
+- [Install and set up](https://meerschaum.io/get-started/): Your first Pipe needs Python and a few local rows. No database server or Docker setup is required.
+- [Your first Pipe](https://meerschaum.io/get-started/bootstrap/): A Pipe connects a data source to a table you can keep up to date. Let's collect temperature readings in a local SQLite database.
+- [Sync new rows](https://meerschaum.io/get-started/incremental-sync/): Your first Pipe already has one reading. Add another to its source:
+- [Your first Pipeline](https://meerschaum.io/get-started/pipelines/): One Pipe collects readings. Another converts them. A Pipeline runs those steps in the right order and gives the workflow a name.
+- [Explore the console](https://meerschaum.io/get-started/start-api/): See the same Pipes and Pipeline from your browser. Continue in the workspace from Your first Pipeline.
+- [Save a project](https://meerschaum.io/get-started/compose-projects/): A Compose project keeps your Pipes, connectors, and plugins in one folder. Put it in version control and run the same workflow again.
 
 ## Reference
 - [📚 Meerschaum Reference Wiki](https://meerschaum.io/reference/): So you've just completed the Getting Started guide ― congratulations! 🥳 "What's next?", you might ask.
@@ -63,13 +65,15 @@
 - [🌳 Environment Variables](https://meerschaum.io/reference/environment/): You can manage the behavior of Meerschaum and emulate multiple installations with environment variables.
 - [🩺 Troubleshooting](https://meerschaum.io/reference/troubleshooting/): A symptom-driven guide to the most common Meerschaum issues. Each entry follows Symptom → Cause → Fix.
 - [⬆️ Migrating to v5](https://meerschaum.io/reference/migrating-to-v5/): Meerschaum v5 is a rewrite of the core, the CLI, jobs, compose, the HTTP API and the MCP server in Rust. The web console stays the Plotly Dash app of v4, served by the Python package. The meerschaum P
+- [📈 Measured Performance](https://meerschaum.io/reference/performance/): Meerschaum 5 moves the data core to Rust. This comparison follows the same workloads across 3.5.2, 4.1.4, and 5.0.0rc2.
 - [📖 Glossary](https://meerschaum.io/reference/glossary/): This page defines the core Meerschaum domain terms in one place. Each entry links to its reference documentation where one exists. Other pages can deep-link to any term by its heading anchor, e.g. #up
 - [💼 Portable](https://meerschaum.io/reference/meerschaum-portable/): The standalone "portable" archive (mrsm-full- / mrsm-minimal-, built with pyoxidizer) is no longer produced. This page remains so old links keep working.
 
 ## Tutorials
-- [📚 Tutorials](https://meerschaum.io/tutorials/): Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the video tutorials if you're more of a visual learner.
+- [Learn by building](https://meerschaum.io/tutorials/): Start small, then add one idea at a time. The beginner path uses local SQLite data and works without an external API or database server.
 
 ## News
+- [Meerschaum 5 preview](https://meerschaum.io/news/v5/): A new foundation for the same small, useful idea: keep your data flowing.
 - [🪵 Changelog](https://meerschaum.io/news/changelog/): Meerschaum 5 is a rewrite of the core in Rust: the data kernel, the sql: / valkey: / api: connectors, the Syncing Engine, jobs, compose, the HTTP API, the MCP server and the mrsm CLI and shell. The me
 - [📢 Announcements](https://meerschaum.io/news/announcements/): > 27 June 2022
 - [🌠 To-Do / Wish List](https://meerschaum.io/news/to-do/): Below are some ongoing tasks I have planned for Meerschaum. This is not an exhaustive list, and if you would like to contribute a feature idea or point out a bug, please start a discussion or open an 

@@ -75,3 +75,34 @@
 .md-search {
   color: #ffffff;
 }
+
+/* A compact learning path with room for real examples. */
+.md-banner a, .md-banner a:hover { color: #fff; }
+.md-banner__inner { text-align: center; }
+.md-typeset h1 { color: var(--md-default-fg-color); font-weight: 750; letter-spacing: -.035em; }
+.md-typeset h2 { font-weight: 650; letter-spacing: -.02em; }
+.mrsm-hero { max-width: 48rem; padding: 2rem 0 1.25rem; }
+.mrsm-hero h1 { font-size: clamp(2rem, 5vw, 3.6rem); line-height: 1.08; margin: .4rem 0 .7rem; }
+.mrsm-hero > p:not(.mrsm-eyebrow):not(.mrsm-hero-note) { max-width: 40rem; font-size: 1.05rem; }
+.mrsm-eyebrow { color: #a83e22; font-size: .65rem; font-weight: 750; letter-spacing: .12em; }
+.mrsm-hero .md-button { margin: .35rem .3rem .35rem 0; border-radius: .35rem; }
+.mrsm-hero-note, .mrsm-caption { color: var(--md-default-fg-color--light); font-size: .75rem; }
+.mrsm-demo { max-width: 47rem; padding: 1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: .65rem; background: var(--md-code-bg-color); }
+.mrsm-demo .mrsm-eyebrow { margin-top: 0; }
+.mrsm-demo .mrsm-caption { margin-bottom: 0; }
+.mrsm-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin: 1.5rem 0; }
+.mrsm-card { padding: 1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: .55rem; }
+.mrsm-card h3 { margin-top: 0; font-size: .95rem; }
+.mrsm-card p { font-size: .8rem; }
+.mrsm-card p:last-child { margin-bottom: 0; font-weight: 600; }
+asciinema-player { display: block; max-width: 100%; min-width: 0; overflow: hidden; border-radius: .4rem; }
+.ap-player { max-width: 100%; }
+.md-typeset iframe { max-width: 100%; }
+.mrsm-benchmark { display: block; border: 1px solid var(--md-default-fg-color--lightest); border-radius: .5rem; }
+.mrsm-screenshot { border: 1px solid var(--md-default-fg-color--lightest); border-radius: .5rem; }
+@media (max-width: 700px) {
+  .mrsm-hero { padding-top: 1rem; }
+  .mrsm-hero .md-button { display: block; text-align: center; margin-right: 0; }
+  .mrsm-card-grid { grid-template-columns: 1fr; }
+  .mrsm-demo { padding: .6rem; }
+}

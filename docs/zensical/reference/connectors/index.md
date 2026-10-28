@@ -1,5 +1,3 @@
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 
 # 🔌 Connectors
 
@@ -13,7 +11,7 @@ The command `mrsm show connectors` will print out your defined connectors and th
 
 The terms **instance** and **repository** connectors refer to specific interfaces for connectors. When connecting to a Meerschaum instance, you use a standard `sql` or `api` connector, which expects to be able to access internal Meerschaum methods, such as retrieving users' and pipes' metadata.
 
-<img src="connectors_venn_diagram.png" alt="Meerschaum Connectors Venn Diagram" align="right">
+<img src="/assets/diagrams/connectors_venn_diagram.png" alt="Meerschaum Connectors Venn Diagram" align="right">
 
 !!! info
     Not all `sql` connections are instance connectors, but all `api` connectors are.

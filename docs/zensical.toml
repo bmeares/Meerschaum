@@ -1,20 +1,22 @@
 [project]
 site_name = "Meerschaum Documentation"
 site_url = "https://meerschaum.io"
-site_description = "Craft elegant data pipes with Meerschaum."
+site_description = "Incremental data pipelines in SQL and Python."
 site_author = "Bennett Meares"
 copyright = "&copy; 2026 Bennett Meares"
 docs_dir = "zensical"
 site_dir = "site"
-dev_addr = "localhost:8000"
+dev_addr = "127.0.0.1:18784"
 repo_url = "https://github.com/bmeares/Meerschaum"
 nav = [
   {"Home" = "index.md"},
   {"Get Started" = [
-    {"🛠️ Setup" = "get-started/index.md"},
-    {"🏗️ Building a Pipe" = "get-started/bootstrap.md"},
-    {"📦️ Compose Projects" = "get-started/compose-projects.md"},
-    {"🖥️ Web Console" = "get-started/start-api.md"},
+    {"Install and set up" = "get-started/index.md"},
+    {"Your first Pipe" = "get-started/bootstrap.md"},
+    {"Sync new rows" = "get-started/incremental-sync.md"},
+    {"Your first Pipeline" = "get-started/pipelines.md"},
+    {"Explore the console" = "get-started/start-api.md"},
+    {"Save a project" = "get-started/compose-projects.md"},
   ]},
   {"Reference" = [
     "reference/index.md",
@@ -84,23 +86,31 @@ nav = [
     {"🌳 Environment Variables" = "reference/environment.md"},
     {"🩺 Troubleshooting" = "reference/troubleshooting.md"},
     {"⬆️ Migrating to v5" = "reference/migrating-to-v5.md"},
+    {"📈 Measured Performance" = "reference/performance.md"},
     {"📖 Glossary" = "reference/glossary.md"},
     {"💼 Portable" = "reference/meerschaum-portable.md"},
   ]},
   {"Tutorials" = "tutorials/index.md"},
   {"Docs" = "https://docs.meerschaum.io"},
   {"News" = [
+    {"Meerschaum 5 preview" = "news/v5.md"},
     {"🪵 Changelog" = "news/changelog.md"},
     {"📢 Announcements" = "news/announcements.md"},
     {"🌠 To-Do / Wish List" = "news/to-do.md"},
     {"🤗 Acknowledgements" = "news/acknowledgements.md"},
   ]},
 ]
-extra_css = ["stylesheets/extra.css"]
+extra_css = ["assets/vendor/asciinema-player.css", "stylesheets/extra.css"]
+extra_javascript = ["assets/vendor/asciinema-player.min.js", "assets/js/media.js"]
 
 [project.theme]
 features = [
   "navigation.tabs",
+  "navigation.instant",
+  "navigation.instant.progress",
+  "navigation.footer",
+  "navigation.top",
+  "announce.dismiss",
   "navigation.path",
   "navigation.prune",
   "navigation.indexes",
@@ -111,7 +121,7 @@ logo = "assets/logo_500x500.png"
 favicon = "assets/logo.ico"
 palette.primary = "deep orange"
 palette.accent = "amber"
-custom_dir = "zensical/overrides"
+custom_dir = "overrides"
 
 [project.theme.icon]
 repo = "fontawesome/brands/github"
@@ -122,6 +132,9 @@ permalink = true
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
 

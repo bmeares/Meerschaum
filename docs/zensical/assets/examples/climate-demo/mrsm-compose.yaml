@@ -1,0 +1,34 @@
+project_name: climate-demo
+root_dir: ./root
+plugins_dir: ./plugins
+
+config:
+  meerschaum:
+    instance: sql:demo
+    connectors:
+      sql:
+        demo:
+          flavor: sqlite
+          database: climate.db
+
+sync:
+  pipes:
+    - connector: plugin:readings
+      metric: temperatures
+      columns:
+        datetime: ts
+        primary: id
+      dtypes:
+        ts: datetime
+    - connector: sql:demo
+      metric: fahrenheit
+      columns:
+        datetime: ts
+        primary: id
+      dtypes:
+        ts: datetime
+      parameters:
+        sql: |-
+          SELECT id, ts,
+                 ROUND(temperature * 9.0 / 5 + 32, 1) AS fahrenheit
+          FROM {{ Pipe('plugin:readings', 'temperatures', instance='sql:demo') }}

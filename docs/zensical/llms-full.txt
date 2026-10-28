@@ -1,11 +1,11 @@
 # Meerschaum Documentation
 
-> Craft elegant data pipes with Meerschaum.
+> Incremental data pipelines in SQL and Python.
 
 
 ---
 
-# Home
+# Keep your data flowing.
 
 Source: https://meerschaum.io/
 
@@ -14,719 +14,514 @@ hide:
   - navigation
   - toc
 ---
-<style>
-  .md-main__inner {
-    margin-top: 0;
-  }
-@media screen and (min-width: 76.1875em) {
-  .md-sidebar {
-    display: none;
-  }
-  #pip-button {
-    width: 20em;
-    font-size: 1.1rem;
-    float: left;
-    cursor: pointer;
-  }
-  #get-started-button {
-    font-size: 1.1rem;
-    width: 20em;
-    cursor: pointer;
-  }
-}
-@media screen and (max-width: 76.1875em) {
-  #pip-button {
-    font-size: 1.0rem;
-    width: 20em;
-    cursor: pointer;
-  }
-  #get-started-button {
-    font-size: 1.0rem;
-    width: 20em;
-    cursor: pointer;
-    margin-bottom: 20px;
-  }
-}
-  .test {
-    align: center;
-  }
 
-.center {
-    text-align: center;
-  }
+<div class="mrsm-hero" markdown>
 
-h1 {
-  display: none;
-}
+<p class="mrsm-eyebrow">MEERSCHAUM 5 · DOCUMENTATION PREVIEW</p>
 
-</style>
-<script type="text/javascript">
-  function copy_install_text(btn){
-    var inp = document.createElement('input');
-    document.body.appendChild(inp);
-    inp.value = "pip install meerschaum";
-    inp.select();
-    document.execCommand('copy',false);
-    inp.remove();
-    old_btn_text = btn.text;
-    btn.text = "Copied!";
-    window.setTimeout(() => {
-      btn.text = old_btn_text;
-    }, 2000);
-    return false;
-   }
-</script>
+# Keep your data flowing.
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<link rel="stylesheet" type="text/css" href="/assets/css/grid.css" />
-<script src="/assets/js/asciinema-player.js"></script>
+Turn a query or a Python function into a **Pipe**. Sync new data, connect your transformations, and see what happened — from your terminal, Python, or the web.
 
-<!-- <script src="https://platform.linkedin.com/badges/js/profile.js" async defer type="text/javascript"></script> -->
-<img src="assets/banner_1920x320.png" alt="Meerschaum Banner">
+[Build your first Pipe](get-started/){ .md-button .md-button--primary }
+[Explore what's new](news/v5/){ .md-button }
 
-<!-- # Welcome to the Meerschaum Documentation Home Page -->
+<p class="mrsm-hero-note">Start with a local SQLite file. Add a database or a plugin when you need one.</p>
 
-<!-- If you'd like to incorporate Meerschaum into your project, head over to [docs.meerschaum.io](https://docs.meerschaum.io) for technical API documentation of the `meerschaum` package. -->
-
-<p style="text-align:center; color:#666666; font-size: 1.2em"><i>Out-of-the-box ETL, easy to learn, and a pleasure to use!</i></p>
-
-<div class="grid-container center">
-  <div class="grid-child">
-    <a id="get-started-button" class="md-button md-button--primary" href="get-started">Get Started</a>
-  </div>
-  <div class="grid-child" >
-    <a id="pip-button" class="md-button" href="javascript:void(0)" style="font-family: monospace" onclick="copy_install_text(this)">$ pip install meerschaum<span class="twemoji">
-</a>
-  </div>
 </div>
 
-<div class="grid-container">
-  <div class="grid-child">
-    <h2>What is Meerschaum?</h2>
-    <p>Meerschaum is a platform for quickly creating and managing time-series data streams called <b><a href="/reference/pipes/">pipes</a></b>. With Meerschaum, you can have a data visualization stack running in minutes.</p>
-    <h2>Why Meerschaum?</h2>
-    <p>Two words: <i>Incremental updates</i>. Fetch the data you need, and Meerschaum will handle the rest.</p>
-    <p>If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.</p>
-    <p>Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing systems.</p>
+<div class="mrsm-demo" markdown>
 
-  </div>
-  <div class="grid-child">
-    <br>
-    <asciinema-player src="/assets/casts/demo.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
-  </div>
+<p class="mrsm-eyebrow">ONE PIPE. TWO SYNCS. NO DUPLICATES.</p>
+
+<asciinema-player src="/assets/casts/v5-first-pipe.cast" size="small" preload="true" rows="15" title="Sync a Pipe, inspect the data, then sync again"></asciinema-player>
+
+<p class="mrsm-caption">A real run of the <a href="get-started/bootstrap/">first-Pipe example</a>, recorded with 5.0.0rc15. Play it, then try it yourself.</p>
+
 </div>
 
-<h2>✨ Features</h2>
-<div class="grid-container">
-  <div class="grid-child">
+<div class="mrsm-card-grid" markdown>
 
-  <h3>Organize ETL Processes into <a href="/reference/pipes">Pipes</a></h3>
+<div class="mrsm-card" markdown>
 
-  <p>Meerschaum <a href="/reference/pipes">Pipes</a> are parametrized ETL processes that are tagged and organized into hierarchies to make scaling up a breeze.</p>
+### A small idea that grows
 
-  <img src="/assets/screenshots/show-pipes-fred.png"></img>
-  <br>
-  <img src="/assets/screenshots/show-pipes-chicken.png"></img>
+A Pipe remembers where its data belongs and how to fetch more. Keep the SQL and Python you already use.
 
-  <h3>Robust <a href="/reference/plugins/writing-plugins/">Plugin System</a></h3>
-  <p>Plugins make it easy to ingest any data source, add functionality to Meerschaum, and organize your utility scripts.</p>
-  <img src="/assets/screenshots/plugin-init.png"></img>
+[Meet Pipes →](reference/pipes/)
 
-
-  <h3>Clean Connector Management</h3>
-
-  <p>Define your connectors at any level: through the CLI, in your environment, or dynamically.</p>
-
-  ```bash
-  ### You can follow an interactive wizard.
-  mrsm bootstrap connector
-
-  ### Or define connectors in your environment.
-  export MRSM_SQL_BAZ='postgresql://foo:bar@localhost:5432/baz'
-  export MRSM_MONGODB_LOCAL='{
-    "uri": "mongodb://localhost:27017",
-    "database": "meerschaum"
-  }'
-  ```
-
-  ```python
-  ### Or you can build connectors on-the-fly in code.
-  import meerschaum as mrsm
-  conn = mrsm.get_connector('sql:demo', flavor='sqlite', database='/tmp/demo.db')
-  ```
-
-  <h3>Design, Develop, and Deploy with <a href="/reference/compose">Meerschaum Compose</a></h3>
-
-  <p>The <a href="/reference/compose">compose</a> workflow allows you to iterate with and version-control your pipes, making collaboration and maintainability much smoother.</p>
-  
-  <img src="/assets/screenshots/mrsm-compose-techslamneggs.png"></img>
-
-  </div>
-  <div class="grid-child">
-
-    <h3>Performant SQL Transformations</h3>
-
-    <p>SQL pipes with the same instance and source connector are synced in-place ― deltas are resolved entirely through SQL and nothing is loaded into RAM.</p>
-
-    <img src="/assets/screenshots/sql-inplace.png"></img>
-
-    <h4>Concurrency at its Finest</h4>
-
-    <p>Maximize your throughput by syncing multiple pipes in parallel.</p>
-
-    <img src="/assets/screenshots/sql-inplace-parallel.png"></img>
-
-    <h4>Elegant Chunking</h4>
-
-    <p>Calm your out-of-memory fears with automatic, parallelized chunking.</p>
-
-    <img src="/assets/screenshots/sql-chunks.png"></img>
-
-    <h3>Simple-Yet-Powerful API</h3>
-
-    Want to use Meerschaum in your code? Check out the <a href="https://docs.meerschaum.io">package documentation</a>!
-
-    ```python
-    import meerschaum as mrsm
-    conn = mrsm.get_connector("sql:demo", uri="sqlite:////tmp/demo.db")
-
-    pipe = mrsm.Pipe(
-        'foo', 'bar',
-        instance = conn,
-        columns = {'datetime': 'dt', 'id': 'id'},
-        dtypes = {'attrs': 'json'},
-    )
-    docs = [
-        {'dt': '2023-01-01', 'id': 1, 'val': 123.4},
-        {'dt': '2023-01-01', 'id': 2, 'val': 567.8},
-    ]
-    pipe.sync(docs)
-
-    docs = [
-        {'dt': '2023-01-01', 'id': 1, 'attrs': {'foo': 'bar'}},
-    ]
-    pipe.sync(docs)
-
-    df = pipe.get_data(params={'id': [1, 2]})
-    print(df)
-    #           dt  id    val           attrs
-    # 0 2023-01-01   1  123.4  {'foo': 'bar'}
-    # 1 2023-01-01   2  567.8            None
-    ```
-
-  <h3>Extensible Connectors Interface</h3>
-
-  Add custom connector types with the <a href="/reference/plugins/writing-plugins/#the-make_connector-decorator"><code class="highlight"><span class="nd">@make_connector</span></code> decorator</a>.
-
-  ```python
-  from meerschaum.connectors import make_connector, Connector
-  required = ['requests']
-
-  @make_connector
-  class NWSConnector(Connector):
-
-      REQUIRED_ATTRIBUTES = ['username', 'password']
-
-      def fetch(self, pipe, begin=None, end=None, **kw):
-          params = {}
-          begin = begin or pipe.get_sync_time()
-          if begin:
-              params['start'] = begin.isoformat()
-          if end:
-              params['end'] = end.isoformat()
-
-          stations = pipe.parameters.get('nws', {}).get('stations', [])
-          for station in stations:
-              url = f"https://api.weather.gov/stations/{station}/observations"
-              response = self.session.get(url, params=params)
-              yield [
-                  feature['properties']
-                  for feature in response.json()['features']
-              ]
-
-      @property
-      def session(self):
-          _sesh = self.__dict__.get('_session', None)
-          if _sesh is not None:
-              return _sesh
-          import requests
-          self._session = requests.Session()
-          self._session.auth = (self.username, self.password)
-          return self._session
-  ```
-
-  </div>
 </div>
 
-<h2>Video Tutorials</h2>
+<div class="mrsm-card" markdown>
 
-<div class="grid-container">
-  <div class="grid-child">
+### From steps to a Pipeline
 
-  <div style="text-align: center">
-    <iframe width="671" height="378" src="https://www.youtube.com/embed/VFFWe7B33Io" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-  </div>
+Connect transformations, preview the work, and run parents before their children. Save the whole workflow under a name.
 
+[Build a Pipeline →](get-started/pipelines/)
 
-  </div>
-  <div class="grid-child">
-
-  <div style="text-align: center">
-    <iframe width="672" height="378" src="https://www.youtube.com/embed/t9tFD4afSD4" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-  </div>
-
-  </div>
 </div>
 
-<div class="grid-container">
-  <div class="grid-child">
-  <h2>Support the Project</h2>
-    <p style="text-align: left">I work on Meerschaum in my free time, so if you enjoy the project and want to support its development, feel free to <a href="https://www.buymeacoffee.com/bmeares">buy me a coffee</a>! You can also support the project on my <a href="https://github.com/sponsors/bmeares">GitHub Sponsors page</a>.
-    </p>
-    <div class="center">
-      <!-- <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="bmeares" data-color="#5F7FFF" data-emoji="🍺"  data-font="Cookie" data-text="Buy me a beer" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00" ></script> -->
-    </div>
-  </div>
-  <div class="grid-child">
-    <h2>Consulting Services</h2>
-    <p>If you're looking to recruit my skills, you can hire my consulting services. Reach out on <a href="https://linkedin.com/in/bennettmeares">LinkedIn</a> to get in touch, or you can commission my help at my <a href="https://github.com/sponsors/bmeares">GitHub Sponsors page</a>.</p>
-  </div>
+<div class="mrsm-card" markdown>
+
+### A clear view of your work
+
+Browse data, edit a Pipe, inspect a Pipeline, and follow runs in the web console. Share access with your team.
+
+[Open the console →](get-started/start-api/)
+
 </div>
+
+</div>
+
+## Familiar tools. A faster foundation.
+
+Meerschaum 5 brings a Rust core, Polars DataFrames, and native database connectors to the Python and command-line workflow. Use [pandas](reference/pipes/reading/#dataframe-library) too, or return plain Python dictionaries with no DataFrame dependency.
+
+[See the measured v3 / v4 / v5 comparison →](reference/performance/)
+
+## Take the next step
+
+[Install](get-started/) → [Make a Pipe](get-started/bootstrap/) → [Sync new rows](get-started/incremental-sync/) → [Connect a Pipeline](get-started/pipelines/).
+
+Already using Meerschaum? Start with [Migrating to v5](reference/migrating-to-v5/).
 
 
 ---
 
-# 🛠️ Setup
+# Install and set up
 
 Source: https://meerschaum.io/get-started/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
+# Get started
 
-# 🛠️ Setup
+Your first Pipe needs Python and a few local rows. No database server or Docker setup is required.
 
-## 🐍 Install from [PyPI](https://pypi.org/project/meerschaum/)
+!!! info "Meerschaum 5 preview"
+    These pages are being prepared for the final 5.0.0 release. The examples and recordings were checked with 5.0.0rc15. Use `--pre` to install the latest published preview; the final release will use `pip install meerschaum`.
 
-!!! note inline end ""
+## Install
 
-    Run Meerschaum commands with `mrsm` (or `python -m meerschaum` if `~/.local/bin/` isn't in your `PATH`).
-
-```bash
-python -m pip install --upgrade meerschaum
-```
-
-!!! note "Upgrading from 4.x?"
-    Read the [migration guide](/reference/migrating-to-v5/) for what changed in 5.0.
-
-The wheel contains the native core and has no required Python dependencies. Wheels are published for Linux (x86_64 and arm64, for glibc distributions and for musl ones such as Alpine), macOS (arm64 and x86_64) and Windows (x86_64), for Python 3.11 or newer.
-
-To work with your data in Python, add [Polars](https://pola.rs) (the DataFrame library Meerschaum returns by default):
+Use Python **3.11 or newer** in your usual virtual environment:
 
 ```bash
-python -m pip install --upgrade 'meerschaum[polars]'
+python -m pip install --upgrade --pre meerschaum
+mrsm --version
 ```
 
-Prefer pandas? Install `meerschaum[pandas]` and set `dataframe: pandas` in `meerschaum.yaml` (`mrsm edit config`); a root created by an earlier version keeps pandas on its own. See [DataFrame library](/reference/pipes/reading/#dataframe-library).
+The package includes the native core and the `mrsm` command. `python -m meerschaum` works too.
 
-??? info "Standalone binary (`cargo install meerschaum`)"
-    `pip install meerschaum` is the whole product: the `mrsm` command it installs runs the native command line from inside the package. If you would rather have a standalone binary (it starts in about 10 ms and needs no Python until you use a Python plugin or connector), build the same command line with Cargo:
-
-    ```bash
-    cargo install meerschaum --locked
-    ```
-
-    This needs Rust 1.95 or newer. `--locked` builds with the dependency versions Meerschaum was tested with (without it Cargo may pick newer ones, which can break the build on Windows). Prebuilt standalone binaries (Linux x86_64 and arm64, macOS arm64 and x86_64, Windows x86_64) are attached to each GitHub release, with a SHA-256 file for each.
-
-    The `duckdb` and `oracle` flavors load native libraries at run time: see [SQL connectors](/reference/connectors/sql-connectors/#duckdb).
-
-    !!! warning "macOS: the prebuilt binary is not signed"
-        The release binaries for macOS are not signed or notarized (Meerschaum 5.0 has no Apple developer signing). A browser marks the downloaded file as quarantined and Gatekeeper then refuses to open it ("cannot be opened because the developer cannot be verified"). Remove the flag once, make the file executable, and run it:
-
-        ```bash
-        xattr -d com.apple.quarantine ./mrsm-<version>-aarch64-apple-darwin   # x86_64-apple-darwin on an Intel Mac
-        chmod +x ./mrsm-<version>-aarch64-apple-darwin
-        ./mrsm-<version>-aarch64-apple-darwin --version
-        ```
-
-        A file downloaded with `curl` or `gh release download` is not quarantined and needs only `chmod +x`. `pip install meerschaum` and `cargo install meerschaum` are not affected: pip and Cargo do not set the flag.
-
-??? info "Docker"
-    The official image is `bmeares/meerschaum`, published for `linux/amd64` and `linux/arm64`. The default tag (`latest`, also `full`) has `meerschaum[full]`; `rust` and `rust-full` have the native CLI without Python; `slim` has only the base wheel; `api` is a deprecated alias of `full`. See [Docker Images](/reference/stack/#docker-images) for the variants and the [migration guide](/reference/migrating-to-v5/) for how they changed in v5.
-
-??? warning "Windows"
-    Everything runs on Windows except one thing. The Python API host (`@api_plugin` routes, the Dash web console and plugin pages) is reached over loopback TCP with a per-start token on Windows. Background jobs are refused on Windows, so `-d` and `start jobs` do not work (and neither does the console's Manage menu, which runs actions as jobs; the Exec box runs in the web terminal and works): run the command in the foreground, use Task Scheduler or a service wrapper, or run Meerschaum in Docker or WSL.
-
-
-??? info "Installing dependencies"
-    Meerschaum will auto-install packages as you use them (into a virtual environment, to preserve your base environment).
-
-    You can manually install these packages in one command:
+??? info "Using DataFrames in Python?"
+    New installations return **Polars** DataFrames. Install the matching extra:
 
     ```bash
-    python -m meerschaum upgrade packages api -y
+    python -m pip install --pre 'meerschaum[polars]'
     ```
 
-    To install the packages into your environment (e.g. you're already using a virtual environment) by adding the name of an [extra](/reference/migrating-to-v5/#installing-and-running), e.g. `api`:
+    For pandas, install `meerschaum[pandas]` and choose `dataframe: pandas` in `meerschaum.yaml`. Existing roots from v4 keep pandas. You can also read rows as plain dictionaries with `pipe.get_data(as_docs=True)`.
+
+    See [Reading data](../reference/pipes/reading.md#dataframe-library).
+
+## Make a workspace
+
+Keep the tutorial's configuration and SQLite database together:
+
+=== "Linux / macOS"
 
     ```bash
-    python -m pip install --upgrade meerschaum[api]
+    mkdir mrsm-demo
+    cd mrsm-demo
+    mkdir .meerschaum
+    export MRSM_ROOT_DIR="$PWD/.meerschaum"
     ```
 
-## 🥞 Start the [Stack](/reference/stack/)
+=== "PowerShell"
 
-!!! note inline end ""
-    You'll need [Docker](https://docs.docker.com/engine/install/) to start the stack.
+    ```powershell
+    mkdir mrsm-demo
+    cd mrsm-demo
+    mkdir .meerschaum
+    $env:MRSM_ROOT_DIR = "$PWD/.meerschaum"
+    ```
+
+`sql:local` is a built-in SQLite connector. It stores your data inside this workspace:
 
 ```bash
-mrsm stack up -d
+mrsm show pipes -i sql:local
 ```
 
-??? example "📽️ Watch an example"
-    <asciinema-player src="/assets/casts/stack.cast" size="small" preload="true" rows="10"></asciinema-player>
+You should see **No pipes to show**. Keep this terminal open for the next steps.
 
-This will start the pre-configured TimescaleDB instance (`sql:main`).
+[Build your first Pipe →](bootstrap.md){ .md-button .md-button--primary }
 
-??? note "Don't have Docker or want to use your own database?"
-    You can use a built-in SQLite database with the keys `sql:local`, or you may use your own database by [creating a new connector](/reference/connectors/#creating-a-connector). Read more about the [`SQLConnector` here](/reference/connectors/sql-connectors/).
+??? info "Other ways to run Meerschaum"
+    **Your database:** add a [SQL connector](../reference/connectors/sql-connectors.md). The [stack](../reference/stack.md) supplies a ready-to-use TimescaleDB database through Docker.
 
-    ??? example "📽️ Watch an example"
-        <asciinema-player src="/assets/casts/bootstrap-connector.cast" size="small" preload="true"></asciinema-player>
+    **Standalone command:** `cargo install meerschaum --locked` builds the stable release's native CLI. Preview versions need an explicit version. Prebuilt binaries are listed on [GitHub Releases](https://github.com/bmeares/Meerschaum/releases).
 
-    ??? info "`MRSM_SQL_<LABEL>` environment variables"
+    **Docker:** see the [image variants](../reference/stack.md#docker-images).
 
-        You can also define connectors in your environment. Set an environment variable `MRSM_SQL_<LABEL>` to your database URI:
+    **macOS binaries:** downloaded binaries are unsigned. If Gatekeeper blocks one, remove its quarantine flag with `xattr -d com.apple.quarantine ./mrsm-<version>-<target>`, then run `chmod +x` on the file. The pip installation does not need this step.
 
-        ```bash
-        MRSM_SQL_FOO=sqlite:////tmp/foo.db \
-          python -m meerschaum start connector sql:foo
-        ```
+    **Windows:** run commands in the foreground. Background jobs need Linux, macOS, Docker, or WSL.
 
-## ⚡ Connect to Your Instance
-
-![Meerschaum instance prompt](/assets/screenshots/prompt.png){ align=left }
-
-Open the Meerschaum shell with `mrsm` or `python -m meerschaum`.
-
-Your default instance is `sql:main` from the [pre-configured stack](/reference/stack/). Connect to a different instance with `instance sql:<label>`.
-
-To test the connection, run the command `mrsm show pipes`. A successful connection should return the message:
-<div style="background-color: black; padding: 15px;">
-<pre style="color: #66ff00"><b>🎉 No pipes to show.</b></pre>
-</div>
-??? tip "Change your default instance"
-
-    The `instance` command temporarily changes your connected instance. To permanently change your default instance:
-
-    1. Open your configuration with `mrsm edit config`.
-    2. Navigate to the key `instance:` at the bottom of the file.
-    3. Edit the value to the keys of your new instance (`mrsm show connectors` to see registered connectors).
-
-    ??? example "Watch an example"
-        <asciinema-player src="/assets/casts/change-instance.cast" size="small" preload="true"></asciinema-player>
-
-If you've successfully connected, try [building a pipe](bootstrap/) to get that data flowing!
+Upgrading an existing installation? Read [Migrating to v5](../reference/migrating-to-v5.md) first.
 
 
 ---
 
-# 🏗️ Building a Pipe
+# Your first Pipe
 
 Source: https://meerschaum.io/get-started/bootstrap/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
+# Your first Pipe
 
-# 🏗️ Building a Pipe
+A **Pipe** connects a data source to a table you can keep up to date. Let's collect temperature readings in a local SQLite database.
 
-Pipes fetch and sync data from [connectors](/reference/connectors/). For this example, we will be using the connector `plugin:noaa` from the [data plugin](/reference/plugins/types-of-plugins/#data-plugins) `noaa`. Type the commands below to bootstrap an example pipe.
+Start in the workspace from [Setup](index.md). Every command below uses `sql:local`.
 
-See the [bootstrapping reference page](/reference/pipes/bootstrapping/) for further information.
+## Add a little data
 
-1. Launch the Meerschaum shell.  
-
-    ```bash
-    mrsm
-    ```
-
-2. Install the `noaa` plugin.
-
-    ```bash
-    install plugin noaa
-    ```
-
-3. Bootstrap the pipe.  
-
-    ```bash
-    bootstrap pipe
-    ```
-
-    1. Choose `plugin:noaa` for the connector, `weather` for the metric, and skip the location.
-
-    2. The plugin will ask for weather stations. Enter `KATL` for Atlanta.
-
-    3. We can keep the default target name `plugin_noaa_weather`. This will be our SQL table.
-
-    4. Skip tags — those are useful for [grouping together pipes](/reference/pipes/tags/).
-
-    5. Answer `n` to skip editing the definition. Answering `yes` will open a YAML file of your [pipe's parameters](/reference/pipes/#parameters).
-
-    6. Finally, answer `y` to sync the pipe.
-
-
-!!! success "Success! Now what?"
-
-    Well done, you've built your first pipe! When you're ready to build your first project, head over the to [compose projects guide](/get-started/compose-projects).
-
-    For now, here are some useful commands to manage your pipe:
-
-    | Command                           | Description                                                                                        |
-    |-----------------------------------|----------------------------------------------------------------------------------------------------|
-    | `show pipes`                      | Print the pipes on this instance.                                                                  |
-    | `show data`                       | Print a preview of the contents of your pipes.                                                     |
-    | `sync pipes`                      | Sync new rows into your pipes.                                                                     |
-    | `sync pipes -m weather --loop -d` | Continuously (`--loop`) sync new rows into weather pipes (`-m`), and run in the background (`-d`). |
-    | `show jobs`                       | Print the background jobs (created with `-d`).                                                     |
-    | `stop jobs`                       | Stop the running background jobs.                                                                  |
-
-<asciinema-player src="/assets/casts/bootstrap-noaa.cast" size="small" preload="true"></asciinema-player>
-
-
----
-
-# 📦️ Compose Projects
-
-Source: https://meerschaum.io/get-started/compose-projects/
-
-# 📦️ Compose Projects
-
-Now that you've got the idea behind pipes, let's write our own plugins and put together a project using <a href="/reference/compose">Meerschaum Compose</a>.
-
-!!! tip "Meerschaum Compose Template Repository"
-    If you'd like to jump straight into a Dockerized environment, create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
-
-Create a new project directory `awesome-sauce`. This is where our code and data will live (for now).
+Create a source table with one reading:
 
 ```bash
-mkdir awesome-sauce
-cd awesome-sauce
+mrsm sql local "CREATE TABLE readings (id INTEGER PRIMARY KEY, ts TEXT, temperature REAL)"
+mrsm sql local "INSERT INTO readings VALUES (1, '2026-01-01 12:00:00', 21.5)"
 ```
 
-Paste the following into `mrsm-compose.yaml`. This defines our pipes and runtime environment.
-
-??? example "`mrsm-compose.yaml`"
-    ```yaml
-    project_name: "awesome-sauce"
-
-    sync:
-      pipes:
-        - connector: "plugin:fred"
-          metric: "price"
-          location: "eggs"
-          target: "price_eggs"
-          columns:
-            datetime: "DATE"
-          dtypes:
-            "PRICE": "float64"
-          parameters:
-            fred:
-              series_id: "APU0000708111"
-
-        - connector: "plugin:fred"
-          metric: "price"
-          location: "chicken"
-          target: "price_chicken"
-          columns:
-            datetime: "DATE"
-          dtypes:
-            "PRICE": "float64"
-          parameters:
-            fred:
-              series_id: "APU0000706111"
-
-        - connector: "sql:tiny"
-          metric: "price"
-          location: "eggs_chicken_a"
-          target: "Food Prices A"
-          columns:
-            datetime: "DATE"
-          parameters:
-            query: |-
-              SELECT
-                e."DATE",
-                e."PRICE" AS "PRICE_EGGS",
-                c."PRICE" AS "PRICE_CHICKEN"
-              FROM "price_eggs" AS e
-              INNER JOIN "price_chicken" AS c
-                ON e."DATE" = c."DATE"
-
-        - connector: "sql:tiny"
-          metric: "price"
-          location: "eggs_chicken_b"
-          target: "Food Prices B"
-          columns:
-            datetime: "DATE"
-            food: "FOOD"
-          parameters:
-            query: |-
-              SELECT
-                "DATE",
-                "PRICE",
-                'eggs' AS "FOOD"
-              FROM "price_eggs"
-              UNION ALL
-              SELECT
-                "DATE",
-                "PRICE",
-                'chicken' AS "FOOD"
-              FROM "price_chicken"
-
-
-    config:
-      meerschaum:
-        instance: "sql:tiny"
-        connectors:
-          sql:
-            tiny:
-              flavor: "sqlite"
-              database: "tiny.db"
-    ```
-
-There are two <a href="/reference/connectors">Connectors</a> used in this project:
-
-- **`plugin:fred`**  
-  A <a href="/reference/plugins/">plugin</a> we will write shortly. This is the data source for our initial pipes.
-- **`sql:tiny`**  
-  A SQLite file `tiny.db`. It's used as the <a href="/reference/connectors/instance-connectors/">instance connector</a> as well as a data source.
-
-The SQLite database makes sense, but what is `plugin:fred`? [FRED](https://fred.stlouisfed.org/series/APU0000708111) is the data source we want to use for this project, so let's create our first plugin to fetch this data.
-
-Create a new directory `plugins`:
+## Give the Pipe a name and a query
 
 ```bash
-mkdir plugins
-cd plugins
+mrsm register pipes -c sql:local -m temperatures -i sql:local \
+  --params '{"columns":{"datetime":"ts","primary":"id"},"dtypes":{"ts":"datetime"},"fetch":{"definition":"SELECT * FROM readings"}}'
 ```
 
-And paste the following into `fred.py`:
+The three pieces to remember:
 
-??? example "`fred.py`"
+| Part | In this example |
+|---|---|
+| Source (`-c`) | `sql:local`, where the query runs |
+| Metric (`-m`) | `temperatures`, the name of this stream |
+| Instance (`-i`) | `sql:local`, where the Pipe and its table live |
+
+The datetime column tells the Pipe where to resume. The primary column identifies each reading.
+
+## Sync and look
+
+```bash
+mrsm sync pipes -i sql:local -m temperatures
+mrsm show data -i sql:local -m temperatures
+```
+
+You'll see the reading **21.5** in the Pipe's table. The source table stays separate.
+
+Run the sync again:
+
+```bash
+mrsm sync pipes -i sql:local -m temperatures
+```
+
+There is still **one row**. Re-reading the same data does not add a duplicate.
+
+??? example "Watch the actual run"
+    <asciinema-player src="/assets/casts/v5-first-pipe.cast" size="small" preload="true" rows="18"></asciinema-player>
+
+??? example "Use the same Pipe from Python"
     ```python
     import meerschaum as mrsm
 
-    CSV_BASE_URL: str = 'https://fred.stlouisfed.org/graph/fredgraph.csv'
-
-    required = ['polars']
-
-    def fetch(pipe: mrsm.Pipe, **kwargs) -> 'pl.DataFrame':
-        import polars as pl
-        series_id = pipe.parameters.get('fred', {}).get('series_id', None)
-        url = f"{CSV_BASE_URL}?id={series_id}"
-        df = pl.read_csv(url)
-        if series_id in df.columns:
-            ### Missing observations are '.': they become nulls.
-            df = df.with_columns(
-                pl.col(series_id).cast(pl.Float64, strict=False).alias('PRICE')
-            ).drop(series_id)
-        return df
+    pipe = mrsm.Pipe('sql:local', 'temperatures', instance='sql:local')
+    success, message = pipe.sync()
+    print(message)
+    print(pipe.get_data(as_docs=True))
     ```
 
-The plugin provides one function `fetch()` that takes a pipe, pulls an ID from `pipe.parameters`, and returns the appropriate DataFrame.
+    Plain dictionaries work with the base package. For a Polars or pandas DataFrame, [install the matching extra](index.md#install) and call `pipe.get_data()`.
 
-Now that we've got our YAML file and project plugin, initialize the built-in <a href="/reference/compose">Compose</a> environment. This installs our dependency (`polars`) into the project's virtual environment for `plugin:fred`:
+[Add new rows →](incremental-sync.md){ .md-button .md-button--primary }
 
-```bash
-cd ../
-mrsm compose init
-```
-
-<image src="/assets/screenshots/compose-init.png" alt="mrsm compose init"/>
-
-Run the project file to sync the pipes one-at-a-time:
-
-```bash
-mrsm compose run
-```
-
-<image src="/assets/screenshots/compose-run.png" alt="mrsm compose run" />
-
-🎉 Success! You've just run an ETL pipeline to process the following steps:
-
-- **Ingest eggs prices in the US.**
-- **Ingest chicken prices in the US.**
-- **Join the tables on `DATE`.**  
-  Grow the table horizontally by splitting `PRICE` into `PRICE_EGGS` and `PRICE_CHICKEN`.
-- **Union the tables.**  
-  Grow the table vertically by adding the index `FOOD` (`'chicken'` or `'eggs'`).
-
-All other Meerschaum actions are executed within the context of this project. For example, let's verify the most recent data with `show data`:
-
-```bash
-mrsm compose show data
-```
-
-<image src="/assets/screenshots/compose-show-data.png" alt="mrsm compose show data" />
-
-When developing, it's useful to hop into a REPL and test out the [Python API](https://docs.meerschaum.io).
-
-```bash
-mrsm compose python
-```
-
-<image src="/assets/screenshots/compose-python.png" alt="mrsm compose python" />
-
-Thank you for making it through the Getting Started guide! This example was based on the May 2023 [Tech Slam 'N Eggs demo project](https://github.com/bmeares/techslamneggs).
-
-There's plenty more great information, such as the <a href="/reference/plugins/writing-plugins">plugins guide</a>. Have fun building your pipes with Meerschaum!
+For other sources, a [Python plugin](../reference/plugins/writing-plugins.md) can fetch data from a file, an API, or your own code.
 
 
 ---
 
-# 🖥️ Web Console
+# Sync new rows
+
+Source: https://meerschaum.io/get-started/incremental-sync/
+
+# Sync new rows
+
+Your [first Pipe](bootstrap.md) already has one reading. Add another to its source:
+
+```bash
+mrsm sql local "INSERT INTO readings VALUES (2, '2026-01-01 13:00:00', 22.0)"
+mrsm sync pipes -i sql:local -m temperatures
+mrsm show data -i sql:local -m temperatures
+```
+
+The Pipe now has **two readings**: 21.5 and 22.0. You used the same sync command; the Pipe picked up the new row.
+
+```mermaid
+flowchart LR
+    A[New source rows] --> B[Sync the Pipe]
+    B --> C[Up-to-date table]
+```
+
+## Why the timestamp matters
+
+A Pipe uses its latest timestamp to choose where the next fetch begins. It looks back over a small overlap to catch late arrivals, then compares the fetched rows with the table.
+
+Already-seen rows stay put. New rows are inserted. Changed rows can update their matching keys.
+
+??? tip "What if data arrives late?"
+    Increase the overlap with `fetch.backtrack_minutes` in the Pipe's parameters. For older history or a specific correction, sync an explicit window:
+
+    ```bash
+    mrsm sync pipes -i sql:local -m temperatures \
+      --begin '2026-01-01' --end '2026-01-02'
+    ```
+
+    See [Syncing](../reference/pipes/syncing.md) for bounds, backtracking, and update options.
+
+??? example "Watch a row arrive"
+    <asciinema-player src="/assets/casts/v5-incremental.cast" size="small" preload="true" rows="18"></asciinema-player>
+
+## Keep it running
+
+For a simple repeating sync, keep the command in the foreground:
+
+```bash
+mrsm sync pipes -i sql:local -m temperatures --loop --min-seconds 60
+```
+
+Press **Ctrl+C** to stop. Later, a [background job](../reference/background-jobs.md) can give it a name and a schedule.
+
+[Connect a transformation →](pipelines.md){ .md-button .md-button--primary }
+
+
+---
+
+# Your first Pipeline
+
+Source: https://meerschaum.io/get-started/pipelines/
+
+# Your first Pipeline
+
+One Pipe collects readings. Another converts them. A **Pipeline** runs those steps in the right order and gives the workflow a name.
+
+Continue with the two readings from [Incremental sync](incremental-sync.md).
+
+```mermaid
+flowchart LR
+    A[(readings)] --> B[temperatures]
+    B --> C[fahrenheit]
+```
+
+## Add the transformation
+
+Run this Python snippet in the same workspace:
+
+```python
+import meerschaum as mrsm
+
+fahrenheit = mrsm.Pipe(
+    'sql:local', 'fahrenheit', instance='sql:local',
+    columns={'datetime': 'ts', 'primary': 'id'},
+    dtypes={'ts': 'datetime'},
+    parameters={'sql': """
+        SELECT id, ts,
+               ROUND(temperature * 9.0 / 5 + 32, 1) AS fahrenheit
+        FROM {{ Pipe('sql:local', 'temperatures', instance='sql:local') }}
+    """},
+)
+fahrenheit.register()
+```
+
+The `{{ Pipe(...) }}` reference finds the parent's table and tells Meerschaum that **temperatures comes first**.
+
+## Save, preview, run
+
+```bash
+mrsm register pipelines climate -i sql:local -c sql:local -m fahrenheit --parents
+mrsm plan pipelines climate -i sql:local
+mrsm sync pipelines climate -i sql:local
+mrsm show data -i sql:local -m fahrenheit
+```
+
+`plan` shows the work without moving data. `sync` runs the Pipeline and records its results. You should see **70.7°F** and **71.6°F**.
+
+??? example "Watch the plan become a run"
+    <asciinema-player src="/assets/casts/v5-pipeline.cast" size="small" preload="true" rows="20"></asciinema-player>
+
+??? example "Plan and run from Python"
+    ```python
+    import meerschaum as mrsm
+
+    pipeline = mrsm.Pipeline('climate', instance='sql:local')
+    print(pipeline.plan())
+    run = pipeline.sync()
+    print(run.success, run.inserted, run.updated)
+    ```
+
+## Let the graph do the remembering
+
+When you add a reading and run `climate` again, Meerschaum syncs the parent first. The child then uses the data available from its parent. Independent branches can run in parallel.
+
+A saved Pipeline remembers its members and settings. A [job](../reference/background-jobs.md) supplies a schedule. Deleting the Pipeline's saved definition keeps its Pipes and their data.
+
+[See it in the console →](start-api.md){ .md-button .md-button--primary }
+
+For backfills, retries, and larger graphs, continue to the [Pipeline reference](../reference/pipelines/index.md).
+
+
+---
+
+# Explore the console
 
 Source: https://meerschaum.io/get-started/start-api/
 
-# 🖥️ The Web API and Console
+# Explore the console
 
-You can use Meerschaum from its web interface. From within a `mrsm` shell, type to commands below to see how:
+See the same Pipes and Pipeline from your browser. Continue in the workspace from [Your first Pipeline](pipelines.md).
 
-1. Install the web console (`pip install meerschaum[dash]`; it is part of `meerschaum[full]` and the `full` Docker image) and start the Web API server. A standalone binary without the console shows a pointer page at `/dash`.
+## Start locally
 
-    ```bash
-    start api
+Install the web console, then start it on loopback:
+
+```bash
+python -m pip install --pre 'meerschaum[dash]'
+mrsm start api -i sql:local --host 127.0.0.1 --port 8001 --secure
+```
+
+Open [localhost:8001/dash](http://localhost:8001/dash). On an empty instance, **Create admin account** sets up its first administrator. Otherwise, sign in with an existing account.
+
+## Find your way around
+
+| Page | Try it |
+|---|---|
+| **Overview** | See Pipes, Pipelines, jobs, and recent runs together. |
+| **Pipes** | Open `temperatures`, preview its rows, and inspect its settings. |
+| **Pipelines** | Open `climate` to explore its graph, preview a plan, and follow runs. |
+| **Jobs** | Give a command or Pipeline a schedule and read its logs. |
+| **Users & Teams** | Add people and choose what they may read or change. |
+
+![The v5 Overview showing the tutorial's Pipes and climate Pipeline](../assets/screenshots/v5-overview.png){ .mrsm-screenshot }
+
+## Follow a Pipeline
+
+Open **Pipelines → climate**. The workspace puts the graph beside the selected Pipe's details. The **Runs** tab shows its history and what each step did.
+
+![The climate Pipeline in the v5 console](../assets/screenshots/v5-pipeline.png){ .mrsm-screenshot }
+
+On a phone, switch between **Graph**, **Pipe details**, and **Output** to focus on one thing at a time.
+
+??? tip "Share with a team"
+    An administrator can create users and teams. Give readers access to the data they need, and give editors only the actions they need. The console shows controls that match their permissions.
+
+    See [Access and locks](../reference/pipes/access-and-locks.md) and [Console permissions](../reference/api-instance/permissions.md).
+
+Press **Ctrl+C** in the server terminal when you're finished.
+
+[Save a repeatable project →](compose-projects.md){ .md-button .md-button--primary }
+
+For HTTPS and a shared deployment, follow the [API instance guide](../reference/api-instance/index.md).
+
+
+---
+
+# Save a project
+
+Source: https://meerschaum.io/get-started/compose-projects/
+
+# Save a project
+
+A Compose project keeps your Pipes, connectors, and plugins in one folder. Put it in version control and run the same workflow again.
+
+This small project collects the same two readings as the beginner tutorial, using a Python function as its source.
+
+## Two files
+
+Create a new folder with this layout:
+
+```text
+climate-demo/
+├── mrsm-compose.yaml
+└── plugins/
+    └── readings.py
+```
+
+Download [mrsm-compose.yaml](../assets/examples/climate-demo/mrsm-compose.yaml) and [readings.py](../assets/examples/climate-demo/plugins/readings.py), or copy them below.
+
+??? example "mrsm-compose.yaml"
+    ```yaml
+    project_name: climate-demo
+    root_dir: ./root
+    plugins_dir: ./plugins
+
+    config:
+      meerschaum:
+        instance: sql:demo
+        connectors:
+          sql:
+            demo:
+              flavor: sqlite
+              database: climate.db
+
+    sync:
+      pipes:
+        - connector: plugin:readings
+          metric: temperatures
+          columns:
+            datetime: ts
+            primary: id
+          dtypes:
+            ts: datetime
+        - connector: sql:demo
+          metric: fahrenheit
+          columns:
+            datetime: ts
+            primary: id
+          dtypes:
+            ts: datetime
+          parameters:
+            sql: |-
+              SELECT id, ts,
+                     ROUND(temperature * 9.0 / 5 + 32, 1) AS fahrenheit
+              FROM {{ Pipe('plugin:readings', 'temperatures', instance='sql:demo') }}
     ```
 
-    ??? tip "Change the port number"
-        To change the port of the API server, add the flag `--port` or `-p`:
+??? example "plugins/readings.py"
+    ```python
+    """A tiny local source for the Meerschaum Compose tutorial."""
 
-        ```bash
-        start api --port 8001
-        ```
 
-2. Visit port 8000 in a web browser (e.g. [http://localhost:8000](http://localhost:8000)) and create an account or login to your instance.
+    def fetch(pipe, **kwargs):
+        return [
+            {'id': 1, 'ts': '2026-01-01 12:00:00', 'temperature': 21.5},
+            {'id': 2, 'ts': '2026-01-01 13:00:00', 'temperature': 22.0},
+        ]
+    ```
 
-    ??? tip "Register from the command-line"
+The plugin returns ordinary dictionaries. It needs no third-party packages. The SQL Pipe references its parent, just as in [Your first Pipeline](pipelines.md).
 
-        You can create users on your instance with the `register user` command.
-        ```bash
-        register user myuser
-        ```
+## Run it
 
-    <img src="/assets/screenshots/login-page.png"/>
+From the `climate-demo` folder:
 
-3. The console opens on the **Overview** of your instance (its pipes, Pipelines, jobs and recent runs). The **Terminal** page in the navigation has the available commands on its left side, like in the `mrsm` shell.
+```bash
+mrsm compose init
+mrsm compose run
+mrsm compose show data
+```
 
-    <img src="/assets/screenshots/dash-bootstrap.png"/>
+Compose runs these Pipes in their declared order. You should see **21.5°C → 70.7°F** and **22.0°C → 71.6°F**. Run it again: the same rows stay in place.
 
-    !!! tip "Adding custom commands"
-        You can add your own actions with [Meerschaum plugins](/reference/plugins/writing-plugins/#the-make_action-decorator).
+Compose keeps this project's configuration in `root/` and its SQLite data in `climate.db`. Keep the YAML and plugin in version control; treat the generated root and database as local state.
 
-    <img src="/assets/screenshots/dash-pipe-statistics.png"/>
+??? tip "Ready for a real source?"
+    Replace the list in `fetch()` with your file or API reader. For larger sources, accept `begin` and `end` and fetch only that window. See [Writing plugins](../reference/plugins/writing-plugins.md).
 
-    Also like the `mrsm` shell, the web console lets you control pipes from several instances (note the instances drop-down on the top right).
-
-# Conclusion
-
-That's all for now! Meerschaum has many other quality of life features, like [integrating with data science tools](/reference/data-analysis-tools/), [running background jobs](/reference/background-jobs/), [adding custom plugins](/reference/plugins/types-of-plugins/), and a whole lot more. Continue on to the [reference wiki](/reference/pipes/) if you'd like to keep reading. Thanks for trying out Meerschaum!
+[Explore the Compose reference →](../reference/compose.md)
 
 
 ---
@@ -932,8 +727,6 @@ See [Reading Data](/reference/pipes/reading/) for `get_data()`, `get_docs()`, `g
 
 Source: https://meerschaum.io/reference/pipes/bootstrapping/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 
 # 🥾 Bootstrapping
 
@@ -1018,8 +811,6 @@ If you want to drop a pipe's table without losing metadata, you can later execut
 
 Source: https://meerschaum.io/reference/pipes/syncing/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 <style>
 #btm {
   display: block;
@@ -4216,8 +4007,6 @@ and execution history are kept; remove referencing scheduled Jobs before deletin
 
 Source: https://meerschaum.io/reference/connectors/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 
 # 🔌 Connectors
 
@@ -4231,7 +4020,7 @@ The command `mrsm show connectors` will print out your defined connectors and th
 
 The terms **instance** and **repository** connectors refer to specific interfaces for connectors. When connecting to a Meerschaum instance, you use a standard `sql` or `api` connector, which expects to be able to access internal Meerschaum methods, such as retrieving users' and pipes' metadata.
 
-<img src="connectors_venn_diagram.png" alt="Meerschaum Connectors Venn Diagram" align="right">
+<img src="/assets/diagrams/connectors_venn_diagram.png" alt="Meerschaum Connectors Venn Diagram" align="right">
 
 !!! info
     Not all `sql` connections are instance connectors, but all `api` connectors are.
@@ -6309,8 +6098,6 @@ This convention is what lets actions chain reliably without try/except scaffoldi
 
 Source: https://meerschaum.io/reference/stack/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 
 # 🥞 Meerschaum Stack
 
@@ -9722,8 +9509,6 @@ reads `******`. `POST /execute` runs the same action, so remote users see the sa
 
 Source: https://meerschaum.io/reference/background-jobs/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 
 # 👷 Background Jobs
 
@@ -10197,8 +9982,6 @@ sync pipes -i sql:local -e api:main
 
 Source: https://meerschaum.io/reference/data-analysis-tools/
 
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 
 # 🔧 Data Analysis Tools
 
@@ -15716,6 +15499,48 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 
 ---
 
+# 📈 Measured Performance
+
+Source: https://meerschaum.io/reference/performance/
+
+# Measured performance
+
+Meerschaum 5 moves the data core to Rust. This comparison follows the same workloads across **3.5.2**, **4.1.4**, and **5.0.0rc2**.
+
+[![Measured v3, v4 and v5 sync, read and startup performance](../assets/bench/meerschaum-v3-v4-v5.svg){ .mrsm-benchmark }](../assets/bench/meerschaum-v3-v4-v5.svg)
+
+[Open full-size SVG](../assets/bench/meerschaum-v3-v4-v5.svg) · [Download PNG](../assets/bench/meerschaum-v3-v4-v5.png)
+
+## A few results
+
+In this run, the Python API synced one million rows to TimescaleDB in **10.36 seconds**, compared with **42.25 seconds** in v4 — about **4.1× faster**.
+
+| Workload | v4.1.4 | v5.0.0rc2 |
+|---|---:|---:|
+| TimescaleDB: sync 1 million rows | 42.247 s | 10.357 s |
+| TimescaleDB: read 1 million rows | 3.822 s | 1.409 s |
+| SQLite: add 1% new rows to a 100,000-row table | 19.569 s | 0.903 s |
+| Wheel CLI: `--version`, including startup | 0.197 s | 0.037 s |
+
+## How it was measured
+
+Recorded **20 October 2026**, using Python 3.14.8 on Linux x86_64, an Intel Xeon Gold 5215, 40 logical CPUs, and 377 GiB RAM. Values are medians of three runs after warm-up. Databases were local; the test adds no network delay. The Python API, wheel CLI, and standalone binary are labeled separately in the chart.
+
+These results describe the measured release candidate and workloads. Your database, data types, machine, and network all affect the outcome. The v4 SQLite million-row sync varied substantially between runs; the chart and report retain that variation.
+
+??? info "Source data and reproduction"
+    The image was generated directly from the recorded medians. No final-release measurements have been substituted.
+
+    - [Recorded results and methodology](https://github.com/bmeares/Meerschaum/blob/2ce8b2bb39530ce1415ccbbe20cc76c75c008379/scripts/bench/results/2026-10-20-v3-v4-v5.md)
+    - [Raw measurements](https://github.com/bmeares/Meerschaum/blob/2ce8b2bb39530ce1415ccbbe20cc76c75c008379/scripts/bench/results/2026-10-20-v3-v4-v5.json)
+    - [Benchmark harness](https://github.com/bmeares/Meerschaum/tree/2ce8b2bb39530ce1415ccbbe20cc76c75c008379/scripts/bench)
+    - [Chart generator](https://github.com/bmeares/Meerschaum/blob/2ce8b2bb39530ce1415ccbbe20cc76c75c008379/scripts/bench/plot_v345.py)
+
+[Try the same incremental workflow →](../get-started/incremental-sync.md)
+
+
+---
+
 # 📖 Glossary
 
 Source: https://meerschaum.io/reference/glossary/
@@ -15880,232 +15705,81 @@ To keep an installation self-contained in one directory, set [`MRSM_ROOT_DIR`](/
 
 ---
 
-# 📚 Tutorials
+# Learn by building
 
 Source: https://meerschaum.io/tutorials/
 
-# 📚 Tutorials
+# Learn by building
 
-Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the [video tutorials](#video-tutorials) if you're more of a visual learner.
+Start small, then add one idea at a time. The beginner path uses local SQLite data and works without an external API or database server.
 
-## ✍️ Written Tutorial
+1. [Install and make a workspace](../get-started/index.md).
+2. [Build your first Pipe](../get-started/bootstrap.md).
+3. [Pick up new rows](../get-started/incremental-sync.md).
+4. [Connect a Pipeline](../get-started/pipelines.md).
+5. [Explore it in the console](../get-started/start-api.md).
+6. [Save it as a project](../get-started/compose-projects.md).
 
-This tutorial takes you from a fresh install to a self-updating, scheduled pipeline. Each step shows both the command-line (`mrsm`) and a short Python equivalent where it's natural to use one.
+## Choose your next project
 
-!!! tip "Prefer the shell or scripts?"
-    Every command below works inside the interactive Meerschaum shell (just run `mrsm` and type the command without the `mrsm` prefix) or as a one-off (`mrsm <command>`). The Python snippets run in any Python session with `import meerschaum as mrsm`.
+| I want to… | Start here |
+|---|---|
+| Fetch data from my own API or file | [Write a Python plugin](../reference/plugins/writing-plugins.md) |
+| Use PostgreSQL, MySQL, or another database | [Add a SQL connector](../reference/connectors/sql-connectors.md) |
+| Run transformations when new data arrives | [Continuous Pipelines](../reference/pipelines/continuous.md) |
+| Build a native extension | [Write a Rust plugin](../reference/plugins/rust-plugins.md) |
+| Give my team a custom page | [Web pages and routes](../reference/plugins/web-pages.md) |
 
-### 1. Install and pick an instance
+## Video tutorials
 
-Install Meerschaum from [PyPI](https://pypi.org/project/meerschaum/):
+??? example "Earlier introductions to Meerschaum"
+    These videos introduce the original Pipe workflow. For the current v5 commands and console, use the written path above.
 
-```bash
-python -m pip install --upgrade meerschaum
-```
+    - [Meerschaum in 100 seconds](https://www.youtube.com/watch?v=VFFWe7B33Io)
+    - [The basics](https://www.youtube.com/watch?v=cS9ZAG4INPk)
+    - [Instances](https://www.youtube.com/watch?v=iOhPn4RjImQ)
+    - [Fetch plugins](https://www.youtube.com/watch?v=rHfGOZFDQsU)
+    - [A closer look at data plugins](https://www.youtube.com/watch?v=t9tFD4afSD4)
 
-Your [instance connector](/reference/connectors/) is where pipe metadata and data are stored. The default is `sql:main` (the [pre-configured TimescaleDB stack](/reference/stack/)). If you don't have Docker, use the built-in SQLite instance `sql:local` — no setup required.
 
-Verify your connection:
+---
 
-```bash
-mrsm show pipes -i sql:local
-```
+# Meerschaum 5 preview
 
-A successful connection returns `🎉 No pipes to show.`
+Source: https://meerschaum.io/news/v5/
 
-??? tip "Change your default instance"
-    The default instance is `sql:main`. To connect to `sql:local` for the rest of this session, run `instance sql:local` inside the shell, or add `-i sql:local` to any command. See [Setup](/get-started/) for making the change permanent.
+# Meet Meerschaum 5
 
-### 2. Bootstrap a pipe
+**A new foundation for the same small, useful idea: keep your data flowing.**
 
-Pipes fetch and sync data from [connectors](/reference/connectors/). We'll use the `plugin:noaa` connector from the `noaa` [data plugin](/reference/plugins/types-of-plugins/#data-plugins) to pull weather observations.
+!!! info "Documentation preview"
+    The final 5.0.0 release is being prepared for review. These examples were checked with 5.0.0rc15.
 
-**CLI** — install the plugin, then bootstrap interactively:
+## Start with a Pipe
 
-```bash
-mrsm install plugin noaa
-mrsm bootstrap pipe -i sql:local
-```
+A query, a file, an API — each can feed a Pipe. Give it a name, sync it, and let incremental updates keep its table current.
 
-When prompted, choose `plugin:noaa` for the connector, `weather` for the metric, skip the location, enter the station `KATL` (Atlanta), keep the default target table, skip tags, answer `n` to skip editing the definition, and answer `y` to sync. See the [bootstrapping guide](/get-started/bootstrap/) for the full walkthrough.
+[Make your first Pipe →](../get-started/bootstrap.md)
 
-**Python** — build the same pipe directly:
+## Connect the steps
 
-```python
-import meerschaum as mrsm
+Pipelines bring related Pipes together. Preview a plan, run parents before children, and inspect the result of each step. Save the workflow under a name and schedule it when you're ready.
 
-pipe = mrsm.Pipe(
-    'plugin:noaa', 'weather',
-    instance='sql:local',
-    parameters={'noaa': {'stations': ['KATL']}},
-)
-pipe.register()
-```
+[Build a Pipeline →](../get-started/pipelines.md)
 
-### 3. Sync the pipe and show the data
+## See what's happening
 
-Syncing fetches new rows from the source and writes them to your instance:
+The console brings Pipes, Pipeline workspaces, jobs, and run history into one place. Teams, permissions, and locks help you share the right controls with the right people.
 
-```bash
-mrsm sync pipes -i sql:local
-```
+[Explore the console →](../get-started/start-api.md)
 
-Preview what landed in the table:
+## Keep the tools you like
 
-```bash
-mrsm show data -i sql:local
-```
+The Rust core does the heavy lifting. Your Python API, SQL, and `mrsm` commands stay close at hand. New installations return Polars DataFrames; pandas remains a choice. Python plugins can grow into native Rust plugins when you need them.
 
-**Python** — sync and read the data back as a Pandas DataFrame:
+[Measured performance →](../reference/performance.md) · [Migrating from v4 →](../reference/migrating-to-v5.md)
 
-```python
-import meerschaum as mrsm
-
-pipe = mrsm.Pipe('plugin:noaa', 'weather', instance='sql:local')
-pipe.sync()
-
-df = pipe.get_data()
-print(df)
-```
-
-!!! info "Incremental syncs"
-    Meerschaum only fetches and writes new or changed rows. Run `sync pipes` again and it picks up where it left off — no duplicate data.
-
-### 4. Set a parameter and re-sync
-
-[Pipe parameters](/reference/pipes/#parameters) control behavior like tags, columns, and dtypes. Let's add a tag so we can group this pipe with others.
-
-**CLI** — edit the pipe's parameters:
-
-```bash
-mrsm edit pipes -i sql:local
-```
-
-**Python** — set a parameter in memory and persist it with `edit()`, then re-sync:
-
-```python
-import meerschaum as mrsm
-
-pipe = mrsm.Pipe('plugin:noaa', 'weather', instance='sql:local')
-pipe.tags = ['weather', 'tutorial']
-pipe.edit()
-
-pipe.sync()
-```
-
-Now you can filter by tag — for example, sync only tagged pipes:
-
-```bash
-mrsm sync pipes --tags tutorial -i sql:local
-```
-
-### 5. Schedule it as a background job
-
-Add `-d` (`--daemon`) to run any command as a [background job](/reference/background-jobs/), and `-s` (`--schedule`) to run it on a recurring schedule. This keeps your weather pipe fresh automatically:
-
-```bash
-mrsm sync pipes -m weather -s 'every 30 minutes' --name weather-sync -d -i sql:local
-```
-
-**Python** — create and start the same job with the [`Job`](https://docs.meerschaum.io/meerschaum.html#Job) class:
-
-```python
-import meerschaum as mrsm
-
-job = mrsm.Job(
-    'weather-sync',
-    "sync pipes -m weather -s 'every 30 minutes' -i sql:local",
-)
-success, msg = job.start()
-```
-
-!!! tip "Preview a schedule"
-    Not sure when a schedule will fire? Check it first with `mrsm show schedule 'every 30 minutes'`. See [Schedules](/reference/background-jobs/#schedules) for the full syntax (`hourly`, `daily starting 00:00`, cron format, and more).
-
-### 6. Monitor the job
-
-List your running jobs and stream their logs:
-
-```bash
-mrsm show jobs
-mrsm show logs weather-sync
-```
-
-When you're done, stop or delete the job:
-
-```bash
-mrsm stop jobs weather-sync
-mrsm delete jobs weather-sync
-```
-
-**Python** — monitor and manage the job programmatically:
-
-```python
-import meerschaum as mrsm
-
-job = mrsm.Job('weather-sync')
-job.monitor_logs()   # stream output
-
-job.stop()
-job.delete()
-```
-
-!!! success "You built a self-updating pipeline!"
-    You've installed Meerschaum, bootstrapped a pipe, synced and inspected its data, tuned its parameters, and scheduled it as a monitored background job.
-
-    **Next steps:**
-
-    - [Compose projects](/get-started/compose-projects/) — define your whole stack of pipes in a single YAML file.
-    - [Pipes reference](/reference/pipes/) — dig into parameters, dtypes, and the sync flow.
-    - [Writing plugins](/reference/plugins/writing-plugins/) — build your own data sources.
-    - [Background jobs](/reference/background-jobs/) — executors, schedules, and remote jobs.
-
-## 🎥 Video Tutorials
-
-Are you more of a visual learner? Check out these video tutorials below where I show how Meerschaum can make your life as a data analyst easier! From the basics to technical lessons, I walk you through ways to harness the power of Meerschaum in your own projects.
-
-### Meerschaum in 100 Seconds
-
-<div style="text-align: center">
-  <iframe width="672" height="378" src="https://www.youtube.com/embed/VFFWe7B33Io" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-</div>
-
->Short on time? Dive right in with this Fireship-style quickstart tutorial!
-
-
-## Learning Meerschaum
-
-### Episode 4: A Closer Look at Data Plugins
-
-<div style="text-align: center">
-  <iframe width="672" height="378" src="https://www.youtube.com/embed/t9tFD4afSD4" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-</div>
-
->Last week, we took our first steps with plugins and built a minimalist pipeline, but today, we're going all in on learning what's really possible with the power of data plugins!
-
-### Episode 3: Intro to Fetch Plugins
-
-<div style="text-align: center">
-  <iframe width="672" height="378" src="https://www.youtube.com/embed/rHfGOZFDQsU" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-</div>
-
->In today's episode, we're stepping up to the challenge and building our data stream with a SINGLE LINE of code — thanks to the power of Pandas and Meerschaum plugins!
-
-### Episode 2: Intro to Instances
-
-<div style="text-align: center">
-  <iframe width="672" height="378" src="https://www.youtube.com/embed/iOhPn4RjImQ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-</div>
-
->In this thrilling installment of *Learning Meerschaum,* we take a look at managing your team's data in multiple instances. Whether you're connecting directly to databases or serving your data over the Internet, Meerschaum gives you the power to scale up your projects!
-
-### Episode 1: The Basics
-
-<div style="text-align: center">
-  <iframe width="672" height="378" src="https://www.youtube.com/embed/cS9ZAG4INPk" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-</div>
-
->In this episode of *Learning Meerschaum*, I show how you can build your SQL ETL pipelines using Meerschaum, an open source ETL / ELT framework, and how you can quickly visualize your data with Grafana, a web-based BI tool.
+[Try the learning path](../get-started/index.md){ .md-button .md-button--primary }
 
 
 ---

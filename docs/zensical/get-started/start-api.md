@@ -1,42 +1,45 @@
-# 🖥️ The Web API and Console
+# Explore the console
 
-You can use Meerschaum from its web interface. From within a `mrsm` shell, type to commands below to see how:
+See the same Pipes and Pipeline from your browser. Continue in the workspace from [Your first Pipeline](pipelines.md).
 
-1. Install the web console (`pip install meerschaum[dash]`; it is part of `meerschaum[full]` and the `full` Docker image) and start the Web API server. A standalone binary without the console shows a pointer page at `/dash`.
+## Start locally
 
-    ```bash
-    start api
-    ```
+Install the web console, then start it on loopback:
 
-    ??? tip "Change the port number"
-        To change the port of the API server, add the flag `--port` or `-p`:
+```bash
+python -m pip install --pre 'meerschaum[dash]'
+mrsm start api -i sql:local --host 127.0.0.1 --port 8001 --secure
+```
 
-        ```bash
-        start api --port 8001
-        ```
+Open [localhost:8001/dash](http://localhost:8001/dash). On an empty instance, **Create admin account** sets up its first administrator. Otherwise, sign in with an existing account.
 
-2. Visit port 8000 in a web browser (e.g. [http://localhost:8000](http://localhost:8000)) and create an account or login to your instance.
+## Find your way around
 
-    ??? tip "Register from the command-line"
+| Page | Try it |
+|---|---|
+| **Overview** | See Pipes, Pipelines, jobs, and recent runs together. |
+| **Pipes** | Open `temperatures`, preview its rows, and inspect its settings. |
+| **Pipelines** | Open `climate` to explore its graph, preview a plan, and follow runs. |
+| **Jobs** | Give a command or Pipeline a schedule and read its logs. |
+| **Users & Teams** | Add people and choose what they may read or change. |
 
-        You can create users on your instance with the `register user` command.
-        ```bash
-        register user myuser
-        ```
+![The v5 Overview showing the tutorial's Pipes and climate Pipeline](../assets/screenshots/v5-overview.png){ .mrsm-screenshot }
 
-    <img src="/assets/screenshots/login-page.png"/>
+## Follow a Pipeline
 
-3. The console opens on the **Overview** of your instance (its pipes, Pipelines, jobs and recent runs). The **Terminal** page in the navigation has the available commands on its left side, like in the `mrsm` shell.
+Open **Pipelines → climate**. The workspace puts the graph beside the selected Pipe's details. The **Runs** tab shows its history and what each step did.
 
-    <img src="/assets/screenshots/dash-bootstrap.png"/>
+![The climate Pipeline in the v5 console](../assets/screenshots/v5-pipeline.png){ .mrsm-screenshot }
 
-    !!! tip "Adding custom commands"
-        You can add your own actions with [Meerschaum plugins](/reference/plugins/writing-plugins/#the-make_action-decorator).
+On a phone, switch between **Graph**, **Pipe details**, and **Output** to focus on one thing at a time.
 
-    <img src="/assets/screenshots/dash-pipe-statistics.png"/>
+??? tip "Share with a team"
+    An administrator can create users and teams. Give readers access to the data they need, and give editors only the actions they need. The console shows controls that match their permissions.
 
-    Also like the `mrsm` shell, the web console lets you control pipes from several instances (note the instances drop-down on the top right).
+    See [Access and locks](../reference/pipes/access-and-locks.md) and [Console permissions](../reference/api-instance/permissions.md).
 
-# Conclusion
+Press **Ctrl+C** in the server terminal when you're finished.
 
-That's all for now! Meerschaum has many other quality of life features, like [integrating with data science tools](/reference/data-analysis-tools/), [running background jobs](/reference/background-jobs/), [adding custom plugins](/reference/plugins/types-of-plugins/), and a whole lot more. Continue on to the [reference wiki](/reference/pipes/) if you'd like to keep reading. Thanks for trying out Meerschaum!
+[Save a repeatable project →](compose-projects.md){ .md-button .md-button--primary }
+
+For HTTPS and a shared deployment, follow the [API instance guide](../reference/api-instance/index.md).

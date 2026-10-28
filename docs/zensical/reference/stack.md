@@ -1,5 +1,3 @@
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 
 # 🥞 Meerschaum Stack
 
