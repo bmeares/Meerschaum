@@ -3534,6 +3534,8 @@ Cursors are why `skip` works for every shape of pipe. Comparing a child's waterm
 
 Before syncing a pipe the executor acquires a **lease** on it, so two jobs never sync the same pipe at once. Leases are short-lived (60 seconds), renewed every third of that, and released when the node finishes. A node that loses its lease mid-sync is aborted before it commits.
 
+Interrupting a run also drains pending lease requests. A successful claim that arrives after its caller is cancelled is released; cleanup keeps the same bounded shutdown wait.
+
 | Instance | How the lease is taken |
 |---|---|
 | SQL | An `INSERT` into the `mrsm_pipe_leases` table (unique key on the pipe), with conditional `DELETE` for expiry |
@@ -15928,7 +15930,7 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
   `write_config` writes a temporary file next to the target and renames it, keeping the mode and owner (a new file is `0600`), so a failed write no longer truncates a file that holds connector passwords. A single bind-mounted file falls back to an in-place rewrite. YAML values that JSON cannot hold (dates, bytes, very large integers) load, substitute and write back unchanged.
 
 - **Two jobs never sync the same pipe at once.**  
-  Pipe leases use `mrsm_pipe_leases` on SQL, `SET NX PX` on Valkey and `/engine/leases` on API instances; custom instance connectors may implement `acquire_pipe_lease` / `release_pipe_lease`.
+  Pipe leases use `mrsm_pipe_leases` on SQL, `SET NX PX` on Valkey and `/engine/leases` on API instances; custom instance connectors may implement `acquire_pipe_lease` / `release_pipe_lease`. Interrupting a run also waits briefly for an in-progress lease request; a successful claim that arrives after cancellation is released.
 
 - **Replace a window instead of merging into it.**  
   `pipe.sync(df, begin=..., end=..., replace=True)` deletes the rows of `[begin, end)` (matching `params`) and inserts the new rows in one transaction, so rows missing from the new data are removed and a failed write leaves the old rows in place. Without `begin` and `end` the window is the data's own datetime range, an empty frame clears the window it is given, and a pipe without a datetime column replaces its whole table. `fetch: {replace: true}` makes every fetched window authoritative (rollups, sources that restate history), chunked syncs and Pipeline runs included, and `mrsm sync pipes --replace` does it from the command line. Valkey clears the window and then writes; `api:` instances replace on the server, which takes a missing bound from the posted rows. See [Replacing a window](/reference/pipes/syncing/#replacing-a-window).
