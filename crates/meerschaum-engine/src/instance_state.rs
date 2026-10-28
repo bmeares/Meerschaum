@@ -21,10 +21,10 @@
 //! the node's lease (two engine runs never sync the same pipe at once) and an in-process lock.
 //! The trait has no atomic counter yet; see the crate README's requests.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, RwLock};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use indexmap::IndexMap;
 use meerschaum_connector::pipe_ops::{
     Doc, REMOTE_STATE_HASH_PREFIX, frame_to_docs, remote_state_key,
@@ -239,6 +239,11 @@ pub fn node_doc(row: &NodeRow, run_started: DateTime<Utc>) -> Doc {
     [
         ("run_id", kv_str(&row.run_id)),
         ("pipe_ref", kv_str(row.pipe_ref.as_str())),
+        ("registration_ref", kv_str(row.pipe_ref.as_str())),
+        (
+            "registration_id",
+            kv_opt_str(row.registration_id.as_deref()),
+        ),
         ("action", kv_str(row.action.name())),
         (
             "status",
@@ -282,6 +287,7 @@ pub fn node_from_doc(doc: &Doc) -> Option<NodeRow> {
         &doc_str(doc, "reason").unwrap_or_default(),
     );
     row.status = parse_enum(doc_str(doc, "status")).unwrap_or(NodeStatus::Pending);
+    row.registration_id = doc_str(doc, "registration_id");
     row.begin = doc_bound(doc, "begin");
     row.end = doc_bound(doc, "end");
     row.num_chunks = doc_int(doc, "num_chunks").unwrap_or(0).max(0) as usize;
@@ -596,15 +602,103 @@ impl InstanceState {
 
     /// The most recent runs on the home instance, newest first.
     pub async fn recent_runs(&self, limit: usize) -> Result<Vec<RunRow>, StateError> {
-        let mut runs: Vec<RunRow> = self
-            .read_rows(&self.home, EnginePipe::Runs, Map::new(), None)
-            .await?
-            .iter()
-            .filter_map(run_from_doc)
-            .collect();
-        runs.sort_by_key(|r| std::cmp::Reverse(r.started));
+        self.recent_runs_query(limit, None, None).await
+    }
+
+    /// One indexed time-ordered page. Bounds are pushed into the instance query rather than
+    /// reading and sorting the entire history in the caller.
+    pub async fn recent_runs_query(
+        &self,
+        limit: usize,
+        since: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+    ) -> Result<Vec<RunRow>, StateError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn(&self.home)?;
+        let pipe = engine_pipe_on(conn.as_ref(), &self.home, EnginePipe::Runs)
+            .await
+            .map_err(|e| unreachable(&self.home, e))?;
+        let query = DataQuery {
+            limit: i64::try_from(limit).ok(),
+            order: Some("desc".into()),
+            // Some instance datetime expressions have whole-second precision. Page on whole
+            // seconds and complete the boundary second before advancing the cursor.
+            begin: since.map(|time| DateBound::utc(time.with_nanosecond(0).unwrap_or(time))),
+            end: before.map(|time| DateBound::utc(time.with_nanosecond(0).unwrap_or(time))),
+            ..Default::default()
+        };
+        let mut runs = match conn.get_pipe_data(&pipe, &query).await {
+            Ok(Some(frame)) => frame_to_docs(&frame)
+                .iter()
+                .filter_map(run_from_doc)
+                .collect(),
+            Ok(None) => Vec::new(),
+            Err(error) => return Err(unreachable(&self.home, error)),
+        };
+        runs.sort_by(|a: &RunRow, b: &RunRow| {
+            b.started.cmp(&a.started).then(b.run_id.cmp(&a.run_id))
+        });
+        runs.retain(|run| since.is_none_or(|since| run.started >= since));
         runs.truncate(limit);
         Ok(runs)
+    }
+
+    /// Complete the boundary second, including fractional timestamps and ties. Equality on
+    /// formatted strings is not portable (SQLite stores space-separated UTC timestamps).
+    pub async fn runs_in_second(&self, started: DateTime<Utc>) -> Result<Vec<RunRow>, StateError> {
+        let begin = started.with_nanosecond(0).unwrap_or(started);
+        let end = begin
+            .checked_add_signed(chrono::TimeDelta::seconds(1))
+            .ok_or_else(|| {
+                StateError::Other("run timestamp is outside the supported range".into())
+            })?;
+        let conn = self.conn(&self.home)?;
+        let pipe = engine_pipe_on(conn.as_ref(), &self.home, EnginePipe::Runs)
+            .await
+            .map_err(|error| unreachable(&self.home, error))?;
+        let query = DataQuery {
+            begin: Some(DateBound::utc(begin)),
+            end: Some(DateBound::utc(end)),
+            order: Some("desc".into()),
+            ..Default::default()
+        };
+        let mut runs: Vec<RunRow> = match conn.get_pipe_data(&pipe, &query).await {
+            Ok(Some(frame)) => frame_to_docs(&frame)
+                .iter()
+                .filter_map(run_from_doc)
+                .filter(|run| run.started >= begin && run.started < end)
+                .collect(),
+            Ok(None) => Vec::new(),
+            Err(error) => return Err(unreachable(&self.home, error)),
+        };
+        runs.sort_by(|a, b| b.started.cmp(&a.started).then(b.run_id.cmp(&a.run_id)));
+        Ok(runs)
+    }
+
+    /// Read nodes for a set of runs, in bounded IN batches (including SQLite/Oracle limits).
+    /// The runs themselves have already been read; do not load each run a second time.
+    pub async fn load_nodes_for_runs(
+        &self,
+        run_ids: &[String],
+    ) -> Result<BTreeMap<String, Vec<NodeRow>>, StateError> {
+        let mut out: BTreeMap<String, Vec<NodeRow>> = BTreeMap::new();
+        for ids in run_ids.chunks(128) {
+            let params = str_map(&[(
+                "run_id",
+                Value::List(ids.iter().cloned().map(Value::Str).collect()),
+            )]);
+            for row in self
+                .read_rows(&self.home, EnginePipe::Nodes, params, None)
+                .await?
+            {
+                if let Some(node) = node_from_doc(&row) {
+                    out.entry(node.run_id.clone()).or_default().push(node);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Node rows on the home instance since `since` (oldest first), for duration estimates.

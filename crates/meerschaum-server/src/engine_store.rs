@@ -90,10 +90,15 @@ impl InstanceEngine {
         if docs.is_empty() {
             return SuccessTuple::ok("Nothing to write.");
         }
-        let pipe = match self.pipe(metric).await {
+        let mut pipe = match self.pipe(metric).await {
             Ok(p) => p,
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
+        if metric == "engine_nodes" {
+            // Add newly declared progress and registration columns to older state tables.
+            pipe.parameters_mut()
+                .insert("static".into(), Value::Bool(false));
+        }
         let df = match engine_pipes::engine_frame(metric, docs) {
             Ok(df) => df,
             Err(e) => return SuccessTuple::fail(e),

@@ -14,10 +14,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::wire::{ToJsonOptions, to_json};
 
+/// Exact local API alias of an engine client writing its node snapshots.
+/// The server validates registration identity before assigning a canonical metrics ref.
+pub const CLIENT_INSTANCE_HEADER: &str = "x-mrsm-engine-client-instance";
+
 /// Whether `metric_key` names one of the engine's state pipes (`engine_state`, `engine_ledger`,
 /// `engine_cursors`, `engine_runs`, `engine_nodes`, `engine_events`).
 pub fn is_engine_metric(metric_key: &str) -> bool {
-    engine_state_parameters(metric_key).is_some()
+    metric_key != meerschaum_connector::sync_metrics::METRIC
+        && engine_state_parameters(metric_key).is_some()
 }
 
 /// Whether `pipe` is an engine state pipe (`mrsm:engine_*`).

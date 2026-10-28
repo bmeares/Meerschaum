@@ -151,6 +151,7 @@ pub fn get_pipes(
             Some(params),
             &defaults,
         )?;
+        pipe.set_registration_id(id.as_ref().map(ToString::to_string));
         pipes.push(SelectedPipe { pipe, id, hydrated });
     }
     Ok(group_pipes(pipes))

@@ -23,6 +23,7 @@ pub mod engine;
 pub mod execute;
 pub mod jobs;
 pub mod login;
+pub mod metrics;
 pub mod misc;
 pub mod pipe_access;
 pub mod pipelines;
@@ -260,7 +261,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         app = login::routes(app);
     }
     execute::start_cleanup(&state);
-    let groups: [(&str, AddRoutes); 15] = [
+    let groups: [(&str, AddRoutes); 16] = [
         ("actions", actions::routes),
         ("actions", execute::routes),
         ("connectors", connectors::routes),
@@ -276,6 +277,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         ("version", version::routes),
         ("engine", engine::routes),
         ("engine", sync_status::routes),
+        ("engine", metrics::routes),
     ];
     for (group, add) in groups {
         if cfg.route_group_is_allowed(group) {

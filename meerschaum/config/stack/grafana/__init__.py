@@ -14,6 +14,7 @@ default_datasource = {
     'datasources': [
         {
             'name': 'Meerschaum Main',
+            'uid': 'meerschaum-main',
             'type': 'postgres',
             'jsonData': {
                 'sslmode': 'disable',

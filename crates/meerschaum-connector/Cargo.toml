@@ -22,6 +22,8 @@ serde_json = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # The sync status recorder (`sync_status`): its time bound, debounce timer and per-pipe write lock.

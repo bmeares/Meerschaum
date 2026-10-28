@@ -3,6 +3,7 @@
 
 use meerschaum_core::config::paths::posix;
 use meerschaum_core::config::sync::CREATE_EXTENSIONS_TEXT;
+use meerschaum_core::config::sync::GRAFANA_DASHBOARDS;
 use meerschaum_core::config::{Config, ConfigOptions};
 
 fn registry(root: &std::path::Path, allow_writes: bool) -> Config {
@@ -10,6 +11,54 @@ fn registry(root: &std::path::Path, allow_writes: bool) -> Config {
     let mut opts = ConfigOptions::with_env(env);
     opts.allow_writes = allow_writes;
     Config::new(opts).unwrap()
+}
+
+#[test]
+fn built_in_grafana_dashboards_upgrade_in_the_existing_folder_and_keep_user_files() {
+    let root = tempfile::tempdir().unwrap();
+    let config = registry(root.path(), true);
+    config
+        .with_state(|state| state.sync_files(&["stack"]))
+        .unwrap();
+    let provider = config.paths().path("GRAFANA_DASHBOARD_PATH");
+    let directory = provider.parent().unwrap();
+    for (name, source) in GRAFANA_DASHBOARDS {
+        assert_eq!(
+            std::fs::read_to_string(directory.join(name)).unwrap(),
+            *source
+        );
+        let dashboard: serde_json::Value = serde_json::from_str(source).unwrap();
+        assert!(dashboard["uid"].as_str().unwrap().starts_with("mrsm-"));
+        assert!(!dashboard["panels"].as_array().unwrap().is_empty());
+    }
+    let (managed_name, source) = GRAFANA_DASHBOARDS[0];
+    let mut old: serde_json::Value = serde_json::from_str(source).unwrap();
+    old["version"] = serde_json::json!(0);
+    std::fs::write(directory.join(managed_name), old.to_string()).unwrap();
+    let custom = directory.join("my-dashboard.json");
+    std::fs::write(&custom, "{\"uid\":\"my-dashboard\"}").unwrap();
+    let collision = directory.join(GRAFANA_DASHBOARDS[1].0);
+    std::fs::write(&collision, "{\"uid\":\"custom-pipes\"}").unwrap();
+    config
+        .with_state(|state| state.sync_files(&["stack"]))
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(directory.join(managed_name)).unwrap(),
+        source
+    );
+    assert_eq!(
+        std::fs::read_to_string(custom).unwrap(),
+        "{\"uid\":\"my-dashboard\"}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(collision).unwrap(),
+        "{\"uid\":\"custom-pipes\"}"
+    );
+    assert!(
+        std::fs::read_to_string(provider)
+            .unwrap()
+            .contains("Meerschaum Dashboards")
+    );
 }
 
 #[test]

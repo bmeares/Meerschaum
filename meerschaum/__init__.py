@@ -62,6 +62,7 @@ if not _LAZY:
     from meerschaum.core.Pipe._sync import SyncResult
     from meerschaum.core.Pipe._status import get_sync_statuses
     from meerschaum.core.Pipeline import Pipeline, Plan, RunResult, get_pipelines, get_runs
+    from meerschaum.core.Pipeline._metrics import get_engine_metrics, initialize_engine_metrics
     from meerschaum.core.Team import Team, get_teams
     from meerschaum.plugins import Plugin
     from meerschaum.utils.venv import Venv
@@ -92,6 +93,8 @@ else:
         'RunResult',
         'get_pipelines',
         'get_runs',
+        'get_engine_metrics',
+        'initialize_engine_metrics',
         'Team',
         'get_teams',
         'Plugin',
@@ -117,6 +120,8 @@ __all__ = (
     "get_pipes",
     "get_pipelines",
     "get_runs",
+    "get_engine_metrics",
+    "initialize_engine_metrics",
     "get_sync_statuses",
     "get_teams",
     "get_connector",

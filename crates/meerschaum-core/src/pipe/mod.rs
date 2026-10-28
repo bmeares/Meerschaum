@@ -187,6 +187,7 @@ pub struct Pipe {
     pub cache_connector_keys: Option<String>,
     default_instance_keys: String,
     warnings: Vec<String>,
+    registration_id: std::sync::Arc<std::sync::RwLock<Option<String>>>,
 }
 
 impl PartialEq for Pipe {
@@ -280,6 +281,22 @@ fn kw<'a>(kwargs: &'a Map, key: &str) -> &'a Value {
 }
 
 impl Pipe {
+    /// Persisted registration identity observed by a connector; never part of parameters.
+    pub fn registration_id(&self) -> Option<String> {
+        self.registration_id
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    /// Remember the registration an existing metadata read observed.
+    pub fn set_registration_id(&self, identity: Option<String>) {
+        *self
+            .registration_id
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = identity;
+    }
+
     /// `Pipe(connector, metric)` with the default instance and no location.
     pub fn new(connector_keys: &str, metric_key: &str) -> Result<Pipe, PipeError> {
         Pipe::builder(connector_keys, metric_key).build()
@@ -530,6 +547,7 @@ impl Pipe {
             cache_connector_keys,
             default_instance_keys: defaults.instance_keys.clone(),
             warnings,
+            registration_id: Default::default(),
         };
 
         for (plural, singular) in [

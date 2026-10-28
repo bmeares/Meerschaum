@@ -44,6 +44,7 @@ pub mod jobs_api;
 pub mod kernel_api;
 pub mod logging;
 pub mod main_api;
+pub mod metrics_api;
 pub mod native_plugin_api;
 pub mod pandas_bridge;
 pub mod pipe_api;
@@ -174,6 +175,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Per-pipe sync status: `pipe.get_sync_status()`, `mrsm.get_sync_statuses()` (rc15, C2)
     status_api::register(m)?;
+    m.add_function(wrap_pyfunction!(metrics_api::engine_metrics, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_api::initialize_engine_metrics, m)?)?;
 
     // The access model: permissions, roles, teams, pipe access and locks (rc15, K2)
     access_api::register(m)?;

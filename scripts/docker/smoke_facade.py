@@ -113,7 +113,12 @@ def main() -> int:
         assert result.success is success and result.message == message
         assert result.inserted == 1, result.inserted
         assert pipe.get_data(as_docs=True) == [{'id': 1, 'value': 'ok'}]
-        ### Neither the Pipe round trip nor the read may need a dataframe or SQL package.
+        mrsm.initialize_engine_metrics(instance=pipe.instance_connector)
+        metrics = mrsm.get_engine_metrics(instance=pipe.instance_connector, pipe=pipe)
+        assert metrics['retention_days'] == 30
+        assert isinstance(metrics['summary']['syncs'], int)
+        assert all(item['metric_key'] == 'probe' for item in metrics['history'])
+        ### Pipe data and performance reads must work without a dataframe or SQL package.
         heavy = [m for m in heavy_names if m in sys.modules and m not in already]
         assert not heavy, 'Unexpected imports: ' + ', '.join(heavy)
         return True

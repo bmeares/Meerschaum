@@ -534,6 +534,69 @@ pub trait InstanceConnector: Connector {
     /// returned as the string `"None"` in place of nulls.
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys>;
 
+    /// Fresh registration identities and parameters for authorization and metrics.
+    ///
+    /// Dictionary backends already return metadata in bulk. List backends such as Valkey
+    /// store parameters separately; read those attributes rather than treating their empty
+    /// fourth tuple element as a complete access policy. The public key-list wire shape is
+    /// unchanged.
+    async fn registered_pipes(
+        &self,
+        query: &PipesKeysQuery,
+    ) -> ConnectorResult<Vec<(Option<PipeId>, PipeKeysEntry)>> {
+        match self.fetch_pipes_keys(query).await? {
+            PipesKeys::Dict(entries) => Ok(entries
+                .into_iter()
+                .map(|(identity, entry)| (Some(identity), entry))
+                .collect()),
+            PipesKeys::List(entries) => {
+                let mut registered = Vec::with_capacity(entries.len());
+                for mut entry in entries {
+                    if entry.location_key.as_deref() == Some("None") {
+                        entry.location_key = None;
+                    }
+                    let pipe = Pipe::builder(&entry.connector_keys, &entry.metric_key)
+                        .location(entry.location_key.as_deref().filter(|key| *key != "None"))
+                        .instance(&self.connector_keys())
+                        .build()
+                        .map_err(|error| ConnectorError::Invalid(error.to_string()))?;
+                    let attributes = self.get_pipe_attributes(&pipe).await?;
+                    if let Some(parameters) = attributes.get("parameters") {
+                        entry.extra = Some(parameters.clone());
+                    }
+                    let identity = attributes.get("pipe_id").and_then(|value| match value {
+                        Value::Int(identity) => Some(PipeId::Int(*identity)),
+                        Value::Str(identity) => Some(PipeId::parse(identity)),
+                        _ => None,
+                    });
+                    registered.push((identity, entry));
+                }
+                Ok(registered)
+            }
+        }
+    }
+
+    /// Bounded internal metrics/run/node candidates and whether the backend scan was capped.
+    /// SQL pushes bounds and limits into its query. Backends which filter after reading
+    /// must override this method to bound both transferred candidates and document fetches.
+    async fn read_engine_metric_rows(
+        &self,
+        metric: &str,
+        query: &DataQuery,
+    ) -> ConnectorResult<(Vec<crate::pipe_ops::Doc>, bool)> {
+        let Some(pipe) = self
+            .engine_state_pipe(&self.connector_keys(), metric)
+            .await?
+        else {
+            return Ok((Vec::new(), false));
+        };
+        let docs = self.get_pipe_docs(&pipe, query).await?;
+        let truncated = query
+            .limit
+            .is_some_and(|limit| docs.len() >= limit.max(0) as usize);
+        Ok((docs, truncated))
+    }
+
     /// `{{ Pipe(...) }}` without an attribute chain: the table a template for this pipe expands to
     /// on this instance (`sql_item_name` on SQL instances). `None` means `pipe.target`.
     fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {
@@ -915,6 +978,47 @@ pub trait InstanceConnector: Connector {
         instance_keys: &str,
     ) -> ConnectorResult<Vec<crate::sync_status::SyncStatus>> {
         crate::sync_status::read_statuses(self, instance_keys).await
+    }
+
+    /// Persist numeric sync history. API clients forward it to the served instance.
+    async fn record_sync_metrics(
+        &self,
+        metrics: &[crate::sync_metrics::SyncMetric],
+    ) -> ConnectorResult<()> {
+        crate::sync_metrics::store(self, metrics).await
+    }
+
+    /// Bounded sync and Pipeline performance history, filtered before aggregation.
+    async fn get_engine_metrics(
+        &self,
+        query: &crate::sync_metrics::MetricsQuery,
+    ) -> ConnectorResult<crate::sync_metrics::MetricsResponse> {
+        crate::sync_metrics::read(self, query).await
+    }
+
+    /// Create empty native metrics storage and indexes for a new instance.
+    async fn initialize_engine_metrics(&self) -> ConnectorResult<()> {
+        crate::sync_metrics::initialize(self).await
+    }
+
+    /// Expire old metric outcomes. SQL deletes through its timestamp index; stores with
+    /// per-document keys override this to delete a bounded batch without scanning history.
+    async fn expire_engine_metrics(&self, before_micros: i64) -> ConnectorResult<()> {
+        let pipe = crate::sync_metrics::metrics_pipe(self).await?;
+        let result = self
+            .clear_pipe(
+                &pipe,
+                &DataQuery {
+                    end: Some(DateBound::Int(before_micros)),
+                    ..Default::default()
+                },
+            )
+            .await;
+        if result.success {
+            Ok(())
+        } else {
+            Err(ConnectorError::Backend(result.message))
+        }
     }
 
     // ----------------------------------------------------------------------------------------

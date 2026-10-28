@@ -181,6 +181,7 @@ impl ComposeInstance {
                 &defaults,
             )
             .map_err(|e| e.message)?;
+            pipe.set_registration_id(id.as_ref().map(ToString::to_string));
             pipes.push(SelectedPipe { pipe, id, hydrated });
         }
         Ok(group_pipes(pipes)

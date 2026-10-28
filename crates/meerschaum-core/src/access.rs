@@ -1820,6 +1820,13 @@ pub fn can_administer_teams(principal: &Principal) -> bool {
     principal.is_admin
 }
 
+/// Whether a principal may use a connector restricted to these teams (`None`: unrestricted).
+pub fn can_use_connector(principal: &Principal, teams: Option<&[String]>) -> bool {
+    teams.is_none_or(|teams| {
+        principal.is_admin || teams.iter().any(|team| principal.is_member(Some(team)))
+    })
+}
+
 /// The access of a pipe `principal` registers through the API or the console: `requested`
 /// with the owner set to the caller (an administrator may name another owner) and the team
 /// defaulting to `primary_team` (the caller's primary team).

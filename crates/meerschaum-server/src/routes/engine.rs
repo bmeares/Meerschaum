@@ -193,7 +193,10 @@ async fn write_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResu
     let Some(items) = j.as_array() else {
         return Err(ApiError::missing(&["body"]));
     };
-    let docs = engine_pipes::docs_from_records(items);
+    let mut docs = engine_pipes::docs_from_records(items);
+    if metric == "engine_nodes" {
+        canonicalize_node_registrations(&ctx, &mut docs).await?;
+    }
     access::runs::check_rows_editable(&mut filter_for(&ctx, &caller), &docs)
         .await
         .map_err(refused)?;
@@ -223,6 +226,80 @@ async fn write_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResu
         ctx.state.engine_streams.publish_docs(&instance, &docs);
     }
     envelope::tuple(&res, 500)
+}
+
+/// Keep the caller's original ref while proving which exact API-local registrations it
+/// captured. Unknown legacy or foreign identities remain unproven to the metrics reader.
+async fn canonicalize_node_registrations(
+    ctx: &Ctx,
+    docs: &mut [meerschaum_connector::pipe_ops::Doc],
+) -> Result<(), ApiError> {
+    use meerschaum_kernel::value::Value as KValue;
+    for doc in docs.iter_mut() {
+        // A submitted canonical override is never authoritative.
+        doc.shift_remove("registration_ref");
+    }
+    let Some(alias) = ctx.headers.get(engine_pipes::CLIENT_INSTANCE_HEADER) else {
+        return Ok(());
+    };
+    let alias = alias
+        .to_str()
+        .map_err(|_| ApiError::new(400, "Invalid engine client instance."))?;
+    if !alias.starts_with("api:") || alias.len() <= 4 || alias.contains('|') {
+        return Err(ApiError::new(400, "Invalid engine client instance."));
+    }
+    let fresh = if ctx.state.config.no_auth {
+        Access::everything()
+    } else {
+        let principal = crate::auth::load_user_or_token(&ctx.state, &ctx.headers).await?;
+        let granted = crate::auth::granted_scopes(&ctx.state, &ctx.headers, &principal).await?;
+        access::access_of_fresh(&ctx.state, principal, &granted).await?
+    };
+    fresh.require(SCOPES, &[])?;
+    let conn = ctx.state.instance();
+    access::guard::check_connector_teams(&ctx.state, &fresh, &conn.connector_keys())?;
+    let registered = ctx.state.pipes(None, true).await?;
+    for doc in docs.iter_mut() {
+        let Some(KValue::Str(reference)) = doc.get("pipe_ref") else {
+            continue;
+        };
+        if reference.split('|').next() != Some(alias) {
+            continue;
+        }
+        let Some(KValue::Str(captured)) = doc.get("registration_id") else {
+            continue;
+        };
+        let Some((connector, metric, location)) =
+            meerschaum_connector::sync_metrics::reference_keys(reference)
+        else {
+            continue;
+        };
+        access::guard::check_connector_teams(&ctx.state, &fresh, connector)?;
+        let handle = registered
+            .get(connector)
+            .and_then(|metrics| metrics.get(metric))
+            .and_then(|locations| locations.get(&location.map(str::to_string)))
+            .ok_or_else(|| ApiError::new(404, "Pipe was not found."))?;
+        if !fresh.can_see_pipe(&handle.pipe) {
+            return Err(ApiError::new(404, "Pipe was not found."));
+        }
+        if !fresh.can_edit(handle.pipe.parameters()) {
+            return Err(access::not_editable(&handle.pipe));
+        }
+        if meerschaum_connector::sync_metrics::observed_registration(&handle.pipe).as_ref()
+            != Some(captured)
+        {
+            return Err(ApiError::new(
+                409,
+                "The Pipe registration changed since capture.",
+            ));
+        }
+        doc.insert(
+            "registration_ref".into(),
+            KValue::Str(handle.pipe.pipe_ref()),
+        );
+    }
+    Ok(())
 }
 
 /// `GET /engine/runs/{run_id}/events/stream` ([`crate::engine_stream`]).

@@ -216,6 +216,14 @@ impl APIConnector {
                 &routes::engine_pipe_path(metric_key, op),
                 RequestOptions {
                     body: body.map(Body::Json).unwrap_or_default(),
+                    headers: if metric_key == "engine_nodes" && op == "write" {
+                        vec![(
+                            engine_pipes::CLIENT_INSTANCE_HEADER.into(),
+                            self.to_string(),
+                        )]
+                    } else {
+                        Vec::new()
+                    },
                     ..Default::default()
                 },
             )

@@ -67,6 +67,8 @@ pub const ENGINE_RUNS: &str = "/engine/runs";
 pub const ENGINE_EVENTS: &str = "/engine/events";
 /// `/engine/sync-status`: the per-pipe sync status (rc15 contract C2).
 pub const ENGINE_SYNC_STATUS: &str = "/engine/sync-status";
+/// `/engine/metrics`: bounded numeric sync and Pipeline history.
+pub const ENGINE_METRICS: &str = "/engine/metrics";
 
 /// `/engine/runs/{run_id}/events/stream`: a run's events as Server-Sent Events.
 pub fn engine_run_events_stream_path(run_id: &str) -> String {

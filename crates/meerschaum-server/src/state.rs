@@ -319,11 +319,11 @@ impl AppState {
             return Ok(d.clone());
         }
         let keys = conn
-            .fetch_pipes_keys(&PipesKeysQuery::default())
+            .registered_pipes(&PipesKeysQuery::default())
             .await
             .map_err(|e| ApiError::exception("Failed to fetch pipes' keys", e))?;
         let mut dict = PipesDict::new();
-        for entry in keys.entries() {
+        for (identity, entry) in keys {
             let lk = normalize_location(entry.location_key.as_deref());
             let params = match &entry.extra {
                 Some(Value::Map(m)) => Some(m.clone()),
@@ -342,6 +342,9 @@ impl AppState {
             )?;
             if params.is_none() {
                 hydrate(&conn, &mut pipe).await?;
+            }
+            if let Some(identity) = identity {
+                pipe.set_registration_id(Some(identity.to_string()));
             }
             dict.entry(entry.connector_keys.clone())
                 .or_default()

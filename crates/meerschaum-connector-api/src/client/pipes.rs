@@ -599,6 +599,14 @@ impl APIConnector {
                     RequestOptions {
                         query: query.clone(),
                         body: Body::Text(String::new()),
+                        headers: if meerschaum_connector::sync_status::in_recorded_sync() {
+                            vec![(
+                                meerschaum_connector::sync_status::CLIENT_RECORDS_HEADER.into(),
+                                "client".into(),
+                            )]
+                        } else {
+                            Vec::new()
+                        },
                         ..Default::default()
                     },
                 )

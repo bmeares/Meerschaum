@@ -26,6 +26,22 @@ const COMPOSE_REPLACEMENTS: &[(&str, &str)] = &[("$", "$$"), ("<DOLLAR>", "$")];
 /// extension only when the server offers it and preloads `pg_stat_statements`.
 pub const CREATE_EXTENSIONS_TEXT: &str = include_str!("create-extensions.sql");
 
+/// Managed Grafana resources shipped in both the standalone CLI and the Python extension.
+pub const GRAFANA_DASHBOARDS: &[(&str, &str)] = &[
+    (
+        "meerschaum-performance.json",
+        include_str!("grafana/meerschaum-performance.json"),
+    ),
+    (
+        "meerschaum-pipes.json",
+        include_str!("grafana/meerschaum-pipes.json"),
+    ),
+    (
+        "meerschaum-pipelines.json",
+        include_str!("grafana/meerschaum-pipelines.json"),
+    ),
+];
+
 impl ConfigState {
     /// `_read_yaml_config(path)`: the leading comment / blank-line header of a YAML file. A file
     /// that does not parse is reported (`Could not parse '<path>':`) and left as it is.
@@ -111,6 +127,33 @@ impl ConfigState {
         std::fs::write(&path, CREATE_EXTENSIONS_TEXT).map_err(|e| e.to_string())
     }
 
+    /// Install/update built-in dashboard files in the existing provisioner's mounted folder.
+    /// Other files are untouched; a filename collision with a different dashboard UID is kept.
+    pub fn write_grafana_dashboards(&mut self) -> Result<(), String> {
+        let provider = self.paths().path("GRAFANA_DASHBOARD_PATH");
+        let directory = provider
+            .parent()
+            .ok_or("Grafana dashboard directory is missing")?;
+        std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        for (name, source) in GRAFANA_DASHBOARDS {
+            let path = directory.join(name);
+            if let Ok(existing) = std::fs::read_to_string(&path) {
+                if existing == *source {
+                    continue;
+                }
+                let old = serde_json::from_str::<serde_json::Value>(&existing);
+                let new: serde_json::Value =
+                    serde_json::from_str(source).map_err(|error| error.to_string())?;
+                if old.as_ref().ok().and_then(|value| value.get("uid")) != new.get("uid") {
+                    self.warn(format!("Keeping customized Grafana dashboard '{}': its UID differs from the built-in.", path.display()));
+                    continue;
+                }
+            }
+            super::write_file_atomically(&path, source.as_bytes()).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     /// `sync_files(keys)`: only the `stack` key has derivative files. Does nothing when writes
     /// are disabled (`_allow_write_missing`), as v4's callers check before calling.
     pub fn sync_files(&mut self, keys: &[&str]) -> Result<(), String> {
@@ -135,6 +178,7 @@ impl ConfigState {
             &paths.path("GRAFANA_DASHBOARD_PATH"),
             &[],
         )?;
-        self.write_initdb()
+        self.write_initdb()?;
+        self.write_grafana_dashboards()
     }
 }

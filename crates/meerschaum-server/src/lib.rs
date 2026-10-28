@@ -130,6 +130,11 @@ pub async fn serve_with_tls(
         });
     }
     let addr = format!("{}:{}", state.config.host, state.config.port);
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        state.instance().initialize_engine_metrics(),
+    )
+    .await;
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     let app = app_with_mcp_and_console(state, mcp, console);
     match https {

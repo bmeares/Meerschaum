@@ -190,7 +190,9 @@ impl SqlConnector {
             placeholder(f, 2)
         );
         let v = self.value_params_catalog(&query, &params).await?;
-        Ok(v.and_then(|v| v.as_i64()))
+        let identity = v.and_then(|v| v.as_i64());
+        pipe.set_registration_id(identity.map(|identity| identity.to_string()));
+        Ok(identity)
     }
 
     /// `get_pipe_attributes(pipe)`: the pipe's row from `mrsm_pipes` (`{}` if unregistered).
@@ -246,6 +248,7 @@ impl SqlConnector {
             "parameters".into(),
             Value::Map(parse_parameters(doc.get("parameters"))),
         );
+        pipe.set_registration_id(kv_int(doc.get("pipe_id")).map(|identity| identity.to_string()));
         Ok(out)
     }
 

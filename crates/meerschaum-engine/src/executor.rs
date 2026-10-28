@@ -549,6 +549,18 @@ where
         if outcome.duration_seconds.is_none() {
             outcome.duration_seconds = elapsed.map(|d| d.as_secs_f64());
         }
+        outcome.run_id = Some(self.emitter.run_id().to_string());
+        if let Some(row) = self.rows.get(r) {
+            outcome.attempts = row.attempts.max(1);
+            outcome.chunks = row.num_chunks as u64;
+            if let (Some(started), Some(finished)) = (row.started, row.finished) {
+                // Final timing includes earlier attempts and retry backoff.
+                outcome.duration_seconds = Some(
+                    (finished - started).num_microseconds().unwrap_or(0).max(0) as f64
+                        / 1_000_000.0,
+                );
+            }
+        }
         self.ctx.state.record_sync_status(r, outcome);
     }
 
@@ -563,6 +575,9 @@ where
         );
         if let Some(row) = self.rows.get_mut(r) {
             row.status = status;
+            row.registration_id = self.ctx.graph.node(r).and_then(|node| {
+                meerschaum_connector::sync_metrics::observed_registration(&node.pipe)
+            });
             if message.is_some() {
                 row.message = message;
             }
@@ -1129,6 +1144,10 @@ where
     let mut rows: IndexMap<PipeRef, NodeRow> = IndexMap::new();
     for n in &plan.nodes {
         let mut row = NodeRow::new(&run_id, &n.pipe_ref, n.action, &n.reason);
+        row.registration_id = ctx
+            .graph
+            .node(&n.pipe_ref)
+            .and_then(|node| meerschaum_connector::sync_metrics::observed_registration(&node.pipe));
         if let Some(t) = sched.nodes.get(&n.pipe_ref) {
             row.planned_start_seconds = Some(t.earliest_start.as_secs_f64());
             row.slack_seconds = Some(t.slack.as_secs_f64());

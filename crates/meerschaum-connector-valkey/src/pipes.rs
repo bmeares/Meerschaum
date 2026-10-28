@@ -14,6 +14,7 @@ use meerschaum_kernel::enforce::{PipeInput, pandas_astype, pipe_enforce_dtypes};
 use meerschaum_kernel::query::{QueryOptions, query_df};
 use meerschaum_kernel::value::Value as KValue;
 
+use crate::backend::ScoreBound;
 use crate::backend::WriteOp;
 use crate::connector::{ValkeyConnector, be, docs_frame};
 use crate::keys::{
@@ -240,12 +241,14 @@ impl ValkeyConnector {
             pipe.metric_key(),
             pipe.location_key(),
         );
-        Ok(self
+        let identity = self
             .get(&pipe_key)
             .await
             .ok()
             .flatten()
-            .and_then(|s| s.trim().parse::<i64>().ok()))
+            .and_then(|s| s.trim().parse::<i64>().ok());
+        pipe.set_registration_id(identity.map(|identity| identity.to_string()));
+        Ok(identity)
     }
 
     /// Return the pipe's document: keys, `parameters` and `pipe_id` (`{}` if unregistered).
@@ -455,8 +458,68 @@ impl ValkeyConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        Ok(self.get_pipe_data_with_budget(pipe, query, None).await?.0)
+    }
+
+    /// Metrics-only bounded candidates; ordinary reads retain their parity behavior.
+    pub(crate) async fn get_pipe_data_bounded(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        budget: usize,
+    ) -> ConnectorResult<(Option<Frame>, bool)> {
+        self.get_pipe_data_with_budget(pipe, query, Some(budget))
+            .await
+    }
+
+    /// Remove a bounded old metrics batch and its exact sorted-set members. Ordinary clear
+    /// keeps its legacy behavior; metric retention must not accumulate stale index entries.
+    pub(crate) async fn expire_metric_rows(&self, before_micros: i64) -> ConnectorResult<()> {
+        let pipe = meerschaum_connector::sync_metrics::metrics_pipe(self).await?;
+        let table = quote_table(&pipe_target(&pipe));
+        let members = self
+            .backend
+            .zrangebyscore_limit(
+                &table,
+                ScoreBound::NegInf,
+                ScoreBound::Value(before_micros.saturating_sub(1) as f64),
+                meerschaum_connector::sync_metrics::MAX_ROWS,
+                false,
+            )
+            .await
+            .map_err(be)?;
+        if members.is_empty() {
+            return Ok(());
+        }
+        let indices = index_columns(&pipe);
+        let mut keys = Vec::with_capacity(members.len());
+        for member in &members {
+            let doc = loads_doc(member)?;
+            if let Some(KValue::Str(identity)) = doc.get("ix") {
+                keys.push(get_document_key(
+                    &ix_string_to_doc(identity),
+                    &indices,
+                    Some(&table),
+                ));
+            }
+        }
+        if !keys.is_empty() {
+            self.backend.del(&keys).await.map_err(be)?;
+        }
+        for member in members {
+            self.backend.zrem(&table, &member).await.map_err(be)?;
+        }
+        Ok(())
+    }
+
+    async fn get_pipe_data_with_budget(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        budget: Option<usize>,
+    ) -> ConnectorResult<(Option<Frame>, bool)> {
         if !self.pipe_exists(pipe).await? {
-            return Ok(None);
+            return Ok((None, false));
         }
         let parameters = pipe.parameters();
         let vk_dtypes = valkey_dtypes(parameters);
@@ -467,9 +530,37 @@ impl ValkeyConnector {
         let begin = query.begin.as_ref().map(DateBound::to_value);
         let end = query.end.as_ref().map(DateBound::to_value);
 
-        let ix_docs: Vec<Doc> = self
-            .read_docs(&target, begin.as_ref(), end.as_ref())
-            .await?
+        let (candidates, capped) = if let Some(budget) = budget {
+            let (min, max) = Self::score_bounds(begin.as_ref(), end.as_ref())?;
+            let mut members = self
+                .backend
+                .zrangebyscore_limit(
+                    &table_name,
+                    min,
+                    max,
+                    budget + 1,
+                    query
+                        .order
+                        .as_deref()
+                        .is_some_and(|order| order.eq_ignore_ascii_case("desc")),
+                )
+                .await
+                .map_err(be)?;
+            let capped = members.len() > budget;
+            members.truncate(budget);
+            let docs = members
+                .iter()
+                .map(|member| loads_doc(member).map_err(ConnectorError::from))
+                .collect::<ConnectorResult<Vec<_>>>()?;
+            (docs, capped)
+        } else {
+            (
+                self.read_docs(&target, begin.as_ref(), end.as_ref())
+                    .await?,
+                false,
+            )
+        };
+        let ix_docs: Vec<Doc> = candidates
             .into_iter()
             .map(|doc| match doc.get("ix") {
                 Some(KValue::Str(s)) => ix_string_to_doc(s),
@@ -534,7 +625,7 @@ impl ValkeyConnector {
             }
         };
         let result = query_df(&df, &opts).map_err(|e| ConnectorError::Backend(e.to_string()))?;
-        Ok(Some(result.frame))
+        Ok((Some(result.frame), capped))
     }
 
     /// Upsert new documents into the pipe's "table".

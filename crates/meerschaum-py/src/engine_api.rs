@@ -604,6 +604,21 @@ fn reader(py: Python<'_>, request: &Json) -> PyResult<(Session, EngineReader)> {
     Ok((session, EngineReader::new(built.registry, built.config)))
 }
 
+/// Resolve only the requested metrics instance, without building a source graph.
+pub(crate) fn metrics_instance(
+    py: Python<'_>,
+    request: &Json,
+) -> PyResult<Arc<dyn meerschaum_connector::InstanceConnector>> {
+    let session = session();
+    let mut request = request.clone();
+    request["targets"] = json!([]);
+    let built = build(py, &session, &request)?;
+    built
+        .registry
+        .instance(&built.instance_keys)
+        .map_err(runtime_err)
+}
+
 /// `engine_runs(request) -> json`: run history, newest first (`limit`, `status`, `pipe`,
 /// `run_name`, `run_id`, `since`).
 #[pyfunction]

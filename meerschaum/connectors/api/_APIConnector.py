@@ -47,6 +47,7 @@ class APIConnector(InstanceConnector):
         do_action_legacy,
     )
     from ._misc import get_mrsm_version, get_chaining_status
+    from ._metrics import get_engine_metrics, initialize_engine_metrics
     from ._pipes import (
         get_pipe_instance_keys,
         register_pipe,

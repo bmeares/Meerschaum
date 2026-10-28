@@ -176,6 +176,21 @@ pub trait ValkeyBackend: Send + Sync {
         min: ScoreBound,
         max: ScoreBound,
     ) -> BackendResult<Vec<String>>;
+    /// Score-bounded candidates with a native LIMIT, optionally newest first.
+    /// Optional backends must implement this to support bounded performance history.
+    async fn zrangebyscore_limit(
+        &self,
+        key: &str,
+        min: ScoreBound,
+        max: ScoreBound,
+        limit: usize,
+        reverse: bool,
+    ) -> BackendResult<Vec<String>> {
+        let _ = (key, min, max, limit, reverse);
+        Err(BackendError(
+            "Bounded sorted-set reads are not implemented.".into(),
+        ))
+    }
     /// `SADD key member`.
     async fn sadd(&self, key: &str, member: &str) -> BackendResult<()>;
     /// `SREM key member`.

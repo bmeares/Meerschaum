@@ -150,6 +150,58 @@ fn swagger_page_matches_fastapi() {
     );
 }
 
+#[test]
+fn performance_routes_document_filters_scopes_and_admin_initialization() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = common::config(dir.path());
+    let doc = serde_json::to_value(meerschaum_server::openapi::document(&cfg)).unwrap();
+    let get = &doc["paths"]["/engine/metrics"]["get"];
+    let names: BTreeSet<_> = get["parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|parameter| {
+            assert_eq!(parameter["in"], "query");
+            assert_eq!(parameter["required"], false);
+            parameter["name"].as_str().unwrap()
+        })
+        .collect();
+    assert_eq!(
+        names,
+        BTreeSet::from([
+            "instance_keys",
+            "begin",
+            "end",
+            "pipe_ref",
+            "pipe",
+            "pipeline",
+            "limit",
+            "buckets",
+            "visible_refs",
+            "visible_pipelines",
+        ])
+    );
+    assert_eq!(
+        get["security"][0]["OAuth2PasswordBearer"],
+        serde_json::json!(["pipes:read"])
+    );
+    assert!(get.get("requestBody").is_none());
+    let post = &doc["paths"]["/engine/metrics"]["post"];
+    assert_eq!(
+        post["security"][0]["OAuth2PasswordBearer"],
+        serde_json::json!(["pipes:write"])
+    );
+    assert_eq!(post["requestBody"]["required"], true);
+    let initialize = &doc["paths"]["/engine/metrics/initialize"]["post"];
+    assert!(
+        initialize["description"]
+            .as_str()
+            .unwrap()
+            .contains("full administrator")
+    );
+    assert!(initialize.get("requestBody").is_none());
+}
+
 /// v4.1.4 lists `GET /webterm/{session_id}` (tag `Webterm`, one required string path parameter, no
 /// body) when the terminal is served; the fixture is recorded with `--no-webterm`, so this test pins
 /// the shape recorded from a v4.1.4 server started without that flag. `/websocket/{session_id}` is a

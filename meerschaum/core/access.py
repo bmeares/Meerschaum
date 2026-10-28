@@ -101,6 +101,7 @@ __all__ = (
     'can_see_email',
     'can_manage_team',
     'can_administer_teams',
+    'can_use_connector',
     'check_access_change',
     'access_for_new_pipe',
     'primary_team',
@@ -495,6 +496,11 @@ def can_manage_team(principal: Union[Principal, Dict[str, Any]], team: str) -> b
 def can_administer_teams(principal: Union[Principal, Dict[str, Any]]) -> bool:
     """Whether `principal` may create, rename and delete teams: administrators."""
     return bool(_core().access_can_administer_teams(_principal_arg(principal)))
+
+
+def can_use_connector(principal: Union[Principal, Dict[str, Any]], teams=None) -> bool:
+    """Apply the server's connector-team restriction (`None` allows every team)."""
+    return bool(_core().access_can_use_connector(_principal_arg(principal), teams))
 
 
 def check_access_change(

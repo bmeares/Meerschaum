@@ -495,7 +495,8 @@ fn build_internal_pipe(instance_keys: &str, metric: &str, kwargs: Map) -> Pipe {
 
 /// The parameters of the Syncing Engine's internal state pipe `mrsm:<metric_key>` (§5.8):
 /// `engine_state`, `engine_ledger`, `engine_cursors`, `engine_runs`, `engine_nodes`,
-/// `engine_events` and `engine_sync_status` (`None` for any other metric). The engine builds its state pipes from these;
+/// `engine_events`, `engine_sync_status` and `engine_metrics` (`None` for any other metric).
+/// The engine builds its state pipes from these;
 /// instance connectors use them to forget a dropped pipe's state ([`forget_engine_state`]).
 pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
     let json = match metric_key {
@@ -529,7 +530,8 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
                                "status": "string", "reason": "string", "begin": "json",
                                "end": "json", "num_chunks": "int", "attempts": "int",
                                "started": "datetime", "actual_started": "datetime", "finished": "datetime",
-                               "duration_seconds": "float", "inserted": "int", "updated": "int",
+                               "duration_seconds": "float", "registration_id": "string", "registration_ref": "string",
+                               "inserted": "int", "updated": "int",
                                "upserted": "int", "deleted": "int", "message": "string",
                                "planned_start_seconds": "float", "slack_seconds": "float"},
                     "upsert": true}"#
@@ -539,7 +541,19 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
                     "dtypes": {"ts": "datetime", "run_id": "string", "seq": "int",
                                "pipe_ref": "string", "event": "string", "payload": "json"}}"#
         }
-        // The per-pipe sync status (`crate::sync_status`): one row per pipe.
+        // Numeric sync outcomes (`crate::sync_metrics`): one row per completed sync.
+        "engine_metrics" => {
+            r#"{"columns": {"datetime": "ts_us", "primary": "event_id"},
+                    "dtypes": {"event_id": "string", "ts_us": "int", "ts": "datetime", "started": "datetime",
+                               "pipe_key": "string", "registration_id": "string", "pipe_ref": "string", "instance_keys": "string",
+                               "connector_keys": "string", "metric_key": "string", "location_key": "string",
+                               "run_id": "string", "success": "bool", "duration_seconds": "float",
+                               "inserted": "int", "updated": "int", "upserted": "int", "deleted": "int", "rows": "int",
+                               "attempts": "int", "chunks": "int", "source": "string"},
+                    "indices": {"event_time": ["ts"], "pipe_time": ["pipe_key", "ts_us"], "run_time": ["run_id", "ts_us"],
+                                "registration_time": ["registration_id", "ts_us"]},
+                    "upsert": true}"#
+        }
         "engine_sync_status" => {
             r#"{"columns": {"primary": "pipe_ref"},
                     "dtypes": {"pipe_ref": "string", "connector_keys": "string",

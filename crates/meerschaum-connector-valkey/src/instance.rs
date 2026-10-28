@@ -156,6 +156,32 @@ impl InstanceConnector for ValkeyConnector {
         ))
     }
 
+    async fn read_engine_metric_rows(
+        &self,
+        metric: &str,
+        query: &DataQuery,
+    ) -> ConnectorResult<(Vec<Doc>, bool)> {
+        let Some(pipe) = self
+            .engine_state_pipe(&self.connector_keys(), metric)
+            .await?
+        else {
+            return Ok((Vec::new(), false));
+        };
+        let budget = query.limit.unwrap_or(5_001).clamp(1, 10_000) as usize;
+        let (frame, capped) = self.get_pipe_data_bounded(&pipe, query, budget).await?;
+        Ok((
+            frame
+                .as_ref()
+                .map(meerschaum_connector::pipe_ops::frame_to_docs)
+                .unwrap_or_default(),
+            capped,
+        ))
+    }
+
+    async fn expire_engine_metrics(&self, before_micros: i64) -> ConnectorResult<()> {
+        self.expire_metric_rows(before_micros).await
+    }
+
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
         ValkeyConnector::pipe_exists(self, pipe).await
     }

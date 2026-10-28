@@ -245,6 +245,18 @@ pub struct SyncOutcome {
     /// How long it took, in seconds.
     #[serde(default)]
     pub duration_seconds: Option<f64>,
+    /// The engine run, when this outcome belongs to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    /// Attempts made, including the first attempt.
+    #[serde(default = "one_attempt")]
+    pub attempts: u32,
+    /// Chunks completed.
+    #[serde(default)]
+    pub chunks: u64,
+    /// Rows deleted by a replacement sync.
+    #[serde(default)]
+    pub deleted: u64,
     /// When it ended.
     #[serde(with = "iso")]
     pub finished: DateTime<Utc>,
@@ -270,6 +282,10 @@ impl SyncOutcome {
             updated: 0,
             upserted: 0,
             duration_seconds: None,
+            run_id: None,
+            attempts: 1,
+            chunks: 1,
+            deleted: 0,
             finished: Utc::now(),
             source,
             job,
@@ -293,8 +309,10 @@ impl SyncOutcome {
 
     /// With the counts written in a sync message (`Inserted 10, updated 2 rows.`,
     /// `Upserted 5 rows.`), for results that carry no counts of their own.
-    pub fn with_message_counts(self) -> SyncOutcome {
+    pub fn with_message_counts(mut self) -> SyncOutcome {
         let (inserted, updated, upserted) = message_counts(&self.message);
+        self.deleted =
+            crate::pipe_ops::sync_result_from_message(self.success, self.message.clone()).deleted;
         self.with_counts(inserted, updated, upserted)
     }
 
@@ -303,6 +321,10 @@ impl SyncOutcome {
         self.duration_seconds = duration.map(|d| d.as_secs_f64());
         self
     }
+}
+
+fn one_attempt() -> u32 {
+    1
 }
 
 /// The row counts a successful sync message reports: `(inserted, updated, upserted)`
@@ -585,7 +607,7 @@ pub fn status_doc(s: &SyncStatus) -> Doc {
     .collect()
 }
 
-fn doc_str(doc: &Doc, key: &str) -> Option<String> {
+pub(crate) fn doc_str(doc: &Doc, key: &str) -> Option<String> {
     match doc.get(key)? {
         v if v.is_na() => None,
         KValue::Str(s) => Some(s.clone()),
@@ -593,7 +615,7 @@ fn doc_str(doc: &Doc, key: &str) -> Option<String> {
     }
 }
 
-fn doc_u64(doc: &Doc, key: &str) -> u64 {
+pub(crate) fn doc_u64(doc: &Doc, key: &str) -> u64 {
     let n = match doc.get(key) {
         Some(KValue::Int(i)) => *i,
         Some(KValue::Float(f)) if f.is_finite() => *f as i64,
@@ -605,7 +627,7 @@ fn doc_u64(doc: &Doc, key: &str) -> u64 {
     n.max(0) as u64
 }
 
-fn doc_f64(doc: &Doc, key: &str) -> Option<f64> {
+pub(crate) fn doc_f64(doc: &Doc, key: &str) -> Option<f64> {
     match doc.get(key)? {
         KValue::Float(f) if f.is_finite() => Some(*f),
         KValue::Int(i) => Some(*i as f64),
@@ -615,7 +637,7 @@ fn doc_f64(doc: &Doc, key: &str) -> Option<f64> {
     }
 }
 
-fn doc_dt(doc: &Doc, key: &str) -> Option<DateTime<Utc>> {
+pub(crate) fn doc_dt(doc: &Doc, key: &str) -> Option<DateTime<Utc>> {
     match doc.get(key)? {
         KValue::Datetime(d) => Some(DateTime::from_naive_utc_and_offset(d.utc, Utc)),
         KValue::Str(s) => parse_iso(s),
@@ -623,10 +645,11 @@ fn doc_dt(doc: &Doc, key: &str) -> Option<DateTime<Utc>> {
     }
 }
 
-fn doc_bool(doc: &Doc, key: &str) -> bool {
+pub(crate) fn doc_bool(doc: &Doc, key: &str) -> bool {
     match doc.get(key) {
         Some(KValue::Bool(b)) => *b,
         Some(KValue::Int(i)) => *i != 0,
+        Some(KValue::Float(value)) => value.is_finite() && *value != 0.0,
         Some(KValue::Str(s)) => matches!(s.trim(), "True" | "true" | "1"),
         _ => false,
     }
@@ -666,7 +689,7 @@ pub fn status_from_doc(doc: &Doc) -> Option<SyncStatus> {
 }
 
 /// The declared dtypes of the status pipe as an enforcement context (no instance query).
-fn static_context(pipe: &Pipe) -> PipeDtypesContext {
+pub(crate) fn static_context(pipe: &Pipe) -> PipeDtypesContext {
     let dtypes: IndexMap<String, String> = match pipe.parameters().get("dtypes") {
         Some(Value::Map(m)) => m
             .iter()
@@ -944,6 +967,7 @@ fn record_in(
     if !is_recorded(pipe) {
         return;
     }
+    crate::sync_metrics::record(conn.clone(), pipe, &outcome);
     let key = pipe.pipe_ref();
     let (start, timer, _replaced) = {
         let mut state = state();
@@ -1203,10 +1227,11 @@ pub async fn wait_written(pipe_refs: &HashSet<String>, timeout: Duration) {
 
 /// Whether this process holds outcomes it has not written yet (held, queued or being written).
 pub fn has_unwritten() -> bool {
-    state()
-        .tracks
-        .values()
-        .any(|t| t.pending.is_some() || !t.queue.is_empty() || t.writing)
+    crate::sync_metrics::has_unwritten()
+        || state()
+            .tracks
+            .values()
+            .any(|t| t.pending.is_some() || !t.queue.is_empty() || t.writing)
 }
 
 /// Write everything this process holds, held successes included, and wait until it is written
@@ -1215,6 +1240,7 @@ pub async fn flush(timeout: Duration) {
     if has_unwritten() {
         settle_where(|_| true, true, timeout).await;
     }
+    crate::sync_metrics::flush(timeout).await;
 }
 
 /// Forget what this process holds for the status of `pipe_ref` before its stored status is

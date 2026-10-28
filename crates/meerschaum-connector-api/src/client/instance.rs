@@ -119,11 +119,20 @@ impl InstanceConnector for APIConnector {
     }
 
     async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
-        APIConnector::get_pipe_attributes(self, pipe).await
+        let attributes = APIConnector::get_pipe_attributes(self, pipe).await?;
+        pipe.set_registration_id(
+            attributes
+                .get("pipe_id")
+                .filter(|identity| !identity.is_null())
+                .map(Value::py_str),
+        );
+        Ok(attributes)
     }
 
     async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
-        APIConnector::get_pipe_id(self, pipe).await
+        let identity = APIConnector::get_pipe_id(self, pipe).await?;
+        pipe.set_registration_id(identity.as_ref().map(ToString::to_string));
+        Ok(identity)
     }
 
     async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
@@ -303,6 +312,24 @@ impl InstanceConnector for APIConnector {
         instance_keys: &str,
     ) -> ConnectorResult<Vec<meerschaum_connector::sync_status::SyncStatus>> {
         self.get_remote_sync_statuses(instance_keys).await
+    }
+
+    async fn record_sync_metrics(
+        &self,
+        metrics: &[meerschaum_connector::sync_metrics::SyncMetric],
+    ) -> ConnectorResult<()> {
+        self.post_sync_metrics(metrics).await
+    }
+
+    async fn get_engine_metrics(
+        &self,
+        query: &meerschaum_connector::sync_metrics::MetricsQuery,
+    ) -> ConnectorResult<meerschaum_connector::sync_metrics::MetricsResponse> {
+        self.get_remote_engine_metrics(query).await
+    }
+
+    async fn initialize_engine_metrics(&self) -> ConnectorResult<()> {
+        self.initialize_remote_engine_metrics().await
     }
 
     async fn register_user(&self, user: &mut User) -> SuccessTuple {

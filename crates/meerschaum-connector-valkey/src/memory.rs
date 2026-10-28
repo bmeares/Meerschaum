@@ -442,6 +442,44 @@ impl ValkeyBackend for MemoryBackend {
         })
     }
 
+    async fn zrangebyscore_limit(
+        &self,
+        key: &str,
+        min: ScoreBound,
+        max: ScoreBound,
+        limit: usize,
+        reverse: bool,
+    ) -> BackendResult<Vec<String>> {
+        self.fault(
+            if reverse {
+                "ZREVRANGEBYSCORE"
+            } else {
+                "ZRANGEBYSCORE"
+            },
+            key,
+        )?;
+        self.with(|m| {
+            let Some(z) = Self::zset_mut(m, key, false)? else {
+                return Ok(Vec::new());
+            };
+            let matches = |(_, score): &&(String, f64)| min.le(*score) && max.ge(*score);
+            Ok(if reverse {
+                z.iter()
+                    .rev()
+                    .filter(matches)
+                    .take(limit)
+                    .map(|(member, _)| member.clone())
+                    .collect()
+            } else {
+                z.iter()
+                    .filter(matches)
+                    .take(limit)
+                    .map(|(member, _)| member.clone())
+                    .collect()
+            })
+        })
+    }
+
     async fn sadd(&self, key: &str, member: &str) -> BackendResult<()> {
         self.fault("SADD", key)?;
         self.with(|m| {

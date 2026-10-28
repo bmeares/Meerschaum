@@ -522,6 +522,23 @@ pub fn access_can_administer_teams(principal: &Bound<'_, PyAny>) -> PyResult<boo
     Ok(access::can_administer_teams(&principal_of(principal)?))
 }
 
+/// Shared connector-team restriction for trusted console callers.
+#[pyfunction]
+#[pyo3(signature = (principal, teams=None))]
+pub fn access_can_use_connector(
+    principal: &Bound<'_, PyAny>,
+    teams: Option<&Bound<'_, PyAny>>,
+) -> PyResult<bool> {
+    let teams = teams
+        .filter(|teams| !teams.is_none())
+        .map(|teams| strings(Some(teams)))
+        .transpose()?;
+    Ok(access::can_use_connector(
+        &principal_of(principal)?,
+        teams.as_deref(),
+    ))
+}
+
 /// `_core.access_check_access_change(principal, old, new)`: `None` when allowed, else why not.
 #[pyfunction]
 pub fn access_check_access_change(
@@ -994,6 +1011,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_can_see_email, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_manage_team, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_administer_teams, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_use_connector, m)?)?;
     m.add_function(wrap_pyfunction!(access_check_access_change, m)?)?;
     m.add_function(wrap_pyfunction!(access_for_new_pipe, m)?)?;
     m.add_function(wrap_pyfunction!(access_primary_team, m)?)?;

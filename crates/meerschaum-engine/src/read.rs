@@ -247,42 +247,79 @@ impl EngineReader {
         }
     }
 
-    /// Run history (the runs table), newest first.
+    /// Run history, newest first, using indexed pages and bulk node reads.
     pub async fn runs(&self, filter: &RunFilter) -> Result<Vec<RunSummary>, StateError> {
         let limit = filter.limit.unwrap_or(100);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let page_size = limit.clamp(128, 512);
+        let mut before = None;
         let mut out = Vec::new();
-        // Over-read so the filters below still fill the page.
-        for run in self
-            .state
-            .recent_runs(if filter.run_name.is_some() {
-                usize::MAX
-            } else {
-                limit.saturating_mul(4).max(limit)
-            })
-            .await?
-        {
-            if filter.run_id.as_ref().is_some_and(|id| *id != run.run_id) {
-                continue;
-            }
-            if filter
-                .run_name
-                .as_ref()
-                .is_some_and(|name| !run.belongs_to_pipeline(name))
-            {
-                continue;
-            }
-            if filter.since.is_some_and(|s| run.started < s) {
-                continue;
-            }
-            if filter.status.is_some_and(|s| s != RunStatus::of(&run)) {
-                continue;
-            }
-            let nodes = self
+        loop {
+            let page = self
                 .state
-                .load_run(&run.run_id)
+                .recent_runs_query(page_size, filter.since, before)
+                .await?;
+            let Some(boundary) = page.last().map(|run| run.started) else {
+                break;
+            };
+            let complete = page.len() < page_size;
+            let seen: std::collections::HashSet<String> =
+                page.iter().map(|run| run.run_id.clone()).collect();
+            self.append_summaries(page, filter, limit, &mut out).await?;
+            if out.len() >= limit || complete {
+                break;
+            }
+            // Complete the entire boundary second before advancing the exclusive cursor:
+            // SQLite datetime expressions can discard subsecond precision.
+            let ties = self
+                .state
+                .runs_in_second(boundary)
                 .await?
-                .map(|r| r.nodes)
-                .unwrap_or_default();
+                .into_iter()
+                .filter(|run| !seen.contains(&run.run_id))
+                .collect();
+            self.append_summaries(ties, filter, limit, &mut out).await?;
+            if out.len() >= limit {
+                break;
+            }
+            before = Some(boundary);
+        }
+        Ok(out)
+    }
+
+    async fn append_summaries(
+        &self,
+        runs: Vec<RunRow>,
+        filter: &RunFilter,
+        limit: usize,
+        out: &mut Vec<RunSummary>,
+    ) -> Result<(), StateError> {
+        let remaining = limit.saturating_sub(out.len());
+        let candidates: Vec<RunRow> = runs
+            .into_iter()
+            .filter(|run| {
+                !filter.run_id.as_ref().is_some_and(|id| *id != run.run_id)
+                    && !filter
+                        .run_name
+                        .as_ref()
+                        .is_some_and(|name| !run.belongs_to_pipeline(name))
+                    && !filter.since.is_some_and(|since| run.started < since)
+                    && !filter
+                        .status
+                        .is_some_and(|status| status != RunStatus::of(run))
+            })
+            .take(if filter.pipe.is_none() {
+                remaining
+            } else {
+                usize::MAX
+            })
+            .collect();
+        let ids: Vec<String> = candidates.iter().map(|run| run.run_id.clone()).collect();
+        let mut nodes = self.state.load_nodes_for_runs(&ids).await?;
+        for run in candidates {
+            let rows = nodes.remove(&run.run_id).unwrap_or_default();
             if let Some(text) = &filter.pipe {
                 let label = text.to_lowercase();
                 let matches = |pipe: &PipeRef| {
@@ -290,18 +327,18 @@ impl EngineReader {
                         || pipe.label().to_lowercase().contains(&label)
                         || pipe.label_with_instance().to_lowercase().contains(&label)
                 };
-                let hit =
-                    run.targets.iter().any(matches) || nodes.iter().any(|n| matches(&n.pipe_ref));
-                if !hit {
+                if !run.targets.iter().any(matches)
+                    && !rows.iter().any(|node| matches(&node.pipe_ref))
+                {
                     continue;
                 }
             }
-            out.push(summarize(run, &nodes));
+            out.push(summarize(run, &rows));
             if out.len() >= limit {
                 break;
             }
         }
-        Ok(out)
+        Ok(())
     }
 
     /// One run with planned-vs-actual bars. A node's planned bar starts at its CPM earliest

@@ -1291,6 +1291,53 @@ pub fn operations() -> Vec<Operation> {
             "Merge a client's sync outcomes of one pipe into its status (`status`).",
             WRITE,
         ),
+        (
+            "get",
+            "/engine/metrics",
+            "Get Sync Performance",
+            vec![
+                IK,
+                ("begin", "query", false, "null|string"),
+                ("end", "query", false, "null|string"),
+                ("pipe_ref", "query", false, "null|string"),
+                ("pipe", "query", false, "null|string"),
+                ("pipeline", "query", false, "null|string"),
+                ("limit", "query", false, "integer|null"),
+                ("buckets", "query", false, "integer|null"),
+                ("visible_refs", "query", false, "null|string"),
+                ("visible_pipelines", "query", false, "null|string"),
+            ],
+            false,
+            "Numeric sync and Pipeline performance (`metrics`), filtered by current scopes, \
+             teams and object access before aggregation. Bounds are ISO-8601 timestamps with \
+             timezones; the default window is 24 hours and the maximum is 30 days. `limit` \
+             defaults to 1000 (maximum 5000), `buckets` to 48 (maximum 200). A bounded view \
+             reports `truncated`. Durations are seconds, timestamps UTC and `success_rate` \
+             a fraction. Rows affected include inserted, updated, upserted and deleted rows. \
+             Optional visibility ceilings are JSON string arrays and may only narrow access.",
+            READ,
+        ),
+        (
+            "post",
+            "/engine/metrics",
+            "Record Sync Performance",
+            vec![IK],
+            true,
+            "Persist a client batch (`metrics`) of 1 through 128 numeric outcomes, at most \
+             1 MiB. Requires current edit access and matching Pipe registration identities; \
+             stale identities are refused. Event IDs deduplicate transport retries.",
+            WRITE,
+        ),
+        (
+            "post",
+            "/engine/metrics/initialize",
+            "Initialize Sync Performance Storage",
+            vec![IK],
+            false,
+            "Create empty native metrics, runs and nodes storage and indexes. Requires a \
+             full administrator. Ordinary performance reads never create storage.",
+            WRITE,
+        ),
     ];
     for (method, path, summary, params, body, description, scopes) in engine {
         ops.push(

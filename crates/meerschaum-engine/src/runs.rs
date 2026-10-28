@@ -110,6 +110,9 @@ pub struct NodeRow {
     pub run_id: String,
     /// The node.
     pub pipe_ref: PipeRef,
+    /// Persisted Pipe registration and ACL segment observed at execution.
+    #[serde(default, skip_serializing)]
+    pub registration_id: Option<String>,
     /// The executed (re-planned) action.
     pub action: Action,
     /// The final status.
@@ -159,6 +162,7 @@ impl NodeRow {
         NodeRow {
             run_id: run_id.to_string(),
             pipe_ref: pipe_ref.clone(),
+            registration_id: None,
             action,
             status: NodeStatus::Pending,
             reason: reason.to_string(),

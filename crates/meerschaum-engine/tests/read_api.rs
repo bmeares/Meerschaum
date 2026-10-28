@@ -7,6 +7,96 @@ use common::*;
 use meerschaum_engine::{Depth, EngineReader, RunFilter, RunOptions, RunStatus, Selection};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_reads_nodes_in_bulk_and_preserves_timestamp_boundary_matches() {
+    use chrono::{Timelike, Utc};
+    use meerschaum_engine::instance_state::{InstanceState, node_doc, run_doc};
+    use meerschaum_engine::runs::{EnginePipe, NodeRow, NodeStatus, RunRow};
+    let env = env("bulk_read_api").await;
+    let state = InstanceState::new(env.registry.clone(), &env.config().home_instance);
+    let base = Utc::now().with_nanosecond(500_000_000).unwrap();
+    let mut runs = Vec::new();
+    let mut nodes = Vec::new();
+    for index in 0..300 {
+        // Several equal timestamps, plus many distinct microseconds in the same second.
+        let started = base + chrono::TimeDelta::microseconds(index / 3);
+        let run: RunRow = serde_json::from_value(serde_json::json!({
+            "run_id": format!("fixture-{index:04}"), "started": started,
+            "finished": started, "success": true, "targets": [env.pipe_ref("raw")],
+            "workers": 1, "num_nodes": 1, "holder": "fixture",
+            "selection": serde_json::json!({"pipeline_definitions": [{"name": format!("named-{index}")}]}).to_string(),
+        })).unwrap();
+        let mut node = NodeRow::new(
+            &run.run_id,
+            &env.pipe_ref("raw"),
+            meerschaum_engine::Action::Incremental,
+            "fixture",
+        );
+        node.status = NodeStatus::Succeeded;
+        runs.push(run_doc(&run));
+        nodes.push(node_doc(&node, started));
+    }
+    state
+        .write_rows(&env.config().home_instance, EnginePipe::Runs, runs)
+        .await
+        .unwrap();
+    state
+        .write_rows(&env.config().home_instance, EnginePipe::Nodes, nodes)
+        .await
+        .unwrap();
+    let reader = EngineReader::new(env.registry.clone(), env.config());
+    env.conn.enable_query_log();
+    let history = reader
+        .runs(&RunFilter {
+            limit: Some(100),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let log = env.conn.take_query_log();
+    assert_eq!(history.len(), 100);
+    assert!(
+        history
+            .iter()
+            .all(|run| run.counts.get("succeeded") == Some(&1))
+    );
+    let reads = |table: &str| {
+        log.iter()
+            .filter(|query| query.contains(&format!("FROM \"{table}\"")))
+            .count()
+    };
+    assert_eq!(reads("mrsm_engine_runs"), 1, "{log:#?}");
+    assert_eq!(reads("mrsm_engine_nodes"), 1, "{log:#?}");
+    let page = state.recent_runs_query(128, None, None).await.unwrap();
+    let missing = (0..300)
+        .find(|index| {
+            !page
+                .iter()
+                .any(|run| run.run_id == format!("fixture-{index:04}"))
+        })
+        .unwrap();
+    let named = reader
+        .runs(&RunFilter {
+            run_name: Some(format!("named-{missing}")),
+            limit: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(named.len(), 1);
+    assert_eq!(named[0].run.run_id, format!("fixture-{missing:04}"));
+    assert!(
+        reader
+            .runs(&RunFilter {
+                limit: Some(0),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reader_shows_runs_gantt_events_and_edge_lag() {
     let fx: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/v4_sync/v4_sync.json")).unwrap();

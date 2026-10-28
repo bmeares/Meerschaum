@@ -30,9 +30,11 @@ use crate::registry::ConnectorRegistry;
 /// The outcome of a sync result, with this process's source and job ([`detect_source`];
 /// `graph_run`: a node of an engine graph run).
 pub fn outcome_of(result: &SyncResult, graph_run: bool) -> SyncOutcome {
-    SyncOutcome::detected(result.success, result.message.clone(), graph_run)
+    let mut outcome = SyncOutcome::detected(result.success, result.message.clone(), graph_run)
         .with_counts(result.inserted, result.updated, result.upserted)
-        .with_duration(result.duration)
+        .with_duration(result.duration);
+    outcome.deleted = result.deleted;
+    outcome
 }
 
 /// Record `result` as the latest sync of `pipe` on its instance (best effort, written in the

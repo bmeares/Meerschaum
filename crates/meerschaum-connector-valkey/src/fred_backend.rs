@@ -8,6 +8,31 @@ use meerschaum_connector::traits::async_trait;
 
 use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend, WriteOp};
 
+fn bounded_score_command(
+    key: &str,
+    min: ScoreBound,
+    max: ScoreBound,
+    limit: usize,
+    reverse: bool,
+) -> (&'static str, Vec<String>) {
+    let (command, first, last) = if reverse {
+        ("ZREVRANGEBYSCORE", max.to_arg(), min.to_arg())
+    } else {
+        ("ZRANGEBYSCORE", min.to_arg(), max.to_arg())
+    };
+    (
+        command,
+        vec![
+            key.into(),
+            first,
+            last,
+            "LIMIT".into(),
+            "0".into(),
+            limit.to_string(),
+        ],
+    )
+}
+
 /// Lua: extend the TTL of `KEYS[1]` if it holds `ARGV[1]`.
 const CAS_PEXPIRE: &str = "if redis.call('get', KEYS[1]) == ARGV[1] then \
      return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end";
@@ -341,6 +366,18 @@ impl ValkeyBackend for FredBackend {
         ))
     }
 
+    async fn zrangebyscore_limit(
+        &self,
+        key: &str,
+        min: ScoreBound,
+        max: ScoreBound,
+        limit: usize,
+        reverse: bool,
+    ) -> BackendResult<Vec<String>> {
+        let (command, arguments) = bounded_score_command(key, min, max, limit, reverse);
+        Ok(to_strings(self.call(command, arguments).await?))
+    }
+
     async fn sadd(&self, key: &str, member: &str) -> BackendResult<()> {
         self.call("SADD", vec![key.into(), member.into()]).await?;
         Ok(())
@@ -417,5 +454,32 @@ impl ValkeyBackend for FredBackend {
     async fn flushdb(&self) -> BackendResult<()> {
         self.call("FLUSHDB", vec![]).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod metric_limit_tests {
+    use super::*;
+
+    #[test]
+    fn native_score_limits_keep_order_and_both_historical_bounds() {
+        let (command, arguments) = bounded_score_command(
+            "history",
+            ScoreBound::Value(10.0),
+            ScoreBound::Value(20.0),
+            11,
+            true,
+        );
+        assert_eq!(command, "ZREVRANGEBYSCORE");
+        assert_eq!(arguments, ["history", "20", "10", "LIMIT", "0", "11"]);
+        let (command, arguments) = bounded_score_command(
+            "history",
+            ScoreBound::NegInf,
+            ScoreBound::Value(100.0),
+            5000,
+            false,
+        );
+        assert_eq!(command, "ZRANGEBYSCORE");
+        assert_eq!(arguments, ["history", "-inf", "100", "LIMIT", "0", "5000"]);
     }
 }

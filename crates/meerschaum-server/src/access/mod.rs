@@ -654,7 +654,7 @@ pub fn pipe_targets_on(conn: &dyn InstanceConnector, pipe: &Pipe) -> Vec<String>
     targets
 }
 
-fn index_from_dict(
+pub(crate) fn index_from_dict(
     instance_keys: &str,
     dict: &PipesDict,
     conn: &dyn InstanceConnector,

@@ -121,10 +121,10 @@ pub fn connector_teams(state: &AppState, connector_keys: &str) -> Option<Vec<Str
 /// Whether `access` may use the connector `connector_keys` for pipes (or SQL reads): every
 /// connector without `teams`; else administrators and the members of a listed team.
 pub fn may_use_connector(state: &AppState, access: &Access, connector_keys: &str) -> bool {
-    match connector_teams(state, connector_keys) {
-        None => true,
-        Some(teams) => access.is_admin() || teams.iter().any(|t| access.in_team(Some(t))),
-    }
+    meerschaum_core::access::can_use_connector(
+        &access.principal,
+        connector_teams(state, connector_keys).as_deref(),
+    )
 }
 
 /// [`may_use_connector`] as a `403`.

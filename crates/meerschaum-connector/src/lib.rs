@@ -30,6 +30,7 @@ pub mod pipe_ops;
 pub mod policy;
 pub mod replace;
 pub mod schema;
+pub mod sync_metrics;
 pub mod sync_status;
 pub mod teams;
 pub mod template;
