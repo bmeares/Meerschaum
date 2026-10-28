@@ -405,6 +405,43 @@ fn is_lost_connection(error: &crate::error::SqlError) -> bool {
 /// A pooled connection idle for less than this is handed out without a liveness check.
 pub(crate) const PING_IDLE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// A cold internal initialization owns a dedicated connection until its metadata and DDL are
+/// ready. These connections never enter a pool, so cancellation also releases session locks.
+pub(crate) enum InternalInitializationGuard {
+    Postgres {
+        _connection: Box<sqlx::PgConnection>,
+    },
+    Mysql {
+        _connection: Box<sqlx::MySqlConnection>,
+    },
+    #[cfg(feature = "mssql")]
+    Mssql {
+        _connection: Box<dyn native::NativeConn>,
+    },
+}
+
+/// MySQL names are server-wide (at most 64 characters); MSSQL names belong to a database.
+/// Include the selected database and the resolved, flavor-truncated physical table in both.
+/// Case folding may serialize distinct case-sensitive names, but cannot split the usual
+/// case-insensitive spellings of one internal table into different locks.
+fn session_initialization_lock_name(
+    database: &str,
+    schema: Option<&str>,
+    target: &str,
+    flavor: Flavor,
+) -> String {
+    use sha2::{Digest, Sha256};
+
+    let database = database.to_lowercase();
+    let table = crate::ident::sql_item_name(target, flavor, schema).to_lowercase();
+    let mut digest = Sha256::new();
+    digest.update(b"meerschaum:internal-table-initialization:");
+    digest.update((database.len() as u64).to_be_bytes());
+    digest.update(database.as_bytes());
+    digest.update(table.as_bytes());
+    hex::encode(digest.finalize())
+}
+
 /// sqlx pings every idle connection before handing it out (`test_before_acquire`): one extra
 /// protocol round trip per acquire, half of a fresh `Pipe`'s `get_sync_time`. A connection used
 /// within [`PING_IDLE_AFTER`] is trusted instead; one idle for longer is still pinged, and a
@@ -429,15 +466,133 @@ impl SqlDriver {
     /// Serialize cold internal-table initialization across independent connectors/processes.
     /// The connection is deliberately unpooled: holding a pool slot while initialization
     /// uses the driver would deadlock a one-connection pool. Dropping it (also on cancellation)
-    /// closes the socket and releases the transaction lock; no session lock enters the pool.
+    /// closes the socket and releases its transaction/session lock; no lock enters the pool.
     pub(crate) async fn lock_internal_initialization(
         &self,
         target: &str,
         schema: Option<&str>,
-    ) -> Result<Option<sqlx::PgConnection>> {
+    ) -> Result<Option<InternalInitializationGuard>> {
         use sha2::{Digest, Sha256};
         use sqlx::Connection;
 
+        if let Pool::Mysql(pool) = &self.pool {
+            self.ready().await?;
+            let limit = pool.options().get_acquire_timeout();
+            let connect_limit = self
+                .gate
+                .as_ref()
+                .map(|gate| connect::connect_timeout(&gate.spec))
+                .unwrap_or_else(|| meerschaum_core::connect::connect_timeout(None));
+            let guard = tokio::time::timeout(
+                limit,
+                Box::pin(async {
+                    let mut connection = tokio::time::timeout(
+                        connect_limit,
+                        sqlx::MySqlConnection::connect_with(&pool.connect_options()),
+                    )
+                    .await
+                    .map_err(|_| sqlx::Error::PoolTimedOut)??;
+                    let selected: Option<String> = sqlx::query_scalar("SELECT DATABASE()")
+                        .fetch_one(&mut connection)
+                        .await?;
+                    let database = schema
+                        .filter(|schema| !schema.is_empty())
+                        .or(selected.as_deref())
+                        .ok_or_else(|| {
+                            crate::SqlError::Database(
+                                "Internal initialization requires a selected database.".into(),
+                            )
+                        })?;
+                    let key = session_initialization_lock_name(database, None, target, self.flavor);
+                    let acquired: Option<i64> = sqlx::query_scalar("SELECT GET_LOCK(?, ?)")
+                        .bind(key)
+                        .bind(limit.as_secs_f64())
+                        .fetch_one(&mut connection)
+                        .await?;
+                    match acquired {
+                        Some(1) => Ok(InternalInitializationGuard::Mysql {
+                            _connection: Box::new(connection),
+                        }),
+                        Some(0) => Err(crate::SqlError::Driver(sqlx::Error::PoolTimedOut)),
+                        _ => Err(crate::SqlError::Database(
+                            "Could not acquire the internal initialization lock.".into(),
+                        )),
+                    }
+                }),
+            )
+            .await
+            .map_err(|_| sqlx::Error::PoolTimedOut)??;
+            return Ok(Some(guard));
+        }
+        #[cfg(feature = "mssql")]
+        if let Pool::Native(pool) = &self.pool
+            && self.flavor == Flavor::Mssql
+        {
+            self.ready().await?;
+            let limit = self
+                .gate
+                .as_ref()
+                .map(|gate| connect::connect_timeout(&gate.spec))
+                .unwrap_or_else(|| meerschaum_core::connect::connect_timeout(None));
+            let guard = tokio::time::timeout(
+                limit,
+                Box::pin(async {
+                    let mut connection = pool.connect_unpooled().await?;
+                    let (_, identity) = native::collect_rows(
+                        connection.as_mut(),
+                        "SELECT DB_NAME(), COALESCE(@P1, SCHEMA_NAME())",
+                        &[schema
+                            .map_or(SqlParam::Null, |schema| SqlParam::Text(schema.to_owned()))],
+                        1,
+                    )
+                    .await?;
+                    let identity = identity.first();
+                    let database = identity.and_then(|row| row.first());
+                    let schema = identity.and_then(|row| row.get(1));
+                    let (Some(SqlValue::Text(database)), Some(SqlValue::Text(schema))) =
+                        (database, schema)
+                    else {
+                        return Err(crate::SqlError::Database(
+                            "Could not resolve the internal initialization database and schema."
+                                .into(),
+                        ));
+                    };
+                    let key = session_initialization_lock_name(
+                        database,
+                        Some(schema),
+                        target,
+                        self.flavor,
+                    );
+                    let timeout_ms = i32::try_from(limit.as_millis()).unwrap_or(i32::MAX);
+                    let (_, rows) = native::collect_rows(
+                        connection.as_mut(),
+                        "DECLARE @result int; \
+                     EXEC @result = sys.sp_getapplock @Resource = @P1, \
+                     @LockMode = 'Exclusive', @LockOwner = 'Session', \
+                     @LockTimeout = @P2, @DbPrincipal = 'public'; SELECT @result;",
+                        &[SqlParam::Text(key), SqlParam::Int(i64::from(timeout_ms))],
+                        1,
+                    )
+                    .await?;
+                    match rows
+                        .first()
+                        .and_then(|row| row.first())
+                        .and_then(SqlValue::as_i64)
+                    {
+                        Some(code) if code >= 0 => Ok(InternalInitializationGuard::Mssql {
+                            _connection: connection,
+                        }),
+                        Some(-1) => Err(crate::SqlError::Driver(sqlx::Error::PoolTimedOut)),
+                        code => Err(crate::SqlError::Database(format!(
+                            "Could not acquire the internal initialization lock ({code:?})."
+                        ))),
+                    }
+                }),
+            )
+            .await
+            .map_err(|_| sqlx::Error::PoolTimedOut)??;
+            return Ok(Some(guard));
+        }
         let Pool::Postgres(pool) = &self.pool else {
             return Ok(None);
         };
@@ -473,7 +628,9 @@ impl SqlDriver {
         })
         .await
         .map_err(|_| sqlx::Error::PoolTimedOut)??;
-        Ok(Some(connection))
+        Ok(Some(InternalInitializationGuard::Postgres {
+            _connection: Box::new(connection),
+        }))
     }
 
     /// Open a connection pool for a connection spec. Connections are opened lazily by the pool,
@@ -1077,6 +1234,170 @@ impl SqlDriver {
 #[cfg(test)]
 mod initialization_tests {
     use super::*;
+
+    #[test]
+    fn session_lock_names_bind_the_database_schema_and_physical_table() {
+        fn name(database: &str, schema: Option<&str>, table: &str, flavor: Flavor) -> String {
+            session_initialization_lock_name(database, schema, table, flavor)
+        }
+        let mysql = name("owned", None, "mrsm_engine_metrics", Flavor::Mysql);
+        assert_eq!(mysql.len(), 64);
+        assert!(mysql.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(
+            mysql,
+            name("OWNED", None, "MRSM_ENGINE_METRICS", Flavor::Mariadb)
+        );
+        assert_ne!(
+            mysql,
+            name("other", None, "mrsm_engine_metrics", Flavor::Mysql)
+        );
+        assert_ne!(
+            mysql,
+            name("owned", None, "mrsm_engine_runs", Flavor::Mysql)
+        );
+        assert_ne!(
+            name("owned", Some("a"), "table", Flavor::Mssql),
+            name("owned", Some("b"), "table", Flavor::Mssql)
+        );
+        for flavor in [Flavor::Mysql, Flavor::Mariadb, Flavor::Mssql] {
+            let long = "internal_".repeat(64);
+            let physical = crate::ident::truncate_item_name(&long, flavor);
+            assert_eq!(
+                name("owned", None, &long, flavor),
+                name("owned", None, &physical, flavor)
+            );
+        }
+    }
+
+    async fn session_test_driver(spec: &ConnectionSpec) -> SqlDriver {
+        let driver = if spec.flavor.driver_family() == DriverFamily::Mysql {
+            SqlDriver::new(
+                spec,
+                Pool::Mysql(
+                    sqlx::mysql::MySqlPoolOptions::new()
+                        .max_connections(1)
+                        .acquire_timeout(std::time::Duration::from_secs(1))
+                        .connect_lazy_with(mysql::connect_options(spec).unwrap()),
+                ),
+            )
+        } else {
+            SqlDriver::connect_lazy(spec).unwrap()
+        };
+        driver.ready().await.unwrap();
+        driver
+    }
+
+    async fn session_internal_initialization_locks(variable: &str, flavor: Flavor) {
+        let Ok(uri) = std::env::var(variable) else {
+            return;
+        };
+        let mut spec = ConnectionSpec::from_uri(&uri, Some("internal_lock"), None).unwrap();
+        spec.flavor = flavor;
+        spec.pool_size = 1;
+        spec.max_overflow = 0;
+        spec.params.insert("connect_timeout".into(), "1".into());
+        let driver = session_test_driver(&spec).await;
+        let contender = session_test_driver(&spec).await;
+        let target = format!("mrsm_init_{}", uuid::Uuid::new_v4().simple());
+        let schema_sql = if flavor.driver_family() == DriverFamily::Mysql {
+            "SELECT DATABASE()"
+        } else {
+            "SELECT SCHEMA_NAME()"
+        };
+        let schema = driver.value(schema_sql).await.unwrap().unwrap();
+        let SqlValue::Text(schema) = schema else {
+            panic!("expected a selected database/schema");
+        };
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let holder_driver = driver.clone();
+        let holder_target = target.clone();
+        let holder = tokio::spawn(async move {
+            let _guard = holder_driver
+                .lock_internal_initialization(&holder_target, Some(&schema))
+                .await
+                .unwrap()
+                .unwrap();
+            entered_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        entered_rx.await.unwrap();
+        // Exercise the driver's own bounded timeout, including equivalent default schema.
+        let timed_out = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            contender.lock_internal_initialization(&target, None),
+        )
+        .await
+        .expect("the configured acquisition deadline must be enforced");
+        assert!(matches!(
+            timed_out,
+            Err(crate::SqlError::Driver(sqlx::Error::PoolTimedOut))
+        ));
+        // An independently cancelled waiter must not leave a session lock in either pool.
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(150),
+                contender.lock_internal_initialization(&target, None),
+            )
+            .await
+            .is_err()
+        );
+        let other = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            contender.lock_internal_initialization(&format!("{target}_other"), None),
+        )
+        .await
+        .expect("different targets must initialize independently")
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            contender
+                .value("SELECT 1")
+                .await
+                .unwrap()
+                .and_then(|v| v.as_i64()),
+            Some(1),
+            "an initialization lock must not hold the only pool slot"
+        );
+        drop(other);
+        holder.abort();
+        assert!(holder.await.unwrap_err().is_cancelled());
+        let guard = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            contender.lock_internal_initialization(&target, None),
+        )
+        .await
+        .expect("a cancelled holder must close its dedicated session")
+        .unwrap()
+        .unwrap();
+        drop(guard);
+        let guard = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            driver.lock_internal_initialization(&target, None),
+        )
+        .await
+        .expect("a dropped guard must not return a locked connection to a pool")
+        .unwrap()
+        .unwrap();
+        drop(guard);
+        driver.close().await;
+        contender.close().await;
+    }
+
+    #[tokio::test]
+    async fn mysql_internal_initialization_locks() {
+        session_internal_initialization_locks("MRSM_TEST_MYSQL_URI", Flavor::Mysql).await;
+    }
+
+    #[tokio::test]
+    async fn mariadb_internal_initialization_locks() {
+        session_internal_initialization_locks("MRSM_TEST_MARIADB_URI", Flavor::Mariadb).await;
+    }
+
+    #[cfg(feature = "mssql")]
+    #[tokio::test]
+    async fn mssql_internal_initialization_locks() {
+        session_internal_initialization_locks("MRSM_TEST_MSSQL_URI", Flavor::Mssql).await;
+    }
 
     #[tokio::test]
     async fn cancelled_initializer_releases_database_lock() {

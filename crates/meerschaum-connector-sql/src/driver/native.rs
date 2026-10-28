@@ -177,6 +177,13 @@ impl NativePool {
         }
     }
 
+    /// Open a dedicated session outside the pool. Dropping it closes the connection rather
+    /// than returning session-owned initialization locks to another caller.
+    #[cfg(feature = "mssql")]
+    pub(crate) async fn connect_unpooled(&self) -> Result<Box<dyn NativeConn>> {
+        self.inner.connector.connect().await
+    }
+
     /// Check out a connection, opening one when none is idle.
     pub(crate) async fn acquire(&self) -> Result<PooledConn> {
         if self
@@ -714,6 +721,32 @@ mod cancellation_tests {
             2,
             "a cancelled BEGIN must not return its connection to the pool"
         );
+    }
+
+    #[cfg(feature = "mssql")]
+    #[tokio::test]
+    async fn dedicated_connections_bypass_pool_capacity_and_are_not_returned() {
+        let opens = Arc::new(AtomicUsize::new(0));
+        let pool = NativePool::new(
+            Box::new(Connector {
+                opens: opens.clone(),
+                begun: Arc::new(tokio::sync::Notify::new()),
+            }),
+            1,
+        );
+        let pooled = pool.acquire().await.unwrap();
+        let dedicated =
+            tokio::time::timeout(std::time::Duration::from_secs(1), pool.connect_unpooled())
+                .await
+                .expect("a dedicated initialization session must not wait for a pool slot")
+                .unwrap();
+        assert_eq!(opens.load(Ordering::SeqCst), 2);
+        drop(dedicated);
+        assert!(pool.inner.idle.lock().unwrap().is_empty());
+        drop(pooled);
+        assert_eq!(pool.inner.idle.lock().unwrap().len(), 1);
+        let _pooled = pool.acquire().await.unwrap();
+        assert_eq!(opens.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

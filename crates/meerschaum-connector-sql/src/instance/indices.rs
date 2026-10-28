@@ -3,19 +3,212 @@
 //! `get_drop_index_queries`). The query text comes from [`crate::queries::index`]; this module
 //! gathers the table state those builders take as input.
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use meerschaum_connector::ConnectorResult;
 use meerschaum_core::{Pipe, SuccessTuple};
 
 use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
 use crate::pipe::SqlPipe;
+use crate::queries::ConnectorCtx;
 use crate::queries::index::{
     DropIndexState, IndexState, get_create_index_queries, get_drop_index_queries,
     get_pipe_index_names,
 };
 
 use super::{SqlConnector, be, geopackage};
+
+/// Expected catalog identity, derived from the typed index plan (never parsed from SQL).
+struct OracleInternalIndex {
+    name: String,
+    columns: Vec<String>,
+    unique: bool,
+    constraint: bool,
+}
+
+fn oracle_catalog_identifier(emitted: &str) -> String {
+    match emitted.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        Some(quoted) => quoted.replace("\"\"", "\""),
+        None => emitted.to_uppercase(),
+    }
+}
+
+fn oracle_catalog_name(name: &str) -> String {
+    oracle_catalog_identifier(&sql_item_name(name, Flavor::Oracle, None))
+}
+
+fn oracle_literal(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+impl OracleInternalIndex {
+    fn guard(&self, query: &str, table: &str, owner: &str) -> String {
+        let (view, columns_view, relation, position, properties, codes) = if self.constraint {
+            (
+                "all_constraints",
+                "all_cons_columns",
+                "cols.owner = existing.owner AND cols.constraint_name = existing.constraint_name",
+                "position",
+                "existing.constraint_type = 'U' AND existing.status = 'ENABLED' \
+                 AND existing.validated = 'VALIDATED' AND existing.deferrable = 'NOT DEFERRABLE'"
+                    .to_owned(),
+                "-2261, -2264",
+            )
+        } else {
+            (
+                "all_indexes",
+                "all_ind_columns",
+                "cols.index_owner = existing.owner AND cols.index_name = existing.index_name",
+                "column_position",
+                format!(
+                    "existing.table_owner = {owner} AND existing.uniqueness = '{}' \
+                     AND existing.status = 'VALID' AND existing.index_type = 'NORMAL'",
+                    if self.unique { "UNIQUE" } else { "NONUNIQUE" },
+                ),
+                "-955, -1408",
+            )
+        };
+        let column_matches = self
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(index, column)| {
+                format!(
+                    "(cols.{position} = {} AND cols.column_name = '{}'{} )",
+                    index + 1,
+                    oracle_literal(&oracle_catalog_name(column)),
+                    if self.constraint {
+                        ""
+                    } else {
+                        " AND cols.descend = 'ASC'"
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let object_name = if self.constraint {
+            "constraint_name"
+        } else {
+            "index_name"
+        };
+        let count = self.columns.len();
+        format!(
+            "DECLARE matching_objects PLS_INTEGER;\nBEGIN\n    EXECUTE IMMEDIATE '{}';\n\
+             EXCEPTION WHEN OTHERS THEN\n    IF SQLCODE NOT IN ({codes}) THEN RAISE; END IF;\n\
+                 SELECT COUNT(*) INTO matching_objects FROM {view} existing\n\
+                 WHERE existing.owner = {owner} AND existing.table_name = '{}'\n\
+                 AND existing.{object_name} = '{}' AND {properties}\n\
+                 AND (SELECT COUNT(*) FROM {columns_view} cols WHERE {relation}) = {count}\n\
+                 AND (SELECT COUNT(*) FROM {columns_view} cols WHERE {relation}\n\
+                      AND ({column_matches})) = {count};\n\
+                 IF matching_objects != 1 THEN RAISE; END IF;\nEND;",
+            oracle_literal(query),
+            oracle_literal(&oracle_catalog_name(table)),
+            oracle_literal(&oracle_catalog_name(&self.name)),
+        )
+    }
+}
+
+/// Oracle has no CREATE INDEX IF NOT EXISTS. Accept only a completed identical
+/// internal definition after a stale-plan duplicate, preserving every genuine DDL error.
+fn guard_oracle_internal_indices(
+    ctx: &ConnectorCtx,
+    sp: &SqlPipe,
+    state: &IndexState,
+    queries: &mut IndexMap<String, Vec<String>>,
+) {
+    let q = |name: &str| sql_item_name(name, Flavor::Oracle, None);
+    let table = sql_item_name(
+        &sp.target,
+        Flavor::Oracle,
+        ctx.get_pipe_schema(sp).as_deref(),
+    );
+    let owner = if ctx.get_pipe_schema(sp).is_some() {
+        // The typed renderer determines the qualifier's quoting on Oracle. Strip
+        // only that exact known target suffix, rather than parsing arbitrary SQL.
+        let Some(qualifier) = table.strip_suffix(&format!(".{}", q(&sp.target))) else {
+            return;
+        };
+        format!(
+            "'{}'",
+            oracle_literal(&oracle_catalog_identifier(qualifier))
+        )
+    } else {
+        "SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')".to_owned()
+    };
+    let names = get_pipe_index_names(ctx, sp);
+    let mut expected = IndexMap::new();
+    for (role, columns) in sp.index_columns() {
+        let Some(name) = names.get(&role) else {
+            continue;
+        };
+        let columns: Vec<_> = columns
+            .as_vec()
+            .into_iter()
+            .filter(|c| !c.is_empty())
+            .collect();
+        if columns.is_empty() {
+            continue;
+        }
+        let rendered = columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ");
+        expected.insert(
+            format!("CREATE INDEX {} ON {table} ({rendered})", q(name)),
+            OracleInternalIndex {
+                name: name.clone(),
+                columns,
+                unique: false,
+                constraint: false,
+            },
+        );
+    }
+    if sp.upsert() {
+        let name = names
+            .get("unique")
+            .filter(|name| !name.is_empty())
+            .cloned()
+            .unwrap_or_else(|| format!("IX_{}_unique", sp.target));
+        let columns: Vec<_> = sp
+            .columns()
+            .values()
+            .map(meerschaum_core::Value::py_str)
+            .filter(|column| state.existing_cols_types.contains_key(column))
+            .collect::<IndexSet<_>>()
+            .into_iter()
+            .collect();
+        if !columns.is_empty() {
+            let rendered = columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ");
+            expected.insert(
+                format!("CREATE UNIQUE INDEX {} ON {table} ({rendered})", q(&name)),
+                OracleInternalIndex {
+                    name: name.clone(),
+                    columns: columns.clone(),
+                    unique: true,
+                    constraint: false,
+                },
+            );
+            let constraint = name.replace("IX_", "UQ_");
+            expected.insert(
+                format!(
+                    "ALTER TABLE {table} ADD CONSTRAINT {} UNIQUE ({rendered})",
+                    q(&constraint)
+                ),
+                OracleInternalIndex {
+                    name: constraint,
+                    columns,
+                    unique: true,
+                    constraint: true,
+                },
+            );
+        }
+    }
+    // Exact equality limits the guard to these typed ordinary/unique definitions.
+    // Unsupported or future DDL retains its original error behavior.
+    for query in queries.values_mut().flatten() {
+        if let Some(index) = expected.get(query) {
+            *query = index.guard(query, &sp.target, &owner);
+        }
+    }
+}
 
 impl SqlConnector {
     /// `get_pipe_index_names(pipe)`: index key → index name on the database.
@@ -110,6 +303,12 @@ impl SqlConnector {
                     }
                 }
             }
+        }
+        if sp.pipe().temporary
+            && sp.pipe().connector_keys() == "mrsm"
+            && self.flavor == Flavor::Oracle
+        {
+            guard_oracle_internal_indices(&self.ctx(), sp, &state, &mut queries);
         }
         Ok(queries)
     }

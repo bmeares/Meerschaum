@@ -1949,6 +1949,43 @@ impl SqlConnector {
             if let Some(s) = schema.as_deref().filter(|s| !s.is_empty()) {
                 let mut q = get_create_schema_if_not_exists_queries(Some(s), flavor)?;
                 if sp.pipe().temporary
+                    && sp.pipe().connector_keys() == "mrsm"
+                    && flavor == Flavor::Mssql
+                    && !q.is_empty()
+                {
+                    // Different internal targets have different initialization locks but
+                    // may create their shared schema together. Lock only while it is absent,
+                    // using the existing create-table transaction, then check again. MSSQL's
+                    // generic CREATE SCHEMA error 2759 cannot distinguish a duplicate from a
+                    // permission failure, so no schema/DDL errors are suppressed.
+                    use sha2::{Digest, Sha256};
+
+                    let schema = truncate_item_name(s, flavor);
+                    let name = schema.replace('\'', "''");
+                    let create = format!("CREATE SCHEMA {}", sql_item_name(&schema, flavor, None))
+                        .replace('\'', "''");
+                    let mut digest = Sha256::new();
+                    digest.update(b"meerschaum:internal-schema-initialization:");
+                    digest.update(schema.to_lowercase().as_bytes());
+                    let key = hex::encode(digest.finalize());
+                    let limit = crate::driver::connect::connect_timeout(self.spec());
+                    let timeout_ms = i32::try_from(limit.as_millis()).unwrap_or(i32::MAX);
+                    q = vec![format!(
+                        "IF SCHEMA_ID(N'{name}') IS NULL\n\
+                         BEGIN\n\
+                             DECLARE @mrsm_schema_lock int;\n\
+                             EXEC @mrsm_schema_lock = sys.sp_getapplock \
+                                 @Resource = N'{key}', @LockMode = 'Exclusive', \
+                                 @LockOwner = 'Transaction', @LockTimeout = {timeout_ms}, \
+                                 @DbPrincipal = 'public';\n\
+                             IF @mrsm_schema_lock < 0\n\
+                                 THROW 50000, 'Could not acquire internal schema initialization lock.', 1;\n\
+                             IF SCHEMA_ID(N'{name}') IS NULL\n\
+                                 EXEC(N'{create}');\n\
+                         END;"
+                    )];
+                }
+                if sp.pipe().temporary
                     && sp.is_static()
                     && sp.pipe().connector_keys() == "mrsm"
                     && flavor.driver_family() == DriverFamily::Postgres

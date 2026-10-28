@@ -667,6 +667,12 @@ impl SqlConnector {
                 Flavor::Mssql => {
                     sql = format!("SELECT TOP {limit}\n{}", &sql["SELECT ".len()..]);
                 }
+                Flavor::Oracle if sp.pipe().temporary && sp.pipe().connector_keys() == "mrsm" => {
+                    // Internal bounded readers may request more than Oracle's 1,000
+                    // IN-list expressions (metrics include a lookahead row). Keep the
+                    // ordinary v4 query text below while bounding internal rows directly.
+                    sql = format!("SELECT * FROM (\n  {sql}\n)\nWHERE ROWNUM <= {limit}");
+                }
                 Flavor::Oracle => {
                     let rows: Vec<String> = (1..=limit).map(|i| i.to_string()).collect();
                     sql = format!(
