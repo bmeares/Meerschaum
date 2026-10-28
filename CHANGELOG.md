@@ -185,6 +185,9 @@ The notes below are written for someone upgrading from 4.1. Everything that beha
 - **Job executors and status in Rust.**  
   The `api:<label>` and `systemd` executors, executor-aware compose and `mrsm api <label> <action>` run natively. Systemd units run the `mrsm` binary with `Environment=MRSM_PYTHON=<absolute path>`, and `systemctl --user stop` asks the job to stop once. Job listings and status read PID files instead of scanning the process table: an idle supervisor pass over 50 completed jobs dropped from 1773 ms to 5 ms of CPU (also in v4.1.5). A job found by name without its PID file matches only processes of its own root, so a v4 job of the same name under another `MRSM_ROOT_DIR` is never stopped by mistake (also in v4.1.6). The environment is read on Linux, macOS and FreeBSD; on other systems such a process matches only under the default root. Remote executor reads that fail now fail the action, so a failed `compose down` cannot silently leave jobs running.
 
+- **Jobs stay visible during metadata updates.**\
+  Job properties are replaced atomically. Concurrent listings and status reads keep a complete record while the supervisor updates it.
+
 - **Jobs survive reboots in every root.**  
   On a systemd host, jobs use the `systemd` executor in every root, a Compose project's own `root_dir` included, not only in the default root. Units are named `mrsm-<job>.service` in the default root, `mrsm-<project>.<job>.service` for a Compose project and `mrsm-<hash of the root>.<job>.service` elsewhere; they carry the root, the plugins directory and the project's environment, their unit files are readable only by their owner, and each root lists only its own units. `local` jobs from earlier versions move to systemd on the next `compose up` or `restart jobs`, keeping their logs; `meerschaum:executor: local` in a root's config keeps its jobs local. Development builds and source checkouts keep jobs `local`.
 
