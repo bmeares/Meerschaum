@@ -48,7 +48,8 @@
 #                (without the root `[patch]`, so plain sqlx) in target/package/. Slow; no credentials
 #                needed, nothing is uploaded. The real `cargo publish` is never run by CI.
 #   parity       Regenerate every crates/*/tests/fixtures/gen_*.py with the v4.1.4 reference
-#                interpreter (scripts/parity/) and fail if the fixtures differ from git.
+#                interpreter (scripts/parity/) and fail if the fixtures differ from git. Detailed
+#                generator output is saved separately; a failed generator also prints its full log.
 #
 # Build accelerators (SELF-HOSTED Linux runners only: `RUNNER_ENVIRONMENT=self-hosted`, or MRSM_CI_ACCEL=1 to force
 # them elsewhere, MRSM_CI_ACCEL=0 to disable; GitHub-hosted runners use Swatinem/rust-cache instead):
@@ -356,10 +357,24 @@ step_parity() {
     return 0
   fi
   "$REPO/scripts/parity/setup_reference.sh"
-  local gen
+  local gen gen_log status logs_dir
+  mkdir -p "$REPO/target"
+  logs_dir="$(mktemp -d "$REPO/target/parity-logs.XXXXXX")"
+  log "Detailed generator output: $logs_dir"
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    printf 'MRSM_PARITY_LOGS_DIR=%s\n' "$logs_dir" >> "$GITHUB_ENV"
+  fi
   for gen in "${gens[@]}"; do
     log "Regenerating with the reference interpreter: $gen"
-    "$REPO/scripts/parity/run.sh" "$gen"
+    gen_log="$logs_dir/${gen//\//__}.log"
+    if "$REPO/scripts/parity/run.sh" "$gen" > "$gen_log" 2>&1; then
+      printf '[parity] passed: %s (detailed output retained)\n' "$gen"
+    else
+      status=$?
+      printf '[parity] failed: %s\n' "$gen" >&2
+      cat "$gen_log" >&2
+      return "$status"
+    fi
   done
   log "Checking that the regenerated fixtures match git"
   local dirs=()

@@ -25,6 +25,8 @@ import json
 import pathlib
 import sys
 
+from _offline_sql import assert_no_io
+
 import meerschaum as mrsm
 assert pathlib.Path(mrsm.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), mrsm.__file__
 
@@ -151,6 +153,7 @@ def main():
         })
 
     out_path = pathlib.Path(__file__).parent / 'uris.json'
+    assert_no_io()
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(cases, f, indent=2)
         f.write('\n')

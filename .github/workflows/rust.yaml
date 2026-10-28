@@ -204,6 +204,14 @@ jobs:
         run: scripts/rust/ci.sh setup
       - name: Regenerate fixtures with the v4.1.4 reference and diff
         run: scripts/rust/ci.sh parity
+      - name: Retain detailed reference-generator output
+        if: ${{ always() && env.MRSM_PARITY_LOGS_DIR != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-generator-logs-${{ github.run_attempt }}
+          path: ${{ env.MRSM_PARITY_LOGS_DIR }}
+          if-no-files-found: error
+          retention-days: 7
 
   # ---------------------------------------------------------------- hosted (compile only)
   # ubuntu-latest keeps compile errors visible when the self-hosted runner is down.

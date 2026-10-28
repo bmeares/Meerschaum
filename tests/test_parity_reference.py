@@ -3,7 +3,10 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+
+import pytest
 
 from tests._binary import skip_or_fail
 
@@ -72,3 +75,70 @@ pathlib.Path(output).write_text(json.dumps({
     assert not Path(probe['root']).exists(), 'The reference root must be cleaned up.'
     assert not probe['plugins'] and not probe['tmux'] and not probe['no_color']
     assert list(caller_root.iterdir()) == [caller_root / 'sentinel']
+
+
+@pytest.mark.parametrize('outcome,expected_status', [
+    ('matching', 0), ('exception', 1), ('exit', 23), ('drift', 1),
+])
+def test_parity_reporting_keeps_details_and_preserves_failures(tmp_path, outcome, expected_status):
+    """Exercise the real parity command with a tiny reference-runner stand-in."""
+    source = Path(__file__).resolve().parents[1]
+    repo = tmp_path / 'repo'
+    for directory in ('scripts/rust', 'scripts/parity', 'crates/probe/tests/fixtures'):
+        (repo / directory).mkdir(parents=True)
+    for relative in ('scripts/rust/ci.sh', 'scripts/parity/check_fixture_hygiene.sh'):
+        shutil.copy2(source / relative, repo / relative)
+    for name, body in {
+        'setup_reference.sh': '#!/usr/bin/env bash\nexit 0\n',
+        'run.sh': '#!/usr/bin/env bash\nset -euo pipefail\nexec python3 "$1"\n',
+    }.items():
+        script = repo / 'scripts/parity' / name
+        script.write_text(body)
+        script.chmod(0o755)
+    fixtures = repo / 'crates/probe/tests/fixtures'
+    (fixtures / 'probe.json').write_text('{"value": 1}\n')
+    (fixtures / 'gen_probe.py').write_text(f'''
+from pathlib import Path
+import traceback
+try:
+    raise ValueError('expected negative fixture case')
+except ValueError:
+    traceback.print_exc()
+outcome = {outcome!r}
+if outcome == 'exception':
+    raise RuntimeError('unexpected fixture failure')
+if outcome == 'exit':
+    raise SystemExit(23)
+if outcome == 'drift':
+    Path(__file__).with_name('probe.json').write_text('{{"value": 2}}\\n')
+''')
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True, capture_output=True)
+    subprocess.run(['git', 'add', '.'], cwd=repo, check=True, capture_output=True)
+    github_env = tmp_path / 'github-env'
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith('MRSM_')
+        and key not in ('TMUX', 'TMUX_PANE', 'PYTHONPATH', 'PYTHONHOME', 'CARGO_TARGET_DIR')
+    }
+    env.update(MRSM_CI_ACCEL='0', GITHUB_ENV=str(github_env))
+    result = subprocess.run(
+        ['bash', str(repo / 'scripts/rust/ci.sh'), 'parity'],
+        cwd=repo, env=env, text=True, capture_output=True, timeout=30,
+    )
+    console = result.stdout + result.stderr
+    assert result.returncode == expected_status, console
+    key, value = github_env.read_text().strip().split('=', 1)
+    assert key == 'MRSM_PARITY_LOGS_DIR'
+    logs = list(Path(value).glob('*.log'))
+    assert len(logs) == 1
+    assert 'expected negative fixture case' in logs[0].read_text()
+    if outcome in ('exception', 'exit'):
+        assert '[parity] failed:' in console
+        assert 'Traceback' in console
+        if outcome == 'exception':
+            assert 'unexpected fixture failure' in console
+    else:
+        assert '[parity] passed:' in console
+        assert 'Traceback' not in console
+        if outcome == 'drift':
+            assert 'Parity fixtures differ' in console

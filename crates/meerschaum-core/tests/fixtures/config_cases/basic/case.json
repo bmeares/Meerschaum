@@ -1,5 +1,8 @@
 {
   "env": {},
+  "setup_queries": [
+    {"keys": ["formatting"]}
+  ],
   "queries": [
     {"keys": ["meerschaum", "instance"]},
     {"keys": ["meerschaum", "connectors", "sql", "main"]},

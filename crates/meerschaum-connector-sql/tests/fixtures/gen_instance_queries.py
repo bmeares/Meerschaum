@@ -25,6 +25,8 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from _offline_sql import assert_no_io
+
 import meerschaum as mrsm
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance_queries.json')
@@ -166,7 +168,7 @@ def resolve_query(shape, query):
 
 def make_conn(flavor, prefix='gen_'):
     kw = (
-        {'database': '/tmp/_mrsm_gen_instance_queries.db'}
+        {'database': os.path.join(os.environ['MRSM_ROOT_DIR'], 'instance_queries.db')}
         if flavor == 'sqlite'
         else {'username': 'u', 'password': 'p', 'host': 'localhost', 'database': 'd'}
     )
@@ -210,6 +212,7 @@ def main():
             current_cols_types.update(cols_types)
             pipe = mrsm.Pipe(
                 'gen', shape, instance=conn,
+                temporary=True,
                 parameters=json.loads(json.dumps(spec['parameters'])),
             )
             base = {
@@ -274,6 +277,10 @@ def main():
     from sqlalchemy.schema import CreateTable, CreateIndex
     import meerschaum.connectors.sql.tables as tables_module
     tables_module._check_create_cache = lambda c, debug=False: False
+    # SQLite forces a cold create even with create=False. Only compile its real
+    # in-memory metadata; neither schema nor table creation belongs to this oracle.
+    tables_module.create_schemas = lambda *args, **kwargs: True
+    tables_module.create_tables = lambda *args, **kwargs: True
     for flavor in ('postgresql', 'timescaledb', 'postgis', 'mysql', 'mariadb', 'sqlite'):
         conn = make_conn(flavor, prefix='ddl_')
         _ = tables_module.get_tables(conn, create=False)
@@ -292,6 +299,7 @@ def main():
         'generator': 'crates/meerschaum-connector-sql/tests/fixtures/gen_instance_queries.py',
         'num_cases': len(cases),
     }
+    assert_no_io()
     with open(OUT, 'w', encoding='utf-8') as f:
         json.dump({'meta': meta, 'cases': cases}, f, indent=1, sort_keys=False)
         f.write('\n')

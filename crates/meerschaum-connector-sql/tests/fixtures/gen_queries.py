@@ -41,6 +41,8 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 
+from _offline_sql import assert_no_io
+
 import meerschaum as mrsm
 from meerschaum.connectors.sql import SQLConnector
 from meerschaum.utils import sql as usql
@@ -1214,6 +1216,7 @@ meta = {
     'generator': 'crates/meerschaum-connector-sql/tests/fixtures/gen_queries.py',
     'num_cases': len(CASES),
 }
+assert_no_io()
 with open(OUT_PATH, 'w', encoding='utf-8') as f:
     ### One case per line keeps diffs reviewable without inflating the file.
     f.write('{"meta": ' + json.dumps(meta) + ', "cases": [\n')
