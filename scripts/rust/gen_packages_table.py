@@ -26,9 +26,8 @@ out.append('''//! The dependency groups of `mrsm show packages` / `upgrade packa
 //! python3 scripts/rust/gen_packages_table.py > crates/meerschaum-cli/src/native/packages_table.rs
 //! ```
 //!
-//! `scripts/check_packaging.py` keeps `_packages.py`, `pyproject.toml` and `extras.rs` in step;
-//! this table is the same data for the groups that are not extras. `tests/generated_tables.rs`
-//! fails when this file differs from the generator's output.
+//! `scripts/check_packaging.py --write` keeps both CLI dependency tables in step with Python.
+//! The fast packaging check and `tests/generated_tables.rs` reject stale generated data.
 
 /// One group: `(import_name, install_name)` pairs in definition order.
 pub type Group = &'static [(&'static str, &'static str)];

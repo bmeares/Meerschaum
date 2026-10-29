@@ -82,7 +82,7 @@ jobs:
         with: { persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Toolchain
         run: scripts/rust/ci.sh setup
-      - name: cargo fmt --all --check
+      - name: Formatting and packaging metadata
         run: scripts/rust/ci.sh fmt
 
   # ---------------------------------------------------------------- self-hosted (full checks)
