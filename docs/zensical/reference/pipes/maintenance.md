@@ -5,7 +5,7 @@ Over time a pipe's target table accumulates dead rows, stale planner statistics,
 | Action | Purpose | `Pipe` method |
 |---|---|---|
 | [`show sizes`](#disk-usage) | Report on-disk size per pipe | [`Pipe.get_size()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_size) |
-| [`show partitions`](#partitions) | Report partition / chunk counts and width | — |
+| [`show partitions`](#partitions) | Report partition / chunk counts and width |, |
 | [`compress pipes`](#compression) | Reclaim space by compressing history | [`Pipe.compress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.compress) |
 | [`decompress pipes`](#compression) | Reverse compression | [`Pipe.decompress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.decompress) |
 | [`vacuum pipes`](#vacuuming-and-analyzing) | Reclaim dead-row space | [`Pipe.vacuum()`](https://docs.meerschaum.io/meerschaum.html#Pipe.vacuum) |
@@ -33,7 +33,7 @@ print(pipe.get_size())
 # 1859584
 ```
 
-Sizes are measured with each flavor's native query — TimescaleDB hypertable size functions, `pg_total_relation_size()` for PostgreSQL / PostGIS (summed across partitions), `data_length + index_length` for MySQL / MariaDB, reserved pages for MSSQL, and `dbstat` for SQLite.
+Sizes are measured with each flavor's native query, TimescaleDB hypertable size functions, `pg_total_relation_size()` for PostgreSQL / PostGIS (summed across partitions), `data_length + index_length` for MySQL / MariaDB, reserved pages for MSSQL, and `dbstat` for SQLite.
 
 ## 🗜️ Compression
 
@@ -45,9 +45,9 @@ mrsm compress pipes -i sql:main -m weather
 
 The mechanism depends on the flavor:
 
-- **TimescaleDB** — enables the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore), installs a columnstore (compression) policy, and converts existing chunks. By default (the [`hypercore`](/reference/pipes/parameters/#hypercore) parameter) a new hypertable already has the columnstore enabled; the [`compress`](/reference/pipes/parameters/#compress) parameter additionally (re)installs a policy on sync.
-- **MySQL / MariaDB** — `ROW_FORMAT=COMPRESSED`.
-- **MSSQL** — `DATA_COMPRESSION = PAGE`.
+- **TimescaleDB**, enables the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore), installs a columnstore (compression) policy, and converts existing chunks. By default (the [`hypercore`](/reference/pipes/parameters/#hypercore) parameter) a new hypertable already has the columnstore enabled; the [`compress`](/reference/pipes/parameters/#compress) parameter additionally (re)installs a policy on sync.
+- **MySQL / MariaDB**, `ROW_FORMAT=COMPRESSED`.
+- **MSSQL**, `DATA_COMPRESSION = PAGE`.
 
 !!! tip "One-shot compression"
     Pass `--no-policy` to compress existing data now **without** installing an ongoing policy (and, for `decompress pipes`, to decompress now while leaving the policy in place):
@@ -91,7 +91,7 @@ For TimescaleDB this removes the columnstore policy, converts compressed chunks 
 mrsm vacuum pipes -i sql:main
 ```
 
-On the PostgreSQL family a plain `VACUUM` reclaims dead tuples internally but does not return space to the operating system — pass `--full` to run `VACUUM FULL`, which rewrites the table (taking an exclusive lock):
+On the PostgreSQL family a plain `VACUUM` reclaims dead tuples internally but does not return space to the operating system, pass `--full` to run `VACUUM FULL`, which rewrites the table (taking an exclusive lock):
 
 ```bash
 mrsm vacuum pipes -i sql:main --full
@@ -107,7 +107,7 @@ mrsm analyze pipes -i sql:main -m weather
 
 ## 🧩 Partitions
 
-For pipes with [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) (or TimescaleDB hypertables), `show partitions` reports the partition / chunk count, the physical partition width, and the approximate number of rows per partition — a useful signal for tuning the width:
+For pipes with [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) (or TimescaleDB hypertables), `show partitions` reports the partition / chunk count, the physical partition width, and the approximate number of rows per partition, a useful signal for tuning the width:
 
 ```bash
 mrsm show partitions -i sql:main
@@ -115,7 +115,7 @@ mrsm show partitions -i sql:main
 
 ### Repartitioning
 
-`verify.chunk_minutes` is the [authoritative partition width](/reference/connectors/sql-connectors/#changing-the-partition-width), read at sync time. To change the width of an **existing** table, use `partition pipes` (don't just edit the parameter — a changed width laid over an existing grid produces overlapping partitions):
+`verify.chunk_minutes` is the [authoritative partition width](/reference/connectors/sql-connectors/#changing-the-partition-width), read at sync time. To change the width of an **existing** table, use `partition pipes` (don't just edit the parameter, a changed width laid over an existing grid produces overlapping partitions):
 
 ```bash
 # Rebuild the 'weather' pipes to 7-day partitions.

@@ -1,8 +1,8 @@
 # 🎼 Meerschaum Compose
 
-Meerschaum Compose does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: you can consolidate everything into a single YAML file ― including all of the pipes and configuration needed for your project. Compose is built into Meerschaum 4.0 and later.
+Meerschaum Compose does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: you can consolidate everything into a single YAML file, including all of the pipes and configuration needed for your project. Compose is built into Meerschaum 4.0 and later.
 
-With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in the Compose project ― one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
+With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in the Compose project, one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
 
 
 !!! tip "Multiple Compose Files"
@@ -165,37 +165,37 @@ The flags may come before or after the subaction, and `-f <file>.yaml` is accept
 
 Below are the supported top-level keys in a Compose file. Note that all keys are optional.
 
-- **`connectors`**  
+- **`connectors`**
   Define the available connectors for the project. Alias for `config.meerschaum.connectors`.
-- **`instance`**  
+- **`instance`**
   Connector keys for the default instance for the project. Alias for `config.meerschaum.instance`.
-- **`pipes`**  
+- **`pipes`**
   List all of the pipes to be used in this project. See the **The `pipes` Key** section below.
-- **`sync`**  
+- **`sync`**
   Govern the behavior of the syncing process. See **The `sync` Key** section below.
-- **`jobs`**  
+- **`jobs`**
   If provided, `compose up` will start the defined jobs. See **The `jobs` Key** below.
 - **`project_name`** (default derived from the file path)
   The tag given to all pipes in this project. Conventional `mrsm-compose.yaml` and `mrsm-compose.yml` files default to their containing directory's name. Other files default to their filename without the final `.yaml` or `.yml` suffix: `/projects/acme/metrics.yaml` becomes `metrics`. Each included file derives its own name. Explicit names (including effective environment values) take precedence. Set `project_name` explicitly to preserve an older directory-based identity for a custom-named file. Every project in a composition must have a unique name.
-- **`root_dir`** (default `./root/`)  
+- **`root_dir`** (default `./root/`)
   A path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
-- **`plugins_dir`** (default `./plugins/`)  
+- **`plugins_dir`** (default `./plugins/`)
   Either a path or list of paths to the plugins directories. A value of `null` will include the current environment plugins directories in the project. See [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir).
-- **`plugins`**  
-  A list of plugins expected to be in the plugins directory. Missing plugins will be [installed from `api:mrsm`](/reference/plugins/repositories/#installing-plugins).  
+- **`plugins`**
+  A list of plugins expected to be in the plugins directory. Missing plugins will be [installed from `api:mrsm`](/reference/plugins/repositories/#installing-plugins).
   To install from a custom repository, append `@api:<label>` to the plugins' names or set the configuration variable `meerschaum:default_repository`.
-- **`config`**  
+- **`config`**
   Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config).
-- **`environment`**  
+- **`environment`**
   Additional environment variables to pass to subprocesses.
-- **`include`**  
+- **`include`**
   Compose files, directories and globs to include. See [Multiple Projects](#multiple-projects-include-and-parent).
-- **`parent`**  
+- **`parent`**
   The compose file or directory of the project which includes this one. See [Multiple Projects](#multiple-projects-include-and-parent).
-- **`isolation`**  
+- **`isolation`**
   If `isolation` is set to `subprocess`, then `compose` will execute commands as subprocesses, ensuring the truest level of isolation. By default, commands are executed within the host Meerschaum process, with isolated configuration and plugins and root directories. This behavior may be temporarily enabled with the flag `--isolated`.
- - **`daemon`**  
-   If `daemon` is `false`, then `compose` will not use a persistent CLI daemon but will instead execute all commands in-process (i.e. appends `--no-daemon` to each command). 
+ - **`daemon`**
+   If `daemon` is `false`, then `compose` will not use a persistent CLI daemon but will instead execute all commands in-process (i.e. appends `--no-daemon` to each command).
 
 !!! tip "Accessing the host configuration"
 
@@ -218,7 +218,7 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
           flavor: "sqlite"
           database: "{MRSM_ROOT_DIR}/foo.db"
         bar:
-          uri: "sqlite:///{__file__}/../bar.db" 
+          uri: "sqlite:///{__file__}/../bar.db"
         secret:
           flavor: "postgresql"
           username: "${PGUSER}"
@@ -255,17 +255,17 @@ The `pipes` key contains a list of [keyword arguments to build `mrsm.Pipe` objec
 
 Keys under the parent key `sync` are the following:
 
-- **`schedule`**  
-  Define a regular interval for syncing processes by setting a [schedule](/reference/background-jobs/#schedules).  
+- **`schedule`**
+  Define a regular interval for syncing processes by setting a [schedule](/reference/background-jobs/schedules/).
   This corresponds to the flag `-s` / `--schedule`.
-- **`min_seconds`** (default `1`)  
-  If a schedule is not set, pipes will be constantly synced and sleep `min_seconds` between laps.  
+- **`min_seconds`** (default `1`)
+  If a schedule is not set, pipes will be constantly synced and sleep `min_seconds` between laps.
   This corresponds to the flags `--min-seconds` and `--loop`.
-- **`timeout_seconds`**  
-  If this value is set, long-running syncing processes which exceed this value will be terminated.  
+- **`timeout_seconds`**
+  If this value is set, long-running syncing processes which exceed this value will be terminated.
   This corresponds to the flag `--timeout-seconds` / `--timeout`.
-- **`args`**  
-  This value may be a string or list of command-line arguments to append to the syncing command.  
+- **`args`**
+  This value may be a string or list of command-line arguments to append to the syncing command.
   This option is available for specific edge case scenarios, such as when working with custom flags or specific intervals (i.e. `--begin` and `--end`).
 
 
@@ -282,9 +282,9 @@ Keys under `jobs` are the names of jobs to be run with `compose up`. If defined,
       echo: "echo 'Hello, World!'"
     ```
 
-`compose up` only replaces jobs which belong to the project, and it checks every job it would start before it changes anything: if one of the names belongs to another project's job, `up` stops with the list of names before a pipe is registered or synced. A job started by Compose records its project's name, so it stays replaceable after you edit its command. Jobs started before that stamp existed are recognized two other ways: by the `-t <project_name>` tag Compose appends to job commands which set no tags of their own, and by running the exact command the project would start. A job under a configured name which proves none of these is refused rather than clobbered — with the caveat that two projects sharing a root directory and configuring the same job name with the same command cannot be told apart until each has started its own job.
+`compose up` only replaces jobs which belong to the project, and it checks every job it would start before it changes anything: if one of the names belongs to another project's job, `up` stops with the list of names before a pipe is registered or synced. A job started by Compose records its project's name, so it stays replaceable after you edit its command. Jobs started before that stamp existed are recognized two other ways: by the `-t <project_name>` tag Compose appends to job commands which set no tags of their own, and by running the exact command the project would start. A job under a configured name which proves none of these is refused rather than clobbered, with the caveat that two projects sharing a root directory and configuring the same job name with the same command cannot be told apart until each has started its own job.
 
-On a host with `systemd`, Compose starts its jobs as `systemd` user services, whatever the project's `root_dir`, so they come back after a reboot without a unit of your own. A project's units are named after it (`mrsm-<project_name>.<job>.service`, for example `mrsm-weather.weather-sync-_sql:main_.service`) and carry the project's root, plugins directory and environment; `compose ps` and `show jobs` list only the current root's units. Jobs that earlier versions ran as `local` daemons move to `systemd` on the next `compose up`: Compose stops the old process first and keeps its logs. Set `meerschaum:executor: local` under the project's `config:` to keep its jobs as daemons. See [Executors](/reference/background-jobs/#executors).
+On a host with `systemd`, Compose starts its jobs as `systemd` user services, whatever the project's `root_dir`, so they come back after a reboot without a unit of your own. A project's units are named after it (`mrsm-<project_name>.<job>.service`, for example `mrsm-weather.weather-sync-_sql:main_.service`) and carry the project's root, plugins directory and environment; `compose ps` and `show jobs` list only the current root's units. Jobs that earlier versions ran as `local` daemons move to `systemd` on the next `compose up`: Compose stops the old process first and keeps its logs. Set `meerschaum:executor: local` under the project's `config:` to keep its jobs as daemons. See [Executors](/reference/background-jobs/executors/).
 
 Job actions run through Compose are scoped the same way, so several projects can share one root directory. `compose start jobs`, `stop jobs`, `pause jobs`, `restart jobs`, and `delete jobs` with no job names act only on this project's jobs (and do nothing if it has none). Naming a job stamped by another project is refused, since running it here would apply this project's config to it: start or stop it from its own project's compose file instead.
 

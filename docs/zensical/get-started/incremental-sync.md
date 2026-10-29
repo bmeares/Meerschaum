@@ -35,6 +35,8 @@ Already-seen rows stay put. New rows are inserted. Changed rows can update their
 ??? example "Watch a row arrive"
     <asciinema-player src="/assets/casts/v5-incremental.cast" size="small" preload="true" rows="18"></asciinema-player>
 
+    <p class="mrsm-caption">Recorded with 5.0.0rc16. Playback pauses are extended for reading.</p>
+
 ## Keep it running
 
 For a simple repeating sync, keep the command in the foreground:
@@ -43,6 +45,6 @@ For a simple repeating sync, keep the command in the foreground:
 mrsm sync pipes -i sql:local -m temperatures --loop --min-seconds 60
 ```
 
-Press **Ctrl+C** to stop. Later, a [background job](../reference/background-jobs.md) can give it a name and a schedule.
+Press **Ctrl+C** to stop. Later, a [background job](../reference/background-jobs/index.md) can give it a name and a schedule.
 
 [Connect a transformation →](pipelines.md){ .md-button .md-button--primary }

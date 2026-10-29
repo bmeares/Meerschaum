@@ -9,7 +9,7 @@
 .mrsm-repr-location { color: #e88ce0; }
 .mrsm-repr-instance { color: #e39bbf; }
 
-.pipes-page { padding: 16px 24px 32px; max-width: 1600px; }
+.pipes-page { padding: 16px 24px 32px; width: 100%; max-width: none; }
 .pipes-page code { color: #dceaf6; }
 .pipes-page * { min-width: 0; }
 .pipes-breadcrumb { display: inline-block; color: #a8becf; text-decoration: none; margin: 4px 0 2px; }

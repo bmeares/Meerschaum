@@ -70,7 +70,7 @@ pub(crate) const LABEL: &str = "io.meerschaum.upgrade-postgres";
 
 /// Where the docs describe the manual procedure.
 pub(crate) const DOCS_HINT: &str =
-    "See \"Upgrading PostgreSQL\" in the docs (reference/stack-upgrades) for the manual procedure.";
+    "See \"Upgrading PostgreSQL\" in the docs (reference/stack/upgrades/) for the manual procedure.";
 
 /// The confirmation flags.
 #[derive(Debug, Clone, Copy, Default)]

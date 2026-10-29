@@ -4,73 +4,132 @@ hide:
   - toc
 ---
 
-<div class="mrsm-hero" markdown>
+<div class="mrsm-home" markdown="1">
 
-<p class="mrsm-eyebrow">MEERSCHAUM 5 · DOCUMENTATION PREVIEW</p>
+<img class="mrsm-home-banner" src="assets/banner_1920x320.png" alt="Meerschaum">
 
-# Keep your data flowing.
+<p class="mrsm-home-tagline"><em>Out-of-the-box ETL, easy to learn, and a pleasure to use!</em></p>
 
-Turn a query or a Python function into a **Pipe**. Sync new data, connect your transformations, and see what happened — from your terminal, Python, or the web.
+<div class="mrsm-home-actions">
+  <a class="md-button md-button--primary" href="get-started/">Get Started</a>
+  <button class="md-button mrsm-install" type="button" data-copy="pip install meerschaum" aria-label="Copy pip install meerschaum"><code>$ pip install meerschaum</code></button>
+  <span class="mrsm-copy-status" role="status" aria-live="polite"></span>
+</div>
 
-[Build your first Pipe](get-started/){ .md-button .md-button--primary }
-[Explore what's new](news/v5/){ .md-button }
+<div class="mrsm-home-grid" markdown="1">
 
-<p class="mrsm-hero-note">Start with a local SQLite file. Add a database or a plugin when you need one.</p>
+<div markdown="1">
+
+## What is Meerschaum?
+
+Meerschaum turns queries and Python functions into named data streams called **[Pipes](reference/pipes/index.md)**. Register a source, sync it, and query the results from your database, Python, or the web console.
+
+## Why Meerschaum?
+
+**Incremental updates.** Fetch the new and changed rows. Meerschaum handles deduplication, upserts, schema changes, and scheduling.
+
+Group related Pipes into a **[Pipeline](reference/pipelines/index.md)** to run transformations in dependency order and keep their history.
+
+[Create your first Pipe →](get-started/bootstrap.md)
 
 </div>
 
-<div class="mrsm-demo" markdown>
+<div class="mrsm-home-demo" markdown="1">
 
-<p class="mrsm-eyebrow">ONE PIPE. TWO SYNCS. NO DUPLICATES.</p>
+<asciinema-player src="/assets/casts/v5-first-pipe.cast" title="Create and sync a Pipe" preload="true"></asciinema-player>
 
-<asciinema-player src="/assets/casts/v5-first-pipe.cast" size="small" preload="true" rows="15" title="Sync a Pipe, inspect the data, then sync again"></asciinema-player>
-
-<p class="mrsm-caption">A real run of the <a href="get-started/bootstrap/">first-Pipe example</a>, recorded with the 5.0.0rc16 candidate. Play it, then try it yourself.</p>
-
-</div>
-
-<div class="mrsm-card-grid" markdown>
-
-<div class="mrsm-card" markdown>
-
-### A small idea that grows
-
-A Pipe remembers where its data belongs and how to fetch more. Keep the SQL and Python you already use.
-
-[Meet Pipes →](reference/pipes/)
-
-</div>
-
-<div class="mrsm-card" markdown>
-
-### From steps to a Pipeline
-
-Connect transformations, preview the work, and run parents before their children. Save the whole workflow under a name.
-
-[Build a Pipeline →](get-started/pipelines/)
-
-</div>
-
-<div class="mrsm-card" markdown>
-
-### A clear view of your work
-
-Browse data, edit a Pipe, inspect a Pipeline, and follow runs in the web console. Share access with your team.
-
-[Open the console →](get-started/start-api/)
+<p class="mrsm-caption">Genuine CLI recording from 5.0.0rc16. Playback pauses are extended for reading.</p>
 
 </div>
 
 </div>
 
-## Familiar tools. A faster foundation.
+## Features
 
-Meerschaum 5 brings a Rust core, Polars DataFrames, and native database connectors to the Python and command-line workflow. Use [pandas](reference/pipes/reading/#dataframe-library) too, or return plain Python dictionaries with no DataFrame dependency.
+<div class="mrsm-home-grid" markdown="1">
 
-[See the measured v3 / v4 / v5 comparison →](reference/performance/)
+<div markdown="1">
 
-## Take the next step
+### Organize ETL into Pipes
 
-[Install](get-started/) → [Make a Pipe](get-started/bootstrap/) → [Sync new rows](get-started/incremental-sync/) → [Connect a Pipeline](get-started/pipelines/).
+Tag streams, inspect their data, and reuse them in transformations.
 
-Already using Meerschaum? Start with [Migrating to v5](reference/migrating-to-v5/).
+![Pipes organized by connector and metric](assets/screenshots/show-pipes-fred.png){ loading=lazy }
+
+### Ingest from any source
+
+A [Python plugin](docs/python/plugins.md) can return rows from a file, service, or device. A [Rust plugin](docs/rust/plugins.md) adds native actions, sources, routes, and more.
+
+![A plugin created from the terminal](assets/screenshots/plugin-init.png){ loading=lazy }
+
+### Keep projects reproducible
+
+[Meerschaum Compose](reference/compose.md) keeps Pipe definitions, jobs, and configuration beside your code.
+
+![A Compose project in the terminal](assets/screenshots/mrsm-compose-techslamneggs.png){ loading=lazy }
+
+</div>
+
+<div markdown="1">
+
+### Transform in SQL
+
+When source and destination share a SQL instance, transformations can run in place. Larger transfers use chunks and concurrent workers.
+
+![An in-place SQL transformation](assets/screenshots/sql-inplace.png){ loading=lazy }
+
+### Use it from your code
+
+```python
+import meerschaum as mrsm
+
+pipe = mrsm.Pipe(
+    'plugin:manual', 'readings',
+    instance='sql:local',
+    columns={'id': 'id'},
+)
+result = pipe.sync([{'id': 1, 'temperature': 21.5}])
+print(result.success, result.inserted)
+print(pipe.get_data(as_docs=True))
+```
+
+Start with the [Python](docs/python/index.md) or [Rust](docs/rust/index.md) guides, then follow the full API references.
+
+### Run and observe
+
+Give work a [schedule](reference/background-jobs/schedules.md), manage it in the [console](reference/api-instance/web-console.md), and chart sync metrics in [Grafana](reference/stack/index.md#built-in-performance-dashboards). Teams, permissions, and locks control shared access.
+
+[Explore the console →](get-started/start-api.md)
+
+</div>
+
+</div>
+
+## Video Tutorials
+
+<div class="mrsm-home-grid mrsm-home-videos">
+  <iframe width="672" height="378" src="https://www.youtube.com/embed/VFFWe7B33Io" title="Getting started with Meerschaum" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+  <iframe width="672" height="378" src="https://www.youtube.com/embed/t9tFD4afSD4" title="Building data pipelines with Meerschaum" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+</div>
+
+<div class="mrsm-home-grid" markdown="1">
+
+<div markdown="1">
+
+## Support the Project
+
+Meerschaum is open source. Help with an [issue or contribution](https://github.com/bmeares/Meerschaum), or support development through [GitHub Sponsors](https://github.com/sponsors/bmeares).
+
+</div>
+
+<div markdown="1">
+
+## Consulting Services
+
+Need help with your data pipelines? Contact Bennett Meares on [LinkedIn](https://linkedin.com/in/bennettmeares).
+
+</div>
+
+</div>
+
+</div>

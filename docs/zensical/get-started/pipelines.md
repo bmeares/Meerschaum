@@ -46,6 +46,8 @@ mrsm show data -i sql:local -m fahrenheit
 ??? example "Watch the plan become a run"
     <asciinema-player src="/assets/casts/v5-pipeline.cast" size="small" preload="true" rows="20"></asciinema-player>
 
+    <p class="mrsm-caption">Recorded with 5.0.0rc16. Playback pauses are extended for reading.</p>
+
 ??? example "Plan and run from Python"
     ```python
     import meerschaum as mrsm
@@ -60,7 +62,7 @@ mrsm show data -i sql:local -m fahrenheit
 
 When you add a reading and run `climate` again, Meerschaum syncs the parent first. The child then uses the data available from its parent. Independent branches can run in parallel.
 
-A saved Pipeline remembers its members and settings. A [job](../reference/background-jobs.md) supplies a schedule. Deleting the Pipeline's saved definition keeps its Pipes and their data.
+A saved Pipeline remembers its members and settings. A [job](../reference/background-jobs/index.md) supplies a schedule. Deleting the Pipeline's saved definition keeps its Pipes and their data.
 
 [See it in the console →](start-api.md){ .md-button .md-button--primary }
 

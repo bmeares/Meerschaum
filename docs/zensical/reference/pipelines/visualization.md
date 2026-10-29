@@ -6,12 +6,17 @@ The engine emits one typed event per transition, and everything you see is drawn
 
 ## Running a Pipeline in the console
 
-Open `/dash/pipelines` and select a registered Pipeline. **Workspace** contains the editable graph;
-**Runs** contains execution history, the selected timeline and its horizontally scrollable stages table.
+Open `/dash/pipelines` for the full-width, purple-accented runbook. Search and sort its rows to
+compare names, members, traversal, and run status. **Details** reveals members; **Recent runs** loads
+history separately when opened.
+
+Open a registered Pipeline to see its **Canvas** and **Runs** views. Canvas contains the graph;
+choose **Edit** to change it. Runs contains execution history, the selected timeline and its
+horizontally scrollable stages table.
 The two views keep their state when switched. On phones, **Graph**, **Pipe details** and **Output**
 switch between workspace panes; selecting a node opens its details. **Tools** groups analysis and
-registration controls, while **Find pipes**, **Pipeline members** and **View options** reveal less frequent
-actions. You may also select a Pipeline by clicking its named boundary. Shared Pipes
+registration controls, while **Find pipes** and **Pipeline members** reveal less frequent
+actions. **View options** opens a fixed-size popup over the canvas. You may also select a Pipeline by clicking its named boundary. Shared Pipes
 may appear in several groups. Select a Pipe to open its inspector immediately; Query, Data / Plan,
 Dependencies, Recent syncs and Parameters load independently. **Resolve symlinks** changes displayed
 SQL in the selected Pipe's instance context, preserving the stored definition.
@@ -19,8 +24,9 @@ SQL in the selected Pipe's instance context, preserving the stored definition.
 **Fullscreen** keeps the canvas, inspector, editor and output dock together. Escape returns to
 the page. Drag the background to pan without selecting page text; zoom, Fit and Center selected
 provide keyboard-accessible controls. Search and status filters highlight matching Pipes, and
-Collapse groups provides an overview. Ctrl/Cmd/Shift-click selects several cards. Alt-drag a Pipe
-to arrange it, then **Save layout** in the canvas toolbar persists coordinates with revision checks. Zoom and pan
+Collapse groups provides an overview. Ctrl/Cmd/Shift-click selects several Pipe cards. On phones,
+pinch with two fingers to zoom. In **Edit** mode, Alt-drag a Pipe to arrange it, then **Save layout**
+in the canvas toolbar persists coordinates with revision checks. Zoom and pan
 remain personal to the browser session.
 
 Right-click a Pipe or use its inspector to **Sync this Pipe**. **Sync options** chooses parent or
@@ -46,7 +52,7 @@ Dependencies, Recent syncs and Parameters independently.
 Review the proposal, then explicitly **Apply proposed tags**. Stale proposals require analysis and
 approval again. Ordinary saves and syncs do not apply tags.
 
-The canvas's **Plan** lists each Pipe in dependency order with its action, the **Reason** in plain words ("up to date: Pipe('sql:main', 'raw') has no new data") and the sync **Window** in words ("last sync − 1 day → latest data"), without a time axis. The toolbar counts the Pipes and the **dependencies** between them; a Pipeline card counts the Pipes it syncs ("3 Pipes", or "1 Pipe + children" before its first run counted them). Run counts read "2 synced, 1 up to date", and a run's output lines say what happened ("Synced Pipe('sql:main', 'daily'): 24 inserted").
+The canvas's **Plan** lists each Pipe in dependency order with its action, the **Reason** in plain words ("up to date: Pipe('sql:main', 'raw') has no new data") and the sync **Window** in words ("last sync − 1 day → latest data"), without a time axis. The toolbar counts the Pipes and the **dependencies** between them; an Overview Pipeline card counts the Pipes it syncs ("3 Pipes", or "1 Pipe + children" before its first run counted them). Run counts read "2 synced, 1 up to date", and a run's output lines say what happened ("Synced Pipe('sql:main', 'daily'): 24 inserted").
 The **Actual execution timeline** uses observed starts and finishes, extends live running bars and
 shows overlap and elapsed time. It omits forecast bars and the image-download control. Engine
 estimates may use prior durations or a 30-second default; these are scheduling hints, not deadlines.

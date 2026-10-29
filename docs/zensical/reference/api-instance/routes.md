@@ -94,7 +94,7 @@ The other `/engine/*` routes carry the engine's own state for `api:` instances (
 
 ## Jobs
 
-Every job the server starts (`POST /jobs/{name}`, `POST /execute`, `POST /pipelines/{name}/sync`) records its caller as `owner` and the caller's primary team as `team`, whatever the request says. `/jobs/*`, `/logs/*` and the log stream show a job only to the people who may see it: its team, its owner and administrators (a console run: its owner, its team's managers and administrators; a job created on the server's host: everyone); to anyone else it does not exist (`404`). See [Who Sees a Job](/reference/background-jobs/#who-sees-a-job) for the permissions each operation needs.
+Every job the server starts (`POST /jobs/{name}`, `POST /execute`, `POST /pipelines/{name}/sync`) records its caller as `owner` and the caller's primary team as `team`, whatever the request says. `/jobs/*`, `/logs/*` and the log stream show a job only to the people who may see it: its team, its owner and administrators (a console run: its owner, its team's managers and administrators; a job created on the server's host: everyone); to anyone else it does not exist (`404`). See [Who Sees a Job](/reference/background-jobs/access/) for the permissions each operation needs.
 
 ## Teams, permissions and pipe access
 

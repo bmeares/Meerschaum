@@ -253,11 +253,13 @@ def build_pipeline_canvas(
                     *([] if read_only else [html.Button('Add Pipe', id='pipeline-add-node', className='pipeline-edit-only')]),
                     html.Button('Fit', id='pipeline-fit', title='Fit to view'),
                     html.Details([
-                        html.Summary('View options'),
+                        html.Summary('View options', **{'aria-controls': 'pipeline-view-options-panel'}),
                         html.Div([
                             html.Div([
-                                html.Button('−', id='pipeline-zoom-out', title='Zoom out'),
-                                html.Button('+', id='pipeline-zoom-in', title='Zoom in'),
+                                html.Button('−', id='pipeline-zoom-out', title='Zoom out',
+                                            **{'aria-label': 'Zoom out'}),
+                                html.Button('+', id='pipeline-zoom-in', title='Zoom in',
+                                            **{'aria-label': 'Zoom in'}),
                             ], className='pipeline-zoom-group', role='group', **{'aria-label': 'Zoom'}),
                             html.Button('Center selected', id='pipeline-center'),
                             *[html.Button(f'Collapse {role}', id={'type': 'pipeline-expand', 'index': role + '-collapse'},
@@ -269,7 +271,7 @@ def build_pipeline_canvas(
                                 ('Succeeded', 'succeeded'), ('Failed', 'failed'), ('Skipped', 'skipped'),
                                 ('Blocked', 'upstream_failed'),
                             ]], id='pipeline-canvas-status', **{'aria-label': 'Filter Pipe status'}),
-                        ], className='pipeline-view-options-body'),
+                        ], id='pipeline-view-options-panel', className='pipeline-view-options-body'),
                     ], className='pipeline-view-options'),
                     html.Button(build_icon('fullscreen'), id='pipeline-fullscreen', title='Toggle fullscreen',
                                 **{'aria-label': 'Toggle fullscreen'}),
@@ -283,7 +285,7 @@ def build_pipeline_canvas(
                    'data-pipeline': (definition or {}).get('name', ''),
                    'data-registry': registry or ''}),
                 id='pipeline-canvas', tabIndex=0,
-                **{'aria-label': 'Pipeline canvas. Drag to pan; use the zoom controls.'}),
+            **{'aria-label': 'Pipeline canvas. Drag to pan, pinch with two fingers to zoom, or use the zoom controls.'}),
         ], className='pipeline-canvas-shell'),
         html.P('This Pipeline has no members.') if not real else None,
         *[html.P(message, className='text-warning') for message in graph['warnings']],
@@ -565,6 +567,7 @@ def build_runs_table(runs: List[Dict[str, Any]], table_id='pipelines-runs-table'
     """
     if not runs:
         return html.P("No runs match.")
+    link_to_pipeline = table_id.startswith(('pipeline-card-history-', 'pipeline-row-history-'))
     rows = []
     for run in runs:
         record = run['run']
@@ -573,8 +576,8 @@ def build_runs_table(runs: List[Dict[str, Any]], table_id='pipelines-runs-table'
             html.Td(
                 html.A(
                     record['run_id'],
-                    href=('/dash/pipelines/' + quote(pipeline or '', safe='') + '?' + urlencode({'run_id': record['run_id'], **({'instance': registry} if registry else {})})) if table_id.startswith('pipeline-card-history-') else '#',
-                    **({} if table_id.startswith('pipeline-card-history-') else {'data-run-id': record['run_id']}),
+                    href=('/dash/pipelines/' + quote(pipeline or '', safe='') + '?' + urlencode({'run_id': record['run_id'], **({'instance': registry} if registry else {})})) if link_to_pipeline else '#',
+                    **({} if link_to_pipeline else {'data-run-id': record['run_id']}),
                     className='pipeline-run-link', title=record['run_id'],
                 )
             ),

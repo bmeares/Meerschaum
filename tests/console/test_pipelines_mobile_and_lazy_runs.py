@@ -44,7 +44,7 @@ def test_pipelines_dropdowns_are_dark_on_a_phone(server, browser):
         tab.login()
         page = tab.page
         tab.goto('/dash/pipelines', '#pipelines-list')
-        page.locator('.pipeline-list-card').first.wait_for(timeout=60000)
+        page.locator('.pipeline-list-entry').first.wait_for(timeout=60000)
         _assert_dark(page, 'list, closed')
         page.locator('#pipelines-find-pipe').tap()
         page.locator('.dash-dropdown-content').wait_for()
@@ -121,13 +121,13 @@ def test_expanding_runs_loads_in_place_without_flashing(server, tab):
     page = tab.page
     page.set_viewport_size({'width': 1280, 'height': 1000})
     tab.goto('/dash/pipelines', '#pipelines-list')
-    page.locator('.pipeline-list-card[data-pipeline=lazy-c]').wait_for(timeout=60000)
+    page.locator('.pipeline-list-entry[data-pipeline=lazy-c]').wait_for(timeout=60000)
     ### Expand the last card: the cards above it, the header and the list stay mounted, visible
     ### and in place, and the Runs swap into the card's placeholder.
     page.evaluate(WATCH, ['.pipelines-list-header', '#pipelines-list',
-                          '.pipeline-list-card[data-pipeline=lazy-a]', '.pipeline-list-card[data-pipeline=lazy-b]'])
-    card = page.locator('.pipeline-list-card[data-pipeline=lazy-c]')
-    card.locator('.accordion-button').click()
+                          '.pipeline-list-entry[data-pipeline=lazy-a]', '.pipeline-list-entry[data-pipeline=lazy-b]'])
+    card = page.locator('.pipeline-list-entry[data-pipeline=lazy-c]')
+    card.get_by_role('button', name='Details for lazy-c', exact=True).click()
     card.locator('.pipeline-run-link').first.wait_for(timeout=30000)
     page.wait_for_timeout(500)
     watch = page.evaluate('window._mrsmWatch')

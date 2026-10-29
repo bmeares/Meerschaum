@@ -126,7 +126,7 @@ def _may_register() -> bool:
 
 
 def list_layout(registry):
-    """One-column cards of the registry's Pipelines, with New pipeline and Find Pipe above."""
+    """The registry's runbook, with local search and sorting above its rows."""
     return [
         _navbar(registry),
         dcc.Location('pipelines-list-location', refresh=False),
@@ -139,7 +139,19 @@ def list_layout(registry):
                              className='pipelines-find-pipe', clearable=True),
             ], className='pipelines-list-header'),
             html.Div(id='pipelines-list-alert'),
-            ### Only the list itself shows the loading state: a card's lazy Runs never hides the page.
+            html.Div([
+                html.Label('Search Pipelines', htmlFor='pipelines-search', className='visually-hidden'),
+                dbc.Input(id='pipelines-search', type='search', placeholder='Search Pipelines'),
+                html.Select([
+                    html.Option('Name A to Z', value='name'),
+                    html.Option('Name Z to A', value='name-desc'),
+                    html.Option('Most recent run', value='recent'),
+                    html.Option('Run status', value='status'),
+                    html.Option('Most members', value='members'),
+                ], id='pipelines-sort', **{'aria-label': 'Sort Pipelines'}),
+                html.Span(id='pipelines-visible-count', role='status', **{'aria-live': 'polite'}),
+            ], className='pipelines-list-tools'),
+            ### Lazy row history never hides or replaces the runbook.
             dcc.Loading(html.Div(id='pipelines-list', className='pipelines-list'), type='dot',
                         target_components={'pipelines-list': 'children'}),
         ], id='pipelines-list-page', className='pipeline-page', **{'data-registry': registry}),

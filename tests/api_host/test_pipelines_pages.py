@@ -211,6 +211,85 @@ assert '/dash/pipelines/two' in cards[1] and 'open=plan' in cards[1]
 '''))
 
 
+def test_runbook_reuses_bulk_reads_and_never_renders_hidden_member_labels(sandbox):
+    root, plugins = sandbox
+    check(run_python(root, plugins, AS_VIEWER + '''
+import meerschaum as mrsm
+import meerschaum.jobs
+from meerschaum.core.Pipeline._saved import save_pipeline
+from meerschaum.api.dash import access, build_dash_app
+build_dash_app()
+from meerschaum.api.dash.callbacks import pipeline_pages as pages
+conn = mrsm.get_connector('sql:apihosttest')
+for metric, acl in [('visible', {'visibility':'public'}),
+                    ('PRIVATE_MEMBER', {'visibility':'private','owner':'alice'})]:
+    assert mrsm.Pipe('layout', metric, instance=conn, parameters={'access':acl}).register()[0]
+public_ref = 'sql:apihosttest|layout|visible|None'
+private_ref = 'sql:apihosttest|layout|PRIVATE_MEMBER|None'
+save_pipeline('one', [public_ref], conn, access={'visibility':'public','owner':'alice'})
+save_pipeline('mixed', [public_ref,private_ref], conn,
+              access={'visibility':'public','owner':'alice'})
+save_pipeline('PRIVATE_PIPELINE', [private_ref], conn,
+              access={'visibility':'private','owner':'alice'})
+calls = []
+original = access._pipeline_registry
+def registry(*args, **kwargs):
+    calls.append('registry')
+    return [(name, params) for name, params in original(*args, **kwargs)
+            if name in {'one', 'mixed', 'PRIVATE_PIPELINE'}]
+access._pipeline_registry = registry
+pages._engine.get_runs = lambda *args, **kwargs: calls.append(('history',kwargs['limit'])) or []
+meerschaum.jobs.get_jobs = lambda **kwargs: calls.append('jobs') or {}
+viewer = as_viewer('bob', admin=False, role='viewer')
+rows = pages.build_list_cards(str(conn), viewer=viewer)
+assert calls == ['registry', ('history',100), 'jobs'], calls
+assert len(rows) == 2, rows
+text = str(rows)
+assert 'PRIVATE_MEMBER' not in text and 'PRIVATE_PIPELINE' not in text, text
+assert 'pipeline-row-toggle' in text and 'pipeline-row-history' in text
+assert 'pipelines-list-sync' not in text and 'Manage' not in text
+assert 'hidden' in text.lower()
+assert 'instance=sql%3Aapihosttest' in text
+'''))
+
+
+def test_runbook_history_reads_only_when_open_with_the_fresh_viewer(sandbox):
+    root, plugins = sandbox
+    check(run_python(root, plugins, '''
+import json
+from types import SimpleNamespace
+from dash.exceptions import PreventUpdate
+from meerschaum.api.dash import build_dash_app, access
+build_dash_app()
+from meerschaum.api.dash.callbacks import pipeline_pages as pages
+calls = []
+pages.dash.ctx = SimpleNamespace(triggered_id={'index':json.dumps({
+    'name':'daily','instance':'sql:apihosttest'})})
+pages._authenticated = lambda session: bool(session)
+viewer = [access.make_viewer('bob', role='viewer')]
+pages._viewer = lambda session: viewer[0]
+def history(instance, **kwargs):
+    calls.append(kwargs)
+    return []
+pages._engine.get_runs = history
+for opened, session in [(False, {'session-id':'bob'}), (True, None)]:
+    try:
+        pages.load_runbook_history(opened, session)
+        raise AssertionError('Closed / anonymous history must not load')
+    except PreventUpdate:
+        pass
+assert calls == []
+pages.load_runbook_history(True, {'session-id':'bob'})
+assert calls[-1] == {'limit':20,'run_name':'daily','viewer':viewer[0]}, calls
+first = viewer[0]
+viewer[0] = access.make_viewer('bob', permissions=[])
+pages.load_runbook_history(True, {'session-id':'bob'})
+assert calls[-1]['viewer'] is viewer[0] and calls[-1]['viewer'] is not first
+assert pages.toggle_runbook_details(1, False) == (True, 'true')
+assert pages.toggle_runbook_details(2, True) == (False, 'false')
+'''))
+
+
 def test_deep_links_and_the_global_instance_obey_the_apis_instance_permissions(sandbox):
     root, plugins = sandbox
     check(run_python(root, plugins, '''

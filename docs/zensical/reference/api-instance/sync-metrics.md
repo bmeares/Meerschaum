@@ -43,7 +43,7 @@ Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC dateti
 
 ## In Grafana
 
-The [Stack](../stack.md) dashboards show the same affected-row, duration, and failure measurements.
+The [Stack](../stack/index.md) dashboards show the same affected-row, duration, and failure measurements.
 
 Grafana reads directly with the database credentials configured for its data source. Its visibility follows those database permissions; the console and HTTP API apply their Pipe and team access rules.
 

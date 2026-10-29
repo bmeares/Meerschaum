@@ -53,9 +53,9 @@ The base Meerschaum dtypes and the SQL types they map to are below. The authorit
 
 ## `numeric` vs `float` vs `int`
 
-- **`int`** — exact whole numbers. Use for counts and integer keys.
-- **`float`** — IEEE-754 double. Fast and compact, but subject to binary rounding error. Use for measurements where exactness isn't required.
-- **`numeric`** — arbitrary-precision `Decimal`. Use when exactness matters (currency, precise identifiers) or when a column mixes integers and decimals. Optionally pin precision and scale with `numeric[precision,scale]`.
+- **`int`**, exact whole numbers. Use for counts and integer keys.
+- **`float`**, IEEE-754 double. Fast and compact, but subject to binary rounding error. Use for measurements where exactness isn't required.
+- **`numeric`**, arbitrary-precision `Decimal`. Use when exactness matters (currency, precise identifiers) or when a column mixes integers and decimals. Optionally pin precision and scale with `numeric[precision,scale]`.
 
 By default, a column that starts as `int` and later receives float values is promoted to `numeric` (so no data is lost). This is governed by the [`mixed_numerics`](/reference/pipes/parameters/#mixed_numerics) parameter:
 
@@ -85,7 +85,7 @@ The `precision` parameter sets the granularity of the `datetime` axis and the va
 | `hour` | `h`, `hr` |
 | `day` | `d`, `D` |
 
-By default the dtype determines the precision — e.g. the default `datetime64[us, UTC]` is microsecond precision. Set it explicitly under `parameters['precision']`:
+By default the dtype determines the precision, e.g. the default `datetime64[us, UTC]` is microsecond precision. Set it explicitly under `parameters['precision']`:
 
 ```python
 pipe = mrsm.Pipe(
@@ -114,19 +114,19 @@ pipe = mrsm.Pipe(
 pipe.sync([{'ts': '2025-01-01', 'station': 1, 'location': 'POINT (-82.4 34.85)'}])
 ```
 
-Values may be `shapely` objects, WKT strings, or WKB (hex / GPKG) bytes — they are coerced automatically.
+Values may be `shapely` objects, WKT strings, or WKB (hex / GPKG) bytes, they are coerced automatically.
 
 !!! warning "Native geometry requires PostGIS"
-    Only **PostGIS**-enabled PostgreSQL instances store these as true `GEOMETRY` / `GEOGRAPHY` columns. On other flavors the geometry is serialized to base64-encoded WKB and stored as text — spatial queries on the database side are not available there.
+    Only **PostGIS**-enabled PostgreSQL instances store these as true `GEOMETRY` / `GEOGRAPHY` columns. On other flavors the geometry is serialized to base64-encoded WKB and stored as text, spatial queries on the database side are not available there.
 
 ## Coercion and enforcement
 
 During [syncing](/reference/pipes/syncing/), incoming data is cast to the pipe's registered dtypes by `Pipe.enforce_dtypes()` before being written. This is controlled by the [`enforce`](/reference/pipes/parameters/#enforce) parameter (default `True`):
 
-- **`enforce=True`** (default) — every incoming DataFrame is coerced to match `parameters['dtypes']`.
-- **`enforce=False`** — coercion is skipped for performance. Only use this when your source already produces clean, correctly-typed data.
+- **`enforce=True`** (default), every incoming DataFrame is coerced to match `parameters['dtypes']`.
+- **`enforce=False`**, coercion is skipped for performance. Only use this when your source already produces clean, correctly-typed data.
 
-When a sync introduces a **new column** or a value that conflicts with the inferred dtype, Meerschaum auto-alters the target table — adding the column or widening the type (e.g. `int` → `numeric`, or a numeric column → `string` if text arrives). This automatic schema evolution is disabled by [`static=True`](/reference/pipes/parameters/#static), in which case new columns and type changes are rejected instead.
+When a sync introduces a **new column** or a value that conflicts with the inferred dtype, Meerschaum auto-alters the target table, adding the column or widening the type (e.g. `int` → `numeric`, or a numeric column → `string` if text arrives). This automatic schema evolution is disabled by [`static=True`](/reference/pipes/parameters/#static), in which case new columns and type changes are rejected instead.
 
 ## Inspecting and changing dtypes
 
@@ -160,7 +160,7 @@ success, msg = pipe.verify_schema(apply=True)    # apply it
 
 ## `json` columns cannot be index columns
 
-A `json` column holds `dict` or `list` values. Syncing sorts and deduplicates on the [index columns](/reference/pipes/parameters/#columns) in Pandas, and containers are unhashable there — so a `json` column in `columns` is refused when the pipe is registered, edited, or synced:
+A `json` column holds `dict` or `list` values. Syncing sorts and deduplicates on the [index columns](/reference/pipes/parameters/#columns) in Pandas, and containers are unhashable there, so a `json` column in `columns` is refused when the pipe is registered, edited, or synced:
 
 ```python
 mrsm.Pipe(
@@ -188,11 +188,11 @@ If you need to identify rows by the contents of a JSON column, give it a scalar 
 
 ## Common dtype issues
 
-- **`Cannot use a 'json' column as an index column`.** Give the column a scalar dtype (e.g. `str`), or move it out of `columns` and into `indices` — see [above](#json-columns-cannot-be-index-columns).
+- **`Cannot use a 'json' column as an index column`.** Give the column a scalar dtype (e.g. `str`), or move it out of `columns` and into `indices`, see [above](#json-columns-cannot-be-index-columns).
 - **A column became `numeric` (or `string`) unexpectedly.** A later sync sent a float into an `int` column (promoted to `numeric`), or text into a numeric column (promoted to `string`). Set the dtype explicitly up front, or use [`mixed_numerics=False`](/reference/pipes/parameters/#mixed_numerics) / [`static=True`](/reference/pipes/parameters/#static) to lock the schema.
 - **`Unknown Pandas data type '...'. Falling back to 'TEXT'.`** The dtype string isn't recognized. Use a base Meerschaum dtype or a valid Pandas dtype string.
 - **Timezone offsets disappeared / shifted.** The `datetime` dtype is tz-aware and coerces everything to UTC. For tz-naive storage, use `datetime64[us]` (no timezone).
-- **Geometry stored as a base64 text blob.** The instance isn't PostGIS-enabled — see [Geometry](#geometry-postgis).
+- **Geometry stored as a base64 text blob.** The instance isn't PostGIS-enabled, see [Geometry](#geometry-postgis).
 - **Schema won't change when I expect it to.** `static=True` blocks new columns and type changes; remove it (or set `enforce=True`) to allow schema evolution.
 
 ---------------

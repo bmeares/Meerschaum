@@ -12,7 +12,7 @@ import json
 from urllib.parse import parse_qs, urlencode, quote
 
 import dash
-from dash.dependencies import Input, Output, State, ALL
+from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -71,9 +71,8 @@ def scheduled_jobs(name, registry, jobs) -> List[str]:
 
 def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
     """
-    One card per registered Pipeline the viewer may see: identity, member and instance counts,
-    last run and schedule, with Open, Sync, Plan and Manage (Sync and Manage for viewers who may
-    use them). History loads when the card is expanded.
+    One runbook entry per visible Pipeline. Keep one bulk registry / recent-runs read;
+    each entry's full history loads only when its Details button is opened.
     """
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
@@ -81,7 +80,7 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
     registry_parameters = dict(access._pipeline_registry(instance))
     definitions = access.visible_pipelines(instance, viewer=viewer, registry_parameters=registry_parameters)
     if not definitions:
-        return [html.P('No Pipelines on this registry yet.', className='pipelines-empty')]
+        return []
     try:
         runs = _engine.get_runs(instance, limit=100, viewer=viewer)
     except Exception:
@@ -91,29 +90,23 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
         jobs = get_jobs()
     except Exception:
         jobs = {}
-    cards = []
+    rows = []
     for name, definition in sorted(definitions.items()):
         targets = definition.get('targets', [])
         instances = {ref.split('|', 1)[0] for ref in targets}
         latest = next((run for run in runs if _engine.run_belongs_to_pipeline(run, name, definition)), None)
         schedules = scheduled_jobs(name, registry, jobs)
-        facts = [pipes_label(definition, latest), count_label(len(instances), 'instance')]
+        status = str((latest or {}).get('status') or '')
+        started_raw = str(((latest or {}).get('run') or {}).get('started') or '')
         if latest:
-            started = str((latest.get('run') or {}).get('started') or '')[:16].replace('T', ' ')
-            facts.append(html.Span(f"{latest.get('status', '')} {started}".strip(),
-                                   className=f"run-status-{latest.get('status', '')}"))
+            last_run = [html.Span(status, className=f'run-status-{status}'),
+                        html.Time(started_raw[:16].replace('T', ' '), dateTime=started_raw)]
         else:
-            facts.append('no recent run')
-        if schedules:
-            facts.append(', '.join(schedules))
+            last_run = 'No recent run'
         identity = json.dumps({'name': name, 'instance': registry}, sort_keys=True)
-        facts_row = []
-        for fact in facts:
-            if facts_row:
-                facts_row.append(' · ')
-            facts_row.append(fact)
+        members = [html.Span(pipes_label(definition, latest))]
         if definition.get('hidden_members'):
-            facts_row += [' · ', access.hidden_label(int(definition['hidden_members']))]
+            members += [html.Small(access.hidden_label(int(definition['hidden_members'])))]
         complete = not definition.get('hidden_members')
         may_sync = complete and viewer.can('pipes:write')
         may_edit = access.can_edit_pipe(viewer, registry_parameters.get(name, {}))
@@ -124,31 +117,99 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
             )
             if may_edit and (complete or action in ('rename', 'delete'))
         ]
-        cards.append(html.Div(dbc.Card([
-            dbc.CardHeader(html.H5(pipeline_title(name, link=True))),
-            dbc.CardBody([
-                html.P(facts_row, className='pipeline-card-facts'),
-                dbc.Accordion([dbc.AccordionItem(
-                    html.Div(runs_placeholder(), id={'type': 'pipeline-card-details', 'index': identity},
-                             className='pipeline-card-runs'),
-                    title='Runs', item_id='history')],
-                    id={'type': 'pipeline-card-accordion', 'index': identity}, active_item=None,
-                    start_collapsed=True),
-            ]),
-            dbc.CardFooter(
-                [dbc.Button('Open', href=pipeline_path(name), size='sm')]
+        preview = [html.Li(html.Code(_engine.ref_label(ref))) for ref in targets[:8]]
+        if len(targets) > 8:
+            preview.append(html.Li(f'{len(targets) - 8} more visible members'))
+        traversal = ', '.join(label for key, label in (
+            ('parents', 'Includes parents'), ('children', 'Includes children')
+        ) if definition.get(key))
+        rows.append(html.Tbody([
+            html.Tr([
+                html.Td(html.A(name, href=pipeline_path(name, instance=registry)),
+                        className='pipeline-list-name', **{'data-label': 'Pipeline'}),
+                html.Td(members, **{'data-label': 'Members'}),
+                html.Td(count_label(len(instances), 'instance'), **{'data-label': 'Instances'}),
+                html.Td(last_run, className='pipeline-list-last-run', **{'data-label': 'Last run'}),
+                html.Td(', '.join(schedules) if schedules else 'Not scheduled',
+                        **{'data-label': 'Schedule'}),
+                html.Td(
+                [dbc.Button('Open', href=pipeline_path(name, instance=registry), size='sm')]
                 + ([dbc.Button('Sync', id={'type': 'pipelines-list-sync', 'index': name}, n_clicks=0,
                                size='sm', color='secondary')] if may_sync else [])
-                + [dbc.Button('Plan', href=pipeline_path(name, open='plan'), size='sm', color='secondary')]
+                + [dbc.Button('Plan', href=pipeline_path(name, instance=registry, open='plan'),
+                              size='sm', color='secondary'),
+                   html.Button('Details', id={'type': 'pipeline-row-toggle', 'index': identity},
+                               n_clicks=0, className='btn btn-secondary btn-sm',
+                               **{'aria-expanded': 'false', 'aria-label': f'Details for {name}'})]
                 + ([dbc.DropdownMenu([
-                    dbc.DropdownMenuItem(label, href=pipeline_path(name, open=action))
+                    dbc.DropdownMenuItem(label, href=pipeline_path(name, instance=registry, open=action))
                     for action, label in manage
                 ], label='Manage', direction='up', size='sm', color='secondary', menu_variant='dark')]
                    if manage else []),
-                className='pipeline-card-actions',
-            ),
-        ]), className='pipeline-list-card', **{'data-pipeline': name}))
-    return cards
+                className='pipeline-list-actions', **{'data-label': 'Actions'}),
+            ], className='pipeline-list-row'),
+            html.Tr(html.Td(dbc.Collapse([
+                html.Div([
+                    html.H4('Members'),
+                    html.Ul(preview) if preview else html.P('No visible members'),
+                    html.P(traversal) if traversal else None,
+                ], className='pipeline-member-preview'),
+                html.Div([
+                    html.H4('Recent runs'),
+                    html.Div(runs_placeholder(), id={'type': 'pipeline-row-history', 'index': identity},
+                             className='pipeline-card-runs'),
+                ], className='pipeline-row-runs'),
+            ], id={'type': 'pipeline-row-collapse', 'index': identity}, is_open=False),
+                colSpan=6), className='pipeline-list-detail'),
+        ], className='pipeline-list-entry', **{
+            'data-pipeline': name, 'data-status': status, 'data-started': started_raw,
+            'data-members': len(targets),
+            'data-search': ' '.join([name, status, *schedules, *(_engine.ref_label(ref) for ref in targets)]),
+        }))
+    return rows
+
+
+def build_runbook(rows):
+    """Keep the table and its empty states in the same list loading boundary."""
+    if not rows:
+        return html.P('No Pipelines on this registry yet.', className='pipelines-empty')
+    return [html.Table([
+        html.Thead(html.Tr([html.Th(label, scope='col') for label in (
+            'Pipeline', 'Members', 'Instances', 'Last run', 'Schedule', 'Actions'
+        )])), *rows,
+    ], className='pipelines-runbook', **{'aria-label': 'Pipelines runbook'}),
+        html.P('No Pipelines match your search.', id='pipelines-no-matches', hidden=True)]
+
+
+@dash_app.callback(
+    Output({'type': 'pipeline-row-collapse', 'index': MATCH}, 'is_open'),
+    Output({'type': 'pipeline-row-toggle', 'index': MATCH}, 'aria-expanded'),
+    Input({'type': 'pipeline-row-toggle', 'index': MATCH}, 'n_clicks'),
+    State({'type': 'pipeline-row-collapse', 'index': MATCH}, 'is_open'),
+    prevent_initial_call=True,
+)
+def toggle_runbook_details(clicks, is_open):
+    if not clicks:
+        raise PreventUpdate
+    return not is_open, str(not is_open).lower()
+
+
+@dash_app.callback(
+    Output({'type': 'pipeline-row-history', 'index': MATCH}, 'children'),
+    Input({'type': 'pipeline-row-collapse', 'index': MATCH}, 'is_open'),
+    State('session-store', 'data'), prevent_initial_call=True,
+)
+def load_runbook_history(is_open, session):
+    """Resolve the viewer again when history is requested, including after revocation."""
+    if not is_open or not _authenticated(session):
+        raise PreventUpdate
+    from meerschaum.api.dash.callbacks.pipelines import build_runs_table
+    meta = json.loads(dash.ctx.triggered_id['index'])
+    return build_runs_table(_engine.get_runs(
+        _engine.get_instance(meta['instance'], strict=True), limit=20,
+        run_name=meta['name'], viewer=_viewer(session),
+    ), table_id='pipeline-row-history-' + meta['name'],
+        registry=meta['instance'], pipeline=meta['name'])
 
 
 @dash_app.callback(
@@ -164,7 +225,7 @@ def render_list(pathname, search, session):
         raise PreventUpdate
     instance = _instance(search)
     try:
-        cards = build_list_cards(str(instance), viewer=_viewer(session))
+        cards = build_runbook(build_list_cards(str(instance), viewer=_viewer(session)))
     except Exception as exc:
         cards = [alert_from_success_tuple((False, f'Could not read the Pipelines on {instance}: {exc}'))]
     try:

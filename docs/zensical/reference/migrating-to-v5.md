@@ -1,8 +1,23 @@
 # ⬆️ Migrating to v5
 
-Meerschaum v5 is a rewrite of the core, the CLI, jobs, compose, the HTTP API and the MCP server in **Rust**. The web console stays the Plotly Dash app of v4, served by the Python package. The `meerschaum` Python package stays, as the plugin SDK and as a thin façade over the Rust core, so **most pipes, plugins, compose projects, jobs and scripts keep working without changes**. This page lists what you need to check, grouped by who you are.
+Meerschaum v5 runs its core, CLI, jobs, Compose, HTTP API, and MCP server in Rust. Your existing data, configuration, Pipe definitions, and Python plugins remain usable. Review the changes below before upgrading a shared installation.
 
-v4.1.x stays installable and receives security fixes until 5.1.0 ships. There is no v6 planned to "finish" the port, so nothing here is a stopgap. If something that worked on 4.1 breaks on 5.0, report it as a GitHub issue tagged `v5-compat`.
+## Upgrade checklist
+
+1. Back up your configuration and database. Keep the old installation available for rollback.
+2. Check Python **3.11+** and the [platform requirements](#installing-and-running).
+3. Install the optional packages your plugins and DataFrame code use.
+4. Review [permissions](#teams-access-and-permissions), especially accounts that run remote actions.
+5. Test one source sync, one transformation, and your scheduled jobs on a copy of the root.
+6. Check saved Job commands with `mrsm show jobs`. Re-enter a blank command with `mrsm edit jobs NAME` before restarting it.
+7. Upgrade the owning installation and restart running services. For Docker, replace the image.
+
+```bash
+python -m pip install --upgrade meerschaum
+mrsm doctor
+```
+
+See [Stack upgrades](stack/upgrades.md) for PostgreSQL and extension maintenance. Expand only the sections which apply to your installation.
 
 ## 🧭 Who needs to read what
 
@@ -17,17 +32,19 @@ v4.1.x stays installable and receives security fixes until 5.1.0 ships. There is
 
 ## ✅ What does not change
 
-- **Pipes.** Keys, `parameters`, every parameter key (`columns`, `dtypes`, `indices`, `tags`, `fetch`, `verify`, `sql`, `target`, `upsert`, `static`, `autoincrement`, `autotime`, `hypertable`, `compress`, `precision`, `null_indices`, `mixed_numerics`, `reference`, `parents`, `children`, `source`), role-keyed `dtypes`, pandas-style dtype strings, every `geometry[...]` notation, integer datetime axes, and the `schema.target` table naming.
-- **Templating.** `{{ Pipe() }}` substitution and attribute chains into parameters (`{{ Pipe('sql:main', 'x').columns }}`), `{{ self.* }}`, `MRSM{...}` symlinks, compose `'{sql:label}'` references, `{MRSM_ROOT_DIR}` and `${ENV}` interpolation.
-- **Config.** The YAML files and their layout under `MRSM_ROOT_DIR/config/`, `MRSM_SQL_<LABEL>` and `MRSM_API_<LABEL>` environment connectors, `connectors.yaml` URIs, `plugins.json`.
-- **Instances.** Existing tables, the internal `_mrsm_internal` schema, user tables and password hashes, token tables, plugin registrations. v5 reads a v4.1 instance as is. No migration script runs on your data; the only additions are unique indexes on the pipe keys of `mrsm_pipes`, the usernames of `mrsm_users` and the plugin names of `mrsm_plugins` (see below).
-- **Compose.** Every key and subaction (`up`, `down`, `ps`, `logs`, `run`, `explain`, `init`, `sync pipes`, `start jobs`, ...), `--file`, `--env-file`, `--dry`, `isolation: subprocess`, `plugins: ['name@api:repo']`, `sync.schedule`.
-- **Jobs.** The on-disk layout under `MRSM_ROOT_DIR/jobs/`, so jobs created on 4.1 are picked up by 5.0. `-d`, `--name`, `-s` cron schedules, `--loop --min-seconds`, `-w`, `+` and `:` chaining, `show logs`, `attach`, `pause`, `stop`, `delete jobs`, the systemd and `api:` executors.
-- **The HTTP API.** Every route, path, method, scope and body shape. JWTs issued by 4.1 validate on 5.0 because the secret file is shared. `--production`, `--secure`, `--host`, `--port`, `api.permissions.*`.
-- **Docker.** The `bmeares/meerschaum` and `bmeares/meerschaum:api` images keep their entrypoints and paths (`/meerschaum/plugins`, `/meerschaum/config`).
-- **The Python API** for pipes, connectors, users, tokens, config and the plugin SDK. See [Python library users](#python-library-users-and-scripts) for the few things to check.
+- **Your data and Pipe definitions.** Existing tables, keys, parameters, SQL templates, and dependencies remain usable.
+- **Your configuration.** Keep `MRSM_ROOT_DIR`, YAML files, environment connectors, Compose projects, and plugin registrations.
+- **Everyday commands.** `sync`, jobs, schedules, and the Python Pipe API keep their familiar interfaces.
+- **Python extensions.** Fetch, sync, action, connector, API, and Dash plugins continue through the Python host.
+
+Some defaults, errors, and permissions deliberately change. The next section lists those differences.
 
 ## ⚠️ Behavior changes at a glance
+
+Use this table to check differences in errors, defaults, permissions, jobs, and SQL behavior.
+
+<details markdown="1">
+<summary>Compare behavior by area</summary>
 
 Everything below is deliberate, and each item links to the section with the details. Check the ones that apply to you before upgrading.
 
@@ -71,7 +88,14 @@ Everything below is deliberate, and each item links to the section with the deta
 | `start api --keyfile/--certfile` | HTTPS through Uvicorn | Native HTTPS with rustls when a key and certificate are supplied; plain HTTP otherwise. [Deployment](#deployment) |
 | Web terminal and tmux | Sessions on your default tmux server | A tmux server of its own under the Meerschaum root, with its own configuration. [Deployment](#deployment) |
 
+</details>
+
 ## 📦 Installing and running
+
+Use Python 3.11 or newer. Install `meerschaum[dash]` for the console, `meerschaum[pandas]` or `[polars]` for your DataFrame library, and your plugins' declared dependencies.
+
+<details markdown="1">
+<summary>Platform, installation ownership, and optional dependencies</summary>
 
 - **Python 3.11 or newer** (only needed when you use Python plugins, the Python API or an extra). 3.10 reaches end of life in October 2026 and is not supported by the v5 wheels.
 - **`pip install meerschaum` still works** and is the only PyPI package. Its `mrsm` (and `meerschaum`) console script runs the native CLI from the wheel's extension, and `python -m meerschaum ...` runs the same code. `cargo install meerschaum` builds the same CLI as a standalone `mrsm` binary: both install Meerschaum, like `polars`. The console script pays for loading the extension: `mrsm show version` takes about 35 ms (the Python interpreter alone is 15 ms) against about 10 ms for the standalone binary (measured on a Linux x86_64 development machine with the release build). Jobs, `systemd` units and compose steps run `python -m meerschaum`, so they carry the same start-up cost per process.
@@ -127,9 +151,16 @@ host update succeeded before a CLI update failed.
 
 After verification, an interactive shell restarts with the updated engine. Other running
 processes must be restarted separately. Containers are upgraded by replacing their image;
-see [Docker variants](stack.md#docker-images).
+see [Docker variants](stack/index.md#docker-images).
+
+</details>
 
 ## ⚙️ Configuration
+
+The existing YAML layout and environment connectors remain. Safe YAML loading, connection timeouts, and recognized connector types have stricter behavior.
+
+<details markdown="1">
+<summary>Configuration compatibility details</summary>
 
 Everything under `MRSM_ROOT_DIR/config/` is read unchanged. Things to know:
 
@@ -158,7 +189,14 @@ Everything under `MRSM_ROOT_DIR/config/` is read unchanged. Things to know:
 
 Run `mrsm show config` on v5 against a v4.1 root directory to see the resolved config.
 
+</details>
+
 ## 🏃 Jobs and the CLI
+
+Existing jobs are discovered in the same root. Installed systemd hosts now use systemd for every root; debug logs go to stderr and piped output omits terminal styles.
+
+<details markdown="1">
+<summary>CLI and job changes</summary>
 
 Core actions behave the same and take the same flags: every option string, `dest`, arity, type and choice is diffed against the 4.1 parser in CI, argument for argument. The help text is new: `mrsm help`, `mrsm -h`, `mrsm show help` and the shell's `help` start with every action in groups (Create, Sync, Run, Inspect, Maintain, Configure) with a one-line description, then your plugins' actions and their subcommands, then the options (the graph-run flags under **Pipeline options**). Scripts that compared `mrsm -h` with 4.1's page byte for byte need updating, and `mrsm help` prints this page instead of running your shell's `help` builtin (`bash -c help` runs that one). `mrsm show data --gui`, `--trace`, `--cache`, `--no-daemon`, `--webterm-port`, `--use-bash` and `--allow-shell-job` are accepted and have no effect, and their help says so.
 
@@ -182,7 +220,7 @@ Core actions behave the same and take the same flags: every option string, `dest
 
 **`start pipeline` and action chains.** Commands joined with `+`, with flags for the whole chain after `:`, are called action chains; type them as before (`show version + show arguments : --loop`). A chain that runs as a job is stored under a hidden internal action, so `show jobs` prints it as you typed it, and jobs 4.1 stored as `start pipeline ... -P {...}` keep running unchanged. Chain messages say "action chain" instead of "pipeline" ("Ran the action chain 3 times.", "The action chain did not run.", "The action chain failed after 2 steps.", "Cancelled the action chain."), and `edit jobs` says "Chain Arguments:". `start pipeline NAME` / `stop pipeline NAME` (plurals and several names work) start and stop a saved Pipeline's background job: its scheduled job when it has one, else a new job `pipeline-NAME` running `sync pipelines NAME -i <instance> --loop --min-seconds 60`. `start pipeline` with neither a name nor a chain payload asks for a Pipeline's name (4.1 said "Nothing to do.").
 
-**`--loop` works with any action, and jobs report their health.** `--loop` repeats any action `--min-seconds` apart (default 1), plugin actions included, retrying a failure after a pause that grows while it keeps failing (capped at an hour); `stop jobs` or Ctrl-C ends it after the current run. A plugin action whose function takes a `loop` parameter keeps 4.1's contract: `--loop` passes `loop=True` and the action repeats by itself. Every other action is repeated by Meerschaum and called once per run with `loop=False`. A job that repeats its work records each lap in `jobs/<name>/laps.json` (deleted with the job), and `show jobs`, `job.health` and the console report `healthy`, `failing`, `stalled` (no lap ended for three times the expected interval, at least a minute; an hour for `--listen`) or `stopped`. See [Job health](/reference/background-jobs/#job-health).
+**`--loop` works with any action, and jobs report their health.** `--loop` repeats any action `--min-seconds` apart (default 1), plugin actions included, retrying a failure after a pause that grows while it keeps failing (capped at an hour); `stop jobs` or Ctrl-C ends it after the current run. A plugin action whose function takes a `loop` parameter keeps 4.1's contract: `--loop` passes `loop=True` and the action repeats by itself. Every other action is repeated by Meerschaum and called once per run with `loop=False`. A job that repeats its work records each lap in `jobs/<name>/laps.json` (deleted with the job), and `show jobs`, `job.health` and the console report `healthy`, `failing`, `stalled` (no lap ended for three times the expected interval, at least a minute; an hour for `--listen`) or `stopped`. See [Job health](/reference/background-jobs/health/).
 
 **`GET /jobs` redacts credentials, and the console's jobs are private.** 4.1 returned every job's `daemon.properties.env` (the server's environment when the job was created: each `MRSM_SQL_*` / `MRSM_API_*` connector URI with its password, and any other secret the process held) to every caller with `jobs:read`. 5.0 masks the password of connector URIs and the value of credential-named variables (`*_PASSWORD`, `*_TOKEN`, `*_SECRET*`, ...), also inside JSON values such as `MRSM_CONFIG`, in `GET /jobs` and `GET /jobs/{name}`; the other variables are unchanged. Automatic workers created by Pipe management and Pipeline runs are visible to their creator, their team’s managers and administrators only. Each worker's kind and owner are recorded with the job, so workers with custom names are covered too; a job record without them whose name begins with `execute-` is treated as an automatic worker. The Exec button uses the existing terminal and does not create an automatic worker.
 
@@ -255,7 +293,14 @@ Saved Pipelines run in the background with `mrsm start pipeline NAME` (see [Jobs
 
 Every sync, bare ones included, also records the pipe's **sync status** (last attempt, success and failure, message, row counts, duration, failures in a row, what ran it) in one row per pipe of `mrsm_engine_sync_status`, created by the first recorded sync (in `_mrsm_internal` on PostgreSQL and MSSQL, beside the instance tables elsewhere). It is the one engine-state row a bare `pipe.sync()` writes (no ledger, cursor or run history), it is written in the background and never fails a sync, and `mrsm` and temporary pipes have none. Read it with `pipe.get_sync_status()`, `mrsm.get_sync_statuses()` or `GET /engine/sync-status`. See [Sync status](/reference/pipelines/state/#sync-status).
 
+</details>
+
 ## 🐍 Python library users and scripts
+
+`SyncResult` still unpacks into `(success, message)`. Check database exception handling, DataFrame defaults, and code which accesses SQLAlchemy directly.
+
+<details markdown="1">
+<summary>Python compatibility details</summary>
 
 `import meerschaum as mrsm` and the public API are unchanged. `mrsm.Pipe`, `mrsm.get_connector`, `mrsm.get_config`, `pipe.sync`, `pipe.get_data`, `pipe.get_sync_time`, `pipe.get_rowcount`, `pipe.verify`, `pipe.filter_existing`, `pipe.enforce_dtypes`, `pipe.parameters` (still a live dict: assign, then `pipe.edit()`), `pipe.columns`, `pipe.dtypes`, `pipe.upsert = True`, pickling, equality and hashing by keys.
 
@@ -315,6 +360,8 @@ Custom instance connectors receive the selected library's frame in `sync_pipe(pi
 
 `exec()` returns a `NativeResult` with the usual cursor methods (`fetchall`, `fetchone`, `fetchmany`, `scalar`, `scalars`, `mappings`, `keys`), `rowcount` and tuple rows with named access. It is not a SQLAlchemy `CursorResult`; `lastrowid` is `None`, and `commit=False` rolls back when the call finishes. Keep a caller-provided SQLAlchemy connection when you need to control a transaction across calls. `exec_queries()` executes its queries and hook queries in one transaction. `read(..., index_col='id', as_pandas=True)` now keeps that index; an unchunked read infers each column from the whole result rather than concatenating separately inferred frames. A connector's `native_sql: false` retains the SQLAlchemy path for compatibility; `--debug` identifies explicit fallbacks.
 
+</details>
+
 ## Teams, access and permissions
 
 The first API account is an administrator. After that, self-registration is disabled unless `api.permissions.registration.users: true` is configured. Administrators add users under **Users & Teams** or with `register users`. Users without explicit scopes follow `api.permissions.default_role` (`editor` by default). Viewer reads; Editor adds, edits and syncs pipes, defines SQL and starts existing jobs; Operator also executes actions, uses the terminal and manages jobs. An explicit legacy `api.permissions.actions.non_admin: true` maps the default to Operator; `--secure` remains administrators-only for actions. Empty custom permissions grant nothing. Tokens are intersected with their owner's current permissions on each request.
@@ -329,6 +376,11 @@ Jobs from earlier versions and jobs created locally remain Everyone's. Remote jo
 
 ## 🔌 Plugin authors
 
+Keep your plugin interface. Declare packages your plugin imports instead of relying on packages v4 happened to install.
+
+<details markdown="1">
+<summary>Fetch, sync, hooks, connectors, and dependencies</summary>
+
 **Data plugins (`fetch`, `sync`, `register`, `setup`), action plugins (`@make_action`, `add_plugin_argument`), hooks, library plugins, `required`, per-plugin venvs and `plugins_dir` lists are unchanged.** The plugin is still a Python module in `MRSM_PLUGINS_DIR`; `fetch` may still return a DataFrame, a GeoDataFrame, a list of dicts, a dict of lists, a JSON string, or a generator of any of those.
 
 What is different underneath, and when it matters:
@@ -337,7 +389,7 @@ What is different underneath, and when it matters:
 - **The working directory is not on `sys.path`.** Every Python process Meerschaum starts (workers, the API host, jobs, compose and pipeline steps, `systemd` units) runs with `-P`, so a `meerschaum.py` or a `meerschaum/` in your project directory can never replace the installed package. A plugin which imports a sibling module from the directory it is run in (not from the plugins directory) must move that module into the plugins directory or into a package; plugins are imported through the plugins directory only. v4's in-process jobs never had the working directory on the path either.
 - **`@post_sync_hook` and `@pre_sync_hook`** receive the same kwargs (`success_tuple`, `sync_timestamp`, `sync_complete_timestamp`, `sync_duration`, ...) and run in the worker after each native sync.
 - **Plugin manifests.** On install, setup and on any source change, Meerschaum records which decorators your plugin uses so that `--help`, tab completion and the server can start without importing Python. If your plugin registers actions or pages **conditionally** (for example, only in production), the manifest sees whatever your module registers at import time with the config present at install time. `mrsm reload` (also spelled `mrsm reload plugins`) rebuilds the manifest unconditionally and recycles the Python workers; the manifest is also rebuilt automatically when a plugin file changes, and after `install`, `upgrade`, `uninstall` and `setup` of plugins.
-- **Actions under `--loop` and `-s`.** `mrsm my_action --loop` now works for any action: Meerschaum repeats it `--min-seconds` apart and calls it once per run with `loop=False`, so it no longer needs a `while True` of its own, and the job records each run for [job health](/reference/background-jobs/#job-health). An action whose function names a `loop` parameter (4.1's `def poll(loop=False, ...)`) keeps 4.1's contract: `--loop` passes `loop=True` and the action repeats by itself (its job's health reads `unknown`). Remove the parameter and the loop to let Meerschaum repeat it. With `-s`, the job's scheduler runs the action once per fire.
+- **Actions under `--loop` and `-s`.** `mrsm my_action --loop` now works for any action: Meerschaum repeats it `--min-seconds` apart and calls it once per run with `loop=False`, so it no longer needs a `while True` of its own, and the job records each run for [job health](/reference/background-jobs/health/). An action whose function names a `loop` parameter (4.1's `def poll(loop=False, ...)`) keeps 4.1's contract: `--loop` passes `loop=True` and the action repeats by itself (its job's health reads `unknown`). Remove the parameter and the loop to let Meerschaum repeat it. With `-s`, the job's scheduler runs the action once per fire.
 - **Action names with several words.** `@make_action(name='weather wait')` (or `@make_action('weather wait')`) registers `mrsm weather wait` whatever the function is called; it runs like `def weather_wait`, and `mrsm weather wait more words` passes `action=['more', 'words']`. A word may use hyphens, not underscores, and a name that collides with an existing action warns and keeps the existing one. `mrsm help` lists every plugin action (and v4-style `<action>_<sub>` subactions) under its words, and `mrsm weather -h` lists `wait` as a subcommand.
 - **Writes to protected connectors.** A plugin that writes through a connector marked `protected: true` (syncing into it, `exec()`, `to_sql()`) gets the refusal (`PermissionError` from `exec()`, a failed `SuccessTuple` elsewhere) unless the command runs with `--allow-protected` or `MRSM_ALLOW_PROTECTED=1`, or the code is inside `with meerschaum.connectors.allow_protected():`. On such a connector `read()` and `value()` accept only statements that read.
 - **New helpers.** `meerschaum.utils.cache` caches function results and values in Valkey or process memory, invalidated by a pipe's syncs ([Caching](/reference/plugins/caching/)), and `meerschaum.testing` is a pytest plugin with fixtures for a temporary root, a SQLite instance, pipes, the API host and console pages ([Testing Plugins](/reference/plugins/testing/)).
@@ -348,7 +400,7 @@ What is different underneath, and when it matters:
     ```python
     # v4 pattern (still works)                     # v5 (recommended)
     def sync(pipe, **kw):                          IS_STREAMING = True
-        client.on_message = lambda m: pipe.sync(   
+        client.on_message = lambda m: pipe.sync(
             [parse(m)]                              def subscribe(pipe, sink, **kw):
         )                                               def on_message(m):
         client.connect(...)                                 sink.push([parse(m)], token=m.mid)
@@ -401,7 +453,14 @@ In v5 the `mrsm` venv starts out holding only the extras you installed. To keep 
 
 - **MCP tools** registered with `meerschaum.mcp.tool(...)` / `resource(...)` keep working. The Rust MCP server lists them alongside the built-in tools and forwards calls to your plugin with the caller's scopes. `get_tools`, `get_resources` and `meerschaum.mcp._registry.get_tools` stay for duplicate-registration guards.
 
+</details>
+
 ## 🌐 API plugins
+
+Python routes still work through the API host. Middleware which intercepted core FastAPI routes needs review because those routes now run natively.
+
+<details markdown="1">
+<summary>Routes, middleware, startup hooks, and sessions</summary>
 
 `@api_plugin` functions still receive a FastAPI `app` and can add routes, middleware, `StaticFiles` mounts and background threads. `meerschaum.api.endpoints`, `get_api_connector`, `get_cache_connector`, `production`, `debug`, `ScopedAuth`, `CurrentScopes`, `_oauth2.SECRET`, `_tokens.get_token_from_authorization`, `get_pipe` and the `models` stay. `api_plugin` returns your function unchanged, so tests that call `init_app(FastAPI())` against a bare app keep passing. `from meerschaum.api import manager` and `Depends(manager)` keep working too: `manager` is now a built-in JWT login manager with `fastapi_login.LoginManager`'s call signature (`user_loader()`, `optional`, `create_access_token()`, ...), so neither `fastapi-login` nor `python-jose` is installed (tokens are validated with PyJWT against the same secret file as the Rust server). `meerschaum.api.aiofiles`, `typing_extensions`, `importlib_metadata`, `packaging_version`, `multipart` and `uvicorn_workers` are no longer re-exported; import what you use from your plugin (declare it in `required`).
 
@@ -449,6 +508,8 @@ api:
 
 The allowlist is a list of `fnmatch` patterns over the **core route groups**: `actions`, `connectors`, `index`, `jobs`, `misc`, `pipes`, `pipelines`, `plugins`, `tokens`, `users`, `version`, `engine`, `mcp` and `dash` (the console's own pages). The default is `['*']`. A core group that is not allowed is not registered, and its paths are not forwarded to the Python host.
 
+An empty allowlist also blocks a plugin's `/healthcheck` replacement. For plugin-only deployments, use the [public preset](api-instance/permissions.md#the-public-preset) to retain native health checks while keeping administrative routes closed.
+
 New in 5.0: `api.permissions.routes.disabled` explicitly disables matching route groups and overrides the allowlist. Native `/login` is enabled by default, independently of the allowlist; disable it explicitly with:
 
 ```yaml
@@ -468,7 +529,14 @@ The disabled login route cannot reappear through host fallback. A namespaced plu
 
 `meerschaum.api.dash.sessions` (`set_session`, `get_user_from_session`, `get_username_from_session`, `delete_session`, `is_session_active`, `session_is_admin`, `set_session_cookie`, `EXPIRES_SECONDS`) reads and writes the same session store as the console, keyed by the same `mrsm-session-id` cookie. Plugins that implement their own registration or login flows and mint console sessions keep working, with one rule v4's Valkey and in-memory stores did not have: a session ID is the UUID form the login uses (`str(uuid.uuid4())`). Any other value counts as no session for every reader (the console's callbacks, `session_user`, `mount_static`), `delete_session()` ignores it, and `set_session()` / `update_session()` write nothing for it; both now return whether they wrote (v4 returned `None`). For new routes, prefer the `session_user` dependency above.
 
+</details>
+
 ## 🎛️ Web pages and Dash plugins
+
+Existing Dash pages remain supported. Console callbacks require a session unless explicitly public. New pages can use the shared page contract.
+
+<details markdown="1">
+<summary>Dash pages and the page contract</summary>
 
 The web console is **the Plotly Dash app of v4.1**, ported onto the v5 façade and served by the Python API host at the same `/dash` paths (`/dash`, `/dash/pipes`, `/dash/jobs`, `/dash/login`, ...). It needs `pip install meerschaum[dash]` (the `full` Docker image has it). The standalone binary (`cargo install meerschaum`, the `rust` image) has no Python in it: it serves the API, `/docs`, `/engine/*`, MCP and the web terminal, and `/dash` shows a pointer page. The `api.permissions.routes.allowlist` route groups hide console pages as in v4. What moved and what is new:
 
@@ -572,7 +640,14 @@ Notes on the contract:
 
 A function that returns a string (or a `(html, status)` pair) is a page-contract page; one that returns a Dash layout is a Dash page. The manifest records which, by calling the function once at install time. A page written this way moves to Rust without touching its chart, because the Rust `plotly` crate emits the same figure JSON (see [Rust plugins](#rust-plugins)).
 
+</details>
+
 ## 🦀 Rust plugins
+
+Rust plugins may be single files or crates using the native SDK. Python is only needed when a plugin uses the Python host.
+
+<details markdown="1">
+<summary>Write a native plugin</summary>
 
 **v5 is still a Python package** (`pip install meerschaum`). Most users keep writing Python plugins, and they work unchanged. Rust plugins are an option for the native performance path (the core, kernel and engine) and for a lean image: `slim` is the base wheel on a minimal Python, and a Rust plugin needs none of the extras.
 
@@ -601,7 +676,14 @@ meerschaum_plugin::export_plugin!(Acme);
 
 A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. Start with the [single-file Rust plugin guide](/reference/plugins/rust-plugins/); the [advanced guide](/reference/plugins/rust-plugins/advanced/) covers packaging, the SDK manifest, the C ABI, testing, and current limitations. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
 
+</details>
+
 ## 🚢 Deployment
+
+Use matching client/server releases and restart services after installing. Containers are upgraded by replacing their images while preserving mounted data.
+
+<details markdown="1">
+<summary>Containers, TLS, services, and terminal sessions</summary>
 
 !!! note "Registration and terminal access"
 
@@ -611,7 +693,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **Stack API image.** The default `api` service runs `bmeares/meerschaum:<version>-full` (for example `bmeares/meerschaum:5.0.0-full`: the `full` image of the same release as the `mrsm` that writes the compose file) instead of the floating `bmeares/meerschaum:api` tag, so the server and the client always run the same version. A root without `config/stack.yaml` follows the version on its own: the next `mrsm stack up -d` after an upgrade recreates only the `api` container (volumes and database are kept). A `stack.yaml` with a `docker-compose.yaml` section keeps its own `api` image: edit `services:api:image` with `mrsm edit config stack`. See [the stack](/reference/stack/).
 - **Platforms.** Wheels are published for Linux x86_64 and arm64 (glibc `manylinux_2_28` and musl `musllinux_1_2`, so Alpine works), macOS arm64 and x86_64, and Windows x86_64. The standalone binaries are attached for Linux x86_64 and arm64, macOS arm64 and x86_64 and Windows x86_64; the macOS ones are not signed (`xattr -d com.apple.quarantine <file>` after a browser download, see [Setup](/get-started/)). The Docker images are multi-architecture (`linux/amd64`, `linux/arm64`).
 - **Stack database setup.** The default `db` service mounts `<root>/db/initdb/create-extensions.sql` as a single file, `/docker-entrypoint-initdb.d/100_meerschaum.sql`, instead of mounting the `<root>/db/initdb` directory over the image's whole setup directory, so the image's own setup runs again on a new volume (`TIMESCALEDB_TELEMETRY: 'off'` takes effect, `timescaledb-tune` tunes the server, `template1` gets TimescaleDB). The script v5 writes creates each extension only when the image ships it (another PostgreSQL image no longer aborts the first start) and preloads `pg_stat_statements`. The healthcheck is `pg_isready -h 127.0.0.1 -p 5432 ...` with a 300 s `start_period`, so `db` is healthy only once the setup is done (a passing check turns it healthy at once; the long start period keeps a slow first setup, e.g. on a Raspberry Pi, from aborting `stack up`), and Grafana's datasource says PostgreSQL 18 (`postgresVersion: 1800`). See [The Database Setup](/reference/stack/#the-database-setup).
-- **Existing stacks.** `mrsm stack` regenerates the compose file from the `stack` config on every run. **Without** `<root>/config/stack.yaml` (v4's `mrsm stack` never writes one; it exists only if you created it, e.g. with `mrsm edit config stack`), your stack takes the new defaults: the next `mrsm stack up -d` recreates the `db` container once (a short restart; the data volume is kept and nothing in the database changes, since Docker runs the setup only on an empty volume). Any extra scripts you put in `<root>/db/initdb/` are no longer mounted, so they would not run for a future fresh volume: move them into `create-extensions.sql`, or add your own mount in `stack.yaml`. **With** a `stack.yaml`, its `docker-compose.yaml` section is used as it is (v5's defaults fill in only a key that is missing entirely, as in v4), so its mount, healthcheck and image stay and the container is not recreated. To take the new compose defaults, edit the `db` service with `mrsm edit config stack` (the mount, the `healthcheck` test and `start_period`), or delete the `docker-compose.yaml` key from `stack.yaml` (your other `stack` keys stay) and run `mrsm stack` again. An existing `create-extensions.sql` is never rewritten: before creating a NEW database volume, delete it (or merge your changes into v5's) so that `mrsm stack` writes v5's script. Update an existing database's extensions and settings with `mrsm upgrade extensions` ([Upgrading the stack](/reference/stack-upgrades/)).
+- **Existing stacks.** `mrsm stack` regenerates the compose file from the `stack` config on every run. **Without** `<root>/config/stack.yaml` (v4's `mrsm stack` never writes one; it exists only if you created it, e.g. with `mrsm edit config stack`), your stack takes the new defaults: the next `mrsm stack up -d` recreates the `db` container once (a short restart; the data volume is kept and nothing in the database changes, since Docker runs the setup only on an empty volume). Any extra scripts you put in `<root>/db/initdb/` are no longer mounted, so they would not run for a future fresh volume: move them into `create-extensions.sql`, or add your own mount in `stack.yaml`. **With** a `stack.yaml`, its `docker-compose.yaml` section is used as it is (v5's defaults fill in only a key that is missing entirely, as in v4), so its mount, healthcheck and image stay and the container is not recreated. To take the new compose defaults, edit the `db` service with `mrsm edit config stack` (the mount, the `healthcheck` test and `start_period`), or delete the `docker-compose.yaml` key from `stack.yaml` (your other `stack` keys stay) and run `mrsm stack` again. An existing `create-extensions.sql` is never rewritten: before creating a NEW database volume, delete it (or merge your changes into v5's) so that `mrsm stack` writes v5's script. Update an existing database's extensions and settings with `mrsm upgrade extensions` ([Upgrading the stack](/reference/stack/upgrades/)).
 - **Bare metal.** Replace `pip install --user meerschaum==4.1.4` with `pip install --user 'meerschaum[full]>=5,<6'` (or the extras you need). The `mrsm` on your `PATH` is now a console script that runs the native CLI inside the `meerschaum` wheel (there is no separate binary package). Jobs and `systemd` units run `python -m meerschaum`, so they work from the same install.
 - **HTTPS.** `mrsm start api --keyfile privkey.pem --certfile fullchain.pem` serves HTTPS natively, including the console, web terminal, MCP and event streams (HTTP/2 and HTTP/1.1). Configure `api.server.ssl_keyfile` / `ssl_certfile`, or keep a TLS reverse proxy. Both files are required and validated before startup; renewals reload without a restart (30-second polling or SIGHUP). Without a pair the server serves plain HTTP. Legacy `api.uvicorn.ssl_*` keys are read with a notice. Under HTTPS, SIGHUP reloads certificates rather than stopping the server; use SIGTERM or Ctrl-C to stop it. Plain HTTP to the TLS port answers `/healthcheck` and redirects other paths with `308`.
 - **A public API.** `mrsm start api --public` (or `api:permissions:preset: public`) is for a server that exists to serve a plugin's public routes and pages: it serves only `/login`, `/healthcheck`, `/version`, plugin routes and plugin pages, turns off the console's own pages, the web terminal, actions, `/execute`, user registration and the API docs, and says so at startup. Route groups you allowlist are served on top. See [The public preset](/reference/api-instance/permissions/#the-public-preset).
@@ -624,7 +706,14 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **The Python package must fit the program.** The Python worker and the API host check the `meerschaum` package they would import before importing it, so a stale copy cannot run its start-up (v4 installs packages whatever `MRSM_NO_AUTO_INSTALL` says). A package of another **major** version, one that looks like v4 (no `worker` module), or one speaking another worker protocol is refused with one message (nothing is imported or installed; the message names the copy and the fix, and `mrsm doctor` shows it); a different release of the same major version starts and warns once, naming both versions. This matters when `mrsm` (`cargo install meerschaum`, a release binary, the Docker image) and the Python package come from different installs: keep them on the same release, or point `MRSM_PYTHON` at an interpreter that has the matching one. This is checked once per interpreter before a worker starts (a missing `meerschaum`, a stale one or an interpreter that cannot start fails in well under a second with the message above, not after a 60 s handshake), and a worker that never connects is stopped after 60 s (`MRSM_WORKER_STARTUP_TIMEOUT`; a timeout alone is remembered for 10 s, never longer).
 - **Logs.** The Rust server's logs and the API host's output are interleaved in the same stream (the API job's logs under `mrsm start api -d`). There is no separate host log and no filter in 5.0; the host's own lines (`The API host exited ...; restarting`, `The plugin manifest changed; restarting the API host.`) come from the server. The host is started only when an installed plugin needs it and restarted with backoff if it exits.
 
+</details>
+
 ## ✨ New in 5.0
+
+See the concise [v5 changelog](../changelog/v5.md) for Pipelines, metrics, teams, native plugins, and console changes.
+
+<details markdown="1">
+<summary>New capabilities</summary>
 
 - **The Syncing Engine and [Pipelines](/reference/pipelines/):** `mrsm sync pipes --parents [N] --children [N] --resume <run_id>`, `mrsm plan pipes` (dry run), `mrsm show graph`, `mrsm show runs` / `show run <id>`, `pipe.sync(parents=, children=)`, `mrsm.Pipeline`, the dirty-range ledger and run history on your instance, and the `/dash/pipelines` console page. Pipe parameters `schedule`, `stream`, `retry` and `min_seconds` ([reference](/reference/pipes/parameters/#schedule)).
 - **Continuous mode:** `--loop` (v4's laps, plus engine runs when the selection has edges) and `--listen` with `IS_STREAMING` connectors, micro-batching and acknowledge-after-commit ([Continuous Mode](/reference/pipelines/continuous/)).
@@ -633,7 +722,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **Replacing a window:** `pipe.sync(df, begin=..., end=..., replace=True)`, `fetch: {replace: true}` and `sync pipes --replace` ([Replacing a window](/reference/pipes/syncing/#replacing-a-window)).
 - **`mrsm verify schema`** and `pipe.verify_schema()`: bring a table in line with its pipe's dtypes, asking first ([verify schema](/reference/actions/#verify-schema)). **Row estimates:** `pipe.get_rowcount(estimate=True)`.
 - **Protected connectors:** `protected: true`, `--allow-protected`, `MRSM_ALLOW_PROTECTED` and `meerschaum.connectors.allow_protected()` ([Protected Connectors](/reference/connectors/#protected-connectors)).
-- **`--loop` for any action**, and **job health** in `show jobs`, `job.health` and the console ([Job health](/reference/background-jobs/#job-health)).
+- **`--loop` for any action**, and **job health** in `show jobs`, `job.health` and the console ([Job health](/reference/background-jobs/health/)).
 - **The web console's Overview, Pipes table and pipe pages, New pipe, Connectors page, New job, user management and installed plugins** ([Web Console](/reference/api-instance/web-console/)).
 - **HTTP and MCP:** `GET /pipelines/{name}`, `POST /pipelines/{name}/plan`, `POST /pipelines/{name}/sync`, `GET /engine/runs/{run_id}` and run filters (`pipeline`, `pipe`, `status`, `since`, `limit`), `GET .../rowcount?estimate=true`, one response shape for the 5.0 routes ([Pipelines, Runs and Actions over HTTP](/reference/api-instance/routes/)), and the MCP tools `list_pipelines`, `plan_pipeline`, `sync_pipeline`, `list_runs`, `get_run`, `list_jobs`, `get_job_logs` and `list_connectors` ([MCP tools](/reference/mcp/tools/)).
 - **The public preset** (`api.permissions.preset: public`, `start api --public`) and path-prefix rate limits ([Permissions and Rate Limits](/reference/api-instance/permissions/)), and the web terminal's own tmux server (`api.webterm.tmux.config`).
@@ -646,12 +735,14 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **Packaging:** one dependency-free `meerschaum` wheel with extras (its `mrsm` console script runs the native CLI), `cargo install meerschaum` for a standalone binary, and the `bmeares/meerschaum:slim` image.
 - **Venv accounting:** `mrsm show venvs`, `mrsm prune venvs`, and attribution of every package installed by `attempt_import`.
 - **Leases:** two jobs never sync the same pipe at once (`mrsm_pipe_leases`), with optional `acquire_pipe_lease` / `release_pipe_lease` on custom instance connectors.
-- **`mrsm upgrade extensions`:** updates a PostgreSQL instance's extensions (TimescaleDB, PostGIS, the Toolkit, ...) to the versions its server ships after an image upgrade, and on the stack's database applies `TIMESCALEDB_TELEMETRY: 'off'` and offers to preload `pg_stat_statements`; `mrsm stack up`, `mrsm start api` and `mrsm upgrade mrsm` point to it when an extension lags ([Upgrading the stack](/reference/stack-upgrades/)).
-- **`mrsm upgrade postgres`:** moves the stack's database to another PostgreSQL major (e.g. a stack whose `stack.yaml` pins `timescale/timescaledb-ha:pg17` to `pg18`): a full backup, then a restore into a new volume that is verified table by table before the stack switches to it; the old volume, the backup and a byte-for-byte copy of `stack.yaml` are kept, and `mrsm upgrade postgres rollback` goes back ([Upgrading the stack](/reference/stack-upgrades/#upgrading-postgresql)).
-- **PostgreSQL startup safety:** `mrsm stack up` refuses a known image whose PostgreSQL major differs from an existing named volume's `PG_VERSION`. Pin the old image, start the old database, then run `mrsm upgrade postgres <major>`. `stack up --force` bypasses this check; interrupted upgrades and restores offer recovery before another run ([Upgrading the stack](/reference/stack-upgrades/#upgrading-postgresql)).
-- **`mrsm backup postgres` / `mrsm restore postgres`:** an online, checksummed backup of the stack's database (nothing is stopped; `mrsm backup postgres -s 'daily' -d` schedules it, `system:backups:postgres:keep` keeps the newest N), and its restore into a new volume, verified against the backup's manifest before the stack switches to it (`mrsm restore postgres rollback` goes back) ([Backing up and restoring](/reference/stack-upgrades/#backing-up-and-restoring)).
+- **`mrsm upgrade extensions`:** updates a PostgreSQL instance's extensions (TimescaleDB, PostGIS, the Toolkit, ...) to the versions its server ships after an image upgrade, and on the stack's database applies `TIMESCALEDB_TELEMETRY: 'off'` and offers to preload `pg_stat_statements`; `mrsm stack up`, `mrsm start api` and `mrsm upgrade mrsm` point to it when an extension lags ([Upgrading the stack](/reference/stack/upgrades/)).
+- **`mrsm upgrade postgres`:** moves the stack's database to another PostgreSQL major (e.g. a stack whose `stack.yaml` pins `timescale/timescaledb-ha:pg17` to `pg18`): a full backup, then a restore into a new volume that is verified table by table before the stack switches to it; the old volume, the backup and a byte-for-byte copy of `stack.yaml` are kept, and `mrsm upgrade postgres rollback` goes back ([Upgrading the stack](/reference/stack/upgrades/#upgrading-postgresql)).
+- **PostgreSQL startup safety:** `mrsm stack up` refuses a known image whose PostgreSQL major differs from an existing named volume's `PG_VERSION`. Pin the old image, start the old database, then run `mrsm upgrade postgres <major>`. `stack up --force` bypasses this check; interrupted upgrades and restores offer recovery before another run ([Upgrading the stack](/reference/stack/upgrades/#upgrading-postgresql)).
+- **`mrsm backup postgres` / `mrsm restore postgres`:** an online, checksummed backup of the stack's database (nothing is stopped; `mrsm backup postgres -s 'daily' -d` schedules it, `system:backups:postgres:keep` keeps the newest N), and its restore into a new volume, verified against the backup's manifest before the stack switches to it (`mrsm restore postgres rollback` goes back) ([Backing up and restoring](/reference/stack/upgrades/#backing-up-and-restoring)).
 - **Shell completions:** `mrsm install completions [bash|zsh|fish|powershell]` writes a completion script for `mrsm` and `meerschaum` (actions, subactions, flags, connector keys, jobs, plugins, files); `mrsm show completions <shell>` prints it and `mrsm uninstall completions` removes it ([Shell Completions](/reference/actions/#shell-completions)).
 - **`mrsm doctor`:** a read-only health check that says what is wrong with an installation and how to fix it: the version and worker interpreter, a stale `meerschaum` copy shadowing the right one, writable directories and free space (a full `/tmp` included), the config files, the instance and its tables, DuckDB and the Oracle client, the Python extras your plugins need, stale plugin virtual environments, failed jobs, the Docker stack and the PostgreSQL extensions. Every WARN or FAIL names its fix, `--nopretty` prints one JSON document for a bug report, and the result fails only when a check FAILs ([Troubleshooting](/reference/troubleshooting/#start-here-mrsm-doctor)).
+
+</details>
 
 ## 🧪 How to upgrade safely
 
@@ -666,6 +757,11 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 9. **Clean up what 4.1 duplicated.** Re-syncs of in-place SQLite rollups and upserts with `NULL` keys no longer duplicate rows, but the copies 4.1 made remain: `mrsm deduplicate pipes -c ...` removes them.
 
 ## 🗑️ Removed in 5.0, at a glance
+
+Check these replacements if your code uses an older internal module or removed command.
+
+<details markdown="1">
+<summary>Removed APIs and their replacements</summary>
 
 | Removed | Replacement |
 |---|---|
@@ -685,3 +781,5 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 | `meerschaum.api.dash.components.pages_offcanvas`, `build_pages_offcanvas_children`, `get_items_menu` (the logo's page list and the More menu) | The console's top navigation (`build_pages_navbar()`) |
 | `start pipeline <flags> -P {...}` as the way to write a chain (still runs) | `a + b : <flags>` |
 | Meerschaum-installed `dask`, `rich`, `dash-ace` and the other packages listed under [Installing](#installing-and-running) | Declare them in your plugin's `required` |
+
+</details>

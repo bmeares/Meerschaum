@@ -71,7 +71,7 @@ This page catalogs useful keys in the `parameters` dictionary.
     #     "parent_pipe_id": 1
     #     "value": 123,
     #     "self_value": 123,
-    # }  
+    # }
     ```
 
 
@@ -108,7 +108,7 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 
 ### Parameter reference
 
-**Essential** — the keys most pipes use:
+**Essential**, the keys most pipes use:
 
 | Parameter | Purpose | Section |
 |---|---|---|
@@ -117,7 +117,7 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 | `tags` | Labels for grouping and filtering pipes | [`tags`](#tags) |
 | `target` | Override the destination table name | [`columns`](#columns) |
 
-**Advanced / opt-in** — enable only when you need them:
+**Advanced / opt-in**, enable only when you need them:
 
 | Parameter | Purpose | Section |
 |---|---|---|
@@ -232,7 +232,7 @@ You may designate the same column as both the `datetime` and `primary` indices.
 
 Set `compress` to enable compression for a pipe's target table to reduce disk usage.
 
-For **TimescaleDB** hypertables (the default stack), compression is handled by the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore). The columnstore (compression) policy is the same mechanism under both names — `add_columnstore_policy` is the modern equivalent of the legacy `add_compression_policy`.
+For **TimescaleDB** hypertables (the default stack), compression is handled by the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore). The columnstore (compression) policy is the same mechanism under both names, `add_columnstore_policy` is the modern equivalent of the legacy `add_compression_policy`.
 
 By default ([`hypercore`](#hypercore)), the columnstore is already enabled at table creation and a policy is auto-created. Setting `compress` additionally (re)installs a columnstore policy automatically on sync, so newly synced chunks are converted in the background. Running the `compress pipes` action (or `Pipe.compress()`) additionally converts any existing uncompressed chunks immediately.
 
@@ -240,7 +240,7 @@ By default ([`hypercore`](#hypercore)), the columnstore is already enabled at ta
     Run `compress pipes --no-policy` to convert existing chunks now **without** installing an ongoing columnstore policy (any pre-existing policy is left untouched). Useful for a one-time reclaim on a pipe you don't want to keep auto-compressing.
 
 !!! tip "Decompressing"
-    Run the `decompress pipes` action (or `Pipe.decompress()`) to reverse compression: it removes the columnstore policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed (MySQL / MariaDB and MSSQL revert their native table compression). Pass `decompress pipes --no-policy` to decompress existing chunks now while leaving the policy in place — handy for a bulk backfill, after which chunks are recompressed on the policy's schedule.
+    Run the `decompress pipes` action (or `Pipe.decompress()`) to reverse compression: it removes the columnstore policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed (MySQL / MariaDB and MSSQL revert their native table compression). Pass `decompress pipes --no-policy` to decompress existing chunks now while leaving the policy in place, handy for a bulk backfill, after which chunks are recompressed on the policy's schedule.
 
 You may set `compress` to `true` to use sensible defaults (segment by the `id` column, order by the `datetime` column descending), or to a dictionary with the following keys for fine-grained control:
 
@@ -254,7 +254,7 @@ How old a chunk must be before the policy converts it (e.g. `'7 days'`). Default
 
 ### `compress.segmentby`
 
-The column(s) to segment by. Accepts a single column name (string) or a list of column names. Defaults to the `id` index — unless `id` is the unique [`primary`](#the-primary-index) key, in which case it is dropped from `segmentby` (a high-cardinality `segmentby` defeats columnstore compression) and moved into `orderby`.
+The column(s) to segment by. Accepts a single column name (string) or a list of column names. Defaults to the `id` index, unless `id` is the unique [`primary`](#the-primary-index) key, in which case it is dropped from `segmentby` (a high-cardinality `segmentby` defeats columnstore compression) and moved into `orderby`.
 
 ### `compress.orderby`
 
@@ -320,7 +320,7 @@ If not explicitly set, dtypes are inferred from the first sync, and syncing conf
     # id          int32[pyarrow]
     # val                float64
     # ts     datetime64[ms, UTC]
-    # dtype: object 
+    # dtype: object
 
     pipe.sync('id:2,foo:3')
     print(pipe.dtypes)
@@ -364,7 +364,7 @@ The `enforce` parameter controls whether a pipe coerces incoming data to match t
 
 !!! warning
     Some instance connectors behave unexpectedly when `enforce=False` (e.g. SQLite).
-    
+
 ---------------
 
 ## `fetch`
@@ -373,7 +373,7 @@ The `fetch` key contains parameters concerning the [fetch stage](/reference/pipe
 
 ### `fetch.backtrack_minutes`
 
-How many minutes of overlap to request when fetching new rows ― see [Backtracking](/reference/pipes/syncing/#backtracking). Defaults to 1440.
+How many minutes of overlap to request when fetching new rows, see [Backtracking](/reference/pipes/syncing/#backtracking). Defaults to 1440.
 
 ### `fetch.definition`
 
@@ -384,7 +384,7 @@ How many minutes of overlap to request when fetching new rows ― see [Backtrack
         SELECT *
         FROM foo
     ```
-    
+
 The base SQL query to be run when fetching new rows. Aliased as `sql` or `query` for convenience. This only applies to pipes with [`SQLConnectors`](/reference/connectors/sql-connectors/) as connectors.
 
 ### `fetch.replace`
@@ -407,9 +407,9 @@ rollups and sources that restate history. See [Replacing a window](/reference/pi
 
 On **TimescaleDB**, the target table is created as a hypertable by default. Set `hypertable` to `False` to create a plain table instead.
 
-On **PostgreSQL / PostGIS**, **MySQL / MariaDB**, and **MSSQL**, `hypertable` controls [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) and also **defaults to `True`** — so a pipe with a [`datetime`](#the-datetime-index) column partitions its target table by range on that column. Set `hypertable` to `False` to opt out (a plain table). Requires a `datetime` column; ignored on flavors without native range partitioning (e.g. SQLite, DuckDB, Oracle). Only newly created tables are affected — a pre-existing plain table is not retroactively partitioned (use `partition pipes` to rebuild it).
+On **PostgreSQL / PostGIS**, **MySQL / MariaDB**, and **MSSQL**, `hypertable` controls [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) and also **defaults to `True`** (so a pipe with a [`datetime`](#the-datetime-index) column partitions its target table by range on that column. Set `hypertable` to `False` to opt out (a plain table). Requires a `datetime` column; ignored on flavors without native range partitioning (e.g. SQLite, DuckDB, Oracle). Only newly created tables are affected) a pre-existing plain table is not retroactively partitioned (use `partition pipes` to rebuild it).
 
-The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](#verifychunk_minutes) and its aliases, default 43200 — 30 days), and partition boundaries are epoch-aligned — the same datetime always maps to the same partition regardless of insert order, and verification chunks (`get_chunk_bounds(align=True)`) coincide with partition edges.
+The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](#verifychunk_minutes) and its aliases, default 43200 (30 days), and partition boundaries are epoch-aligned) the same datetime always maps to the same partition regardless of insert order, and verification chunks (`get_chunk_bounds(align=True)`) coincide with partition edges.
 
 `verify.chunk_minutes` is the **authoritative** partition width: editing it does not retroactively reshape an existing table, and changing it for a populated table can produce misaligned, overlapping partitions. To change an existing table's width, run the `partition pipes` action (or [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition)), which rebuilds the table at the new width:
 
@@ -438,7 +438,7 @@ mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
 
 ## `hypercore`
 
-TimescaleDB-only. By default (`True`), the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) is enabled when the hypertable is created — the `CREATE TABLE` declares `tsdb.segmentby` / `tsdb.orderby` (resolved the same way as [`compress`](#compress)), which causes TimescaleDB to auto-create a columnstore policy that converts old chunks in the background.
+TimescaleDB-only. By default (`True`), the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) is enabled when the hypertable is created, the `CREATE TABLE` declares `tsdb.segmentby` / `tsdb.orderby` (resolved the same way as [`compress`](#compress)), which causes TimescaleDB to auto-create a columnstore policy that converts old chunks in the background.
 
 Set `hypercore` to `False` for a plain row-store hypertable (no columnstore, no auto-policy). Has no effect unless the pipe is a [`hypertable`](#hypertable). From Python, `mrsm.Pipe(..., hypercore=False)` sets it too.
 
@@ -569,7 +569,7 @@ Set `parents` to a list of keys (`connector`, `metric`, `location`, etc.) or a s
     - connector: foo
       metric: bar
       parameters:
-        children: 
+        children:
         - connector: foo
           metric: bar
           location: child
@@ -691,7 +691,7 @@ A pipe may inherit the base parameters from another reference pipe. Set `referen
     )
 
     print(pipe.parameters)
-    # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}} 
+    # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}}
     ```
 
 ---------------
@@ -822,7 +822,7 @@ In addition to days, alias keys are allowed to specify other units of time. In o
 
     ```python
     import meerschaum as mrsm
-    
+
     pipe = mrsm.Pipe(
         'foo', 'bar',
         parameters={

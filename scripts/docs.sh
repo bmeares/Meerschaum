@@ -29,8 +29,7 @@ PY
 fi
 
 if [ "$site_only" -eq 0 ]; then
-  cat docs/zensical/news/changelog.md > CHANGELOG.md
-  cat docs/zensical/news/acknowledgements.md > ACKNOWLEDGEMENTS.md
+  "$PYTHON_BIN" scripts/generate_changelog.py
   # Documentation imports never read the maintainer's config or installed plugins.
   docs_scratch="$(mktemp -d "${TMPDIR:-/tmp}/mrsm-docs.XXXXXX")"
   trap 'rm -rf "$docs_scratch"' EXIT
@@ -49,6 +48,7 @@ PY
   "$PYTHON_BIN" scripts/generate_mcp_docs.py
   PDOC_ALLOW_EXEC=1 "$PYTHON_BIN" -m pdoc -o docs/pdoc -d numpy -n \
     --favicon https://meerschaum.io/assets/logo.ico --logo https://meerschaum.io/assets/logo_48x48.png ./meerschaum/
+  "$PYTHON_BIN" scripts/normalize_generated_docs.py docs/pdoc
   "$PYTHON_BIN" scripts/gen_llms_txt.py
 fi
 

@@ -83,7 +83,7 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
 
    ```bash
    git grep -nF -e "$OLD_CARGO" -e "$OLD_PEP" -- . \
-     ':!scripts/bench/results' ':!CHANGELOG.md' ':!docs/zensical/news/changelog.md' ':!Cargo.lock' \
+     ':!scripts/bench/results' ':!CHANGELOG.md' ':!docs/zensical/changelog' ':!Cargo.lock' \
      ':!scripts/check_packaging.py' ':!crates/meerschaum-py/src/build_info.rs' ':!docs/design/v5.0.0.md' \
      ':!.agents' ':!.claude' ':!docs/zensical/llms-full.txt'
    ```
@@ -98,7 +98,7 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
    above it). Also re-read `requires-python` (`>=3.11`), the `Programming Language :: Python :: 3.x`
    classifiers (3.11 to 3.15; the smoke matrix covers 3.11 and 3.14), and `license = "Apache-2.0"` with
    `license-files` (PEP 639; `twine check` validates it).
-3. **Changelog.** Edit `docs/zensical/news/changelog.md` (source of truth). Keep all 5.0.0 development
+3. **Changelog.** Edit `docs/zensical/changelog/v5.md` (source of truth). Keep all 5.0.0 development
    changes under one `v5.0.0` entry explicitly marked **Unreleased** until the final release. Do not add
    release-candidate changelog entries. Then run `./scripts/docs.sh` (it regenerates root `CHANGELOG.md`, which is committed; `./scripts/build.sh`
    also runs it). The maintainer owns the 5.0.0 wording.

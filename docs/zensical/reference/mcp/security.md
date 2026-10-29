@@ -4,7 +4,7 @@ The MCP server hands an AI agent the same capabilities a person has at the CLI o
 
 ## The two trust models
 
-**stdio (`mrsm start mcp`) has no authentication and needs none.** It is spawned by a client on your machine and runs as you. It can do anything your `mrsm` command can. There is no scope enforcement because there is no principal to scope — this is the CLI's trust model.
+**stdio (`mrsm start mcp`) has no authentication and needs none.** It is spawned by a client on your machine and runs as you. It can do anything your `mrsm` command can. There is no scope enforcement because there is no principal to scope, this is the CLI's trust model.
 
 Never expose the stdio server over a network shim (`socat`, an SSH tunnel to an untrusted peer, a container port). Use the HTTP transport, which authenticates.
 
@@ -12,7 +12,7 @@ Never expose the stdio server over a network shim (`socat`, an SSH tunnel to an 
 
 ## Scope enforcement
 
-Each tool declares the scope it needs. Tools your token does not cover are **omitted from `tools/list`**, not advertised and then refused — an agent never sees a capability it cannot use.
+Each tool declares the scope it needs. Tools your token does not cover are **omitted from `tools/list`**, not advertised and then refused, an agent never sees a capability it cannot use.
 
 See the [tool reference](tools.md#scopes) for the generated scope-to-tool matrix.
 
@@ -45,7 +45,7 @@ every tool that modifies anything is hidden and refused, **even for a `*`-scoped
 
 ## `execute_action` is broad by design
 
-`execute_action` runs Meerschaum actions, which is the whole CLI. The `actions:execute` scope has always meant this — the REST `/actions` route behaves identically.
+`execute_action` runs Meerschaum actions, which is the whole CLI. The `actions:execute` scope has always meant this, the REST `/actions` route behaves identically.
 
 The actions which execute arbitrary code or SQL on the host are refused by default:
 
@@ -71,7 +71,7 @@ Do not grant `actions:execute` to a token you would not grant a shell to. If an 
 
 ## `read_sql` and read-only enforcement
 
-`read_sql` runs under its own `sql:read` scope — running `SELECT` against every database the host can reach is a much larger privilege than `connectors:read`, which only lists connector labels. Because `SQLConnector.read()` executes whatever it is given, the tool checks the statement first and refuses:
+`read_sql` runs under its own `sql:read` scope, running `SELECT` against every database the host can reach is a much larger privilege than `connectors:read`, which only lists connector labels. Because `SQLConnector.read()` executes whatever it is given, the tool checks the statement first and refuses:
 
 - anything whose leading keyword is not `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `VALUES`, or `TABLE`
 - more than one statement (`SELECT 1; DROP TABLE users`)
@@ -92,16 +92,16 @@ The pipe tools refuse any pipe whose `target` is `mrsm_users`, `mrsm_tokens`, `m
 
 ## Deployment checklist
 
-- [ ] Tokens are scoped to the minimum each agent needs — no `*` in production.
+- [ ] Tokens are scoped to the minimum each agent needs, no `*` in production.
 - [ ] `api:mcp:read_only` is `true` anywhere agents should only look.
 - [ ] `actions:execute` is granted deliberately, if at all.
 - [ ] Connectors reachable via `read_sql` use read-only database roles.
-- [ ] The API is behind TLS ([NGINX](../api-instance/nginx.md)) — bearer tokens must not cross plaintext.
+- [ ] The API is behind TLS ([NGINX](../api-instance/nginx.md)), bearer tokens must not cross plaintext.
 - [ ] `api:dash:mcp:enabled` is left `false` on any public instance.
 
 ## Dash's MCP server is not authenticated
 
-Dash's own MCP server is served from inside the Dash WSGI app, which sits **outside** FastAPI's authentication. Nothing it exposes is scope-checked. Meerschaum therefore ships it disabled, and when you do enable it, limits it to layout introspection — callbacks must opt in individually rather than all being exposed by default.
+Dash's own MCP server is served from inside the Dash WSGI app, which sits **outside** FastAPI's authentication. Nothing it exposes is scope-checked. Meerschaum therefore ships it disabled, and when you do enable it, limits it to layout introspection, callbacks must opt in individually rather than all being exposed by default.
 
 Enable `api:dash:mcp:enabled` only on a local development instance:
 

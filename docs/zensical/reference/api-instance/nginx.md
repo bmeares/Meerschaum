@@ -66,7 +66,7 @@ server {
     location / {
         proxy_pass http://localhost:8000;
     }
-    
+
     location ~* /(ws|websocket)(/|$) {
         proxy_pass http://localhost:8000$request_uri;
         proxy_http_version 1.1;
@@ -92,7 +92,7 @@ server {
 
 
     server_name mrsm.DOMAIN;
-    
+
     listen 80;
     listen [::]:80;
     return 404; # managed by Certbot

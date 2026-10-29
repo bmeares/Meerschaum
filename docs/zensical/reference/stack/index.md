@@ -1,9 +1,7 @@
 
 # 🥞 Meerschaum Stack
 
-The Meerschaum stack is an integrated collection of services designed to help you start visualizing your data as quickly as possible.
-
-The `stack` command wraps [Docker Compose](https://docs.docker.com/compose/) to create a full-stack Meerschaum installation ― services such as a database instance, API server, and pre-configured Grafana instance.
+The Stack uses [Docker Compose](https://docs.docker.com/compose/) to run a database, the API and console, Valkey, and Grafana together. Start it with `mrsm stack up -d`. See [upgrades and backups](upgrades.md) when maintaining an existing Stack.
 
 ## 🐳 Services
 
@@ -20,7 +18,7 @@ You can edit the stack's Docker Compose file with `mrsm edit config stack`.
 
 The `api` service runs the `full` image of the same release as the `mrsm` that writes the compose file (`bmeares/meerschaum:<version>-full`), so the API server and the client use the same version, and API plugins and the Dash console work without further installs. The image is built for `linux/amd64` and `linux/arm64`.
 
-!!! info "Upgrading an existing stack to 5.x"
+??? info "Upgrading an existing stack to 5.x"
     Earlier versions of the stack ran `bmeares/meerschaum:api`. `mrsm stack` regenerates the compose file on every run: a root without `config/stack.yaml` takes the new image the next time you run `mrsm stack up -d`, which recreates only the `api` container (the volumes and the database are kept). After `pip install --upgrade meerschaum` the tag follows the new version in the same way, so run `mrsm stack up -d` after every upgrade (or `mrsm stack pull` first to fetch the image ahead of time).
 
     A `config/stack.yaml` that has a `docker-compose.yaml` section keeps its own `api` image, because the defaults only fill in what is missing. To move it, edit `services:api:image` with `mrsm edit config stack` to `bmeares/meerschaum:<version>-full` (or delete the `api` service's `image` line so the default applies), then run `mrsm stack up -d`. `mrsm stack config` prints the compose file that will run.
@@ -33,6 +31,9 @@ The `api` service runs the `full` image of the same release as the `mrsm` that w
     ```
 
 ### 🗄️ The Database Setup
+
+<details markdown="1">
+<summary>First-run setup, extensions, and health checks</summary>
 
 The first time the `db` service starts on an empty volume, the image's entrypoint sets up the database. A new stack mounts Meerschaum's setup script as a single file into the image's own setup directory:
 
@@ -53,10 +54,12 @@ so the image's scripts run first and Meerschaum's runs last:
 The `db` healthcheck asks the server over TCP (`pg_isready -h 127.0.0.1 -p 5432 ...`, with a 300 second `start_period`): the entrypoint's setup server only listens on its Unix socket, so the service turns healthy (and `api` and `grafana` start) only after the setup is done. A passing check turns it healthy at once; the long start period only keeps a slow first setup (e.g. on a Raspberry Pi) from being reported unhealthy, which would abort `mrsm stack up`.
 
 !!! note "The setup runs once"
-    Docker runs the setup only when the data volume is empty. `mrsm stack` writes `create-extensions.sql` under your root directory once, when it is missing, and never overwrites it, so you may edit it before the first `mrsm stack up` (e.g. to create more extensions). Changing it later does nothing for an existing database: see [Upgrading the stack](/reference/stack-upgrades/) (`mrsm upgrade extensions`) for updating the extensions and settings of a database that already exists.
+    Docker runs the setup only when the data volume is empty. `mrsm stack` writes `create-extensions.sql` under your root directory once, when it is missing, and never overwrites it, so you may edit it before the first `mrsm stack up` (e.g. to create more extensions). Changing it later does nothing for an existing database: see [Upgrading the stack](/reference/stack/upgrades/) (`mrsm upgrade extensions`) for updating the extensions and settings of a database that already exists.
 
-!!! info "Stacks created before 5.0"
+??? info "Stacks created before 5.0"
     Earlier versions mounted the whole `<root>/db/initdb` directory over `/docker-entrypoint-initdb.d`, which hid the image's own scripts (no telemetry opt-out, no tuning, no extensions in `template1`), and checked health over the Unix socket. `mrsm stack` regenerates the compose file on every run: a root without `config/stack.yaml` (v4's `mrsm stack` never writes one) takes the new defaults, and the next `mrsm stack up -d` recreates the `db` container once (the data volume is kept; extra scripts in `<root>/db/initdb/` are no longer mounted for a future fresh volume). A `stack.yaml` with a `docker-compose.yaml` section keeps that section as it is. See the [migration guide](/reference/migrating-to-v5/#deployment).
+
+</details>
 
 ### Docker Images
 
@@ -139,13 +142,13 @@ mrsm stack up -d db grafana
 
 The Stack provisions three dashboards in Grafana's **Meerschaum Dashboards** folder:
 
-- **Meerschaum Performance** — the overall duration, failure, and write-rate picture.
-- **Pipe Performance** — focus on one Pipe and its recent syncs.
-- **Pipeline Performance** — compare Pipeline runs and follow their results.
+- **Meerschaum Performance**, the overall duration, failure, and write-rate picture.
+- **Pipe Performance**, focus on one Pipe and its recent syncs.
+- **Pipeline Performance**, compare Pipeline runs and follow their results.
 
 Use them to find slow Pipes, inspect recent failures, and follow P95 duration, retries, chunks, and **rows affected/s**. Replacements count deleted plus new rows; unchanged syncs affect zero rows.
 
-Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](api-instance/sync-metrics.md) for capture and history limits.
+Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](../api-instance/sync-metrics.md) for capture and history limits.
 
 ## 💾 Backing Up and Upgrading the Database
 
@@ -153,8 +156,8 @@ Grafana queries the configured database directly with its data-source credential
 `<root>/backups/postgres/<timestamp>/`, and `mrsm restore postgres` puts a backup into a new volume
 and switches the stack to it, keeping the current one. `mrsm upgrade postgres` moves the database
 to a newer PostgreSQL major the same way (a backup first, then a verified restore). See
-[Backing up and restoring](/reference/stack-upgrades/#backing-up-and-restoring) and
-[Upgrading PostgreSQL](/reference/stack-upgrades/#upgrading-postgresql).
+[Backing up and restoring](/reference/stack/upgrades/#backing-up-and-restoring) and
+[Upgrading PostgreSQL](/reference/stack/upgrades/#upgrading-postgresql).
 
 ## 🛑 Stopping the Stack
 

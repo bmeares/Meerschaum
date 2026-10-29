@@ -52,7 +52,7 @@ Open **Performance** (`/dash/performance`) to compare duration, write rate, and 
 
 The **Terminal** page (`/dash/terminal`; the old `/dash/webterm` and links to `/dash` with an action in the query open it too) is the console's command builder beside the web terminal: pick the connector, metric, location and [tags](/reference/pipes/tags/) filters on the left, an action and its flags, and click **Exec**. **Pipes**, **Jobs** and **Pipelines** list their cards beside the form.
 
-You have complete control of your Meerschaum instance via the webterm, an interactive terminal tied to your username. 
+You have complete control of your Meerschaum instance via the webterm, an interactive terminal tied to your username.
 
 The Terminal page is for users with the `webterm:use` permission (the Operator role and administrators); Exec runs actions, which needs `actions:execute` too.
 
@@ -169,9 +169,11 @@ Nothing is saved before you click one of them. Registering follows the API's rul
 
 ## Pipelines
 
-The **Pipelines** page (`/dash/pipelines`) shows the dependency graph of your pipes, a Gantt chart of the latest or selected run, the runs table and the run events, and a pipe's page has its parents and children on the **Lineage** tab. See [Visualization](/reference/pipelines/visualization/#in-the-web-console).
+The **Pipelines** page (`/dash/pipelines`) is a full-width, purple-accented runbook, distinct from the Pipes table. Search or sort its rows to compare **Name**, members, traversal, and run status. Open **Details** for member information or **Recent runs** to load history separately.
 
-A saved Pipeline has an access of its own, like a pipe: **New pipeline** asks for its **Team** and **Visibility** (your primary team and Team by default), and you own it. Its members you may not see are only counted (**1 hidden pipe**) on its card and canvas, and you may not run it, analyze its tags or clear its pipes until you may change every member. Runs, the canvas, lineage, plans and the Overview show only the pipes you may see; a run with none of them is not listed, and a stage of a pipe you may not see is shown as **Hidden pipe**.
+Open a Pipeline for its **Canvas** and **Runs** views. The canvas supports a fixed-size **View options** popup and two-finger pinch zoom on phones. A Pipe's **Lineage** tab shows its parents and children. See [Visualization](/reference/pipelines/visualization/#in-the-web-console).
+
+A saved Pipeline has an access of its own, like a pipe: **New pipeline** asks for its **Team** and **Visibility** (your primary team and Team by default), and you own it. Its members you may not see are only counted (**1 hidden pipe**) in its list, Overview card, and canvas, and you may not run it, analyze its tags or clear its pipes until you may change every member. Runs, the canvas, lineage, plans and the Overview show only the pipes you may see; a run with none of them is not listed, and a stage of a pipe you may not see is shown as **Hidden pipe**.
 
 ## Plugins
 

@@ -1,5 +1,5 @@
 <!--
-    GENERATED FILE — DO NOT EDIT.
+    GENERATED FILE: DO NOT EDIT.
     Regenerate with `python scripts/generate_mcp_docs.py` after changing the MCP registry
     (`crates/meerschaum-server/src/mcp/`: v4's `registry.json` and v5's additions in `v5.rs`).
 -->
@@ -81,7 +81,7 @@ transport grants everything, because it runs as the user who launched it.
 
 ### `clear_pipe`
 
-Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. Deleted rows are not recoverable — pass `begin`/`end`/`params` to scope it, and note that omitting all three deletes every row.
+Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. Deleted rows are not recoverable: pass `begin`/`end`/`params` to scope it, and note that omitting all three deletes every row.
 
 **Scope:** `pipes:delete`
 
@@ -205,7 +205,7 @@ Return a pipe's full attributes: its parameters dict (columns, dtypes, tags, fet
 
 ### `get_pipe_data`
 
-Read rows from a pipe. Narrow the result with `begin`/`end` (the datetime axis) and `params` (a WHERE filter) — on a datetime-axis pipe a time window is much cheaper than paging. Set `backtrack_minutes` to read the most recent rows relative to the pipe's sync time without knowing its bounds. Pass the returned `next_cursor` back as `cursor` for the next page.
+Read rows from a pipe. Narrow the result with `begin`/`end` (the datetime axis) and `params` (a WHERE filter): on a datetime-axis pipe a time window is much cheaper than paging. Set `backtrack_minutes` to read the most recent rows relative to the pipe's sync time without knowing its bounds. Pass the returned `next_cursor` back as `cursor` for the next page.
 
 **Scope:** `pipes:read`
 
@@ -296,7 +296,7 @@ List the saved Pipelines on an instance: named groups of pipes that sync togethe
 
 ### `list_pipes`
 
-List registered Meerschaum pipes and their keys, tags, index columns, and dtypes. Start here to discover what data is available. Results are paginated — pass the returned `next_cursor` back as `cursor` to continue.
+List registered Meerschaum pipes and their keys, tags, index columns, and dtypes. Start here to discover what data is available. Results are paginated: pass the returned `next_cursor` back as `cursor` to continue.
 
 **Scope:** `pipes:read`
 
@@ -379,7 +379,7 @@ Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe')
 
 ### `sync_documents`
 
-Insert or update rows in a pipe from a list of records you supply. No source connector is consulted — Meerschaum filters duplicates and upserts according to the pipe's configuration.
+Insert or update rows in a pipe from a list of records you supply. No source connector is consulted: Meerschaum filters duplicates and upserts according to the pipe's configuration.
 
 **Scope:** `pipes:write`
 
@@ -455,4 +455,4 @@ before calling:
 back as `cursor` for the next page; a `null` cursor means there is nothing more.
 
 On a pipe with a datetime axis, narrowing with `begin` and `end` is far cheaper
-than paging — cursors re-read the rows they skip.
+than paging: cursors re-read the rows they skip.

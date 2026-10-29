@@ -55,7 +55,7 @@ Like fetch plugins, sync plugins define how to get and parse data. Sync plugins,
 
 ## ⏯️ Action Plugins
 
-Action plugins add additional commands to Meerschaum, such as the [built-in actions](/reference/actions) like `sync`, `bootstrap`, and `show`. The sky is the limit for actions ― the action function serves as an entry point from `mrsm`.
+Action plugins add additional commands to Meerschaum, such as the [built-in actions](/reference/actions) like `sync`, `bootstrap`, and `show`. The sky is the limit for actions, the action function serves as an entry point from `mrsm`.
 
 For example, the `color` plugin provides the `color` action, which is a convenience command to toggle the shell's Unicode and ANSI configuration.
 

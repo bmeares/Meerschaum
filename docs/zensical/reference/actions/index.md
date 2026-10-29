@@ -105,15 +105,15 @@ sync pipes -c sql:main : -s 'daily starting 00:00' -d
 
 Here are some useful chain flags:
 
-- `--loop`  
+- `--loop`
   Run the chain continuously.
-- `--min-seconds` (default `1`)  
+- `--min-seconds` (default `1`)
   How many seconds to sleep between laps (if `--loop` or `x3`).
-- `-s`, `--schedule`, `--cron`  
-  Run the chain on a [schedule](/reference/background-jobs/#schedules).
-- `-d`, `--daemon`  
+- `-s`, `--schedule`, `--cron`
+  Run the chain on a [schedule](/reference/background-jobs/schedules/).
+- `-d`, `--daemon`
   Create a background job which runs the chain.
-- `x3`, `3`  
+- `x3`, `3`
   Run the chain a specific number of times.
 
 Note that you can add `:` to single commands as well:
@@ -135,7 +135,7 @@ mrsm show pipes --loop --min-seconds 300
 mrsm my_plugin_action --loop --min-seconds 60 -d
 ```
 
-Actions that already loop or start jobs (`sync`, `verify` and `deduplicate pipes`, `sync pipelines`, `start job ...`, `-d`, the servers) keep their own behavior. So does a plugin action whose function has a `loop` parameter (`def poll(loop=False, **kwargs)`, the 4.1 way): it receives `loop=True` and repeats by itself. Remove the parameter and the loop to let Meerschaum repeat it, which also records each run for [job health](/reference/background-jobs/#job-health).
+Actions that already loop or start jobs (`sync`, `verify` and `deduplicate pipes`, `sync pipelines`, `start job ...`, `-d`, the servers) keep their own behavior. So does a plugin action whose function has a `loop` parameter (`def poll(loop=False, **kwargs)`, the 4.1 way): it receives `loop=True` and repeats by itself. Remove the parameter and the loop to let Meerschaum repeat it, which also records each run for [job health](/reference/background-jobs/health/).
 
 ## Daemonize Actions
 
@@ -162,7 +162,7 @@ mrsm /path/to/script.sh -s 'every 5 minutes' -d
 
 ## Subaction Pattern
 
-Most actions take a **subaction** (the noun) that selects what to operate on — usually `pipes`, but also `plugins`, `users`, `connectors`, `jobs`, `config`, `venvs`, and more:
+Most actions take a **subaction** (the noun) that selects what to operate on, usually `pipes`, but also `plugins`, `users`, `connectors`, `jobs`, `config`, `venvs`, and more:
 
 ```bash
 register pipes        register plugins        register users
@@ -351,11 +351,11 @@ Optimize storage and statistics for pipes' target tables. See [Pipe Maintenance]
 | `vacuum` | Reclaim dead-tuple disk space (PostgreSQL `VACUUM`; `--full` for `VACUUM FULL`). |
 | `analyze` | Refresh the query planner's statistics (no space reclaimed). |
 | `compress` | Enable compression / columnstore and install a policy so future chunks compress automatically. |
-| `decompress` | Inverse of `compress` — remove the policy and convert chunks back to row-store. |
+| `decompress` | Inverse of `compress`, remove the policy and convert chunks back to row-store. |
 | `partition` | Repartition target tables to a new chunk width (`--chunk-minutes`). |
 | `restart` | Restart stopped jobs that were not manually stopped. |
 | `index` | Create the indices defined in pipes' parameters. |
-| `backup` | `backup postgres`: an online backup of the stack's database (v5, see [Backing up and restoring](../stack-upgrades.md#backing-up-and-restoring)). |
+| `backup` | `backup postgres`: an online backup of the stack's database (v5, see [Backing up and restoring](../stack/upgrades.md#backing-up-and-restoring)). |
 | `restore` | `restore postgres`: restore the stack's database from a backup into a new volume (v5, same page). |
 
 #### `index`
@@ -383,7 +383,7 @@ Manage Meerschaum plugins and their Python dependencies.
 |---|---|
 | `install` | Install Meerschaum plugins (from a repository) or Python packages (into the `mrsm` venv). |
 | `uninstall` | Uninstall plugins or Python packages. |
-| `upgrade` | Upgrade Meerschaum itself, plugins, or packages (e.g. `upgrade meerschaum`); `upgrade extensions` updates a PostgreSQL instance's extensions, `upgrade postgres` moves the stack's database to a newer PostgreSQL major (v5, see [Upgrading the stack](../stack-upgrades.md)). |
+| `upgrade` | Upgrade Meerschaum itself, plugins, or packages (e.g. `upgrade meerschaum`); `upgrade extensions` updates a PostgreSQL instance's extensions, `upgrade postgres` moves the stack's database to a newer PostgreSQL major (v5, see [Upgrading the stack](../stack/upgrades.md)). |
 | `setup` | Run a plugin's `setup()` function (e.g. `setup plugins noaa`). |
 | `reload` | Reload the running Meerschaum instance (re-import plugins and modules in place). |
 
@@ -430,4 +430,4 @@ it is one read statement (in a transaction that is rolled back), and a statement
 refused unless you pass `--allow-protected`.
 
 !!! danger "Arbitrary execution"
-    `sql`, `os`, `sh`, and `python` run **arbitrary** SQL, shell commands, and Python code with the privileges of the Meerschaum process. They are intended for trusted, interactive use only — never expose them to untrusted input, and be cautious enabling them on shared or networked instances.
+    `sql`, `os`, `sh`, and `python` run **arbitrary** SQL, shell commands, and Python code with the privileges of the Meerschaum process. They are intended for trusted, interactive use only, never expose them to untrusted input, and be cautious enabling them on shared or networked instances.

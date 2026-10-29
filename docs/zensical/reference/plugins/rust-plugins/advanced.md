@@ -1203,4 +1203,3 @@ a semicolon after `vec![...]`: that would discard the rows and return `()` inste
 Use the full crate layout above for multiple source files, relative included assets, typed
 Arrow frames, or a hand-written manifest. Relative paths in a
 shorthand file resolve from its generated copy in the cache.
-

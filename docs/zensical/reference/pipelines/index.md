@@ -60,6 +60,11 @@ Schedule a Pipeline with an ordinary Job running `sync pipelines NAME -i REGISTR
 
 ## 🌳 The Pipe Graph
 
+Dependencies come from `parents`, `children`, and `{{ Pipe(...) }}` references. The graph combines these edges and runs parents before children.
+
+<details markdown="1">
+<summary>Edges, cross-instance references, and cycle handling</summary>
+
 Each pipe is a **node**. Edges point from a parent to the pipe that reads it. Edges come from three places, combined and de-duplicated:
 
 1. **`parents` / `parent`** in a pipe's [parameters](/reference/pipes/parameters/): an edge from the parent to this pipe.
@@ -107,7 +112,14 @@ A few rules:
 - Edges may cross instances. The child's ledger entries and cursor live on the **child's** instance. If a parent's instance is unreachable, the child is marked `upstream_failed`.
 - Set `system.engine.implicit_edges: false` to ignore `{{ Pipe() }}` references and use only `parents` / `children`.
 
+</details>
+
 ## 🎯 Selecting a Slice
+
+Use `--parents` or `--children` to include dependencies. Preview with `plan pipes` before syncing.
+
+<details markdown="1">
+<summary>Selection flags, Python examples, planning, and history</summary>
 
 The usual `-c`, `-m`, `-l`, `-t` and `-i` filters pick the **targets**. Add the graph flags to pull in their neighbours:
 
@@ -284,7 +296,14 @@ run                         started (UTC)        status     wall  ok/nodes  targ
 
 `plan pipes` takes the same selection and bound flags as `sync pipes` (`--parents [N]`, `--children [N]`, `--begin`, `--end`, `--resume`) and prints one row per pipe: the action, the sync window in words (`last sync − 1 day → latest data`, `2026-10-12 09:00 → latest data`, `all data`), the number of chunks and the reason in plain words. A `*` marks a pipe planned against the current state that the executor plans again when its parents finish. `--nopretty` prints the plan as JSON (each row keeps its machine-readable `bounds` and adds `bounds_text`, the window in words).
 
+</details>
+
 ## 🧮 What the Planner Decides
+
+The planner chooses root, incremental, backfill, rebuild, skip, or observe actions. Run history records why each node ran.
+
+<details markdown="1">
+<summary>Actions, late data, bounds, and edge windows</summary>
 
 For every node in the selection the planner picks one **action**. The ledger cursors (see [Engine State](/reference/pipelines/state/)) are the primary signal; watermarks (a pipe's sync time) are the fallback.
 
@@ -357,6 +376,8 @@ parents:
 
 Keys are `lookback_{seconds,minutes,hours,days,weeks}` and `lookahead_*`, or a bare number (raw units on an integer axis, minutes on a datetime axis).
 
+</details>
+
 ## 💥 Failures and Resuming
 
 - A node that fails marks every descendant `upstream_failed`. Independent branches keep running.
@@ -380,6 +401,11 @@ The first engine run on a pipe has no stored hash, so it records a baseline rath
 
 ## ⚖️ Bare Syncs Stay v4
 
+A plain `sync pipes` keeps independent Pipe behavior. Graph syncs add watermark capping, rebuild detection, and failure propagation.
+
+<details markdown="1">
+<summary>Flat sync comparison and chunk pipelining</summary>
+
 | | `sync pipes` (flat) | `--parents` / `--children` |
 |---|---|---|
 | Ordering | By edges when there are any, otherwise v4's `connector, metric, location` order | Dependency order |
@@ -395,7 +421,14 @@ By default a child starts after its parents finish. With `--chunk-pipelining` (o
 
 Pipelining goes one level deep (a child overlaps its parents, not its grandchildren), needs the native executor, never applies to flat selections, and never starts a `rebuild` early. The resulting tables are identical to a run without it.
 
+</details>
+
 ## Saved pipelines and scheduled Jobs
+
+A saved Pipeline owns a named selection. A [Job](../background-jobs/index.md) gives it a schedule. Deleting the definition keeps its member Pipes and their data.
+
+<details markdown="1">
+<summary>Saved definitions, schedules, background jobs, and API registries</summary>
 
 A named pipeline stores an exact selection on its instance. Its metadata uses an internal
 `mrsm` registration and is excluded from the data graph. Saving a selection never changes
@@ -427,7 +460,7 @@ mrsm show jobs
 mrsm stop pipeline daily-totals -i sql:main
 ```
 
-A Pipeline's background job is a job that syncs it on its instance (`sync pipelines NAME -i <instance> ...`): the job its schedule runs in (created from the Pipelines page or with `pipeline.schedule(...)`), or the one `start pipeline` created. `start pipeline` starts the Pipeline's scheduled jobs when it has any (and names the other jobs it left alone), else its other jobs. When the Pipeline has none, `start pipeline` creates `pipeline-NAME`, which runs `sync pipelines NAME -i <instance> --loop --min-seconds 60` and prints what it created. For a new job, `--min-seconds 300` sets the pace (default 60 seconds, or the Pipeline's saved `min_seconds` default), `-s 'every 10 minutes'` makes it a schedule instead of a loop, and `--name` names it. A name that is not saved on the instance is an error that lists the saved Pipelines (`stop pipeline` stops every job of the Pipeline, even one whose Pipeline has since been deleted). When a loop job and another job of the same Pipeline both run, `start pipeline` warns that its pipes sync more than once. `show jobs` shows how the job's runs go (for example `last good sync 2 min ago`; see [Job health](/reference/background-jobs/#job-health)).
+A Pipeline's background job is a job that syncs it on its instance (`sync pipelines NAME -i <instance> ...`): the job its schedule runs in (created from the Pipelines page or with `pipeline.schedule(...)`), or the one `start pipeline` created. `start pipeline` starts the Pipeline's scheduled jobs when it has any (and names the other jobs it left alone), else its other jobs. When the Pipeline has none, `start pipeline` creates `pipeline-NAME`, which runs `sync pipelines NAME -i <instance> --loop --min-seconds 60` and prints what it created. For a new job, `--min-seconds 300` sets the pace (default 60 seconds, or the Pipeline's saved `min_seconds` default), `-s 'every 10 minutes'` makes it a schedule instead of a loop, and `--name` names it. A name that is not saved on the instance is an error that lists the saved Pipelines (`stop pipeline` stops every job of the Pipeline, even one whose Pipeline has since been deleted). When a loop job and another job of the same Pipeline both run, `start pipeline` warns that its pipes sync more than once. `show jobs` shows how the job's runs go (for example `last good sync 2 min ago`; see [Job health](/reference/background-jobs/health/)).
 
 `sync pipelines NAME --loop` runs the engine's [continuous mode](/reference/pipelines/continuous/) over the Pipeline's members, as `sync pipes --parents --loop` does: a member with a `schedule` of its own syncs when it is due (a lap with nothing due records no run), and its children follow it as usual. Each run is named after the Pipeline. An edit of the Pipeline (on the Pipelines page or with `edit pipelines`) takes effect within half a minute: the loop finishes its current run and starts again with the new members.
 
@@ -465,3 +498,5 @@ Schedule guards check Jobs available on the client and registry server. Server-s
 should use the server's own instance keys, such as `sql:main`, rather than an HTTP alias pointing
 back to that server: the server cannot infer that arbitrary client aliases name its own registry.
 Jobs on unrelated executors are not discoverable automatically.
+
+</details>

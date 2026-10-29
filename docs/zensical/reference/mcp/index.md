@@ -6,7 +6,7 @@ There are two transports. They expose the same tools, resources, and prompts:
 
 | Transport | Where | Auth | Use it when |
 | --- | --- | --- | --- |
-| **stdio** | `mrsm start mcp` | None — inherits your shell | The client runs on the same machine as Meerschaum |
+| **stdio** | `mrsm start mcp` | None, inherits your shell | The client runs on the same machine as Meerschaum |
 | **HTTP** | `/mcp` on the API | OAuth2 scopes per tool | The client is remote |
 
 ## Quick start: local (stdio)
@@ -24,7 +24,7 @@ Point your MCP client at the `mrsm` executable. For Claude Desktop or Claude Cod
 }
 ```
 
-That's it — no API server, no token. The stdio server runs as the user who launched it and can do anything that user's `mrsm` command can, exactly like the CLI.
+That's it, no API server, no token. The stdio server runs as the user who launched it and can do anything that user's `mrsm` command can, exactly like the CLI.
 
 !!! note "Isolate a project"
     Set `MRSM_ROOT_DIR` in the client's `env` to scope the server to one Meerschaum root:
@@ -71,15 +71,15 @@ curl -H "Authorization: Bearer mrsm-key:..." https://your-api-host/mcp
 
 ## What the agent gets
 
-**Tools** — the operations. Discovering and reading pipes (`list_pipes`, `get_pipe_data`, `get_pipe_attributes`, `get_pipe_stats`), writing to them (`sync_pipe`, `sync_documents`, `register_pipe`, `edit_pipe`, `verify_pipe`, `deduplicate_pipe`), removing data (`clear_pipe`, `drop_pipe`, `delete_pipe`), saved [Pipelines](/reference/pipelines/) (`list_pipelines`, `plan_pipeline` to see what a run would do, `sync_pipeline` to start one in the background), their history (`list_runs`, `get_run`), background jobs (`list_jobs`, `get_job_logs`), the configured connectors (`list_connectors`), and two escape hatches (`read_sql`, `execute_action`). `sync_pipe` with `parents` or `children` also syncs a pipe's upstream or downstream pipes in dependency order, and the datetime bounds (`begin`, `end`) take ISO datetimes or integers. See the [tool reference](tools.md).
+**Tools**, the operations. Discovering and reading pipes (`list_pipes`, `get_pipe_data`, `get_pipe_attributes`, `get_pipe_stats`), writing to them (`sync_pipe`, `sync_documents`, `register_pipe`, `edit_pipe`, `verify_pipe`, `deduplicate_pipe`), removing data (`clear_pipe`, `drop_pipe`, `delete_pipe`), saved [Pipelines](/reference/pipelines/) (`list_pipelines`, `plan_pipeline` to see what a run would do, `sync_pipeline` to start one in the background), their history (`list_runs`, `get_run`), background jobs (`list_jobs`, `get_job_logs`), the configured connectors (`list_connectors`), and two escape hatches (`read_sql`, `execute_action`). `sync_pipe` with `parents` or `children` also syncs a pipe's upstream or downstream pipes in dependency order, and the datetime bounds (`begin`, `end`) take ISO datetimes or integers. See the [tool reference](tools.md).
 
-**Resources** — documents the agent can fetch once and cache: `mrsm://pipes`, `mrsm://pipes/{ck}/{mk}/{lk}`, `mrsm://actions`, `mrsm://connectors`, and `mrsm://docs` (this reference, served locally, no network needed).
+**Resources**, documents the agent can fetch once and cache: `mrsm://pipes`, `mrsm://pipes/{ck}/{mk}/{lk}`, `mrsm://actions`, `mrsm://connectors`, and `mrsm://docs` (this reference, served locally, no network needed).
 
-**Prompts** — guided workflows the client surfaces as commands: `bootstrap_pipe`, `diagnose_sync_failure`, and `explain_pipe`.
+**Prompts**, guided workflows the client surfaces as commands: `bootstrap_pipe`, `diagnose_sync_failure`, and `explain_pipe`.
 
 Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`), so a well-behaved client asks before it deletes anything.
 
-**Plugin entries** — plugins add their own tools, resources and prompts next to these: Python plugins with `meerschaum.mcp.tool(...)` (served through the API host), and Rust plugins by declaring them in their manifest (served in-process, over HTTP and stdio alike; see [Routes and MCP in Rust plugins](../plugins/rust-plugins/routes-and-mcp.md)). Plugin entries obey the same scopes and read-only mode, and never replace a built-in tool.
+**Plugin entries**, plugins add their own tools, resources and prompts next to these: Python plugins with `meerschaum.mcp.tool(...)` (served through the API host), and Rust plugins by declaring them in their manifest (served in-process, over HTTP and stdio alike; see [Routes and MCP in Rust plugins](../plugins/rust-plugins/routes-and-mcp.md)). Plugin entries obey the same scopes and read-only mode, and never replace a built-in tool.
 
 ## Configuration
 
@@ -96,14 +96,14 @@ api:
       allowlist: []
 ```
 
-Set `api:mcp:enabled` to `false` to drop the `/mcp` route entirely. The stdio transport is unaffected — it is only ever started explicitly.
+Set `api:mcp:enabled` to `false` to drop the `/mcp` route entirely. The stdio transport is unaffected, it is only ever started explicitly.
 
 ## Security
 
 Read [MCP security](security.md) before exposing `/mcp` to anything you do not control. The short version:
 
 - Scope your tokens. A token with `pipes:read` cannot write, drop, or run actions, and the tools it cannot call are hidden from it entirely.
-- `actions:execute` is broad by design — it is the CLI. Do not hand it out casually.
+- `actions:execute` is broad by design, it is the CLI. Do not hand it out casually.
 - Use `read_only: true` for any deployment where an agent should only ever look.
 
 ## Migrating from the `mcp` plugin
@@ -117,11 +117,11 @@ mrsm uninstall plugin mcp
 The tools are broadly the same, with a few changes:
 
 - `get_sync_time`, `get_bound_time`, `get_pipe_rowcount`, `pipe_exists`, and `get_pipe_columns_types` are consolidated into **`get_pipe_stats`**, which returns all of it in one call.
-- `get_pipe_doc` and `get_pipe_value` are gone — use `get_pipe_data` with `limit: 1` and `select_columns`.
+- `get_pipe_doc` and `get_pipe_value` are gone, use `get_pipe_data` with `limit: 1` and `select_columns`.
 - `get_backtrack_data` is now `get_pipe_data`'s `backtrack_minutes` argument.
 - `list_actions` and `list_connectors` are now the `mrsm://actions` and `mrsm://connectors` resources.
 - `read_sql` now refuses anything that is not a single read-only statement.
 
 ## Dash's MCP server
 
-Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).
+Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API, see the [web console docs](../api-instance/web-console.md#dash-mcp-server).

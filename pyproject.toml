@@ -35,8 +35,7 @@ maintainers = [
     { name = "Bennett Meares", email = "bennett.meares@gmail.com" },
 ]
 classifiers = [
-    # 5.0.x pre-releases: Beta. Switch back to "5 - Production/Stable" for 5.0.0 final (.agents/skills/release).
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: System Administrators",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
@@ -75,8 +74,10 @@ gui = ["pywebview>=3.6.3"]
 full = ["meerschaum[pandas,polars,geo,sql,api,dash,shell]"]
 
 [project.urls]
-Documentation = "https://docs.meerschaum.io"
-Changelog = "https://meerschaum.io/news/changelog"
+Documentation = "https://meerschaum.io/docs/"
+"Python API" = "https://docs.meerschaum.io"
+"Rust API" = "https://docs.rs/meerschaum/latest/meerschaum/"
+Changelog = "https://meerschaum.io/changelog/"
 GitHub = "https://github.com/bmeares/Meerschaum"
 Homepage = "https://meerschaum.io"
 Donate = "https://github.com/sponsors/bmeares"

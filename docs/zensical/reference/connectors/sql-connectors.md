@@ -109,19 +109,19 @@ When a pipe has the same fetch and instance connectors, syncing will occur entir
     # 60 2024-05-23    KATL  26.004545
     # 61 2024-05-24    KATL  26.479167
     # 62 2024-05-25    KATL       25.0
-    # 
+    #
     # [63 rows x 3 columns]
     ```
 
 ## Native Range Partitioning
 
-[TimescaleDB](https://github.com/timescale/timescaledb) auto-creates chunks on insert. Other flavors do not, so Meerschaum declares a natively range-partitioned table and pre-creates the partitions a sync needs. This is controlled by the [`hypertable`](/reference/pipes/parameters/#hypertable) parameter, which **defaults to `True`** (the same flag and default TimescaleDB uses) — so a pipe with a [`datetime`](/reference/pipes/parameters/#the-datetime-index) column is partitioned by default on:
+[TimescaleDB](https://github.com/timescale/timescaledb) auto-creates chunks on insert. Other flavors do not, so Meerschaum declares a natively range-partitioned table and pre-creates the partitions a sync needs. This is controlled by the [`hypertable`](/reference/pipes/parameters/#hypertable) parameter, which **defaults to `True`** (the same flag and default TimescaleDB uses), so a pipe with a [`datetime`](/reference/pipes/parameters/#the-datetime-index) column is partitioned by default on:
 
 - **PostgreSQL** / **PostGIS**
 - **MySQL** / **MariaDB**
 - **Microsoft SQL Server**
 
-Set `hypertable` to `False` to opt out and create a plain table. A partitioned pipe must define a `datetime` column (the partition axis); `hypertable` has no effect on flavors without native range partitioning (SQLite, DuckDB, Oracle). Pre-existing plain tables are never retroactively partitioned — partition creation is skipped for a table that isn't already declaratively partitioned, so enabling `hypertable` only affects tables created afterward (use `partition pipes` to rebuild an existing one).
+Set `hypertable` to `False` to opt out and create a plain table. A partitioned pipe must define a `datetime` column (the partition axis); `hypertable` has no effect on flavors without native range partitioning (SQLite, DuckDB, Oracle). Pre-existing plain tables are never retroactively partitioned, partition creation is skipped for a table that isn't already declaratively partitioned, so enabling `hypertable` only affects tables created afterward (use `partition pipes` to rebuild an existing one).
 
 ```python
 import meerschaum as mrsm
@@ -139,18 +139,18 @@ pipe = mrsm.Pipe(
 
 ### Boundaries
 
-The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](/reference/pipes/parameters/#verifychunk_minutes) and its `chunk_hours`/`chunk_days`/… aliases, default 43200 — 30 days). Each `[lo, hi)` boundary is **epoch-aligned**: the grid is anchored to the Unix epoch (`1970-01-01`), so a given datetime always lands in the same partition no matter which rows arrive first. This makes partitioning deterministic and lets [verification syncs](/reference/pipes/syncing/#verification-syncs) align their chunk edges (`Pipe.get_chunk_bounds(align=True)`) to the partition boundaries.
+The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](/reference/pipes/parameters/#verifychunk_minutes) and its `chunk_hours`/`chunk_days`/… aliases, default 43200, 30 days). Each `[lo, hi)` boundary is **epoch-aligned**: the grid is anchored to the Unix epoch (`1970-01-01`), so a given datetime always lands in the same partition no matter which rows arrive first. This makes partitioning deterministic and lets [verification syncs](/reference/pipes/syncing/#verification-syncs) align their chunk edges (`Pipe.get_chunk_bounds(align=True)`) to the partition boundaries.
 
 The `datetime` axis may be an integer epoch ([`dtype` `int`](/reference/pipes/parameters/#dtypes)); the width then comes from [`verify.chunk_range`](/reference/pipes/parameters/#verifychunk_range) (or the time-based width converted via the pipe's `precision`), and boundaries are plain integers aligned to the interval. The partition column is folded into the table's primary key, as each flavor requires the partition key to be part of the PK / clustered index.
 
 ### Per-flavor mechanics
 
-The partitioned parent is created with flavor-specific DDL when the table is first created; child partitions are then created on demand in `sync_pipe`, **before** each batch of rows is inserted, by walking the interval grid from the dataframe's minimum to maximum datetime (capped at `system.connectors.sql.instance.max_partitions_per_sync`, default 10,000, per sync — raise that or `chunk_minutes` if you hit the warning).
+The partitioned parent is created with flavor-specific DDL when the table is first created; child partitions are then created on demand in `sync_pipe`, **before** each batch of rows is inserted, by walking the interval grid from the dataframe's minimum to maximum datetime (capped at `system.connectors.sql.instance.max_partitions_per_sync`, default 10,000, per sync, raise that or `chunk_minutes` if you hit the warning).
 
 | Flavor | Parent table DDL | Adding partitions |
 |---|---|---|
-| **PostgreSQL** / **PostGIS** | `PARTITION BY RANGE (<dt>)` — an empty parent holding no rows. | `CREATE TABLE IF NOT EXISTS … PARTITION OF … FOR VALUES FROM (lo) TO (hi)` per missing child. |
-| **MySQL** / **MariaDB** | `PARTITION BY RANGE COLUMNS (<dt>) (…)` — initial partitions declared inline (MySQL cannot create a zero-partition table), computed from the first sync's dataframe. | `ALTER TABLE … ADD PARTITION (… VALUES LESS THAN (hi))`, appending upward from the highest existing boundary. |
+| **PostgreSQL** / **PostGIS** | `PARTITION BY RANGE (<dt>)`, an empty parent holding no rows. | `CREATE TABLE IF NOT EXISTS … PARTITION OF … FOR VALUES FROM (lo) TO (hi)` per missing child. |
+| **MySQL** / **MariaDB** | `PARTITION BY RANGE COLUMNS (<dt>) (…)`, initial partitions declared inline (MySQL cannot create a zero-partition table), computed from the first sync's dataframe. | `ALTER TABLE … ADD PARTITION (… VALUES LESS THAN (hi))`, appending upward from the highest existing boundary. |
 | **MSSQL** | A `CREATE PARTITION FUNCTION … AS RANGE RIGHT FOR VALUES (…)` plus `CREATE PARTITION SCHEME` are created first; the table's clustered PK is placed on the scheme. | `ALTER PARTITION SCHEME … NEXT USED` + `ALTER PARTITION FUNCTION … SPLIT RANGE (boundary)` per new boundary. The scheme and function are dropped with the table. |
 
 The datetime column a table is partitioned by keeps its type: [`verify schema`](/reference/actions/#verify-schema) leaves a type change of it out of the plan (PostgreSQL, PostGIS and MSSQL cannot change it in place; MySQL and MariaDB only between `DATE` and `DATETIME` or between integer types) and applies the other changes.
@@ -159,7 +159,7 @@ For PostgreSQL the highest partition is determined from the requested grid direc
 
 ### Changing the partition width
 
-`verify.chunk_minutes` is the **authoritative** partition width. It is read at sync time, so editing it does not retroactively reshape an existing table — and worse, a changed width laid over an existing grid (e.g. a 7-day grid over 30-day partitions) produces overlapping boundaries that PostgreSQL rejects outright. Treat the width as fixed for the life of a table.
+`verify.chunk_minutes` is the **authoritative** partition width. It is read at sync time, so editing it does not retroactively reshape an existing table, and worse, a changed width laid over an existing grid (e.g. a 7-day grid over 30-day partitions) produces overlapping boundaries that PostgreSQL rejects outright. Treat the width as fixed for the life of a table.
 
 To actually change the width of an existing table, use the `partition pipes` action (or [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition)), which updates `verify.chunk_minutes` and rebuilds the table at the new width:
 
@@ -170,7 +170,7 @@ mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
 
 | Flavor | Repartition strategy |
 |---|---|
-| **TimescaleDB** | `set_chunk_time_interval()` — applies to **future** chunks only; existing chunks keep their size (no rewrite). |
+| **TimescaleDB** | `set_chunk_time_interval()`, applies to **future** chunks only; existing chunks keep their size (no rewrite). |
 | **PostgreSQL** / **PostGIS**, **MySQL** / **MariaDB**, **MSSQL** | The table is rebuilt at the new width: its data is read, the table is dropped, and the data is re-synced (recreating the table and its partitions). The pinned width is updated. |
 
 !!! warning "Rebuild cost"
@@ -369,7 +369,7 @@ database through Python's own driver, separately from the connector's pool.
 ### [`meerschaum.utils.sql`](https://docs.meerschaum.io/meerschaum/utils/sql.html) Functions
 
 !!! warning ""
-    🚧 This section is still under construction ― code snippets will be added soon!
+    🚧 This section is still under construction, code snippets will be added soon!
 
 #### [`build_where()`](https://docs.meerschaum.io/meerschaum/utils/sql.html#build_where)
 
@@ -381,12 +381,12 @@ from meerschaum.utils.sql import build_where
 
 conn = mrsm.get_connector('sql:main')
 print(build_where({'foo': [1, 2, 3]}, conn))
-# 
+#
 # WHERE
 #     "foo" IN ('1', '2', '3')
 
 print(build_where({'foo': ['_3', '_4']}, conn))
-# 
+#
 # WHERE
 #     ("foo" NOT IN ('3', '4'))
 ```

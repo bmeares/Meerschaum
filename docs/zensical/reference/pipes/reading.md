@@ -78,14 +78,14 @@ into its own virtual environment when automatic installs are allowed.
 combined with `as_docs=True`. (`as_dask=True` is not supported: it raises a `TypeError`; read
 large tables in chunks instead.)
 
-**Chunked iteration** — pass `as_chunks=True` (alias `as_iterator=True`) to get a generator of DataFrames, each covering a time-bound slice. Useful for large datasets that don't fit in memory:
+**Chunked iteration**, pass `as_chunks=True` (alias `as_iterator=True`) to get a generator of DataFrames, each covering a time-bound slice. Useful for large datasets that don't fit in memory:
 
 ```python
 for chunk_df in pipe.get_data(as_chunks=True):
     process(chunk_df)
 ```
 
-**Errors** — a pipe whose table does not exist yet (never synced) returns `None`. When the
+**Errors**, a pipe whose table does not exist yet (never synced) returns `None`. When the
 instance cannot be read (an unreachable server, a permission error), `get_data()` raises the
 database's error; on an `api:` instance, an API server that cannot be reached or fails the read
 (`500`) raises too. Pass `silent=True` to get `None` instead:
@@ -122,7 +122,7 @@ pipe.get_rowcount(estimate=True)
 
 ### `get_docs()`
 
-Returns `List[Dict[str, Any]]` — rows as plain Python dictionaries, without a DataFrame library. Ideal for JSON APIs, small targeted queries, or when no DataFrame is needed.
+Returns `List[Dict[str, Any]]`, rows as plain Python dictionaries, without a DataFrame library. Ideal for JSON APIs, small targeted queries, or when no DataFrame is needed.
 
 ```python
 docs = pipe.get_docs()

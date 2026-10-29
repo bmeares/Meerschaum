@@ -69,7 +69,7 @@ What each group looks at:
 | `plugins` | Whether the cached plugin manifest is current (a missing or stale one is a WARN: `mrsm reload`), how many plugins are installed, the ones whose import failed, and virtual environments built by another Python than the worker's (or whose interpreter is gone). Plugin code is never imported by the doctor. |
 | `jobs` | Jobs that are running, paused or stopped, jobs whose last run failed, and stale PID files. |
 | `stack` | If the Docker stack's compose file exists and Docker answers, the state and health of each service (a service stopped on purpose is a WARN, a crashed or unhealthy one a FAIL). The stack is never touched. |
-| `extensions` | The PostgreSQL extensions of the instance against what the server ships (see [Upgrading the stack](/reference/stack-upgrades/)). |
+| `extensions` | The PostgreSQL extensions of the instance against what the server ships (see [Upgrading the stack](/reference/stack/upgrades/)). |
 
 ---
 
@@ -81,7 +81,7 @@ What each group looks at:
 
 **Cause:** This is almost always one of:
 
-1. **Deduplication.** `pipe.filter_existing(df)` diffs incoming rows against the overlapping window already stored. Identical rows are dropped — nothing new to insert.
+1. **Deduplication.** `pipe.filter_existing(df)` diffs incoming rows against the overlapping window already stored. Identical rows are dropped, nothing new to insert.
 2. **The sync window excluded your data.** With `begin=''` (the default), the lower bound is the pipe's *sync time* minus `fetch:backtrack_minutes`. Rows older than that window are never fetched.
 3. **Backtrack too small for late-arriving / corrected data.** If a source updates rows slightly behind the latest timestamp, a small `backtrack_minutes` won't re-fetch them.
 
@@ -145,7 +145,7 @@ See [Syncing](pipes/syncing.md) for the full fetch → enforce → filter → wr
 
 **Symptom:** This warning appears during a sync.
 
-**Cause:** The incoming data's earliest timestamp is later than its latest — usually a malformed source query, a swapped `begin`/`end`, or mixed timezone parsing producing nonsensical ordering.
+**Cause:** The incoming data's earliest timestamp is later than its latest, usually a malformed source query, a swapped `begin`/`end`, or mixed timezone parsing producing nonsensical ordering.
 
 **Fix:** Inspect the fetched frame (`pipe.fetch(begin=..., end=...)`) and check the `datetime` column for parsing errors. Make sure `begin <= end` if you passed them explicitly.
 
@@ -170,7 +170,7 @@ See [Syncing](pipes/syncing.md) for the full fetch → enforce → filter → wr
 
 **Symptom:** Sync errors or rows dropped; the datetime axis has missing values.
 
-**Cause:** The `datetime` index column drives the incremental sync window — null (`NaT`) values there have no defined position.
+**Cause:** The `datetime` index column drives the incremental sync window, null (`NaT`) values there have no defined position.
 
 **Fix:** Clean the source so the datetime column is always populated, or move the nullable field out of the index. If you need nulls allowed in *other* index columns, set `null_indices: True` (see [Parameters](pipes/parameters.md)).
 
@@ -203,7 +203,7 @@ See the supported dtype strings in [Parameters](pipes/parameters.md).
 
 **Symptom:** A column's database type isn't what you expected, or it changed on a later sync.
 
-**Cause:** By default, Meerschaum auto-alters the schema — it adds new columns and widens types as incoming data evolves.
+**Cause:** By default, Meerschaum auto-alters the schema, it adds new columns and widens types as incoming data evolves.
 
 **Fix:**
 
@@ -224,8 +224,8 @@ See the supported dtype strings in [Parameters](pipes/parameters.md).
 
 **Cause:** One of:
 
-- `static: True` — schema changes are disabled entirely.
-- `enforce: False` — dtype enforcement (which also captures new columns) is skipped, so untracked columns may be ignored.
+- `static: True`, schema changes are disabled entirely.
+- `enforce: False`, dtype enforcement (which also captures new columns) is skipped, so untracked columns may be ignored.
 
 **Fix:** Remove `static`/set it to `False` to allow auto-alter, and leave `enforce` at its default (`True`) unless you have a specific reason to skip enforcement. See [Parameters](pipes/parameters.md).
 
@@ -237,12 +237,12 @@ See the supported dtype strings in [Parameters](pipes/parameters.md).
 
 **Symptom:** An upsert sync raises a database error complaining there is no unique/exclusion constraint matching the `ON CONFLICT` specification (PostgreSQL), or an equivalent error on MySQL/MSSQL.
 
-**Cause:** On a **partitioned table** (a TimescaleDB hypertable *or* a native range-partitioned PostgreSQL / MySQL / MSSQL table — the default for datetime-axis pipes since v3.4.0), the partition column (your `datetime` column) is folded into the composite primary key. An upsert conflict target of the `primary` key alone therefore has no matching unique constraint, and the database rejects it. The conflict target **must include the datetime column** on partitioned tables.
+**Cause:** On a **partitioned table** (a TimescaleDB hypertable *or* a native range-partitioned PostgreSQL / MySQL / MSSQL table, the default for datetime-axis pipes since v3.4.0), the partition column (your `datetime` column) is folded into the composite primary key. An upsert conflict target of the `primary` key alone therefore has no matching unique constraint, and the database rejects it. The conflict target **must include the datetime column** on partitioned tables.
 
-**Fix:** Meerschaum handles this automatically — the conflict/join columns for a partitioned upsert are `[datetime_col, primary_key]`. If you hit this with a custom setup:
+**Fix:** Meerschaum handles this automatically, the conflict/join columns for a partitioned upsert are `[datetime_col, primary_key]`. If you hit this with a custom setup:
 
 - Ensure your `columns['datetime']` is set so the partition column is known.
-- Or opt the pipe out of native partitioning by setting `hypertable: False` before the table is created (only affects *newly* created tables — pre-existing plain tables aren't retroactively partitioned).
+- Or opt the pipe out of native partitioning by setting `hypertable: False` before the table is created (only affects *newly* created tables, pre-existing plain tables aren't retroactively partitioned).
 
     ```python
     pipe.parameters['hypertable'] = False
@@ -283,7 +283,7 @@ See the native-partitioning notes in [Maintenance](pipes/maintenance.md) and [Pa
 
 **Symptom:** You want to point a connector at a database/API without editing config files.
 
-**Cause:** N/A — this is the intended override mechanism.
+**Cause:** N/A, this is the intended override mechanism.
 
 **Fix:** Set `MRSM_SQL_<LABEL>` or `MRSM_API_<LABEL>` to a URI. The label becomes the connector's label (lowercased):
 
@@ -307,7 +307,7 @@ export MRSM_API_MRSM='https://user:pass@api.example.com'
 **Fix:**
 
 - Log in interactively: `mrsm login`, or bootstrap the connector with `mrsm bootstrap connector` to store credentials.
-- Embed credentials in the URI (`MRSM_API_<LABEL>=https://user:pass@host`) — see above.
+- Embed credentials in the URI (`MRSM_API_<LABEL>=https://user:pass@host`), see above.
 - For non-interactive jobs, use an API token. See [API instance](api-instance/index.md).
 - Confirm the server is reachable and the account has the needed role.
 
@@ -351,7 +351,7 @@ mrsm reload plugins
 
 ### Stale `~/.local` install shadows your working tree (developers)
 
-**Symptom:** Running tests or `python -m meerschaum` reflects an *old* version — new modules are missing, behavior is outdated — even though your repo is up to date.
+**Symptom:** Running tests or `python -m meerschaum` reflects an *old* version (new modules are missing, behavior is outdated) even though your repo is up to date.
 
 **Cause:** A separately installed `meerschaum` under `~/.local/lib/pythonX.Y/site-packages/` is earlier on `sys.path` than the repo checkout and shadows it.
 
@@ -367,15 +367,15 @@ Verify with `import meerschaum; print(meerschaum.__file__, meerschaum.__version_
 
 ## Debugging tips
 
-- **`--debug`** — add to any action to print resolved SQL, sync windows, and dtype enforcement. The single most useful diagnostic. See [Debug output](#debug-output) below for what it prints and where.
+- **`--debug`**, add to any action to print resolved SQL, sync windows, and dtype enforcement. The single most useful diagnostic. See [Debug output](#debug-output) below for what it prints and where.
 
     ```bash
     mrsm sync pipes -c plugin:foo -m bar --debug
     ```
 
-- **`mrsm show pipes`** — list the pipes matching your key filters; confirm the pipe exists and resolves to the instance you expect. Add `-i <instance>` to target a specific instance.
+- **`mrsm show pipes`**, list the pipes matching your key filters; confirm the pipe exists and resolves to the instance you expect. Add `-i <instance>` to target a specific instance.
 
-- **`pipe.get_sync_time()`** — the current upper bound of the datetime axis. If this is unexpectedly recent, your sync window is excluding older data.
+- **`pipe.get_sync_time()`**, the current upper bound of the datetime axis. If this is unexpectedly recent, your sync window is excluding older data.
 
     ```python
     import meerschaum as mrsm
@@ -383,16 +383,16 @@ Verify with `import meerschaum; print(meerschaum.__file__, meerschaum.__version_
     print(pipe.get_sync_time())
     ```
 
-- **`pipe.parameters`** — inspect the full metadata dict: `columns`, `dtypes`, `fetch`, `upsert`, `static`, `enforce`, `hypertable`, etc. Most "why is it doing that?" questions are answered here.
+- **`pipe.parameters`**, inspect the full metadata dict: `columns`, `dtypes`, `fetch`, `upsert`, `static`, `enforce`, `hypertable`, etc. Most "why is it doing that?" questions are answered here.
 
     ```python
     import json
     print(json.dumps(pipe.parameters, indent=2, default=str))
     ```
 
-- **`mrsm show columns` / `mrsm show rowcounts`** — confirm the stored schema and row counts match expectations.
+- **`mrsm show columns` / `mrsm show rowcounts`**, confirm the stored schema and row counts match expectations.
 
-- **`pipe.get_data(begin=..., end=..., params=...)`** — pull a sample directly to see what's actually stored.
+- **`pipe.get_data(begin=..., end=..., params=...)`**, pull a sample directly to see what's actually stored.
 
 ### Debug output
 

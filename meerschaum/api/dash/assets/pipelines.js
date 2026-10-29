@@ -203,6 +203,11 @@
         // A gesture outlives a re-render (an edit's draft re-renders the canvas, sometimes the
         // canvas element itself): it lives on the page, and a replaced card is found by its Pipe.
         const g = window._mrsmCanvasGesture = window._mrsmCanvasGesture || {drag: null, moved: false};
+        if (g.viewportKey !== viewportKey) {
+            g.drag = null; g.pinch = null; g.touches = new Map(); g.moved = false;
+            g.viewportKey = viewportKey;
+        }
+        g.touches = g.touches || new Map();
         if (g.drag) {
             if (g.drag.node && !g.drag.node.isConnected) g.drag.node = currentCards.find(card => card.dataset.ref === g.drag.ref) || null;
             if (g.drag.handle && !g.drag.handle.isConnected) g.drag.handle = currentCards.find(card => card.dataset.ref === g.drag.ref) || null;
@@ -304,7 +309,32 @@
         canvas._mrsmOpenMenu = openMenu;
         on('pipeline-zoom-in', () => zoom(1.25));
         on('pipeline-zoom-out', () => zoom(.8));
+        const cancelDrag = () => {
+            if (g.drag?.node) {
+                g.drag.node.style.left = g.drag.originalLeft;
+                g.drag.node.style.top = g.drag.originalTop;
+            }
+            proposal = null; g.drag = null; drawEdges();
+        };
+        const touchPair = () => Array.from(g.touches.values()).slice(0, 2);
+        const beginPinch = () => {
+            const [a, b] = touchPair();
+            if (!a || !b) return;
+            cancelDrag();
+            const box = canvas.getBoundingClientRect();
+            const mx = (a.x + b.x)/2 - box.left, my = (a.y + b.y)/2 - box.top;
+            g.pinch = {distance: Math.max(1, Math.hypot(b.x-a.x, b.y-a.y)), scale,
+                       worldX: (mx-x)/scale, worldY: (my-y)/scale};
+            g.moved = true; g.suppressTouchClick = true;
+            for (const pointer of g.touches.keys()) { try { canvas.setPointerCapture(pointer); } catch (_) {} }
+        };
         canvas.onpointerdown = e => {
+            if (e.pointerType !== 'touch') { g.suppressTouchClick = false; g.moved = false; }
+            if (e.pointerType === 'touch') {
+                if (!g.touches.size) { g.suppressTouchClick = false; g.moved = false; }
+                g.touches.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                if (g.touches.size >= 2) { e.preventDefault(); beginPinch(); return; }
+            }
             const node = e.target.closest('.pipeline-stage');
             const handle = e.target.closest('.pipeline-edge-handle');
             const edit = editing();
@@ -315,7 +345,8 @@
             window.getSelection()?.removeAllRanges();
             g.moved = false;
             g.drag = {node: edit ? node : null, handle: edit && handle ? node : null, x:e.clientX-x, y:e.clientY-y,
-                    startX:e.clientX, startY:e.clientY, left:node?.offsetLeft, top:node?.offsetTop, pointer:e.pointerId, ref:node?.dataset.ref};
+                    startX:e.clientX, startY:e.clientY, left:node?.offsetLeft, top:node?.offsetTop,
+                    originalLeft:node?.style.left, originalTop:node?.style.top, pointer:e.pointerId, ref:node?.dataset.ref};
             // Capture only once it is a drag, so a plain click still reaches its card.
             if (!g.drag.node && !g.drag.handle) canvas.setPointerCapture(e.pointerId);
         };
@@ -324,11 +355,22 @@
             return {px: (e.clientX - box.left - x) / scale, py: (e.clientY - box.top - y) / scale};
         };
         canvas.onpointermove = e => {
+            if (e.pointerType === 'touch' && g.touches.has(e.pointerId)) {
+                g.touches.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                if (g.pinch && g.touches.size >= 2) {
+                    e.preventDefault();
+                    const [a, b] = touchPair(), box = canvas.getBoundingClientRect();
+                    scale = Math.max(.15, Math.min(2, g.pinch.scale * Math.hypot(b.x-a.x, b.y-a.y) / g.pinch.distance));
+                    x = (a.x+b.x)/2 - box.left - g.pinch.worldX*scale;
+                    y = (a.y+b.y)/2 - box.top - g.pinch.worldY*scale;
+                    draw(); return;
+                }
+            }
             // A press that landed on a card while it was being replaced never reached the canvas:
             // the gesture starts from here instead of being lost.
             if (g.drag && !(e.buttons & 1)) { g.drag = null; return; }
             if (!g.drag && (e.buttons & 1) && !e.target.closest?.('a')) canvas.onpointerdown(e);
-            if (!g.drag) return;
+            if (!g.drag || g.drag.pointer !== e.pointerId) return;
             const wasMoved = g.moved;
             g.moved = g.moved || Math.hypot(e.clientX-g.drag.startX, e.clientY-g.drag.startY) > 5;
             if (g.moved && !wasMoved && (g.drag.node || g.drag.handle)) { try { canvas.setPointerCapture(g.drag.pointer); } catch (_) {} }
@@ -345,7 +387,19 @@
                 drawEdges();
             } else { x=e.clientX-g.drag.x; y=e.clientY-g.drag.y; draw(); }
         };
-        canvas.onpointerup = canvas.onpointercancel = e => {
+        canvas.onpointerup = e => {
+            g.touches.delete(e.pointerId);
+            if (g.pinch) {
+                if (g.touches.size >= 2) beginPinch();
+                else {
+                    g.pinch = null;
+                    const [remaining] = g.touches.entries();
+                    g.drag = remaining ? {pointer: remaining[0], x:remaining[1].x-x, y:remaining[1].y-y,
+                        startX:remaining[1].x, startY:remaining[1].y} : null;
+                }
+                return;
+            }
+            if (g.drag?.pointer !== e.pointerId) return;
             if (g.drag?.handle && g.moved) {
                 const target = document.elementsFromPoint(e.clientX, e.clientY)
                     .map(element => element.closest('.pipeline-stage:not(.pipeline-placeholder)')).find(Boolean);
@@ -360,6 +414,13 @@
                 window.dash_clientside.set_props('pipeline-layout-draft', {data: Object.assign({}, layout)});
             }
             g.drag = null;
+        };
+        canvas.onpointercancel = e => {
+            cancelDrag();
+            g.touches.clear(); g.pinch = null; g.moved = true; g.suppressTouchClick = true;
+        };
+        canvas.onlostpointercapture = e => {
+            if (g.touches.has(e.pointerId)) canvas.onpointercancel(e);
         };
         canvas.onwheel = e => {if (e.ctrlKey || e.metaKey) {e.preventDefault();zoom(e.deltaY<0?1.1:1/1.1);}};
         canvas.onkeydown = e => {
@@ -377,7 +438,9 @@
             else if (e.key.startsWith('Arrow')) {e.preventDefault();x += e.key==='ArrowLeft'?40:e.key==='ArrowRight'?-40:0;y += e.key==='ArrowUp'?40:e.key==='ArrowDown'?-40:0;draw();}
         };
         canvas.onclick = e => {
-            if (g.moved) { g.moved = false; e.preventDefault(); e.stopPropagation(); return; }
+            if (e.detail !== 0 && (g.suppressTouchClick || g.moved)) {
+                g.moved = false; e.preventDefault(); e.stopPropagation(); return;
+            }
             if (readOnlyCanvas) return;
             const selected = e.target.closest('.pipeline-stage:not(.pipeline-placeholder)');
             if (selected) {
@@ -434,6 +497,8 @@
     document.addEventListener('keydown', e => {
         if (e.target.matches?.('.pipeline-node-output-icon') && ['Enter', ' '].includes(e.key)) { e.preventDefault(); e.target.click(); }
         if (e.key === 'Escape') {
+            const viewOptions = document.querySelector('.pipeline-view-options[open]');
+            if (viewOptions) { viewOptions.open = false; viewOptions.querySelector('summary')?.focus(); return; }
             const editor = document.getElementById('pipeline-draft-editor');
             if (editor?.open) { editor.open = false; return; }
             if (document.querySelector('.pipeline-context-menu')) {
@@ -446,6 +511,9 @@
         }
     });
     document.addEventListener('click', e => {
+        document.querySelectorAll('.pipeline-view-options[open]').forEach(options => {
+            if (!options.contains(e.target)) options.open = false;
+        });
         const tool = e.target.closest('button[id]');
         const action = tool && document.getElementById('pipeline-canvas')?._mrsmActions?.[tool.id];
         if (action) { action(); return; }

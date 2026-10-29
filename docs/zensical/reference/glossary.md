@@ -10,7 +10,7 @@ A top-level command such as `sync`, `show`, or `register`, implemented as a modu
 
 ### Subaction
 
-A noun-specific variant of an [action](#action), auto-discovered by naming convention (e.g. `sync pipes` → `sync_pipes`). New subactions need no registration — just define `def <action>_<subaction>(**kwargs) -> SuccessTuple`.
+A noun-specific variant of an [action](#action), auto-discovered by naming convention (e.g. `sync pipes` → `sync_pipes`). New subactions need no registration, just define `def <action>_<subaction>(**kwargs) -> SuccessTuple`.
 
 ### Backtrack (`backtrack_minutes`)
 
@@ -18,16 +18,16 @@ The overlapping window between syncs (default 1440 minutes), set under `paramete
 
 ### Chunk (`chunk_minutes`)
 
-The interval into which a [verification sync](#verification-sync) divides a pipe's range (default 43200 minutes — 30 days), set under `parameters['verify']['chunk_minutes']`. It is also the authoritative width for [native partitioning](#native-partitioning). Aliases: `chunk_hours`/`chunk_days`/`chunk_weeks`/`chunk_years`/`chunk_seconds`. See [Verification Syncs](/reference/pipes/syncing/#verification-syncs).
+The interval into which a [verification sync](#verification-sync) divides a pipe's range (default 43200 minutes, 30 days), set under `parameters['verify']['chunk_minutes']`. It is also the authoritative width for [native partitioning](#native-partitioning). Aliases: `chunk_hours`/`chunk_days`/`chunk_weeks`/`chunk_years`/`chunk_seconds`. See [Verification Syncs](/reference/pipes/syncing/#verification-syncs).
 
 ### Columns
 
 The `parameters['columns']` dictionary maps a semantic *role* to a column name. The key roles are:
 
-- **`datetime`** — the column driving incremental sync (the begin/end window); defines the [datetime axis](#datetime-axis).
-- **`id`** — forms the composite uniqueness key alongside `datetime`.
-- **`primary`** — the primary-key column.
-- **`value`** — the measured value column.
+- **`datetime`**, the column driving incremental sync (the begin/end window); defines the [datetime axis](#datetime-axis).
+- **`id`**, forms the composite uniqueness key alongside `datetime`.
+- **`primary`**, the primary-key column.
+- **`value`**, the measured value column.
 
 Pipes without a `datetime` column still work but lose incremental behavior. See [Columns](/reference/pipes/parameters/).
 
@@ -57,7 +57,7 @@ A TimescaleDB columnstore feature. With `hypercore=True` (default), the columnst
 
 ### Hypertable
 
-Set by `parameters['hypertable']` (default `True`). On TimescaleDB, the target table is created as a hypertable. On other flavors supporting range partitioning (PostgreSQL/PostGIS, MySQL/MariaDB, MSSQL), datetime-axis pipes are range-partitioned by default — see [native partitioning](#native-partitioning). Set `False` to opt out. Only newly created tables are affected.
+Set by `parameters['hypertable']` (default `True`). On TimescaleDB, the target table is created as a hypertable. On other flavors supporting range partitioning (PostgreSQL/PostGIS, MySQL/MariaDB, MSSQL), datetime-axis pipes are range-partitioned by default, see [native partitioning](#native-partitioning). Set `False` to opt out. Only newly created tables are affected.
 
 ### In-place sync
 
@@ -65,7 +65,7 @@ A [sync](#sync) of a `sql:`-connector pipe whose data never leaves the database:
 
 ### Instance connector
 
-The [connector](#connector) where a pipe's metadata *and* data are stored — a pipe's 4th key (`instance=`/`mrsm_instance=`). Must implement the pipes/users/plugins/tokens interface (`IS_INSTANCE = True`). Implementations: `SQLConnector`, `APIConnector`, `ValkeyConnector`. See [Instances and Repositories](/reference/connectors/#instances-and-repositories).
+The [connector](#connector) where a pipe's metadata *and* data are stored, a pipe's 4th key (`instance=`/`mrsm_instance=`). Must implement the pipes/users/plugins/tokens interface (`IS_INSTANCE = True`). Implementations: `SQLConnector`, `APIConnector`, `ValkeyConnector`. See [Instances and Repositories](/reference/connectors/#instances-and-repositories).
 
 ### Job
 
@@ -77,7 +77,7 @@ A pipe's optional third key (default `None`), used to tag or shard a data stream
 
 ### Metric key
 
-A pipe's second key — a label for the data stream it represents (e.g. `weather`, `sales`).
+A pipe's second key, a label for the data stream it represents (e.g. `weather`, `sales`).
 
 ### `MRSM{}` config symlink
 
@@ -93,7 +93,7 @@ The central `pipe.parameters` metadata dictionary holding `columns`, `dtypes`, `
 
 ### Pipe
 
-A named data stream synced into a table, identified by three keys — [connector](#connector-keys), [metric](#metric-key), and [location](#location-key) — plus an [instance connector](#instance-connector) where its metadata and data live. The central abstraction in Meerschaum. See [Pipes](/reference/pipes/).
+A named data stream synced into a table, identified by three keys ([connector](#connector-keys), [metric](#metric-key), and [location](#location-key)) plus an [instance connector](#instance-connector) where its metadata and data live. The central abstraction in Meerschaum. See [Pipes](/reference/pipes/).
 
 ### Plugin
 
@@ -105,11 +105,11 @@ A subset of [instance connectors](#instance-connector) used to host and distribu
 
 ### Source connector
 
-The [connector](#connector) named by a pipe's [connector keys](#connector-keys) — the origin of the pipe's data (e.g. `sql:main`, `plugin:noaa`). Distinct from the [instance connector](#instance-connector), which stores the result.
+The [connector](#connector) named by a pipe's [connector keys](#connector-keys), the origin of the pipe's data (e.g. `sql:main`, `plugin:noaa`). Distinct from the [instance connector](#instance-connector), which stores the result.
 
 ### `SuccessTuple`
 
-The universal return type `Tuple[bool, str]` used by actions, pipe methods, and connector methods — e.g. `(True, "Success")` or `(False, "reason")`. Action-level code returns a `SuccessTuple` rather than raising.
+The universal return type `Tuple[bool, str]` used by actions, pipe methods, and connector methods, e.g. `(True, "Success")` or `(False, "reason")`. Action-level code returns a `SuccessTuple` rather than raising.
 
 ### Sync
 

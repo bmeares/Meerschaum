@@ -16,7 +16,7 @@ When you create a token, you receive three key pieces of information: a Client I
 Additionally, tokens have the following attributes:
 
 - **Label:** A human-readable name to help you identify the token
-- **Expiration:** An optional timestamp after which the token will become invalid  
+- **Expiration:** An optional timestamp after which the token will become invalid
   Set the `expiration` to `None` to prevent a token from expiring (use at your own risk!)
 - **Scopes:** A list of permissions that define what actions the token can perform
 - **User:** The user account that owns the token
@@ -137,9 +137,9 @@ success, msg = token.delete()
 
 There are two ways to use a token to authenticate with the API:
 
-1. Post the **Client ID** and **Client Secret** to `/login`.  
+1. Post the **Client ID** and **Client Secret** to `/login`.
   The standard OAuth flow now accepts `client_id` and `client_secret` (in addition to `username` and `password`). This returns short-lived bearer tokens.
-2. Set the **API Key** directly in the `Authorization` header.  
+2. Set the **API Key** directly in the `Authorization` header.
   For situations where the standard OAuth flow isn't feasible (e.g. some IoT workloads), you can directly embed the API Key in the `Authorization` header. The API Key wraps the Client ID and Secret and is authenticated on every request.
 
 ??? example "Authenticating with `curl`"

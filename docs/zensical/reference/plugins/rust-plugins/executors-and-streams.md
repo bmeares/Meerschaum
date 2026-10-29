@@ -13,7 +13,7 @@ The complete, tested examples are
 
 ## 👷 Executors
 
-An executor manages [background jobs](../../background-jobs.md#executors) by name. Declare its
+An executor manages [background jobs](../../background-jobs/executors.md) by name. Declare its
 type under the manifest's top-level `executor_types` and return it from `Plugin::executor`:
 
 ```rust

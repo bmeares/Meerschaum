@@ -49,7 +49,7 @@ Polars DataFrames and LazyFrames (collected at the sync boundary) sync directly:
     The instance `sql:local` defaults to a built-in SQLite database.
 
 `Pipe.filter_existing()` accepts Polars frames and returns Polars frames.
-Rows are compared natively — the existing rows are read as Polars,
+Rows are compared natively, the existing rows are read as Polars,
 and the anti-join is performed by Polars without a pandas round-trip.
 Columns which Polars cannot compare (`uuid`, `object`, and geometry)
 fall back to pandas internally and are converted back on return.

@@ -33,11 +33,11 @@ def test_list_opens_a_read_only_pipeline_then_edit_mode_saves(server, tab):
     page = tab.page
     try:
         tab.goto('/dash/pipelines', '#pipelines-list')
-        card = page.locator('.pipeline-list-card').filter(has_text='workspace-test')
+        card = page.locator('.pipeline-list-entry').filter(has_text='workspace-test')
         card.wait_for(timeout=60000)
         ### One member that follows its parents, before any run counted them.
-        assert '1 Pipe + parents · 1 instance' in card.inner_text()
-        card.locator('.pipeline-title-link').click()
+        assert '1 Pipe + parents' in card.inner_text() and '1 instance' in card.inner_text()
+        card.locator('.pipeline-list-name a').click()
         page.wait_for_function("location.pathname === '/dash/pipelines/workspace-test'")
         page.wait_for_selector('.pipeline-stage', timeout=60000)
         ### Read-only: only explicit members, traversal collapsed; no edit controls.
@@ -408,7 +408,7 @@ def test_stepper_explorer_copy_and_legacy_links(server, tab):
     page.wait_for_function("location.pathname === '/dash/pipelines/legacy-test'", timeout=30000)
     page.wait_for_selector('.pipeline-stage', timeout=60000)
     tab.goto('/dash/pipelines', '#pipelines-list')
-    page.locator('.pipeline-list-card').first.wait_for(timeout=60000)
+    page.locator('.pipeline-list-entry').first.wait_for(timeout=60000)
     page.locator('#pipelines-find-pipe').click()
     page.locator('[role=option], .Select-option, .dash-dropdown-option').filter(has_text='w7child').last.click()
     page.wait_for_function("location.pathname === '/dash/pipelines/explore'", timeout=30000)
@@ -460,7 +460,7 @@ def test_the_global_instance_is_shared_by_the_console_and_pipelines(server, tab)
     page = tab.page
     page.set_viewport_size({'width': 1280, 'height': 900})
     tab.goto('/dash/pipelines', '#pages-instance-select')
-    page.locator('.pipeline-list-card', has_text='instance-test').wait_for(timeout=60000)
+    page.locator('.pipeline-list-entry', has_text='instance-test').wait_for(timeout=60000)
     select = page.locator('#pages-instance-select')
     values = select.evaluate("(node) => Array.from(node.options).map(option => option.value)")
     assert 'sql:local' in values and select.input_value() == 'sql:w7console', values
@@ -479,5 +479,5 @@ def test_the_global_instance_is_shared_by_the_console_and_pipelines(server, tab)
     assert page.locator('#pages-instance-select').input_value() == other
     page.evaluate("document.cookie = 'mrsm-instance=' + encodeURIComponent('sql:w7console') + '; path=/'")
     tab.goto('/dash/pipelines', '#pipelines-list')
-    page.locator('.pipeline-list-card', has_text='instance-test').wait_for(timeout=60000)
+    page.locator('.pipeline-list-entry', has_text='instance-test').wait_for(timeout=60000)
     assert _errors(tab) == [], _errors(tab)

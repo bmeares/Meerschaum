@@ -8,7 +8,7 @@ The command `mrsm show environment` will print out your current set `MRSM_` vari
 
 ## Summary
 
-All Meerschaum environment variables begin with the prefix `MRSM_`. The most commonly used variables are summarized below; each is described in detail later on this page.
+Nearly all Meerschaum environment variables begin with the prefix `MRSM_`. The most commonly used variables are summarized below; each is described in detail later on this page.
 
 | Variable | Purpose | Default |
 |---|---|---|
@@ -313,7 +313,7 @@ sql:
     password: MRSM{meerschaum:connectors:sql:main:password}
 ```
 
-Now `sql:reporting` shares credentials with `sql:main` — change them in one place.
+Now `sql:reporting` shares credentials with `sql:main`, change them in one place.
 
 ### In a pipe parameter
 

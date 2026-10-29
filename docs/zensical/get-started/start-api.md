@@ -7,7 +7,7 @@ See the same Pipes and Pipeline from your browser. Continue in the workspace fro
 Install the web console, then start it on loopback:
 
 ```bash
-python -m pip install --pre 'meerschaum[dash]'
+python -m pip install 'meerschaum[dash]'
 mrsm start api -i sql:local --host 127.0.0.1 --port 8001 --secure
 ```
 

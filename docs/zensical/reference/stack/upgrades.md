@@ -2,10 +2,22 @@
 
 Pulling newer images (`mrsm stack pull`, or `mrsm upgrade mrsm`) updates the stack's software, but
 not everything inside its database volume. This page covers what an upgrade leaves behind and the
-commands that finish the job. See [the stack page](stack.md) for how the stack's database is set
+commands that finish the job. See [the stack page](index.md) for how the stack's database is set
 up in the first place.
 
+| Task | Command |
+|---|---|
+| Update extension versions in an existing database | `mrsm upgrade extensions` |
+| Move the Stack database to a newer PostgreSQL major | `mrsm upgrade postgres` |
+| Make an online backup | `mrsm backup postgres` |
+| Restore into a new volume | `mrsm restore postgres` |
+
 ## Updating extensions
+
+Run `mrsm upgrade extensions` to preview and approve updates. Long-running clients must reconnect afterward. Database restart settings are shown separately.
+
+<details markdown="1">
+<summary>Extension plans, permissions, and restart behavior</summary>
 
 ### What lags and why
 
@@ -112,7 +124,14 @@ API servers on other hosts) so it loads the new version:
 mrsm restart jobs
 ```
 
+</details>
+
 ## Upgrading PostgreSQL
+
+Run `mrsm upgrade postgres` for a planned dump-and-restore into a new volume. The old volume is kept. Read the downtime and rollback details before approving a production upgrade.
+
+<details markdown="1">
+<summary>Upgrade workflow, downtime, verification, and rollback</summary>
 
 The image of the stack's `db` service decides its PostgreSQL major. A stack whose `stack.yaml`
 names the image keeps that major (stacks set up by Meerschaum 3.0 to 3.3 with a `stack.yaml` run
@@ -336,7 +355,14 @@ Then compare the row counts and database settings on both servers. Repeat steps 
 for each database. In a Docker setup, run these commands in a container of the new image that can
 reach both servers, and point the service at the new server's volume when it matches.
 
+</details>
+
 ## Backing up and restoring
+
+`mrsm backup postgres` runs online. `mrsm restore postgres` verifies a backup and restores into a new volume. Writes made since the backup stay in the previous volume.
+
+<details markdown="1">
+<summary>Backup files, retention, restore checks, and rollback</summary>
 
 ### `mrsm backup postgres`
 
@@ -368,7 +394,7 @@ Backups contain the roles and each connectable, non-template database. They do n
 `postgresql.conf`, `pg_hba.conf`, or customizations of `template1`; keep those separately.
 Settings made with `ALTER SYSTEM` are recorded, subject to the restore exclusions above.
 
-**Scheduled backups.** The command asks nothing, so it runs as a [job](background-jobs.md):
+**Scheduled backups.** The command asks nothing, so it runs as a [job](../background-jobs/index.md):
 
 ```bash
 mrsm backup postgres -s 'daily' -d
@@ -424,3 +450,5 @@ containers that exist with the image they were created from, so they skip this c
 `stack up`, wait for an upgrade, restore or rollback that is moving the database (see
 [Downtime](#downtime)). Unknown image families and tags such as `latest` cannot
 be checked this way.
+
+</details>

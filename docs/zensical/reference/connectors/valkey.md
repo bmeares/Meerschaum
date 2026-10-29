@@ -25,10 +25,10 @@ The connector is built from connection attributes or a single `uri` string. The 
 
 | Attribute | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `host` | ✅ | — | Valkey/Redis hostname. |
+| `host` | ✅ |, | Valkey/Redis hostname. |
 | `port` | | `6379` | Server port. |
 | `username` | | `default` | Username (Valkey ACL). |
-| `password` | | — | Password. |
+| `password` | |, | Password. |
 | `db` | | `0` | Logical database number. |
 | `socket_timeout` | | `300` | Socket timeout in seconds. |
 
@@ -93,7 +93,7 @@ The `ValkeyConnector` implements the full [instance connector interface](/refere
 Compared to [`SQLConnector`](/reference/connectors/sql-connectors/):
 
 - **Filtering** via `params`, `begin`, and `end` is applied **in-memory** after reading candidate documents (datetime ranges are narrowed at the store level via the sorted-set score, but column `params` are filtered client-side).
-- There are **no SQL features** — no joins, no in-place syncs, no native partitioning/hypertables.
+- There are **no SQL features**, no joins, no in-place syncs, no native partitioning/hypertables.
 - **Thread safety:** the connector inherits `IS_THREAD_SAFE = False`, so it is not used for concurrent-read connection pools the way a thread-safe SQL connector is.
 
 ## Example

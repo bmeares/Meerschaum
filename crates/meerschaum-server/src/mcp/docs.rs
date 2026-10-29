@@ -414,7 +414,7 @@ pub fn render_tool_reference(tools: &[Tool], resources: &[Resource], prompts: &[
         }
     }
     sections.push(TOOL_REFERENCE_FOOTER.to_string());
-    sections.join("\n")
+    sections.join("\n").replace(" — ", ": ").replace('—', ":")
 }
 
 #[cfg(test)]

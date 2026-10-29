@@ -2,15 +2,12 @@
 
 Your first Pipe needs Python and a few local rows. No database server or Docker setup is required.
 
-!!! info "Meerschaum 5 preview"
-    These pages are being prepared for the final 5.0.0 release. The examples and recordings were checked with the 5.0.0rc16 candidate. Use `--pre` to install the latest published preview; the final release will use `pip install meerschaum`.
-
 ## Install
 
 Use Python **3.11 or newer** in your usual virtual environment:
 
 ```bash
-python -m pip install --upgrade --pre meerschaum
+python -m pip install --upgrade meerschaum
 mrsm --version
 ```
 
@@ -20,7 +17,7 @@ The package includes the native core and the `mrsm` command. `python -m meerscha
     New installations return **Polars** DataFrames. Install the matching extra:
 
     ```bash
-    python -m pip install --pre 'meerschaum[polars]'
+    python -m pip install 'meerschaum[polars]'
     ```
 
     For pandas, install `meerschaum[pandas]` and choose `dataframe: pandas` in `meerschaum.yaml`. Existing roots from v4 keep pandas. You can also read rows as plain dictionaries with `pipe.get_data(as_docs=True)`.
@@ -60,11 +57,11 @@ You should see **No pipes to show**. Keep this terminal open for the next steps.
 [Build your first Pipe →](bootstrap.md){ .md-button .md-button--primary }
 
 ??? info "Other ways to run Meerschaum"
-    **Your database:** add a [SQL connector](../reference/connectors/sql-connectors.md). The [stack](../reference/stack.md) supplies a ready-to-use TimescaleDB database through Docker.
+    **Your database:** add a [SQL connector](../reference/connectors/sql-connectors.md). The [stack](../reference/stack/index.md) supplies a ready-to-use TimescaleDB database through Docker.
 
-    **Standalone command:** `cargo install meerschaum --locked` builds the stable release's native CLI. Preview versions need an explicit version. Prebuilt binaries are listed on [GitHub Releases](https://github.com/bmeares/Meerschaum/releases).
+    **Standalone command:** `cargo install meerschaum --locked` builds the stable release's native CLI. Prebuilt binaries are listed on [GitHub Releases](https://github.com/bmeares/Meerschaum/releases).
 
-    **Docker:** see the [image variants](../reference/stack.md#docker-images).
+    **Docker:** see the [image variants](../reference/stack/index.md#docker-images).
 
     **macOS binaries:** downloaded binaries are unsigned. If Gatekeeper blocks one, remove its quarantine flag with `xattr -d com.apple.quarantine ./mrsm-<version>-<target>`, then run `chmod +x` on the file. The pip installation does not need this step.
 
