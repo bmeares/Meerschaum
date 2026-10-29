@@ -542,7 +542,7 @@ class Tab:
         ### The scripts of that page never loaded (see `goto`).
         if self.network_changed_ever and 'is not defined' in str(error):
             return
-        self.errors.append(f"pageerror: {error}")
+        self.errors.append(f"pageerror: {getattr(error, 'stack', None) or error}")
 
     def _on_console(self, message):
         ### A script that never loaded (see `goto`) leaves its globals undefined.
