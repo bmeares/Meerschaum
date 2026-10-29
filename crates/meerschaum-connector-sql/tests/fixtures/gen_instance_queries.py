@@ -275,6 +275,7 @@ def main():
 
     ### Instance tables (SQLAlchemy `CREATE TABLE` / `CREATE INDEX` as `create_all` emits them).
     from sqlalchemy.schema import CreateTable, CreateIndex
+    from sqlalchemy.dialects import mysql, postgresql, sqlite
     import meerschaum.connectors.sql.tables as tables_module
     tables_module._check_create_cache = lambda c, debug=False: False
     # SQLite forces a cold create even with create=False. Only compile its real
@@ -284,7 +285,12 @@ def main():
     for flavor in ('postgresql', 'timescaledb', 'postgis', 'mysql', 'mariadb', 'sqlite'):
         conn = make_conn(flavor, prefix='ddl_')
         _ = tables_module.get_tables(conn, create=False)
-        dialect = conn.engine.dialect
+        # DDL compilation needs a dialect, never an engine or an installed DBAPI.
+        dialect = (
+            sqlite.dialect() if flavor == 'sqlite'
+            else mysql.dialect() if flavor in ('mysql', 'mariadb')
+            else postgresql.dialect()
+        )
         ddl = {}
         for table in conn.metadata.sorted_tables:
             stmts = [str(CreateTable(table).compile(dialect=dialect))]
