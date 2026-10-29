@@ -239,7 +239,7 @@ def test_each_role_gets_its_pages_and_pipes_and_nothing_hidden_leaks(access_serv
         assert (page.locator('#pipes-new-button').count() == 1) is (username != 'w8-viewer')
         ### A Pipeline with a member they may not see says how many.
         tab.goto('/dash/pipelines', '#pipelines-list')
-        page.wait_for_selector('.pipeline-card-facts', timeout=30000)
+        page.wait_for_selector('.pipeline-list-entry', timeout=30000)
         facts = page.inner_text('#pipelines-list')
         if 'w8opsonly' not in SEES[username]:
             assert '1 hidden pipe' in facts, (username, facts)
@@ -524,7 +524,7 @@ def test_role_screenshots(access_server, browser, viewport):
                 page.wait_for_timeout(500)
                 page.screenshot(path=str(out / f'{label}-{width}-edit-user.png'), full_page=True)
                 tab.goto('/dash/pipelines', '#pipelines-list')
-                page.wait_for_selector('.pipeline-card-facts', timeout=30000)
+                page.wait_for_selector('.pipeline-list-entry', timeout=30000)
                 page.screenshot(path=str(out / f'{label}-{width}-pipelines.png'), full_page=True)
             if label == 'manager':
                 ### Access… and Locks… of their team's pipe, and New pipe's Team and Visibility.
@@ -543,7 +543,7 @@ def test_role_screenshots(access_server, browser, viewport):
                 tab.goto('/dash/pipes/new', '#new-pipe-team')
                 page.screenshot(path=str(out / f'{label}-{width}-new-pipe.png'), full_page=True)
                 tab.goto('/dash/pipelines', '#pipelines-list')
-                page.wait_for_selector('.pipeline-card-facts', timeout=30000)
+                page.wait_for_selector('.pipeline-list-entry', timeout=30000)
                 page.screenshot(path=str(out / f'{label}-{width}-pipelines.png'), full_page=True)
             if label == 'editor':
                 tab.goto('/dash/terminal', '#page-not-available')

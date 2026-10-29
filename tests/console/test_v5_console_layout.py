@@ -272,6 +272,9 @@ def test_real_touch_pinch_tracks_midpoint_and_keeps_pan_and_buttons(layout_serve
         page.locator('#pipeline-inspector').wait_for(state='hidden')
         page.locator('.pipeline-stage').last.tap()
         page.locator('#pipeline-inspector').wait_for()
+        query = page.locator('#pipeline-query-view')
+        query.wait_for()
+        assert 'SELECT' in query.inner_text().upper()
         page.screenshot(path=str(artifacts() / 'pinch-390.png'))
         assert not tab.errors, tab.errors
     finally:

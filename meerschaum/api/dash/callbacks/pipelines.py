@@ -403,13 +403,9 @@ def load_inspector_section(selection, section, resolve, retry, session):
         if section == 'query' or not section:
             from meerschaum.api.dash._support import get_pipe_query
             query = get_pipe_query(pipe, apply_symlinks=True if resolve is None else resolve, warn=False)
-            from meerschaum.utils.packages import attempt_import
-            dash_ace = attempt_import('dash_ace', lazy=False, check_update=False)
-            body = [dash_ace.DashAceEditor(
-                id='pipeline-query-view', value=query, mode='sql', theme='twilight',
-                width='100%', height=f'{min(400, max(120, 20 * len(query.splitlines()) + 24))}px',
-                readOnly=True, showGutter=True, showPrintMargin=False,
-                highlightActiveLine=False, wrapEnabled=True, tabSize=4,
+            body = [html.Pre(
+                html.Code(query), id='pipeline-query-view', tabIndex=0,
+                style={'maxHeight': '400px', 'overflow': 'auto'},
             ) if query else html.P('This source uses a connector or plugin to fetch data.'),
                     html.A('Open Pipe editor', href=_engine.pipe_href(ref), target='_blank')]
         elif section == 'edit':
