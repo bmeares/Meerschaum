@@ -20,14 +20,12 @@ html = import_html(check_update=CHECK_UPDATE)
 
 
 def _connector_row(keys, session, details=False):
-    from meerschaum.api.dash.pages.connectors import may_view, may_see_details
+    from meerschaum.api.dash.access import _secure
     from meerschaum.api.dash.connector_listing import list_connectors
     from meerschaum.api.dash.users import viewer
-    sid = session.get('session-id') if isinstance(session,dict) else None
-    if not may_view(sid) or (details and not may_see_details(sid)):
-        raise PermissionError('Connector details are unavailable.')
     who = viewer(session)
-    if not who['active'] or not who['viewer'].can('connectors:read') or (details and not who['admin']):
+    if (not who['active'] or not who['viewer'].can('connectors:read')
+        or ((details or _secure()) and not who['admin'])):
         raise PermissionError('Connector details are unavailable.')
     rows = list_connectors(viewer=who['viewer'])
     row = next((row for row in rows if row['keys']==keys),None)

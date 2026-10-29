@@ -21,7 +21,7 @@ apply_environment_patches()
 from types import SimpleNamespace
 from unittest.mock import patch
 from meerschaum.api import get_api_connector
-from meerschaum.api.dash import dash_app, connector_listing, sessions
+from meerschaum.api.dash import dash_app, connector_listing, sessions, access
 from meerschaum.api.dash.callbacks import connectors_page as callbacks
 from meerschaum.api.dash.pages import connectors
 from meerschaum.core import User
@@ -51,6 +51,10 @@ with patch.object(callbacks.dash, 'ctx', trigger), \\
     result = callbacks.connector_info_click([2], 0, admin)
     assert 'db.invalid' not in str(result) and 'Inspect' not in str(result[3])
     assert 'not available' in str(callbacks.inspect_connector_click(1, admin))
+    with patch.object(access, '_secure', return_value=True):
+        for session in (ops, admin):
+            result = callbacks.connector_info_click([3], 0, session)
+            assert result[1] == 'Connector' and 'not available' in str(result[2])
 plugin_row = {'keys':'custom:local','type':'custom','source':'Plugin','plugin':'modal_source',
               'source_detail':None,'attributes':{},'fields':{}}
 assert '/dash/plugins/installed/modal_source' in str(connectors.build_table([plugin_row], False))
