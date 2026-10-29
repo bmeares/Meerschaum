@@ -162,6 +162,7 @@ packages['polars'] = {
 ### `terminado` and `tornado` (v4's console) are not used any more: the terminal is the Rust server's.
 packages['dash'] = {
     'dash'                           : 'dash>=4.1.0',
+    'pygments'                       : 'pygments>=2.21.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=2.0.4',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=2.0.5',
@@ -272,6 +273,7 @@ _extras_packages: Dict[str, Dict[str, str]] = {
     },
     'dash': {
         'dash'                       : 'dash>=4.1.0',
+        'pygments'                   : 'pygments>=2.21.0',
         'a2wsgi'                     : 'a2wsgi>=1.10.0',
         'dash_bootstrap_components'  : 'dash-bootstrap-components>=2.0.4',
         'dash_ace'                   : 'dash-ace>=0.2.1',

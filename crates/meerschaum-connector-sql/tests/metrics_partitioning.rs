@@ -87,6 +87,17 @@ async fn cleanup(conn: &SqlConnector) {
         .unwrap();
 }
 
+async fn compression_after(conn: &SqlConnector, table: &str) -> i64 {
+    conn.value(&format!(
+        "SELECT (config->>'compress_after')::bigint FROM timescaledb_information.jobs \
+         WHERE hypertable_schema='_mrsm_internal' AND hypertable_name='{table}' \
+         AND proc_name='policy_compression'"
+    ))
+    .await
+    .and_then(|value| value.as_i64())
+    .unwrap()
+}
+
 #[tokio::test]
 async fn timescale_metrics_writes_share_a_month_chunk() {
     let Some((conn, _)) = connectors().await else {
@@ -122,6 +133,7 @@ async fn timescale_metrics_writes_share_a_month_chunk() {
         MONTH_US
     );
     assert_eq!(dimension(&conn, &sp.target, "num_chunks").await, 1);
+    assert_eq!(compression_after(&conn, &sp.target).await, MONTH_US);
     assert_eq!(
         conn.value(&format!(
             "SELECT COUNT(*) FROM {}",
@@ -177,7 +189,9 @@ async fn timescale_cold_readiness_repairs_legacy_metrics_interval() {
         .await
         .unwrap();
     assert_eq!(dimension(&first, &sp.target, "num_chunks").await, 2);
+    assert_eq!(compression_after(&first, &sp.target).await, 43200);
     fresh.initialize_engine_metrics().await.unwrap();
+    assert_eq!(compression_after(&fresh, &sp.target).await, MONTH_US);
     assert_eq!(
         dimension(&fresh, &sp.target, "integer_interval").await,
         MONTH_US

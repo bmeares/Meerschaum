@@ -91,7 +91,12 @@ assert row['port'] == 5432 and row['source'] == 'Environment'
 assert {'host','username','password','database','flavor'} <= set(row['fields']['required'])
 assert {'schema','uri','teams'} <= set(row['fields']['supported'])
 shown = str(connectors.build_table([row], False, details=True))
-assert 'Inspect' in shown and 'Supported keys' in shown and 'weather' in shown
+assert 'connector-info-button' in shown and 'Inspect' not in shown
+assert 'Supported keys' not in shown
+body, footer = connectors.connector_info(row, details=True, testable=True)
+shown += str(body) + str(footer) + str(connectors.connector_inspection(row))
+assert 'Inspect' in shown and 'Test connection' in shown
+assert 'Supported keys' in shown and 'weather' in shown
 for secret in ('secret-main-321','nested-token-654','query-secret-987'):
     assert secret not in shown and secret not in json.dumps(rows), secret
 public = str(connectors.build_table([row], False, details=False))

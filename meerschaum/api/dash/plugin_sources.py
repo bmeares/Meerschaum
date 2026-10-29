@@ -258,10 +258,75 @@ def build_source_browser(kind: str, name: str, session: Any):
         return html.P('No source files are available to preview.', className='text-muted')
     return html.Section([
         html.H4('Source'),
-        html.Label('File', htmlFor='plugin-source-file'),
-        dcc.Dropdown(id='plugin-source-file', value=files[0], clearable=False,
-                     options=[{'label': file, 'value': file} for file in files]),
+        dcc.Input(id='plugin-source-file',type='hidden',value=files[0]),
         dcc.Store(id='plugin-source-context', data={'kind': kind, 'name': name}),
-        dcc.Loading(html.Pre(id='plugin-source-content', className='plugin-source-content',
-                             tabIndex=0, **{'aria-label': 'Plugin source'}), type='dot'),
+        html.Div([
+            source_tree(files,files[0]),
+            dcc.Loading(html.Div(id='plugin-source-content',className='plugin-source-content',
+                                **{'aria-label':'Plugin source'}),type='dot'),
+        ],className='plugin-source-workspace'),
     ], className='plugin-source-browser')
+
+
+def source_tree(files, selected):
+    from dash import html
+    tree = {'folders':{},'files':[]}
+    for relative in files:
+        node = tree
+        parts = pathlib.PurePosixPath(relative).parts
+        for part in parts[:-1]:
+            node = node['folders'].setdefault(part,{'folders':{},'files':[]})
+        node['files'].append((parts[-1],relative))
+    def branch(node, prefix=''):
+        items = []
+        for name,child in sorted(node['folders'].items()):
+            path = prefix+name+'/'
+            items.append(html.Li(html.Details([
+                html.Summary(name,className='plugin-source-folder'),
+                branch(child,path),
+            ],open=selected.startswith(path))))
+        for name,path in sorted(node['files']):
+            suffix = pathlib.PurePosixPath(name).suffix.lstrip('.').upper()
+            items.append(html.Li(html.Button([
+                html.Span(suffix or 'FILE',className='plugin-source-file-kind'),
+                html.Span(name,className='plugin-source-file-name'),
+            ],id={'type':'plugin-source-select','path':path},n_clicks=0,type='button',
+                className='plugin-source-file'+(' active' if path==selected else ''),
+                title=path,**{'aria-label':path})))
+        return html.Ul(items,className='plugin-source-tree-list')
+    return html.Nav(branch(tree),className='plugin-source-tree',**{'aria-label':'Plugin files'})
+
+
+def source_preview(path, source):
+    """Render highlighted tokens as escaped text, without interpreting plugin HTML."""
+    from dash import html, dcc
+    from pygments.lexers import get_lexer_by_name
+    from pygments.token import Token
+    mode = {'.py':'python','.rs':'rust','.toml':'toml','.json':'json','.yaml':'yaml',
+            '.yml':'yaml','.sql':'sql','.md':'markdown','.txt':'text'}.get(
+                pathlib.PurePosixPath(path).suffix.lower(),'text')
+    lexer = get_lexer_by_name(mode)
+    styles = ((Token.Comment,'comment'),(Token.Keyword,'keyword'),
+              (Token.Name.Function,'function'),(Token.Name.Class,'class'),
+              (Token.Name.Builtin,'builtin'),(Token.Name.Decorator,'decorator'),
+              (Token.Literal.String,'string'),(Token.Literal.Number,'number'),
+              (Token.Operator,'operator'))
+    runs = []
+    for _, token, value in lexer.get_tokens_unprocessed(source):
+        style = next((name for category,name in styles if token in category),None)
+        if runs and runs[-1][0]==style:
+            runs[-1][1] += value
+        else:
+            runs.append([style,value])
+        # Keep a hostile or highly fragmented source from creating an oversized DOM.
+        if len(runs)>5000:
+            runs = [(None,source)]
+            break
+    tokens = [html.Span(value,className='source-token-'+style) if style else value
+              for style,value in runs]
+    lines = len(source.splitlines())
+    return html.Div([
+        html.Div([html.Code(path),html.Span(f'{lines:,} lines',className='text-muted'),
+                  dcc.Clipboard(content=source,title='Copy source')],className='plugin-source-toolbar'),
+        html.Div(html.Pre(html.Code(tokens,className='language-'+mode)),className='plugin-source-code'),
+    ],className='plugin-source-preview')

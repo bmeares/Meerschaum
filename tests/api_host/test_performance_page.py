@@ -111,3 +111,19 @@ with patch.object(performance,'metrics',side_effect=PermissionError('private obj
     result = callbacks.render_performance('/dash/performance',None,'24h',None,None,0,0,1,'sql:apihosttest',{})
     assert 'not available' in str(result) and 'private object' not in str(result)
 '''))
+
+
+def test_performance_polling_and_manual_refresh_pause_during_a_request(sandbox):
+    root, plugins = sandbox
+    check(run_python(root, plugins, '''
+from meerschaum.api.dash import dash_app
+from meerschaum.api.dash.callbacks import performance
+dash_app._setup_server()
+callback = next(item for item in dash_app._callback_list
+                if 'performance-body.children' in item['output'])
+running = callback['running']
+assert running['running']['performance-interval.disabled'] is True
+assert running['running']['performance-refresh.disabled'] is True
+assert running['runningOff']['performance-interval.disabled'] is False
+assert running['runningOff']['performance-refresh.disabled'] is False
+'''))

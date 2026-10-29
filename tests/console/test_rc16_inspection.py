@@ -88,6 +88,11 @@ def inspection_server():
     }}}}
     server = Server('rc16-inspection', config=config, native=False, args=['--workers','2'])
     (server.plugins/'rc16_installed.py').write_text('"""A local source for inspection."""\n\ndef fetch(pipe, **kwargs):\n    return [{"value": 16}]\n')
+    package = server.plugins/'rc18_source'
+    (package/'helpers').mkdir(parents=True)
+    (package/'__init__.py').write_text('"""Explore synthetic source files."""\n\ndef fetch(pipe, **kwargs):\n    return [{"value": 18}]\n')
+    (package/'helpers'/'sample.rs').write_text('pub fn reading() -> u32 {\n    18\n}\n')
+    (package/'helpers'/'literal.md').write_text('```\n<script>window.sourceExecuted = true</script>\n````\n')
     try:
         server.start()
         result = server.python(SETUP)
@@ -148,10 +153,30 @@ def test_connector_and_plugin_inspection_obey_roles(inspection_server,browser,wi
             rows = tab.page.locator('#connectors-table tbody')
             if role == 'admin':
                 own = rows.locator('tr[data-keys="sql:rc16_ops"]')
-                own.locator('summary:text-is("Inspect")').click()
-                text = own.inner_text()
+                assert rows.locator('button:text-is("Inspect")').count() == 0
+                assert tab.page.locator('#connectors-table thead th').all_text_contents() == ['Connector','Source']
+                own.get_by_role('button',name='sql:rc16_ops',exact=True).click()
+                modal = tab.page.locator('.connector-info-modal.show')
+                modal.wait_for()
+                text = modal.inner_text()
                 assert 'weather' in text and 'db.invalid' in text and '5432' in text
+                assert modal.get_by_role('button',name='Test connection',exact=True).is_visible()
+                modal.get_by_role('button',name='Inspect',exact=True).click()
+                modal.get_by_text('Supported keys',exact=True).wait_for()
+                text = modal.inner_text()
                 assert 'Supported keys' in text and 'Required keys' in text
+                bounds = modal.locator('.modal-dialog').bounding_box()
+                assert bounds['x'] >= 0 and bounds['x']+bounds['width'] <= width+1, bounds
+                assert modal.evaluate('element => element.scrollWidth <= element.clientWidth + 1')
+                tab.page.screenshot(path=str(artifacts()/f'connector-modal-{width}.png'))
+                modal.get_by_role('button',name='Close',exact=True).last.click()
+                modal.wait_for(state='hidden')
+                rows.locator('tr[data-keys="sql:w7console"]').get_by_role('button',name='sql:w7console',exact=True).click()
+                modal.wait_for()
+                modal.get_by_role('button',name='Test connection',exact=True).click()
+                modal.get_by_text('Connected in',exact=False).wait_for(timeout=30000)
+                modal.get_by_role('button',name='Close',exact=True).last.click()
+                modal.wait_for(state='hidden')
             else:
                 expected, hidden = ('ops','sales') if role == 'ops' else ('sales','ops')
                 assert rows.locator(f'tr[data-keys="sql:rc16_{expected}"]').count() == 1
@@ -186,6 +211,34 @@ def test_connector_and_plugin_inspection_obey_roles(inspection_server,browser,wi
             tab.page.locator('#plugin-source-content').scroll_into_view_if_needed()
             tab.page.screenshot(path=str(artifacts()/f'repository-source-{role}-{width}.png'))
         assert not tab.errors, tab.errors
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize('width',[1440,390])
+def test_source_tree_highlights_rust_and_keeps_markdown_literal(inspection_server,browser,width):
+    context = browser.new_context(viewport={'width':width,'height':900})
+    try:
+        tab = Tab(context.new_page(),inspection_server.base_url)
+        tab.login(path='/dash')
+        tab.goto('/dash/plugins/installed/rc18_source','#plugin-source-content')
+        tab.page.locator('.plugin-source-code .source-token-keyword').first.wait_for()
+        assert 'Explore synthetic source files.' in tab.page.inner_text('.plugin-detail-description')
+        assert 'Package' in tab.page.inner_text('.plugin-detail-properties')
+        tab.page.locator('.plugin-source-tree summary:text-is("helpers")').click()
+        tab.page.get_by_role('button',name='helpers/sample.rs',exact=True).click()
+        tab.page.wait_for_function("document.querySelector('.plugin-source-toolbar code')?.textContent === 'helpers/sample.rs'")
+        tab.page.locator('.plugin-source-code .source-token-keyword').first.wait_for()
+        assert tab.page.locator('.plugin-source-code .source-token-keyword').count() >= 2
+        assert 'reading' in tab.page.inner_text('.plugin-source-code')
+        assert tab.page.locator('.plugin-source-file.active').count() == 1
+        tab.page.screenshot(path=str(artifacts()/f'source-tree-{width}.png'))
+        tab.page.get_by_role('button',name='helpers/literal.md',exact=True).click()
+        tab.page.wait_for_function("document.querySelector('.plugin-source-toolbar code')?.textContent === 'helpers/literal.md'")
+        assert '<script>window.sourceExecuted = true</script>' in tab.page.inner_text('.plugin-source-code')
+        assert tab.page.evaluate('window.sourceExecuted === undefined')
+        assert tab.page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+        assert not tab.errors,tab.errors
     finally:
         context.close()
 

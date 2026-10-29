@@ -4,7 +4,7 @@
 
 ## Meerschaum 5
 
-### 5.0.0
+### 5.0.0 (Unreleased)
 
 The data engine, database connectors, CLI, HTTP API, jobs, and Compose now run in Rust. Keep your Pipe definitions, configuration, Python plugins, and existing data. Start with the [migration guide](https://meerschaum.io/reference/migrating-to-v5/).
 

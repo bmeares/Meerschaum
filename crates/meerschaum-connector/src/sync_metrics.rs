@@ -960,6 +960,46 @@ async fn engine_docs<C: InstanceConnector + ?Sized>(
     conn.read_engine_metric_rows(metric, query).await
 }
 
+async fn read_sync_history<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    params: &Map,
+    registrations: &[Value],
+    begin: DateTime<Utc>,
+    end: DateTime<Utc>,
+    limit: usize,
+) -> ConnectorResult<(Vec<SyncMetric>, bool)> {
+    let mut history = Vec::new();
+    let mut truncated = false;
+    let batch = if conn.connector_type() == "valkey" {
+        registrations.len()
+    } else {
+        900
+    };
+    for identities in registrations.chunks(batch) {
+        let mut params = params.clone();
+        params.insert("registration_id".into(), Value::List(identities.to_vec()));
+        let (rows, capped) = conn
+            .read_engine_metric_rows(
+                METRIC,
+                &DataQuery {
+                    begin: Some(DateBound::Int(begin.timestamp_micros())),
+                    end: Some(DateBound::Int(end.timestamp_micros().saturating_add(1))),
+                    params: Some(params),
+                    limit: Some((limit + 1) as i64),
+                    order: Some("desc".into()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        truncated |= capped;
+        history.extend(rows.iter().filter_map(SyncMetric::from_doc));
+        history.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| a.event_id.cmp(&b.event_id)));
+        truncated |= history.len() > limit;
+        history.truncate(limit + 1);
+    }
+    Ok((history, truncated))
+}
+
 /// Read authorized rows with indexed bounds and limits, then aggregate only that visible set.
 /// Public transports must derive visibility ceilings themselves, never trust request ceilings.
 pub async fn read<C: InstanceConnector + ?Sized>(
@@ -1034,22 +1074,47 @@ pub async fn read<C: InstanceConnector + ?Sized>(
     if allowed_registrations.is_empty() {
         return Ok(response);
     }
+    let (mut history, capped) = if query.pipeline.is_none() {
+        read_sync_history(conn, &params, &allowed_registrations, begin, end, limit).await?
+    } else {
+        (Vec::new(), false)
+    };
+    response.truncated |= capped;
+    let mut seen_runs = HashSet::new();
+    let mut linked_runs: Vec<Value> = history
+        .iter()
+        .filter_map(|metric| {
+            let id = metric.run_id.as_ref()?;
+            seen_runs.insert(id.clone()).then(|| Value::Str(id.clone()))
+        })
+        .collect();
+    if current_pipelines.is_empty() {
+        response.truncated |= linked_runs.len() > MAX_RUNS;
+        linked_runs.truncate(MAX_RUNS);
+    }
     // Pipeline identities and global run timings are visible only when the whole run is visible.
-    let (runs, runs_capped) = engine_docs(
-        conn,
-        "engine_runs",
-        &DataQuery {
-            begin: Some(DateBound::utc(
-                end.checked_sub_signed(TimeDelta::days(RETENTION_DAYS))
-                    .unwrap_or(DateTime::<Utc>::MIN_UTC),
-            )),
-            end: None,
-            limit: Some(MAX_RUNS as i64),
-            order: Some("desc".into()),
-            ..Default::default()
-        },
-    )
-    .await?;
+    let (runs, runs_capped) = if current_pipelines.is_empty() && linked_runs.is_empty() {
+        (Vec::new(), false)
+    } else {
+        engine_docs(
+            conn,
+            "engine_runs",
+            &DataQuery {
+                begin: Some(DateBound::utc(
+                    end.checked_sub_signed(TimeDelta::days(RETENTION_DAYS))
+                        .unwrap_or(DateTime::<Utc>::MIN_UTC),
+                )),
+                end: None,
+                params: current_pipelines
+                    .is_empty()
+                    .then(|| [("run_id".into(), Value::List(linked_runs))].into()),
+                limit: Some(MAX_RUNS as i64),
+                order: Some("desc".into()),
+                ..Default::default()
+            },
+        )
+        .await?
+    };
     response.truncated |= runs_capped;
     let mut candidate_runs = Vec::new();
     for run in runs {
@@ -1248,36 +1313,11 @@ pub async fn read<C: InstanceConnector + ?Sized>(
             Value::List(visible_runs.iter().cloned().map(Value::Str).collect()),
         );
     }
-    let mut history = Vec::new();
-    // Each database query is bounded and stays below Oracle's 1,000-value IN limit.
-    // Registration stamps already identify both the Pipe and its current ACL segment.
-    let filter_batch = if conn.connector_type() == "valkey" {
-        // The native candidate cap precedes its in-memory filter; scan that cap once.
-        allowed_registrations.len()
-    } else {
-        900
-    };
-    for identities in allowed_registrations.chunks(filter_batch) {
-        let mut params = params.clone();
-        params.insert("registration_id".into(), Value::List(identities.to_vec()));
-        let (rows, scan_capped) = conn
-            .read_engine_metric_rows(
-                METRIC,
-                &DataQuery {
-                    begin: Some(DateBound::Int(begin.timestamp_micros())),
-                    end: Some(DateBound::Int(end.timestamp_micros().saturating_add(1))),
-                    params: Some(params),
-                    limit: Some((limit + 1) as i64),
-                    order: Some("desc".into()),
-                    ..Default::default()
-                },
-            )
-            .await?;
-        response.truncated |= scan_capped;
-        history.extend(rows.iter().filter_map(SyncMetric::from_doc));
-        history.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| a.event_id.cmp(&b.event_id)));
-        response.truncated |= history.len() > limit;
-        history.truncate(limit + 1);
+    if query.pipeline.is_some() {
+        let (rows, capped) =
+            read_sync_history(conn, &params, &allowed_registrations, begin, end, limit).await?;
+        history = rows;
+        response.truncated |= capped;
     }
     // Recheck the ceiling before every aggregation, even if a custom backend ignores params.
     history.retain(|metric| {
@@ -1351,6 +1391,190 @@ pub async fn read<C: InstanceConnector + ?Sized>(
 #[cfg(test)]
 mod bounds_tests {
     use super::*;
+    use crate::{
+        Connector, ConnectorResult, DateBound, PipeId, PipeKeysEntry, PipesKeys, PipesKeysQuery,
+        SyncOptions,
+    };
+    use indexmap::IndexMap;
+    use meerschaum_core::SuccessTuple;
+    use meerschaum_kernel::Frame;
+
+    struct MetricsOnly {
+        saved_pipeline: bool,
+        linked_run: bool,
+    }
+
+    #[crate::async_trait]
+    impl Connector for MetricsOnly {
+        fn connector_type(&self) -> &str {
+            "synthetic"
+        }
+        fn label(&self) -> &str {
+            "metrics"
+        }
+        async fn test_connection(&self) -> ConnectorResult<bool> {
+            Ok(true)
+        }
+    }
+
+    #[crate::async_trait]
+    impl InstanceConnector for MetricsOnly {
+        async fn registered_pipes(
+            &self,
+            query: &PipesKeysQuery,
+        ) -> ConnectorResult<Vec<(Option<PipeId>, PipeKeysEntry)>> {
+            if !query.connector_keys.is_empty() {
+                return Ok(if self.saved_pipeline {
+                    vec![(
+                        Some(PipeId::Int(2)),
+                        PipeKeysEntry {
+                            connector_keys: "mrsm".into(),
+                            metric_key: "pipeline".into(),
+                            location_key: Some("daily".into()),
+                            extra: Some(
+                                Value::from_json_str(r#"{"pipeline":{"id":"saved-daily"}}"#)
+                                    .unwrap(),
+                            ),
+                        },
+                    )]
+                } else {
+                    Vec::new()
+                });
+            }
+            Ok(vec![(
+                Some(PipeId::Int(1)),
+                PipeKeysEntry {
+                    connector_keys: "synthetic".into(),
+                    metric_key: "readings".into(),
+                    location_key: None,
+                    extra: Some(Value::Map(Map::new())),
+                },
+            )])
+        }
+        async fn read_engine_metric_rows(
+            &self,
+            metric: &str,
+            _query: &DataQuery,
+        ) -> ConnectorResult<(Vec<Doc>, bool)> {
+            if metric != METRIC {
+                return Err(ConnectorError::Invalid("Pipeline history was read".into()));
+            }
+            let pipe = Pipe::builder("synthetic", "readings")
+                .instance(&self.connector_keys())
+                .build()
+                .unwrap();
+            let outcome = SyncOutcome::new(true, "", crate::sync_status::SyncSource::Python, None)
+                .with_counts(2, 0, 0);
+            let mut metric = SyncMetric::from_outcome(&pipe, &outcome);
+            metric.ts -= TimeDelta::seconds(1);
+            metric.started = metric.ts;
+            metric.registration_id = registration_stamp("1", &Map::new());
+            if self.linked_run {
+                metric.run_id = Some("standalone-engine-run".into());
+            }
+            Ok((vec![metric.to_doc()], false))
+        }
+        async fn register_pipe(&self, _pipe: &Pipe) -> SuccessTuple {
+            unreachable!()
+        }
+        async fn get_pipe_attributes(&self, _pipe: &Pipe) -> ConnectorResult<Map> {
+            unreachable!()
+        }
+        async fn get_pipe_id(&self, _pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
+            unreachable!()
+        }
+        async fn fetch_pipes_keys(&self, _query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
+            unreachable!()
+        }
+        async fn pipe_exists(&self, _pipe: &Pipe) -> ConnectorResult<bool> {
+            unreachable!()
+        }
+        async fn drop_pipe(&self, _pipe: &Pipe) -> SuccessTuple {
+            unreachable!()
+        }
+        async fn sync_pipe(
+            &self,
+            _pipe: &Pipe,
+            _frame: Frame,
+            _options: &SyncOptions,
+        ) -> SuccessTuple {
+            unreachable!()
+        }
+        async fn get_pipe_data(
+            &self,
+            _pipe: &Pipe,
+            _query: &DataQuery,
+        ) -> ConnectorResult<Option<Frame>> {
+            unreachable!()
+        }
+        async fn get_sync_time(
+            &self,
+            _pipe: &Pipe,
+            _params: Option<&Map>,
+            _newest: bool,
+        ) -> ConnectorResult<Option<DateBound>> {
+            unreachable!()
+        }
+        async fn get_pipe_rowcount(
+            &self,
+            _pipe: &Pipe,
+            _query: &DataQuery,
+        ) -> ConnectorResult<Option<i64>> {
+            unreachable!()
+        }
+        async fn get_pipe_columns_types(
+            &self,
+            _pipe: &Pipe,
+        ) -> ConnectorResult<IndexMap<String, String>> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn standalone_metrics_skip_unneeded_pipeline_history() {
+        let result = read(
+            &MetricsOnly {
+                saved_pipeline: false,
+                linked_run: false,
+            },
+            &MetricsQuery::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.summary.syncs, 1);
+        assert_eq!(result.summary.rows, 2);
+        assert_eq!(result.history.len(), 1);
+        assert!(!result.series.is_empty());
+        assert!(result.pipelines.is_empty());
+    }
+
+    #[tokio::test]
+    async fn saved_pipelines_still_require_their_run_history() {
+        let error = read(
+            &MetricsOnly {
+                saved_pipeline: true,
+                linked_run: false,
+            },
+            &MetricsQuery::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("Pipeline history was read"));
+    }
+
+    #[tokio::test]
+    async fn unsaved_engine_runs_still_require_their_run_history() {
+        let error = read(
+            &MetricsOnly {
+                saved_pipeline: false,
+                linked_run: true,
+            },
+            &MetricsQuery::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("Pipeline history was read"));
+    }
 
     #[test]
     fn extreme_typed_bounds_return_validation_errors_instead_of_panicking() {

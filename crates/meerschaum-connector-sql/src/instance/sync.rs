@@ -951,6 +951,18 @@ impl SqlConnector {
             );
             self.driver.exec(&query).await.map_err(be)?;
         }
+        // The same legacy chunk value also became the automatically created columnstore policy.
+        let query = format!(
+            "SELECT public.alter_job(job_id, config => jsonb_set(config, '{{compress_after}}', \
+             to_jsonb({expected}::bigint))) FROM timescaledb_information.jobs \
+             WHERE hypertable_schema = '{}' AND hypertable_name = '{}' \
+             AND proc_name = 'policy_compression' \
+             AND CASE WHEN jsonb_typeof(config->'compress_after') = 'number' \
+             THEN (config->>'compress_after')::numeric BETWEEN 1 AND 43200 ELSE false END",
+            schema.replace('\'', "''"),
+            sp.target.replace('\'', "''"),
+        );
+        self.driver.exec(&query).await.map_err(be)?;
         Ok(())
     }
 

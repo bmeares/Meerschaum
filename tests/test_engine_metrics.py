@@ -26,6 +26,11 @@ def _check_timescale_metrics_partition_growth(conn, event_id):
         + where + " AND column_name='ts_us'"
     )
     assert interval == month_us, f'Expected 30-day metrics chunks, got {interval} microseconds.'
+    compression_after = conn.value(
+        "SELECT (config->>'compress_after')::BIGINT FROM timescaledb_information.jobs WHERE "
+        + where + " AND proc_name='policy_compression'"
+    )
+    assert compression_after == month_us, f'Expected a 30-day columnstore policy, got {compression_after}.'
     before = conn.value('SELECT num_chunks FROM timescaledb_information.hypertables WHERE ' + where)
     prefix = 'partition_probe_' + uuid.uuid4().hex + '_'
     base_us = int(datetime.now(timezone.utc).timestamp() * 1_000_000) // month_us * month_us

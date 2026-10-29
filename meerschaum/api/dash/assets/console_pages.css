@@ -162,20 +162,70 @@
 .dbc_dark .dash-datepicker-content input { color: #fff; background: transparent; }
 
 .plugin-source-browser { margin: 24px 0; min-width: 0; }
+.plugin-source-workspace {
+    display: grid;
+    grid-template-columns: minmax(11rem, 17rem) minmax(0, 1fr);
+    border: 1px solid #47515c;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #17212b;
+    color: #dceaf6;
+}
+.plugin-source-tree { max-height: 70vh; overflow: auto; padding: 8px 0; border-right: 1px solid #47515c; background: #131c25; }
+.plugin-source-tree-list { list-style: none; padding: 0; margin: 0; }
+.plugin-source-tree-list .plugin-source-tree-list { padding-left: 12px; }
+.plugin-source-folder { padding: 8px; cursor: pointer; font-size: 0.85rem; overflow-wrap: anywhere; }
+.plugin-source-file {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; min-height: 36px; padding: 6px 10px;
+    color: #dceaf6; background: transparent; border: 0; text-align: left;
+    font-family: monospace; font-size: 0.8rem;
+}
+.plugin-source-file:hover, .plugin-source-file:focus-visible { background: #213449; }
+.plugin-source-file.active { background: #24425f; box-shadow: inset 3px 0 #85caff; }
+.plugin-source-file-kind { flex: 0 0 2rem; color: #b9a7f5; font-size: 0.6rem; }
+.plugin-source-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-source-content {
-    margin-top: 12px;
-    padding: 16px;
-    max-height: 65vh;
-    overflow: auto;
-    white-space: pre;
+    min-width: 0;
+    overflow: hidden;
     color: #dceaf6;
     background: #17212b;
-    border: 1px solid #47515c;
-    border-radius: 6px;
     font-size: 0.85rem;
 }
+.plugin-source-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #47515c; }
+.plugin-source-toolbar code { flex: 1; min-width: 0; overflow-wrap: anywhere; color: #dceaf6; }
+.plugin-source-code pre { margin: 0; padding: 16px; max-height: 65vh; overflow: auto; border: 0; background: #17212b; font-size: 0.8rem; }
+.plugin-source-code pre code { color: inherit; background: transparent; }
+.plugin-source-code > :last-child { margin-bottom: 0; }
+.source-token-keyword, .source-token-operator { color: #d7a8ff; }
+.source-token-string { color: #b4d99b; }
+.source-token-comment { color: #9ba8b4; font-style: italic; }
+.source-token-number, .source-token-builtin { color: #efbe86; }
+.source-token-function, .source-token-class, .source-token-decorator { color: #8cd3ef; }
+.plugin-detail-wrapper { min-width: 0; }
+.plugin-detail-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
+.plugin-detail-header h1 { margin-bottom: 6px; }
+.plugin-detail-actions, .plugin-capabilities { display: flex; flex-wrap: wrap; gap: 8px; }
+.plugin-detail-metadata { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 24px; margin-top: 24px; }
+.plugin-detail-metadata h2 { font-size: 1rem; }
+.plugin-detail-properties { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; }
+.plugin-detail-properties dd { margin: 0; overflow-wrap: anywhere; }
+.plugin-detail-description pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.plugin-detail-description p { max-width: 78ch; }
+.connector-key-button { min-height: 44px; padding: 4px 0; text-align: left; max-width: 100%; }
+.connector-key-button:hover code, .connector-key-button:focus-visible code { color: #85caff; text-decoration: underline; }
+.connector-info-modal .modal-dialog { max-width: min(52rem, calc(100vw - 24px)); }
+.connector-info-modal .modal-body { min-width: 0; overflow-wrap: anywhere; }
+.connector-info-modal .connectors-attributes { max-width: 100%; }
+.connector-info-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; }
+.connector-info-summary dd { margin: 0; overflow-wrap: anywhere; }
+.connector-info-source { margin: 12px 0; }
+.connector-inspection { margin-top: 24px; }
 .connectors-fields { margin: 12px 0 6px; max-width: 36rem; font-size: 0.8rem; }
 .connectors-fields dd { overflow-wrap: anywhere; }
 @media (max-width: 767.98px) {
-    .plugin-source-browser .dash-dropdown-trigger { min-height: 44px; }
+    .plugin-source-workspace { grid-template-columns: minmax(0, 1fr); }
+    .plugin-source-tree { max-height: 200px; border-right: 0; border-bottom: 1px solid #47515c; }
+    .plugin-source-file, .plugin-source-folder { min-height: 44px; }
+    .connector-info-modal .modal-footer { gap: 8px; }
 }

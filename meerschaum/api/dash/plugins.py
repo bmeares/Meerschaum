@@ -210,6 +210,9 @@ def get_installed_plugins(check_packages: bool = True) -> List[Dict[str, Any]]:
             'missing': missing,
             'import_error': entry.get('import_error'),
             'origin': origins.get(name),
+            'description': entry.get('description') or entry.get('docstring'),
+            'plugin_requirements': [str(r) for r in (entry.get('required') or [])
+                                    if str(r).startswith('plugin:')],
         })
     return plugins
 
@@ -471,7 +474,7 @@ def _build_plugin_card(
         desc_textarea_kw['style'] = {'min-height': '12em'}
 
     title_el = (
-        html.H3(plugin_name, style={'margin': 0})
+        html.H1(plugin_name, style={'margin': 0})
         if detail
         else html.H5(plugin_name, style={'margin': 0})
     )
@@ -514,10 +517,10 @@ def _build_plugin_card(
             ],
             className='plugin-author',
         ),
-        dbc.Textarea(**desc_textarea_kw),
+        (_plugin_description(desc) if detail else dbc.Textarea(**desc_textarea_kw)),
     ]
     if owner:
-        body_children += [
+        edit_controls = [
             dbc.Button(
                 'Update description',
                 size='sm',
@@ -527,6 +530,9 @@ def _build_plugin_card(
             ),
             html.Div(id={'type': 'edit-alert-div', 'index': plugin_name}),
         ]
+        body_children += ([html.Details([html.Summary('Edit description'),
+                          dbc.Textarea(**desc_textarea_kw),*edit_controls])]
+                         if detail else edit_controls)
 
     if detail:
         install_cmd = f"mrsm install plugin {plugin_name} -r api:<label>"
@@ -538,6 +544,13 @@ def _build_plugin_card(
                 style={'margin-bottom': 0},
             ),
         ]
+        body_children.pop(0)
+        body_children.insert(0,html.Dl([
+            html.Dt('Version'),html.Dd(plugin_version or 'Not declared'),
+            html.Dt('Publisher'),html.Dd(str(plugin_username)),
+            html.Dt('Status'),html.Dd('Installed on this server' if plugin_name in (installed or {})
+                                    else 'Published to this repository'),
+        ],className='plugin-detail-properties'))
 
     installed = installed or {}
     reinstall = plugin_name in installed
@@ -718,10 +731,7 @@ def build_plugin_detail(
             installed = {}
     return html.Div([
         back_button,
-        html.Br(),
-        html.Br(),
         _build_plugin_card(plugin_name, session_data, detail=True, admin=admin, installed=installed),
-        html.Br(),
         _source_browser('repository', plugin_name, session_data),
     ], className='plugin-detail-wrapper')
 
@@ -742,14 +752,72 @@ def build_installed_plugin_detail(name: str, session: Any) -> Any:
                       if plugin['name'] == name), None)
     if not installed:
         return html.Div([back, html.H5('This plugin is not installed.')], className='console-empty')
+    from meerschaum.api.dash.connector_listing import mask_text
+    description = installed.get('description') or _installed_description(name,session)
+    actions = []
+    if installed.get('origin'):
+        actions.append(dbc.Button('Update',color='secondary',
+            id={'type':'plugin-action','action':'update','index':name}))
+    actions.append(dbc.Button('Uninstall',color='danger',outline=True,
+        id={'type':'plugin-action','action':'uninstall','index':name}))
+    info = [('Runtime',installed['kind']),
+            ('Layout','Single file' if installed['layout']=='file' else 'Package'),
+            ('Version',installed['version'] or 'Not declared'),
+            ('Installed from',mask_text(installed.get('origin') or 'Local files'))]
+    status = ('Failed to load' if installed.get('import_error') else
+              'Not loaded' if installed.get('not_loaded') else 'Installed')
+    details = []
+    for label,value in info:
+        details += [html.Dt(label),html.Dd(value)]
+    requirements = installed['required']+installed.get('plugin_requirements',[])
     return html.Div([
         back,
-        html.H3(name),
-        html.P(' · '.join(value for value in (plugin_kind_label(installed), installed['version']) if value),
-               className='text-muted'),
-        html.Div([dbc.Badge(item, color='secondary', class_name='me-1') for item in installed['provides']]),
+        html.Header([
+            html.Div([html.H1(name),dbc.Badge(status,color='warning' if status!='Installed' else 'success')]),
+            html.Div(actions,className='plugin-detail-actions'),
+        ],className='plugin-detail-header'),
+        _plugin_description(description),
+        html.Div([
+            html.Section([html.H2('Details'),html.Dl(details,className='plugin-detail-properties')]),
+            html.Section([html.H2('Provides'),html.Div([
+                dbc.Badge(item,color='secondary') for item in installed['provides']
+            ],className='plugin-capabilities') if installed['provides'] else html.P('No capabilities declared.')]),
+            html.Section([html.H2('Requirements'),
+                html.Ul([html.Li(html.Code(item)) for item in requirements]) if requirements
+                else html.P('No additional packages declared.',className='text-muted')]),
+        ],className='plugin-detail-metadata'),
         _source_browser('installed', name, session),
-    ], className='plugin-detail-wrapper')
+    ],className='plugin-detail-wrapper')
+
+
+def _plugin_description(value):
+    text = str(value or '').strip()
+    if not text:
+        return None
+    first = text.split('\n\n',1)[0]
+    preview = first[:500]+('…' if len(first)>500 else '')
+    return html.Div([
+        html.P(preview),
+        html.Details([html.Summary('Full description'),html.Pre(text)]) if text!=preview else None,
+    ],className='plugin-detail-description')
+
+
+def _installed_description(name, session):
+    """Read a bounded entry-point docstring without importing the plugin."""
+    from meerschaum.api.dash.plugin_sources import source_files, read_source
+    import ast
+    import tomllib
+    try:
+        files = source_files('installed',name,session)
+        if 'plugin.toml' in files:
+            data = tomllib.loads(read_source('installed',name,'plugin.toml',session))
+            return (data.get('plugin') or data.get('package') or data).get('description')
+        first = next((file for file in files if file.endswith('.py')),None)
+        if first:
+            return ast.get_docstring(ast.parse(read_source('installed',name,first,session)))
+    except Exception:
+        pass
+    return None
 
 
 def is_plugin_owner(plugin_name: str, session_data: Dict['str', Any]) -> bool:

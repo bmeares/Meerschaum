@@ -145,8 +145,7 @@ c=mrsm.get_connector('sql:w7console')
 assert c.set_user_attributes(User('review-source-reader',instance=c),{'role':'custom','scopes':[]})[0]
 ''')
         assert revoke.returncode == 0, revoke.stderr[-3000:]
-        page.locator('#plugin-source-file').click()
-        page.get_by_text('rc16_repository/helper.py', exact=True).click()
+        page.get_by_role('button', name='rc16_repository/helper.py', exact=True).click()
         page.get_by_text('Plugin source is not available to your account.', exact=True).wait_for()
         assert 'PRIVATE_AFTER_REVOKE' not in page.inner_text('body')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
