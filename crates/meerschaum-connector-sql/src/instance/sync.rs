@@ -825,6 +825,10 @@ impl SqlConnector {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
         }
+        if initializing_internal && flavor.is_timescaledb() && pipe.metric_key() == "engine_metrics"
+        {
+            self.upgrade_metrics_partition_interval(&sp).await?;
+        }
 
         if autoincrement_needs_reset && let Some(pk) = &primary_key {
             let max_id_query = get_max_id_query(&sp.target, pk, flavor, schema.as_deref());
@@ -918,6 +922,36 @@ impl SqlConnector {
         }
         let _ = dt_col;
         Ok(result)
+    }
+
+    /// rc17 metrics omitted the integer axis's unit, creating microsecond-sized chunks.
+    /// Correct future chunks once per connection; retained history stays untouched.
+    async fn upgrade_metrics_partition_interval(&self, sp: &SqlPipe) -> ConnectorResult<()> {
+        let ChunkInterval::Int(expected) = sp.chunk_interval().map_err(be)? else {
+            return Ok(());
+        };
+        let schema = self.get_pipe_schema(sp);
+        let schema = schema.as_deref().unwrap_or("public");
+        let query = format!(
+            "SELECT integer_interval FROM timescaledb_information.dimensions \
+             WHERE hypertable_schema = '{}' AND hypertable_name = '{}' \
+             AND column_name = 'ts_us'",
+            schema.replace('\'', "''"),
+            sp.target.replace('\'', "''"),
+        );
+        let current = self.driver.value(&query).await.map_err(be)?;
+        if current
+            .and_then(|value| value.as_i64())
+            .is_some_and(|n| n < expected)
+        {
+            let table = sql_item_name(&sp.target, self.flavor, Some(schema));
+            let query = format!(
+                "SELECT public.set_chunk_time_interval('{}', {expected})",
+                table.replace('\'', "''"),
+            );
+            self.driver.exec(&query).await.map_err(be)?;
+        }
+        Ok(())
     }
 
     /// Old internal MySQL/MariaDB history used DATETIME(0), rounding subsecond runs and

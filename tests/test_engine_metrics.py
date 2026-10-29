@@ -16,6 +16,40 @@ from tests.connectors import conns, get_flavors
 METRICS_FLAVORS = [flavor for flavor in get_flavors() if flavor in conns and flavor != 'api']
 
 
+def _check_timescale_metrics_partition_growth(conn, event_id):
+    """A day's timestamps must share a chunk, regardless of integer-axis defaults."""
+    table = '"_mrsm_internal"."mrsm_engine_metrics"'
+    where = "hypertable_schema='_mrsm_internal' AND hypertable_name='mrsm_engine_metrics'"
+    month_us = 30 * 24 * 60 * 60 * 1_000_000
+    interval = conn.value(
+        'SELECT integer_interval FROM timescaledb_information.dimensions WHERE '
+        + where + " AND column_name='ts_us'"
+    )
+    assert interval == month_us, f'Expected 30-day metrics chunks, got {interval} microseconds.'
+    before = conn.value('SELECT num_chunks FROM timescaledb_information.hypertables WHERE ' + where)
+    prefix = 'partition_probe_' + uuid.uuid4().hex + '_'
+    base_us = int(datetime.now(timezone.utc).timestamp() * 1_000_000) // month_us * month_us
+    epoch = f'({base_us}::BIGINT + hour * 3600000000::BIGINT)'
+    template_id = event_id.replace("'", "''")
+    try:
+        result = conn.exec(f'''
+            INSERT INTO {table}
+            SELECT (jsonb_populate_record(NULL::{table}, to_jsonb(template) ||
+                jsonb_build_object('event_id', '{prefix}' || hour,
+                                   'ts_us', {epoch},
+                                   'ts', to_timestamp({epoch} / 1000000.0),
+                                   'started', to_timestamp({epoch} / 1000000.0)))).*
+            FROM (SELECT * FROM {table} WHERE event_id='{template_id}' LIMIT 1) template
+            CROSS JOIN generate_series(0, 23) hour
+        ''')
+        assert result is not None
+        assert conn.value(f"SELECT COUNT(*) FROM {table} WHERE starts_with(event_id,'{prefix}')") == 24
+        after = conn.value('SELECT num_chunks FROM timescaledb_information.hypertables WHERE ' + where)
+        assert after <= before + 1, (before, after)
+    finally:
+        conn.exec(f"DELETE FROM {table} WHERE starts_with(event_id,'{prefix}')")
+
+
 @pytest.mark.parametrize('flavor', METRICS_FLAVORS)
 def test_native_metrics_capture_replacements_on_each_instance_backend(flavor):
     """Best-effort telemetry must not hide a broken backend schema or affected-row decoder."""
@@ -40,6 +74,8 @@ def test_native_metrics_capture_replacements_on_each_instance_backend(flavor):
         assert summary['rows'] == 5, result
         assert summary['duration_seconds'] >= 0, result
         assert all(item['metric_key'] == pipe.metric_key for item in result['history'])
+        if flavor.startswith('timescaledb'):
+            _check_timescale_metrics_partition_growth(conn, result['history'][0]['event_id'])
     finally:
         pipe.delete()
 
