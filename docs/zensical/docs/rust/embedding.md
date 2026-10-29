@@ -33,4 +33,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Continue with [syncing rows](pipes.md). For engine configuration and run options, browse [the engine module](https://docs.rs/meerschaum/latest/meerschaum/engine/).
+Continue with [syncing rows](pipes.md). For engine configuration and run options, browse [the engine module](https://docs.rs/meerschaum-engine/latest/meerschaum_engine/).
