@@ -2,7 +2,7 @@
 //! metadefinition built by [`crate::queries::metadef::get_pipe_metadef`] on this connector.
 
 use indexmap::IndexMap;
-use meerschaum_connector::{ConnectorResult, DateBound};
+use meerschaum_connector::{ConnectorResult, DateBound, InstanceConnector};
 use meerschaum_core::{Pipe, Value};
 use meerschaum_kernel::Frame;
 
@@ -54,6 +54,67 @@ pub fn metadef_bound(b: Option<&DateBound>) -> Bound {
 }
 
 impl SqlConnector {
+    /// Resolve the same first parent the Python facade supplies to the query builder.
+    pub(crate) async fn resolve_fetch_parent(
+        &self,
+        pipe: &Pipe,
+    ) -> ConnectorResult<Option<ParentSpec>> {
+        let Some(mut parent) = pipe.parent(&self.settings.pipe_defaults).map_err(be)? else {
+            return Ok(None);
+        };
+        let provider = self.instance_provider();
+        let external = if parent.instance_keys() == self.keys() {
+            None
+        } else {
+            provider.instance(parent.instance_keys())
+        };
+        let instance: &dyn InstanceConnector = if parent.instance_keys() == self.keys() {
+            self
+        } else if let Some(instance) = external.as_deref() {
+            instance
+        } else {
+            return Ok(None);
+        };
+        let attributes = instance.get_pipe_attributes(&parent).await?;
+        let registered = attributes
+            .get("parameters")
+            .map(Value::to_map)
+            .unwrap_or_default();
+        parent.set_parameters(meerschaum_core::value::apply_patch_maps(
+            &registered,
+            parent.raw_parameters(),
+        ));
+        if meerschaum_connector::template::needs_instance_resolution(&parent) {
+            let (resolved, warnings) = meerschaum_connector::resolve_pipe(
+                &parent,
+                instance,
+                Some(provider.as_ref()),
+                &self.settings.pipe_defaults,
+            )
+            .await;
+            for warning in warnings {
+                tracing::warn!("{warning}");
+            }
+            parent = resolved;
+        }
+        let dt_col = parent.column("datetime");
+        let dt_typ = dt_col
+            .as_ref()
+            .and_then(|column| parent.dtypes().get(column).map(Value::py_str));
+        Ok(Some(ParentSpec {
+            target: parent.target(None).map_err(be)?,
+            schema: instance.pipe_table_schema(&parent),
+            dt_col,
+            dt_typ,
+            precision_unit: parent
+                .precision(&self.settings.pipe_defaults)
+                .map_err(be)?
+                .unit
+                .name()
+                .into(),
+        }))
+    }
+
     /// `get_pipe_metadef(pipe, params, begin, end, check_existing)`. Uses the pipe's parameters as
     /// resolved so far; [`SqlConnector::prepare_pipe`] first for cross-pipe templates.
     pub fn get_pipe_metadef(
@@ -96,7 +157,11 @@ impl SqlConnector {
     pub async fn fetch(&self, pipe: &Pipe, args: &FetchArgs) -> ConnectorResult<Option<Frame>> {
         // Resolve cross-pipe templates (`{{ Pipe() }}` in the SQL definition) first.
         let pipe = self.prepare_pipe(pipe).await;
-        let Some(meta_def) = self.get_pipe_metadef_for_sync(&pipe, args)? else {
+        let mut args = args.clone();
+        if args.parent.is_none() {
+            args.parent = self.resolve_fetch_parent(&pipe).await?;
+        }
+        let Some(meta_def) = self.get_pipe_metadef_for_sync(&pipe, &args)? else {
             return Err(be(format!(
                 "Could not determine a SQL definition for {pipe}.\n    Set the key `query` in `pipe.parameters` to a valid SQL query."
             )));

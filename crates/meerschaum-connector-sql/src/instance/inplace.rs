@@ -269,6 +269,10 @@ impl SqlConnector {
         } else {
             None
         };
+        let parent = match self.resolve_fetch_parent(pipe).await {
+            Ok(parent) => parent,
+            Err(error) => return SuccessTuple::fail(error.to_string()),
+        };
         let metadef = match self.get_pipe_metadef_for_sync(
             pipe,
             &FetchArgs {
@@ -277,7 +281,7 @@ impl SqlConnector {
                 check_existing,
                 params: params.map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
                 sync_time,
-                parent: None,
+                parent,
             },
         ) {
             Ok(Some(m)) => m,

@@ -60,6 +60,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - Replace an authoritative time window with `pipe.sync(rows, begin=..., end=..., replace=True)`.
 - Persist numeric sync metrics across processes, with current access checks before aggregation.
 - Keep private history private when a Pipe or Pipeline is deleted, recreated, or its access changes.
+- Bound SQL parent reads before window functions, keeping incremental syncs fast.
 - Initialize internal tables and indexes safely when workers start together.
 - Publish complete Job properties atomically, keeping listings consistent during updates.
 - Release a Pipe lease even when acquisition completes after cancellation.

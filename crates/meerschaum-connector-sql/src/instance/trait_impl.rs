@@ -151,6 +151,11 @@ impl InstanceConnector for SqlConnector {
         Some(self.pipe_table_name(&sp))
     }
 
+    fn pipe_table_schema(&self, pipe: &Pipe) -> Option<String> {
+        let sp = self.sql_pipe(pipe).ok()?;
+        self.get_pipe_schema(&sp)
+    }
+
     fn pipe_target_aliases(&self, pipe: &Pipe) -> Vec<String> {
         let Ok(sp) = self.sql_pipe(pipe) else {
             return Vec::new();

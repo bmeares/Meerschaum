@@ -613,6 +613,12 @@ pub trait InstanceConnector: Connector {
         None
     }
 
+    /// The SQL schema containing this pipe's physical table, when the instance has schemas.
+    fn pipe_table_schema(&self, pipe: &Pipe) -> Option<String> {
+        let _ = pipe;
+        None
+    }
+
     /// Physical target aliases used to authorize a pipe before accessing its data. SQL
     /// instances include identifier truncation and any database byte limit; this must not
     /// require a connection or change the pipe's parameters.
