@@ -133,23 +133,34 @@ def test_connectors_page_masks_secrets_and_tests_connections(server, context):
     page = tab.page
     row = page.locator('#connectors-table tr[data-keys="sql:w7secret"]')
     assert 'Environment' in row.inner_text() and 'MRSM_SQL_W7SECRET' in row.inner_text()
-    assert '127.0.0.1' in row.inner_text() and 'postgresql' in row.inner_text()
-    row.locator('summary').click()
-    assert 'w7user:' in row.inner_text()
+    assert '127.0.0.1' not in row.inner_text()
+    row.get_by_role('button',name='sql:w7secret',exact=True).click()
+    modal = page.locator('.connector-info-modal.show')
+    modal.wait_for()
+    assert '127.0.0.1' in modal.inner_text() and 'postgresql' in modal.inner_text()
+    modal.get_by_role('button',name='Inspect',exact=True).click()
+    modal.locator('.connectors-attributes').wait_for()
+    assert 'w7user:' in modal.inner_text()
     ### The mask reads as dots, not as `•` escapes.
-    assert 'postgresql://w7user:••••••@127.0.0.1:1/w7' in row.inner_text()
-    assert '\\u2022' not in row.inner_text()
+    assert 'postgresql://w7user:••••••@127.0.0.1:1/w7' in modal.inner_text()
+    assert '\\u2022' not in modal.inner_text()
     ### An administrator tests it: the failure is shown, the password never is.
-    row.locator('.connectors-test-button').click()
+    modal.locator('.connectors-test-button').click()
     page.wait_for_function(
-        "document.querySelector('#connectors-table tr[data-keys=\"sql:w7secret\"] "
+        "document.querySelector('.connector-info-modal.show "
         ".connectors-test-result').innerText.length > 0",
         timeout=60000,
     )
-    assert 'Connected' not in row.locator('.connectors-test-result').inner_text()
+    assert 'Connected' not in modal.locator('.connectors-test-result').inner_text()
+    modal.get_by_role('button',name='Close',exact=True).last.click()
+    modal.wait_for(state='hidden')
     local = page.locator('#connectors-table tr[data-keys="sql:w7console"]')
-    local.locator('.connectors-test-button').click()
-    _wait_text(page, '#connectors-table tr[data-keys="sql:w7console"] .connectors-test-result', 'Connected')
+    local.get_by_role('button',name='sql:w7console',exact=True).click()
+    modal.wait_for()
+    modal.locator('.connectors-test-button').click()
+    _wait_text(page, '.connector-info-modal.show .connectors-test-result', 'Connected')
+    modal.get_by_role('button',name='Close',exact=True).last.click()
+    modal.wait_for(state='hidden')
     ### The filter keeps the matching rows.
     page.fill('#connectors-filter', 'w7secret')
     page.wait_for_function(
@@ -220,7 +231,6 @@ def test_overview_and_connectors_fit_a_phone(server, browser):
         assert small == [], small
 
         tab.goto('/dash/connectors', '#connectors-table')
-        page.locator('#connectors-table tr[data-keys="sql:w7secret"] summary').click()
         ### A long variable name (or path) wraps beside its label inside the card.
         page.evaluate("""() => {
             document.querySelector('#connectors-table tr[data-keys="sql:w7secret"] .connectors-source-detail')
@@ -232,6 +242,15 @@ def test_overview_and_connectors_fit_a_phone(server, browser):
         assert overflowing == [], overflowing
         small = page.evaluate(SMALL_TARGETS, '#connectors-page')
         assert small == [], small
+        page.locator('#connectors-table tr[data-keys="sql:w7secret"]').get_by_role(
+            'button',name='sql:w7secret',exact=True).click()
+        modal = page.locator('.connector-info-modal.show')
+        modal.wait_for()
+        modal.get_by_role('button',name='Inspect',exact=True).click()
+        modal.locator('.connectors-attributes').wait_for()
+        small = page.evaluate(SMALL_TARGETS, '.connector-info-modal.show')
+        assert small == [], small
+        assert modal.evaluate('element => element.scrollWidth <= element.clientWidth + 1')
         assert _errors(tab) == [], _errors(tab)
     finally:
         context.close()

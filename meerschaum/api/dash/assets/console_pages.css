@@ -212,7 +212,7 @@
 .plugin-detail-properties dd { margin: 0; overflow-wrap: anywhere; }
 .plugin-detail-description pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .plugin-detail-description p { max-width: 78ch; }
-.connector-key-button { min-height: 44px; padding: 4px 0; text-align: left; max-width: 100%; }
+.connector-key-button { min-height: 44px; min-width: 44px; padding: 4px 0; text-align: left; max-width: 100%; }
 .connector-key-button:hover code, .connector-key-button:focus-visible code { color: #85caff; text-decoration: underline; }
 .connector-info-modal .modal-dialog { max-width: min(52rem, calc(100vw - 24px)); }
 .connector-info-modal .modal-body { min-width: 0; overflow-wrap: anywhere; }
@@ -228,4 +228,6 @@
     .plugin-source-tree { max-height: 200px; border-right: 0; border-bottom: 1px solid #47515c; }
     .plugin-source-file, .plugin-source-folder { min-height: 44px; }
     .connector-info-modal .modal-footer { gap: 8px; }
+    .connector-info-modal .modal-footer .btn { min-height: 44px; }
+    .connector-info-modal .modal-header .btn-close { min-width: 44px; min-height: 44px; padding: 0; }
 }

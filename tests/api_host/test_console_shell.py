@@ -185,9 +185,24 @@ client.get('/dash/_dash-layout')
 sign_in('shelluser', user_type='admin', session_id='00000000-0000-4000-8000-0000005e1101')
 client.cookies.set('mrsm-session-id', '00000000-0000-4000-8000-0000005e1101')
 page = route(client, dash_app, '/dash/connectors')
-text = json.dumps(page, ensure_ascii=False)
 rows = {row['keys']: row for row in cl.list_connectors()}
-pre = [n['props'].get('children') for n in walk(page) if n.get('props', {}).get('className') == 'connectors-attributes']
+assert find(page, 'connector-info-modal') is not None
+assert not [n for n in walk(page) if n.get('props', {}).get('className') == 'connectors-attributes']
+callback = next(key for key in dash_app.callback_map if 'connector-inspect-content' in key)
+inspections = []
+for keys in ('sql:revpatch','sql:atsecret','valkey:revcache','sql:jsonsecret','hookish:main'):
+    button = json.dumps({'type':'connector-inspect-button','index':keys},sort_keys=True,separators=(',',':'))
+    response = client.post('/dash/_dash-update-component',json={
+        'output':callback,
+        'outputs':{'id':{'type':'connector-inspect-content','index':keys},'property':'children'},
+        'inputs':[{'id':button,'property':'n_clicks','value':1}],
+        'state':[{'id':'session-store','property':'data','value':{'session-id':'00000000-0000-4000-8000-0000005e1101'}}],
+        'changedPropIds':[button+'.n_clicks'],
+    })
+    assert response.status_code == 200, response.text[-2000:]
+    inspections.append(next(iter(response.json()['response'].values()))['children'])
+text = json.dumps([page,*inspections], ensure_ascii=False)
+pre = [n['props'].get('children') for n in walk(inspections) if n.get('props', {}).get('className') == 'connectors-attributes']
 print('JSON:' + json.dumps({
     'leaks': [secret for secret in %r if secret in text or secret in cl.as_json(list(rows.values()))],
     'escaped_mask': '\\\\u2022' in text,
