@@ -38,4 +38,4 @@ Register the sources and transformations before calling the helper. If definitio
 
 The root-level reexports are the stable Rust interface. The implementation module used for registry and selection helpers may change in a minor release, so pin the crate version when depending on those details.
 
-See [Engine](https://docs.rs/meerschaum/latest/meerschaum/struct.Engine.html), [RunOptions](https://docs.rs/meerschaum/latest/meerschaum/struct.RunOptions.html), and [engine internals](https://docs.rs/meerschaum/latest/meerschaum/engine/) for full signatures. The [operational Pipeline guide](../../reference/pipelines/index.md) explains planning, backfills, and recovery.
+See [Engine](https://docs.rs/meerschaum/latest/meerschaum/struct.Engine.html), [RunOptions](https://docs.rs/meerschaum/latest/meerschaum/struct.RunOptions.html), and [engine internals](https://docs.rs/meerschaum-engine/latest/meerschaum_engine/) for full signatures. The [operational Pipeline guide](../../reference/pipelines/index.md) explains planning, backfills, and recovery.
