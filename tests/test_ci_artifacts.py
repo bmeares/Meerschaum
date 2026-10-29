@@ -60,6 +60,25 @@ def test_downloaded_binary_provenance_ignores_transport_mtime(producer):
     assert record['build']['rustc'] == producer[1].read_text().strip()
 
 
+def test_dependency_lock_provenance_matches_windows_and_unix_checkouts(producer, tmp_path):
+    repo, compiler, payload = producer
+    (repo / '.gitattributes').write_bytes((REPO / '.gitattributes').read_bytes())
+    git(repo, 'add', '.gitattributes')
+    git(repo, 'commit', '-qm', 'Use the repository checkout attributes')
+    windows = tmp_path / 'windows-checkout'
+    git(repo, '-c', 'core.autocrlf=true', 'clone', '-q', str(repo), str(windows))
+    git(windows, 'config', 'core.autocrlf', 'true')
+    (payload / 'mrsm').write_bytes(b'fixture-binary')
+    manifest = payload / 'provenance.json'
+    artifacts.create_manifest(payload, manifest, kind='binary', profile='release',
+                              target='x86_64-pc-windows-msvc', toolchain_file=compiler,
+                              repo=windows)
+    artifacts.verify_manifest(manifest, kind='binary', profile='release',
+                              target='x86_64-pc-windows-msvc', repo=repo)
+    assert (windows / 'Cargo.lock').read_bytes() == (repo / 'Cargo.lock').read_bytes()
+    assert (windows / 'rust-toolchain.toml').read_bytes() == (repo / 'rust-toolchain.toml').read_bytes()
+
+
 @pytest.mark.parametrize('change', ['bytes', 'missing', 'wrong-profile', 'wrong-target', 'other-program'])
 def test_an_artifact_cannot_silently_change_or_substitute_its_payload(producer, change):
     program, manifest = binary_manifest(producer)
