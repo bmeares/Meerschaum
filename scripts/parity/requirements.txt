@@ -61,7 +61,7 @@ greenlet==3.5.6
 pyasn1==0.6.4
 pydantic==2.13.4
 pydantic-core==2.46.4
-pyjwt==2.13.0
+pyjwt==2.15.0
 python-dotenv==1.2.2
 python-jose==3.5.0
 python-multipart==0.0.32
