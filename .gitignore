@@ -1,4 +1,3 @@
-.pyodide-xbuildenv/
 *.pem
 file_system_*
 *Zone.Identifier
@@ -6,14 +5,10 @@ file_system_*
 /* *.yaml */
 *.sqlite
 *.mrsm_history
-.pyinstaller
 .venv/
-.tuna/
-.snakeviz/
 *.prof
 *.db
 scratch/
-/portable/
 /test_root/
 /tests/data/
 /test_plugins/
@@ -121,6 +116,8 @@ celerybeat.pid
 
 # Environments
 .env
+# Compose parity fixture: dummy values that the recorded output depends on.
+!crates/meerschaum-compose/tests/fixtures/projects/*/.env
 .venv
 env/
 # venv/
@@ -148,3 +145,11 @@ dmypy.json
 .aider*
 .claude/*
 !.claude/skills/
+target/
+
+# v5 parity harness reference interpreter (scripts/parity/setup_reference.sh)
+.venv-ref/
+/.venv-test/
+
+# Benchmark checkpoints (scripts/bench/run.py writes one per stage; the final results are committed)
+scripts/bench/results/*-checkpoint-*.json

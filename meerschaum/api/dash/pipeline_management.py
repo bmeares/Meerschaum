@@ -1,0 +1,240 @@
+"""
+The pieces of the Pipelines pages: the styled `Pipeline('name')`, the member panel shared by the
+New pipeline stepper and Edit mode, the detail page's header, Edit bar and Manage dialogs.
+"""
+from meerschaum.utils.packages import import_html, import_dcc
+import dash_bootstrap_components as dbc
+html, dcc = import_html(), import_dcc()
+
+
+def pipeline_title(name, registry=None, link=False):
+    """
+    `Pipeline('name')` styled like the CLI's `pipeline_repr()` (a bold `Pipeline(` and `)`, the
+    name like a metric key), with the registry as a badge.
+    """
+    title = html.Span([
+        html.Span('Pipeline(', className='mrsm-repr-type'),
+        html.Span(repr(str(name)), className='mrsm-repr-name'),
+        html.Span(')', className='mrsm-repr-type'),
+    ], className='mrsm-pipeline-repr')
+    if link:
+        from urllib.parse import quote
+        title = html.A(title, href='/dash/pipelines/' + quote(str(name), safe=''),
+                       className='pipeline-title-link')
+    parts = [title]
+    if registry:
+        parts.append(dbc.Badge(str(registry), color='secondary', className='pipeline-registry-badge'))
+    return parts
+
+
+def _refresh_icon():
+    """The refresh icon (an inline SVG, so it renders with any font)."""
+    from meerschaum.api.dash.components import build_icon
+    return build_icon('refresh')
+
+
+def runs_placeholder():
+    """A card's Runs before they load: a fixed-height slot, replaced in place."""
+    return html.Div(dbc.Spinner(size='sm', color='secondary'), className='pipeline-runs-placeholder',
+                    role='status', **{'aria-label': 'Loading runs'})
+
+
+def count_label(count, noun):
+    """`1 member`, `2 members`."""
+    return f"{count} {noun}" + ('' if count == 1 else 's')
+
+
+def resolved_count(run):
+    """How many Pipes a run of a Pipeline synced: its members and the Pipes it followed."""
+    import json
+    selection = ((run or {}).get('run') or {}).get('selection')
+    if isinstance(selection, str):
+        try:
+            selection = json.loads(selection)
+        except ValueError:
+            return None
+    resolved = selection.get('resolved_targets') if isinstance(selection, dict) else None
+    return len(resolved) if isinstance(resolved, list) and resolved else None
+
+
+def pipes_label(definition, latest_run=None):
+    """
+    How many Pipes a Pipeline syncs: its members, with the parents or children it follows
+    counted from its latest run when there is one (`3 Pipes`), else named (`1 Pipe + children`).
+    """
+    definition = definition or {}
+    targets = definition.get('targets') or []
+    parents, children = definition.get('parents'), definition.get('children')
+    if not parents and not children:
+        return count_label(len(targets), 'Pipe')
+    resolved = resolved_count(latest_run)
+    if resolved:
+        return count_label(resolved, 'Pipe')
+    follows = 'parents and children' if parents and children else ('parents' if parents else 'children')
+    return f"{count_label(len(targets), 'Pipe')} + {follows}"
+
+
+def build_member_panel(prefix, registry, instance_options):
+    """
+    Search existing Pipes on any instance and register new ones (applied when the draft is
+    saved or created). `prefix` keeps the stepper's and Edit mode's ids apart.
+    """
+    return html.Div([
+        dcc.Dropdown(id=f'{prefix}-draft-members', options=[], multi=True, closeOnSelect=True,
+                     placeholder='Members'),
+        html.Div([
+            dcc.Dropdown(id=f'{prefix}-add-instance', options=instance_options, value=str(registry),
+                         clearable=False, placeholder='Instance', className='pipeline-add-instance'),
+            dbc.Button('Find Pipes', id=f'{prefix}-add-find', size='sm', color='secondary'),
+        ], className='pipeline-add-find-row'),
+        html.Details([
+            html.Summary('New Pipe'),
+            dbc.Input(id=f'{prefix}-add-connector', placeholder='Connector keys', size='sm'),
+            dbc.Input(id=f'{prefix}-add-metric', placeholder='Metric key', size='sm'),
+            dbc.Input(id=f'{prefix}-add-location', placeholder='Location key', size='sm'),
+            html.Details([
+                html.Summary('Parameters'),
+                dbc.Textarea(id=f'{prefix}-add-parameters', value='{}', placeholder='{}'),
+            ], className='pipeline-add-parameters'),
+            dbc.Button('Add new Pipe', id=f'{prefix}-add-register', size='sm'),
+        ], className='pipeline-add-new'),
+        html.Div(id=f'{prefix}-add-alert'),
+        dcc.Store(id=f'{prefix}-member-options', data={'options': []}),
+    ], className='pipeline-member-panel')
+
+
+#: What a Pipeline's page may offer: `(right, label)` of its header's Manage menu.
+MANAGE_ITEMS = (
+    ('analyze', 'Analyze tags', 'pipeline-analyze'),
+    ('schedule', 'Schedule', 'pipeline-manage-schedule'),
+    ('copy', 'Copy', 'pipeline-manage-copy'),
+    ('rename', 'Rename', 'pipeline-manage-rename'),
+    ('clear', 'Clear', 'pipeline-manage-clear'),
+    ('drop', 'Drop', 'pipeline-manage-drop'),
+    ('delete', 'Delete', 'pipeline-delete'),
+)
+
+
+def pipeline_rights(viewer, name, registry):
+    """
+    What the viewer may do on a Pipeline's page: `sync`, `edit`, and each Manage item (every
+    member visible and theirs to change for the ones that touch members; AC7).
+    """
+    from meerschaum.api.dash import access
+    rights = {key: False for key in ('sync', 'edit') + tuple(item for item, _, _ in MANAGE_ITEMS)}
+    if viewer is None:
+        return {key: True for key in rights}
+    try:
+        parameters = access.pipeline_registry_parameters(name, registry)
+        if parameters and not access.can_see_pipe(viewer, parameters):
+            return rights
+        members_ok = access.may_sync_pipeline(viewer, name, registry)[0] if parameters else True
+        editable = access.can_edit_pipe(viewer, parameters or {}, 'pipes:write')
+    except Exception:
+        return rights
+    rights.update({
+        'sync': members_ok and viewer.can('pipes:write'),
+        'edit': editable,
+        'analyze': members_ok and editable,
+        'schedule': members_ok and viewer.can('jobs:write'),
+        'copy': members_ok and viewer.can('pipes:register'),
+        'rename': editable,
+        'clear': members_ok and viewer.can('pipes:delete'),
+        'drop': members_ok and viewer.can('pipes:drop'),
+        'delete': access.can_edit_pipe(viewer, parameters or {}, 'pipes:delete'),
+    })
+    return rights
+
+
+def build_detail_header(name, registry, rights=None):
+    """
+    The detail page's header: identity, then Sync, Plan, Edit and Manage (each only for a viewer
+    who may use it: `rights`, from `pipeline_rights`).
+    """
+    rights = rights if rights is not None else {}
+    shown = lambda key: (None if rights.get(key, True) else {'display': 'none'})
+    items = [
+        dbc.DropdownMenuItem(label, id=item_id, n_clicks=0, style=shown(key))
+        for key, label, item_id in MANAGE_ITEMS
+    ]
+    items.insert(4, dbc.DropdownMenuItem(divider=True))
+    any_item = any(rights.get(key, True) for key, _, _ in MANAGE_ITEMS)
+    return html.Div([
+        html.Div([
+            html.H3(pipeline_title(name), id='pipeline-title'),
+            dbc.Badge(str(registry), color='secondary', className='pipeline-registry-badge'),
+            dbc.Badge('Draft', id='pipeline-draft-badge', color='warning', className='pipeline-draft-badge'),
+            html.Span(id='pipeline-draft-notice', className='pipeline-unsaved-count'),
+        ], className='pipeline-identity'),
+        html.Div([
+            dbc.Button('Sync', id='pipeline-run-now', n_clicks=0, size='sm', style=shown('sync')),
+            dbc.Button('Cancel run', id='pipeline-cancel-current', n_clicks=0, size='sm', color='danger',
+                       outline=True, style={'display': 'none'}),
+            dbc.Button('Plan', id='pipeline-plan-open', n_clicks=0, size='sm', color='secondary'),
+            dbc.Button('Edit', id='pipeline-edit-toggle', n_clicks=0, size='sm', color='secondary',
+                       className='pipeline-read-only', style=shown('edit')),
+            dbc.DropdownMenu(items, label='Manage', direction='up', size='sm', color='secondary',
+                             menu_variant='dark', id='pipeline-manage-menu',
+                             className='pipeline-read-only',
+                             style=(None if any_item else {'display': 'none'})),
+            html.Div([
+                dbc.Button('Undo', id='pipeline-draft-undo', size='sm', color='secondary'),
+                dbc.Button('Redo', id='pipeline-draft-redo', size='sm', color='secondary'),
+                dbc.Button('Discard', id='pipeline-draft-discard', size='sm', color='secondary'),
+                dbc.Button('Save', id='pipeline-draft-save', size='sm', color='primary'),
+            ], className='pipeline-edit-actions pipeline-edit-only'),
+            dbc.Button(_refresh_icon(), id='pipelines-refresh-button', size='sm', color='black', title='Refresh'),
+        ], className='pipeline-header-actions'),
+        html.Div([
+            dbc.Button('Resume draft', id='pipeline-draft-resume', size='sm', color='warning'),
+            dbc.Button('Start over', id='pipeline-draft-start-over', size='sm', color='secondary'),
+        ], id='pipeline-draft-restore', className='pipeline-draft-restore', hidden=True),
+    ], className='pipeline-detail-header')
+
+
+def build_manage_dialogs():
+    """Plan, Analyze, Schedule, Copy and Rename dialogs, and the destructive confirmations."""
+    modal = lambda id, title, body, footer=None, size='lg': dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle(title)),
+        dbc.ModalBody(body),
+        *([dbc.ModalFooter(footer)] if footer else []),
+    ], id=id, is_open=False, size=size, scrollable=True, className='pipeline-dialog')
+    return html.Div([
+        modal('pipeline-plan-modal', 'Plan', html.Div(id='pipeline-plan-body'), size='xl'),
+        modal('pipeline-analyze-modal', 'Analyze tags', [
+            html.Div(id='pipeline-analysis-alert'),
+            html.Div(id='pipeline-analysis-preview'),
+        ], dbc.Button('Apply proposed tags', id='pipeline-apply-tags', color='warning', size='sm',
+                      disabled=True)),
+        modal('pipeline-schedule-modal', 'Schedule', [
+            html.Div(id='pipeline-job-settings-notice'),
+            dbc.Row([
+                dbc.Col([dbc.Label('Job name', size='sm'),
+                         dbc.Input(id='pipeline-job-name', placeholder='Job name', size='sm')], md=6),
+                dbc.Col([dbc.Label('Schedule', size='sm'),
+                         dbc.Input(id='pipeline-job-schedule', placeholder='every 5 minutes', size='sm')], md=6),
+            ], className='g-2'),
+            dbc.Row([
+                dbc.Col([dbc.Label('Workers', size='sm'), dbc.Input(id='pipeline-job-workers',
+                         type='number', min=1, step=1, value=4, size='sm')], md=4),
+                dbc.Col([dbc.Label('Retries', size='sm'), dbc.Input(id='pipeline-job-retries',
+                         type='number', min=0, step=1, value=0, size='sm')], md=4),
+                dbc.Col(dbc.Checkbox(id='pipeline-job-force', label='Allow rebuilds', value=False),
+                        md=4, className='pipeline-job-force'),
+            ], className='g-2 mt-1 mb-3'),
+            dbc.Button('Create scheduled job', id='pipeline-job-create', size='sm'),
+            html.Div(id='pipeline-jobs', className='mt-3'),
+        ]),
+        modal('pipeline-copy-modal', 'Copy', [
+            dbc.Input(id='pipeline-copy-name', placeholder='New Pipeline name', size='sm'),
+            html.Div(id='pipeline-copy-alert'),
+        ], dbc.Button('Copy', id='pipeline-copy-confirm', size='sm')),
+        modal('pipeline-rename-modal', 'Rename', [
+            dbc.Input(id='pipeline-rename-name', placeholder='New Pipeline name', size='sm'),
+            html.Div(id='pipeline-rename-alert'),
+        ], dbc.Button('Rename', id='pipeline-rename-confirm', size='sm')),
+        dcc.ConfirmDialog(id='pipeline-destructive-confirm'),
+        dcc.Store(id='pipeline-destructive-action'),
+        dcc.ConfirmDialog(id='pipeline-delete-confirm'),
+        dcc.Store(id='pipeline-delete-target'),
+    ])

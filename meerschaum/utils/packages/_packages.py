@@ -13,7 +13,7 @@ packages dictionary is structured in the following schema:
     }
 """
 
-from typing import Dict
+from typing import Dict, List
 
 _MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/wheels/"
 
@@ -75,8 +75,8 @@ packages: Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
-        'duckdb'                     : 'duckdb>=1.0.0',
-        'duckdb_engine'              : 'duckdb-engine>=0.13.0',
+        'duckdb'                     : 'duckdb>=1.5.6',
+        'duckdb_engine'              : 'duckdb-engine>=0.17.0',
     },
     'drivers-extras': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
@@ -158,15 +158,13 @@ packages['polars'] = {
     'pyarrow'                        : packages['sql']['pyarrow'],
     'geoarrow'                       : packages['gis']['geoarrow'],
 }
+### The web console (Plotly Dash, served by the API host; design D21). `dash_daq`, `flask_compress`,
+### `terminado` and `tornado` (v4's console) are not used any more: the terminal is the Rust server's.
 packages['dash'] = {
-    'flask_compress'                 : 'Flask-Compress>=1.17.0',
     'dash'                           : 'dash>=4.1.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=2.0.4',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=2.0.5',
-    'dash_daq'                       : 'dash-daq>=0.6.0',
-    'terminado'                      : 'terminado>=0.18.1',
-    'tornado'                        : 'tornado>=6.5.1',
     'a2wsgi'                         : 'a2wsgi>=1.10.0',
 }
 packages['api'] = {
@@ -224,8 +222,95 @@ for group, import_names in packages.items():
         _full[import_name] = install_name
 packages['full'] = _full
 
-extras = {
-    group: list(import_names_install_names_map.values())
-    for group, import_names_install_names_map in packages.items()
-    if not group.startswith('_')
+### The v5 distribution extras (docs/design/v5.0.0.md §12.1, D20): `pip install meerschaum[<extra>]`.
+### This is the source for `[project.optional-dependencies]` in the root pyproject.toml;
+### `scripts/check_packaging.py` fails if the two drift apart. `{import_name: install_name}`.
+### The v4 groups above stay for the transitional Python code (`attempt_import`, `mrsm upgrade
+### packages <group>`, `mrsm show packages <group>`): the groups that share a name with an extra
+### (`sql`, `api`, `dash`, `polars`, `gui`, `full`) keep their v4 contents until that code moves
+### to Rust, while the new-only names (`pandas`, `geo`, `shell`, `cli-tools`, `sql-*`) are real
+### groups too.
+_extras_packages: Dict[str, Dict[str, str]] = {
+    'pandas': {
+        'pandas'                     : 'pandas>=3.0.0',
+        'pyarrow'                    : 'pyarrow>=20.0.0',
+    },
+    'polars': {
+        'polars'                     : 'polars>=1.43.2',
+    },
+    'geo': {
+        'shapely'                    : 'shapely>=2.0.7',
+        'pyproj'                     : 'pyproj>=3.7.1',
+        'geopandas'                  : 'geopandas>=1.0.1',
+        'geoarrow'                   : 'geoarrow-types>=0.3.0',
+    },
+    'sql': {
+        'sqlalchemy'                 : 'SQLAlchemy>=2.0.41',
+        'psycopg'                    : 'psycopg[binary]>=3.2.9',
+        'pymysql'                    : 'PyMySQL>=0.9.0',
+    },
+    'sql-mssql': {
+        'pyodbc'                     : 'pyodbc>=4.0.30',
+    },
+    'sql-oracle': {
+        'oracledb'                   : 'oracledb>=2.5.0',
+    },
+    'sql-duckdb': {
+        'duckdb'                     : 'duckdb>=1.5.6',
+        'duckdb_engine'              : 'duckdb-engine>=0.17.0',
+    },
+    'sql-cockroachdb': {
+        'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
+    },
+    'api': {
+        'fastapi'                    : 'fastapi>=0.128.0',
+        'uvicorn'                    : 'uvicorn>=0.35.0',
+        'a2wsgi'                     : 'a2wsgi>=1.10.0',
+        'multipart'                  : 'python-multipart>=0.0.20',
+        'jwt'                        : 'PyJWT>=2.8.0',
+        'websockets'                 : 'websockets>=15.0.1',
+    },
+    'dash': {
+        'dash'                       : 'dash>=4.1.0',
+        'a2wsgi'                     : 'a2wsgi>=1.10.0',
+        'dash_bootstrap_components'  : 'dash-bootstrap-components>=2.0.4',
+        'dash_ace'                   : 'dash-ace>=0.2.1',
+        ### The console builds its app with `dash_extensions.enrich.DashProxy` (`Trigger` and
+        ### duplicate outputs, which plugins written for v4's console use).
+        'dash_extensions'            : 'dash-extensions>=2.0.5',
+    },
+    'shell': {
+        'ptpython'                   : 'ptpython>=3.0.27',
+    },
+    'cli-tools': {
+        'pgcli'                      : 'pgcli>=3.1.0',
+        'mycli'                      : 'mycli>=1.23.2',
+        'litecli'                    : 'litecli>=1.5.0',
+        'gadwall'                    : 'gadwall>=0.2.0',
+    },
+    'gui': {
+        'webview'                    : 'pywebview>=3.6.3',
+    },
 }
+### `[full]` is the union of these extras (`cli-tools` and `gui` are excluded, as in v4).
+_full_extras = ('pandas', 'polars', 'geo', 'sql', 'api', 'dash', 'shell')
+
+### Make the new-only groups available to `show/upgrade packages` and the install-name lookup.
+for _group, _import_names in _extras_packages.items():
+    if _group not in packages:
+        packages[_group] = dict(_import_names)
+    for _import_name, _install_name in _import_names.items():
+        all_packages.setdefault(_import_name, _install_name)
+
+extras: Dict[str, List[str]] = {
+    group: list(dict.fromkeys(_import_names.values()))
+    for group, _import_names in _extras_packages.items()
+}
+### The console runs in the API host and shows pipe data as pandas frames, so `[dash]` brings the
+### `api` and `pandas` extras with it (`pip install meerschaum[dash]` is a working console).
+extras['dash'] = list(dict.fromkeys(extras['dash'] + extras['api'] + extras['pandas']))
+extras['full'] = list(dict.fromkeys(
+    install_name
+    for group in _full_extras
+    for install_name in extras[group]
+))

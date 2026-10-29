@@ -1,0 +1,1798 @@
+{
+  "columns": 100,
+  "steps": [
+    {
+      "kind": "sql",
+      "queries": [
+        "CREATE TABLE src_weather (ts TIMESTAMP, station INTEGER, temperature REAL)",
+        "INSERT INTO src_weather VALUES ('2024-01-01 00:00:00', 1, 2.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-01 00:00:00', 2, 3.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-02 00:00:00', 1, 4.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-02 00:00:00', 2, 5.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-03 00:00:00', 1, 5.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-03 00:00:00', 2, 6.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-04 00:00:00', 1, 7.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-04 00:00:00', 2, 8.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-05 00:00:00', 1, 8.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-05 00:00:00', 2, 9.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-06 00:00:00', 1, 10.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-06 00:00:00', 2, 11.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-07 00:00:00', 1, 11.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-07 00:00:00', 2, 12.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-08 00:00:00', 1, 13.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-08 00:00:00', 2, 14.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-09 00:00:00', 1, 14.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-09 00:00:00', 2, 15.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-10 00:00:00', 1, 16.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-10 00:00:00', 2, 17.0)"
+      ]
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 No pipes to show.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:local",
+        "-m",
+        "weather",
+        "-i",
+        "sql:local",
+        "--params",
+        "{\"fetch\": {\"definition\": \"SELECT * FROM src_weather\"}, \"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Successfully registered 1 pipe.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:local",
+        "-m",
+        "weather",
+        "-i",
+        "sql:local",
+        "--params",
+        "{\"fetch\": {\"definition\": \"SELECT * FROM src_weather\"}, \"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 Failed to register 1 pipe.\u001b[0m\n\n",
+      "stderr": "\u001b[1;33m 🔔 \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;33m is already registered.\u001b[0m\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[35m  Attributes for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[35m:\u001b[0m\n\u001b[35m  ──────────────────────────────────────────────────────────────────\u001b[0m\n\u001b[1m{\u001b[0m\n  \u001b[1;34m\"connector_keys\"\u001b[0m: \u001b[32m\"sql:local\"\u001b[0m,\n  \u001b[1;34m\"metric_key\"\u001b[0m: \u001b[32m\"weather\"\u001b[0m,\n  \u001b[1;34m\"location_key\"\u001b[0m: \u001b[3;35mnull\u001b[0m,\n  \u001b[1;34m\"parameters\"\u001b[0m: \u001b[1m{\u001b[0m\n    \u001b[1;34m\"fetch\"\u001b[0m: \u001b[1m{\u001b[0m\n      \u001b[1;34m\"definition\"\u001b[0m: \u001b[32m\"SELECT * FROM src_weather\"\u001b[0m\n    \u001b[1m}\u001b[0m,\n    \u001b[1;34m\"columns\"\u001b[0m: \u001b[1m{\u001b[0m\n      \u001b[1;34m\"datetime\"\u001b[0m: \u001b[32m\"ts\"\u001b[0m,\n      \u001b[1;34m\"id\"\u001b[0m: \u001b[32m\"station\"\u001b[0m\n    \u001b[1m}\u001b[0m\n  \u001b[1m}\u001b[0m,\n  \u001b[1;34m\"pipe_id\"\u001b[0m: \u001b[1;36m1\u001b[0m\n\u001b[1m}\u001b[0m\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "{\"connector_keys\": \"sql:local\", \"metric_key\": \"weather\", \"location_key\": null, \"parameters\": {\"fetch\": {\"definition\": \"SELECT * FROM src_weather\"}, \"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}, \"pipe_id\": 1}\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "rowcounts",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                          Pipe row-counts:                                          \n                                                                                                    \n  \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                                \n  0                                                                                                 \n                                                                                                    \n                                                                                                    \n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "sync",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[38;5;114m ✅ Finished syncing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[38;5;114m:\u001b[0m\n    Inserted 20, updated 0 rows.\n    \n\n\n                                     Successfully synced pipes:                                     \n                                                                                                    \n  ✅ \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                             \n  ―――――――――――――――――――――――――――――――――――――――――――――――――――――                                             \n  Inserted 20, updated 0 rows.                                                                      \n                                                                                                    \n                                                                                                    \n                                                                                                    \n\n\u001b[1;92m 🎉 It took <DURATION> to sync 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "rowcounts",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                          Pipe row-counts:                                          \n                                                                                                    \n  \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                                \n  20                                                                                                \n                                                                                                    \n                                                                                                    \n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "rowcounts",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "Pipe('sql:local', 'weather', instance='sql:local')\n20\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "columns",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m  \u001b[0m\n  Index Columns for \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m:\n  ─────────────────────────────────────────────────────────────────────\n\u001b[1m{\u001b[0m\u001b[32m'datetime'\u001b[0m: \u001b[32m'ts'\u001b[0m, \u001b[32m'id'\u001b[0m: \u001b[32m'station'\u001b[0m\u001b[1m}\u001b[0m\n\n              ╷         ╷                   \n \u001b[1m \u001b[0m\u001b[1;37mColumn     \u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1;36mDB Type\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1;33mPD Type         \u001b[0m\u001b[1m \u001b[0m \n╶─────────────┼─────────┼──────────────────╴\n  \u001b[37mts         \u001b[0m │ \u001b[36mNUMERIC\u001b[0m │ \u001b[33mdatetime        \u001b[0m  \n  \u001b[37mstation    \u001b[0m │ \u001b[36mINTEGER\u001b[0m │ \u001b[33mint32[pyarrow]  \u001b[0m  \n  \u001b[37mtemperature\u001b[0m │ \u001b[36m   REAL\u001b[0m │ \u001b[33mfloat64[pyarrow]\u001b[0m  \n              ╵         ╵                   \n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "data",
+        "-i",
+        "sql:local",
+        "--begin",
+        "2024-01-08",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "{\"connector_keys\": \"sql:local\", \"metric_key\": \"weather\", \"location_key\": null, \"parameters\": {\"fetch\": {\"definition\": \"SELECT * FROM src_weather\"}, \"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}, \"instance_keys\": \"sql:local\"}\n\"{\\\"ts\\\":{\\\"0\\\":\\\"2024-01-08T00:00:00+00:00\\\",\\\"1\\\":\\\"2024-01-08T00:00:00+00:00\\\",\\\"2\\\":\\\"2024-01-09T00:00:00+00:00\\\",\\\"3\\\":\\\"2024-01-09T00:00:00+00:00\\\",\\\"4\\\":\\\"2024-01-10T00:00:00+00:00\\\",\\\"5\\\":\\\"2024-01-10T00:00:00+00:00\\\"},\\\"station\\\":{\\\"0\\\":1,\\\"1\\\":2,\\\"2\\\":1,\\\"3\\\":2,\\\"4\\\":1,\\\"5\\\":2},\\\"temperature\\\":{\\\"0\\\":13.0,\\\"1\\\":14.0,\\\"2\\\":14.5,\\\"3\\\":15.5,\\\"4\\\":16.0,\\\"5\\\":17.0}}\"\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "data",
+        "-i",
+        "sql:local",
+        "--begin",
+        "2024-01-08"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Data for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m from 2024-01-08 00:00:00+00:00:\u001b[0m\n| ts                        |   station |   temperature |\n|:--------------------------|----------:|--------------:|\n| 2024-01-08 00:00:00+00:00 |         1 |          13   |\n| 2024-01-08 00:00:00+00:00 |         2 |          14   |\n| 2024-01-09 00:00:00+00:00 |         1 |          14.5 |\n| 2024-01-09 00:00:00+00:00 |         2 |          15.5 |\n| 2024-01-10 00:00:00+00:00 |         1 |          16   |\n| 2024-01-10 00:00:00+00:00 |         2 |          17   |\n[6 rows x 3 columns]\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "sql",
+      "queries": [
+        "INSERT INTO src_weather VALUES ('2024-01-11 00:00:00', 1, 26.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-11 00:00:00', 2, 25.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-12 00:00:00', 1, 29.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-12 00:00:00', 2, 28.0)",
+        "INSERT INTO src_weather VALUES ('2024-01-13 00:00:00', 1, 31.5)",
+        "INSERT INTO src_weather VALUES ('2024-01-13 00:00:00', 2, 30.5)"
+      ]
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "sync",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n{\"pipe\": {\"connector_keys\": \"sql:local\", \"metric_key\": \"weather\", \"location_key\": null, \"instance_keys\": \"sql:local\"}, \"success\": true, \"message\": \"Inserted 6, updated 0 rows.\"}\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "rowcounts",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "Pipe('sql:local', 'weather', instance='sql:local')\n26\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "sync",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--begin",
+        "2024-01-01",
+        "--end",
+        "2024-01-05"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[38;5;114m ✅ Finished syncing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[38;5;114m:\u001b[0m\n    Inserted 0, updated 0 rows.\n    \n\n\n                                     Successfully synced pipes:                                     \n                                                                                                    \n  ✅ \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                             \n  ―――――――――――――――――――――――――――――――――――――――――――――――――――――                                             \n  Inserted 0, updated 0 rows.                                                                       \n                                                                                                    \n                                                                                                    \n                                                                                                    \n\n\u001b[1;92m 🎉 It took <DURATION> to sync 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "verify",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--chunk-days",
+        "5",
+        "-w",
+        "1"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Verifying \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m:\u001b[0m\n    Syncing 5 chunks (unbounded) of size '5 days' between '2024-01-01 00:00:00+00:00' and '2024-01-13 00:01:00+00:00'.\n\n\u001b[95m 💬 Verifying first chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m:\u001b[0m\n    None - 2024-01-01 00:00:00+00:00\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    None - 2024-01-01 00:00:00+00:00\n    Inserted 0, updated 0 rows.\n\n\u001b[95m 💬 Completed first chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m:\u001b[0m\n    None - 2024-01-01 00:00:00+00:00\n\n\u001b[95m 💬 Verifying batch (1/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n    Inserted 0, updated 0 rows.\n\n\n\u001b[1;92m 🎉 Completed batch (1/4):\u001b[0m\n    ──────────────────────\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n    Successfully synced 1 chunk\n    (synced 0 rows in total).\n\n\u001b[95m 💬 Verifying batch (2/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n    Inserted 0, updated 0 rows.\n\n\n\u001b[1;92m 🎉 Completed batch (2/4):\u001b[0m\n    ──────────────────────\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n    Successfully synced 1 chunk\n    (synced 0 rows in total).\n\n\u001b[95m 💬 Verifying batch (3/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n    Inserted 0, updated 0 rows.\n\n\n\u001b[1;92m 🎉 Completed batch (3/4):\u001b[0m\n    ──────────────────────\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n    Successfully synced 1 chunk\n    (synced 0 rows in total).\n\n\u001b[95m 💬 Verifying batch (4/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-13 00:01:00+00:00 - None\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-13 00:01:00+00:00 - None\n    Inserted 0, updated 0 rows.\n\n\n\u001b[1;92m 🎉 Completed batch (4/4):\u001b[0m\n    ──────────────────────\n    2024-01-13 00:01:00+00:00 - None\n    Successfully synced 1 chunk\n    (synced 0 rows in total).\n\n\n\u001b[38;5;114m ✅ Finished syncing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[38;5;114m:\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n    Successfully synced 5 chunks\n    (synced 0 rows in total).\n    \n\n\n                                     Successfully synced pipes:                                     \n                                                                                                    \n  ✅ \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                             \n  ―――――――――――――――――――――――――――――――――――――――――――――――――――――                                             \n  2024-01-01 00:00:00+00:00 - 2024-01-13 00:01:00+00:00                                             \n  Successfully synced 5 chunks                                                                      \n  (synced 0 rows in total).                                                                         \n                                                                                                    \n                                                                                                    \n                                                                                                    \n\n\u001b[1;92m 🎉 It took <DURATION> to sync 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "verify",
+        "rowcounts",
+        "-i",
+        "sql:local",
+        "--chunk-days",
+        "5",
+        "-w",
+        "1"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Verifying \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m:\u001b[0m\n    Checking 5 chunks (unbounded) of size '5 days' between '2024-01-01 00:00:00+00:00' and '2024-01-13 00:01:00+00:00'.\n\n\u001b[95m 💬 Verifying first chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m:\u001b[0m\n    None - 2024-01-01 00:00:00+00:00\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    None - 2024-01-01 00:00:00+00:00\n    Row-count is up-to-date (checked 0 rows vs 0 remote).\n\n\u001b[95m 💬 Completed first chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m:\u001b[0m\n    None - 2024-01-01 00:00:00+00:00\n\n\u001b[95m 💬 Verifying batch (1/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n\n\u001b[95m 💬 Checking row-counts for batch bounds:\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n    Row-count is up-to-date (checked 4 rows vs 4 remote).\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n    Row-count is up-to-date (checked 4 rows vs 4 remote).\n\n\u001b[95m 💬 Entire batch is up-to-date.\u001b[0m\n\n\u001b[1;92m 🎉 Completed batch (1/4):\u001b[0m\n    ──────────────────────\n    Verified chunk for \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m:\n    2024-01-01 00:00:00+00:00 - 2024-01-03 00:00:00+00:00\n    Row-count is up-to-date (checked 4 rows vs 4 remote).\n\n\u001b[95m 💬 Verifying batch (2/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n\n\u001b[95m 💬 Checking row-counts for batch bounds:\u001b[0m\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n    Row-count is up-to-date (checked 10 rows vs 10 remote).\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n    Row-count is up-to-date (checked 10 rows vs 10 remote).\n\n\u001b[95m 💬 Entire batch is up-to-date.\u001b[0m\n\n\u001b[1;92m 🎉 Completed batch (2/4):\u001b[0m\n    ──────────────────────\n    Verified chunk for \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m:\n    2024-01-03 00:00:00+00:00 - 2024-01-08 00:00:00+00:00\n    Row-count is up-to-date (checked 10 rows vs 10 remote).\n\n\u001b[95m 💬 Verifying batch (3/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n\n\u001b[95m 💬 Checking row-counts for batch bounds:\u001b[0m\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n    Row-count is up-to-date (checked 12 rows vs 12 remote).\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n    Row-count is up-to-date (checked 12 rows vs 12 remote).\n\n\u001b[95m 💬 Entire batch is up-to-date.\u001b[0m\n\n\u001b[1;92m 🎉 Completed batch (3/4):\u001b[0m\n    ──────────────────────\n    Verified chunk for \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m:\n    2024-01-08 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n    Row-count is up-to-date (checked 12 rows vs 12 remote).\n\n\u001b[95m 💬 Verifying batch (4/4) for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n    2024-01-13 00:01:00+00:00 - None\n\n\u001b[95m 💬 Checking row-counts for batch bounds:\u001b[0m\n    2024-01-13 00:01:00+00:00 - None\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-13 00:01:00+00:00 - None\n    Row-count is up-to-date (checked 0 rows vs 0 remote).\n\n\n\u001b[1;92m 🎉 Verified chunk for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m:\u001b[0m\n    2024-01-13 00:01:00+00:00 - None\n    Row-count is up-to-date (checked 0 rows vs 0 remote).\n\n\u001b[95m 💬 Entire batch is up-to-date.\u001b[0m\n\n\u001b[1;92m 🎉 Completed batch (4/4):\u001b[0m\n    ──────────────────────\n    Verified chunk for \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m:\n    2024-01-13 00:01:00+00:00 - None\n    Row-count is up-to-date (checked 0 rows vs 0 remote).\n\n\n\u001b[38;5;114m ✅ Finished syncing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[38;5;114m:\u001b[0m\n    2024-01-01 00:00:00+00:00 - 2024-01-13 00:01:00+00:00\n    Successfully checked 1 chunk\n    (synced 0 rows in total).\n    \n    Found 0 chunks to be out-of-sync.\n    \n\n\n                                     Successfully synced pipes:                                     \n                                                                                                    \n  ✅ \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                             \n  ―――――――――――――――――――――――――――――――――――――――――――――――――――――                                             \n  2024-01-01 00:00:00+00:00 - 2024-01-13 00:01:00+00:00                                             \n  Successfully checked 1 chunk                                                                      \n  (synced 0 rows in total).                                                                         \n                                                                                                    \n  Found 0 chunks to be out-of-sync.                                                                 \n                                                                                                    \n                                                                                                    \n                                                                                                    \n\n\u001b[1;92m 🎉 It took <DURATION> to sync 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "deduplicate",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[38;5;114m ✅ Finished syncing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[38;5;114m:\u001b[0m\n    Successfully deduplicated table \"sql_local_weather\".\n    \n\n\n                                     Successfully synced pipes:                                     \n                                                                                                    \n  ✅ \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                             \n  ―――――――――――――――――――――――――――――――――――――――――――――――――――――                                             \n  Successfully deduplicated table \"sql_local_weather\".                                              \n                                                                                                    \n                                                                                                    \n                                                                                                    \n\n\u001b[1;92m 🎉 It took <DURATION> to sync 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "index",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Creating indices for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\n\u001b[1;92m 🎉 Finished indexing 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "tag",
+        "pipes",
+        "-i",
+        "sql:local",
+        "production",
+        "weather"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 No tags were provided.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "tags",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 No pipes have been tagged.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "tags",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "tag",
+        "pipes",
+        "-i",
+        "sql:local",
+        "_weather"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 No tags were provided.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--tags",
+        "production",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "edit",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--params",
+        "{\"verify\": {\"chunk_days\": 3}}",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                        Pipes to be edited:                                         \n                                                                                                    \n  \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                                \n                                                                                                    \n\u001b[95m 💬 Will patch the following parameters into \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m:\u001b[0m\n\u001b[1m{\u001b[0m\u001b[32m'verify'\u001b[0m: \u001b[1m{\u001b[0m\u001b[32m'chunk_days'\u001b[0m: \u001b[1;36m3\u001b[0m\u001b[1m}\u001b[0m\u001b[1m}\u001b[0m\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "{\"connector_keys\": \"sql:local\", \"metric_key\": \"weather\", \"location_key\": null, \"parameters\": {\"fetch\": {\"definition\": \"SELECT * FROM src_weather\"}, \"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"verify\": {\"chunk_days\": 3}}, \"pipe_id\": 1}\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "vacuum",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Vacuuming \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\n    Pipe                                                Before   After  Saved\n    -------------------------------------------------------------------------\n    Pipe('sql:local', 'weather', instance='sql:local')  4.1 kB  4.1 kB    0 B\n    -------------------------------------------------------------------------\n    Total                                               4.1 kB  4.1 kB    0 B\n\n\n\u001b[1;92m 🎉 Finished vacuuming 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "analyze",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Analyzing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\n\u001b[1;92m 🎉 Finished analyzing 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "sizes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Calculating size for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\u001b[95m 💬 Size for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m: 4.1 kB\u001b[0m\n\n    Pipe                                                  Size\n    ----------------------------------------------------------\n    \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m  4.1 kB\n    ----------------------------------------------------------\n    Total                                               4.1 kB\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "sizes",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "Pipe('sql:local', 'weather', instance='sql:local')\t4.1 kB\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "partitions",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Inspecting partitions for \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\n    Pipe                                                Partitions  Interval  Rows/Part\n    -----------------------------------------------------------------------------------\n    \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m           -         -          -\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "compress",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Compressing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\n    Pipe                                                Before   After  Saved\n    -------------------------------------------------------------------------\n    Pipe('sql:local', 'weather', instance='sql:local')  4.1 kB  4.1 kB    0 B\n    -------------------------------------------------------------------------\n    Total                                               4.1 kB  4.1 kB    0 B\n\n\n\u001b[1;31m 💢 Finished compressing 1 pipe\u001b[0m\n    (0 succeeded, 1 failed).\n\n",
+      "stderr": "\u001b[1;33m 🔔 Compression is not supported for flavor 'sqlite'.\u001b[0m\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "decompress",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Decompressing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\n    Pipe                                                Before   After  Added\n    -------------------------------------------------------------------------\n    Pipe('sql:local', 'weather', instance='sql:local')  4.1 kB  4.1 kB    0 B\n    -------------------------------------------------------------------------\n    Total                                               4.1 kB  4.1 kB    0 B\n\n\n\u001b[1;31m 💢 Finished decompressing 1 pipe\u001b[0m\n    (0 succeeded, 1 failed).\n\n",
+      "stderr": "\u001b[1;33m 🔔 Decompression is not supported for flavor 'sqlite'.\u001b[0m\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "partition",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Repartitioning \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m...\u001b[0m\n\n    Pipe                                                Result  Width  Partitions\n    -----------------------------------------------------------------------------\n    Pipe('sql:local', 'weather', instance='sql:local')  FAILED      -           -\n    -----------------------------------------------------------------------------\n    Total                                                                       0\n\n\n\u001b[1;31m 💢 Repartitioned 0 of 1 pipe (1 failed) across 0 partitions.\u001b[0m\n\n",
+      "stderr": "\u001b[1;33m 🔔 Repartitioning is not supported for flavor 'sqlite'.\u001b[0m\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "copy",
+        "pipes",
+        "sql:other",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {
+        "MRSM_SQL_OTHER": "sqlite:///{root}/other.db"
+      },
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 Copying \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[95m (1 / 1)...\u001b[0m\n\n\u001b[1;92m 🎉 Successfully copied \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m to \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\n\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:other'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[1;92m.\u001b[0m\n\n\n\u001b[1;92m 🎉 Copied 1 pipe.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:other",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {
+        "MRSM_SQL_OTHER": "sqlite:///{root}/other.db"
+      },
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "{\"connector_keys\": \"sql:local\", \"metric_key\": \"weather\", \"location_key\": null, \"parameters\": {\"fetch\": {\"definition\": \"SELECT * FROM src_weather\"}, \"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"verify\": {\"chunk_days\": 3}}, \"pipe_id\": 1}\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "rowcounts",
+        "-i",
+        "sql:other",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {
+        "MRSM_SQL_OTHER": "sqlite:///{root}/other.db"
+      },
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "Pipe('sql:local', 'weather', instance='sql:other')\n0\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "connectors",
+        "sql:other"
+      ],
+      "stdin": "",
+      "env": {
+        "MRSM_SQL_OTHER": "sqlite:///{root}/other.db"
+      },
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "  \n  Configured 'sql' Connectors:\n  ────────────────────────────\n\u001b[1m{\u001b[0m\n    \u001b[32m'default'\u001b[0m: \u001b[1m{\u001b[0m\u001b[1m}\u001b[0m,\n    \u001b[32m'main'\u001b[0m: \u001b[1m{\u001b[0m\n        \u001b[32m'username'\u001b[0m: \u001b[32m'mrsm'\u001b[0m,\n        \u001b[32m'password'\u001b[0m: \u001b[32m'****'\u001b[0m,\n        \u001b[32m'flavor'\u001b[0m: \u001b[32m'timescaledb-ha'\u001b[0m,\n        \u001b[32m'host'\u001b[0m: \u001b[32m'localhost'\u001b[0m,\n        \u001b[32m'database'\u001b[0m: \u001b[32m'meerschaum'\u001b[0m,\n        \u001b[32m'port'\u001b[0m: \u001b[1;36m5432\u001b[0m\n    \u001b[1m}\u001b[0m,\n    \u001b[32m'local'\u001b[0m: \u001b[1m{\u001b[0m\u001b[32m'flavor'\u001b[0m: \u001b[32m'sqlite'\u001b[0m, \u001b[32m'database'\u001b[0m: \u001b[32m'\u001b[0m\u001b[32m{\u001b[0m\u001b[32mSQLITE_DB_PATH\u001b[0m\u001b[32m}\u001b[0m\u001b[32m'\u001b[0m\u001b[1m}\u001b[0m,\n    \u001b[32m'memory'\u001b[0m: \u001b[1m{\u001b[0m\u001b[32m'flavor'\u001b[0m: \u001b[32m'sqlite'\u001b[0m, \u001b[32m'database'\u001b[0m: \u001b[32m':memory:'\u001b[0m\u001b[1m}\u001b[0m,\n    \u001b[32m'other'\u001b[0m: \u001b[1m{\u001b[0m\u001b[32m'uri'\u001b[0m: \u001b[32m'sqlite:///<ROOT>/other.db'\u001b[0m\u001b[1m}\u001b[0m\n\u001b[1m}\u001b[0m\n  \n  Attributes for connector 'sql:other':\n  ─────────────────────────────────────\n\u001b[1m{\u001b[0m\u001b[32m'uri'\u001b[0m: \u001b[32m'sqlite:///<ROOT>/other.db'\u001b[0m\u001b[1m}\u001b[0m\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "pipes",
+        "-i",
+        "sql:other",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {
+        "MRSM_SQL_OTHER": "sqlite:///{root}/other.db"
+      },
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Finished deleting 1 pipes.\u001b[0m\n    (1 succeeded, 0 failed)\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "plugins"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 To see all installable plugins from repository 'api:mrsm', run `show plugins all`\u001b[0m\n\u001b[95m 💬 To see plugins created by a certain user, run `show plugins [username]`\u001b[0m\n                                         Installed plugins:                                         \n                                                                                                    \n                                                                                                    \n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "plugins",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "plugins",
+        "all",
+        "-r",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 Failed to execute `show plugins all` with `ValueError`:\u001b[0m\n    \n    Only APIConnectors may be treated as repositories.\n\n",
+      "stderr": "Traceback (most recent call last):\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/_internal/entry.py\", line 420, in _do_action_wrapper\n    result = action_function(**filter_keywords(action_function, **kw))\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/show.py\", line 713, in _show_plugins\n    repo_connector = parse_repo_keys(repository)\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/connectors/parse.py\", line 120, in parse_repo_keys\n    raise ValueError(\"Only APIConnectors may be treated as repositories.\")\nValueError: Only APIConnectors may be treated as repositories.\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "register",
+        "plugins"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 No plugins to register.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "register",
+        "plugins",
+        "noaa"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 Finished registering 0 plugins\u001b[0m\n    (0 succeeded, 0 failed).\n\n",
+      "stderr": "\u001b[1;33m 🔔 Plugin 'noaa' is not installed and cannot be registered. Ignoring...\u001b[0m\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "users",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                             Registered users for instance 'sql:local':                             \n                                                                                                    \n                                                                                                    \n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "users",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                             Registered users for instance 'sql:local':                             \n                                                                                                    \n                                                                                                    \n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "register",
+        "users",
+        "alice",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "rc"
+      ],
+      "stdout": " ❓ Password for user 'alice':\r\n\r\n\r\n\r\n\r\n\r\n\r\n                                 ❓ Password for user 'alice':\r\n\n\u001b[1;31m 💢 Aborted registering users alice\u001b[0m\n\n",
+      "stderr": "Warning: Input is not a terminal (fd=0).\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "users",
+        "alice",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 User 'alice' does not exist. Skipping...\u001b[0m\n\n\u001b[1;31m 💢 No users to delete.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "clear",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--begin",
+        "2024-01-12",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                    Number of Rows to be Deleted                                    \n                                                                                                    \n  \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                                \n  4                                                                                                 \n                                                                                                    \n                                                                                                    \n\n\u001b[1;92m 🎉 Finished clearing 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "rowcounts",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "Pipe('sql:local', 'weather', instance='sql:local')\n22\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "clear",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--begin",
+        "2024-01-12"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "rc"
+      ],
+      "stdout": "                                    Number of Rows to be Deleted                                    \n                                                                                                    \n  \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                                \n  0                                                                                                 \n                                                                                                    \n                                                                                                    \n ❓ Are you sure you want to delete 0 rows across 1 pipe in the following range\r                                                                               ?\r\n\r\n    Newer than (>=) 2024-01-12 00:00:00+00:00\r\n \r\n [y/N]\r\n\r\n\r\n         ❓ Are you sure you want to delete 0 rows across 1 pipe in the following range\r                                                                               ?\r\n\r\n    Newer than (>=) 2024-01-12 00:00:00+00:00\r\n \r\n [y/N]\r\n\n\u001b[1;31m 💢 Failed to execute `clear pipes` with `EOFError`.\u001b[0m\n\n",
+      "stderr": "Warning: Input is not a terminal (fd=0).\nTraceback (most recent call last):\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/_internal/entry.py\", line 420, in _do_action_wrapper\n    result = action_function(**filter_keywords(action_function, **kw))\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/clear.py\", line 95, in _clear_pipes\n    if not _ask_with_rowcounts(pipes, begin=begin, end=end, debug=debug, yes=yes, **kw):\n           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/clear.py\", line 179, in _ask_with_rowcounts\n    return yes_no(question, yes=yes, nopretty=nopretty, noask=noask, default='n')\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/utils/prompt.py\", line 233, in yes_no\n    answer = prompt(question + ending, icon=icon, detect_password=False, noask=noask)\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/utils/prompt.py\", line 139, in prompt\n    answer = prompt_toolkit.prompt(**prompt_kwargs) if not noask else ''\n             ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/shortcuts/prompt.py\", line 1458, in prompt\n    return session.prompt(\n           ~~~~~~~~~~~~~~^\n        message,\n        ^^^^^^^^\n    ...<43 lines>...\n        inputhook=inputhook,\n        ^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/shortcuts/prompt.py\", line 1064, in prompt\n    return self.app.run(\n           ~~~~~~~~~~~~^\n        set_exception_handler=set_exception_handler,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<2 lines>...\n        inputhook=inputhook,\n        ^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 1000, in run\n    return asyncio.run(coro)\n           ~~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/runners.py\", line 205, in run\n    return runner.run(main)\n           ~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/runners.py\", line 128, in run\n    return self._loop.run_until_complete(task)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/base_events.py\", line 720, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 884, in run_async\n    return await _run_async(f)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 744, in _run_async\n    result = await f\n             ^^^^^^^\nEOFError\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "clear",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--begin",
+        "2024-01-12",
+        "--noask"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                    Number of Rows to be Deleted                                    \n                                                                                                    \n  \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                                \n  0                                                                                                 \n                                                                                                    \n                                                                                                    \n\n\u001b[1;31m 💢 No rows were deleted.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "drop",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Finished dropping 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "rowcounts",
+        "-i",
+        "sql:local",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "Pipe('sql:local', 'weather', instance='sql:local')\n0\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "sync",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-m",
+        "weather"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[38;5;114m ✅ Finished syncing \u001b[0m\u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m\u001b[38;5;114m:\u001b[0m\n    Inserted 26, updated 0 rows.\n    \n\n\n                                     Successfully synced pipes:                                     \n                                                                                                    \n  ✅ \u001b[1;37mPipe(\u001b[0m\u001b[32m'sql:local'\u001b[0m\u001b[1;37m, \u001b[0m\u001b[94m'weather'\u001b[0m\u001b[37m, instance=\u001b[0m\u001b[38;2;209;119;164m'sql:local'\u001b[0m\u001b[1;37m)\u001b[0m                                             \n  ―――――――――――――――――――――――――――――――――――――――――――――――――――――                                             \n  Inserted 26, updated 0 rows.                                                                      \n                                                                                                    \n                                                                                                    \n                                                                                                    \n\n\u001b[1;92m 🎉 It took <DURATION> to sync 1 pipe\u001b[0m\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "drop",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "rc"
+      ],
+      "stdout": " ❓ Are you sure you want to drop these tables?\r\n    Data will be lost and will need to be resynced.\r\n\r\n    - \"sql_local_weather\"\r\n \r\n [y/N]\r\n\r\n         ❓ Are you sure you want to drop these tables?\r\n    Data will be lost and will need to be resynced.\r\n\r\n    - \"sql_local_weather\"\r\n \r\n [y/N]\r\n\n\u001b[1;31m 💢 Failed to execute `drop pipes` with `EOFError`.\u001b[0m\n\n",
+      "stderr": "Warning: Input is not a terminal (fd=0).\nTraceback (most recent call last):\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/_internal/entry.py\", line 420, in _do_action_wrapper\n    result = action_function(**filter_keywords(action_function, **kw))\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/drop.py\", line 75, in _drop_pipes\n    answer = yes_no(question, default='n', noask=noask, yes=yes)\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/utils/prompt.py\", line 233, in yes_no\n    answer = prompt(question + ending, icon=icon, detect_password=False, noask=noask)\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/utils/prompt.py\", line 139, in prompt\n    answer = prompt_toolkit.prompt(**prompt_kwargs) if not noask else ''\n             ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/shortcuts/prompt.py\", line 1458, in prompt\n    return session.prompt(\n           ~~~~~~~~~~~~~~^\n        message,\n        ^^^^^^^^\n    ...<43 lines>...\n        inputhook=inputhook,\n        ^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/shortcuts/prompt.py\", line 1064, in prompt\n    return self.app.run(\n           ~~~~~~~~~~~~^\n        set_exception_handler=set_exception_handler,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<2 lines>...\n        inputhook=inputhook,\n        ^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 1000, in run\n    return asyncio.run(coro)\n           ~~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/runners.py\", line 205, in run\n    return runner.run(main)\n           ~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/runners.py\", line 128, in run\n    return self._loop.run_until_complete(task)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/base_events.py\", line 720, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 884, in run_async\n    return await _run_async(f)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 744, in _run_async\n    result = await f\n             ^^^^^^^\nEOFError\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "drop",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--noask"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 No pipes were dropped.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "rc"
+      ],
+      "stdout": " ❓ Are you sure you want to drop these tables?\r\n    Data will be lost and will need to be resynced.\r\n\r\n    - \"sql_local_weather\"\r\n \r\n [y/N]\r\n\r\n         ❓ Are you sure you want to drop these tables?\r\n    Data will be lost and will need to be resynced.\r\n\r\n    - \"sql_local_weather\"\r\n \r\n [y/N]\r\n\n\u001b[1;31m 💢 Failed to execute `delete pipes` with `EOFError`.\u001b[0m\n\n",
+      "stderr": "Warning: Input is not a terminal (fd=0).\nTraceback (most recent call last):\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/_internal/entry.py\", line 420, in _do_action_wrapper\n    result = action_function(**filter_keywords(action_function, **kw))\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/delete.py\", line 90, in _delete_pipes\n    _ = actions['drop'](\n        ['pipes'],\n    ...<4 lines>...\n        **kw\n    )\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/drop.py\", line 26, in drop\n    return choose_subaction(action, options, **kw)\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/__init__.py\", line 243, in choose_subaction\n    return options[parsed_choice](**kw)\n           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/actions/drop.py\", line 75, in _drop_pipes\n    answer = yes_no(question, default='n', noask=noask, yes=yes)\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/utils/prompt.py\", line 233, in yes_no\n    answer = prompt(question + ending, icon=icon, detect_password=False, noask=noask)\n  File \"<REPO>/.venv-ref/lib64/python3.14/site-packages/meerschaum/utils/prompt.py\", line 139, in prompt\n    answer = prompt_toolkit.prompt(**prompt_kwargs) if not noask else ''\n             ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/shortcuts/prompt.py\", line 1458, in prompt\n    return session.prompt(\n           ~~~~~~~~~~~~~~^\n        message,\n        ^^^^^^^^\n    ...<43 lines>...\n        inputhook=inputhook,\n        ^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/shortcuts/prompt.py\", line 1064, in prompt\n    return self.app.run(\n           ~~~~~~~~~~~~^\n        set_exception_handler=set_exception_handler,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<2 lines>...\n        inputhook=inputhook,\n        ^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 1000, in run\n    return asyncio.run(coro)\n           ~~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/runners.py\", line 205, in run\n    return runner.run(main)\n           ~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/runners.py\", line 128, in run\n    return self._loop.run_until_complete(task)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File \"/usr/lib64/python3.14/asyncio/base_events.py\", line 720, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 884, in run_async\n    return await _run_async(f)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"<REPO>/.venv-ref/lib/python3.14/site-packages/prompt_toolkit/application/application.py\", line 744, in _run_async\n    result = await f\n             ^^^^^^^\nEOFError\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--noask"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 No pipes deleted.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "pipes",
+        "-i",
+        "sql:local",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Finished deleting 1 pipes.\u001b[0m\n    (1 succeeded, 0 failed)\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "pipes",
+        "-i",
+        "sql:local"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 No pipes to show.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:local",
+        "-m",
+        "weather",
+        "-i",
+        "sql:local",
+        "--params",
+        "{\"fetch\": {\"definition\": \"SELECT * FROM src_weather\"}, \"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Successfully registered 1 pipe.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 No running or stopped jobs.\u001b[0m\n    You can start a background job with `-d` or `--daemon`,\n    or run the command `start job` before action commands.\n\n    Examples:\n      - start api -d\n      - start job sync pipes --loop\n\n\u001b[1;92m 🎉 No jobs to show.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "sh",
+        "echo",
+        "hello",
+        "-d",
+        "--name",
+        "listpipes",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Started Job(\"listpipes\", \"sh echo hello --name listpipes -y\").\u001b[0m\n\n\n\u001b[1;92m 🎉 Successfully started job 'listpipes'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "wait_jobs",
+      "names": [
+        "listpipes"
+      ]
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "listpipes\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                                                         \n                        Jobs on Executor 'local'                         \n╭───────────┬──────────┬───────────────────────────────────┬────────────╮\n│\u001b[1m \u001b[0m\u001b[1m     Name\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mExecutor\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mCommand                          \u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mStatus    \u001b[0m\u001b[1m \u001b[0m│\n├───────────┼──────────┼───────────────────────────────────┼────────────┤\n│\u001b[35m \u001b[0m\u001b[35mlistpipes\u001b[0m\u001b[35m \u001b[0m│\u001b[33m \u001b[0m\u001b[33mlocal   \u001b[0m\u001b[33m \u001b[0m│ sh echo hello --name listpipes -y │ \u001b[31mstopped   \u001b[0m │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │            │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │ \u001b[1;92m🎉 Success\u001b[0m │\n╰───────────┴──────────┴───────────────────────────────────┴────────────╯\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "logs",
+        "listpipes",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n-*-\nMRSM_JOB: listpipes\n-*-\n\n<TS> | hello\n<TS> | \n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "start",
+        "jobs",
+        "listpipes",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                                                         \n                        Jobs on Executor 'local'                         \n╭───────────┬──────────┬───────────────────────────────────┬────────────╮\n│\u001b[1m \u001b[0m\u001b[1m     Name\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mExecutor\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mCommand                          \u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mStatus    \u001b[0m\u001b[1m \u001b[0m│\n├───────────┼──────────┼───────────────────────────────────┼────────────┤\n│\u001b[35m \u001b[0m\u001b[35mlistpipes\u001b[0m\u001b[35m \u001b[0m│\u001b[33m \u001b[0m\u001b[33mlocal   \u001b[0m\u001b[33m \u001b[0m│ sh echo hello --name listpipes -y │ \u001b[31mstopped   \u001b[0m │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │            │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │ \u001b[1;92m🎉 Success\u001b[0m │\n╰───────────┴──────────┴───────────────────────────────────┴────────────╯\n\u001b[95m 💬 Starting the job 'listpipes'...\u001b[0m\n\n\u001b[1;92m 🎉 Started Job(\"listpipes\", \"sh echo hello --name listpipes -y\").\u001b[0m\n\n\n\u001b[1;92m 🎉 Successfully started job 'listpipes'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "wait_jobs",
+      "names": [
+        "listpipes"
+      ]
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs",
+        "listpipes"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                                                         \n                        Jobs on Executor 'local'                         \n╭───────────┬──────────┬───────────────────────────────────┬────────────╮\n│\u001b[1m \u001b[0m\u001b[1m     Name\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mExecutor\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mCommand                          \u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mStatus    \u001b[0m\u001b[1m \u001b[0m│\n├───────────┼──────────┼───────────────────────────────────┼────────────┤\n│\u001b[35m \u001b[0m\u001b[35mlistpipes\u001b[0m\u001b[35m \u001b[0m│\u001b[33m \u001b[0m\u001b[33mlocal   \u001b[0m\u001b[33m \u001b[0m│ sh echo hello --name listpipes -y │ \u001b[31mstopped   \u001b[0m │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │            │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │ \u001b[1;92m🎉 Success\u001b[0m │\n╰───────────┴──────────┴───────────────────────────────────┴────────────╯\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "start",
+        "job",
+        "show",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--name",
+        "emptyjob",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 Create a new job with `-d` / `--daemon`.\u001b[0m\n\n\n\u001b[1;31m 💢 Failed to start job 'emptyjob'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 1
+    },
+    {
+      "kind": "wait_jobs",
+      "names": [
+        "emptyjob"
+      ]
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "jobs",
+        "emptyjob",
+        "-f"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 No jobs to delete; nothing to do.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "sync",
+        "pipes",
+        "-i",
+        "sql:local",
+        "--loop",
+        "--min-seconds",
+        "600",
+        "-d",
+        "--name",
+        "looper",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Started Job(\"looper\", \"sync pipes -i sql:local --loop --min-seconds 600 --name looper -y\").\u001b[0m\n\n\n\u001b[1;92m 🎉 Successfully started job 'looper'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "sleep",
+      "seconds": 4
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs",
+        "looper",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "looper\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "pause",
+        "jobs",
+        "looper",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Successfully paused job 'looper'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs",
+        "looper",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "looper\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "start",
+        "jobs",
+        "looper",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                                                                                    \n                                      Jobs on Executor 'local'                                      \n╭────────┬──────────┬─────────────────────────────────────────────────────────────────┬────────────╮\n│\u001b[1m \u001b[0m\u001b[1m  Name\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mExecutor\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mCommand                                                        \u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mStatus    \u001b[0m\u001b[1m \u001b[0m│\n├────────┼──────────┼─────────────────────────────────────────────────────────────────┼────────────┤\n│\u001b[35m \u001b[0m\u001b[35mlooper\u001b[0m\u001b[35m \u001b[0m│\u001b[33m \u001b[0m\u001b[33mlocal   \u001b[0m\u001b[33m \u001b[0m│ sync pipes -i sql:local --loop --min-seconds 600 --name looper  │ \u001b[33mpaused    \u001b[0m │\n│\u001b[35m        \u001b[0m│\u001b[33m          \u001b[0m│ -y                                                              │ (restarts) │\n╰────────┴──────────┴─────────────────────────────────────────────────────────────────┴────────────╯\n\u001b[95m 💬 Starting the job 'looper'...\u001b[0m\n\n\u001b[1;92m 🎉 Started Job(\"looper\", \"sync pipes -i sql:local --loop --min-seconds 600 --name looper -y\").\u001b[0m\n\n\n\u001b[1;92m 🎉 Successfully started job 'looper'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "stop",
+        "jobs",
+        "looper",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Stopped 1 job.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "stop",
+        "jobs",
+        "looper",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Stopped 1 job.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "stop",
+        "jobs",
+        "listpipes",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 The selected jobs are currently stopped.\u001b[0m\n\n",
+      "stderr": "\u001b[1;33m 🔔 Skipping stopped job 'listpipes'.\u001b[0m\n",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "pause",
+        "jobs",
+        "listpipes",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;31m 💢 No running jobs to pause. You can start jobs with `-d` or `start jobs`.\u001b[0m\n\n",
+      "stderr": "\u001b[1;33m 🔔 Skipping stopped job 'listpipes'.\u001b[0m\n",
+      "rc": 1
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "jobs",
+        "listpipes",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "                                                                         \n                        Jobs on Executor 'local'                         \n╭───────────┬──────────┬───────────────────────────────────┬────────────╮\n│\u001b[1m \u001b[0m\u001b[1m     Name\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mExecutor\u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mCommand                          \u001b[0m\u001b[1m \u001b[0m│\u001b[1m \u001b[0m\u001b[1mStatus    \u001b[0m\u001b[1m \u001b[0m│\n├───────────┼──────────┼───────────────────────────────────┼────────────┤\n│\u001b[35m \u001b[0m\u001b[35mlistpipes\u001b[0m\u001b[35m \u001b[0m│\u001b[33m \u001b[0m\u001b[33mlocal   \u001b[0m\u001b[33m \u001b[0m│ sh echo hello --name listpipes -y │ \u001b[31mstopped   \u001b[0m │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │            │\n│\u001b[35m           \u001b[0m│\u001b[33m          \u001b[0m│                                   │ \u001b[1;92m🎉 Success\u001b[0m │\n╰───────────┴──────────┴───────────────────────────────────┴────────────╯\n\n\u001b[1;92m 🎉 Deleted job 'listpipes'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "jobs",
+        "nosuchjob",
+        "-y"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 No jobs to delete; nothing to do.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs",
+        "--nopretty"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "looper\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "delete",
+        "jobs",
+        "-f"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\n\u001b[1;92m 🎉 Deleted job 'looper'.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    },
+    {
+      "kind": "mrsm",
+      "args": [
+        "show",
+        "jobs"
+      ],
+      "stdin": "",
+      "env": {},
+      "compare": [
+        "stdout",
+        "stderr",
+        "rc"
+      ],
+      "stdout": "\u001b[95m 💬 No running or stopped jobs.\u001b[0m\n    You can start a background job with `-d` or `--daemon`,\n    or run the command `start job` before action commands.\n\n    Examples:\n      - start api -d\n      - start job sync pipes --loop\n\n\u001b[1;92m 🎉 No jobs to show.\u001b[0m\n\n",
+      "stderr": "",
+      "rc": 0
+    }
+  ]
+}

@@ -74,6 +74,9 @@ class Venv:
                 **self._kwargs
             )
         except OSError as e:
+            ### None is the current interpreter, not a named environment to recreate.
+            if self._venv is None:
+                raise
             if self._init_if_not_exists:
                 if not init_venv(self._venv, force=True):
                     raise e

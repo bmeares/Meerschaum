@@ -8,7 +8,7 @@ The command `mrsm show environment` will print out your current set `MRSM_` vari
 
 ## Summary
 
-All Meerschaum environment variables begin with the prefix `MRSM_`. The most commonly used variables are summarized below; each is described in detail later on this page.
+Nearly all Meerschaum environment variables begin with the prefix `MRSM_`. The most commonly used variables are summarized below; each is described in detail later on this page.
 
 | Variable | Purpose | Default |
 |---|---|---|
@@ -19,10 +19,19 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_WORK_DIR` | Base directory under which the root directory is created when `MRSM_ROOT_DIR` is unset. | current working directory |
 | `MRSM_CONFIG` | Inline JSON or simplified-dictionary patch applied to the configuration. | _(unset)_ |
 | `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
-| `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). | _(unset)_ |
-| `MRSM_RUNTIME` | Marks a special runtime (e.g. `portable`, `docker`). | _(unset)_ |
-| `MRSM_NO_AUTO_INSTALL` | Disable package installation triggered by `attempt_import()`. | _(unset)_ |
+| `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). Only variables of an existing connector type are read. | _(unset)_ |
+| `MRSM_CONNECT_TIMEOUT` | Seconds to wait for the first connection of a SQL, API or Valkey connector; overrides every connector's `connect_timeout` attribute. | `5` |
+| `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
+| `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
+| `MRSM_ALLOW_PROTECTED` | `1` allows writes to connectors marked `protected: true` for this process and its children (like `--allow-protected`). | _(unset)_ |
+| `MRSM_DATAFRAME` | `polars` or `pandas`: the DataFrame library Python APIs return, for this process and the jobs and workers it starts (overrides `meerschaum:dataframe`). | _(unset: `dataframe` in `meerschaum.yaml`)_ |
+| `MRSM_DUCKDB_LIB` | Path to DuckDB's shared library; explicitly selects the native C API and prevents mixed Python SQLAlchemy access. | _(unset: Python driver when installed; otherwise native library lookup)_ |
+| `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
+| `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
+| `MRSM_WORKER_STARTUP_TIMEOUT` | Seconds a Python worker may take to connect and say hello before it is killed and refused (for 10 s only). | `60` |
+| `NO_COLOR` | Any non-empty value prints plain text, without colors or other styles (see [Colors and Plain Output](/reference/actions/#colors-and-plain-output)). | _(unset)_ |
+| `FORCE_COLOR` | Style the output even when it does not go to a terminal (any value but `0`, `false` or `no`). | _(unset: styles only on a terminal and in jobs)_ |
 
 !!! tip "Inspecting your environment"
     Run `mrsm show environment` to list every currently set `MRSM_` variable. Run `mrsm show config` to inspect the resolved configuration after all patches and connectors have been applied.
@@ -80,11 +89,11 @@ MRSM_VENVS_DIR='venvs/' mrsm show plugins
 
 ## **`MRSM_WORK_DIR`**
 
-`MRSM_WORK_DIR` designates the base working directory under which the root directory is located when `MRSM_ROOT_DIR` is not explicitly set. This is primarily useful for portable and containerized deployments where the process is launched from a known location.
+`MRSM_WORK_DIR` designates the base working directory under which the root directory is located when `MRSM_ROOT_DIR` is not explicitly set. This is primarily useful for containerized deployments where the process is launched from a known location.
 
 ## **`MRSM_<TYPE>_<LABEL>`**
 
-You can temporarily register new connectors in a variable in the form `MRSM_<TYPE>_<LABEL>`, where `<TYPE>` is the connector type, and `<LABEL>` is the label for the connector (converted to lower case). Check here for more information about [environment connectors](/reference/connectors/#-environment-connectors), but in a nutshell, set the variable to the [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) of your connector.
+You can temporarily register new connectors in a variable in the form `MRSM_<TYPE>_<LABEL>`, where `<TYPE>` is the connector type, and `<LABEL>` is the label for the connector (converted to lower case). Check here for more information about [environment connectors](/reference/connectors/#environment-connectors), but in a nutshell, set the variable to the [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) of your connector.
 
 ```bash
 MRSM_SQL_FOO=sqlite:////tmp/temp.db \
@@ -109,6 +118,19 @@ MRSM_SQL_FOO='{"flavor": "sqlite", "database": "/tmp/temp.db"}' \
 
 !!! note "Reserved names"
     Names that match the reserved Meerschaum variables (e.g. `MRSM_ROOT_DIR`, `MRSM_CONFIG`) are *not* interpreted as connectors.
+
+!!! note "Only real connector types"
+    Only a variable whose `<TYPE>` is a connector type that exists becomes a connector: the built-in types (`sql`, `api`, `valkey`, `plugin`, `systemd`) and the types your plugins register with `@make_connector`. Any other `MRSM_<X>_<Y>` variable (`MRSM_DUCKDB_LIB`, `MRSM_TEST_PG_URI`, a variable a plugin reads itself) is ignored instead of turning into a connector such as `duckdb:lib` (as it did in v4).
+
+## **`MRSM_CONNECT_TIMEOUT`**
+
+A SQL, API or Valkey connector fails fast when its server cannot be reached. The first connection a command makes reports a refused connection, an unknown host or rejected credentials at once (`sql:main: cannot connect to localhost:5432 (connection refused). Is the database running?`), and gives up on a host that does not answer after `connect_timeout` seconds (5 by default). Set the `connect_timeout` attribute on a connector to change it for that connector, or `MRSM_CONNECT_TIMEOUT` to change it for all of them:
+
+```bash
+MRSM_CONNECT_TIMEOUT=2 mrsm show pipes -i sql:main
+```
+
+A long-running job that loses a connection it had already established keeps retrying as before.
 
 ## **`MRSM_CONFIG`**
 
@@ -137,7 +159,7 @@ MRSM_PATCH='baz:MRSM{foo:bar}' \
 
 ## **`MRSM_RUNTIME`**
 
-`MRSM_RUNTIME` marks a special runtime context. For example, `MRSM_RUNTIME=portable` is set by the portable distribution so that Meerschaum can ensure `readline` is available, and `MRSM_RUNTIME=docker` is set inside the official Docker image. You typically do not need to set this yourself.
+`MRSM_RUNTIME` marks a special runtime context. For example, `MRSM_RUNTIME=docker` is set inside the official Docker image. You typically do not need to set this yourself.
 
 ## **`MRSM_NOASK` / `MRSM_NONINTERACTIVE`**
 
@@ -147,6 +169,34 @@ Set either of these to disable interactive prompts. When set, Meerschaum assumes
 MRSM_NOASK=1 mrsm bootstrap pipes
 ```
 
+## **`MRSM_ALLOW_PROTECTED`**
+
+Connectors marked `protected: true` refuse every change (see
+[Protected Connectors](/reference/connectors/#protected-connectors)). Set
+`MRSM_ALLOW_PROTECTED=1` to allow writes for a process and the processes it starts, for example
+a server whose instance is protected:
+
+```bash
+MRSM_ALLOW_PROTECTED=1 mrsm start api
+```
+
+For one command, `--allow-protected` does the same. `-y` / `--yes` never does.
+
+## **`MRSM_DATAFRAME`**
+
+Every Python API that returns a DataFrame (`pipe.get_data()`, `conn.read()`, `pipe.fetch()`,
+`Plan.to_dataframe()`, the frames handed to plugin code) returns the library of `dataframe` in
+`meerschaum.yaml`: `polars` for a new root, `pandas` for a root created before 5.0.0rc15 (see
+[DataFrame library](/reference/pipes/reading/#dataframe-library)). `MRSM_DATAFRAME` overrides it
+for a process, the jobs it starts and the Python workers it runs plugins in:
+
+```bash
+MRSM_DATAFRAME=pandas python my_report.py
+```
+
+`as_polars=True` / `as_pandas=True` on a call override both. Any other value is an error that names
+the variable.
+
 ## **`MRSM_NO_AUTO_INSTALL`**
 
 Meerschaum normally installs a missing optional dependency when a feature first imports it. Set
@@ -154,9 +204,65 @@ Meerschaum normally installs a missing optional dependency when a feature first 
 will be reported instead of downloaded; otherwise Meerschaum warns before the first automatic download
 in each process. Install the dependency group before starting Meerschaum.
 
+The variable covers every implicit installation: `attempt_import()`, the dependency version checks
+(which never install a version parser), creating a virtual environment (no `uv venv --seed`), the
+API host, and the DuckDB library download (see [`MRSM_DUCKDB_LIB`](#mrsm_duckdb_lib)), including
+DuckDB's own extension auto-install. Installs you ask for, such as `mrsm install packages` or `pip_install()` from your
+own code, still run, but never bootstrap `uv`, `pip` or `wheel` for themselves.
+
 ```bash
 MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
 ```
+
+## **`MRSM_DUCKDB_LIB`**
+
+Python hosts with `meerschaum[sql-duckdb]` installed and this variable unset share the public Python
+DuckDB driver between Rust Pipe operations and SQLAlchemy. An explicit `MRSM_DUCKDB_LIB` selects
+the native C API instead. SQLAlchemy access is refused in that process to prevent separate database
+instances from losing writes. Unset the variable and restart the interpreter to use both interfaces.
+Restart after installing the extra if the process already selected the native driver.
+
+The standalone binary and Python hosts using the native C API load DuckDB's own shared library
+(`libduckdb.so`, `libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time.
+Meerschaum looks for it in this order:
+
+1. `MRSM_DUCKDB_LIB`, a path to the file (for air-gapped hosts; a library that fails to load is an error);
+2. the cache under `<root>/drivers/`;
+3. the system library path;
+4. a checksum-verified download of the official release, unless `MRSM_NO_AUTO_INSTALL` is set.
+
+```bash
+MRSM_DUCKDB_LIB=/opt/duckdb/libduckdb.so mrsm show drivers
+```
+
+Run `mrsm show drivers` to see where the library comes from, and `mrsm install driver duckdb` /
+`mrsm uninstall driver duckdb` to manage the cached copy.
+
+The native C API path refuses per-connection DuckDB options that it cannot honor, including
+`access_mode=READ_ONLY`. Use the Python `sql-duckdb` extra for connections with these settings.
+
+## **`MRSM_BIN`**
+
+By default the `mrsm` and `meerschaum` console scripts of the Python package run the CLI inside the
+installed extension. Set `MRSM_BIN` to the path of a standalone `mrsm` binary (for example one built by
+`cargo install meerschaum`) to run that program instead. The binary must report the same `--version`
+as the installed package. Everything Meerschaum re-launches itself for (jobs, compose, pipeline steps)
+uses the same program.
+
+## **`MRSM_PYTHON`**
+
+The standalone `mrsm` binary runs Python plugins in a worker process. `MRSM_PYTHON` names the Python
+interpreter for those workers, for package installs, and for `mrsm upgrade meerschaum` (which otherwise
+refuses to guess which environment to upgrade). Inside the Python package the interpreter that is already
+running is used and you do not need to set it.
+
+Before the first worker starts, the binary checks the interpreter once (`python -P -c ...`, 10 s limit):
+it must import a `meerschaum` of the same major version. A missing, stale (v4) or mismatched package, an
+interpreter that cannot start, and a worker that never connects each fail at once with one message that
+names the interpreter, what it found and the fix (`pip install meerschaum==<version>` or `MRSM_PYTHON`);
+the refusal is remembered for a few seconds, so many pipes do not each wait. A worker has
+`MRSM_WORKER_STARTUP_TIMEOUT` seconds (default 60, for connecting and the hello together) before it is
+killed; raise it for a legitimately slow cold start.
 
 ## Internal Variables
 
@@ -167,6 +273,9 @@ The following variables are set automatically by Meerschaum (e.g. for background
 | `MRSM_SERVER_ID` | Identifier of the API server instance. |
 | `MRSM_DAEMON_ID` | Identifier of the running daemon (background job). |
 | `MRSM_JOB` | Marks that the current process is running as a job. |
+| `MRSM_BIN_EXEC` | Set by the Python launcher to the path of `MRSM_BIN` when it hands over to it; guards against a launcher re-executing itself forever. |
+| `MRSM_API_HOST` | Marks the process as the Python API host (plugin routes and Dash apps). |
+| `MRSM_CORE_TRACE` | Set to `1` to print per-stage timings of the native boundary to stderr (diagnostics). |
 | `MRSM_SYSTEMD_LOG_PATH` | Log path used by the `systemd` job executor. |
 | `MRSM_SYSTEMD_STDIN_PATH` | Stdin FIFO path used by the `systemd` job executor. |
 | `MRSM_SYSTEMD_RESULT_PATH` | Result path used by the `systemd` job executor. |
@@ -204,7 +313,7 @@ sql:
     password: MRSM{meerschaum:connectors:sql:main:password}
 ```
 
-Now `sql:reporting` shares credentials with `sql:main` — change them in one place.
+Now `sql:reporting` shares credentials with `sql:main`, change them in one place.
 
 ### In a pipe parameter
 

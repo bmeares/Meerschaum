@@ -16,6 +16,7 @@
 
 .md-banner {
     background-color: #4b100c;
+    color: #fff;
 }
 
 .md-header__topic {
@@ -75,3 +76,37 @@
 .md-search {
   color: #ffffff;
 }
+
+/* The original banner and two-column homepage, responsive on smaller screens. */
+.md-banner a, .md-banner a:hover { color: #fff; }
+.md-banner__inner { text-align: center; }
+.md-typeset h1 { color: var(--md-default-fg-color); font-weight: 700; }
+.md-typeset h2 { font-weight: 650; }
+.mrsm-home { max-width: 66rem; margin: 0 auto; }
+.mrsm-home-banner { display: block; width: 100%; height: auto; }
+.mrsm-home-tagline { text-align: center; color: var(--md-default-fg-color--light); font-size: 1.1rem; }
+.mrsm-home-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; margin: 1.5rem 0 2rem; position: relative; }
+.mrsm-home-actions .md-button { min-width: 15rem; text-align: center; cursor: pointer; }
+.mrsm-install { background: transparent; border: 2px solid #ce6d5f; color: #7b2d19; padding: .5rem 1rem; font-size: .85rem; border-radius: .25rem; }
+.mrsm-install:hover, .mrsm-install:focus-visible { background: #fff3ed; }
+.mrsm-install code { background: none; color: inherit; padding: 0; }
+.mrsm-copy-status { position: absolute; top: 100%; font-size: .7rem; }
+.mrsm-home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.75rem; align-items: start; margin: 1.25rem 0 2rem; }
+.mrsm-home-grid > div { min-width: 0; }
+.mrsm-home-grid h2:first-child, .mrsm-home-grid h3:first-child { margin-top: 0; }
+.mrsm-home-grid img { width: 100%; height: auto; border-radius: .25rem; }
+.mrsm-home-demo { padding-top: .4rem; }
+.mrsm-home-videos iframe { border: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+.mrsm-caption { color: var(--md-default-fg-color--light); font-size: .7rem; }
+asciinema-player { display: block; max-width: 100%; min-width: 0; overflow: hidden; border-radius: .4rem; }
+.ap-player { max-width: 100%; }
+.md-typeset iframe { max-width: 100%; }
+.mrsm-screenshot { border: 1px solid var(--md-default-fg-color--lightest); border-radius: .5rem; }
+@media (max-width: 760px) {
+  .mrsm-home-grid { grid-template-columns: 1fr; gap: 1rem; }
+  .mrsm-home-actions .md-button { min-width: 0; width: 100%; }
+  .mrsm-home-tagline { font-size: .9rem; }
+}
+
+/* The homepage banner supplies its title. */
+body:has(.mrsm-home) .md-content h1 { display: none; }

@@ -1,0 +1,22 @@
+
+Show pipes data as Pandas DataFrames.
+
+Usage:
+    - Use --gui to open an interactive window.
+
+    - `show data all` to grab all data for the chosen Pipes.
+      WARNING: This may be dangerous!
+
+    - `show data 60` to grab the last 60 (or any number) minutes of data for all pipes.
+
+    - `show data --begin 2020-01-01 --end 2021-01-01` to specify date rangers.
+      **NOTE:** You must specify to at least the day, otherwise the date parser will assume
+      you mean today's date.
+
+    - Regular pipes parameters (-c, -m, -l, etc.)
+
+Examples:
+    - show data -m weather --gui
+        Open an interactive pandasgui window for the last 1440 minutes of data
+        for all pipes of metric 'weather'.
+

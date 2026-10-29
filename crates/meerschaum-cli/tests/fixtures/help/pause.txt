@@ -1,0 +1,5 @@
+
+Pause running jobs.
+
+    Options:
+        `pause [jobs]`

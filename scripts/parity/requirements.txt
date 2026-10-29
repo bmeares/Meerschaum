@@ -1,0 +1,71 @@
+# Data-library pins for the parity reference venv (.venv-ref), installed next to meerschaum==4.1.4
+# by setup_reference.sh. Fixture output depends on these versions (dtype names, repr of NA values,
+# WKB/WKT formatting), so they are pinned to the versions the committed fixtures were generated
+# with. Bump them deliberately and regenerate every fixture in the same change.
+numpy==2.4.2
+pandas==3.0.0
+pyarrow==23.0.0
+pyodbc==5.3.0
+# Oracle driver of the v4 reference (thick mode, Instant Client): the Oracle parity probes of the
+# crate tests compare against v4.1.4 on the Oracle test container.
+oracledb==26.0.1
+shapely==2.1.2
+pyproj==3.7.2
+geopandas==1.1.1
+pyogrio==0.12.1
+geoarrow-types==0.3.0
+polars==1.44.1
+pytz==2025.2
+# The v4 `valkey:` connector's client, for the Valkey parity tests (tests/test_valkey_connector.py).
+valkey==6.1.1
+
+# v4 `_internal` group (not expressible as a pip extra because of the leading underscore).
+dataclass-wizard>=0.35.0
+
+# v4 `compose` group, needed by crates/meerschaum-compose/tests/fixtures/gen_compose.py.
+envyaml>=1.10.211231
+
+# v4 `formatting` group, needed by crates/meerschaum-cli/tests/fixtures/gen_format.py (the Rust
+# formatting toolkit reproduces rich's layout and pprintpp/tabulate output byte for byte).
+rich==15.0.0
+pprintpp==0.4.0
+tabulate==0.10.0
+
+# v4 job machinery (`daemon`, `dill`, `psutil`), needed by
+# crates/meerschaum-jobs/tests/fixtures/gen_jobs.py, which links the reference venv in as `mrsm`.
+python-daemon==3.1.2
+dill==0.4.1
+psutil==7.2.2
+
+# pty driving and screen rendering for crates/meerschaum-cli/tests/fixtures/gen_shell_screens.py
+# (records v4's prompt_toolkit shell screens: toolbar, completion menu, auto-suggest).
+pexpect==4.9.0
+ptyprocess==0.7.0
+pyte==0.8.2
+wcwidth==0.9.2
+prompt-toolkit==3.0.53
+
+# v4 `api` group plus SQLAlchemy. v4 auto-installs these into its `mrsm` venv at the newest
+# versions when they are missing, and a newer stack (FastAPI 0.143 / Starlette 1.7 / PyJWT 2.15 /
+# SQLAlchemy 2.1) changes crates/meerschaum-connector-api/tests/fixtures/gen_api.py's recording (the job-log
+# request fails with "Invalid credentials"). Installed here, v4 finds them (`allow_outside_venv`)
+# and never installs its own.
+aiosqlite==0.22.1
+annotated-doc==0.0.5
+annotated-types==0.7.0
+anyio==4.14.0
+ecdsa==0.19.2
+fastapi==0.138.0
+fastapi-login==1.10.3
+greenlet==3.5.6
+pyasn1==0.6.4
+pydantic==2.13.4
+pydantic-core==2.46.4
+pyjwt==2.13.0
+python-dotenv==1.2.2
+python-jose==3.5.0
+python-multipart==0.0.32
+rsa==4.9.1
+sqlalchemy==2.0.51
+starlette==1.3.1
+typing-inspection==0.4.2

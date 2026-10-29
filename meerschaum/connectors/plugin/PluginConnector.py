@@ -36,6 +36,15 @@ class PluginConnector(Connector):
         from meerschaum.utils.venv import Venv
 
         self._plugin = Plugin(self.label)
+
+        ### A native (Rust) plugin is not a Python module: the core runs its hooks.
+        self.is_native = _is_native_plugin(self.label)
+        if self.is_native:
+            self.fetch = self._native_fetch
+            self.sync = None
+            self.register = self._native_register
+            return
+
         with Venv(self._plugin):
             plugin_module = self._plugin.module or _import_first_party_plugin(self.label)
             if plugin_module is None:
@@ -64,3 +73,33 @@ class PluginConnector(Connector):
 
             if self.fetch is None and self.sync is None:
                 error(f"Could not import `fetch()` or `sync()` methods for plugin '{self.label}'.")
+
+    def _native_fetch(self, pipe, **kw):
+        """
+        Fetch a native plugin's rows through the core (`pipe.fetch()`).
+        """
+        return pipe.fetch(**kw)
+
+    def _native_register(self, pipe, **kw):
+        """
+        Run a native plugin's `register(pipe)` in the core and return its parameters
+        (`None` without a `register` hook; a non-dict return value is passed through so that
+        `Pipe.register()` warns about it, as for a Python plugin).
+        """
+        from meerschaum import _core
+        outcome = _core.native_connector_register(pipe)
+        if outcome is None:
+            return None
+        valid, parameters, repr_ = outcome
+        return parameters if valid else repr_
+
+
+def _is_native_plugin(name: str) -> bool:
+    """
+    Whether `name` is a native (Rust) plugin in the configured plugins directories.
+    """
+    from meerschaum import _core
+    try:
+        return name in _core.native_plugin_names()
+    except Exception:
+        return False

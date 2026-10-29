@@ -1,0 +1,5 @@
+
+Verify the states of pipes, packages, and more.
+
+    Options:
+        `verify [packages, pipes, plugins, rowcounts, venvs]`

@@ -1,0 +1,3 @@
+# The stack's database setup script is embedded with `include_str!` and must stay byte-identical
+# to the Python copy (LF) on every checkout, including Windows `core.autocrlf`.
+*.sql text eol=lf

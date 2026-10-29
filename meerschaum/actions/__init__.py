@@ -4,11 +4,17 @@
 
 """
 Default actions available to the mrsm CLI.
+
+Every standard action runs in the native dispatcher (`mrsm`, from the wheel's extension or the standalone binary).
+The functions in `actions` are thin façades over it: `actions['sync'](['pipes'], **kw)` runs
+`sync pipes` natively and returns its `SuccessTuple`. Actions added by plugins (`@make_action`)
+are the plugins' own functions.
 """
 
 from __future__ import annotations
 from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict, SuccessTuple
 from meerschaum.utils.packages import get_modules_from_package
+from inspect import getmembers, isfunction  # kept: importable from here in v4
 
 __all__ = (
     'get_action',
@@ -19,6 +25,80 @@ __all__ = (
     'get_main_action_name',
     'get_completer',
 )
+
+### The core registry: `{name: {'doc', 'accepts_executor_keys', 'subactions': {name: function}}}`,
+### read once from the native dispatcher (`_core.core_actions()`).
+_core_registry: Dict[str, Dict[str, Any]] = {}
+
+
+def _make_function(
+    function_name: str,
+    prefix: List[str],
+    doc: str,
+    accepts_executor_keys: bool,
+) -> Callable[[Any], SuccessTuple]:
+    """
+    Build the façade of one core action (or subaction).
+    `function_name` is v4's function name (`sync`, `_sync_pipes`), `prefix` the words that
+    select it in the native dispatcher.
+    """
+    import inspect
+
+    def _function(action: Optional[List[str]] = None, **kw: Any) -> SuccessTuple:
+        from meerschaum import _core
+        from meerschaum._internal.entry import adhoc_context
+        return _core.run_action([*prefix, *(action or [])], kw, adhoc_context())
+
+    _function.__name__ = function_name
+    _function.__qualname__ = function_name
+    _function.__module__ = __name__
+    _function.__doc__ = doc or None
+    parameters = [
+        inspect.Parameter(
+            'action',
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=None,
+            annotation=Optional[List[str]],
+        ),
+    ]
+    if accepts_executor_keys:
+        parameters.append(
+            inspect.Parameter(
+                'executor_keys',
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Optional[str],
+            )
+        )
+    parameters.append(inspect.Parameter('kw', inspect.Parameter.VAR_KEYWORD, annotation=Any))
+    _function.__signature__ = inspect.Signature(parameters, return_annotation=SuccessTuple)
+    _function._mrsm_core_action = True
+    return _function
+
+
+def _load_core_registry() -> Dict[str, Dict[str, Any]]:
+    """Read the registry of the native actions once."""
+    if _core_registry:
+        return _core_registry
+    from meerschaum import _core
+    for name, doc, accepts_executor_keys, subs in _core.core_actions():
+        function = _make_function(name, [name], doc, accepts_executor_keys)
+        subactions = {
+            sub_name: _make_function(
+                function_name,
+                [name, sub_name],
+                sub_doc,
+                sub_accepts_executor_keys,
+            )
+            for sub_name, function_name, sub_doc, sub_accepts_executor_keys in subs
+        }
+        _core_registry[name] = {
+            'function': function,
+            'doc': doc,
+            'subactions': subactions,
+        }
+    return _core_registry
+
 
 def get_subactions(
     action: Union[str, List[str]],
@@ -40,6 +120,14 @@ def get_subactions(
     action_function = get_action(action[0], _actions=_actions)
     if action_function is None:
         return subactions
+
+    ### The standard actions: the native registry knows their subactions.
+    if getattr(action_function, '_mrsm_core_action', False):
+        registry = _load_core_registry().get(action[0], None)
+        if registry is None:
+            registry = _load_core_registry().get(action_function.__name__, None)
+        return dict(registry['subactions']) if registry is not None else subactions
+
     try:
         action_module = importlib.import_module(action_function.__module__)
     except ImportError:
@@ -154,12 +242,15 @@ def get_completer(
 ) -> Union[
         Callable[['meerschaum._internal.shell.Shell', str, str, int, int], List[str]], None
     ]:
-    """Search for a custom completer function for an action."""
+    """
+    Search for a custom completer function for an action.
+    The standard actions complete in the native shell, so only plugin actions have one.
+    """
     import importlib, inspect
     if isinstance(action, str):
         action = [action]
     action_function = get_action(action)
-    if action_function is None:
+    if action_function is None or getattr(action_function, '_mrsm_core_action', False):
         return None
     try:
         action_module = importlib.import_module(action_function.__module__)
@@ -183,7 +274,7 @@ def get_completer(
         return candidates[0][1]
     if len(candidates) > 1:
         return sorted(candidates)[-1][1]
-    
+
     return None
 
 
@@ -294,47 +385,17 @@ def choices_docstring(action: str, globs: Optional[Dict[str, Any]] = None) -> st
     options_str = options_str[:-2] + "]`"
     return options_str
 
-### build __all__ from other .py files in this package
-import sys
-modules = get_modules_from_package(
-    sys.modules[__name__],
-    names = False,
-)
-__all__ = ['actions', 'get_subactions', 'get_action', 'get_main_action_name', 'get_completer']
 
-### Build the actions dictionary by importing all
-### functions that do not begin with '_' from all submodules.
-from inspect import getmembers, isfunction
-actions = {}
+### The action modules of plugins (`load_plugins()` keeps this list current).
+modules: List[Any] = []
+
+### The standard actions, in v4's order, then the plugins' (`make_action()` adds to this).
+actions: Dict[str, Callable[[Any], SuccessTuple]] = {
+    _name: _entry['function']
+    for _name, _entry in _load_core_registry().items()
+}
 _custom_actions_plugins: Dict[str, str] = {}
 _plugins_actions: Dict[str, List[str]] = {}
-
-for module in modules:
-    ### A couple important things happening here:
-    ### 1. Find all functions in all modules in `actions` package
-    ###     (skip functions that begin with '_')
-    ### 2. Add them as members to the Shell class
-    ###     - Original definition : meerschaum._internal.shell.Shell
-    ###     - New definition      : meerschaum._internal.Shell
-    ### 3. Populate the actions dictionary with function names and functions
-    ###
-    ### UPDATE:
-    ### Shell modifications have been deferred to get_shell in order to improve lazy loading.
-
-    actions.update(
-        dict(
-            [
-                ### __name__ and new function pointer
-                (ob[0], ob[1])
-                    for ob in getmembers(module)
-                        if isfunction(ob[1])
-                            ### check that the function belongs to the module
-                            and ob[0] == module.__name__.replace('_', '').split('.')[-1]
-                            ### skip functions that start with '__'
-                            and ob[0][0] != '__'
-            ]
-        )
-    )
 
 original_actions = actions.copy()
 from meerschaum._internal.entry import entry, get_shell
@@ -342,6 +403,8 @@ import meerschaum.plugins
 make_action = meerschaum.plugins.make_action
 pre_sync_hook = meerschaum.plugins.pre_sync_hook
 post_sync_hook = meerschaum.plugins.post_sync_hook
+
+__all__ = ['actions', 'get_subactions', 'get_action', 'get_main_action_name', 'get_completer']
 
 ### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
 __pdoc__ = {

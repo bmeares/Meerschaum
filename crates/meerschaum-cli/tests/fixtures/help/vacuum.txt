@@ -1,0 +1,8 @@
+
+Vacuum pipes' target tables to reclaim dead-tuple disk space.
+
+For PostgreSQL-family tables this runs `VACUUM` (optionally `VACUUM FULL` with `--full`);
+other flavors fall back to their respective space-reclaiming mechanisms.
+
+    Options:
+        `vacuum [pipes]`

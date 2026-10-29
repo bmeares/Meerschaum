@@ -7,12 +7,33 @@ Verify the contents of a pipe by resyncing its interval.
 """
 
 from datetime import datetime, timedelta
-import time
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
-from meerschaum.utils.warnings import warn, info
 from meerschaum._internal.static import STATIC_CONFIG
+
+### `Pipe.sync()` keywords `Pipe.verify()` passes as explicit arguments to `_core.verify_pipe`
+### (every other keyword is forwarded to each chunk's sync: `force`, `retries`, plugin arguments).
+_VERIFY_SYNC_KWARGS = frozenset({'chunksize', 'check_existing'})
+
+
+def _rust_verify_context(
+    pipe: 'mrsm.Pipe',
+    debug: bool = False,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """
+    Return `(context, '')` with the connectors `_core.verify_pipe` needs (the pipe's instance
+    and source, as the Rust SQL connectors this process holds, and the attributes of the
+    connectors it defined ad hoc), or `(None, reason)` when a connector has no native driver.
+    """
+    from meerschaum.core.Pipe._sync import _native_context
+    context, reason = _native_context(pipe, debug=debug)
+    if context is None:
+        return None, reason
+    connectors = dict(context['connectors'])
+    if context['connector'] is not None:
+        connectors[str(pipe.instance_keys)] = context['connector']
+    return {'connectors': connectors, 'attributes': context['attributes']}, ''
 
 
 def verify(
@@ -79,468 +100,43 @@ def verify(
     -------
     A SuccessTuple indicating whether the pipe was successfully resynced.
     """
-    from meerschaum.utils.pool import get_pool
-    from meerschaum.utils.formatting import make_header
-    from meerschaum.utils.misc import interval_str
-    workers = self.get_num_workers(workers)
-    check_rowcounts = skip_chunks_with_greater_rowcounts or check_rowcounts_only
-
-    ### Skip configured bounding in parameters
-    ### if `bounded` is explicitly `False`.
-    bound_time = (
-        self.get_bound_time(debug=debug)
-        if bounded is not False
-        else None
-    )
-    if bounded is None:
-        bounded = bound_time is not None
-
-    if bounded and begin is None:
-        begin = (
-            bound_time
-            if bound_time is not None
-            else self.get_sync_time(newest=False, debug=debug)
-        )
-        if begin is None:
-            remote_oldest_sync_time = self.get_sync_time(newest=False, remote=True, debug=debug)
-            begin = remote_oldest_sync_time
-    if bounded and end is None:
-        end = self.get_sync_time(newest=True, debug=debug)
-        if end is None:
-            remote_newest_sync_time = self.get_sync_time(newest=True, remote=True, debug=debug)
-            end = remote_newest_sync_time
-        if end is not None:
-            end += (
-                timedelta(minutes=1)
-                if hasattr(end, 'tzinfo')
-                else 1
-            )
-
-    begin, end = self.parse_date_bounds(begin, end)
-    cannot_determine_bounds = bounded and begin is None and end is None
-
-    if cannot_determine_bounds and not check_rowcounts_only:
-        warn(f"Cannot determine sync bounds for {self}. Syncing instead...", stack=False)
-        sync_success, sync_msg = self.sync(
-            begin=begin,
-            end=end,
-            params=params,
-            workers=workers,
-            debug=debug,
-            **kwargs
-        )
-        if not sync_success:
-            return sync_success, sync_msg
-
-        if deduplicate:
-            return self.deduplicate(
-                begin=begin,
-                end=end,
-                params=params,
-                workers=workers,
-                debug=debug,
-                **kwargs
-            )
-        return sync_success, sync_msg
-
-    chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
-    chunk_bounds = self.get_chunk_bounds(
+    from meerschaum import _core
+    ### Verifying re-syncs its chunks: a `sync` lock refuses it before any is read.
+    if not check_rowcounts_only:
+        refusal = self._lock_refusal('sync', always=True, debug=debug)
+        if refusal:
+            return False, refusal
+    context, reason = _rust_verify_context(self, debug=debug)
+    if context is None:
+        return False, f"Cannot verify {self}: {reason}."
+    result = _core.verify_pipe(
+        self,
+        context['connectors'],
         begin=begin,
         end=end,
+        params=params,
         chunk_interval=chunk_interval,
         bounded=bounded,
-        align=True,
+        deduplicate=deduplicate,
+        workers=workers,
+        batchsize=batchsize,
+        skip_chunks_with_greater_rowcounts=skip_chunks_with_greater_rowcounts,
+        check_rowcounts_only=check_rowcounts_only,
+        chunksize=kwargs.get('chunksize', -1),
+        check_existing=kwargs.get('check_existing', True),
+        kwargs={
+            key: value
+            for key, value in kwargs.items()
+            if key not in _VERIFY_SYNC_KWARGS
+        },
+        attributes=context['attributes'],
         debug=debug,
     )
+    ### The chunk syncs ran in Rust: drop what this object cached about the table.
+    self._invalidate_cache(hard=True, debug=debug)
+    self._clear_cache_key('_attributes_sync_time', debug=debug)
+    return result
 
-    ### Consider it a success if no chunks need to be verified.
-    if not chunk_bounds:
-        if deduplicate:
-            return self.deduplicate(
-                begin=begin,
-                end=end,
-                params=params,
-                workers=workers,
-                debug=debug,
-                **kwargs
-            )
-        return True, f"Could not determine chunks between '{begin}' and '{end}'; nothing to do."
-
-    begin_to_print = (
-        begin
-        if begin is not None
-        else (
-            chunk_bounds[0][0]
-            if bounded
-            else chunk_bounds[0][1]
-        )
-    )
-    end_to_print = (
-        end
-        if end is not None
-        else (
-            chunk_bounds[-1][1]
-            if bounded
-            else chunk_bounds[-1][0]
-        )
-    )
-    message_header = f"{begin_to_print} - {end_to_print}"
-    max_chunks_syncs = mrsm.get_config('pipes', 'verify', 'max_chunks_syncs')
-
-    info(
-        f"Verifying {self}:\n    "
-        + ("Syncing" if not check_rowcounts_only else "Checking")
-        + f" {len(chunk_bounds)} chunk"
-        + ('s' if len(chunk_bounds) != 1 else '')
-        + f" ({'un' if not bounded else ''}bounded)"
-        + f" of size '{interval_str(chunk_interval)}'"
-        + f" between '{begin_to_print}' and '{end_to_print}'.\n"
-    )
-
-    ### Dictionary of the form bounds -> success_tuple, e.g.:
-    ### {
-    ###    (2023-01-01, 2023-01-02): (True, "Success")
-    ### }
-    bounds_success_tuples = {}
-    def process_chunk_bounds(
-        chunk_begin_and_end: Tuple[
-            Union[int, datetime],
-            Union[int, datetime]
-        ],
-        _workers: Optional[int] = 1,
-    ):
-        if chunk_begin_and_end in bounds_success_tuples:
-            return chunk_begin_and_end, bounds_success_tuples[chunk_begin_and_end]
-
-        chunk_begin, chunk_end = chunk_begin_and_end
-        do_sync = True
-        chunk_success, chunk_msg = False, "Did not sync chunk."
-        if check_rowcounts:
-            existing_rowcount = self.get_rowcount(begin=chunk_begin, end=chunk_end, debug=debug)
-            remote_rowcount = self.get_rowcount(
-                begin=chunk_begin,
-                end=chunk_end,
-                remote=True,
-                debug=debug,
-            )
-            checked_rows_str = (
-                f"checked {existing_rowcount:,} row"
-                + ("s" if existing_rowcount != 1 else '')
-                + f" vs {remote_rowcount:,} remote"
-            )
-            if (
-                existing_rowcount is not None
-                and remote_rowcount is not None
-                and existing_rowcount >= remote_rowcount
-            ):
-                do_sync = False
-                chunk_success, chunk_msg = True, (
-                    "Row-count is up-to-date "
-                    f"({checked_rows_str})."
-                )
-            elif check_rowcounts_only:
-                do_sync = False
-                chunk_success, chunk_msg = True, (
-                    f"Row-counts are out-of-sync ({checked_rows_str})."
-                )
-
-        num_syncs = 0
-        while num_syncs < max_chunks_syncs:
-            chunk_success, chunk_msg = self.sync(
-                begin=chunk_begin,
-                end=chunk_end,
-                params=params,
-                workers=_workers,
-                debug=debug,
-                **kwargs
-            ) if do_sync else (chunk_success, chunk_msg)
-            if chunk_success:
-                break
-            num_syncs += 1
-            time.sleep(num_syncs**2)
-        chunk_msg = chunk_msg.strip()
-        if ' - ' not in chunk_msg:
-            chunk_label = f"{chunk_begin} - {chunk_end}"
-            chunk_msg = f'Verified chunk for {self}:\n{chunk_label}\n{chunk_msg}'
-        mrsm.pprint((chunk_success, chunk_msg))
-
-        return chunk_begin_and_end, (chunk_success, chunk_msg)
-
-    ### If we have more than one chunk, attempt to sync the first one and return if its fails.
-    if len(chunk_bounds) > 1:
-        first_chunk_bounds = chunk_bounds[0]
-        first_label = f"{first_chunk_bounds[0]} - {first_chunk_bounds[1]}"
-        info(f"Verifying first chunk for {self}:\n    {first_label}")
-        (
-            (first_begin, first_end),
-            (first_success, first_msg)
-        ) = process_chunk_bounds(first_chunk_bounds, _workers=workers)
-        if not first_success:
-            return (
-                first_success,
-                f"\n{first_label}\n"
-                + f"Failed to sync first chunk:\n{first_msg}"
-            )
-        bounds_success_tuples[first_chunk_bounds] = (first_success, first_msg)
-        info(f"Completed first chunk for {self}:\n    {first_label}\n")
-        chunk_bounds = chunk_bounds[1:]
-
-    pool = get_pool(workers=workers)
-    batches = self.get_chunk_bounds_batches(chunk_bounds, batchsize=batchsize, workers=workers)
-
-    def process_batch(
-        batch_chunk_bounds: Tuple[
-            Tuple[Union[datetime, int, None], Union[datetime, int, None]],
-            ...
-        ]
-    ):
-        _batch_begin = batch_chunk_bounds[0][0]
-        _batch_end = batch_chunk_bounds[-1][-1]
-        batch_message_header = f"{_batch_begin} - {_batch_end}"
-
-        if check_rowcounts_only:
-            info(f"Checking row-counts for batch bounds:\n    {batch_message_header}")
-            _, (batch_init_success, batch_init_msg) = process_chunk_bounds(
-                (_batch_begin, _batch_end)
-            )
-            mrsm.pprint((batch_init_success, batch_init_msg))
-            if batch_init_success and 'up-to-date' in batch_init_msg:
-                info("Entire batch is up-to-date.")
-                return batch_init_success, batch_init_msg
-
-        batch_bounds_success_tuples = dict(pool.map(process_chunk_bounds, batch_chunk_bounds))
-        bounds_success_tuples.update(batch_bounds_success_tuples)
-        batch_bounds_success_bools = {
-            bounds: tup[0]
-            for bounds, tup in batch_bounds_success_tuples.items()
-        }
-
-        if all(batch_bounds_success_bools.values()):
-            msg = get_chunks_success_message(
-                batch_bounds_success_tuples,
-                header=batch_message_header,
-                check_rowcounts_only=check_rowcounts_only,
-            )
-            if deduplicate:
-                deduplicate_success, deduplicate_msg = self.deduplicate(
-                    begin=_batch_begin,
-                    end=_batch_end,
-                    params=params,
-                    workers=workers,
-                    debug=debug,
-                    **kwargs
-                )
-                return deduplicate_success, msg + '\n\n' + deduplicate_msg
-            return True, msg
-
-        batch_chunk_bounds_to_resync = [
-            bounds
-            for bounds, success in zip(batch_chunk_bounds, batch_bounds_success_bools)
-            if not success
-        ]
-        batch_bounds_to_print = [
-            f"{bounds[0]} - {bounds[1]}"
-            for bounds in batch_chunk_bounds_to_resync
-        ]
-        if batch_bounds_to_print:
-            warn(
-                "Will resync the following failed chunks:\n    "
-                + '\n    '.join(batch_bounds_to_print),
-                stack=False,
-            )
-
-        retry_bounds_success_tuples = dict(pool.map(
-            process_chunk_bounds,
-            batch_chunk_bounds_to_resync
-        ))
-        batch_bounds_success_tuples.update(retry_bounds_success_tuples)
-        bounds_success_tuples.update(retry_bounds_success_tuples)
-        retry_bounds_success_bools = {
-            bounds: tup[0]
-            for bounds, tup in retry_bounds_success_tuples.items()
-        }
-
-        if all(retry_bounds_success_bools.values()):
-            chunks_message = (
-                get_chunks_success_message(
-                    batch_bounds_success_tuples,
-                    header=batch_message_header,
-                    check_rowcounts_only=check_rowcounts_only,
-                ) + f"\nRetried {len(batch_chunk_bounds_to_resync)} chunk" + (
-                    's'
-                    if len(batch_chunk_bounds_to_resync) != 1
-                    else ''
-                ) + "."
-            )
-            if deduplicate:
-                deduplicate_success, deduplicate_msg = self.deduplicate(
-                    begin=_batch_begin,
-                    end=_batch_end,
-                    params=params,
-                    workers=workers,
-                    debug=debug,
-                    **kwargs
-                )
-                return deduplicate_success, chunks_message + '\n\n' + deduplicate_msg
-            return True, chunks_message
-
-        batch_chunks_message = get_chunks_success_message(
-            batch_bounds_success_tuples,
-            header=batch_message_header,
-            check_rowcounts_only=check_rowcounts_only,
-        )
-        if deduplicate:
-            deduplicate_success, deduplicate_msg = self.deduplicate(
-                begin=begin,
-                end=end,
-                params=params,
-                workers=workers,
-                debug=debug,
-                **kwargs
-            )
-            return deduplicate_success, batch_chunks_message + '\n\n' + deduplicate_msg
-        return False, batch_chunks_message
-
-    num_batches = len(batches)
-    for batch_i, batch in enumerate(batches):
-        batch_begin = batch[0][0]
-        batch_end = batch[-1][-1]
-        batch_counter_str = f"({(batch_i + 1):,}/{num_batches:,})"
-        batch_label = f"batch {batch_counter_str}:\n{batch_begin} - {batch_end}"
-        retry_failed_batch = True
-        try:
-            for_self = 'for ' + str(self)
-            batch_label_str = batch_label.replace(':\n', ' ' + for_self + '...\n    ')
-            info(f"Verifying {batch_label_str}\n")
-            batch_success, batch_msg = process_batch(batch)
-        except (KeyboardInterrupt, Exception) as e:
-            batch_success = False
-            batch_msg = str(e)
-            retry_failed_batch = False
-
-        batch_msg_to_print = (
-            f"{make_header('Completed batch ' + batch_counter_str + ':', left_pad=0)}\n{batch_msg}"
-        )
-        mrsm.pprint((batch_success, batch_msg_to_print))
-
-        if not batch_success and retry_failed_batch:
-            info(f"Retrying batch {batch_counter_str}...")
-            retry_batch_success, retry_batch_msg = process_batch(batch)
-            retry_batch_msg_to_print = (
-                f"Retried {make_header('batch ' + batch_label, left_pad=0)}\n{retry_batch_msg}"
-            )
-            mrsm.pprint((retry_batch_success, retry_batch_msg_to_print))
-
-            batch_success = retry_batch_success
-            batch_msg = retry_batch_msg
-
-        if not batch_success:
-            return False, f"Failed to verify {batch_label}:\n\n{batch_msg}"
-
-    chunks_message = get_chunks_success_message(
-        bounds_success_tuples,
-        header=message_header,
-        check_rowcounts_only=check_rowcounts_only,
-    )
-    return True, chunks_message
-
-
-
-def get_chunks_success_message(
-    chunk_success_tuples: Dict[Tuple[Any, Any], SuccessTuple],
-    header: str = '',
-    check_rowcounts_only: bool = False,
-) -> str:
-    """
-    Sum together all of the inserts and updates from the chunks.
-
-    Parameters
-    ----------
-    chunk_success_tuples: Dict[Tuple[Any, Any], SuccessTuple]
-        A dictionary mapping chunk bounds to the resulting SuccessTuple.
-
-    header: str
-        An optional header to print before the message.
-
-    Returns
-    -------
-    A success message.
-    """
-    from meerschaum.utils.formatting import extract_stats_from_message
-    from meerschaum.utils.misc import items_str
-    success_chunk_messages = [tup[1] for bounds, tup in chunk_success_tuples.items() if tup[0]]
-    fail_chunk_bounds_tuples = {
-        bounds: tup
-        for bounds, tup in chunk_success_tuples.items()
-        if not tup[0]
-    }
-    chunk_stats = [extract_stats_from_message(msg) for msg in success_chunk_messages]
-    inserts = [stat['inserted'] for stat in chunk_stats]
-    updates = [stat['updated'] for stat in chunk_stats]
-    upserts = [stat['upserted'] for stat in chunk_stats]
-    checks = [stat['checked'] for stat in chunk_stats]
-    out_of_sync_bounds_messages = {
-        bounds: message
-        for bounds, (success, message) in chunk_success_tuples.items()
-        if 'out-of-sync' in message
-    } if check_rowcounts_only else {}
-
-    num_inserted = sum(inserts)
-    num_updated = sum(updates)
-    num_upserted = sum(upserts)
-    num_checked = sum(checks)
-    num_fails = len(fail_chunk_bounds_tuples)
-    num_out_of_sync = len(out_of_sync_bounds_messages)
-
-    header = (header + "\n") if header else ""
-    stats_msg = items_str(
-        (
-            (
-                ([f'inserted {num_inserted:,}'] if num_inserted else [])
-                + ([f'updated {num_updated:,}'] if num_updated else [])
-                + ([f'upserted {num_upserted:,}'] if num_upserted else [])
-                + ([f'checked {num_checked:,}'] if num_checked else [])
-            ) or ['synced 0']
-        ),
-        quotes=False,
-        and_=False,
-    )
-
-    success_msg = (
-        "Successfully "
-        + ('synced' if not check_rowcounts_only else 'checked')
-        + f" {len(chunk_success_tuples):,} chunk"
-        + ('s' if len(chunk_success_tuples) != 1 else '')
-        + '\n(' + stats_msg
-        + ' rows in total).'
-    )
-    if check_rowcounts_only:
-        success_msg += (
-            f"\n\nFound {num_out_of_sync} chunk"
-            + ('s' if num_out_of_sync != 1 else '')
-            + ' to be out-of-sync'
-            + ('.' if num_out_of_sync == 0 else ':\n\n  ')
-            + '\n  '.join(
-                [
-                    f'{lbound} - {rbound}'
-                    for lbound, rbound in out_of_sync_bounds_messages
-                ]
-            )
-        )
-    fail_msg = (
-        ''
-        if num_fails == 0
-        else (
-            f"\n\nFailed to sync {num_fails:,} chunk"
-            + ('s' if num_fails != 1 else '') + ":\n"
-            + '\n'.join([
-                f"{fail_begin} - {fail_end}\n{msg}\n"
-                for (fail_begin, fail_end), (_, msg) in fail_chunk_bounds_tuples.items()
-            ])
-        )
-    )
-
-    return header + success_msg + fail_msg
 
 
 def get_bound_interval(self, debug: bool = False) -> Union[timedelta, int, None]:
@@ -634,3 +230,59 @@ def get_bound_time(self, debug: bool = False) -> Union[datetime, int, None]:
         if bound_time > oldest_sync_time or extreme_sync_times_delta
         else None
     )
+
+
+def verify_schema(
+    self,
+    apply: bool = False,
+    dry_run: bool = False,
+    debug: bool = False,
+) -> SuccessTuple:
+    """
+    Compare the pipe's table with its declared dtypes (`dtypes`, the `columns` roles, geometry
+    notations) and, with `apply=True`, bring the table in line.
+
+    Added columns and safe widenings (`int` to `bigint`, `int` to `float`, `float` to `numeric`,
+    `varchar(n)` to `text`, `text` to `json`) keep every value; other type changes may fail on
+    existing values or change them. Columns are never dropped, and static pipes are included.
+    The command line equivalent is `mrsm verify schema`.
+
+    Parameters
+    ----------
+    apply: bool, default False
+        If `True`, apply every change the plan lists. Otherwise nothing is written.
+
+    dry_run: bool, default False
+        If `True`, return the SQL the plan would run (and write nothing).
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple`: the message is the plan (a table of the columns that change), the SQL
+    with `dry_run=True`, or the plan and what changed with `apply=True`. A protected instance
+    refuses `apply=True` unless writes are allowed (`meerschaum.connectors.allow_protected()`).
+
+    Examples
+    --------
+    >>> pipe = mrsm.Pipe('plugin:noaa', 'weather', dtypes={'temperature': 'float'})
+    >>> success, plan = pipe.verify_schema()
+    >>> print(plan)
+    >>> success, msg = pipe.verify_schema(apply=True)
+    """
+    from meerschaum import _core
+    from meerschaum.core.Pipe._data import _rust_context
+    context = _rust_context(self, debug=debug)
+    success, message = _core.pipe_verify_schema(
+        self,
+        context,
+        apply=(apply and not dry_run),
+        dry_run=dry_run,
+        debug=debug,
+    )
+    if apply and not dry_run:
+        ### The table's columns changed: forget the cached columns types.
+        self._clear_cache_key('_columns_types', debug=debug)
+        self._clear_cache_key('_columns_types_timestamp', debug=debug)
+    return success, message

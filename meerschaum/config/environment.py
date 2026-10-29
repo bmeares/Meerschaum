@@ -16,6 +16,7 @@ import threading
 
 from meerschaum.utils.typing import List, Union, Dict, Any, Optional
 from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum import _core
 
 ### Serialize the process-global swap of `os.environ` and `meerschaum.config.paths`
 ### globals performed by `replace_env`. A daemon process runs several threads
@@ -31,8 +32,12 @@ def apply_environment_patches(env: Optional[Dict[str, Any]] = None) -> None:
     """
     config_var = STATIC_CONFIG['environment']['config']
     patch_var = STATIC_CONFIG['environment']['patch']
-    apply_environment_config(config_var, env=env)
-    apply_environment_config(patch_var, env=env)
+    ### Nothing to apply: do not touch the native registry (importing `meerschaum.config` runs
+    ### this, and a bare import must not load the extension).
+    _env = env if env is not None else os.environ
+    if config_var not in _env and patch_var not in _env:
+        return
+    return _core.apply_environment_patches(env)
 
 
 def apply_environment_config(env_var: str, env: Optional[Dict[str, Any]] = None) -> None:
@@ -94,8 +99,10 @@ def apply_environment_uris(env: Optional[Dict[str, Any]] = None) -> None:
     Patch temporary connectors defined in environment variables which start with
     `MRSM_SQL_` or `MRSM_API_`.
     """
-    for env_var in get_connector_env_vars(env=env):
-        apply_connector_uri(env_var, env=env)
+    env_vars = get_connector_env_vars(env=env)
+    if not env_vars:
+        return
+    return _core.apply_environment_uris(env)
 
 
 def get_connector_env_regex() -> str:

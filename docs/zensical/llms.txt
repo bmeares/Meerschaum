@@ -1,58 +1,98 @@
 # Meerschaum Documentation
 
-> Craft elegant data pipes with Meerschaum.
+> Incremental data pipelines in SQL and Python.
 
 ## Home
-- [Home](https://meerschaum.io/): Want to use Meerschaum in your code? Check out the <a href="https://docs.meerschaum.io">package documentation</a>!
+- [Home](https://meerschaum.io/): Meerschaum turns queries and Python functions into named data streams called Pipes. Register a source, sync it, and query the results from your database, Python, or the web console.
 
 ## Get Started
-- [🛠️ Setup](https://meerschaum.io/get-started/): Run Meerschaum commands with mrsm (or python -m meerschaum if ~/.local/bin/ isn't in your PATH).
-- [🏗️ Building a Pipe](https://meerschaum.io/get-started/bootstrap/): Pipes fetch and sync data from connectors. For this example, we will be using the connector plugin:noaa from the data plugin noaa. Type the commands below to bootstrap an example pipe.
-- [📦️ Compose Projects](https://meerschaum.io/get-started/compose-projects/): Now that you've got the idea behind pipes, let's write our own plugins and put together a project using <a href="/reference/compose">Meerschaum Compose</a>.
-- [🖥️ Web Console](https://meerschaum.io/get-started/start-api/): You can use Meerschaum from its web interface. From within a mrsm shell, type to commands below to see how:
+- [Install and set up](https://meerschaum.io/get-started/): Your first Pipe needs Python and a few local rows. No database server or Docker setup is required.
+- [Your first Pipe](https://meerschaum.io/get-started/bootstrap/): A Pipe connects a data source to a table you can keep up to date. Let's collect temperature readings in a local SQLite database.
+- [Sync new rows](https://meerschaum.io/get-started/incremental-sync/): Your first Pipe already has one reading. Add another to its source:
+- [Your first Pipeline](https://meerschaum.io/get-started/pipelines/): One Pipe collects readings. Another converts them. A Pipeline runs those steps in the right order and gives the workflow a name.
+- [Explore the console](https://meerschaum.io/get-started/start-api/): See the same Pipes and Pipeline from your browser. Continue in the workspace from Your first Pipeline.
+- [Save a project](https://meerschaum.io/get-started/compose-projects/): A Compose project keeps your Pipes, connectors, and plugins in one folder. Put it in version control and run the same workflow again.
 
 ## Reference
-- [📚 Meerschaum Reference Wiki](https://meerschaum.io/reference/): So you've just completed the Getting Started guide ― congratulations! 🥳 "What's next?", you might ask.
+- [Reference](https://meerschaum.io/reference/): Find commands, settings, and operational guides for an existing Meerschaum installation.
 - [🚰 Pipes](https://meerschaum.io/reference/pipes/): A Meerschaum pipe represents a data stream into a table and the necessary parameters to sync new data.
 - [🥾 Bootstrapping](https://meerschaum.io/reference/pipes/bootstrapping/): The bootstrap pipes action includes a setup wizard to guide you through the process of creating new pipes. In this tutorial, we'll be looking at the prompts you'll encounter to help you better underst
-- [📥 Syncing](https://meerschaum.io/reference/pipes/syncing/): I wrote my master's thesis on comparing syncing strategies. Here are the presentation slides which summarize my findings.
+- [📥 Syncing](https://meerschaum.io/reference/pipes/syncing/): I wrote my master's thesis on comparing syncing strategies.
 - [📖 Reading Data](https://meerschaum.io/reference/pipes/reading/): Use Pipe.getdata() and its convenience wrappers to read rows from the instance.
 - [🔖 Tags](https://meerschaum.io/reference/pipes/tags/): You can define custom groupings of pipes with tags. Consider the example below:
 - [🧩 Parameters](https://meerschaum.io/reference/pipes/parameters/): This page catalogs useful keys in the parameters dictionary.
 - [🔤 Data Types](https://meerschaum.io/reference/pipes/dtypes/): This page explains what Meerschaum data types (dtypes) are, when to use each one, and how dtype coercion behaves during syncs. For the dtype table in context with the rest of the metadata, see paramet
 - [🧹 Maintenance](https://meerschaum.io/reference/pipes/maintenance/): Over time a pipe's target table accumulates dead rows, stale planner statistics, and uncompressed history. Meerschaum provides a family of maintenance actions to keep tables lean and queries fast. Eac
+- [🔒 Access and Locks](https://meerschaum.io/reference/pipes/access-and-locks/): Meerschaum is open by default. On an instance where nobody sets up teams, access or locks, every
+- [🕸️ Pipelines](https://meerschaum.io/reference/pipelines/): > New in v5. The Syncing Engine understands how your pipes depend on one another. It decides which pipes need to run, how wide each sync must be, runs independent branches in parallel, and records wha
+- [🗃️ Engine State](https://meerschaum.io/reference/pipelines/state/): The engine adds no database files to your root directory. Everything it remembers lives on your instance, as internal pipes alongside Meerschaum's own tables (on flavors that have schemas, PostgreSQL
+- [♾️ Continuous Mode](https://meerschaum.io/reference/pipelines/continuous/): mrsm sync pipes --loop keeps the engine running. On a flat selection it behaves exactly as v4's laps did: every selected pipe syncs, then the process sleeps --min-seconds N after the lap ends, then th
+- [📊 Visualization](https://meerschaum.io/reference/pipelines/visualization/): The engine emits one typed event per transition, and everything you see is drawn from that stream or from the recorded run:
 - [🔌 Connectors](https://meerschaum.io/reference/connectors/): Meerschaum coordinates everything via connectors. Use cases for Connectors include fetching and inserting data when syncing pipes.
 - [🗂️ SQL Connectors](https://meerschaum.io/reference/connectors/sql-connectors/): Meerschaum's first-class connector is the SQLConnector. Several built-in sql connectors are defined by default:
 - [🗄️ Instance Connectors](https://meerschaum.io/reference/connectors/instance-connectors/): Instance connectors store pipes' metadata (and may also be used as a source connector, e.g. the #!python SQLConnector).
 - [🗝️ Valkey Connectors](https://meerschaum.io/reference/connectors/valkey/): The ValkeyConnector syncs pipes to a Valkey instance. Valkey is an in-memory key-value store forked from Redis, so the same connector also works against a Redis server.
 - [❓ Other Connector Types](https://meerschaum.io/reference/connectors/other-connectors/): Though the SQL Connector is the premier Meerschaum connector type, there are plenty of other implementations of the instance connector interface.
-- [🐍 Python API](https://meerschaum.io/reference/python-api/): Most of this documentation is written from the perspective of the mrsm command-line interface, but everything you can do from the CLI you can also do from Python. This page is a practical cheat sheet 
-- [🥞 Stack](https://meerschaum.io/reference/stack/): The Meerschaum stack is an integrated collection of services designed to help you start visualizing your data as quickly as possible.
-- [🌐 API Instance](https://meerschaum.io/reference/api-instance/): The Meerschaum API instance (and Web Console) lets you manage pipes, jobs, and connectors over the Internet. Start the API server with the stack or via start api; see Deployment below for ways to run 
-- [Security and Tokens](https://meerschaum.io/reference/api-instance/tokens/): Meerschaum tokens are long-lived API keys that grant programmatic access to a Meerschaum instance. They are a secure way to authenticate for services like IoT devices or CI/CD pipelines without using 
-- [NGINX](https://meerschaum.io/reference/api-instance/nginx/): Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (certbot). There are several important goals when setting up forwarding:
-- [Web Console](https://meerschaum.io/reference/api-instance/web-console/): The Meerschaum Web Console provides a graphical interface for managing your Meerschaum instance, served by the API instance. To access it, start the API (mrsm start api) and navigate to your host URL 
+- [🥞 Meerschaum Stack](https://meerschaum.io/reference/stack/): The Stack uses Docker Compose to run a database, the API and console, Valkey, and Grafana together. Start it with mrsm stack up -d. See upgrades and backups when maintaining an existing Stack.
+- [Upgrades and backups](https://meerschaum.io/reference/stack/upgrades/): Pulling newer images (mrsm stack pull, or mrsm upgrade mrsm) updates the stack's software, but
+- [🌐 API Instance](https://meerschaum.io/reference/api-instance/): The Meerschaum API instance (and Web Console) lets you manage pipes, jobs, and connectors over the Internet. Start the API server with the stack or via start api; see Deployment below for ways to run
+- [Security and Tokens](https://meerschaum.io/reference/api-instance/tokens/): Meerschaum tokens are long-lived API keys that grant programmatic access to a Meerschaum instance. They are a secure way to authenticate for services like IoT devices or CI/CD pipelines without using
+- [Permissions and Rate Limits](https://meerschaum.io/reference/api-instance/permissions/): An API server decides three things about every request: whether the route is served at all (route groups), who may call it (authentication and scopes), and how often (rate limits). All of it lives und
+- [Pipelines, Access and Actions over HTTP](https://meerschaum.io/reference/api-instance/routes/): Besides the existing pipe, user, token, plugin and job routes, an API server has routes for saved Pipelines, their runs, teams and pipe access and the console's background actions. Existing route bodi
+- [NGINX](https://meerschaum.io/reference/api-instance/nginx/): Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (certbot), especially when several sites share port 443. (The API server can also serve HTTPS by itself: see TLS / SSL
+- [Web Console](https://meerschaum.io/reference/api-instance/web-console/): The Meerschaum Web Console provides a graphical interface for managing your Meerschaum instance, served by the API instance. To access it, start the API (mrsm start api) and navigate to your host URL
+- [Sync Metrics](https://meerschaum.io/reference/api-instance/sync-metrics/): Find slow or failing syncs, and see how much data each Pipe or Pipeline changes.
 - [🤖 MCP Server](https://meerschaum.io/reference/mcp/): Meerschaum ships a Model Context Protocol server, so an AI agent can discover your pipes, read their data, and run actions without you writing any glue code.
 - [Tool Reference](https://meerschaum.io/reference/mcp/tools/): Every tool, resource, and prompt the MCP server exposes, generated
 - [Security](https://meerschaum.io/reference/mcp/security/): The MCP server hands an AI agent the same capabilities a person has at the CLI or web console. Treat a token for it exactly as you would a Meerschaum login.
-- [🎼 Compose](https://meerschaum.io/reference/compose/): Meerschaum Compose does the same for Meerschaum as Docker Compose does for Docker: you can consolidate everything into a single YAML file ― including all of the pipes and configuration needed for your
-- [⏯️ Actions](https://meerschaum.io/reference/actions/): To see available actions, run help or show actions.
-- [👷 Background Jobs](https://meerschaum.io/reference/background-jobs/): Meerschaum's job management system lets you run any process in the background ― just add -d to any command. Thanks to the built-in scheduler, you no longer have to worry about manually configuring cro
+- [🎼 Compose](https://meerschaum.io/reference/compose/): Meerschaum Compose does the same for Meerschaum as Docker Compose does for Docker: you can consolidate everything into a single YAML file, including all of the pipes and configuration needed for your
+- [⏯️ Actions](https://meerschaum.io/reference/actions/): Run mrsm help (or mrsm -h) to see every action with a one-line description, then the options.
+- [📺 Watch and Shell Shortcuts](https://meerschaum.io/reference/actions/watch/): show prints something once; watch keeps it on screen as it changes. watch run and watch jobs are full-screen views (new in v5) that take the whole terminal and give it back as it was when you leave; w
+- [👥 Teams, Access and Locks](https://meerschaum.io/reference/actions/teams-and-access/): Meerschaum is open by default: on an instance where nobody sets up teams, access or locks, every
+- [Background Jobs](https://meerschaum.io/reference/background-jobs/): Add -d to run an action in the background. Give it a name so you can find its logs later:
+- [Schedules](https://meerschaum.io/reference/background-jobs/schedules/): Use --schedule (-s) to repeat an action. Add -d to keep it running in the background:
+- [Executors](https://meerschaum.io/reference/background-jobs/executors/): An executor runs a job. Select one with -e (--executor-keys):
+- [Access](https://meerschaum.io/reference/background-jobs/access/): API-created jobs record the authenticated owner and that user's primary team. Requests cannot assign a different owner or team. Jobs created on the host through the CLI, Compose, systemd, or Python be
+- [Automatic Runs](https://meerschaum.io/reference/background-jobs/runs/): Clicking Sync on a Pipe or Run on a Pipeline starts a temporary worker. The console lists it under Runs, keeping one-off work out of persistent Jobs. A manually created one-shot Job stays in Jobs.
+- [Health](https://meerschaum.io/reference/background-jobs/health/): Repeating jobs record each completed run, called a lap. mrsm show jobs and the console show the last successful sync and whether work is failing or stalled.
+- [Startup stagger](https://meerschaum.io/reference/background-jobs/startup/): Starting many jobs together can overload a host. Meerschaum spreads bulk starts with random delay, host load checks, and a per-root limit on starting workers.
 - [🔧 Data Analysis Tools](https://meerschaum.io/reference/data-analysis-tools/): Meerschaum comes with a pre-configured data visualization stack so that you can spend your time on analysis rather than configuring servers.
 - [➕ Plugins](https://meerschaum.io/reference/plugins/): Meerschaum plugins let you ingest any data source into pipes as well as defining custom actions, connectors, API endpoints, dash apps, and more.
-- [✍️ Writing Your Own](https://meerschaum.io/reference/plugins/writing-plugins/): > This tutorial explains how to extend Meerschaum with plugins. For general information, consult the Types of Plugins reference page.
+- [✍️ Writing Your Own](https://meerschaum.io/reference/plugins/writing-plugins/): Rust plugins can be a single .rs file for actions, data sources, or connectors. See the Rust quickstart to get started, or the advanced guide for packaging and the full SDK. The examples below use Pyt
 - [🤔 Types of Plugins](https://meerschaum.io/reference/plugins/types-of-plugins/): > This page introduces the different types of Meerschaum plugins. For technical information, consult the Writing Your Own Plugins tutorial.
+- [🖥️ Web Pages and Routes](https://meerschaum.io/reference/plugins/web-pages/): Plugins add pages to the Web Console with #!python @webpage, make them interactive with Dash callbacks, and add API routes with #!python @apiplugin. This page covers who may use them (signed-in visito
+- [🗃️ Caching](https://meerschaum.io/reference/plugins/caching/): Some things are slow to compute: a query over a big table, a chart, a call to someone else's API. meerschaum.utils.cache remembers the result for a while, shares it with every process of your deployme
+- [🧪 Testing Plugins](https://meerschaum.io/reference/plugins/testing/): meerschaum.testing is a pytest plugin: your tests get a throwaway Meerschaum root, a fresh SQLite instance for each test, pipes that clean up after themselves, the web API in the test process and the
+- [🦀 Rust Plugins](https://meerschaum.io/reference/plugins/rust-plugins/): A Rust plugin can be one .rs file. Add a command, return rows of data, or create a
+- [Advanced](https://meerschaum.io/reference/plugins/rust-plugins/advanced/): Start with the single-file Rust plugin guide for actions,
+- [Routes and MCP](https://meerschaum.io/reference/plugins/rust-plugins/routes-and-mcp/): A Rust plugin can serve HTTP routes next to the core API (the native counterpart of
+- [Executors and Streams](https://meerschaum.io/reference/plugins/rust-plugins/executors-and-streams/): A Rust plugin can provide a job executor (the native counterpart of @makeexecutor) and
 - [🚀 Repositories](https://meerschaum.io/reference/plugins/repositories/): Meerschaum gives you the ability to easily install and create plugins. Refer to the guide below on how to install, write, and publish plugins.
 - [🌳 Environment Variables](https://meerschaum.io/reference/environment/): You can manage the behavior of Meerschaum and emulate multiple installations with environment variables.
 - [🩺 Troubleshooting](https://meerschaum.io/reference/troubleshooting/): A symptom-driven guide to the most common Meerschaum issues. Each entry follows Symptom → Cause → Fix.
+- [⬆️ Migrating to v5](https://meerschaum.io/reference/migrating-to-v5/): Meerschaum v5 runs its core, CLI, jobs, Compose, HTTP API, and MCP server in Rust. Your existing data, configuration, Pipe definitions, and Python plugins remain usable. Review the changes below befor
 - [📖 Glossary](https://meerschaum.io/reference/glossary/): This page defines the core Meerschaum domain terms in one place. Each entry links to its reference documentation where one exists. Other pages can deep-link to any term by its heading anchor, e.g. #up
-- [💼 Portable](https://meerschaum.io/reference/meerschaum-portable/): Sometimes, it's not worth the hassle setting up a complete Python environment. If you're using a non-administrative account or just want to test out Meerschaum, Meerschaum Portable might be right for 
 
 ## Tutorials
-- [📚 Tutorials](https://meerschaum.io/tutorials/): Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the video tutorials if you're more of a visual learner.
+- [Learn by building](https://meerschaum.io/tutorials/): Start small, then add one idea at a time. The beginner path uses local SQLite data and works without an external API or database server.
 
-## News
-- [🪵 Changelog](https://meerschaum.io/news/changelog/): This is the current release cycle, so stay tuned for future releases!
-- [📢 Announcements](https://meerschaum.io/news/announcements/): > 27 June 2022
-- [🌠 To-Do / Wish List](https://meerschaum.io/news/to-do/): Below are some ongoing tasks I have planned for Meerschaum. This is not an exhaustive list, and if you would like to contribute a feature idea or point out a bug, please start a discussion or open an 
-- [🤗 Acknowledgements](https://meerschaum.io/news/acknowledgements/): Meerschaum is built with the help of many incredible open source libraries. In the spirit of open source, I've chosen to release the project under the permissive Apache 2.0 license.
+## Docs
+- [Developer docs](https://meerschaum.io/docs/): Use Meerschaum in an application, provide data from a plugin, or add a command.
+- [Python](https://meerschaum.io/docs/python/): Install the package, then import the SDK:
+- [Pipes](https://meerschaum.io/docs/python/pipes/): A Pipe stores a named data stream on an instance. This example uses the built-in local SQLite instance and supplies its own rows:
+- [Pipelines](https://meerschaum.io/docs/python/pipelines/): A Pipeline selects Pipes and runs their dependencies in order. Once your Pipes are registered, save a workflow on their instance:
+- [Plugins](https://meerschaum.io/docs/python/plugins/): Save readings.py in your plugins directory, or use mrsm bootstrap plugins readings to create it:
+- [Rust](https://meerschaum.io/docs/rust/): Embed Pipes and the engine in a Rust application, or extend an installed Meerschaum with a native plugin.
+- [Embedding](https://meerschaum.io/docs/rust/embedding/): Library applications disable default features to avoid building the full CLI:
+- [Pipes](https://meerschaum.io/docs/rust/pipes/): This local example provides rows directly and writes them through the SQL connector. Use the dependencies from Embedding.
+- [Pipelines](https://meerschaum.io/docs/rust/pipelines/): The engine takes a connector registry, a home instance, and run options. Its selection chooses targets and how far to traverse their dependencies.
+- [Plugins](https://meerschaum.io/docs/rust/plugins/): A single-file plugin needs no Cargo project. Save greetings.rs in your plugins directory:
+
+## Changelog
+- [Changelog](https://meerschaum.io/changelog/): Meerschaum 5 brings a Rust core, dependency-aware Pipelines, and a new web console.
+- [v5](https://meerschaum.io/changelog/v5/): The data engine, database connectors, CLI, HTTP API, jobs, and Compose now run in Rust. Keep your Pipe definitions, configuration, Python plugins, and existing data. Start with the migration guide.
+- [v4](https://meerschaum.io/changelog/v4/): Historical release notes for the 4.x series.
+- [v3](https://meerschaum.io/changelog/v3/): Historical release notes for the 3.x series.
+- [v2](https://meerschaum.io/changelog/v2/): Historical release notes for the 2.x series.
+- [v1](https://meerschaum.io/changelog/v1/): Historical release notes for the 1.x series.
+- [v0](https://meerschaum.io/changelog/v0/): Historical release notes for the 0.x series.

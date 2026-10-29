@@ -1,0 +1,3 @@
+
+Show the registered users in a Meerschaum instance (default is the current instance).
+

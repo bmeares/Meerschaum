@@ -1,0 +1,34 @@
+[package]
+name = "meerschaum-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the Arrow/Polars data kernel (dtype enforcement, unseen-row diffs, special columns)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-kernel"
+keywords = ["meerschaum", "etl", "arrow", "polars", "dataframe"]
+categories = ["data-structures", "database"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[dependencies]
+meerschaum-core = { workspace = true }
+polars = { workspace = true }
+arrow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
+indexmap = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+base64 = "0.23"
+hex = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }

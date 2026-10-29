@@ -1,0 +1,44 @@
+[package]
+name = "meerschaum-connector-valkey"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the Valkey (Redis-compatible) instance connector"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-connector-valkey"
+keywords = ["meerschaum", "valkey", "redis", "etl", "pipelines"]
+categories = ["database", "asynchronous"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+# `wire::to_json` (pandas' `to_json`, for `push_df`); no HTTP client.
+meerschaum-connector-api = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+# Crate-private: the Valkey client.
+fred = { version = "10", default-features = false, features = [
+    "i-keys",
+    "i-sorted-sets",
+    "i-sets",
+    "i-lists",
+    "i-hashes",
+    "i-scripts",
+    "i-server",
+] }
+
+[dev-dependencies]
+meerschaum-connector = { workspace = true, features = ["testing"] }
+tokio = { workspace = true }
+serde_json = { workspace = true }

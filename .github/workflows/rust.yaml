@@ -1,0 +1,308 @@
+# Linux PR checks keep broad Rust unit coverage. Full nightly/release runs add the
+# platform matrix and reference regeneration. Shipping binaries belong to wheels.yaml;
+# tagging verifies existing release artifacts instead of rebuilding them here.
+name: rust
+
+on:
+  push:
+    branches: [ main, v5 ]
+  pull_request:
+  workflow_call:
+    inputs:
+      full:
+        type: boolean
+        default: true
+      parity:
+        type: boolean
+        default: true
+  schedule:
+    - cron: '47 4 * * *'
+  workflow_dispatch:
+    inputs:
+      parity:
+        description: 'Run the reference-harness parity job (regenerate fixtures with meerschaum 4.1.4).'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Branch pushes and pull requests of the same branch share a group: a newer one supersedes the
+# running one (a release push and its pull request are the same commit). A dispatch (the release
+# gate) or a tag has its own group and is never cancelled; the self-hosted jobs that share host
+# state (`test`, `parity`) are serialized per host below, so a dispatch waits for them instead of racing.
+concurrency:
+  group: rust-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && 'auto' || github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref_type == 'branch' || github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '16'
+  NEXTEST_TEST_THREADS: '8'
+  RUST_BACKTRACE: '1'
+  MRSM_CI_MIN_FREE_GB: '10'
+
+jobs:
+  # ---------------------------------------------------------------- what changed
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.changes.outputs.rust }}
+      rust_test: ${{ steps.changes.outputs.rust_test }}
+      parity: ${{ steps.changes.outputs.parity }}
+      frontcrate: ${{ steps.changes.outputs.frontcrate }}
+      package: ${{ steps.changes.outputs.package }}
+      duckdb: ${{ steps.changes.outputs.duckdb }}
+      full: ${{ steps.changes.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}' }
+      - id: changes
+        name: Which jobs does this change need?
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          FORCE_FULL: ${{ inputs.full }}
+        run: |
+          event="$GITHUB_EVENT_NAME"
+          if [ "$FORCE_FULL" = true ]; then event=workflow_call; fi
+          python3 scripts/ci/changes.py --event "$event" --ref "$GITHUB_REF" --before "$BEFORE" --after "$GITHUB_SHA" --base "$BASE"
+
+  # ---------------------------------------------------------------- hosted: formatting (a quick gate)
+  fmt:
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false, ref: '${{ github.sha }}' }
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: cargo fmt --all --check
+        run: scripts/rust/ci.sh fmt
+
+  # ---------------------------------------------------------------- self-hosted (full checks)
+  # Self-hosted jobs never run for pull requests from forks: they would execute untrusted code on
+  # the maintainer's host. Fork PRs still get the hosted `fmt` and `check` legs.
+
+  clippy:
+    needs: [ changes, fmt ]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard (drops the release/ci layers, then cargo clean, below 10 GB free)
+        run: scripts/rust/ci.sh disk-guard
+      - name: cargo clippy --all-targets -- -D warnings
+        run: scripts/rust/ci.sh clippy
+      - name: cargo doc --workspace --no-deps --all-features (-D warnings)
+        run: scripts/rust/ci.sh doc
+
+  test:
+    needs: [ changes, fmt ]
+    if: ${{ !cancelled() && needs.changes.outputs.rust_test == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    concurrency:
+      group: mrsm-rust-test
+      cancel-in-progress: false
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard (drops the release/ci layers, then cargo clean, below 10 GB free)
+        run: scripts/rust/ci.sh disk-guard
+      - name: Build the native Python extension
+        # Since D14 several cargo tests start real Python workers that import `meerschaum`, which
+        # requires the extension. A debug build, so it reuses the dependencies `cargo nextest` /
+        # `cargo test` compile. MRSM_PYTHON, exported by the step, makes the workers use the interpreter the
+        # extension was built with.
+        run: scripts/rust/ci.sh extension
+      - name: cargo nextest run --workspace (+ doc tests)
+        # `MRSM_TEST_NO_CORE=1` still skips the extension-dependent tests locally, where it is not built.
+        env:
+          MRSM_NO_AUTO_INSTALL: '1'
+        run: scripts/rust/ci.sh test
+
+  # The `meerschaum` front crate's features are only ever built together by the workspace: compile it with
+  # no default features, with each feature alone and run its tests with `full`, so a missing `cfg` or
+  # feature edge (`server` without `api`, ...) fails here and not for the first user.
+  frontcrate:
+    needs: [ changes, fmt ]
+    if: ${{ !cancelled() && needs.changes.outputs.frontcrate == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard (drops the release/ci layers, then cargo clean, below 10 GB free)
+        run: scripts/rust/ci.sh disk-guard
+      - name: meerschaum feature matrix
+        run: scripts/rust/ci.sh frontcrate
+
+  # crates.io packaging dry-run (docs/design/v5-build.md "Publishing to crates.io"): `cargo package
+  # --workspace --no-verify` writes every tarball (explicit `include` lists, lockstep `=<ver>` internal
+  # dependencies, publish metadata) and scripts/rust/check_packages.py rejects an archive of 10 MB or
+  # more or one that ships tests, fixtures or benches.
+  # Nothing is compiled or uploaded, so it takes seconds. `--no-verify` skips compiling the tarballs:
+  # the full build-from-tarball check is `scripts/rust/ci.sh publish-dry-run` (slow; it builds them
+  # without the root `[patch.crates-io]`, which crates.io ignores, so with plain sqlx). Run it before
+  # a release.
+  package:
+    needs: [ changes, fmt ]
+    if: ${{ !cancelled() && needs.changes.outputs.package == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Packaging metadata (versions, extras, crates.io metadata)
+        run: python3 scripts/check_packaging.py
+      - name: cargo package --workspace --no-verify, then size and contents checks
+        run: scripts/rust/ci.sh package
+
+  # Optional parity job (docs/design/v5.0.0.md §10.2): regenerate every
+  # crates/*/tests/fixtures/gen_*.py with the released meerschaum 4.1.4 in .venv-ref and fail if
+  # the committed fixtures change. ~10 minutes, so it runs only when a generator, a fixture or the
+  # reference harness changed (scripts/ci/changes.py), or on a dispatch / tag. Skip it with the repository
+  # variable MRSM_SKIP_PARITY=true or by unticking `parity` on a manual run. .venv-ref/ persists on the runner.
+  parity:
+    needs: [ changes ]
+    if: ${{ !cancelled() && needs.changes.outputs.parity == 'true' && (inputs.full || vars.MRSM_SKIP_PARITY != 'true') && (inputs.full || github.event_name != 'workflow_dispatch' || inputs.parity) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    concurrency:
+      group: mrsm-rust-parity
+      cancel-in-progress: false
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
+      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Regenerate fixtures with the v4.1.4 reference and diff
+        run: scripts/rust/ci.sh parity
+      - name: Retain detailed reference-generator output
+        if: ${{ always() && env.MRSM_PARITY_LOGS_DIR != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-generator-logs-${{ github.run_attempt }}
+          path: ${{ env.MRSM_PARITY_LOGS_DIR }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------- hosted (compile only)
+  # ubuntu-latest keeps compile errors visible when the self-hosted runner is down.
+  # windows/macos are allowed to fail until the §15 Windows/macOS work lands.
+  check:
+    name: check (${{ matrix.os }})
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.full == 'true' && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false, ref: '${{ github.sha }}' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      # Hosted runners are ephemeral, so this cache lives in GitHub's cache storage, not on the
+      # self-hosted disk. Restored on every run, saved from `v5` only (a PR cache cannot be shared).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: check-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+      - name: cargo check --workspace
+        run: scripts/rust/ci.sh check
+
+  # DuckDB is not compiled in: `mrsm` and the extension load DuckDB's own `libduckdb`, downloaded from
+  # the pinned release (SHA-256 in crates/meerschaum-connector-sql/src/duckdb_lib/install.rs). The
+  # self-hosted `test` job is authoritative on Linux x86_64 (it runs the whole suite against the
+  # cached library). These hosted legs prove the other platforms' pinned assets: the installer
+  # downloads the library for the platform, the loader finds it, and the type / parameter / timezone
+  # tests run against it. Linux arm64 uses the `linux-arm64` zip, macOS (arm64) the `osx-universal`
+  # one, Windows the `windows-amd64` / `windows-arm64` DLLs. Required on Linux arm64, macOS and
+  # Windows x64; `windows-11-arm` stays optional (its runner image and toolchain are newer).
+  # Runs when the DuckDB loader (or its installer script) changed, and on a dispatch / tag.
+  duckdb-platforms:
+    name: duckdb (${{ matrix.os }})
+    needs: changes
+    if: ${{ needs.changes.outputs.duckdb == 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm ]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false, ref: '${{ github.sha }}' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Toolchain
+        run: scripts/rust/ci.sh setup
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: duckdb-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+      - name: DuckDB loader (download, verify, load, query)
+        run: scripts/rust/ci.sh duckdb-platform
+
+  # The required status check: always runs, fails only when a job that RAN failed or was cancelled.
+  # Skipped jobs (nothing they read changed) are fine, so a docs-only push is green with no heavy job.
+  summary:
+    name: summary
+    if: ${{ always() }}
+    needs: [ changes, fmt, clippy, test, frontcrate, package, parity, check, duckdb-platforms ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: No job failed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ['NEEDS'])
+          bad = {name: job['result'] for name, job in needs.items() if job['result'] in ('failure', 'cancelled')}
+          for name, job in needs.items():
+              print(f"{name}: {job['result']}")
+          if bad:
+              sys.exit(f'failed or cancelled: {bad}')
+          PY

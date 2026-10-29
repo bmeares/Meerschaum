@@ -1,0 +1,9 @@
+
+Upgrade the current Meerschaum instance.
+Optionally specify dependency groups.
+
+Examples:
+    - `upgrade meerschaum`
+    - `upgrade meerschaum full`
+
+

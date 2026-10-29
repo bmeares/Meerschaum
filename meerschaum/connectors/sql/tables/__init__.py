@@ -319,9 +319,11 @@ def create_schemas(
 
             create_schema_query = f"CREATE SCHEMA {if_not_exists_str}{schema_name}"
             try:
-                result = conn.exec(create_schema_query, debug=debug)
+                ### Meerschaum's own schema: internal bookkeeping, allowed on protected instances.
+                result = conn.exec(create_schema_query, debug=debug, _skip_protected=True)
                 successes[schema] = (result is not None)
             except Exception as e:
+                successes[schema] = False
                 warn(f"Failed to create internal schema '{schema}':\n{e}")
     return all(successes.values())
 

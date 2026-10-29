@@ -1,0 +1,5 @@
+
+Remove a job's log files and delete the job's ID.
+
+If the job is running, ask to kill the job first.
+

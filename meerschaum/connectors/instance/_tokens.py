@@ -18,6 +18,36 @@ from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import dprint
 
 
+def _scopes_list(value) -> List[str]:
+    """
+    Return a token's `scopes` as a list of strings.
+
+    SQLite (and any instance which returns raw documents) stores the `json` column as text,
+    so `Pipe.get_value()` / `Pipe.get_doc()` return `'["pipes:read"]'` rather than a list.
+    v4.1.4 passed that string on (`get_token_model()` failed validation and the login route
+    did substring checks on it).
+    """
+    import json
+    if value is None:
+        return []
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode('utf-8')
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return [text]
+        if isinstance(value, str):
+            return [value]
+    if isinstance(value, (list, tuple, set)) or hasattr(value, 'tolist'):
+        items = value.tolist() if hasattr(value, 'tolist') else list(value)
+        return [str(item) for item in items]
+    return []
+
+
 def get_tokens_pipe(self) -> mrsm.Pipe:
     """
     Return the internal pipe for tokens management.
@@ -214,18 +244,17 @@ def get_tokens(
     if debug:
         dprint(f"Getting tokens with {user_id=}, {params=}")
 
-    tokens_df = tokens_pipe.get_data(params=params, debug=debug)
-    if tokens_df is None:
+    tokens_docs = tokens_pipe.get_docs(params=params, debug=debug)
+    if not tokens_docs:
         return []
 
     if debug:
-        dprint(f"Retrieved tokens dataframe:\n{tokens_df}")
+        dprint(f"Retrieved token documents:\n{tokens_docs}")
 
-    tokens_docs = tokens_df.to_dict(orient='records')
     return [
         Token(
             instance=self,
-            **token_doc
+            **{**token_doc, 'scopes': _scopes_list(token_doc.get('scopes'))}
         )
         for token_doc in reversed(tokens_docs)
     ]
@@ -244,7 +273,7 @@ def get_token(self, token_id: Union[uuid.UUID, str], debug: bool = False) -> Uni
     token_model = self.get_token_model(token_id)
     if token_model is None:
         return None
-    return Token(**dict(token_model))
+    return Token(instance=self, **dict(token_model))
 
 
 def get_token_model(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> 'Union[TokenModel, None]':
@@ -253,7 +282,7 @@ def get_token_model(self, token_id: Union[uuid.UUID, Token], debug: bool = False
     """
     from meerschaum.models import TokenModel
     if isinstance(token_id, Token):
-        token_id = Token.id
+        token_id = token_id.id
     if not token_id:
         raise ValueError("Invalid token ID.")
     tokens_pipe = self.get_tokens_pipe()
@@ -263,6 +292,8 @@ def get_token_model(self, token_id: Union[uuid.UUID, Token], debug: bool = False
     )
     if doc is None:
         return None
+    doc = dict(doc)
+    doc['scopes'] = _scopes_list(doc.get('scopes'))
     return TokenModel(**doc)
 
 
@@ -301,7 +332,9 @@ def get_token_scopes(self, token_id: Union[uuid.UUID, Token], debug: bool = Fals
         raise ValueError("Invalid token ID.")
 
     tokens_pipe = self.get_tokens_pipe()
-    return tokens_pipe.get_value('scopes', params={'id': token_id}, debug=debug) or []
+    return _scopes_list(
+        tokens_pipe.get_value('scopes', params={'id': token_id}, debug=debug)
+    )
 
 
 def token_exists(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> bool:

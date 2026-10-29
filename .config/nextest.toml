@@ -1,0 +1,23 @@
+# cargo-nextest settings for `scripts/rust/ci.sh test` (docs/design/v5-build.md "CI: what runs when").
+# nextest runs every test in its own process and does not run doc tests: CI follows it with
+# `cargo test --workspace --doc`. Locally `cargo test` still works; nothing here changes it.
+
+[profile.default]
+# Report every failure at the end of the run, and show a failing test's output where it fails too.
+failure-output = "immediate-final"
+final-status-level = "slow"
+# A test over a minute is "slow" (two of the CLI parity tests are); one that exceeds ten minutes is hung.
+slow-timeout = { period = "60s", terminate-after = 10 }
+# Run at most this many tests at once (a CI runner shares its host with other services; the default is one per core).
+test-threads = 16
+
+# The live Valkey tests of `meerschaum-connector-valkey` share one database of the test server
+# (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`), and `valkey_replay`'s
+# `replay_live` flushes it and compares every key after each step: run them one at a time.
+# (`cargo test` runs one test binary at a time, so only nextest needs this.)
+[test-groups]
+valkey-live = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(meerschaum-connector-valkey) & test(/_live$/)'
+test-group = 'valkey-live'

@@ -1,0 +1,8 @@
+
+Upgrade and install dependencies.
+If provided, upgrade only a dependency group, otherwise default to `full`.
+
+Examples:
+    upgrade packages
+    upgrade packages full
+

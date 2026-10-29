@@ -2,7 +2,7 @@
 
 > This page introduces the different types of Meerschaum plugins. For technical information, consult the [Writing Your Own Plugins tutorial](/reference/plugins/writing-plugins/).
 
-There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**, and you may choose to use any or all of the three purposes. You may also create [library plugins](#library-plugins) to contain utilities for other plugins.
+Plugins are Python modules, and in v5 they may also be native [Rust plugins](/reference/plugins/rust-plugins/), which support data sources, actions and supported native API extensions. A Rust plugin can be a single `.rs` file defining `fetch` or `sync`, marking actions with `#[make_action]`, or defining source connector modules with `#[make_connector]`. There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**, and you may choose to use any or all of the three purposes. You may also create [library plugins](#library-plugins) to contain utilities for other plugins.
 
 ## 📈 Data Plugins
 
@@ -10,7 +10,7 @@ Data plugins retrieve and parse data, then pass it on to Meerschaum for later an
 
 ### 🐶 Fetch Plugins
 
-Fetch plugins are the most straightforward: they pull data from some data source and return a dictionary or Pandas DataFrame. For example, one common use-case for a fetch plugin is to parse JSON data from a web API. All you need to do is retrieve and parse data, and Meerschaum handles [filtering out duplicates](https://docs.meerschaum.io/#meerschaum.Pipe.filter_existing) and updating your tables.
+Fetch plugins are the most straightforward: they pull data from some data source and return a dictionary or a DataFrame (Polars, pandas or Arrow). For example, one common use-case for a fetch plugin is to parse JSON data from a web API. All you need to do is retrieve and parse data, and Meerschaum handles [filtering out duplicates](https://docs.meerschaum.io/#meerschaum.Pipe.filter_existing) and updating your tables.
 
 ??? example "Fetch plugin example"
     ```python
@@ -25,7 +25,7 @@ Fetch plugins are the most straightforward: they pull data from some data source
         return {'columns': {'datetime': 'dt'}}
 
     def fetch(pipe, **kw) -> Dict[List[datetime.datetime]]:
-        """You can return a pandas DataFrame or a dictionary of lists."""
+        """You can return a DataFrame (Polars, pandas, Arrow) or a dictionary of lists."""
         return {'dt': [datetime.datetime.utcnow()]}
     ```
 
@@ -55,7 +55,7 @@ Like fetch plugins, sync plugins define how to get and parse data. Sync plugins,
 
 ## ⏯️ Action Plugins
 
-Action plugins add additional commands to Meerschaum, such as the [built-in actions](/reference/actions) like `sync`, `bootstrap`, and `show`. The sky is the limit for actions ― the action function serves as an entry point from `mrsm`.
+Action plugins add additional commands to Meerschaum, such as the [built-in actions](/reference/actions) like `sync`, `bootstrap`, and `show`. The sky is the limit for actions, the action function serves as an entry point from `mrsm`.
 
 For example, the `color` plugin provides the `color` action, which is a convenience command to toggle the shell's Unicode and ANSI configuration.
 
@@ -102,14 +102,14 @@ You can list other plugins in your [`required` list](/reference/plugins/writing-
     ```python
     # ~/.config/meerschaum/plugins/lib.py
     __version__ = '1.0.0'
-    required = ['pandas']
+    required = ['polars']
 
-    def transform_df(df: 'pd.DataFrame') -> 'pd.DataFrame':
-        df['foo'] = 'bar'
-        return df
+    def transform_df(df: 'pl.DataFrame') -> 'pl.DataFrame':
+        import polars as pl
+        return df.with_columns(pl.lit('bar').alias('foo'))
     ```
 
-    Because `lib.py` above lists `pandas` in its `required` list, plugins which rely upon it inherit its dependencies without needing to reinstall them. Consider plugin `foo` below:
+    Because `lib.py` above lists `polars` in its `required` list, plugins which rely upon it inherit its dependencies without needing to reinstall them. Consider plugin `foo` below:
 
     ```python
     # ~/.config/meerschaum/plugins/foo.py
@@ -123,11 +123,11 @@ You can list other plugins in your [`required` list](/reference/plugins/writing-
     def register(pipe, **kw):
         return {'columns': {'datetime': 'dt'}}
 
-    def fetch(pipe, **kw) -> 'pd.DataFrame':
+    def fetch(pipe, **kw) -> 'pl.DataFrame':
         ### inherited from `lib`; no need to specify in `required`
-        import pandas as pd
+        import polars as pl
 
-        df = pd.DataFrame({'dt': [datetime.datetime.utcnow()]})
+        df = pl.DataFrame({'dt': [datetime.datetime.now(datetime.timezone.utc)]})
 
         return lib.module.transform_df(df)
     ```

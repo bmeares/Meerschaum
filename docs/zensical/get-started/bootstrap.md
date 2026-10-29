@@ -1,56 +1,69 @@
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
+# Your first Pipe
 
-# 🏗️ Building a Pipe
+A **Pipe** connects a data source to a table you can keep up to date. Let's collect temperature readings in a local SQLite database.
 
-Pipes fetch and sync data from [connectors](/reference/connectors/). For this example, we will be using the connector `plugin:noaa` from the [data plugin](/reference/plugins/types-of-plugins/#data-plugins) `noaa`. Type the commands below to bootstrap an example pipe.
+Start in the workspace from [Setup](index.md). Every command below uses `sql:local`.
 
-See the [bootstrapping reference page](/reference/pipes/bootstrapping/) for further information.
+## Add a little data
 
-1. Launch the Meerschaum shell.  
+Create a source table with one reading:
 
-    ```bash
-    mrsm
+```bash
+mrsm sql local "CREATE TABLE readings (id INTEGER PRIMARY KEY, ts TEXT, temperature REAL)"
+mrsm sql local "INSERT INTO readings VALUES (1, '2026-01-01 12:00:00', 21.5)"
+```
+
+## Give the Pipe a name and a query
+
+```bash
+mrsm register pipes -c sql:local -m temperatures -i sql:local \
+  --params '{"columns":{"datetime":"ts","primary":"id"},"dtypes":{"ts":"datetime"},"fetch":{"definition":"SELECT * FROM readings"}}'
+```
+
+The three pieces to remember:
+
+| Part | In this example |
+|---|---|
+| Source (`-c`) | `sql:local`, where the query runs |
+| Metric (`-m`) | `temperatures`, the name of this stream |
+| Instance (`-i`) | `sql:local`, where the Pipe and its table live |
+
+The datetime column tells the Pipe where to resume. The primary column identifies each reading.
+
+## Sync and look
+
+```bash
+mrsm sync pipes -i sql:local -m temperatures
+mrsm show data -i sql:local -m temperatures
+```
+
+You'll see the reading **21.5** in the Pipe's table. The source table stays separate.
+
+Run the sync again:
+
+```bash
+mrsm sync pipes -i sql:local -m temperatures
+```
+
+There is still **one row**. Re-reading the same data does not add a duplicate.
+
+??? example "Watch the actual run"
+    <asciinema-player src="/assets/casts/v5-first-pipe.cast" size="small" preload="true" rows="18"></asciinema-player>
+
+    <p class="mrsm-caption">Recorded with 5.0.0rc16. Playback pauses are extended for reading.</p>
+
+??? example "Use the same Pipe from Python"
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe('sql:local', 'temperatures', instance='sql:local')
+    success, message = pipe.sync()
+    print(message)
+    print(pipe.get_data(as_docs=True))
     ```
 
-2. Install the `noaa` plugin.
+    Plain dictionaries work with the base package. For a Polars or pandas DataFrame, [install the matching extra](index.md#install) and call `pipe.get_data()`.
 
-    ```bash
-    install plugin noaa
-    ```
+[Add new rows →](incremental-sync.md){ .md-button .md-button--primary }
 
-3. Bootstrap the pipe.  
-
-    ```bash
-    bootstrap pipe
-    ```
-
-    1. Choose `plugin:noaa` for the connector, `weather` for the metric, and skip the location.
-
-    2. The plugin will ask for weather stations. Enter `KATL` for Atlanta.
-
-    3. We can keep the default target name `plugin_noaa_weather`. This will be our SQL table.
-
-    4. Skip tags — those are useful for [grouping together pipes](/reference/pipes/tags/).
-
-    5. Answer `n` to skip editing the definition. Answering `yes` will open a YAML file of your [pipe's parameters](/reference/pipes/#parameters).
-
-    6. Finally, answer `y` to sync the pipe.
-
-
-!!! success "Success! Now what?"
-
-    Well done, you've built your first pipe! When you're ready to build your first project, head over the to [compose projects guide](/get-started/compose-projects).
-
-    For now, here are some useful commands to manage your pipe:
-
-    | Command                           | Description                                                                                        |
-    |-----------------------------------|----------------------------------------------------------------------------------------------------|
-    | `show pipes`                      | Print the pipes on this instance.                                                                  |
-    | `show data`                       | Print a preview of the contents of your pipes.                                                     |
-    | `sync pipes`                      | Sync new rows into your pipes.                                                                     |
-    | `sync pipes -m weather --loop -d` | Continuously (`--loop`) sync new rows into weather pipes (`-m`), and run in the background (`-d`). |
-    | `show jobs`                       | Print the background jobs (created with `-d`).                                                     |
-    | `stop jobs`                       | Stop the running background jobs.                                                                  |
-
-<asciinema-player src="/assets/casts/bootstrap-noaa.cast" size="small" preload="true"></asciinema-player>
+For other sources, a [Python plugin](../reference/plugins/writing-plugins.md) can fetch data from a file, an API, or your own code.

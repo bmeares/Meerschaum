@@ -31,7 +31,7 @@ def register(
     if self.temporary:
         return False, "Cannot register pipes created with `temporary=True` (read-only)."
 
-    from meerschaum.utils.formatting import get_console
+    from meerschaum.utils.formatting import print_exception
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin, custom_types
     from meerschaum.config._patch import apply_patch_to_config
@@ -58,7 +58,7 @@ def register(
             with Venv(get_connector_plugin(_conn), debug=debug):
                 params = self.connector.register(self)
         except Exception:
-            get_console().print_exception()
+            print_exception()
             params = None
         params = {} if params is None else params
         if not isinstance(params, dict):
@@ -82,5 +82,14 @@ def register(
     if not indices_success:
         return indices_success, indices_msg
 
+    ### Registering a pipe that exists again must not get past its `parameters` lock (a custom
+    ### instance connector may overwrite the registration; the core checks its own instances).
+    refusal = self._edit_lock_refusal(patch=False, debug=debug)
+    if refusal:
+        return False, refusal
+
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.register_pipe(self, debug=debug, **kw)
+        result = self.instance_connector.register_pipe(self, debug=debug, **kw)
+    from meerschaum.core.Pipe._cache import _bump_invalidation_epoch
+    _bump_invalidation_epoch()
+    return result

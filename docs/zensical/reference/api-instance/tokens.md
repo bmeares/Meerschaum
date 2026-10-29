@@ -16,7 +16,7 @@ When you create a token, you receive three key pieces of information: a Client I
 Additionally, tokens have the following attributes:
 
 - **Label:** A human-readable name to help you identify the token
-- **Expiration:** An optional timestamp after which the token will become invalid  
+- **Expiration:** An optional timestamp after which the token will become invalid
   Set the `expiration` to `None` to prevent a token from expiring (use at your own risk!)
 - **Scopes:** A list of permissions that define what actions the token can perform
 - **User:** The user account that owns the token
@@ -35,19 +35,19 @@ This will prompt you for the owner of the token and print the Client ID, Client 
 
 ## 🌐 Web UI
 
-The easiest way to can manage tokens is on the [Web Console](/reference/api-instance/web-console). Click the Meerschaum logo and navigate to `Settings` > `Tokens`. From here, you can:
+The easiest way to can manage tokens is on the [Web Console](/reference/api-instance/web-console). Open the user menu (your username, at the top right) and choose **Tokens**. From here, you can:
 
--   Create new tokens using the `+` button.
+-   Create new tokens with **New token**.
 -   Edit, invalidate, or delete existing tokens from the context menu (`⠇`).
 
-When you create a new token, a dialog will appear prompting you for a label, expiration date, and scopes. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
+When you create a new token, a form prompts you for a label, expiration date, and scopes. The **Grant all scopes, including custom and future ones** switch (the scope `*`) is on by default for an administrator or a holder of `*` (for anyone else the form starts from your own scopes and the switch is off); turn it off to pick built-in scopes from a checklist and to type custom (plugin) scopes. The edit form of a token that holds `*` shows the switch on, and saving it keeps `*`. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
 
 <img src="/assets/screenshots/web-console-tokens.png" alt="Web Console tokens page">
 
 ---
 ## 🐍 Python API
 
-In addition to the CLI and Web UI, you can manage tokens directly on [instance connectors](/reference/connector/instance-connectors).
+In addition to the CLI and Web UI, you can manage tokens directly on [instance connectors](/reference/connectors/instance-connectors/).
 
 ### Creating a Token
 
@@ -137,9 +137,9 @@ success, msg = token.delete()
 
 There are two ways to use a token to authenticate with the API:
 
-1. Post the **Client ID** and **Client Secret** to `/login`.  
+1. Post the **Client ID** and **Client Secret** to `/login`.
   The standard OAuth flow now accepts `client_id` and `client_secret` (in addition to `username` and `password`). This returns short-lived bearer tokens.
-2. Set the **API Key** directly in the `Authorization` header.  
+2. Set the **API Key** directly in the `Authorization` header.
   For situations where the standard OAuth flow isn't feasible (e.g. some IoT workloads), you can directly embed the API Key in the `Authorization` header. The API Key wraps the Client ID and Secret and is authenticated on every request.
 
 ??? example "Authenticating with `curl`"
@@ -151,3 +151,21 @@ There are two ways to use a token to authenticate with the API:
     curl -X GET http://localhost:8000/pipes \
       -H "Authorization: $API_KEY"
     ```
+
+---
+
+## 🎯 Scopes
+
+A token (and a user, through the `scopes` attribute of their account) holds a list of scope strings, and every API route requires the scopes it names (`pipes:read`, `jobs:execute`, `jobs:stop`, ...). A request missing one is refused with `403` and `Missing required scope: '<scope>'`.
+
+- **`*` grants all scopes, including custom and future scopes.** It is stored literally and checked on every request, so a `*` token keeps working when a plugin defines a new scope or a later release adds one. Use it for trusted automation. `edit tokens` and `edit users` keep a `*` you type as `*` (v4 replaced it with the list of built-in scopes), and so do `register tokens --scopes '*'`, `POST /tokens/register` with `"scopes": ["*"]` and the console's token form. When no scopes are given, a new token gets its owner's scopes, and a new user (`register users`) follows the instance's default role (see [Teams, Access and Locks](../actions/teams-and-access.md)).
+- **A token carries at most its owner's scopes.** Registering or editing a token with a scope the owner does not hold, or with `*` when the owner is neither an administrator nor a holder of `*`, is refused with `403` (or a failure in `register tokens` / `edit tokens` and the console) naming each disallowed scope; nothing is trimmed. A token registered without scopes gets its owner's own, and editing a token keeps the scopes it already holds. The console's register form starts from your own scopes, and "Grant all scopes" is on by default only for an administrator or a holder of `*`.
+- **Only the owner or an administrator may change a token.** Editing, invalidating or deleting another user's token answers `403`; only an administrator may make an invalidated token valid again; an edit that omits `scopes` or `is_valid` keeps them. `mrsm edit tokens` and the other token actions work on the instance directly with the operator's own access and are trusted; the rule is enforced by an `api:` instance's server.
+- **Custom scopes are plain strings.** A plugin's `@api_plugin` routes may require any scope, for example `ScopedAuth(['myplugin:read'])`, and a token is granted it by listing it explicitly (`--scopes myplugin:read pipes:read`). Meerschaum does not validate scope names, so a typo grants nothing.
+- **Stopping a job needs `jobs:execute` and `jobs:stop`.** v4 required a misspelled `josb:stop` that no one could hold, so only `*` tokens and administrators could stop jobs over the API. v5 requires `jobs:stop`, and still accepts a token that explicitly holds the legacy `josb:stop` in its place.
+- **Running actions.** Remote actions need `actions:execute` and `jobs:execute`; creating jobs also needs `jobs:write`. Setting `api.permissions.actions.non_admin: false` (`start api --secure`) restricts these operations to administrators. Restricted keys follow the remote command limits even when their owner is an administrator. Pipe Sync and Verify controls use the Pipe's own permissions. See [who may run actions](/reference/api-instance/permissions/#who-may-run-actions).
+
+```bash
+mrsm register tokens --name automation --scopes '*'
+mrsm register tokens --name plugin-reader --scopes myplugin:read pipes:read
+```

@@ -1,0 +1,24 @@
+project_name: reg
+root_dir: ./root
+pipes:
+  - connector: plugin:reg
+    metric: uptodate
+    instance: sql:local
+  - connector: plugin:reg
+    metric: outdated
+    instance: sql:local
+    columns:
+      datetime: ts
+  - connector: plugin:reg
+    metric: added
+    instance: sql:local
+    parameters:
+      fetch:
+        backtrack_minutes: 10
+  - connector: plugin:reg
+    metric: untagged
+    instance: sql:local
+    tags: [local-tag]
+  - connector: plugin:reg
+    metric: new
+    instance: sql:local

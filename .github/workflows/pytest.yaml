@@ -1,32 +1,199 @@
 name: pytest
 
 on:
+  workflow_call:
+    inputs:
+      profile:
+        type: string
+        default: ci
+      artifacts_run_id:
+        type: string
+        default: ''
+      full:
+        type: boolean
+        default: true
+      run_console:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
-      publish:
-        description: 'Run the pytest script.'
-        required: false
-        default: ""
+      profile:
+        description: 'ci builds test artifacts; release consumes an existing wheels run.'
+        type: choice
+        options: [ci, release]
+        default: ci
+      artifacts_run_id:
+        description: 'For release: run containing the exact-commit validated wheel and CLI.'
+        type: string
+        default: ''
+      shards:
+        description: 'all, or comma-separated core,postgres,mysql,mssql-valkey,oracle'
+        type: string
+        default: all
+      run_console:
+        description: 'Run the required console browser suite in the core lane.'
+        type: boolean
+        default: false
   push:
-    branches: [ main, staging ]
+    branches: [main, staging, v5]
   pull_request:
-    branches:
-      - dev
-      - main
-      - staging
+    branches: [dev, main, staging]
+  schedule:
+    - cron: '17 5 * * *'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pytest-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'auto' || github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 jobs:
-  tests:
-    runs-on: self-hosted
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pytest: ${{ steps.plan.outputs.pytest }}
+      full: ${{ steps.plan.outputs.full }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      wheel_artifact: ${{ steps.plan.outputs.wheel_artifact }}
+      binary_artifact: ${{ steps.plan.outputs.binary_artifact }}
+      binary_profile: ${{ steps.plan.outputs.binary_profile }}
     steps:
-
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Integration Tests
-        run: ./scripts/test.sh db
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}'}
+      - id: plan
+        name: Select test lanes from the tested revision
         env:
-          COMPOSE_INTERACTIVE_NO_CLI: 1
-          MRSM_TEST_FLAVORS: "all"
-          MRSM_DEBUG: "false"
-          MRSM_INSTALL_PACKAGES: "api"
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PROFILE: ${{ inputs.profile || 'ci' }}
+          FULL: ${{ inputs.full }}
+          SHARDS: ${{ inputs.shards }}
+          ARTIFACTS_RUN: ${{ inputs.artifacts_run_id }}
+        run: |
+          if [ "$PROFILE" = release ] && [ -z "$ARTIFACTS_RUN" ]; then
+            echo 'Release tests require verified artifacts: dispatch release.yaml, or supply artifacts_run_id.' >&2
+            exit 1
+          fi
+          args=()
+          if [ "$FULL" = true ]; then args+=(--full); fi
+          python scripts/ci/test_plan.py --event "$GITHUB_EVENT_NAME" --before "$BEFORE" --after "$GITHUB_SHA" --base "$BASE" --profile "$PROFILE" --shards "$SHARDS" "${args[@]}"
+
+  artifacts:
+    name: build test artifacts once
+    needs: changes
+    if: ${{ needs.changes.outputs.pytest == 'true' && inputs.profile != 'release' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '16'
+      MRSM_TEST_CONSOLE: ${{ (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
+      - name: Clean the runner checkout, preserving build and dependency caches
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - name: Rust toolchain
+        run: scripts/rust/ci.sh setup
+      - name: Disk guard
+        run: scripts/rust/ci.sh disk-guard
+      - name: Build wheel and CLI before starting any test services
+        run: bash scripts/ci/build_pytest.sh
+      - uses: actions/upload-artifact@v4
+        with: {name: pytest-wheel, path: '${{ env.CI_ARTIFACT_DIR }}/wheel/*', if-no-files-found: error, retention-days: 7}
+      - uses: actions/upload-artifact@v4
+        with: {name: pytest-binary, path: '${{ env.CI_ARTIFACT_DIR }}/binary/*', if-no-files-found: error, retention-days: 7}
+      - uses: actions/upload-artifact@v4
+        if: ${{ env.MRSM_TEST_CONSOLE == '1' }}
+        with: {name: console-native-fixture-debug, path: '${{ env.CI_ARTIFACT_DIR }}/console-native-fixture/**', if-no-files-found: error, retention-days: 7}
+
+  tests:
+    name: tests (${{ matrix.shard }})
+    needs: [changes, artifacts]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.pytest == 'true' && (needs.artifacts.result == 'success' || (needs.artifacts.result == 'skipped' && inputs.profile == 'release')) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: self-hosted
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    env:
+      PYTEST_ARTIFACT_DIR: ${{ github.workspace }}/.ci-artifacts
+      PYTEST_WHEEL_PROFILE: ${{ inputs.profile || 'ci' }}
+      PYTEST_BINARY_PROFILE: ${{ needs.changes.outputs.binary_profile }}
+      MRSM_NO_AUTO_INSTALL: '1'
+      MRSM_NO_UPDATE_CHECK: '1'
+      MRSM_TEST_CONSOLE: ${{ matrix.shard == 'core' && (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
+      - name: Clean the runner checkout, preserving build and dependency caches
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.changes.outputs.wheel_artifact }}
+          path: ${{ env.PYTEST_ARTIFACT_DIR }}/wheel
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.changes.outputs.binary_artifact }}
+          path: ${{ env.PYTEST_ARTIFACT_DIR }}/binary
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ matrix.shard == 'core' && env.MRSM_TEST_CONSOLE == '1' }}
+        with:
+          name: ${{ inputs.profile == 'release' && 'console-native-fixture-release' || 'console-native-fixture-debug' }}
+          path: ${{ env.PYTEST_ARTIFACT_DIR }}/console-native-fixture
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Prepare the environment from complete verified artifacts
+        run: bash scripts/ci/prepare_pytest.sh
+      - name: Prove collection is disjoint and complete
+        if: ${{ matrix.shard == 'core' }}
+        run: python scripts/ci/services.py validate --root "$RUNNER_TEMP/mrsm-collection-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Run this shard with its own roots, ports, databases and cleanup
+        run: python scripts/ci/services.py run --shard "${{ matrix.shard }}" --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}" --workers "${{ matrix.workers }}" --
+      - name: Clean up only this shard's owned services after failure or cancellation
+        if: ${{ always() }}
+        run: python scripts/ci/services.py cleanup --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}"
+      - name: Preserve shard ownership and collection evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/.ci-services.json
+            ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/collection.json
+            ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/users-collection.json
+            ${{ runner.temp }}/mrsm-collection-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+            ${{ runner.temp }}/mrsm-collection-${{ github.run_id }}-${{ github.run_attempt }}/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  summary:
+    name: summary
+    if: ${{ always() }}
+    needs: [changes, artifacts, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: No selected job failed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ['NEEDS'])
+          for name, job in needs.items():
+              print(f"{name}: {job['result']}")
+          bad = {name: job['result'] for name, job in needs.items() if job['result'] in ('failure', 'cancelled')}
+          if bad:
+              sys.exit(f'failed or cancelled: {bad}')
+          PY

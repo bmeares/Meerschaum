@@ -1,0 +1,9 @@
+{
+  "env": {},
+  "queries": [
+    {"keys": ["quirks"]},
+    {"keys": ["both"]},
+    {"keys": ["onlyyml"]},
+    {"keys": ["quirks", "merged", "tags"]}
+  ]
+}

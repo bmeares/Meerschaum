@@ -216,15 +216,15 @@ def test_dateadd_str_accepts_valid_dateparts(good_datepart: str):
     assert len(result) > 0
 
 
-@pytest.mark.parametrize('injection_params', [
-    {'col': "1'; DROP TABLE users; --"},
-    {'col': "val' OR '1'='1"},
-    {'col': "x' UNION SELECT password FROM users --"},
+@pytest.mark.parametrize('injection_params,rejected', [
+    ({'col': "1'; DROP TABLE users; --"}, True),
+    ({'col': "val' OR '1'='1"}, False),
+    ({'col': "x' UNION SELECT password FROM users --"}, True),
 ])
-def test_build_where_escapes_values(injection_params: Dict[str, Any]):
+def test_build_where_escapes_values(injection_params: Dict[str, Any], rejected: bool):
     """
-    build_where() must either abort (return '') or escape quotes so the raw
-    injection payload does not appear verbatim in the output.
+    build_where() must reject a filter with a false predicate or escape its quotes.
+    Rejected filters must never become an empty restriction.
     """
     import warnings
     conn = mrsm.get_connector(
@@ -235,5 +235,8 @@ def test_build_where_escapes_values(injection_params: Dict[str, Any]):
         warnings.filterwarnings('ignore', message='.*SQL injection.*', category=UserWarning)
         result = build_where(injection_params, conn)
     raw_value = list(injection_params.values())[0]
-    # Either aborted entirely or the raw unescaped value is absent
-    assert result == '' or raw_value not in result
+    assert result
+    if rejected:
+        assert result == '\nWHERE\n    1 = 0'
+    else:
+        assert raw_value not in result

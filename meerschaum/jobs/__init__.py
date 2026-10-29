@@ -9,8 +9,17 @@ Higher-level utilities for managing `meerschaum.utils.daemon.Daemon`.
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Optional, List, SuccessTuple
 
+from meerschaum.jobs import _native
 from meerschaum.jobs._Job import Job, StopMonitoringLogs
 from meerschaum.jobs._Executor import Executor
+from meerschaum.jobs._access import (
+    filter_visible_jobs,
+    can_see_job,
+    job_access,
+    ownership_properties,
+    get_team_jobs,
+    move_team_jobs,
+)
 
 __all__ = (
     'Job',
@@ -29,9 +38,28 @@ __all__ = (
     'check_restart_jobs',
     'start_check_jobs_thread',
     'stop_check_jobs_thread',
+    'filter_visible_jobs',
+    'can_see_job',
+    'job_access',
+    'ownership_properties',
+    'get_team_jobs',
+    'move_team_jobs',
 )
 
 executor_types: List[str] = ['api', 'local']
+
+
+def _rows_to_jobs(rows) -> Dict[str, Job]:
+    """Build the `Job`s of a native listing."""
+    jobs = {}
+    for row in rows:
+        keys = row['executor_keys']
+        jobs[row['name']] = Job(
+            row['name'],
+            None if keys == 'local' else row['sysargs'],
+            executor_keys=keys,
+        )
+    return jobs
 
 
 def get_jobs(
@@ -56,74 +84,22 @@ def get_jobs(
     -------
     A dictionary mapping job names to jobs.
     """
-    from meerschaum.connectors.parse import parse_executor_keys
-    executor_keys = executor_keys or get_executor_keys_from_context()
-
-    include_local_and_system = (
-        combine_local_and_systemd
-        and str(executor_keys).split(':', maxsplit=1)[0] in ('None', 'local', 'systemd')
-        and get_executor_keys_from_context() == 'systemd'
-    )
-
-    def _get_local_jobs():
-        from meerschaum.utils.daemon import get_daemons
-        daemons = get_daemons()
-        jobs = {
-            daemon.daemon_id: Job(name=daemon.daemon_id, executor_keys='local')
-            for daemon in daemons
-        }
-        return {
-            name: job
-            for name, job in jobs.items()
-            if (include_hidden or not job.hidden) and not job._is_externally_managed
-
-        }
-
-    def _get_systemd_jobs():
-        from meerschaum.jobs.systemd import SystemdExecutor
-        conn = SystemdExecutor('systemd')
-        jobs = conn.get_jobs(debug=debug)
-        return {
-            name: job
-            for name, job in jobs.items()
-            if include_hidden or not job.hidden
-        }
-
-    if include_local_and_system:
-        local_jobs = _get_local_jobs()
-        systemd_jobs = _get_systemd_jobs()
-        shared_jobs = set(local_jobs) & set(systemd_jobs)
-        if shared_jobs:
-            from meerschaum.utils.misc import items_str
-            from meerschaum.utils.warnings import warn
-            warn(
-                "Job"
-                + ('s' if len(shared_jobs) != 1 else '')
-                + f" {items_str(list(shared_jobs))} "
-                + "exist"
-                + ('s' if len(shared_jobs) == 1 else '')
-                + " in both `local` and `systemd`.",
-                stack=False,
-            )
-        return {**local_jobs, **systemd_jobs}
-
-    if executor_keys == 'local':
-        return _get_local_jobs()
-
-    if executor_keys == 'systemd':
-        return _get_systemd_jobs()
-
+    from meerschaum.utils.warnings import warn
+    native = _native.core()
     try:
-        _ = parse_executor_keys(executor_keys, construct=False)
-        conn = parse_executor_keys(executor_keys)
-        jobs = conn.get_jobs(debug=debug)
-        return {
-            name: job
-            for name, job in jobs.items()
-            if include_hidden or not job.hidden
-        }
-    except Exception:
+        rows, warnings = native.jobs_get_jobs(
+            executor_keys,
+            include_hidden,
+            combine_local_and_systemd,
+            api_attributes=_native.api_attributes(executor_keys),
+        )
+    except RuntimeError as e:
+        ### An unreachable or unauthorized executor is not "no jobs".
+        warn(f"Could not get the jobs of executor '{executor_keys}': {e}", stack=False)
         return {}
+
+    _native.emit_warnings(warnings)
+    return _rows_to_jobs(rows)
 
 
 def get_filtered_jobs(
@@ -138,47 +114,23 @@ def get_filtered_jobs(
     Return a list of jobs filtered by the user.
     """
     from meerschaum.utils.warnings import warn as _warn
-    jobs = get_jobs(
-        executor_keys,
-        include_hidden=True,
-        combine_local_and_systemd=combine_local_and_systemd,
-        debug=debug,
-    )
-    if not filter_list:
-        return {
-            name: job
-            for name, job in jobs.items()
-            if include_hidden or not job.hidden
-        }
+    native = _native.core()
+    try:
+        rows, listing_warnings, missing = native.jobs_get_filtered_jobs(
+            executor_keys,
+            filter_list or [],
+            include_hidden,
+            combine_local_and_systemd,
+            api_attributes=_native.api_attributes(executor_keys),
+        )
+    except RuntimeError as e:
+        _warn(f"Could not get the jobs of executor '{executor_keys}': {e}", stack=False)
+        return {}
 
-    jobs_to_return = {}
-    filter_list_without_underscores = [name for name in filter_list if not name.startswith('_')]
-    filter_list_with_underscores = [name for name in filter_list if name.startswith('_')]
-    if (
-        filter_list_without_underscores and not filter_list_with_underscores
-        or filter_list_with_underscores and not filter_list_without_underscores
-    ):
-        pass
-    for name in filter_list:
-        job = jobs.get(name, None)
-        if job is None:
-            if warn:
-                _warn(
-                    f"Job '{name}' does not exist.",
-                    stack=False,
-                )
-            continue
-        jobs_to_return[name] = job
-
-    if not jobs_to_return and filter_list_with_underscores:
-        names_to_exclude = [name.lstrip('_') for name in filter_list_with_underscores]
-        return {
-            name: job
-            for name, job in jobs.items()
-            if name not in names_to_exclude
-        }
-
-    return jobs_to_return
+    _native.emit_warnings(listing_warnings)
+    if warn:
+        _native.emit_warnings(missing)
+    return _rows_to_jobs(rows)
 
 
 def get_restart_jobs(
@@ -356,10 +308,15 @@ def check_restart_jobs(
 
 
 def _check_restart_jobs_against_lock(*args, **kwargs):
+    import fcntl
     import meerschaum.config.paths as paths
-    from meerschaum.utils.locks import InterProcessLock
-    with InterProcessLock(paths.CHECK_JOBS_LOCK_PATH):
-        check_restart_jobs(*args, **kwargs)
+    paths.CHECK_JOBS_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(paths.CHECK_JOBS_LOCK_PATH, 'a+', encoding='utf-8') as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            check_restart_jobs(*args, **kwargs)
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 _check_loop_stop_thread = None
@@ -407,36 +364,14 @@ def stop_check_jobs_thread():
         warn(f"Failed to remove check jobs lock file:\n{e}")
 
 
-_context_keys = None
 def get_executor_keys_from_context() -> str:
     """
-    If we are running on the host with the default root, default to `'systemd'`.
+    Return the configured executor (`meerschaum:executor`).
+    Otherwise, on a host with `systemd`, return `'systemd'` (for any root directory) unless
+    Meerschaum runs from a source checkout or a development build.
     Otherwise return `'local'`.
     """
-    global _context_keys
-
-    if _context_keys is not None:
-        return _context_keys
-
-    import meerschaum.config.paths as paths
-    from meerschaum.config import get_config
-    from meerschaum.utils.misc import is_systemd_available
-    from meerschaum.utils.packages import is_installed
-
-    configured_executor = get_config('meerschaum', 'executor', warn=False)
-    if configured_executor is not None:
-        return configured_executor
-
-    _context_keys = (
-        'systemd'
-        if (
-            is_systemd_available()
-            and paths.ROOT_DIR_PATH == paths.DEFAULT_ROOT_DIR_PATH
-            and is_installed('meerschaum', venv=None, allow_outside_venv=False)
-        )
-        else 'local'
-    )
-    return _context_keys
+    return _native.core().jobs_executor_keys_from_context()
 
 
 def _install_healthcheck_job() -> SuccessTuple:

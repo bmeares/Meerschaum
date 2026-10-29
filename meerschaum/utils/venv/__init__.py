@@ -18,7 +18,7 @@ __all__ = sorted([
     'activate_venv', 'deactivate_venv', 'init_venv',
     'inside_venv', 'is_venv_active', 'venv_exec',
     'venv_executable', 'venv_exists', 'venv_target_path',
-    'Venv', 'get_venvs', 'verify_venv', 'get_module_venv',
+    'Venv', 'get_venvs', 'verify_venv', 'get_module_venv', 'ensure_default_venvs',
 ])
 __pdoc__ = {'Venv': True}
 
@@ -75,6 +75,33 @@ def activate_venv(
         init_venv(venv=venv, debug=debug)
 
     with LOCKS['active_venvs']:
+        base_fallback = False
+        try:
+            target_path = venv_target_path(venv, debug=debug, allow_nonexistent=True)
+        except OSError as error:
+            import errno
+            import site
+            from meerschaum._internal.static import STATIC_CONFIG
+            if (
+                venv is not None
+                or inside_venv()
+                or os.environ.get(STATIC_CONFIG['environment']['runtime']) == 'portable'
+                or error.errno not in (errno.EACCES, errno.EROFS)
+            ):
+                raise
+            ### Activating the base interpreter does not install anything. If its user site
+            ### cannot be created, reuse an existing global site already visible to it.
+            ### Keep venv_target_path(None) strict for callers that need an install target.
+            base_sites = set(site.getsitepackages())
+            target_path = next((
+                pathlib.Path(path)
+                for path in sys.path
+                if path in base_sites and pathlib.Path(path).is_dir()
+            ), None)
+            if target_path is None:
+                raise
+            base_fallback = True
+
         if thread_id not in threads_active_venvs:
             threads_active_venvs[thread_id] = {}
         active_venvs.add(venv)
@@ -83,7 +110,6 @@ def activate_venv(
         else:
             threads_active_venvs[thread_id][venv] += 1
 
-        target_path = venv_target_path(venv, debug=debug, allow_nonexistent=True)
         if not target_path.exists() and venv is not None and init_if_not_exists:
             init_venv(venv=venv, force=True, debug=debug)
 
@@ -101,7 +127,7 @@ def activate_venv(
         ):
             return True
 
-        if venv in active_venvs_order:
+        if venv in active_venvs_order or base_fallback:
             try:
                 sys.path.remove(target)
             except Exception:
@@ -124,6 +150,53 @@ def activate_venv(
             pass
 
     return True
+
+
+def ensure_default_venvs(debug: bool = False) -> bool:
+    """
+    Put the shared `'mrsm'` virtual environment on `sys.path` (when it exists and is not already
+    there), the way v4 left it for plugin code.
+
+    In v4 every process that ran plugin code had imported `meerschaum` and called
+    `attempt_import(..., venv='mrsm')` long before the first plugin was imported, so the
+    shared `mrsm` venv (where a dependency-free `pip install meerschaum` puts pandas and
+    friends on first use) was always visible: a plugin with its own `required` venv could still
+    `import pandas`. The order v4 produced is: the plugin's venv(s) first, then the base
+    interpreter's site-packages, then `<root>/venvs/mrsm`, then the rest of `sys.path`. The
+    plugin venv is activated later (on top), so this activates `'mrsm'` and then the base
+    interpreter (`venv=None`), exactly as v4's `attempt_import` calls did.
+
+    This never creates a virtual environment and never installs anything
+    (`MRSM_NO_AUTO_INSTALL` is unaffected): without a `mrsm` venv there is nothing to expose.
+
+    Returns
+    -------
+    A bool indicating whether the `mrsm` venv is on `sys.path` afterwards.
+    """
+    import sys
+    try:
+        target_path = venv_target_path('mrsm', allow_nonexistent=True, debug=debug)
+        target = target_path.as_posix()
+        if not target_path.exists():
+            return False
+        with LOCKS['sys.path']:
+            if target not in sys.path:
+                activate_venv('mrsm', init_if_not_exists=False, debug=debug)
+            if target not in sys.path:
+                return False
+            try:
+                base = venv_target_path(None, debug=debug).as_posix()
+            except (Exception, SystemExit):
+                return True
+            ### The base interpreter's site-packages come before the `mrsm` venv (v4:
+            ### `activate_venv(None)` ran after `activate_venv('mrsm')`).
+            index = sys.path.index(target)
+            if base != target and base not in sys.path[:index]:
+                sys.path.insert(index, base)
+                active_venvs.add(None)
+            return True
+    except (Exception, SystemExit):
+        return False
 
 
 def deactivate_venv(
@@ -239,6 +312,49 @@ def is_venv_active(
 
 
 verified_venvs = set()
+_venv_mutation_locks = {}
+_venv_mutation_locks_guard = RLock()
+
+
+def _locked_venv_mutation(func):
+    """Serialize creation and verification, including recursive repair, for each environment."""
+    from functools import wraps
+    from inspect import signature
+    call_signature = signature(func)
+
+    @wraps(func)
+    def locked(*args, **kwargs):
+        import meerschaum.config.paths as paths
+        from meerschaum.utils.locks import InterProcessLock
+
+        arguments = call_signature.bind(*args, **kwargs)
+        arguments.apply_defaults()
+        venv = arguments.arguments['venv']
+        # Already-verified activation performs no mutations and must keep working even
+        # when its cache directory has become read-only.
+        if (
+            func.__name__ == 'init_venv'
+            and not arguments.arguments['force']
+            and venv in verified_venvs
+        ):
+            return func(*args, **kwargs)
+
+        # Keep this distinct from the legacy existence-marker `<venv>.lock`: file locks
+        # persist after release. Share the same object for recursive init / verify calls.
+        lock_path = paths.VENVS_CACHE_RESOURCES_PATH / (venv + '.mutation.lock')
+        lock_key = str(lock_path.absolute())
+        with _venv_mutation_locks_guard:
+            thread_lock, process_lock = _venv_mutation_locks.setdefault(
+                lock_key, (RLock(), InterProcessLock(lock_path)),
+            )
+        with thread_lock:
+            with process_lock:
+                return func(*args, **kwargs)
+
+    return locked
+
+
+@_locked_venv_mutation
 def verify_venv(
     venv: str,
     debug: bool = False,
@@ -248,7 +364,6 @@ def verify_venv(
     """
     import platform
     import os
-    import shutil
     import sys
 
     import meerschaum.config.paths as paths
@@ -290,6 +405,7 @@ def verify_venv(
         """
         Return the version for the python binary at the given path.
         """
+        proc = None
         try:
             ### It might be a broken symlink, so skip on errors.
             if debug:
@@ -301,8 +417,12 @@ def verify_venv(
             )
             stdout, stderr = proc.communicate(timeout=1.0)
         except Exception as e:
-            ### E.g. the symlink may be broken.
-            if is_symlink(python_path):
+            # A loaded host may exceed the probe timeout with a valid interpreter. Reap
+            # that child, and only remove aliases whose targets are actually missing.
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+            if is_symlink(python_path) and not python_path.exists():
                 try:
                     python_path.unlink()
                 except Exception as _e:
@@ -348,13 +468,22 @@ def verify_venv(
             if python_path == real_path:
                 continue
 
+            # Already-normalized aliases need no mutation. For indirect aliases, replace
+            # atomically so another process may keep executing this interpreter throughout.
+            if python_path.is_symlink() and python_path.readlink() == real_path:
+                continue
+            import uuid
+            temporary_path = python_path.with_name('.' + filename + '.' + uuid.uuid4().hex)
             try:
-                python_path.unlink()
-            except Exception:
-                pass
-            success, msg = make_symlink(real_path, python_path)
-            if not success:
-                warn(msg, color=False)
+                success, msg = make_symlink(real_path, temporary_path)
+                if success:
+                    os.replace(temporary_path, python_path)
+                else:
+                    warn(msg, color=False)
+            except OSError as e:
+                warn(str(e), color=False)
+            finally:
+                temporary_path.unlink(missing_ok=True)
             continue
 
         python_versioned_path = bin_path / python_versioned_name
@@ -362,11 +491,11 @@ def verify_venv(
             ### Avoid circular symlinks.
             if get_python_version(python_versioned_path) == version:
                 continue
-            python_versioned_path.unlink()
-        shutil.move(python_path, python_versioned_path)
+        os.replace(python_path, python_versioned_path)
 
 
 tried_virtualenv = False
+@_locked_venv_mutation
 def init_venv(
     venv: str = 'mrsm',
     verify: bool = True,
@@ -462,11 +591,13 @@ def init_venv(
             verified_venvs.add(venv)
         return True
 
-    from meerschaum.utils.packages import run_python_package, attempt_import, _get_pip_os_env
+    from meerschaum.utils.packages import (
+        run_python_package, attempt_import, _get_pip_os_env, _get_uv_bin, _auto_install_allowed,
+    )
     global tried_virtualenv
     try:
         import venv as _venv
-        uv = attempt_import('uv', venv=None, debug=debug) if is_uv_enabled() else None
+        uv = _get_uv_bin() if is_uv_enabled() else None
         virtualenv = None
     except ImportError:
         _venv = None
@@ -480,108 +611,115 @@ def init_venv(
 
     wait_for_lock()
     update_lock(True)
+    try:
+        if rename_vtp:
+            if debug:
+                print(f"Moving '{vtp}' to '{temp_vtp}'...")
+            shutil.move(vtp, temp_vtp)
 
-    if rename_vtp:
-        if debug:
-            print(f"Moving '{vtp}' to '{temp_vtp}'...")
-        shutil.move(vtp, temp_vtp)
-
-    if uv is not None:
-        _venv_success = run_python_package(
-            'uv',
-            ['venv', venv_path.as_posix(), '-q', '--no-project', '--allow-existing', '--seed'],
-            venv=None,
-            env=_get_pip_os_env(),
-            debug=debug,
-        ) == 0
-
-    if _venv is not None and not _venv_success:
-        f = io.StringIO()
-        with redirect_stdout(f):
+        if uv is not None:
+            # Plugin imports run in this interpreter. Letting uv choose another version
+            # makes verification recreate the venv while its creation lock is still held.
             _venv_success = run_python_package(
-                'venv',
-                [venv_path.as_posix()] + (
-                    ['--symlinks']
-                    if platform.system() != 'Windows'
-                    else []
+                'uv',
+                [
+                    'venv', venv_path.as_posix(), '--python', sys.executable,
+                    '-q', '--no-project', '--allow-existing',
+                ] + (
+                    ### `--seed` downloads `pip`, `setuptools` and `wheel` into the new venv.
+                    ['--seed'] if _auto_install_allowed() else []
                 ),
-                venv=None, debug=debug
+                venv=None,
+                env=_get_pip_os_env(),
+                debug=debug,
             ) == 0
+
+        if _venv is not None and not _venv_success:
+            f = io.StringIO()
+            with redirect_stdout(f):
+                _venv_success = run_python_package(
+                    'venv',
+                    [venv_path.as_posix()] + (
+                        ['--symlinks']
+                        if platform.system() != 'Windows'
+                        else []
+                    ),
+                    venv=None, debug=debug
+                ) == 0
+            if not _venv_success:
+                print(f"Please install python3-venv.\n{f.getvalue()}\nFalling back to virtualenv...")
+            if not venv_exists(venv, debug=debug):
+                _venv = None
         if not _venv_success:
-            print(f"Please install python3-venv.\n{f.getvalue()}\nFalling back to virtualenv...")
-        if not venv_exists(venv, debug=debug):
-            _venv = None
-    if not _venv_success:
-        virtualenv = attempt_import(
-            'virtualenv',
-            venv=None,
-            lazy=False,
-            install=(not tried_virtualenv),
-            warn=False,
-            check_update=False,
-            color=False,
-            debug=debug,
-        )
-        if virtualenv is None:
-            print(
-                "Failed to import `venv` or `virtualenv`! "
-                + "Please install `virtualenv` via pip then restart Meerschaum."
+            virtualenv = attempt_import(
+                'virtualenv',
+                venv=None,
+                lazy=False,
+                install=(not tried_virtualenv),
+                warn=False,
+                check_update=False,
+                color=False,
+                debug=debug,
             )
-            if rename_vtp and temp_vtp.exists():
-                if debug:
-                    print(f"Moving '{temp_vtp}' back to '{vtp}'...")
-                shutil.move(temp_vtp, vtp)
-            update_lock(False)
-            return False
+            if virtualenv is None:
+                print(
+                    "Failed to import `venv` or `virtualenv`! "
+                    + "Please install `virtualenv` via pip then restart Meerschaum."
+                )
+                if rename_vtp and temp_vtp.exists():
+                    if debug:
+                        print(f"Moving '{temp_vtp}' back to '{vtp}'...")
+                    shutil.move(temp_vtp, vtp)
+                return False
 
-        tried_virtualenv = True
-        try:
-            python_folder = (
-                'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
-            )
-            dist_packages_path = (
-                paths.VIRTENV_RESOURCES_PATH /
-                venv / 'local' / 'lib' / python_folder / 'dist-packages'
-            )
-            local_bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
-            bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'bin'
-            vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
-            if bin_path.exists():
-                try:
-                    shutil.rmtree(bin_path)
-                except Exception:
-                    import traceback
-                    traceback.print_exc()
-            virtualenv.cli_run([venv_path.as_posix()])
-            if dist_packages_path.exists():
-                vtp.mkdir(exist_ok=True, parents=True)
-                for file_path in dist_packages_path.glob('*'):
-                    shutil.move(file_path, vtp)
-                shutil.rmtree(dist_packages_path)
-                #  shutil.move(dist_packages_path, vtp)
-                bin_path.mkdir(exist_ok=True, parents=True)
-                for file_path in local_bin_path.glob('*'):
-                    shutil.move(file_path, bin_path)
-                #  shutil.move(local_bin_path, bin_path)
-                shutil.rmtree(local_bin_path)
+            tried_virtualenv = True
+            try:
+                python_folder = (
+                    'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
+                )
+                dist_packages_path = (
+                    paths.VIRTENV_RESOURCES_PATH /
+                    venv / 'local' / 'lib' / python_folder / 'dist-packages'
+                )
+                local_bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
+                bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'bin'
+                vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
+                if bin_path.exists():
+                    try:
+                        shutil.rmtree(bin_path)
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+                virtualenv.cli_run([venv_path.as_posix()])
+                if dist_packages_path.exists():
+                    vtp.mkdir(exist_ok=True, parents=True)
+                    for file_path in dist_packages_path.glob('*'):
+                        shutil.move(file_path, vtp)
+                    shutil.rmtree(dist_packages_path)
+                    #  shutil.move(dist_packages_path, vtp)
+                    bin_path.mkdir(exist_ok=True, parents=True)
+                    for file_path in local_bin_path.glob('*'):
+                        shutil.move(file_path, bin_path)
+                    #  shutil.move(local_bin_path, bin_path)
+                    shutil.rmtree(local_bin_path)
 
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            if rename_vtp and temp_vtp.exists():
-                shutil.move(temp_vtp, vtp)
-            update_lock(False)
-            return False
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                if rename_vtp and temp_vtp.exists():
+                    shutil.move(temp_vtp, vtp)
+                return False
+        if rename_vtp and temp_vtp.exists():
+            if debug:
+                print(f"Cleanup: move '{temp_vtp}' back to '{vtp}'.")
+            shutil.move(temp_vtp, vtp)
+    finally:
+        update_lock(False)
+
+    # The mutation lock is reentrant: verification may recreate an incompatible environment.
     if verify:
         verify_venv(venv, debug=debug)
         verified_venvs.add(venv)
-
-    if rename_vtp and temp_vtp.exists():
-        if debug:
-            print(f"Cleanup: move '{temp_vtp}' back to '{vtp}'.")
-        shutil.move(temp_vtp, vtp)
-
-    update_lock(False)
     return True
 
 

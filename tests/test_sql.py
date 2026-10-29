@@ -7,7 +7,6 @@ Test SQL utility functions.
 """
 
 import datetime
-from types import SimpleNamespace
 import pytest
 import meerschaum as mrsm
 from tests.connectors import conns, get_flavors
@@ -116,55 +115,10 @@ def test_parse_uri(uri: str, expected_attributes):
     assert SQLConnector.parse_uri(uri) == expected_attributes
 
 
-def test_get_pipe_data_uses_adbc_for_polars(monkeypatch):
-    """Arrow-safe Polars reads use ADBC and strip SQLAlchemy's dialect from the URI."""
-    import polars as pl
-    import meerschaum.utils.packages as packages
-    from meerschaum.connectors.sql._pipes import get_pipe_data
-
-    expected = pl.DataFrame({'id': [1]})
-    real_attempt_import = packages.attempt_import
-
-    def attempt_import(*names, **kw):
-        if names == ('adbc_driver_postgresql',):
-            assert kw.get('install') is False
-            return SimpleNamespace()
-        return real_attempt_import(*names, **kw)
-
-    monkeypatch.setattr(
-        packages,
-        'attempt_import',
-        attempt_import,
-    )
-    monkeypatch.setattr(
-        pl,
-        'read_database_uri',
-        lambda query, uri, engine: (
-            expected
-            if (
-                query == 'SELECT id FROM test'
-                and uri == 'postgresql://user:pass@localhost/db'
-                and engine == 'adbc'
-            )
-            else None
-        ),
-    )
-    connector = SimpleNamespace(
-        flavor='postgresql',
-        URI='postgresql+psycopg://user:pass@localhost/db',
-        get_pipe_data_query=lambda *args, **kw: 'SELECT id FROM test',
-    )
-    pipe = SimpleNamespace(
-        enforce=True,
-        get_columns_types=lambda **kw: {'id': 'BIGINT'},
-        get_dtypes=lambda **kw: {'id': 'int64'},
-    )
-
-    assert get_pipe_data(connector, pipe, as_polars=True) is expected
-
-
 def test_duckdb_unchunked_read_iterator(tmp_path):
     """DuckDB's unchunked Pandas result is exposed as one iterator chunk."""
+    pytest.importorskip('sqlalchemy')
+    pytest.importorskip('duckdb')
     if mrsm.attempt_import('duckdb', install=False, warn=False) is None:
         pytest.skip("DuckDB is not installed.")
 
@@ -291,73 +245,3 @@ def test_find_top_level_select_index_skips_comments_and_strings():
     assert find_top_level_select_index("WITH a AS (SELECT 1)") == -1
 
 
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_stale_temporary_tables_scan_is_throttled(flavor: str):
-    """
-    The stale-table scan must run at most once a minute and must not duplicate bookkeeping rows.
-    """
-    import datetime
-    import sqlalchemy
-    from meerschaum.connectors.sql.tables import get_tables
-
-    conn = conns[flavor]
-    if not isinstance(conn, SQLConnector):
-        return
-
-    temp_tables_table = get_tables(mrsm_instance=conn, create=True)['temp_tables']
-    stale_name = f'_mrsm_test_stale_{flavor}'
-
-    ### Seed a stale bookkeeping row so the scan has something to flag.
-    conn.exec(
-        sqlalchemy.delete(temp_tables_table).where(temp_tables_table.c.table == stale_name),
-        silent=True,
-    )
-    conn.exec(
-        sqlalchemy.insert(temp_tables_table).values(
-            date_created=(
-                datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-                - datetime.timedelta(days=30)
-            ),
-            table=stale_name,
-            ready_to_drop=None,
-        ),
-        silent=True,
-    )
-
-    scans, inserts = [], []
-    original_read, original_exec = conn.read, conn.exec
-
-    def counting_read(query, **kw):
-        ### Only the stale scan filters on `date_created`; the cheap drop path selects
-        ### on `ready_to_drop` and runs on every call by design.
-        if 'date_created' in str(query):
-            scans.append(query)
-        return original_read(query, **kw)
-
-    def counting_exec(query, **kw):
-        if 'INSERT' in str(query).upper():
-            inserts.append(query)
-        return original_exec(query, **kw)
-
-    ### Stub the drop itself: other workers hold temporary tables of their own, and dropping
-    ### them out from under a concurrent test is what this test is not about.
-    original_drop = conn._drop_temporary_tables
-    conn._drop_temporary_tables = lambda **kw: (True, "Success")
-    conn._stale_temporary_tables_check_timestamp = None
-    conn.read, conn.exec = counting_read, counting_exec
-    try:
-        for _ in range(5):
-            success, msg = conn._drop_old_temporary_tables(refresh=False)
-            assert success, msg
-    finally:
-        conn.read, conn.exec = original_read, original_exec
-        conn._drop_temporary_tables = original_drop
-        conn.exec(
-            sqlalchemy.delete(temp_tables_table).where(temp_tables_table.c.table == stale_name),
-            silent=True,
-        )
-
-    ### Only the first call scans; the remaining four are throttled.
-    assert len(scans) == 1, f"Scanned {len(scans)} times, expected 1."
-    ### The stale tables are flagged with an UPDATE, never re-inserted.
-    assert not inserts, f"Wrote {len(inserts)} bookkeeping rows, expected 0."

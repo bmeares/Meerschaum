@@ -71,7 +71,7 @@ This page catalogs useful keys in the `parameters` dictionary.
     #     "parent_pipe_id": 1
     #     "value": 123,
     #     "self_value": 123,
-    # }  
+    # }
     ```
 
 
@@ -108,7 +108,7 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 
 ### Parameter reference
 
-**Essential** — the keys most pipes use:
+**Essential**, the keys most pipes use:
 
 | Parameter | Purpose | Section |
 |---|---|---|
@@ -117,7 +117,7 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 | `tags` | Labels for grouping and filtering pipes | [`tags`](#tags) |
 | `target` | Override the destination table name | [`columns`](#columns) |
 
-**Advanced / opt-in** — enable only when you need them:
+**Advanced / opt-in**, enable only when you need them:
 
 | Parameter | Purpose | Section |
 |---|---|---|
@@ -133,14 +133,34 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 | `mixed_numerics` | Control int→float→numeric coercion | [`mixed_numerics`](#mixed_numerics) |
 | `precision` | Datetime precision unit | [`precision`](#precision) |
 | `indices` | Additional non-unique performance indices | [`indices`](#indices) |
-| `fetch` | Source-specific fetch config (e.g. `backtrack_minutes`) | [`fetch`](#fetch) |
+| `fetch` | Source-specific fetch config (e.g. `backtrack_minutes`, `replace`) | [`fetch`](#fetch) |
 | `sql` / `query` | SQL definition for SQL-connector pipes | [`sql`, `query`](#sql-query) |
 | `reference` / `references` / `parents` / `children` | Inherit or relate other pipes' parameters | [`reference`](#reference), [`parents`](#parents) |
+| `schedule` / `min_seconds` / `retry` / `stream` | Syncing Engine: per-pipe cadence, rate limit, retries and micro-batching | [`schedule`](#schedule), [`min_seconds`](#min_seconds), [`retry`](#retry), [`stream`](#stream) |
 | `verify` | Verification-sync config (e.g. `chunk_minutes`) | [`verify`](#verify) |
+| `access` | Owner, team and visibility (who may see and change the pipe through the API and the console) | [`access`](#access) |
+| `locks` | Operations the pipe refuses everywhere (`sync`, `clear`, `drop`, ...) | [`locks`](#locks) |
 
 For more, see the full reference below or [docs.meerschaum.io](https://docs.meerschaum.io).
 
 ---------------
+
+## `access`
+
+Who owns the pipe and who may see and change it through the API server, the MCP server and the web
+console (local access with the instance's credentials sees everything). See
+[Access and Locks](/reference/pipes/access-and-locks/#access).
+
+```yaml
+access:
+  owner: carol          # a username, or null
+  team: analytics       # a team; null is Everyone
+  visibility: private   # team (default), private or everyone
+  edit: owner           # team (default) or owner
+```
+
+A pipe without `access` belongs to Everyone: every user sees and changes it. Set it with
+`pipe.set_access(...)` or `mrsm edit pipes access`.
 
 ## `autoincrement`
 
@@ -212,7 +232,7 @@ You may designate the same column as both the `datetime` and `primary` indices.
 
 Set `compress` to enable compression for a pipe's target table to reduce disk usage.
 
-For **TimescaleDB** hypertables (the default stack), compression is handled by the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore). The columnstore (compression) policy is the same mechanism under both names — `add_columnstore_policy` is the modern equivalent of the legacy `add_compression_policy`.
+For **TimescaleDB** hypertables (the default stack), compression is handled by the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore). The columnstore (compression) policy is the same mechanism under both names, `add_columnstore_policy` is the modern equivalent of the legacy `add_compression_policy`.
 
 By default ([`hypercore`](#hypercore)), the columnstore is already enabled at table creation and a policy is auto-created. Setting `compress` additionally (re)installs a columnstore policy automatically on sync, so newly synced chunks are converted in the background. Running the `compress pipes` action (or `Pipe.compress()`) additionally converts any existing uncompressed chunks immediately.
 
@@ -220,7 +240,7 @@ By default ([`hypercore`](#hypercore)), the columnstore is already enabled at ta
     Run `compress pipes --no-policy` to convert existing chunks now **without** installing an ongoing columnstore policy (any pre-existing policy is left untouched). Useful for a one-time reclaim on a pipe you don't want to keep auto-compressing.
 
 !!! tip "Decompressing"
-    Run the `decompress pipes` action (or `Pipe.decompress()`) to reverse compression: it removes the columnstore policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed (MySQL / MariaDB and MSSQL revert their native table compression). Pass `decompress pipes --no-policy` to decompress existing chunks now while leaving the policy in place — handy for a bulk backfill, after which chunks are recompressed on the policy's schedule.
+    Run the `decompress pipes` action (or `Pipe.decompress()`) to reverse compression: it removes the columnstore policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed (MySQL / MariaDB and MSSQL revert their native table compression). Pass `decompress pipes --no-policy` to decompress existing chunks now while leaving the policy in place, handy for a bulk backfill, after which chunks are recompressed on the policy's schedule.
 
 You may set `compress` to `true` to use sensible defaults (segment by the `id` column, order by the `datetime` column descending), or to a dictionary with the following keys for fine-grained control:
 
@@ -234,7 +254,7 @@ How old a chunk must be before the policy converts it (e.g. `'7 days'`). Default
 
 ### `compress.segmentby`
 
-The column(s) to segment by. Accepts a single column name (string) or a list of column names. Defaults to the `id` index — unless `id` is the unique [`primary`](#the-primary-index) key, in which case it is dropped from `segmentby` (a high-cardinality `segmentby` defeats columnstore compression) and moved into `orderby`.
+The column(s) to segment by. Accepts a single column name (string) or a list of column names. Defaults to the `id` index, unless `id` is the unique [`primary`](#the-primary-index) key, in which case it is dropped from `segmentby` (a high-cardinality `segmentby` defeats columnstore compression) and moved into `orderby`.
 
 ### `compress.orderby`
 
@@ -300,7 +320,7 @@ If not explicitly set, dtypes are inferred from the first sync, and syncing conf
     # id          int32[pyarrow]
     # val                float64
     # ts     datetime64[ms, UTC]
-    # dtype: object 
+    # dtype: object
 
     pipe.sync('id:2,foo:3')
     print(pipe.dtypes)
@@ -344,7 +364,7 @@ The `enforce` parameter controls whether a pipe coerces incoming data to match t
 
 !!! warning
     Some instance connectors behave unexpectedly when `enforce=False` (e.g. SQLite).
-    
+
 ---------------
 
 ## `fetch`
@@ -353,7 +373,7 @@ The `fetch` key contains parameters concerning the [fetch stage](/reference/pipe
 
 ### `fetch.backtrack_minutes`
 
-How many minutes of overlap to request when fetching new rows ― see [Backtracking](/reference/pipes/syncing/#backtracking). Defaults to 1440.
+How many minutes of overlap to request when fetching new rows, see [Backtracking](/reference/pipes/syncing/#backtracking). Defaults to 1440.
 
 ### `fetch.definition`
 
@@ -364,8 +384,22 @@ How many minutes of overlap to request when fetching new rows ― see [Backtrack
         SELECT *
         FROM foo
     ```
-    
+
 The base SQL query to be run when fetching new rows. Aliased as `sql` or `query` for convenience. This only applies to pipes with [`SQLConnectors`](/reference/connectors/sql-connectors/) as connectors.
+
+### `fetch.replace`
+
+!!! example inline end ""
+    ```yaml
+    fetch:
+      replace: true
+    ```
+
+Make every fetched window authoritative (default `false`): instead of merging the fetched rows
+into the table, each sync deletes the rows of the window it fetched (`[begin, end)`, by default the
+sync time minus the backtrack interval onward) and inserts the fetched rows, in one transaction.
+Rows that disappeared from the source within the window disappear from the pipe. Use it for
+rollups and sources that restate history. See [Replacing a window](/reference/pipes/syncing/#replacing-a-window).
 
 ---------------
 
@@ -373,9 +407,9 @@ The base SQL query to be run when fetching new rows. Aliased as `sql` or `query`
 
 On **TimescaleDB**, the target table is created as a hypertable by default. Set `hypertable` to `False` to create a plain table instead.
 
-On **PostgreSQL / PostGIS**, **MySQL / MariaDB**, and **MSSQL**, `hypertable` controls [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) and also **defaults to `True`** — so a pipe with a [`datetime`](#the-datetime-index) column partitions its target table by range on that column. Set `hypertable` to `False` to opt out (a plain table). Requires a `datetime` column; ignored on flavors without native range partitioning (e.g. SQLite, DuckDB, Oracle). Only newly created tables are affected — a pre-existing plain table is not retroactively partitioned (use `partition pipes` to rebuild it).
+On **PostgreSQL / PostGIS**, **MySQL / MariaDB**, and **MSSQL**, `hypertable` controls [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) and also **defaults to `True`** (so a pipe with a [`datetime`](#the-datetime-index) column partitions its target table by range on that column. Set `hypertable` to `False` to opt out (a plain table). Requires a `datetime` column; ignored on flavors without native range partitioning (e.g. SQLite, DuckDB, Oracle). Only newly created tables are affected) a pre-existing plain table is not retroactively partitioned (use `partition pipes` to rebuild it).
 
-The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](#verifychunk_minutes) and its aliases, default 43200 — 30 days), and partition boundaries are epoch-aligned — the same datetime always maps to the same partition regardless of insert order, and verification chunks (`get_chunk_bounds(align=True)`) coincide with partition edges.
+The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](#verifychunk_minutes) and its aliases, default 43200 (30 days), and partition boundaries are epoch-aligned) the same datetime always maps to the same partition regardless of insert order, and verification chunks (`get_chunk_bounds(align=True)`) coincide with partition edges.
 
 `verify.chunk_minutes` is the **authoritative** partition width: editing it does not retroactively reshape an existing table, and changing it for a populated table can produce misaligned, overlapping partitions. To change an existing table's width, run the `partition pipes` action (or [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition)), which rebuilds the table at the new width:
 
@@ -404,9 +438,9 @@ mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
 
 ## `hypercore`
 
-TimescaleDB-only. By default (`True`), the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) is enabled when the hypertable is created — the `CREATE TABLE` declares `tsdb.segmentby` / `tsdb.orderby` (resolved the same way as [`compress`](#compress)), which causes TimescaleDB to auto-create a columnstore policy that converts old chunks in the background.
+TimescaleDB-only. By default (`True`), the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) is enabled when the hypertable is created, the `CREATE TABLE` declares `tsdb.segmentby` / `tsdb.orderby` (resolved the same way as [`compress`](#compress)), which causes TimescaleDB to auto-create a columnstore policy that converts old chunks in the background.
 
-Set `hypercore` to `False` for a plain row-store hypertable (no columnstore, no auto-policy). Has no effect unless the pipe is a [`hypertable`](#hypertable).
+Set `hypercore` to `False` for a plain row-store hypertable (no columnstore, no auto-policy). Has no effect unless the pipe is a [`hypertable`](#hypertable). From Python, `mrsm.Pipe(..., hypercore=False)` sets it too.
 
 ---------------
 
@@ -443,6 +477,40 @@ The keys specified in `columns` are included in `indices` by default, as well as
     ```
 ---------------
 
+## `locks`
+
+The operations the pipe refuses, whoever asks and however (command line, Python, jobs, the
+Syncing Engine, the API, the web console); `-y`, `--force` and `--allow-protected` never get past
+a lock. A list of `parameters`, `sync`, `clear`, `drop`, `delete` or `all`:
+
+```yaml
+locks: [drop, delete]   # syncs and clears still run; dropping and deleting are refused
+```
+
+| Lock | Refuses |
+|---|---|
+| `parameters` | Parameter edits (changing `locks` stays allowed; syncs still write). |
+| `sync` | Syncs, replaced windows, deduplication and verification syncs. |
+| `clear` | Row deletes (clears, replaced windows, rebuilds). |
+| `drop` | Drops, rebuilds and table schema changes (`verify schema`, repartitioning). |
+| `delete` | Deleting the pipe. |
+| `all` | All of the above. |
+
+Set them with `pipe.lock(...)` / `pipe.unlock(...)` or `mrsm lock pipes` / `mrsm unlock pipes`. In
+a Pipeline run, a pipe locked against syncs is skipped as **locked** (not a failure). See
+[Access and Locks](/reference/pipes/access-and-locks/#locks).
+
+---------------
+
+## `min_seconds`
+
+*New in v5.* The shortest time between two runs of this pipe when the Syncing Engine triggers it from a parent in [continuous mode](/reference/pipelines/continuous/#children-of-a-stream). When a streaming parent flushes more often than this, the flushes are coalesced into one run of the child. Falls back to `system.engine.debounce_seconds`, then to the loop's `--min-seconds`.
+
+```yaml
+parameters:
+  min_seconds: 30
+```
+
 ## `mixed_numerics`
 
 Toggle whether a pipe will coerce mixed integer and float values into the `numeric` dtype (default `True`). Set this to `False` to disable this behavior, preventing potential schema changes on the target table (akin to `static=True`).
@@ -453,6 +521,36 @@ Toggle whether a pipe will coerce mixed integer and float values into the `numer
 
 Toggle whether a pipe will allow null indices (default `True`). Set this to `False` for a performance improvement in situations where null index values are not expected.
 
+With `null_indices` on, a row whose index columns are `NULL` is matched like any other key: an
+[`upsert`](#upsert) updates it in place instead of inserting it again. The unique key of an
+upsert pipe is the usual one over its index columns, so Meerschaum 4.1 can still upsert into a
+table that 5.0 created.
+
+- **PostgreSQL 15 and later** (TimescaleDB and PostGIS included): new tables declare that unique
+  constraint `UNIQUE NULLS NOT DISTINCT`, so `NULL` keys are equal for every upsert.
+- **SQLite, older PostgreSQL, and tables created before 5.0.0rc15**: the unique key treats
+  `NULL`s as distinct, so the upsert matches the rows that have a `NULL` key itself: it updates
+  the ones that exist and inserts the others. Older tables need no rebuild.
+- **MySQL and MariaDB** match the keys with `<=>`.
+- **MSSQL and Oracle** `MERGE` on a `COALESCE(...)` comparison.
+
+On MySQL, MariaDB and SQLite, a batch that repeats a key keeps its last row (as
+`ON DUPLICATE KEY UPDATE` does). Where the unique key treats `NULL`s as distinct (on MySQL,
+MariaDB and PostgreSQL 14 or older), two processes that upsert the same new `NULL` key at the same
+moment can both insert it.
+
+### Null-like strings
+
+In a column declared with a text dtype (`dtypes: {name: string}`) and in a text index column
+(`columns`), the strings `'None'`, `'NA'`, `'nan'`, `'NaT'`, `'NaTz'`, `''` and `'<NA>'` are
+values: they are written as text, and `params={'code': 'NA'}` matches the text `NA` (Namibia's
+country code, a station named `None`). Only real nulls (`None`, `NaN`, `pd.NA`, `NaT`) are `NULL`.
+Python `None` matches nulls and `'_None'` matches non-nulls on every column. Other columns keep
+the older rule, where those strings mean `NULL`. Oracle stores `''` as `NULL`, so there `''` is a
+null in every column (`params={'code': ''}` matches `NULL`). On Valkey instances a document's key
+is made of the text of its index values, so a `NULL` index value and the text `'None'` (or
+`'nan'`, `'<NA>'`) in the same index column are the same document there.
+
 ---------------
 
 ## `parents`
@@ -460,6 +558,8 @@ Toggle whether a pipe will allow null indices (default `True`). Set this to `Fal
 Associate a pipe with its upstream pipes via the `parents` (or `parent`) key. For example, syncing a SQL pipe with a defined `parent` allows for changing the data type of the `datetime` column between integer and timestamp values. The complement to `parents` is `children` (`child`).
 
 Set `parents` to a list of keys (`connector`, `metric`, `location`, etc.) or a string for the `Pipe` constructor.
+
+`parents` and `children` are the **graph edges** of the [Syncing Engine](/reference/pipelines/): with `sync pipes --parents` / `--children` (or `pipe.sync(parents=True)`, or `mrsm.Pipeline`) the engine syncs a pipe's ancestors or descendants in dependency order and never syncs a child past its parents' watermark. `{{ Pipe() }}` references in a pipe's `sql` are edges too, without declaring anything. An entry may carry `lookback_<unit>` / `lookahead_<unit>` (`seconds`, `minutes`, `hours`, `days`, `weeks`) and an `axis` to say how far a parent change reaches into the child, see [Windows for edges](/reference/pipelines/#windows-for-edges-lookback-and-lookahead). `reference` / `references` are **not** edges.
 
 ??? example
     The `parent` key corresponds to the constructor for the parent pipe.
@@ -469,7 +569,7 @@ Set `parents` to a list of keys (`connector`, `metric`, `location`, etc.) or a s
     - connector: foo
       metric: bar
       parameters:
-        children: 
+        children:
         - connector: foo
           metric: bar
           location: child
@@ -591,10 +691,28 @@ A pipe may inherit the base parameters from another reference pipe. Set `referen
     )
 
     print(pipe.parameters)
-    # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}} 
+    # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}}
     ```
 
 ---------------
+
+## `retry`
+
+*New in v5.* Retry policy of a node in an engine run: `max` retries after the first attempt, waiting `backoff_seconds` (fixed) between attempts. Losing the pipe's lease counts as a failed attempt. See [Failures and Resuming](/reference/pipelines/#failures-and-resuming).
+
+```yaml
+parameters:
+  retry: {max: 3, backoff_seconds: 30}
+```
+
+## `schedule`
+
+*New in v5.* The cadence of a root pipe under `sync pipes --loop`, in the grammar of `--schedule` / `-s` (`every 6 hours`, `daily starting 03:00`). A pipe with a schedule only syncs when it is due; the others keep syncing every lap. A schedule that does not parse is ignored with a warning. See [Continuous Mode](/reference/pipelines/continuous/#-loop).
+
+```yaml
+parameters:
+  schedule: daily starting 03:00
+```
 
 ## `schema`
 
@@ -618,6 +736,19 @@ Setting `static` will prevent new columns from being added and existing columns 
 
 ---------------
 
+## `stream`
+
+*New in v5.* Micro-batching triggers for a streaming source (`IS_STREAMING` connector) under `sync pipes --listen`. The sink flushes on whichever trigger fires first: `idle_ms` (default `250`, or `auto`), `max_latency_ms` (`2000`), `max_rows` (`5000`) and `max_bytes` (8 MB). See [Micro-batching](/reference/pipelines/continuous/#micro-batching).
+
+```yaml
+parameters:
+  stream:
+    idle_ms: 250
+    max_latency_ms: 2000
+    max_rows: 5000
+    max_bytes: 8388608
+```
+
 ## `tags`
 
 A list of a pipe's [tags](/reference/pipes/tags/), e.g.:
@@ -634,7 +765,7 @@ tags:
 
 Setting `upsert` to `true` enables high-performance syncs by combining inserts and updates into a single transaction.
 
-Upserts rely on unique constraints on indices and as such should be used in situations where a table's schema is fixed. See the [upsert SQL source](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/sql.py) for further details.
+Upserts rely on unique constraints on indices and as such should be used in situations where a table's schema is fixed. Rows whose index columns are `NULL` upsert in place too (see [`null_indices`](#null_indices)). To replace a whole window of rows instead of upserting into it, see [Replacing a window](/reference/pipes/syncing/#replacing-a-window).
 
 !!! warning
     Ensure your instance connector supports upserts before enabling `upsert` (e.g. `SQLConnector`).
@@ -691,7 +822,7 @@ In addition to days, alias keys are allowed to specify other units of time. In o
 
     ```python
     import meerschaum as mrsm
-    
+
     pipe = mrsm.Pipe(
         'foo', 'bar',
         parameters={

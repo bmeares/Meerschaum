@@ -1,0 +1,5 @@
+{
+  "description": "Both mrsm-compose.yaml and mrsm-compose.yml exist: warn and use the .yaml file.",
+  "width": 100,
+  "runs": [{"name": "explain", "action": ["explain"]}, {"name": "ps", "action": ["ps"]}]
+}

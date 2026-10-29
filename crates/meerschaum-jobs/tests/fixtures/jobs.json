@@ -1,0 +1,2057 @@
+{
+ "scenarios": {
+  "done-ok": {
+   "files": {
+    "jobs/done-ok/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/done-ok/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/done-ok/properties.json": {
+     "type": "json",
+     "text": "{\"label\": \"bash ok.sh\", \"result\": [true, \"Success\"], \"process\": {\"began\": \"2000-01-01T00:00:01.000001\", \"ended\": \"2000-01-01T00:00:03.000003\"}}"
+    },
+    "logs/done-ok.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | hello\n2000-01-01 00:00 | line two\n2000-01-01 00:00 | "
+    }
+   },
+   "state": {
+    "status": "stopped",
+    "pid": null,
+    "sysargs": [
+     "bash",
+     "ok.sh"
+    ],
+    "executor_keys": "local",
+    "result": [
+     true,
+     "Success"
+    ],
+    "logs": "\n2000-01-01 00:00 | hello\n2000-01-01 00:00 | line two\n2000-01-01 00:00 | ",
+    "label": "bash ok.sh",
+    "daemon_label": "bash ok.sh",
+    "restart": false,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": null,
+    "ended": "2000-01-01T00:00:03.000003",
+    "stop_time": null,
+    "hidden": false,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\"done-ok\", \"bash ok.sh\")",
+    "properties": {
+     "label": "bash ok.sh",
+     "result": [
+      true,
+      "Success"
+     ],
+     "process": {
+      "began": "2000-01-01T00:00:01.000001",
+      "ended": "2000-01-01T00:00:03.000003"
+     }
+    }
+   }
+  },
+  "failed": {
+   "files": {
+    "jobs/failed/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/failed/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/failed/properties.json": {
+     "type": "json",
+     "text": "{\"label\": \"bash fail.sh\", \"result\": [false, \"Returned exit code: 3\"], \"process\": {\"began\": \"2000-01-01T00:00:01.000001\", \"ended\": \"2000-01-01T00:00:03.000003\"}}"
+    },
+    "logs/failed.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | about to fail\n"
+    }
+   },
+   "state": {
+    "status": "stopped",
+    "pid": null,
+    "sysargs": [
+     "bash",
+     "fail.sh"
+    ],
+    "executor_keys": "local",
+    "result": [
+     false,
+     "Returned exit code: 3"
+    ],
+    "logs": "\n2000-01-01 00:00 | about to fail\n",
+    "label": "bash fail.sh",
+    "daemon_label": "bash fail.sh",
+    "restart": false,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": null,
+    "ended": "2000-01-01T00:00:03.000003",
+    "stop_time": null,
+    "hidden": false,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\"failed\", \"bash fail.sh\")",
+    "properties": {
+     "label": "bash fail.sh",
+     "result": [
+      false,
+      "Returned exit code: 3"
+     ],
+     "process": {
+      "began": "2000-01-01T00:00:01.000001",
+      "ended": "2000-01-01T00:00:03.000003"
+     }
+    }
+   },
+   "truncated_after": "about to fail\n"
+  },
+  "with-env": {
+   "files": {
+    "jobs/with-env/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/with-env/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/with-env/properties.json": {
+     "type": "json",
+     "text": "{\"env\": {\"FOO\": \"bar\", \"MRSM_TEST_N\": \"1\"}, \"label\": \"bash env.sh\", \"result\": [true, \"Success\"], \"process\": {\"began\": \"2000-01-01T00:00:01.000001\", \"ended\": \"2000-01-01T00:00:03.000003\"}}"
+    },
+    "logs/with-env.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | FOO=bar N=1\n2000-01-01 00:00 | "
+    }
+   },
+   "state": {
+    "status": "stopped",
+    "pid": null,
+    "sysargs": [
+     "bash",
+     "env.sh"
+    ],
+    "executor_keys": "local",
+    "result": [
+     true,
+     "Success"
+    ],
+    "logs": "\n2000-01-01 00:00 | FOO=bar N=1\n2000-01-01 00:00 | ",
+    "label": "bash env.sh",
+    "daemon_label": "bash env.sh",
+    "restart": false,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": null,
+    "ended": "2000-01-01T00:00:03.000003",
+    "stop_time": null,
+    "hidden": false,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true",
+     "FOO": "bar",
+     "MRSM_TEST_N": "1"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\"with-env\", \"bash env.sh\")",
+    "properties": {
+     "env": {
+      "FOO": "bar",
+      "MRSM_TEST_N": "1"
+     },
+     "label": "bash env.sh",
+     "result": [
+      true,
+      "Success"
+     ],
+     "process": {
+      "began": "2000-01-01T00:00:01.000001",
+      "ended": "2000-01-01T00:00:03.000003"
+     }
+    }
+   }
+  },
+  ".hidden-job": {
+   "files": {
+    "jobs/.hidden-job/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/.hidden-job/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/.hidden-job/properties.json": {
+     "type": "json",
+     "text": "{\"label\": \"bash ok.sh\", \"result\": [true, \"Success\"], \"process\": {\"began\": \"2000-01-01T00:00:01.000001\", \"ended\": \"2000-01-01T00:00:03.000003\"}}"
+    },
+    "logs/.hidden-job.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | hello\n2000-01-01 00:00 | line two\n2000-01-01 00:00 | "
+    }
+   },
+   "state": {
+    "status": "stopped",
+    "pid": null,
+    "sysargs": [
+     "bash",
+     "ok.sh"
+    ],
+    "executor_keys": "local",
+    "result": [
+     true,
+     "Success"
+    ],
+    "logs": "\n2000-01-01 00:00 | hello\n2000-01-01 00:00 | line two\n2000-01-01 00:00 | ",
+    "label": "bash ok.sh",
+    "daemon_label": "bash ok.sh",
+    "restart": false,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": null,
+    "ended": "2000-01-01T00:00:03.000003",
+    "stop_time": null,
+    "hidden": true,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\".hidden-job\", \"bash ok.sh\")",
+    "properties": {
+     "label": "bash ok.sh",
+     "result": [
+      true,
+      "Success"
+     ],
+     "process": {
+      "began": "2000-01-01T00:00:01.000001",
+      "ended": "2000-01-01T00:00:03.000003"
+     }
+    }
+   }
+  },
+  "running": {
+   "files": {
+    "jobs/running/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/running/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/running/process.pid": {
+     "type": "pid",
+     "text": "{PID}"
+    },
+    "jobs/running/properties.json": {
+     "type": "json",
+     "text": "{\"restart\": true, \"label\": \"show version --nopretty : --loop --min-seconds 60\", \"result\": null, \"process\": {\"began\": \"2000-01-01T00:00:01.000001\"}}"
+    },
+    "logs/running.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds...\u001b[0m\n2000-01-01 00:00 | "
+    }
+   },
+   "state": {
+    "status": "running",
+    "pid": "{PID}",
+    "sysargs": [
+     "show",
+     "version",
+     "--nopretty",
+     ":",
+     "--loop",
+     "--min-seconds",
+     "60"
+    ],
+    "executor_keys": "local",
+    "result": [
+     true,
+     "Job(\"running\", \"show version --nopretty : --loop --min-seconds 60\") is running."
+    ],
+    "logs": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds...\u001b[0m\n2000-01-01 00:00 | ",
+    "label": "show version --nopretty\n: --loop --min-seconds 60",
+    "daemon_label": "show version --nopretty : --loop --min-seconds 60",
+    "restart": true,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": null,
+    "ended": null,
+    "stop_time": null,
+    "hidden": false,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\"running\", \"show version --nopretty : --loop --min-seconds 60\")",
+    "properties": {
+     "restart": true,
+     "label": "show version --nopretty : --loop --min-seconds 60",
+     "result": null,
+     "process": {
+      "began": "2000-01-01T00:00:01.000001"
+     }
+    }
+   }
+  },
+  "paused": {
+   "files": {
+    "jobs/running/.stop.json": {
+     "type": "json",
+     "text": "{\"stop_time\": \"2000-01-01T00:00:04.000004+00:00\", \"action\": \"pause\"}"
+    },
+    "jobs/running/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/running/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/running/process.pid": {
+     "type": "pid",
+     "text": "{PID}"
+    },
+    "jobs/running/properties.json": {
+     "type": "json",
+     "text": "{\"restart\": true, \"label\": \"show version --nopretty : --loop --min-seconds 60\", \"result\": null, \"process\": {\"began\": \"2000-01-01T00:00:01.000001\", \"paused\": \"2000-01-01T00:00:02.000002\"}}"
+    },
+    "logs/running.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds...\u001b[0m\n2000-01-01 00:00 | "
+    }
+   },
+   "state": {
+    "status": "paused",
+    "pid": "{PID}",
+    "sysargs": [
+     "show",
+     "version",
+     "--nopretty",
+     ":",
+     "--loop",
+     "--min-seconds",
+     "60"
+    ],
+    "executor_keys": "local",
+    "result": [
+     false,
+     "No result available."
+    ],
+    "logs": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds...\u001b[0m\n2000-01-01 00:00 | ",
+    "label": "show version --nopretty\n: --loop --min-seconds 60",
+    "daemon_label": "show version --nopretty : --loop --min-seconds 60",
+    "restart": true,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": "2000-01-01T00:00:02.000002",
+    "ended": null,
+    "stop_time": "2000-01-01T00:00:04.000004+00:00",
+    "hidden": false,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\"running\", \"show version --nopretty : --loop --min-seconds 60\")",
+    "properties": {
+     "restart": true,
+     "label": "show version --nopretty : --loop --min-seconds 60",
+     "result": null,
+     "process": {
+      "began": "2000-01-01T00:00:01.000001",
+      "paused": "2000-01-01T00:00:02.000002"
+     }
+    }
+   }
+  },
+  "killed": {
+   "files": {
+    "jobs/running/.stop.json": {
+     "type": "json",
+     "text": "{\"stop_time\": \"2000-01-01T00:00:04.000004+00:00\", \"action\": \"kill\"}"
+    },
+    "jobs/running/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/running/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/running/properties.json": {
+     "type": "json",
+     "text": "{\"restart\": true, \"label\": \"show version --nopretty : --loop --min-seconds 60\", \"result\": null, \"process\": {\"began\": \"2000-01-01T00:00:01.000001\", \"paused\": \"2000-01-01T00:00:02.000002\"}}"
+    },
+    "logs/running.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds...\u001b[0m\n2000-01-01 00:00 | "
+    }
+   },
+   "state": {
+    "status": "stopped",
+    "pid": null,
+    "sysargs": [
+     "show",
+     "version",
+     "--nopretty",
+     ":",
+     "--loop",
+     "--min-seconds",
+     "60"
+    ],
+    "executor_keys": "local",
+    "result": [
+     false,
+     "No result available."
+    ],
+    "logs": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds...\u001b[0m\n2000-01-01 00:00 | ",
+    "label": "show version --nopretty\n: --loop --min-seconds 60",
+    "daemon_label": "show version --nopretty : --loop --min-seconds 60",
+    "restart": true,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": "2000-01-01T00:00:02.000002",
+    "ended": null,
+    "stop_time": "2000-01-01T00:00:04.000004+00:00",
+    "hidden": false,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\"running\", \"show version --nopretty : --loop --min-seconds 60\")",
+    "properties": {
+     "restart": true,
+     "label": "show version --nopretty : --loop --min-seconds 60",
+     "result": null,
+     "process": {
+      "began": "2000-01-01T00:00:01.000001",
+      "paused": "2000-01-01T00:00:02.000002"
+     }
+    }
+   }
+  },
+  "stopped": {
+   "files": {
+    "jobs/stopped/.stop.json": {
+     "type": "json",
+     "text": "{\"stop_time\": \"2000-01-01T00:00:04.000004+00:00\", \"action\": \"quit\"}"
+    },
+    "jobs/stopped/input.stdin": {
+     "type": "fifo"
+    },
+    "jobs/stopped/pickle.pkl": {
+     "type": "pickle"
+    },
+    "jobs/stopped/properties.json": {
+     "type": "json",
+     "text": "{\"restart\": true, \"label\": \"show version --nopretty : --loop --min-seconds 60\", \"result\": [true, \"Success\"], \"process\": {\"began\": \"2000-01-01T00:00:01.000001\", \"ended\": \"2000-01-01T00:00:03.000003\"}}"
+    },
+    "logs/stopped.log.0": {
+     "type": "text",
+     "text": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds..."
+    }
+   },
+   "state": {
+    "status": "stopped",
+    "pid": null,
+    "sysargs": [
+     "show",
+     "version",
+     "--nopretty",
+     ":",
+     "--loop",
+     "--min-seconds",
+     "60"
+    ],
+    "executor_keys": "local",
+    "result": [
+     true,
+     "Success"
+    ],
+    "logs": "\n2000-01-01 00:00 | 4.1.4\n2000-01-01 00:00 | \u001b[95m 💬 Sleeping for 60.0 seconds...",
+    "label": "show version --nopretty\n: --loop --min-seconds 60",
+    "daemon_label": "show version --nopretty : --loop --min-seconds 60",
+    "restart": true,
+    "began": "2000-01-01T00:00:01.000001",
+    "paused": null,
+    "ended": "2000-01-01T00:00:03.000003",
+    "stop_time": "2000-01-01T00:00:04.000004+00:00",
+    "hidden": false,
+    "exists": true,
+    "env": {
+     "PYTHONUNBUFFERED": "1",
+     "LINES": "40",
+     "COLUMNS": "70",
+     "MRSM_NONINTERACTIVE": "true"
+    },
+    "delete_after_completion": false,
+    "is_blocking_on_stdin": false,
+    "str": "Job(\"stopped\", \"show version --nopretty : --loop --min-seconds 60\")",
+    "properties": {
+     "restart": true,
+     "label": "show version --nopretty : --loop --min-seconds 60",
+     "result": [
+      true,
+      "Success"
+     ],
+     "process": {
+      "began": "2000-01-01T00:00:01.000001",
+      "ended": "2000-01-01T00:00:03.000003"
+     }
+    }
+   },
+   "truncated_after": "Sleeping for 60.0 seconds..."
+  }
+ },
+ "rotating": [
+  {
+   "name": "plain",
+   "kwargs": {
+    "num_files_to_keep": 3,
+    "max_file_size": 100,
+    "write_timestamps": false
+   },
+   "ops": [
+    {
+     "op": [
+      "write",
+      "line 00: \n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 01: x\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 02: xx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 03: xxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 04: xxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 05: xxxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 06: xxxxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 07: \n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 08: x\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 09: xx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 10: xxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 11: xxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 12: xxxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 13: xxxxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 14: \n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 15: x\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 16: xx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 17: xxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 18: xxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "line 19: xxxxx\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\n"
+     }
+    },
+    {
+     "op": [
+      "readlines"
+     ],
+     "value": [
+      "line 00: \n",
+      "line 01: x\n",
+      "line 02: xx\n",
+      "line 03: xxx\n",
+      "line 04: xxxx\n",
+      "line 05: xxxxx\n",
+      "line 06: xxxxxx\n",
+      "line 07: \n",
+      "line 08: x\n",
+      "line 09: xx\n",
+      "line 10: xxx\n",
+      "line 11: xxxx\n",
+      "line 12: xxxxx\n",
+      "line 13: xxxxxx\n",
+      "line 14: \n",
+      "line 15: x\n",
+      "line 16: xx\n",
+      "line 17: xxx\n",
+      "line 18: xxxx\n",
+      "line 19: xxxxx\n"
+     ],
+     "cursor": [
+      2,
+      75
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "tail without newline"
+     ],
+     "value": null,
+     "cursor": [
+      2,
+      75
+     ],
+     "files": {
+      "plain.log.0": "line 00: \nline 01: x\nline 02: xx\nline 03: xxx\nline 04: xxxx\nline 05: xxxxx\nline 06: xxxxxx\n",
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline"
+     }
+    },
+    {
+     "op": [
+      "write",
+      " ... continued\n"
+     ],
+     "value": null,
+     "cursor": [
+      2,
+      75
+     ],
+     "files": {
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline",
+      "plain.log.3": " ... continued\n"
+     }
+    },
+    {
+     "op": [
+      "readlines"
+     ],
+     "value": [
+      "tail without newline ... continued\n"
+     ],
+     "cursor": [
+      3,
+      15
+     ],
+     "files": {
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline",
+      "plain.log.3": " ... continued\n"
+     }
+    },
+    {
+     "op": [
+      "read"
+     ],
+     "value": "",
+     "cursor": [
+      3,
+      15
+     ],
+     "files": {
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline",
+      "plain.log.3": " ... continued\n"
+     }
+    },
+    {
+     "op": [
+      "fresh_read"
+     ],
+     "value": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\nline 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline ... continued\n",
+     "cursor": [
+      3,
+      15
+     ],
+     "files": {
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline",
+      "plain.log.3": " ... continued\n"
+     }
+    },
+    {
+     "op": [
+      "fresh_readlines"
+     ],
+     "value": [
+      "line 07: \n",
+      "line 08: x\n",
+      "line 09: xx\n",
+      "line 10: xxx\n",
+      "line 11: xxxx\n",
+      "line 12: xxxxx\n",
+      "line 13: xxxxxx\n",
+      "line 14: \n",
+      "line 15: x\n",
+      "line 16: xx\n",
+      "line 17: xxx\n",
+      "line 18: xxxx\n",
+      "line 19: xxxxx\n",
+      "tail without newline ... continued\n"
+     ],
+     "cursor": [
+      3,
+      15
+     ],
+     "files": {
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline",
+      "plain.log.3": " ... continued\n"
+     }
+    },
+    {
+     "op": [
+      "close"
+     ],
+     "value": null,
+     "cursor": [
+      3,
+      15
+     ],
+     "files": {
+      "plain.log.1": "line 07: \nline 08: x\nline 09: xx\nline 10: xxx\nline 11: xxxx\nline 12: xxxxx\nline 13: xxxxxx\n",
+      "plain.log.2": "line 14: \nline 15: x\nline 16: xx\nline 17: xxx\nline 18: xxxx\nline 19: xxxxx\ntail without newline",
+      "plain.log.3": " ... continued\n"
+     }
+    }
+   ]
+  },
+  {
+   "name": "timestamps",
+   "kwargs": {
+    "num_files_to_keep": 2,
+    "max_file_size": 150,
+    "write_timestamps": true
+   },
+   "ops": [
+    {
+     "op": [
+      "write",
+      "message 0"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 1"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 2"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 3"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n2000-01-01 00:00 | message 3\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 4"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n2000-01-01 00:00 | message 3\n2000-01-01 00:00 | message 4\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 5"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n2000-01-01 00:00 | message 3\n2000-01-01 00:00 | message 4\n",
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 6"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n2000-01-01 00:00 | message 3\n2000-01-01 00:00 | message 4\n",
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 7"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n2000-01-01 00:00 | message 3\n2000-01-01 00:00 | message 4\n",
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 8"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n2000-01-01 00:00 | message 3\n2000-01-01 00:00 | message 4\n",
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 9"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.0": "2000-01-01 00:00 | message 0\n2000-01-01 00:00 | message 1\n2000-01-01 00:00 | message 2\n2000-01-01 00:00 | message 3\n2000-01-01 00:00 | message 4\n",
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 10"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n",
+      "timestamps.log.2": "2000-01-01 00:00 | message 10\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "message 11"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n",
+      "timestamps.log.2": "2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n"
+     }
+    },
+    {
+     "op": [
+      "fresh_read"
+     ],
+     "value": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n",
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n",
+      "timestamps.log.2": "2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n"
+     }
+    },
+    {
+     "op": [
+      "fresh_readlines"
+     ],
+     "value": [
+      "2000-01-01 00:00 | message 5\n",
+      "2000-01-01 00:00 | message 6\n",
+      "2000-01-01 00:00 | message 7\n",
+      "2000-01-01 00:00 | message 8\n",
+      "2000-01-01 00:00 | message 9\n",
+      "2000-01-01 00:00 | message 10\n",
+      "2000-01-01 00:00 | message 11\n"
+     ],
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n",
+      "timestamps.log.2": "2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "two\nlines"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n",
+      "timestamps.log.2": "2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n2000-01-01 00:00 | two\nlines\n"
+     }
+    },
+    {
+     "op": [
+      "fresh_read"
+     ],
+     "value": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n2000-01-01 00:00 | two\nlines\n",
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n",
+      "timestamps.log.2": "2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n2000-01-01 00:00 | two\nlines\n"
+     }
+    },
+    {
+     "op": [
+      "close"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "timestamps.log.1": "2000-01-01 00:00 | message 5\n2000-01-01 00:00 | message 6\n2000-01-01 00:00 | message 7\n2000-01-01 00:00 | message 8\n2000-01-01 00:00 | message 9\n",
+      "timestamps.log.2": "2000-01-01 00:00 | message 10\n2000-01-01 00:00 | message 11\n2000-01-01 00:00 | two\nlines\n"
+     }
+    }
+   ]
+  },
+  {
+   "name": "unicode",
+   "kwargs": {
+    "num_files_to_keep": 5,
+    "max_file_size": 100,
+    "write_timestamps": false
+   },
+   "ops": [
+    {
+     "op": [
+      "write",
+      "éééééééééééééééééééééééééééééé\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "unicode.log.0": "éééééééééééééééééééééééééééééé\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "unicode.log.0": "éééééééééééééééééééééééééééééé\n",
+      "unicode.log.1": "💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "ascii\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "unicode.log.0": "éééééééééééééééééééééééééééééé\n",
+      "unicode.log.1": "💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \n",
+      "unicode.log.2": "ascii\n"
+     }
+    },
+    {
+     "op": [
+      "fresh_read"
+     ],
+     "value": "éééééééééééééééééééééééééééééé\n💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \nascii\n",
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "unicode.log.0": "éééééééééééééééééééééééééééééé\n",
+      "unicode.log.1": "💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \n",
+      "unicode.log.2": "ascii\n"
+     }
+    },
+    {
+     "op": [
+      "fresh_readlines"
+     ],
+     "value": [
+      "éééééééééééééééééééééééééééééé\n",
+      "💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \n",
+      "ascii\n"
+     ],
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "unicode.log.0": "éééééééééééééééééééééééééééééé\n",
+      "unicode.log.1": "💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \n",
+      "unicode.log.2": "ascii\n"
+     }
+    },
+    {
+     "op": [
+      "close"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "unicode.log.0": "éééééééééééééééééééééééééééééé\n",
+      "unicode.log.1": "💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 💬 \n",
+      "unicode.log.2": "ascii\n"
+     }
+    }
+   ]
+  },
+  {
+   "name": "seek",
+   "kwargs": {
+    "num_files_to_keep": 4,
+    "max_file_size": 100,
+    "write_timestamps": false
+   },
+   "ops": [
+    {
+     "op": [
+      "write",
+      "000000000000000000000000000000\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "111111111111111111111111111111\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "222222222222222222222222222222\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "333333333333333333333333333333\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "444444444444444444444444444444\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "555555555555555555555555555555\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "666666666666666666666666666666\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n"
+     }
+    },
+    {
+     "op": [
+      "write",
+      "777777777777777777777777777777\n"
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n777777777777777777777777777777\n"
+     }
+    },
+    {
+     "op": [
+      "seek",
+      0
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n777777777777777777777777777777\n"
+     }
+    },
+    {
+     "op": [
+      "readlines"
+     ],
+     "value": [
+      "000000000000000000000000000000\n",
+      "111111111111111111111111111111\n",
+      "222222222222222222222222222222\n",
+      "333333333333333333333333333333\n",
+      "444444444444444444444444444444\n",
+      "555555555555555555555555555555\n",
+      "666666666666666666666666666666\n",
+      "777777777777777777777777777777\n"
+     ],
+     "cursor": [
+      2,
+      62
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n777777777777777777777777777777\n"
+     }
+    },
+    {
+     "op": [
+      "seek",
+      0
+     ],
+     "value": null,
+     "cursor": [
+      0,
+      0
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n777777777777777777777777777777\n"
+     }
+    },
+    {
+     "op": [
+      "read"
+     ],
+     "value": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n666666666666666666666666666666\n777777777777777777777777777777\n",
+     "cursor": [
+      2,
+      62
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n777777777777777777777777777777\n"
+     }
+    },
+    {
+     "op": [
+      "readlines"
+     ],
+     "value": [],
+     "cursor": [
+      2,
+      62
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n777777777777777777777777777777\n"
+     }
+    },
+    {
+     "op": [
+      "close"
+     ],
+     "value": null,
+     "cursor": [
+      2,
+      62
+     ],
+     "files": {
+      "seek.log.0": "000000000000000000000000000000\n111111111111111111111111111111\n222222222222222222222222222222\n",
+      "seek.log.1": "333333333333333333333333333333\n444444444444444444444444444444\n555555555555555555555555555555\n",
+      "seek.log.2": "666666666666666666666666666666\n777777777777777777777777777777\n"
+     }
+    }
+   ]
+  }
+ ],
+ "interceptor": [
+  {
+   "chunks": [
+    "hello\n"
+   ],
+   "output": "\n2000-01-01 00:00 | hello\n2000-01-01 00:00 | "
+  },
+  {
+   "chunks": [
+    "hello\n",
+    "a\nb",
+    "c\n\n"
+   ],
+   "output": "\n2000-01-01 00:00 | hello\n2000-01-01 00:00 | a\n2000-01-01 00:00 | bc\n2000-01-01 00:00 | \n2000-01-01 00:00 | "
+  },
+  {
+   "chunks": [
+    "no newline",
+    " at all"
+   ],
+   "output": "\n2000-01-01 00:00 | no newline at all"
+  },
+  {
+   "chunks": [
+    "\n",
+    "\n"
+   ],
+   "output": "\n2000-01-01 00:00 | \n2000-01-01 00:00 | \n2000-01-01 00:00 | "
+  }
+ ],
+ "systemd": [
+  {
+   "name": "sync-weather",
+   "sysargs": [
+    "sync",
+    "pipes",
+    "-c",
+    "plugin:noaa",
+    "--loop",
+    "--min-seconds",
+    "3600"
+   ],
+   "service_name": "mrsm-sync-weather.service",
+   "service_file_path": "{TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service",
+   "symlink_path": "{TMP}/userhome/.config/systemd/user/mrsm-sync-weather.service",
+   "logs_path": "{TMP}/root/systemd/logs/mrsm-sync-weather.service.log",
+   "socket_path": "{TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service.stdin",
+   "result_path": "{TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service.result.json",
+   "unit": "[Unit]\nDescription=Run the job 'sync-weather'\n\n[Service]\nExecStart={PYTHON} -m meerschaum sync pipes -c plugin:noaa --loop --min-seconds 3600\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier=mrsm-sync-weather.service\nEnvironment=MRSM_ROOT_DIR={TMP}/root\nEnvironment=MRSM_PLUGINS_DIR={TMP}/plugins\nEnvironment=MRSM_VENVS_DIR={TMP}/venvs\nEnvironment=MRSM_NO_AUTO_INSTALL=1\nEnvironment=MRSM_DAEMON_ID=sync-weather\nEnvironment=MRSM_SYSTEMD_LOG_PATH={TMP}/root/systemd/logs/mrsm-sync-weather.service.log\nEnvironment=MRSM_SYSTEMD_RESULT_PATH={TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service.result.json\nEnvironment=MRSM_SYSTEMD_STDIN_PATH={TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service.stdin\nEnvironment=MRSM_SYSTEMD_DELETE_JOB=0\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=LINES=40\nEnvironment=COLUMNS=70\nEnvironment=MRSM_NONINTERACTIVE=true\n\n[Install]\nWantedBy=default.target\n",
+   "socket": "[Unit]\nBindsTo=mrsm-sync-weather.service\n\n[Socket]\nListenFIFO={TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service.stdin\nFileDescriptorName=stdin\nRemoveOnStop=true\nSocketMode=0660\n",
+   "parsed_sysargs": [
+    "sync",
+    "pipes",
+    "-c",
+    "plugin:noaa",
+    "--loop",
+    "--min-seconds",
+    "3600"
+   ],
+   "restart": true
+  },
+  {
+   "name": "my job",
+   "sysargs": [
+    "show",
+    "version",
+    "--nopretty"
+   ],
+   "properties": {
+    "env": {
+     "FOO": "bar baz",
+     "QUOTE": "it's"
+    },
+    "externally_managed": true
+   },
+   "service_name": "mrsm-my-job.service",
+   "service_file_path": "{TMP}/root/systemd/services/my job/mrsm-my-job.service",
+   "symlink_path": "{TMP}/userhome/.config/systemd/user/mrsm-my-job.service",
+   "logs_path": "{TMP}/root/systemd/logs/mrsm-my-job.service.log",
+   "socket_path": "{TMP}/root/systemd/services/my job/mrsm-my-job.service.stdin",
+   "result_path": "{TMP}/root/systemd/services/my job/mrsm-my-job.service.result.json",
+   "unit": "[Unit]\nDescription=Run the job 'my job'\n\n[Service]\nExecStart={PYTHON} -m meerschaum show version --nopretty\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier=mrsm-my-job.service\nEnvironment=MRSM_ROOT_DIR={TMP}/root\nEnvironment=MRSM_PLUGINS_DIR={TMP}/plugins\nEnvironment=MRSM_VENVS_DIR={TMP}/venvs\nEnvironment=MRSM_NO_AUTO_INSTALL=1\nEnvironment=MRSM_DAEMON_ID='my job'\nEnvironment=MRSM_SYSTEMD_LOG_PATH={TMP}/root/systemd/logs/mrsm-my-job.service.log\nEnvironment=MRSM_SYSTEMD_RESULT_PATH='{TMP}/root/systemd/services/my job/mrsm-my-job.service.result.json'\nEnvironment=MRSM_SYSTEMD_STDIN_PATH='{TMP}/root/systemd/services/my job/mrsm-my-job.service.stdin'\nEnvironment=MRSM_SYSTEMD_DELETE_JOB=0\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=LINES=40\nEnvironment=COLUMNS=70\nEnvironment=MRSM_NONINTERACTIVE=true\nEnvironment=FOO='bar baz'\nEnvironment=QUOTE='it'\"'\"'s'\n\n[Install]\nWantedBy=default.target\n",
+   "socket": "[Unit]\nBindsTo=mrsm-my-job.service\n\n[Socket]\nListenFIFO={TMP}/root/systemd/services/my job/mrsm-my-job.service.stdin\nFileDescriptorName=stdin\nRemoveOnStop=true\nSocketMode=0660\n",
+   "parsed_sysargs": [
+    "show",
+    "version",
+    "--nopretty"
+   ],
+   "restart": false
+  },
+  {
+   "name": "cleanup",
+   "sysargs": [
+    "delete",
+    "pipes",
+    "-c",
+    "sql:main",
+    "-y"
+   ],
+   "properties": {
+    "delete_after_completion": true,
+    "externally_managed": true
+   },
+   "service_name": "mrsm-cleanup.service",
+   "service_file_path": "{TMP}/root/systemd/services/cleanup/mrsm-cleanup.service",
+   "symlink_path": "{TMP}/userhome/.config/systemd/user/mrsm-cleanup.service",
+   "logs_path": "{TMP}/root/systemd/logs/mrsm-cleanup.service.log",
+   "socket_path": "{TMP}/root/systemd/services/cleanup/mrsm-cleanup.service.stdin",
+   "result_path": "{TMP}/root/systemd/services/cleanup/mrsm-cleanup.service.result.json",
+   "unit": "[Unit]\nDescription=Run the job 'cleanup'\n\n[Service]\nExecStart={PYTHON} -m meerschaum delete pipes -c sql:main -y\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier=mrsm-cleanup.service\nEnvironment=MRSM_ROOT_DIR={TMP}/root\nEnvironment=MRSM_PLUGINS_DIR={TMP}/plugins\nEnvironment=MRSM_VENVS_DIR={TMP}/venvs\nEnvironment=MRSM_NO_AUTO_INSTALL=1\nEnvironment=MRSM_DAEMON_ID=cleanup\nEnvironment=MRSM_SYSTEMD_LOG_PATH={TMP}/root/systemd/logs/mrsm-cleanup.service.log\nEnvironment=MRSM_SYSTEMD_RESULT_PATH={TMP}/root/systemd/services/cleanup/mrsm-cleanup.service.result.json\nEnvironment=MRSM_SYSTEMD_STDIN_PATH={TMP}/root/systemd/services/cleanup/mrsm-cleanup.service.stdin\nEnvironment=MRSM_SYSTEMD_DELETE_JOB=1\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=LINES=40\nEnvironment=COLUMNS=70\nEnvironment=MRSM_NONINTERACTIVE=true\n\n[Install]\nWantedBy=default.target\n",
+   "socket": "[Unit]\nBindsTo=mrsm-cleanup.service\n\n[Socket]\nListenFIFO={TMP}/root/systemd/services/cleanup/mrsm-cleanup.service.stdin\nFileDescriptorName=stdin\nRemoveOnStop=true\nSocketMode=0660\n",
+   "parsed_sysargs": [
+    "delete",
+    "pipes",
+    "-c",
+    "sql:main",
+    "-y"
+   ],
+   "restart": false
+  },
+  {
+   "name": "quoted",
+   "sysargs": [
+    "sql",
+    "main",
+    "SELECT 'x' AS y",
+    "--name",
+    "quoted"
+   ],
+   "service_name": "mrsm-quoted.service",
+   "service_file_path": "{TMP}/root/systemd/services/quoted/mrsm-quoted.service",
+   "symlink_path": "{TMP}/userhome/.config/systemd/user/mrsm-quoted.service",
+   "logs_path": "{TMP}/root/systemd/logs/mrsm-quoted.service.log",
+   "socket_path": "{TMP}/root/systemd/services/quoted/mrsm-quoted.service.stdin",
+   "result_path": "{TMP}/root/systemd/services/quoted/mrsm-quoted.service.result.json",
+   "unit": "[Unit]\nDescription=Run the job 'quoted'\n\n[Service]\nExecStart={PYTHON} -m meerschaum sql main 'SELECT '\"'\"'x'\"'\"' AS y' --name quoted\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier=mrsm-quoted.service\nEnvironment=MRSM_ROOT_DIR={TMP}/root\nEnvironment=MRSM_PLUGINS_DIR={TMP}/plugins\nEnvironment=MRSM_VENVS_DIR={TMP}/venvs\nEnvironment=MRSM_NO_AUTO_INSTALL=1\nEnvironment=MRSM_DAEMON_ID=quoted\nEnvironment=MRSM_SYSTEMD_LOG_PATH={TMP}/root/systemd/logs/mrsm-quoted.service.log\nEnvironment=MRSM_SYSTEMD_RESULT_PATH={TMP}/root/systemd/services/quoted/mrsm-quoted.service.result.json\nEnvironment=MRSM_SYSTEMD_STDIN_PATH={TMP}/root/systemd/services/quoted/mrsm-quoted.service.stdin\nEnvironment=MRSM_SYSTEMD_DELETE_JOB=0\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=LINES=40\nEnvironment=COLUMNS=70\nEnvironment=MRSM_NONINTERACTIVE=true\n\n[Install]\nWantedBy=default.target\n",
+   "socket": "[Unit]\nBindsTo=mrsm-quoted.service\n\n[Socket]\nListenFIFO={TMP}/root/systemd/services/quoted/mrsm-quoted.service.stdin\nFileDescriptorName=stdin\nRemoveOnStop=true\nSocketMode=0660\n",
+   "parsed_sysargs": [
+    "sql",
+    "main",
+    "SELECT 'x' AS y",
+    "--name",
+    "quoted"
+   ],
+   "restart": false
+  }
+ ],
+ "names": {
+  "adjectives": {
+   "colors": [
+    "red",
+    "blue",
+    "green",
+    "orange",
+    "pink",
+    "amber",
+    "bright",
+    "dark",
+    "neon"
+   ],
+   "sizes": [
+    "big",
+    "small",
+    "large",
+    "huge",
+    "tiny",
+    "long",
+    "short",
+    "average",
+    "mini",
+    "micro",
+    "maximum",
+    "minimum",
+    "median"
+   ],
+   "personalities": [
+    "groovy",
+    "cool",
+    "awesome",
+    "nice",
+    "fantastic",
+    "sweet",
+    "great",
+    "amazing",
+    "terrific",
+    "funky",
+    "fancy",
+    "sneaky",
+    "elegant",
+    "dreamy"
+   ],
+   "emotions": [
+    "angry",
+    "happy",
+    "excited",
+    "suspicious",
+    "sad",
+    "thankful",
+    "grateful",
+    "satisfied",
+    "peaceful",
+    "ferocious",
+    "content"
+   ],
+   "sensations": [
+    "sleepy",
+    "awake",
+    "alert",
+    "thirsty",
+    "comfy",
+    "warm",
+    "cold",
+    "chilly",
+    "soft",
+    "smooth",
+    "chunky",
+    "hungry"
+   ],
+   "materials": [
+    "golden",
+    "silver",
+    "metal",
+    "plastic",
+    "wool",
+    "wooden",
+    "nylon",
+    "fuzzy",
+    "silky",
+    "suede",
+    "vinyl"
+   ],
+   "qualities": [
+    "expensive",
+    "cheap",
+    "premier",
+    "best",
+    "favorite",
+    "better",
+    "good",
+    "affordable",
+    "organic",
+    "electric"
+   ]
+  },
+  "nouns": {
+   "animals": [
+    "mouse",
+    "fox",
+    "horse",
+    "pig",
+    "hippo",
+    "elephant",
+    "tiger",
+    "deer",
+    "salmon",
+    "gerbil",
+    "snake",
+    "turtle",
+    "rhino",
+    "dog",
+    "cat",
+    "giraffe",
+    "rabbit",
+    "squirrel",
+    "unicorn",
+    "lizard",
+    "lion",
+    "bear",
+    "gazelle",
+    "whale",
+    "dolphin",
+    "fish",
+    "butterfly",
+    "ladybug",
+    "fly",
+    "shrimp",
+    "flamingo",
+    "parrot",
+    "tuna",
+    "panda",
+    "lemur",
+    "duck",
+    "seal",
+    "walrus",
+    "seagull",
+    "iguana",
+    "salamander",
+    "kitten",
+    "puppy",
+    "octopus"
+   ],
+   "weather": [
+    "rain",
+    "sun",
+    "snow",
+    "wind",
+    "tornado",
+    "hurricane",
+    "blizzard",
+    "monsoon",
+    "storm",
+    "shower",
+    "hail"
+   ],
+   "plants": [
+    "tree",
+    "flower",
+    "vine",
+    "fern",
+    "palm",
+    "palmetto",
+    "oak",
+    "pine",
+    "rose",
+    "lily",
+    "ivy",
+    "leaf",
+    "shrubbery",
+    "acorn",
+    "fruit"
+   ],
+   "foods": [
+    "pizza",
+    "sushi",
+    "apple",
+    "banana",
+    "sandwich",
+    "burger",
+    "taco",
+    "bratwurst",
+    "grape",
+    "coconut",
+    "bread",
+    "toast"
+   ],
+   "geographies": [
+    "ocean",
+    "mountain",
+    "desert",
+    "forest",
+    "tundra",
+    "savanna",
+    "grassland",
+    "prairie",
+    "lake",
+    "city",
+    "river"
+   ],
+   "vehicles": [
+    "car",
+    "bike",
+    "boat",
+    "bus",
+    "trolley",
+    "tram",
+    "plane",
+    "skates",
+    "skateboard",
+    "kayak",
+    "canoe",
+    "paddleboard",
+    "skis",
+    "snowboard",
+    "truck",
+    "bicycle",
+    "unicycle",
+    "tricycle"
+   ],
+   "clothing": [
+    "socks",
+    "shirt",
+    "dress",
+    "shoes",
+    "hat",
+    "glasses",
+    "pocket",
+    "shorts",
+    "pants",
+    "skirt",
+    "capris",
+    "helmet"
+   ],
+   "instruments": [
+    "guitar",
+    "piano",
+    "trombone",
+    "drums",
+    "viola",
+    "violin",
+    "trumpet",
+    "bass",
+    "harmonica",
+    "banjo"
+   ]
+  }
+ },
+ "readlines": {
+  "name": "done-ok",
+  "lines": [
+   "\n",
+   "2000-01-01 00:00 | hello\n",
+   "2000-01-01 00:00 | line two\n",
+   "2000-01-01 00:00 | "
+  ],
+  "offset": "0 73",
+  "again": []
+ },
+ "deleted": {
+  "name": "done-ok",
+  "result": [
+   true,
+   "Deleted Job(\"done-ok\")."
+  ],
+  "files": {},
+  "exists": false
+ },
+ "strip_timestamp": [
+  {
+   "line": "2000-01-01 00:00 | hello\n",
+   "stripped": "hello\n"
+  },
+  {
+   "line": "2024-12-31 23:59 | x",
+   "stripped": "x"
+  },
+  {
+   "line": "2024-12-31 23:59 |",
+   "stripped": ""
+  },
+  {
+   "line": "2024-13-31 23:59 | bad month",
+   "stripped": "2024-13-31 23:59 | bad month"
+  },
+  {
+   "line": "no timestamp here",
+   "stripped": "no timestamp here"
+  },
+  {
+   "line": "",
+   "stripped": ""
+  },
+  {
+   "line": "2024-01-01 00:00",
+   "stripped": ""
+  },
+  {
+   "line": "2024-01-01 00:00 | ",
+   "stripped": ""
+  },
+  {
+   "line": "   2024-01-01 00:00 | leading space",
+   "stripped": "   2024-01-01 00:00 | leading space"
+  }
+ ]
+}

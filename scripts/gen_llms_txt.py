@@ -70,7 +70,7 @@ def doc_title_and_desc(md_path: Path) -> tuple[str, str]:
         ### Drop markdown link/emphasis syntax, collapse whitespace.
         s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
         s = re.sub(r"[*_`]", "", s)
-        desc = re.sub(r"\s+", " ", s).strip()[:200]
+        desc = re.sub(r"\s+", " ", s).strip()[:200].rstrip()
     return title, desc
 
 

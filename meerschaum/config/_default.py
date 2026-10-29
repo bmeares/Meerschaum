@@ -36,6 +36,9 @@ default_meerschaum_config = {
     'instance': 'sql:main',
     'api_instance': 'MRSM{meerschaum:instance}',
     'repository': 'api:mrsm',
+    ### The DataFrame library Meerschaum returns frames in (`polars` or `pandas`; rc15).
+    ### A root created before 5.0.0rc15 is given `pandas` the first time it is opened.
+    'dataframe': 'polars',
     'connectors': {
         'sql': {
             'default': {},
@@ -217,6 +220,8 @@ default_api_config = {
     ### authentication of its own, because it is served from inside the Dash WSGI
     ### app where the API's token auth does not apply.
     'dash': {
+        ### Console callbacks answer only signed-in visitors unless public (rc15).
+        'callbacks_require_session': True,
         'mcp': {
             'enabled': False,
         },
@@ -226,14 +231,16 @@ default_api_config = {
         'default_expiration_days': 366,
     },
     'permissions':       {
+        ### Self-registration is off: the first account (while there are no users) is an
+        ### administrator, who adds the others (rc15).
         'registration': {
-            'users': True,
+            'users': False,
             'pipes': True,
             'plugins': True,
         },
-        'actions': {
-            'non_admin': True,
-        },
+        ### `default_role` (not set here): the permissions of users without their own
+        ### (`viewer`, `editor` (the default) or `operator`). When it is not set, Meerschaum 4's
+        ### `actions: {non_admin: true}` in your config means `operator`.
         'chaining': {
             'insecure_parent_instance': False,
             'child_apis': False,
@@ -316,25 +323,8 @@ default_config['plugins'] = default_plugins_config
 from meerschaum.config._jobs import default_jobs_config
 default_config['jobs'] = default_jobs_config
 ### add configs from other packages
-try:
-    import meerschaum.config.stack
-except ImportError:
-    pass
-finally:
-    from meerschaum.config.stack import default_stack_config
+from meerschaum.config.stack import default_stack_config
 default_config['stack'] = default_stack_config
 from meerschaum.config._dash import default_dash_config
 default_config['dash'] = default_dash_config
 
-default_header_comment = """
-#####################################################################
-#                                                                   #
-#  Edit or add credentials for connectors.                          #
-#  You can read more about connectors at https://meerschaum.io.     #
-#                                                                   #
-#  Connectors inherit from `default`, and flavor-dependent defaults #
-#  are defined for SQL connectors (e.g. port 5432 for PostgreSQL).  #
-#                                                                   #
-#####################################################################
-
-"""

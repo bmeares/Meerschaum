@@ -1,12 +1,31 @@
+# Meerschaum 5: a maturin *mixed* project (docs/design/v5.0.0.md D9, §12).
+#
+# One wheel per platform: the `meerschaum` Python package (the root `meerschaum/` directory) plus
+# the PyO3 extension `meerschaum._core._native` (crates/meerschaum-py) as a `cp311-abi3` module.
+# This is the only PyPI package (D8, revised): the `mrsm` and `meerschaum` console scripts run the
+# CLI in-process from the extension (`_native.main`), so there is no separate binary wheel. The
+# standalone binary is `cargo install meerschaum`. The base wheel depends on nothing (D20, §12.1);
+# data, SQL, GIS, API and Dash libraries are extras.
+#
+# Version: the single source of truth is `[workspace.package] version` in the root Cargo.toml
+# (maturin reads it from crates/meerschaum-py). `scripts/check_packaging.py` keeps the
+# console scripts, the extras below, `meerschaum/utils/packages/_packages.py`,
+# `requirements/<extra>.txt`, the extras table compiled into `mrsm`
+# (crates/meerschaum-cli/src/extras.rs) and `meerschaum/config/_version.py` in sync with it, and
+# with `--wheels DIST` checks the built wheel and its `mrsm --version` (see that script).
+#
+# In-tree development builds do not use this file's build: `scripts/rust/build_py.sh` drops
+# `meerschaum/_core/_native.abi3.so` into the working tree (crates/meerschaum-py/pyproject.toml).
+
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "meerschaum"
 description = "Sync Time-Series Pipes with Meerschaum"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [
@@ -21,41 +40,75 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
+    "Programming Language :: Rust",
     "Programming Language :: SQL",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Database",
     "Natural Language :: English",
 ]
+dynamic = ["version"]
 
-dynamic = ["version", "dependencies", "optional-dependencies"]
+# D8, D20: the base wheel has no dependencies.
+dependencies = []
+
+# §12.1. Mirrors `extras` in meerschaum/utils/packages/_packages.py (enforced by
+# scripts/check_packaging.py): edit both together.
+[project.optional-dependencies]
+pandas = ["pandas>=3.0.0", "pyarrow>=20.0.0"]
+polars = ["polars>=1.43.2"]
+geo = ["shapely>=2.0.7", "pyproj>=3.7.1", "geopandas>=1.0.1", "geoarrow-types>=0.3.0"]
+sql = ["SQLAlchemy>=2.0.41", "psycopg[binary]>=3.2.9", "PyMySQL>=0.9.0"]
+sql-mssql = ["pyodbc>=4.0.30"]
+sql-oracle = ["oracledb>=2.5.0"]
+sql-duckdb = ["duckdb>=1.5.6", "duckdb-engine>=0.17.0"]
+sql-cockroachdb = ["sqlalchemy-cockroachdb>=2.0.0"]
+api = ["fastapi>=0.128.0", "uvicorn>=0.35.0", "a2wsgi>=1.10.0", "python-multipart>=0.0.20", "PyJWT>=2.8.0", "websockets>=15.0.1"]
+dash = ["dash>=4.1.0", "a2wsgi>=1.10.0", "dash-bootstrap-components>=2.0.4", "dash-ace>=0.2.1", "dash-extensions>=2.0.5", "fastapi>=0.128.0", "uvicorn>=0.35.0", "python-multipart>=0.0.20", "PyJWT>=2.8.0", "websockets>=15.0.1", "pandas>=3.0.0", "pyarrow>=20.0.0"]
+shell = ["ptpython>=3.0.27"]
+cli-tools = ["pgcli>=3.1.0", "mycli>=1.23.2", "litecli>=1.5.0", "gadwall>=0.2.0"]
+gui = ["pywebview>=3.6.3"]
+full = ["meerschaum[pandas,polars,geo,sql,api,dash,shell]"]
 
 [project.urls]
-Documentation = "https://docs.meerschaum.io"
-Changelog = "https://meerschaum.io/news/changelog"
+Documentation = "https://meerschaum.io/docs/"
+"Python API" = "https://docs.meerschaum.io"
+"Rust API" = "https://docs.rs/meerschaum/latest/meerschaum/"
+Changelog = "https://meerschaum.io/changelog/"
 GitHub = "https://github.com/bmeares/Meerschaum"
 Homepage = "https://meerschaum.io"
 Donate = "https://github.com/sponsors/bmeares"
 Discord = "https://discord.gg/8U8qMUjvcc"
 
+# Both console scripts run the CLI in-process from the `_native` extension; `meerschaum` is the v4
+# name and stays an alias of `mrsm`. They point at the top-level module `_meerschaum_mrsm`, which
+# marks the process as the CLI before `meerschaum` is imported, so the package skips the façade
+# (`import meerschaum` is otherwise eager, as it always was).
 [project.scripts]
-mrsm = "meerschaum.__main__:main"
-meerschaum = "meerschaum.__main__:main"
+mrsm = "_meerschaum_mrsm:main"
+meerschaum = "_meerschaum_mrsm:main"
 
-[tool.setuptools]
-zip-safe = true
-include-package-data = true
-
-[tool.setuptools.dynamic]
-version = {attr = "meerschaum.config._version.__version__"}
-
-[tool.setuptools.packages.find]
-include = ["meerschaum*"]
-exclude = ["docs*", "tests*"]
-
-[tool.setuptools.package-data]
-"*" = ["*.html", "*.css", "*.js", "*.png", "*.ico", "api/resources/**"]
+[tool.maturin]
+bindings = "pyo3"
+strip = true
+manifest-path = "crates/meerschaum-py/Cargo.toml"
+module-name = "meerschaum._core._native"
+python-source = "."
+python-packages = ["meerschaum"]
+include = [{ path = "_meerschaum_mrsm.py", format = ["sdist", "wheel"] }]
+# `extension-module` is a crate feature (not a default) so `cargo test` can link libpython
+# (same feature set as scripts/rust/build_py.sh).
+features = ["pyo3/abi3-py311", "extension-module", "oracle"]
+exclude = [
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "meerschaum/_core/_native*.so",
+    "meerschaum/_core/_native*.pyd",
+    "meerschaum/_core/_core*.so",
+    "meerschaum/_core/_core*.pyd",
+    # Test sources of the extension crate are not shipped in the sdist.
+    "crates/meerschaum-py/tests/**",
+]

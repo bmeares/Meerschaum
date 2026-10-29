@@ -1,0 +1,10 @@
+
+Upgrade all installed plugins to the latest versions.
+If no plugins are specified, attempt to upgrade all,
+otherwise only upgrade the specified plugins.
+
+Examples:
+
+upgrade plugins
+upgrade plugins noaa
+

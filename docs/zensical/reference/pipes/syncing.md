@@ -1,5 +1,3 @@
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
 <style>
 #btm {
   display: block;
@@ -21,7 +19,7 @@
 # 📥 Syncing
 
 !!! abstract inline end "Want to read more?"
-    I wrote my [master's thesis](https://tigerprints.clemson.edu/all_theses/3647/) on comparing syncing strategies. [Here are the presentation slides](https://meerschaum.io/files/pdf/slides.pdf) which summarize my findings.
+    I wrote my [master's thesis](https://tigerprints.clemson.edu/all_theses/3647/) on comparing syncing strategies.
 
 Meerschaum efficiently syncs time-series data in three basic ETL steps: **fetch**, **filter**, and **upsert**.
 
@@ -29,7 +27,7 @@ Meerschaum efficiently syncs time-series data in three basic ETL steps: **fetch*
 
 The primary reason for syncing in this way is to take advantage of the properties of time-series data. Note that when writing your plugins, you only need to focus on getting data within `begin` and `end` bounds, and Meerschaum will handle the rest.
 
-- **Fetch** (*Extract* and *Transform*)  
+- **Fetch** (*Extract* and *Transform*)
   Because most new data will be newer than the previous sync, the fetch stage returns rows greater than the previous sync time (minus a backtracking window).
 
 ??? example "Example `fetch` query"
@@ -55,7 +53,7 @@ The primary reason for syncing in this way is to take advantage of the propertie
         fetch(begin=sync_time)
         ```
 
-- **Filter** (*remove duplicates*)  
+- **Filter** (*remove duplicates*)
   After fetching the latest rows, the difference is taken to remove duplicates.
 
 !!! tip inline end "Skip filtering"
@@ -91,13 +89,13 @@ The primary reason for syncing in this way is to take advantage of the propertie
             how = 'left',
             on = None,
             indicator = True,
-        ) 
+        )
         mask = (joined_df['_merge'] == 'left_only')
         delta_df = joined_df[mask]
         ```
 
 
-  - **Upsert** (*Load*)  
+  - **Upsert** (*Load*)
 
     Once new rows are fetched and filtered, they are inserted into the database table via the pipe's [instance connector](/reference/connectors/#instances-and-repositories). If [`upsert`](/reference/pipes/parameters/#upsert) is set in the pipe's parameters, then inserts and updates are performed in one query.
 
@@ -141,10 +139,10 @@ Depending on your data source, sometimes data may be missed. When rows are backl
 
 ### Add a backtrack interval
 
-The backtrack interval is the overlapping window between syncs (default 1440 minutes). 
+The backtrack interval is the overlapping window between syncs (default 1440 minutes).
 <img src="/assets/diagrams/backtrack-minutes.png" alt="Meerschaum backtrack minutes interval" width="75%" style="margin: auto;" id="btm"/>
 
-In the example above, there are four data streams that grow at separate rates — the dotted lines represent remote data which have not yet been synced. By default, only data to the right of the red line will be fetched, which will miss data for the "slower" IDs.
+In the example above, there are four data streams that grow at separate rates, the dotted lines represent remote data which have not yet been synced. By default, only data to the right of the red line will be fetched, which will miss data for the "slower" IDs.
 
 You can modify the backtrack interval under the key `fetch:backtrack_minutes`:
 
@@ -172,6 +170,74 @@ You can modify the backtrack interval under the key `fetch:backtrack_minutes`:
         },
     )
     ```
+
+## Replacing a window
+
+A sync normally merges: new rows are inserted, changed rows updated, and rows missing from the
+new data are left alone. When the new data is the whole truth for a time range (a corrected
+day of readings, a rollup recomputed from its source), replace that range instead: the rows of
+`[begin, end)` are deleted and the new rows inserted **in one transaction**, so readers never
+see the window half-written and a failed write leaves the old rows in place.
+
+=== "Python"
+
+    ```python
+    from datetime import datetime
+
+    pipe.sync(
+        df,
+        begin=datetime(2024, 1, 1),
+        end=datetime(2024, 1, 2),
+        replace=True,
+    )
+    #  🎉 Replaced 96 rows with 94 rows.
+    ```
+
+=== "Bash"
+
+    ```bash
+    mrsm sync pipes -c sql:main -m weather \
+      --begin 2024-01-01 --end 2024-01-02 --replace
+    ```
+
+=== "`mrsm edit pipes`"
+
+    ```yaml
+    fetch:
+      replace: true
+    ```
+
+How the window is chosen:
+
+- **With data** (`pipe.sync(df, replace=True)`): `begin` and `end` are the window. A bound you do
+  not pass comes from the data: `begin` is the earliest datetime in `df` and `end` just after the
+  latest, so every row you pass is inside. Rows outside `[begin, end)` are not written (the message
+  says how many were skipped). `params` limits the window to the matching rows.
+- **Without data** (a fetch): the window is the fetch's own `[begin, end)`, by default the sync
+  time minus the [backtrack interval](#backtracking) onward. Set
+  [`fetch: {replace: true}`](/reference/pipes/parameters/#fetchreplace) to replace every fetched
+  window, chunked syncs and [Pipelines](/reference/pipelines/) chunks included (each chunk
+  replaces its own window). Rows the source returns outside the window are not written. The first
+  sync, into a table that does not exist yet, has nothing to replace: its chunks are synced one by
+  one like any fetch.
+- **An empty frame** with `begin` and `end` clears the window. With neither, the sync is refused,
+  so an empty frame never clears a table by accident.
+- **A pipe without a `datetime` column** has one window: the whole table (matching `params`).
+
+The connectors' own `sync_pipe(pipe, df, replace=True, begin=..., end=..., params=...)` (SQL,
+Valkey, `api:`) and the API's `POST /pipes/{connector}/{metric}/{location}/data?replace=true`
+follow the same rules: a bound that is not given comes from the rows (`begin=None` over HTTP is
+no bound on that side), and the API answers `400` for an empty body without `begin` and `end`.
+
+In a [Pipeline](/reference/pipelines/), a replacing sync marks its whole window as changed, so its
+children re-sync the window and drop the rows it deleted. A child's window ends at its parents'
+latest data, so rows newer than a parent's new latest row stay in the child until the child is
+rebuilt or cleared.
+
+!!! note "Instances"
+    SQL instances delete and insert in one transaction. Valkey has no transactions: it clears the
+    window, then writes the rows. `api:` instances pass the window to the server, which replaces it
+    in one transaction on its own instance.
 
 ## Verification Syncs
 

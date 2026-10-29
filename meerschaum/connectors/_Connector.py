@@ -122,6 +122,15 @@ class Connector(metaclass=abc.ABCMeta):
         ### add additional arguments or override configuration
         self._attributes.update(kw)
 
+        ### Remember what the caller passed: a connector built with its own attributes
+        ### (`get_connector('sql', 'x', flavor=...)`) overrides the configured `sql:x` in the
+        ### actions this process runs (`meerschaum._internal.entry.adhoc_context`), as in v4.
+        self.__dict__['_explicit_attributes'] = {
+            key: value
+            for key, value in kw.items()
+            if key not in ('type', 'label')
+        }
+
         ### finally, update __dict__ with _attributes.
         self.__dict__.update(self._attributes)
 
@@ -201,6 +210,24 @@ class Connector(metaclass=abc.ABCMeta):
         })
         return _meta
 
+
+    @property
+    def protected(self) -> bool:
+        """
+        Whether the connector is protected (`protected: true` in its attributes, or
+        `?protected=true` on its URI): every write through it is refused unless writes to
+        protected connectors are allowed (`--allow-protected`, `MRSM_ALLOW_PROTECTED=1`, or
+        `meerschaum.connectors.allow_protected()`). Reads are never blocked.
+        """
+        from meerschaum.connectors import is_protected_value, uri_marks_protected
+        return (
+            is_protected_value(self.__dict__.get('protected', False))
+            or uri_marks_protected(self.__dict__.get('uri', None))
+        )
+
+    @protected.setter
+    def protected(self, value: Any) -> None:
+        self.__dict__['protected'] = value
 
     @property
     def type(self) -> str:

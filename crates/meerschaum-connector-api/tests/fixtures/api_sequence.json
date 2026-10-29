@@ -1,0 +1,2611 @@
+{
+  "password": "fixture_pass",
+  "steps": [
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "username=fixture_admin&password=fixture_pass"
+          },
+          "content_type": "application/json",
+          "has_auth": false,
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "method": "POST",
+          "response": {
+            "text": "{\"access_token\":\"<jwt>\",\"token_type\":\"bearer\",\"expires\":\"2000-01-01T00:00:00.000000\"}"
+          },
+          "status": 200,
+          "url": "/login"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully logged into 'api:fixture''."
+      ],
+      "step": "login",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": false,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "\"4.1.4\""
+          },
+          "status": 200,
+          "url": "/version/mrsm"
+        }
+      ],
+      "result": "4.1.4",
+      "step": "get_mrsm_version",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "false"
+          },
+          "status": 200,
+          "url": "/chaining"
+        }
+      ],
+      "result": false,
+      "step": "get_chaining_status",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[\"analyze\",\"api\",\"attach\",\"bootstrap\",\"clear\",\"compose\",\"compress\",\"copy\",\"decompress\",\"deduplicate\",\"delete\",\"drop\",\"edit\",\"flush\",\"index\",\"install\",\"login\",\"os\",\"partition\",\"pause\",\"python\",\"register\",\"reload\",\"restart\",\"setup\",\"sh\",\"show\",\"sql\",\"stack\",\"start\",\"stop\",\"sync\",\"tag\",\"uninstall\",\"upgrade\",\"vacuum\",\"verify\"]"
+          },
+          "status": 200,
+          "url": "/actions"
+        }
+      ],
+      "result": [
+        "analyze",
+        "api",
+        "attach",
+        "bootstrap",
+        "clear",
+        "compose",
+        "compress",
+        "copy",
+        "decompress",
+        "deduplicate",
+        "delete",
+        "drop",
+        "edit",
+        "flush",
+        "index",
+        "install",
+        "login",
+        "os",
+        "partition",
+        "pause",
+        "python",
+        "register",
+        "reload",
+        "restart",
+        "setup",
+        "sh",
+        "show",
+        "sql",
+        "stack",
+        "start",
+        "stop",
+        "sync",
+        "tag",
+        "uninstall",
+        "upgrade",
+        "vacuum",
+        "verify"
+      ],
+      "step": "get_actions",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "\"4.1.4\""
+          },
+          "status": 200,
+          "url": "/version"
+        }
+      ],
+      "result": "4.1.4",
+      "step": "raw_get_version",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"version\":\"4.1.4\",\"num_plugins\":0,\"num_users\":1,\"num_pipes\":0}"
+          },
+          "status": 200,
+          "url": "/info"
+        }
+      ],
+      "result": {
+        "num_pipes": 0,
+        "num_plugins": 0,
+        "num_users": 1,
+        "version": "4.1.4"
+      },
+      "step": "raw_get_info",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"success\":true,\"message\":\"Success\"}"
+          },
+          "status": 200,
+          "url": "/healthcheck"
+        }
+      ],
+      "result": {
+        "message": "Success",
+        "success": true
+      },
+      "step": "raw_get_healthcheck",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"sql\":[\"main\",\"local\",\"memory\",\"fixture\"],\"api\":[\"main\",\"local\",\"mrsm\"],\"valkey\":[\"main\"],\"parity\":[\"reference\"]}"
+          },
+          "status": 200,
+          "url": "/connectors"
+        }
+      ],
+      "result": {
+        "api": [
+          "main",
+          "local",
+          "mrsm"
+        ],
+        "parity": [
+          "reference"
+        ],
+        "sql": [
+          "main",
+          "local",
+          "memory",
+          "fixture"
+        ],
+        "valkey": [
+          "main"
+        ]
+      },
+      "step": "raw_get_connectors",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"username\":\"fixture_admin\",\"user_id\":1,\"user_type\":\"admin\",\"attributes\":{}}"
+          },
+          "status": 200,
+          "url": "/users/me"
+        }
+      ],
+      "result": {
+        "attributes": {},
+        "user_id": 1,
+        "user_type": "admin",
+        "username": "fixture_admin"
+      },
+      "step": "raw_get_users_me",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"detail\":\"Not Found\"}"
+          },
+          "status": 404,
+          "url": "/id"
+        }
+      ],
+      "result": {
+        "detail": "Not Found"
+      },
+      "step": "raw_get_id",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "true"
+          },
+          "status": 200,
+          "url": "/metadata"
+        }
+      ],
+      "result": false,
+      "step": "create_metadata",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Successfully registered Pipe('demo', 'temperature', 'home', instance='sql:fixture').\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/register"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully registered Pipe('demo', 'temperature', 'home', instance='sql:fixture')."
+      ],
+      "step": "register_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "response": {
+            "text": "{\"detail\":\"Pipe('demo', 'temperature', 'home', instance='sql:fixture') already registered.\"}"
+          },
+          "status": 409,
+          "url": "/pipes/demo/temperature/home/register"
+        }
+      ],
+      "result": [
+        false,
+        "{\"detail\":\"Pipe('demo', 'temperature', 'home', instance='sql:fixture') already registered.\"}"
+      ],
+      "step": "register_pipe_again",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"columns\": {\"id\": \"room\"}}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Successfully registered Pipe('demo', 'humidity', instance='sql:fixture').\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/humidity/%5BNone%5D/register"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully registered Pipe('demo', 'humidity', instance='sql:fixture')."
+      ],
+      "step": "register_pipe_null_location",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "response": {
+            "text": "{\"detail\":\"Unable to serve any pipes with connector keys `mrsm` over the API.\"}"
+          },
+          "status": 403,
+          "url": "/pipes/mrsm/secrets/%5BNone%5D/register"
+        }
+      ],
+      "result": [
+        false,
+        "{\"detail\":\"Unable to serve any pipes with connector keys `mrsm` over the API.\"}"
+      ],
+      "step": "mrsm_connector_403",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"2\":[\"demo\",\"humidity\",null,\"{\\\"columns\\\": {\\\"id\\\": \\\"room\\\"}}\"],\"1\":[\"demo\",\"temperature\",\"home\",\"{\\\"columns\\\": {\\\"datetime\\\": \\\"ts\\\", \\\"id\\\": \\\"station\\\"}, \\\"tags\\\": [\\\"outdoor\\\"]}\"]}"
+          },
+          "status": 200,
+          "url": "/pipes/keys?connector_keys=%5B%5D&metric_keys=%5B%5D&location_keys=%5B%5D&tags=%5B%5D&params=null&as_dict=True"
+        }
+      ],
+      "result": {
+        "1": [
+          "demo",
+          "temperature",
+          "home",
+          "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+        ],
+        "2": [
+          "demo",
+          "humidity",
+          null,
+          "{\"columns\": {\"id\": \"room\"}}"
+        ]
+      },
+      "step": "fetch_pipes_keys",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"1\":[\"demo\",\"temperature\",\"home\",\"{\\\"columns\\\": {\\\"datetime\\\": \\\"ts\\\", \\\"id\\\": \\\"station\\\"}, \\\"tags\\\": [\\\"outdoor\\\"]}\"]}"
+          },
+          "status": 200,
+          "url": "/pipes/keys?connector_keys=%5B%22demo%22%5D&metric_keys=%5B%22temperature%22%5D&location_keys=%5B%22home%22%5D&tags=%5B%22outdoor%22%5D&params=%7B%22connector_keys%22%3A+%22demo%22%7D&as_dict=True"
+        }
+      ],
+      "result": {
+        "1": [
+          "demo",
+          "temperature",
+          "home",
+          "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+        ]
+      },
+      "step": "fetch_pipes_keys_filtered",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "1"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/id"
+        }
+      ],
+      "result": 1,
+      "step": "get_pipe_id",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"pipe_id\":1,\"connector_keys\":\"demo\",\"metric_key\":\"temperature\",\"location_key\":\"home\",\"parameters\":{\"columns\":{\"datetime\":\"ts\",\"id\":\"station\"},\"tags\":[\"outdoor\"]}}"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/attributes"
+        }
+      ],
+      "result": {
+        "connector_keys": "demo",
+        "location_key": "home",
+        "metric_key": "temperature",
+        "parameters": {
+          "columns": {
+            "datetime": "ts",
+            "id": "station"
+          },
+          "tags": [
+            "outdoor"
+          ]
+        },
+        "pipe_id": 1
+      },
+      "step": "get_pipe_attributes",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "false"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/exists"
+        }
+      ],
+      "result": false,
+      "step": "pipe_exists_before",
+      "websockets": []
+    },
+    {
+      "chunksize": 2,
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"pipe_id\":1,\"connector_keys\":\"demo\",\"metric_key\":\"temperature\",\"location_key\":\"home\",\"parameters\":{\"columns\":{\"datetime\":\"ts\",\"id\":\"station\"},\"tags\":[\"outdoor\"]}}"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/attributes"
+        },
+        {
+          "body": {
+            "text": "{\"ts\":{\"0\":\"2024-01-01T00:00:00+00:00\",\"1\":\"2024-01-01T00:00:00+00:00\"},\"station\":{\"0\":\"a\",\"1\":\"b\\/c\"},\"val\":{\"0\":1.5,\"1\":0.1},\"n\":{\"0\":1,\"1\":null}}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Inserted 2, updated 0 rows.\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/data?begin=&force=False&retries=10&min_seconds=1&check_existing=True&blocking=True&sync_chunks=True&safe_copy=True&columns=%7B%22datetime%22%3A+%22ts%22%2C+%22id%22%3A+%22station%22%7D"
+        },
+        {
+          "body": {
+            "text": "{\"ts\":{\"2\":\"2024-01-02T12:30:00.250000+00:00\"},\"station\":{\"2\":\"\\u00e9\"},\"val\":{\"2\":1e+20},\"n\":{\"2\":3}}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Inserted 1, updated 0 rows.\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/data?begin=&force=False&retries=10&min_seconds=1&check_existing=True&blocking=True&sync_chunks=True&safe_copy=True&columns=%7B%22datetime%22%3A+%22ts%22%2C+%22id%22%3A+%22station%22%7D"
+        },
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Success\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/cache"
+        }
+      ],
+      "result": [
+        true,
+        "It took <t> to sync 3 rows across 2 chunks to Pipe('demo', 'temperature', 'home', instance='api:fixture')."
+      ],
+      "step": "sync_pipe_chunked",
+      "sync_df": {
+        "__df__": {
+          "columns": [
+            "ts",
+            "station",
+            "val",
+            "n"
+          ],
+          "data": {
+            "n": [
+              1,
+              {
+                "t": "na"
+              },
+              3
+            ],
+            "station": [
+              "a",
+              "b/c",
+              "\u00e9"
+            ],
+            "ts": [
+              {
+                "t": "dt",
+                "v": "2024-01-01T00:00:00+00:00"
+              },
+              {
+                "t": "dt",
+                "v": "2024-01-01T00:00:00+00:00"
+              },
+              {
+                "t": "dt",
+                "v": "2024-01-02T12:30:00.250000+00:00"
+              }
+            ],
+            "val": [
+              1.5,
+              0.1,
+              1e+20
+            ]
+          },
+          "dtypes": {
+            "n": "Int64",
+            "station": "str",
+            "ts": "datetime64[us, UTC]",
+            "val": "float64"
+          }
+        }
+      },
+      "sync_kwargs": [
+        [
+          "begin",
+          ""
+        ],
+        [
+          "end",
+          null
+        ],
+        [
+          "force",
+          false
+        ],
+        [
+          "retries",
+          10
+        ],
+        [
+          "min_seconds",
+          1
+        ],
+        [
+          "check_existing",
+          true
+        ],
+        [
+          "blocking",
+          true
+        ],
+        [
+          "workers",
+          null
+        ],
+        [
+          "callback",
+          null
+        ],
+        [
+          "error_callback",
+          null
+        ],
+        [
+          "sync_chunks",
+          true
+        ],
+        [
+          "safe_copy",
+          true
+        ]
+      ],
+      "websockets": []
+    },
+    {
+      "chunksize": -1,
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"ts\":{\"0\":\"2024-01-03T00:00:00+00:00\"},\"station\":{\"0\":\"a\"},\"val\":{\"0\":-4.0},\"n\":{\"0\":4}}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Inserted 1, updated 0 rows.\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/data?check_existing=False&columns=%7B%22datetime%22%3A+%22ts%22%2C+%22id%22%3A+%22station%22%7D"
+        },
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Success\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/cache"
+        }
+      ],
+      "result": [
+        true,
+        "It took <t> to sync 1 row across 1 chunk to Pipe('demo', 'temperature', 'home', instance='api:fixture')."
+      ],
+      "step": "sync_pipe_default_chunks",
+      "sync_df": {
+        "__df__": {
+          "columns": [
+            "ts",
+            "station",
+            "val",
+            "n"
+          ],
+          "data": {
+            "n": [
+              4
+            ],
+            "station": [
+              "a"
+            ],
+            "ts": [
+              {
+                "t": "dt",
+                "v": "2024-01-03T00:00:00+00:00"
+              }
+            ],
+            "val": [
+              -4.0
+            ]
+          },
+          "dtypes": {
+            "n": "Int64",
+            "station": "str",
+            "ts": "datetime64[us, UTC]",
+            "val": "float64"
+          }
+        }
+      },
+      "sync_kwargs": [
+        [
+          "check_existing",
+          false
+        ]
+      ],
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "true"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/exists"
+        }
+      ],
+      "result": true,
+      "step": "pipe_exists_after",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "\"2024-01-03T00:00:00+00:00\""
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/sync_time?newest=True&debug=False"
+        }
+      ],
+      "result": {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00+00:00"
+      },
+      "step": "get_sync_time_newest",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "\"2024-01-01T00:00:00+00:00\""
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/sync_time?newest=False&debug=False"
+        }
+      ],
+      "result": {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00"
+      },
+      "step": "get_sync_time_oldest",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"station\": \"a\"}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "GET",
+          "response": {
+            "text": "\"2024-01-03T00:00:00+00:00\""
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/sync_time?newest=True&debug=False"
+        }
+      ],
+      "result": {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00+00:00"
+      },
+      "step": "get_sync_time_params",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "4"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/rowcount?remote=False"
+        }
+      ],
+      "result": 4,
+      "step": "get_pipe_rowcount",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"station\": [\"a\", \"\\u00e9\"]}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "GET",
+          "response": {
+            "text": "2"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/rowcount?begin=2024-01-02+00%3A00%3A00%2B00%3A00&remote=False"
+        }
+      ],
+      "result": 2,
+      "step": "get_pipe_rowcount_filtered",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[{\"ts\":\"2024-01-01T00:00:00+00:00\",\"station\":\"a\",\"val\":\"1.5\",\"n\":1},{\"ts\":\"2024-01-01T00:00:00+00:00\",\"station\":\"b\\/c\",\"val\":\"0.1\",\"n\":null},{\"ts\":\"2024-01-02T12:30:00.250000+00:00\",\"station\":\"\\u00e9\",\"val\":\"1.0e+20\",\"n\":3},{\"ts\":\"2024-01-03T00:00:00+00:00\",\"station\":\"a\",\"val\":\"-4\",\"n\":4}]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/data?select_columns=null&omit_columns=null&params=null&as_chunks=False"
+        },
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "true"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/exists"
+        },
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"ts\":\"NUMERIC\",\"station\":\"NUMERIC\",\"val\":\"TEXT\",\"n\":\"INTEGER\"}"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/columns/types"
+        }
+      ],
+      "result": {
+        "__df__": {
+          "columns": [
+            "ts",
+            "station",
+            "val",
+            "n"
+          ],
+          "data": {
+            "n": [
+              1,
+              {
+                "t": "na"
+              },
+              3,
+              4
+            ],
+            "station": [
+              "a",
+              "b/c",
+              "\u00e9",
+              "a"
+            ],
+            "ts": [
+              {
+                "t": "dt",
+                "v": "2024-01-01T00:00:00+00:00"
+              },
+              {
+                "t": "dt",
+                "v": "2024-01-01T00:00:00+00:00"
+              },
+              {
+                "t": "dt",
+                "v": "2024-01-02T12:30:00.250000+00:00"
+              },
+              {
+                "t": "dt",
+                "v": "2024-01-03T00:00:00+00:00"
+              }
+            ],
+            "val": [
+              "1.5",
+              "0.1",
+              "1.0e+20",
+              "-4"
+            ]
+          },
+          "dtypes": {
+            "n": "Int64",
+            "station": "string",
+            "ts": "datetime64[us, UTC]",
+            "val": "string"
+          }
+        }
+      },
+      "step": "get_pipe_data",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[{\"ts\":\"2024-01-01T00:00:00+00:00\",\"station\":\"a\",\"val\":\"1.5\"},{\"ts\":\"2024-01-02T12:30:00.250000+00:00\",\"station\":\"\\u00e9\",\"val\":\"100000000000000000000\"}]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/data?select_columns=%5B%22ts%22%2C+%22station%22%2C+%22val%22%5D&omit_columns=null&begin=2024-01-01+00%3A00%3A00%2B00%3A00&end=2024-01-03+00%3A00%3A00%2B00%3A00&params=%7B%22station%22%3A+%22_b%2Fc%22%7D&as_chunks=False"
+        }
+      ],
+      "result": {
+        "__df__": {
+          "columns": [
+            "ts",
+            "station",
+            "val"
+          ],
+          "data": {
+            "station": [
+              "a",
+              "\u00e9"
+            ],
+            "ts": [
+              {
+                "t": "dt",
+                "v": "2024-01-01T00:00:00+00:00"
+              },
+              {
+                "t": "dt",
+                "v": "2024-01-02T12:30:00.250000+00:00"
+              }
+            ],
+            "val": [
+              "1.5",
+              "100000000000000000000"
+            ]
+          },
+          "dtypes": {
+            "station": "string",
+            "ts": "datetime64[us, UTC]",
+            "val": "string"
+          }
+        }
+      },
+      "step": "get_pipe_data_filtered",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[{\"ts\": \"2024-01-01 00:00:00.000000\", \"station\": \"a\", \"val\": \"1.5\", \"n\": 1}, {\"ts\": \"2024-01-03 00:00:00.000000\", \"station\": \"a\", \"val\": \"-4\", \"n\": 4}]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/docs?select_columns=null&omit_columns=null&params=%7B%22station%22%3A+%22a%22%7D&order=asc&limit=5"
+        }
+      ],
+      "result": [
+        {
+          "n": 1,
+          "station": "a",
+          "ts": "2024-01-01 00:00:00.000000",
+          "val": "1.5"
+        },
+        {
+          "n": 4,
+          "station": "a",
+          "ts": "2024-01-03 00:00:00.000000",
+          "val": "-4"
+        }
+      ],
+      "step": "get_pipe_docs",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"ts\":\"NUMERIC\",\"station\":\"NUMERIC\",\"val\":\"TEXT\",\"n\":\"INTEGER\"}"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/columns/types"
+        }
+      ],
+      "result": {
+        "n": "INTEGER",
+        "station": "NUMERIC",
+        "ts": "NUMERIC",
+        "val": "TEXT"
+      },
+      "step": "get_pipe_columns_types",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{}"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/columns/indices"
+        }
+      ],
+      "result": {},
+      "step": "get_pipe_columns_indices",
+      "websockets": []
+    },
+    {
+      "error": "AttributeError: 'APIConnector' object has no attribute 'get_pipe_index_names'",
+      "requests": [],
+      "result": null,
+      "step": "get_pipe_index_names",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"unique\":\"IX_demo_temperature_home_station_ts\",\"datetime\":\"IX_demo_temperature_home_ts\",\"id\":\"IX_demo_temperature_home_station\"}"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/indices/names"
+        }
+      ],
+      "result": {
+        "datetime": "IX_demo_temperature_home_ts",
+        "id": "IX_demo_temperature_home_station",
+        "unique": "IX_demo_temperature_home_station_ts"
+      },
+      "step": "raw_get_indices_names",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "4096"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/size"
+        }
+      ],
+      "result": 4096,
+      "step": "get_pipe_size",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Size unchanged (4.1 kB).\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/vacuum?full=True"
+        }
+      ],
+      "result": [
+        true,
+        "Size unchanged (4.1 kB)."
+      ],
+      "step": "vacuum_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Analyzed Pipe('demo', 'temperature', 'home', instance='sql:fixture').\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/analyze"
+        }
+      ],
+      "result": [
+        true,
+        "Analyzed Pipe('demo', 'temperature', 'home', instance='sql:fixture')."
+      ],
+      "step": "analyze_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[false,\"Compression is not supported for flavor 'sqlite'.\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/compress"
+        }
+      ],
+      "result": [
+        false,
+        "Compression is not supported for flavor 'sqlite'."
+      ],
+      "step": "compress_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[false,\"Decompression is not supported for flavor 'sqlite'.\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/decompress?no_policy=True"
+        }
+      ],
+      "result": [
+        false,
+        "Decompression is not supported for flavor 'sqlite'."
+      ],
+      "step": "decompress_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[false,\"Repartitioning is not supported for flavor 'sqlite'.\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/partition?chunk_minutes=1440"
+        }
+      ],
+      "result": [
+        false,
+        "Repartitioning is not supported for flavor 'sqlite'."
+      ],
+      "step": "partition_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[[\"2024-01-01T00:00:00+00:00\", \"2024-01-02T00:00:00+00:00\"], [\"2024-01-02T00:00:00+00:00\", \"2024-01-03T00:00:00+00:00\"]]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/chunk_bounds?begin=2024-01-01&end=2024-01-03&chunk_interval_minutes=1440"
+        }
+      ],
+      "result": [
+        [
+          "2024-01-01T00:00:00+00:00",
+          "2024-01-02T00:00:00+00:00"
+        ],
+        [
+          "2024-01-02T00:00:00+00:00",
+          "2024-01-03T00:00:00+00:00"
+        ]
+      ],
+      "step": "raw_get_chunk_bounds",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "text/csv; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "ts,station,val,n\n2024-01-01 00:00:00+00:00,a,1.5,1\n2024-01-01 00:00:00+00:00,b/c,0.1,\n2024-01-02 12:30:00.250000+00:00,\u00e9,1.0E+20,3\n2024-01-03 00:00:00+00:00,a,-4,4\n"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/csv"
+        }
+      ],
+      "result": "ts,station,val,n\n2024-01-01 00:00:00+00:00,a,1.5,1\n2024-01-01 00:00:00+00:00,b/c,0.1,\n2024-01-02 12:30:00.250000+00:00,\u00e9,1.0E+20,3\n2024-01-03 00:00:00+00:00,a,-4,4\n",
+      "step": "raw_get_csv",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "PATCH",
+          "response": {
+            "text": "[true,\"Successfully edited Pipe('demo', 'temperature', 'home', instance='sql:fixture').\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/edit?patch=False"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully edited Pipe('demo', 'temperature', 'home', instance='sql:fixture')."
+      ],
+      "step": "edit_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"tags\": [\"outdoor\"]}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "PATCH",
+          "response": {
+            "text": "[true,\"Successfully edited Pipe('demo', 'temperature', 'home', instance='sql:fixture').\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/edit?patch=True"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully edited Pipe('demo', 'temperature', 'home', instance='sql:fixture')."
+      ],
+      "step": "edit_pipe_patch",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Success\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/clear?begin=2024-01-02+00%3A00%3A00%2B00%3A00&params=%7B%22station%22%3A+%22a%22%7D"
+        }
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "step": "clear_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Success\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/cache"
+        }
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "step": "delete_pipe_cache",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Success\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/drop"
+        }
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "step": "drop_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Success\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/temperature/home/delete"
+        }
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "step": "delete_pipe",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Success\"]"
+          },
+          "status": 200,
+          "url": "/pipes/demo/humidity/%5BNone%5D/delete"
+        }
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "step": "delete_pipe_null_location",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "username=fixture_user&password=fixture_user_pass&attributes=%7B%22a%22%3A+1%7D&email=u%40example.com"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Successfully registered user 'fixture_user'.\"]"
+          },
+          "status": 200,
+          "url": "/users/register"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully registered user 'fixture_user'."
+      ],
+      "step": "register_user",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[\"fixture_admin\",\"fixture_user\"]"
+          },
+          "status": 200,
+          "url": "/users"
+        }
+      ],
+      "result": [
+        "fixture_admin",
+        "fixture_user"
+      ],
+      "step": "get_users",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "2"
+          },
+          "status": 200,
+          "url": "/users/fixture_user/id"
+        }
+      ],
+      "result": 2,
+      "step": "get_user_id",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"a\":1}"
+          },
+          "status": 200,
+          "url": "/users/fixture_user/attributes"
+        }
+      ],
+      "result": {
+        "a": 1
+      },
+      "step": "get_user_attributes",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"detail\":\"API chaining is not enabled on this Meerschaum instance!\\n\\nIf you manage this server and want to allow this API instance be a parent instance for other API instances,\\nrun `edit config api` and search for `permissions`.\\nUnder 'api:permissions:chaining', change the value of `child_apis` to `true`, and restart the API.\\n\\nIt is highly encouraged that you serve this API over HTTPS! Sensitive data like pipe data and salted\\npassword hashes will be shared between APIs.\"}"
+          },
+          "status": 403,
+          "url": "/users/fixture_user/type"
+        }
+      ],
+      "result": null,
+      "step": "get_user_type",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"detail\":\"API chaining is not enabled on this Meerschaum instance!\\n\\nIf you manage this server and want to allow this API instance be a parent instance for other API instances,\\nrun `edit config api` and search for `permissions`.\\nUnder 'api:permissions:chaining', change the value of `child_apis` to `true`, and restart the API.\\n\\nIt is highly encouraged that you serve this API over HTTPS! Sensitive data like pipe data and salted\\npassword hashes will be shared between APIs.\"}"
+          },
+          "status": 403,
+          "url": "/users/fixture_user/password_hash"
+        }
+      ],
+      "result": null,
+      "step": "get_user_password_hash",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "username=fixture_user&password=fixture_user_pass&type=basic&email=new%40example.com&attributes=%7B%22a%22%3A+1%7D"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Successfully edited user 'fixture_user'.\"]"
+          },
+          "status": 200,
+          "url": "/users/edit"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully edited user 'fixture_user'."
+      ],
+      "step": "edit_user",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Successfully deleted user 'fixture_user'\"]"
+          },
+          "status": 200,
+          "url": "/users/fixture_user"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully deleted user 'fixture_user'"
+      ],
+      "step": "delete_user",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"label\": \"fixture-token\", \"scopes\": [\"pipes:read\", \"pipes:write\"], \"expiration\": \"2030-01-01T00:00:00+00:00\"}"
+          },
+          "content_type": "text/plain; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "Internal Server Error"
+          },
+          "status": 500,
+          "url": "/tokens/register"
+        }
+      ],
+      "result": [
+        false,
+        "Failed to register token:\nInternal Server Error"
+      ],
+      "step": "register_token",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[{\"id\":\"00000000-0000-4000-8000-000000000001\",\"creation\":\"2000-01-01T00:00:00Z\",\"expiration\":\"2030-01-01T00:00:00Z\",\"label\":\"fixture-token\",\"user_id\":1,\"scopes\":[\"pipes:read\",\"pipes:write\"],\"is_valid\":true}]"
+          },
+          "status": 200,
+          "url": "/tokens"
+        }
+      ],
+      "result": [
+        {
+          "creation": {
+            "t": "dt",
+            "v": "2000-01-01T00:00:00+00:00"
+          },
+          "expiration": {
+            "t": "dt",
+            "v": "2030-01-01T00:00:00+00:00"
+          },
+          "id": {
+            "t": "uuid",
+            "v": "00000000-0000-4000-8000-000000000001"
+          },
+          "is_valid": true,
+          "label": "fixture-token",
+          "scopes": [
+            "pipes:read",
+            "pipes:write"
+          ],
+          "secret_hash": null,
+          "user_id": 1
+        }
+      ],
+      "step": "get_tokens",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[{\"id\":\"00000000-0000-4000-8000-000000000001\",\"creation\":\"2000-01-01T00:00:00Z\",\"expiration\":\"2030-01-01T00:00:00Z\",\"label\":\"fixture-token\",\"user_id\":1,\"scopes\":[\"pipes:read\",\"pipes:write\"],\"is_valid\":true}]"
+          },
+          "status": 200,
+          "url": "/tokens?labels=fixture-token"
+        }
+      ],
+      "result": [
+        {
+          "creation": {
+            "t": "dt",
+            "v": "2000-01-01T00:00:00+00:00"
+          },
+          "expiration": {
+            "t": "dt",
+            "v": "2030-01-01T00:00:00+00:00"
+          },
+          "id": {
+            "t": "uuid",
+            "v": "00000000-0000-4000-8000-000000000001"
+          },
+          "is_valid": true,
+          "label": "fixture-token",
+          "scopes": [
+            "pipes:read",
+            "pipes:write"
+          ],
+          "secret_hash": null,
+          "user_id": 1
+        }
+      ],
+      "step": "get_tokens_labels",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "text/plain; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "Internal Server Error"
+          },
+          "status": 500,
+          "url": "/tokens/00000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "result": null,
+      "step": "get_token_model",
+      "websockets": []
+    },
+    {
+      "error": "ConnectionError: Connection aborted (reset by the server).",
+      "requests": [
+        {
+          "body": {
+            "text": "{\"creation\": null, \"expiration\": \"2030-01-01T00:00:00+00:00\", \"label\": \"fixture-token-edited\", \"is_valid\": true, \"scopes\": [\"pipes:read\", \"pipes:write\"]}"
+          },
+          "content_type": "",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "response": {
+            "reset": true
+          },
+          "status": null,
+          "url": "/tokens/00000000-0000-4000-8000-000000000001/edit"
+        }
+      ],
+      "result": null,
+      "step": "edit_token",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "text/plain; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "Internal Server Error"
+          },
+          "status": 500,
+          "url": "/tokens/00000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "result": false,
+      "step": "token_exists",
+      "websockets": []
+    },
+    {
+      "error": "ConnectionError: Connection aborted (reset by the server).",
+      "requests": [
+        {
+          "body": null,
+          "content_type": "",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "reset": true
+          },
+          "status": null,
+          "url": "/tokens/00000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "result": null,
+      "step": "get_token_scopes",
+      "websockets": []
+    },
+    {
+      "client_id": "00000000-0000-4000-8000-000000000001",
+      "client_secret": "fixturesecret001fixtures",
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "client_id=00000000-0000-4000-8000-000000000001&client_secret=fixturesecret001fixtures"
+          },
+          "content_type": "application/json",
+          "has_auth": false,
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "method": "POST",
+          "response": {
+            "text": "{\"access_token\":\"<jwt>\",\"token_type\":\"bearer\",\"expires\":\"2000-01-01T00:00:00.000000\"}"
+          },
+          "status": 200,
+          "url": "/login"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully logged into 'api:fixture_cc''."
+      ],
+      "step": "login_client_credentials",
+      "websockets": []
+    },
+    {
+      "error": "Exception: \n\u001b[1;31m \ud83d\uded1 Expecting value: line 1 column 1 (char 0)\u001b[0m",
+      "requests": [
+        {
+          "body": null,
+          "content_type": "text/plain; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "Internal Server Error"
+          },
+          "status": 500,
+          "url": "/pipes/keys?connector_keys=%5B%5D&metric_keys=%5B%5D&location_keys=%5B%5D&tags=%5B%5D&params=null&as_dict=True"
+        }
+      ],
+      "result": null,
+      "step": "client_credentials_request",
+      "websockets": []
+    },
+    {
+      "api_key": "mrsm-key:MDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxOmZpeHR1cmVzZWNyZXQwMDFmaXh0dXJlcw==",
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "text/plain; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "Internal Server Error"
+          },
+          "status": 500,
+          "url": "/tokens/validate"
+        }
+      ],
+      "result": [
+        false,
+        "API key is not valid."
+      ],
+      "step": "login_api_key",
+      "websockets": []
+    },
+    {
+      "error": "ConnectionError: Connection aborted (reset by the server).",
+      "requests": [
+        {
+          "body": null,
+          "content_type": "",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "reset": true
+          },
+          "status": null,
+          "url": "/users"
+        }
+      ],
+      "result": null,
+      "step": "api_key_request",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "text/plain; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "Internal Server Error"
+          },
+          "status": 500,
+          "url": "/tokens/00000000-0000-4000-8000-000000000001/invalidate"
+        }
+      ],
+      "result": [
+        false,
+        "Failed to invalidate token:\nInternal Server Error"
+      ],
+      "step": "invalidate_token",
+      "websockets": []
+    },
+    {
+      "error": "ConnectionError: Connection aborted (reset by the server).",
+      "requests": [
+        {
+          "body": null,
+          "content_type": "",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "reset": true
+          },
+          "status": null,
+          "url": "/tokens/00000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "result": null,
+      "step": "delete_token",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "{\"detail\":\"Invalid token format. Expected Base64-encoded 'token_id:secret'.\"}"
+          },
+          "status": 401,
+          "url": "/tokens/validate"
+        }
+      ],
+      "result": {
+        "detail": "Invalid token format. Expected Base64-encoded 'token_id:secret'."
+      },
+      "step": "api_key_validate",
+      "websockets": []
+    },
+    {
+      "archive": "H4sIAAAAAAAC/+3NsQrCMBSF4Tv7FNm6xZtauvksF4cqAYklTUTf3tRFcBYR/L/lHM5yjvFWap5sPtdTTFuzmGIx8/NdPkabcRie2bynaj+++rqHXehVnMoX1KUccruX/2R2nfISL8nM7V2nPnjtNgIAAAAAAAAAAAAAAAAA+HEPqcNdfgAoAAA=",
+      "error": null,
+      "plugin": {
+        "attributes": {},
+        "name": "fixture_plugin",
+        "version": "0.1.0"
+      },
+      "requests": [
+        {
+          "body": {
+            "base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJhcmNoaXZlIjsgZmlsZW5hbWU9ImZpeHR1cmVfcGx1Z2luLnRhci5neiINCg0KH4sIAAAAAAAC/+3NsQrCMBSF4Tv7FNm6xZtauvksF4cqAYklTUTf3tRFcBYR/L/lHM5yjvFWap5sPtdTTFuzmGIx8/NdPkabcRie2bynaj+++rqHXehVnMoX1KUccruX/2R2nfISL8nM7V2nPnjtNgIAAAAAAAAAAAAAAAAA+HEPqcNdfgAoAAANCi0tQk9VTkRBUlktLQ0K"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "multipart/form-data; boundary=BOUNDARY"
+          },
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Successfully registered plugin 'fixture_plugin'.\"]"
+          },
+          "status": 200,
+          "url": "/plugins/fixture_plugin?version=0.1.0&attributes=%7B%7D"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully registered plugin 'fixture_plugin'."
+      ],
+      "step": "register_plugin",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[\"fixture_plugin\"]"
+          },
+          "status": 200,
+          "url": "/plugins"
+        }
+      ],
+      "result": [
+        "fixture_plugin"
+      ],
+      "step": "get_plugins",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "[\"fixture_plugin\"]"
+          },
+          "status": 200,
+          "url": "/plugins?search_term=fix"
+        }
+      ],
+      "result": [
+        "fixture_plugin"
+      ],
+      "step": "get_plugins_search",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{}"
+          },
+          "status": 200,
+          "url": "/plugins/fixture_plugin/attributes"
+        }
+      ],
+      "result": {},
+      "step": "get_plugin_attributes",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "\"0.1.0\""
+          },
+          "status": 200,
+          "url": "/plugins/fixture_plugin/version"
+        }
+      ],
+      "result": "0.1.0",
+      "step": "get_plugin_version",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/x-tar",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "base64": "H4sIAAAAAAAC/+3NsQrCMBSF4Tv7FNm6xZtauvksF4cqAYklTUTf3tRFcBYR/L/lHM5yjvFWap5sPtdTTFuzmGIx8/NdPkabcRie2bynaj+++rqHXehVnMoX1KUccruX/2R2nfISL8nM7V2nPnjtNgIAAAAAAAAAAAAAAAAA+HEPqcNdfgAoAAA="
+          },
+          "status": 200,
+          "url": "/plugins/fixture_plugin"
+        }
+      ],
+      "result": 137,
+      "step": "raw_download_plugin",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Successfully deleted plugin 'fixture_plugin'.\"]"
+          },
+          "status": 200,
+          "url": "/plugins/fixture_plugin"
+        }
+      ],
+      "result": [
+        true,
+        "Successfully deleted plugin 'fixture_plugin'."
+      ],
+      "step": "delete_plugin",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"sysargs\": [\"python\", \"print('ready', flush=True); import time; time.sleep(3600)\"], \"properties\": {\"tags\": [\"x\"]}}"
+          },
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Started Job(\\\"fixture-job\\\", \\\"python 'print('\\\"'\\\"'ready'\\\"'\\\"', flush=True); import time; time.sleep(3600)'\\\").\"]"
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job"
+        }
+      ],
+      "result": [
+        true,
+        "Started Job(\"fixture-job\", \"python 'print('\"'\"'ready'\"'\"', flush=True); import time; time.sleep(3600)'\")."
+      ],
+      "step": "create_job",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "true"
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job/exists"
+        }
+      ],
+      "result": true,
+      "step": "get_job_exists",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[true,\"Stopped Job(\\\"fixture-job\\\", \\\"python 'print('\\\"'\\\"'ready'\\\"'\\\"', flush=True); import time; time.sleep(3600)'\\\").\"]"
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job/stop"
+        }
+      ],
+      "result": [
+        true,
+        "Stopped Job(\"fixture-job\", \"python 'print('\"'\"'ready'\"'\"', flush=True); import time; time.sleep(3600)'\")."
+      ],
+      "step": "stop_job",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [],
+      "result": {
+        "lines": 8,
+        "result": [
+          false,
+          "Python interpreter returned -2."
+        ]
+      },
+      "step": "monitor_logs",
+      "websockets": [
+        {
+          "events": [
+            [
+              "send",
+              "<token>"
+            ],
+            [
+              "recv",
+              "\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 | Warning: Input is not a terminal (fd=0).\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 | >>> import meerschaum as mrsm\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 | >>> print('ready', flush=True)\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 |  import time\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 |  time.sleep(3600)\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 | ready\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 | "
+            ],
+            [
+              "recv",
+              "MRSM_STOP"
+            ],
+            [
+              "recv",
+              "[false,\"Python interpreter returned -2.\"]"
+            ],
+            [
+              "close",
+              null
+            ]
+          ],
+          "uri": "/logs/fixture-job/ws"
+        }
+      ]
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"fixture-job\":{\"sysargs\":[\"python\",\"print('ready', flush=True); import time; time.sleep(3600)\"],\"result\":[false,\"Python interpreter returned -2.\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Python interpreter returned -2.\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}}"
+          },
+          "status": 200,
+          "url": "/jobs"
+        }
+      ],
+      "result": [
+        "fixture-job"
+      ],
+      "step": "get_jobs",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"sysargs\":[\"python\",\"print('ready', flush=True); import time; time.sleep(3600)\"],\"result\":[false,\"Python interpreter returned -2.\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Python interpreter returned -2.\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}"
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job"
+        }
+      ],
+      "result": [
+        "daemon",
+        "restart",
+        "result",
+        "status",
+        "sysargs"
+      ],
+      "step": "get_job_metadata",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "\"\\n2000-01-01 00:00 | Warning: Input is not a terminal (fd=0).\\n2000-01-01 00:00 | >>> import meerschaum as mrsm\\n2000-01-01 00:00 | >>> print('ready', flush=True)\\n2000-01-01 00:00 |  import time\\n2000-01-01 00:00 |  time.sleep(3600)\\n2000-01-01 00:00 | ready\\n2000-01-01 00:00 | \""
+          },
+          "status": 200,
+          "url": "/logs/fixture-job"
+        }
+      ],
+      "result": true,
+      "step": "get_logs",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "\"2000-01-01T00:00:00.000000Z\""
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job/stop_time"
+        }
+      ],
+      "result": true,
+      "step": "get_job_stop_time",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "false"
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job/is_blocking_on_stdin"
+        }
+      ],
+      "result": false,
+      "step": "get_job_is_blocking_on_stdin",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"detail\":\"Not Found\"}"
+          },
+          "status": 404,
+          "url": "/jobs/fixture-job/prompt_kwargs"
+        }
+      ],
+      "result": {},
+      "step": "get_job_prompt_kwargs",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "[false,\"Daemon 'fixture-job' is not running and cannot be paused.\"]"
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job/pause"
+        }
+      ],
+      "result": [
+        false,
+        "Daemon 'fixture-job' is not running and cannot be paused."
+      ],
+      "step": "pause_job",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "DELETE",
+          "response": {
+            "text": "[true,\"Deleted Job(\\\"fixture-job\\\").\"]"
+          },
+          "status": 200,
+          "url": "/jobs/fixture-job"
+        }
+      ],
+      "result": [
+        true,
+        "Deleted Job(\"fixture-job\")."
+      ],
+      "step": "delete_job",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "{\"detail\":\"Job(\\\"missing-job\\\") does not exist.\"}"
+          },
+          "status": 404,
+          "url": "/jobs/missing-job/start"
+        }
+      ],
+      "result": [
+        false,
+        "Job(\"missing-job\") does not exist."
+      ],
+      "step": "start_job_missing",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": null,
+          "content_type": "application/json",
+          "has_auth": true,
+          "headers": {},
+          "method": "GET",
+          "response": {
+            "text": "{\"detail\":\"Job(\\\"missing-job\\\") doesn't exist.\"}"
+          },
+          "status": 404,
+          "url": "/jobs/missing-job"
+        }
+      ],
+      "result": {},
+      "step": "get_job_missing",
+      "websockets": []
+    },
+    {
+      "error": null,
+      "requests": [
+        {
+          "body": {
+            "text": "{\"action\": [\"version\"], \"noask\": true, \"yes\": true}"
+          },
+          "content_type": "text/plain; charset=utf-8",
+          "has_auth": true,
+          "headers": {},
+          "method": "POST",
+          "response": {
+            "text": "Internal Server Error"
+          },
+          "status": 500,
+          "url": "/actions/show"
+        }
+      ],
+      "result": [
+        false,
+        "Internal Server Error"
+      ],
+      "step": "do_action_legacy",
+      "websockets": []
+    }
+  ],
+  "username": "fixture_admin"
+}

@@ -1,0 +1,13 @@
+project_name: load
+root_dir: ./shared-root
+plugins_dir:
+  - ./shared-plugins
+  - null
+pipes:
+  - connector: sql:local
+    metric: clean
+    instance: sql:local
+    parameters:
+      query: "SELECT * FROM {{ Pipe('plugin:shared', 'raw', instance='sql:local') }}"
+jobs:
+  load: "sync pipes -c sql:local --loop --min-seconds 60"

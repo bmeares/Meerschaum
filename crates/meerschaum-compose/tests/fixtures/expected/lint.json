@@ -1,0 +1,448 @@
+{
+ "case": {
+  "description": "Lint targets: an unknown top-level key, a missing plugins_dir entry, a stale {{ Pipe() }} reference, dtype:/tag: typos, string-typed tags.",
+  "width": 120,
+  "runs": [
+   {
+    "name": "explain",
+    "action": [
+     "explain"
+    ]
+   },
+   {
+    "name": "explain-narrow",
+    "action": [
+     "explain"
+    ],
+    "width": 80
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "lint"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "lint"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/does-not-exist"
+    ],
+    "project_name": "lint",
+    "pipes": [
+     {
+      "connector": "sql:local",
+      "metric": "source",
+      "instance": "sql:local",
+      "parameters": {
+       "columns": {
+        "datetime": "ts"
+       },
+       "dtype": {
+        "value": "float64"
+       },
+       "tag": "legacy",
+       "index": {
+        "station": "station"
+       }
+      }
+     },
+     {
+      "connector": "sql:local",
+      "metric": "derived",
+      "instance": "sql:local",
+      "parameters": {
+       "sql": "SELECT *\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}",
+       "columns": "{{ Pipe('sql:local', 'source', instance='sql:local').columns }}",
+       "indexes": {
+        "id": "id"
+       },
+       "tags": "string-tags-in-parameters"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "lint"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/does-not-exist\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/does-not-exist\"],\"project_name\":\"lint\",\"pipes\":[{\"connector\":\"sql:local\",\"metric\":\"source\",\"instance\":\"sql:local\",\"parameters\":{\"columns\":{\"datetime\":\"ts\"},\"dtype\":{\"value\":\"float64\"},\"tag\":\"legacy\",\"index\":{\"station\":\"station\"}}},{\"connector\":\"sql:local\",\"metric\":\"derived\",\"instance\":\"sql:local\",\"parameters\":{\"sql\":\"SELECT *\\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}\",\"columns\":\"{{ Pipe('sql:local', 'source', instance='sql:local').columns }}\",\"indexes\":{\"id\":\"id\"},\"tags\":\"string-tags-in-parameters\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"lint\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "lint",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"lint\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "sql:local",
+     "metric": "source",
+     "instance": "sql:local",
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "dtype": {
+       "value": "float64"
+      },
+      "tag": "legacy",
+      "index": {
+       "station": "station"
+      }
+     },
+     "tags": [
+      "lint"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "sql:local",
+     "metric": "derived",
+     "instance": "sql:local",
+     "parameters": {
+      "sql": "SELECT *\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}",
+      "columns": "{{ Pipe('sql:local', 'source', instance='sql:local').columns }}",
+      "indexes": {
+       "id": "id"
+      },
+      "tags": "string-tags-in-parameters"
+     },
+     "tags": [
+      "lint"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('sql:local', 'source', instance='sql:local')",
+     "connector_keys": "sql:local",
+     "metric_key": "source",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "dtype": {
+       "value": "float64"
+      },
+      "tag": "legacy",
+      "index": {
+       "station": "station"
+      },
+      "tags": [
+       "lint"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('sql:local', 'derived', instance='sql:local')",
+     "connector_keys": "sql:local",
+     "metric_key": "derived",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT *\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}",
+      "columns": "{{ Pipe('sql:local', 'source', instance='sql:local').columns }}",
+      "indexes": {
+       "id": "id"
+      },
+      "tags": [
+       "lint"
+      ]
+     }
+    }
+   ],
+   "explain": "                                                    Pipes in 'lint'                                                     \n                                                  ╷                                                 ╷                   \n  Defined Pipes                                   │Compose Parameters                               │Remote Parameters  \n╶─────────────────────────────────────────────────┼─────────────────────────────────────────────────┼──────────────────╴\n  ╭───────────────── Instance ──────────────────╮ │                                                 │                   \n  │ sql:local                                   │ │                                                 │                   \n  ╰─────────────────────────────────────────────╯ │                                                 │                   \n                                                  │                                                 │                   \n  Pipe('sql:local', 'source',                     │{                                                │                   \n  instance='sql:local')                           │  \"columns\": {                                   │                   \n                                                  │    \"datetime\": \"ts\"                             │                   \n  ⭕ Not registered                               │  },                                             │                   \n                                                  │  \"dtype\": {                                     │                   \n                                                  │    \"value\": \"float64\"                           │                   \n                                                  │  },                                             │                   \n                                                  │  \"tag\": \"legacy\",                               │                   \n                                                  │  \"index\": {                                     │                   \n                                                  │    \"station\": \"station\"                         │                   \n                                                  │  },                                             │                   \n                                                  │  \"tags\": [                                      │                   \n                                                  │    \"lint\"                                       │                   \n                                                  │  ]                                              │                   \n                                                  │}                                                │                   \n                                                  │                                                 │                   \n  Pipe('sql:local', 'derived',                    │{                                                │                   \n  instance='sql:local')                           │  \"sql\": \"SELECT *\\nFROM {{ Pipe('sql:local', '… │                   \n                                                  │  \"columns\": \"{{ Pipe('sql:local', 'source', in… │                   \n  ⭕ Not registered                               │  \"indexes\": {                                   │                   \n                                                  │    \"id\": \"id\"                                   │                   \n                                                  │  },                                             │                   \n                                                  │  \"tags\": [                                      │                   \n                                                  │    \"lint\"                                       │                   \n                                                  │  ]                                              │                   \n                                                  │}                                                │                   \n                                                  ╵                                                 ╵                   \n",
+   "written_files": {},
+   "config_hash_normalized": "96f2ed6b78a5f38c0e1d50aa7d10d2b77964326973432c144637702fc612fc43"
+  },
+  {
+   "name": "explain-narrow",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 80,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "lint"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "lint"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/does-not-exist"
+    ],
+    "project_name": "lint",
+    "pipes": [
+     {
+      "connector": "sql:local",
+      "metric": "source",
+      "instance": "sql:local",
+      "parameters": {
+       "columns": {
+        "datetime": "ts"
+       },
+       "dtype": {
+        "value": "float64"
+       },
+       "tag": "legacy",
+       "index": {
+        "station": "station"
+       }
+      }
+     },
+     {
+      "connector": "sql:local",
+      "metric": "derived",
+      "instance": "sql:local",
+      "parameters": {
+       "sql": "SELECT *\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}",
+       "columns": "{{ Pipe('sql:local', 'source', instance='sql:local').columns }}",
+       "indexes": {
+        "id": "id"
+       },
+       "tags": "string-tags-in-parameters"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "lint"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/does-not-exist\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/does-not-exist\"],\"project_name\":\"lint\",\"pipes\":[{\"connector\":\"sql:local\",\"metric\":\"source\",\"instance\":\"sql:local\",\"parameters\":{\"columns\":{\"datetime\":\"ts\"},\"dtype\":{\"value\":\"float64\"},\"tag\":\"legacy\",\"index\":{\"station\":\"station\"}}},{\"connector\":\"sql:local\",\"metric\":\"derived\",\"instance\":\"sql:local\",\"parameters\":{\"sql\":\"SELECT *\\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}\",\"columns\":\"{{ Pipe('sql:local', 'source', instance='sql:local').columns }}\",\"indexes\":{\"id\":\"id\"},\"tags\":\"string-tags-in-parameters\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"lint\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "lint",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"lint\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "sql:local",
+     "metric": "source",
+     "instance": "sql:local",
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "dtype": {
+       "value": "float64"
+      },
+      "tag": "legacy",
+      "index": {
+       "station": "station"
+      }
+     },
+     "tags": [
+      "lint"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "sql:local",
+     "metric": "derived",
+     "instance": "sql:local",
+     "parameters": {
+      "sql": "SELECT *\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}",
+      "columns": "{{ Pipe('sql:local', 'source', instance='sql:local').columns }}",
+      "indexes": {
+       "id": "id"
+      },
+      "tags": "string-tags-in-parameters"
+     },
+     "tags": [
+      "lint"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('sql:local', 'source', instance='sql:local')",
+     "connector_keys": "sql:local",
+     "metric_key": "source",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "dtype": {
+       "value": "float64"
+      },
+      "tag": "legacy",
+      "index": {
+       "station": "station"
+      },
+      "tags": [
+       "lint"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('sql:local', 'derived', instance='sql:local')",
+     "connector_keys": "sql:local",
+     "metric_key": "derived",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT *\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}",
+      "columns": "{{ Pipe('sql:local', 'source', instance='sql:local').columns }}",
+      "indexes": {
+       "id": "id"
+      },
+      "tags": [
+       "lint"
+      ]
+     }
+    }
+   ],
+   "explain": "                                Pipes in 'lint'                                 \n                              ╷                             ╷                   \n  Defined Pipes               │Compose Parameters           │Remote Parameters  \n╶─────────────────────────────┼─────────────────────────────┼──────────────────╴\n  ╭─────── Instance ────────╮ │                             │                   \n  │ sql:local               │ │                             │                   \n  ╰─────────────────────────╯ │                             │                   \n                              │                             │                   \n  Pipe('sql:local', 'source', │{                            │                   \n  instance='sql:local')       │  \"columns\": {               │                   \n                              │    \"datetime\": \"ts\"         │                   \n  ⭕ Not registered           │  },                         │                   \n                              │  \"dtype\": {                 │                   \n                              │    \"value\": \"float64\"       │                   \n                              │  },                         │                   \n                              │  \"tag\": \"legacy\",           │                   \n                              │  \"index\": {                 │                   \n                              │    \"station\": \"station\"     │                   \n                              │  },                         │                   \n                              │  \"tags\": [                  │                   \n                              │    \"lint\"                   │                   \n                              │  ]                          │                   \n                              │}                            │                   \n                              │                             │                   \n  Pipe('sql:local',           │{                            │                   \n  'derived',                  │  \"sql\": \"SELECT *\\nFROM {{… │                   \n  instance='sql:local')       │  \"columns\": \"{{ Pipe('sql:… │                   \n                              │  \"indexes\": {               │                   \n  ⭕ Not registered           │    \"id\": \"id\"               │                   \n                              │  },                         │                   \n                              │  \"tags\": [                  │                   \n                              │    \"lint\"                   │                   \n                              │  ]                          │                   \n                              │}                            │                   \n                              ╵                             ╵                   \n",
+   "written_files": {},
+   "config_hash_normalized": "96f2ed6b78a5f38c0e1d50aa7d10d2b77964326973432c144637702fc612fc43"
+  }
+ ]
+}

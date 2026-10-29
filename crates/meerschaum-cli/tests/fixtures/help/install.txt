@@ -1,0 +1,5 @@
+
+Install Meerschaum plugins or Python packages.
+
+    Options:
+        `install [packages, plugins, required]`

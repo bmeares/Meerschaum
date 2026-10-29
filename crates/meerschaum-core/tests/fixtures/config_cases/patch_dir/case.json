@@ -1,0 +1,8 @@
+{
+  "env": {},
+  "queries": [
+    {"keys": ["custom"]},
+    {"keys": ["custom", "b", "e"]},
+    {"keys": []}
+  ]
+}

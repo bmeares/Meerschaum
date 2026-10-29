@@ -1,0 +1,5 @@
+
+Uninstall Meerschaum plugins or Python packages.
+
+    Options:
+        `uninstall [packages, plugins]`

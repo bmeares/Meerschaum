@@ -8,15 +8,10 @@ User class definition
 
 from __future__ import annotations
 
-import os
-import hashlib
-import hmac
 import uuid
-from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Dict, Any, Union, List
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Tuple
 
 
 __all__ = ('hash_password', 'verify_password', 'User')
@@ -49,27 +44,8 @@ def hash_password(
     See the `passlib` documentation on the string format:
     https://passlib.readthedocs.io/en/stable/lib/passlib.hash.pbkdf2_digest.html#format-algorithm
     """
-    from meerschaum._internal.static import STATIC_CONFIG
-    hash_config = STATIC_CONFIG['users']['password_hash']
-    if password is None:
-        password = ''
-    if salt is None:
-        salt = os.urandom(hash_config['salt_bytes'])
-    if rounds is None:
-        rounds = hash_config['pbkdf2_sha256__default_rounds']
-
-    pw_hash = hashlib.pbkdf2_hmac(
-        hash_config['algorithm_name'],
-        password.encode('utf-8'),
-        salt,
-        rounds,
-    ) 
-    return (
-        f"$pbkdf2-{hash_config['algorithm_name']}"
-        + f"${rounds}"
-        + '$' + ab64_encode(salt).decode('utf-8')
-        + '$' + ab64_encode(pw_hash).decode('utf-8')
-    )
+    from meerschaum._core import hash_password as _hash_password
+    return _hash_password(password, salt=salt, rounds=rounds)
 
 
 def verify_password(
@@ -91,80 +67,8 @@ def verify_password(
     -------
     A `bool` indicating whether `password` matches `password_hash`.
     """
-    from meerschaum._internal.static import STATIC_CONFIG
-    if password is None or password_hash is None:
-        return False
-    try:
-        digest, rounds_str, encoded_salt, encoded_checksum = password_hash.split('$')[1:]
-        algorithm_name = digest.split('-')[-1]
-        salt = ab64_decode(encoded_salt)
-        checksum = ab64_decode(encoded_checksum)
-        rounds = int(rounds_str)
-    except Exception:
-        warn(f"Failed to extract context from password hash '{password_hash}'. Is it corrupted?")
-        return False
-
-    return hmac.compare_digest(
-        checksum,
-        hashlib.pbkdf2_hmac(
-            algorithm_name,
-            password.encode('utf-8'),
-            salt,
-            rounds,
-        )
-    )
-
-_BASE64_STRIP = b"=\n"
-_BASE64_PAD1 = b"="
-_BASE64_PAD2 = b"=="
-
-
-def ab64_encode(data):
-    return b64s_encode(data).replace(b"+", b".")
-
-
-def ab64_decode(data):
-    """
-    decode from shortened base64 format which omits padding & whitespace.
-    uses custom ``./`` altchars, but supports decoding normal ``+/`` altchars as well.
-    """
-    if isinstance(data, str):
-        # needs bytes for replace() call, but want to accept ascii-unicode ala a2b_base64()
-        try:
-            data = data.encode("ascii")
-        except UnicodeEncodeError:
-            raise ValueError("string argument should contain only ASCII characters")
-    return b64s_decode(data.replace(b".", b"+"))
-
-
-def b64s_encode(data):
-    return b2a_base64(data).rstrip(_BASE64_STRIP)
-
-
-def b64s_decode(data):
-    """
-    decode from shortened base64 format which omits padding & whitespace.
-    uses default ``+/`` altchars.
-    """
-    if isinstance(data, str):
-        # needs bytes for replace() call, but want to accept ascii-unicode ala a2b_base64()
-        try:
-            data = data.encode("ascii")
-        except UnicodeEncodeError as ue:
-            raise ValueError("string argument should contain only ASCII characters") from ue
-    off = len(data) & 3
-    if off == 0:
-        pass
-    elif off == 2:
-        data += _BASE64_PAD2
-    elif off == 3:
-        data += _BASE64_PAD1
-    else:  # off == 1
-        raise ValueError("Invalid base64 input")
-    try:
-        return a2b_base64(data)
-    except _BinAsciiError as err:
-        raise TypeError(err) from err
+    from meerschaum._core import verify_password as _verify_password
+    return _verify_password(password, password_hash)
 
 
 class User:
@@ -245,14 +149,142 @@ class User:
 
     def get_scopes(self, refresh: bool = False, debug: bool = False) -> List[str]:
         """
-        Return the scopes for this user.
+        Return the scopes (permissions) this user holds: every permission for an administrator;
+        `attributes['scopes']` when set (a literal `'*'` is kept: every scope, plugins' and
+        future ones included); otherwise the permissions of their role (`attributes['role']`,
+        else the instance's default role, `api:permissions:default_role`).
+
+        Meerschaum 4 gave every scope to a user without a `scopes` attribute; the default role
+        now decides (`'editor'` unless configured).
+
+        Parameters
+        ----------
+        refresh: bool, default False
+            If `True`, read the user's attributes (and type) from the instance again. A read
+            that fails raises.
+
+        Returns
+        -------
+        A list of scope names.
         """
-        from meerschaum._internal.static import STATIC_CONFIG
-        _attributes = self.get_attributes(refresh=refresh, debug=debug)
-        return _attributes.get('scopes', None) or list(STATIC_CONFIG['tokens']['scopes'])
+        from meerschaum.core.access import user_permissions
+        attributes = self.get_attributes(refresh=refresh, debug=debug)
+        scopes = attributes.get('scopes', None)
+        if isinstance(scopes, (list, tuple)) and '*' in scopes:
+            return ['*']
+        user_type = self.type
+        if not user_type and (refresh or not attributes):
+            user_type = self._stored_type(debug=debug)
+        return user_permissions(user_type, attributes)
 
     def register(self, debug: bool = False, **kwargs: Any) -> mrsm.SuccessTuple:
         """
         Register a user to the instance connector.
         """
         return self.instance_connector.register_user(self, debug=debug, **kwargs)
+
+    # ------------------------------------------------------------------------------------------
+    # The access model (`meerschaum.core.access`)
+    # ------------------------------------------------------------------------------------------
+
+    def _stored_type(self, debug: bool = False) -> Optional[str]:
+        if self.type:
+            return self.type
+        try:
+            return self.instance_connector.get_user_type(self, debug=debug)
+        except Exception:
+            return None
+
+    def _stored_attributes(self, debug: bool = False) -> Dict[str, Any]:
+        ### Attributes given (or set) here win; an empty dictionary (`User.attributes` starts as
+        ### one) means they were never read.
+        ### A read that fails raises: guessing could grant the default role's permissions to a
+        ### user whose own are fewer.
+        if self._attributes:
+            return self._attributes
+        return self.instance_connector.get_user_attributes(self, debug=debug) or {}
+
+    @property
+    def permissions(self) -> List[str]:
+        """
+        The user's effective permissions: every permission for an administrator, their explicit
+        permissions (`attributes['scopes']`), else their role's (`attributes['role']`, else the
+        default role `api:permissions:default_role`). Through an `api:` instance, the server's
+        answer. A user whose attributes were set here is computed from them.
+        """
+        from meerschaum.core.access import user_permissions
+        if not self._attributes and not self.type:
+            getter = getattr(self.instance_connector, 'get_user_permissions', None)
+            if callable(getter):
+                return list(getter(self))
+        return user_permissions(self._stored_type(), self._stored_attributes())
+
+    @permissions.setter
+    def permissions(self, permissions: List[str]) -> None:
+        """Set explicit permissions in memory (`set_permissions()` saves them)."""
+        from meerschaum.core.access import attributes_with_permissions
+        self._attributes = attributes_with_permissions(self._stored_attributes(), permissions)
+
+    @property
+    def role(self) -> str:
+        """
+        The user's role: `'admin'` for administrators, else `'viewer'`, `'editor'` or
+        `'operator'` (the preset their permissions equal or their stored role), or `'custom'`
+        for explicit permissions that are no preset.
+        """
+        from meerschaum.core.access import user_role
+        if not self._attributes and not self.type:
+            getter = getattr(self.instance_connector, 'get_user_role', None)
+            if callable(getter):
+                return str(getter(self))
+        return user_role(self._stored_type(), self._stored_attributes())
+
+    @role.setter
+    def role(self, role: str) -> None:
+        """Set a role preset in memory (`set_role()` saves it)."""
+        from meerschaum.core.access import attributes_with_role
+        self._attributes = attributes_with_role(self._stored_attributes(), str(role))
+
+    def set_role(self, role: str, debug: bool = False) -> mrsm.SuccessTuple:
+        """
+        Give the user a role preset (`'viewer'`, `'editor'` or `'operator'`) and save it: its
+        permissions apply from then on (explicit permissions are removed). Administrators are
+        made by their user type, not a role.
+        """
+        role = str(role).strip().lower()
+        if role not in ('viewer', 'editor', 'operator'):
+            return False, (
+                f"Invalid role '{role}': use 'viewer', 'editor' or 'operator' "
+                "(administrators are made by their user type)."
+            )
+        if (self._stored_type(debug=debug) or '').lower() == 'admin':
+            return False, f"'{self.username}' is an administrator: change their user type first."
+        self.role = role
+        return self.instance_connector.set_user_attributes(self, self._attributes, debug=debug)
+
+    def set_permissions(self, permissions: List[str], debug: bool = False) -> mrsm.SuccessTuple:
+        """
+        Give the user explicit permissions (see `meerschaum.core.access.ALL_PERMISSIONS`) and
+        save them.
+        """
+        from meerschaum.core.access import ALL_PERMISSIONS
+        unknown = [p for p in permissions if p not in ALL_PERMISSIONS and p != '*']
+        if unknown:
+            return False, "Unknown permissions: " + ', '.join(f"'{p}'" for p in unknown) + "."
+        self.permissions = list(permissions)
+        return self.instance_connector.set_user_attributes(self, self._attributes, debug=debug)
+
+    @property
+    def teams(self) -> List[Tuple[str, str]]:
+        """The user's teams as `(team, role)` pairs, `Everyone` first."""
+        return [tuple(pair) for pair in self.instance_connector.get_user_teams(self)]
+
+    @property
+    def primary_team(self) -> str:
+        """
+        The user's primary team (the default team of the pipes they create):
+        `attributes['primary_team']` when they are in it, else their first team other than
+        `Everyone`, else `Everyone`.
+        """
+        from meerschaum.core.access import primary_team
+        return primary_team(self._stored_attributes(), self.teams)

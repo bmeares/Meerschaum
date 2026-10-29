@@ -1,5 +1,19 @@
 name: buildx
 
+# Builds slim/minimal (base Python wheel), full (native CLI, Python extras, both toolchains),
+# rust (Python-free runtime), and rust-full (Python-free with the Rust toolchain), then runs
+# native/offline runtime smokes and size gates for all four targets. api aliases full.
+#
+# All Docker builds run on self-hosted Linux x86_64 runners. Prereleases build amd64 only;
+# finals also build arm64 under QEMU. Each architecture has a persistent, resource-limited
+# BuildKit cache. Jobs and runs are serialized because the runners share a Docker daemon.
+# The publish job merges exactly the architectures selected from the Cargo version.
+# Prereleases only get version-qualified tags; floating tags remain unchanged.
+#
+# The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`
+# exceeds 250 MB or `full` exceeds 2500 MB (uncompressed, `docker image inspect`). `warn` only
+# reports (use it to look at a branch that is over budget); `skip` does not measure.
+
 on:
   workflow_dispatch:
     inputs:
@@ -7,29 +21,151 @@ on:
         description: 'Publish the images to DockerHub.'
         type: boolean
         default: false
+      v4_only:
+        description: 'Build only the default-target images per dep group (no slim).'
+        type: boolean
+        default: false
+      size_gate:
+        description: 'Size gate mode (slim ≤ 250 MB, full ≤ 2500 MB; rust ≤ 250 MB; rust-full ≤ 1600 MB): enforce fails the run, warn only reports.'
+        type: choice
+        options: [ enforce, warn, skip ]
+        default: enforce
   # pull_request:
     # branches: main
   # push:
     # branches: main
     # tags:
 
+permissions:
+  contents: read
+
+# Shared daemon, image tags and persistent builders: never overlap two release builds.
+concurrency:
+  group: mrsm-docker-release
+  cancel-in-progress: false
+
 jobs:
-  buildx:
+  metadata:
+    name: Docker release platforms
     runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.matrix.outputs.docker }}
+      platforms: ${{ steps.matrix.outputs.docker_platforms }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Select release platforms
+        id: matrix
+        run: python scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"
+
+  buildx:
+    name: buildx (${{ matrix.arch }})
+    needs: metadata
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 720
+    env:
+      # Keep login credentials and builder selection out of the user's Docker config.
+      PYTHON_BIN: python3
+      BUILDX_BUILDER: meerschaum-release-${{ matrix.arch }}
+      DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.metadata.outputs.docker) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install python3
-        uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          persist-credentials: false
+          clean: false
 
-      - name: Set up QEMU
+      - name: Clean the build context, preserving other CI caches
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+
+      - name: Isolate Docker configuration
+        run: |
+          docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
+          echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
+
+      # setup-python's downloaded interpreters do not support every self-hosted Linux distro.
+      # The orchestration scripts use only the standard library; the image builds its own Python.
+      - name: Check host Python
+        run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
+
+      - name: Set up ARM64 emulation
+        if: matrix.arch == 'arm64'
         uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          name: meerschaum-release-${{ matrix.arch }}
+          use: false
+          keep-state: true
+          driver-opts: |
+            memory=64g
+            cpu-period=100000
+            cpu-quota=1600000
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 16
+              reservedSpace = "10GB"
+              maxUsedSpace = "100GB"
+              minFreeSpace = "30GB"
+
+      # Load and test the requested architecture, including under QEMU for arm64.
+      - name: Build Docker images
+        id: build
+        run: ./scripts/docker/buildx.sh --platform ${{ matrix.platform }} ${{ inputs.v4_only && '--v4-only' || '' }}
+
+      - name: Size gate
+        if: ${{ !inputs.v4_only && inputs.size_gate != 'skip' }}
+        env:
+          # `inputs` is empty on events other than workflow_dispatch: default to enforcing.
+          SIZE_GATE_MODE: ${{ inputs.size_gate || 'enforce' }}
+          SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
+          FULL_IMAGE: ${{ steps.build.outputs.full_image }}
+          RUST_IMAGE: ${{ steps.build.outputs.rust_image }}
+          RUST_FULL_IMAGE: ${{ steps.build.outputs.rust_full_image }}
+        run: |
+          args=(--slim-image "$SLIM_IMAGE" --full-image "$FULL_IMAGE" --slim-max 250 --full-max 2500 --rust-image "$RUST_IMAGE" --rust-full-image "$RUST_FULL_IMAGE" --rust-max 250 --rust-full-max 1600)
+          if [ "$SIZE_GATE_MODE" = "warn" ]; then
+            args+=(--warn-only)
+          fi
+          ./scripts/docker/size_gate.sh "${args[@]}"
+
+      # Release skill §5.7: the base wheel must serve its public operations offline, on a read-only
+      # filesystem, with installs disabled (scripts/docker/smoke_facade.py exits nonzero otherwise).
+      # The slim rootfs ships `python3` (also as `python`) and `bash`.
+      - name: Facade smoke (slim)
+        if: ${{ !inputs.v4_only }}
+        env:
+          SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
+        run: |
+          [ -n "$SLIM_IMAGE" ] || { echo "No slim image was built." >&2; exit 1; }
+          docker run --rm --network none --read-only --tmpfs /scratch \
+            -e MRSM_NO_AUTO_INSTALL=1 -e MRSM_ROOT_DIR=/scratch/root -e MRSM_PLUGINS_DIR=/scratch/plugins \
+            -v "$PWD/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
+            --entrypoint python3 "$SLIM_IMAGE" -I -c '
+          import importlib.util
+          import runpy
+          import site
+          import sys
+          from pathlib import Path
+          for directory in ("/scratch/root", "/scratch/plugins"):
+              Path(directory).mkdir(parents=True, exist_ok=True)
+          sites = [Path(p).resolve() for p in site.getsitepackages(["/usr/local"]) if Path(p).is_dir()]
+          assert sites and all(p.is_relative_to("/usr/local") and p.name == "site-packages" for p in sites), sites
+          sys.path[:0] = [str(p) for p in sites]
+          spec = importlib.util.find_spec("meerschaum")
+          assert spec and spec.origin and any(Path(spec.origin).resolve().is_relative_to(p) for p in sites), spec
+          runpy.run_path("/smoke_facade.py", run_name="__main__")
+          '
 
       - name: Login to DockerHub
         if: inputs.publish
@@ -38,10 +174,73 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build Docker images
-        if: ${{ !inputs.publish }}
-        run: ./scripts/docker/buildx.sh
-
-      - name: Build and publish Docker images
+      # Reuses the builder's layer cache from the build step above. Only the architecture's own
+      # `<version>-<tag>-<arch>` tags are pushed here; the `publish` job joins them.
+      - name: Publish this architecture's images
         if: inputs.publish
-        run: ./scripts/docker/buildx.sh --push
+        run: |
+          ./scripts/docker/buildx.sh --push --arch-tags --platform ${{ matrix.platform }} \
+            ${{ inputs.v4_only && '--v4-only' || '' }}
+
+  # Joins the architectures' images into the published tags. Runs only for a publish, and only when
+  # every architecture built, passed its gates and pushed.
+  publish:
+    name: publish (multi-architecture tags)
+    needs: [metadata, buildx]
+    if: ${{ inputs.publish }}
+    runs-on: [self-hosted, Linux, X64]
+    env:
+      PYTHON_BIN: python3
+      EXPECTED_PLATFORMS: ${{ needs.metadata.outputs.platforms }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with: { persist-credentials: false, clean: false }
+
+      - name: Isolate Docker configuration
+        run: |
+          docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
+          echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
+
+      # setup-python's downloaded interpreters do not support every self-hosted Linux distro.
+      # The orchestration scripts use only the standard library; the image builds its own Python.
+      - name: Check host Python
+        run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          use: false
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create the multi-architecture tags
+        run: ./scripts/docker/buildx.sh --merge ${{ inputs.v4_only && '--v4-only' || '' }}
+
+      - name: Check the published platforms
+        env:
+          V4_ONLY: ${{ inputs.v4_only }}
+        run: |
+          version="$(python3 scripts/check_packaging.py --version)"
+          groups="minimal full"
+          if [ "$V4_ONLY" != true ]; then groups="$groups slim rust rust-full"; fi
+          for group in $groups; do
+            docker buildx imagetools inspect --raw "bmeares/meerschaum:$version-$group" > manifest.json
+            python3 - <<'PY'
+          import json, os
+          with open('manifest.json') as stream:
+              manifest = json.load(stream)
+          platforms = {
+              p['os'] + '/' + p['architecture']
+              for m in manifest['manifests']
+              if (p := m.get('platform', {})).get('os') == 'linux'
+          }
+          expected = set(os.environ['EXPECTED_PLATFORMS'].split(','))
+          assert platforms == expected, (platforms, expected)
+          print('Verified platforms:', ', '.join(sorted(platforms)))
+          PY
+          done

@@ -9,7 +9,7 @@ hide:
 Below is a list of common questions and issues you may encounter. If you have suggestions, please join the [FAQ Suggestions discussion on the GitHub repository](https://github.com/bmeares/Meerschaum/discussions/46)!
 
 ??? faq "How do I upgrade to the latest version?"
-    You can install the latest version of Meerschaum with `pip install --upgrade meerschaum` or the command `mrsm upgrade mrsm`, which installs the latest version from PyPI and pulls the latest Docker images.
+    You can install the latest version of Meerschaum with `pip install --upgrade meerschaum` or the command `mrsm upgrade mrsm`, which upgrades the installation `mrsm` runs from (pip, uv, pipx, Cargo or a downloaded binary) and, when Docker is available, pulls the stack's images. Inside a Docker container, pull the new image and recreate the container instead (see the [migration guide](/reference/migrating-to-v5/#upgrading-an-installation)).
 
 ??? faq "`mrsm` doesn't work!"
     You can invoke `mrsm` directly with `python -m meerschaum`. Check that your `PATH` includes scripts installed by `pip`, such as `~/.local/bin`.
@@ -40,22 +40,16 @@ Below is a list of common questions and issues you may encounter. If you have su
     If you are planning on integrating Meerschaum into your Python scripts, you can access actions directly via the `meerschaum.actions.actions` dictionary. Please consult [the Python package documentation](https://docs.meerschaum.io) for more information. Also, you might want to consider making your script into a [Meerschaum action by writing an action plugin](/reference/plugins/types-of-plugins/#action-plugins).
 
 ??? faq "Connectors don't work for `<database flavor>`!"
-    Connectors use `sqlalchemy` Engines under the hood, and here is the [list of supported database flavors](https://github.com/bmeares/Meerschaum/blob/5b91293b378a41aee82c85db541f46248baaac7c/meerschaum/connectors/sql/_create_engine.py#L146) (e.g. `mssql`, `mysql`, `oracle`, `postgresql`, `sqlite`, `duckdb`, `citus`, `cockroachdb`, `mariadb`, `timescaledb`). If your database flavor isn't listed, you might be able to use a supported flavor that shares a driver (e.g. `postgresql` is a commonly shared flavor).
+    Pipe operations run through Meerschaum's own Rust drivers, which support these flavors: `timescaledb`, `timescaledb-ha`, `postgresql`, `postgis`, `citus`, `cockroachdb`, `mssql`, `mysql`, `mariadb`, `oracle`, `sqlite`, `geopackage` and `duckdb` (see [Supported Flavors](/reference/connectors/sql-connectors/#supported-flavors)). If your database isn't listed, you might be able to use a supported flavor that speaks the same protocol (e.g. `postgresql` is a commonly shared flavor).
 
-    In cases like Microsoft SQL server or Oracle SQL, make sure you have the appropriate drivers installed. [Here is a utility script I wrote to automatically install Microsoft and Oracle drivers](https://raw.githubusercontent.com/bmeares/Meerschaum/main/scripts/drivers.sh) (currently supports Ubuntu / Debian and Fedora / CentOS / RHEL):
+    Most flavors need nothing else installed. Microsoft SQL Server needs no ODBC driver. Two flavors need a client library:
 
-    ```bash
-    curl -sf -L https://raw.githubusercontent.com/bmeares/Meerschaum/main/scripts/drivers.sh -o drivers.sh
-    chmod +x drivers.sh
-    sudo ./drivers.sh
-    ```
+    - **Oracle** needs [Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client.html) (`libclntsh`) on the loader path; see [Oracle SQL](/reference/connectors/sql-connectors/#oracle-sql).
+    - **DuckDB** uses the `meerschaum[sql-duckdb]` extra in Python, or downloads DuckDB's own library on first use; see [DuckDB](/reference/connectors/sql-connectors/#duckdb).
 
-    Here are the driver links if you want to manually install them:
+    Run `mrsm show drivers` to see whether these libraries were found, and `mrsm doctor` for a full health check.
 
-      - [Microsoft SQL Server](https://docs.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server?view=sql-server-ver15)
-      - [Oracle SQL](https://docs.oracle.com/en/database/oracle/oracle-database/19/cwlin/installing-odbc-drivers-for-linux-x86-64.html)
-
-    Additionally, for Meerschaum to install `pyodbc`, you may need `g++` and `gcc` installed:
+    Raw SQL from Python (`conn.read()`, `conn.exec()`, `conn.engine`) still goes through SQLAlchemy and needs the `meerschaum[sql]` extra, plus `meerschaum[sql-mssql]` (`pyodbc`, which needs Microsoft's [ODBC driver](https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server)) or `meerschaum[sql-oracle]` for those flavors.
 
 ??? faq "How do I completely uninstall Meerschaum?"
     - Take down your stack and delete its data with `mrsm stack down -v`.

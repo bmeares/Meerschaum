@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meerschaum.io/schemas/plugins-manifest/1",
+  "title": "Meerschaum plugin manifest",
+  "description": "Built by a Python worker (`build_manifest`), cached by the Rust host at <root>/cache/plugins_manifest.json and keyed by the fingerprints of the plugin source trees (design §4.3).",
+  "type": "object",
+  "required": ["schema_version", "meerschaum_version", "python_version", "fingerprint", "plugins"],
+  "properties": {
+    "schema_version": {"const": 5},
+    "meerschaum_version": {"type": "string"},
+    "python_version": {"type": "string"},
+    "python_executable": {"type": ["string", "null"]},
+    "fingerprint": {
+      "description": "SHA-256 over every plugin's name and fingerprint, in discovery order.",
+      "type": ["string", "null"]
+    },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/plugin"}
+    },
+    "connector_types": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/connector_type"}
+    },
+    "executor_types": {
+      "description": "Job executor types (`<type>:<label>` executor keys) provided by native plugins.",
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/executor_type"}
+    },
+    "api_plugins": {"$ref": "#/$defs/names", "description": "Plugins with @api_plugin functions."},
+    "dash_plugins": {"$ref": "#/$defs/names", "description": "Plugins with @dash_plugin functions."},
+    "web_pages": {"$ref": "#/$defs/names", "description": "Plugins with @web_page layouts."},
+    "mcp_tools": {"$ref": "#/$defs/names", "description": "Plugins registering MCP tools, resources or prompts."},
+    "console": {"type": "boolean", "description": "The Dash web console is served: the API host runs for it even when no plugin needs it (written by the server's start-up probe, never by a worker)."},
+    "pre_sync_hooks": {"$ref": "#/$defs/names"},
+    "post_sync_hooks": {"$ref": "#/$defs/names"},
+    "load_errors": {"type": "object", "additionalProperties": {"type": "string"}},
+    "entry_point_plugins": {
+      "$ref": "#/$defs/names",
+      "description": "Entry-point plugins (the `meerschaum.plugins` group) the interpreter had when the manifest was built; a different set makes the cache stale."
+    }
+  },
+  "$defs": {
+    "names": {"type": "array", "items": {"type": "string"}},
+    "nullable_string": {"type": ["string", "null"]},
+    "plugin": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"$ref": "#/$defs/nullable_string"},
+        "path": {"$ref": "#/$defs/nullable_string"},
+        "required": {"$ref": "#/$defs/names"},
+        "data_functions": {
+          "type": "array",
+          "items": {"enum": ["fetch", "sync", "register", "setup", "subscribe"]}
+        },
+        "actions": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        "arguments": {"type": "array", "items": {"$ref": "#/$defs/argument"}},
+        "pre_sync_hooks": {"$ref": "#/$defs/names"},
+        "post_sync_hooks": {"$ref": "#/$defs/names"},
+        "api_plugins": {"$ref": "#/$defs/names"},
+        "api_routes": {"description": "Routes of a native plugin, served by the `api_route` call kind.", "type": "array", "items": {"$ref": "#/$defs/api_route"}},
+        "dash_plugins": {"$ref": "#/$defs/names"},
+        "web_pages": {"type": "array", "items": {"$ref": "#/$defs/web_page"}},
+        "mcp_tools": {"type": "array", "items": {"$ref": "#/$defs/mcp_tool"}},
+        "mcp_resources": {"type": "array", "items": {"$ref": "#/$defs/mcp_resource"}},
+        "mcp_prompts": {"type": "array", "items": {"$ref": "#/$defs/mcp_prompt"}},
+        "connectors": {"$ref": "#/$defs/names"},
+        "import_error": {"$ref": "#/$defs/nullable_string"},
+        "venv_warnings": {"description": "Static attempt_import findings (D20).", "type": "array", "items": {"type": "string"}},
+        "fingerprint": {
+          "description": "SHA-256 over the plugin tree's relative paths, sizes and mtimes (excluding __pycache__ and .pyc).",
+          "$ref": "#/$defs/nullable_string"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "doc": {"$ref": "#/$defs/nullable_string"},
+        "daemon": {"type": "boolean"},
+        "has_completer": {"type": "boolean"},
+        "words": {"$ref": "#/$defs/names", "description": "The words that run the action (`@make_action(name='weather wait')`, else the name split on `_`)."},
+        "handles_loop": {"type": "boolean", "description": "The action function takes a `loop` parameter: it repeats itself with `--loop`, so the host does not run it in laps (written by the host's worker extension)."},
+        "subactions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}, "doc": {"$ref": "#/$defs/nullable_string"}}
+          }
+        }
+      }
+    },
+    "argument": {
+      "type": "object",
+      "required": ["option_strings", "action"],
+      "properties": {
+        "option_strings": {"$ref": "#/$defs/names"},
+        "dest": {"$ref": "#/$defs/nullable_string"},
+        "action": {"type": "string"},
+        "nargs": {},
+        "const": {},
+        "default": {},
+        "type": {"$ref": "#/$defs/nullable_string"},
+        "choices": {},
+        "required": {"type": "boolean"},
+        "help": {"$ref": "#/$defs/nullable_string"},
+        "metavar": {}
+      }
+    },
+    "web_page": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {"type": "string"},
+        "page_group": {"$ref": "#/$defs/nullable_string"},
+        "page_key": {"$ref": "#/$defs/nullable_string"},
+        "login_required": {"type": "boolean"},
+        "skip_navbar": {"type": "boolean"},
+        "dark_theme": {"type": "boolean"},
+        "function": {"$ref": "#/$defs/nullable_string"},
+        "mode": {"enum": ["html", "dash"]},
+        "route": {"$ref": "#/$defs/nullable_string"},
+        "host_scopes": {"$ref": "#/$defs/names", "description": "Scopes the page's host calls have for every viewer, on top of the viewer's own (not `*`)."}
+      }
+    },
+    "mcp_tool": {
+      "type": "object",
+      "required": ["name", "description", "input_schema"],
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "input_schema": {"type": "object"},
+        "output_schema": {},
+        "scopes": {"$ref": "#/$defs/names"},
+        "title": {"$ref": "#/$defs/nullable_string"},
+        "annotations": {"type": "object"}
+      }
+    },
+    "api_route": {
+      "type": "object",
+      "required": ["name", "path"],
+      "properties": {
+        "name": {"type": "string"},
+        "method": {"type": "string", "description": "An HTTP method or `*` (default `GET`)."},
+        "path": {"type": "string", "description": "Starlette syntax: one `{name}` (or `{name:int|float|uuid|str}`) parameter per segment with an optional static prefix and suffix, and a final `{*rest}` or `{rest:path}` catch-all."},
+        "scopes": {"$ref": "#/$defs/names"},
+        "public": {"type": "boolean", "description": "Served without credentials; a public route may not declare `scopes`."},
+        "host_scopes": {"$ref": "#/$defs/names", "description": "Scopes the route's host calls have for every caller, on top of the caller's own (not `*`)."},
+        "description": {"$ref": "#/$defs/nullable_string"}
+      }
+    },
+    "mcp_resource": {
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "uri": {"$ref": "#/$defs/nullable_string"},
+        "uri_template": {"$ref": "#/$defs/nullable_string"},
+        "mime_type": {"$ref": "#/$defs/nullable_string"},
+        "scopes": {"$ref": "#/$defs/names"},
+        "title": {"$ref": "#/$defs/nullable_string"}
+      }
+    },
+    "mcp_prompt": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"$ref": "#/$defs/nullable_string"},
+        "title": {"$ref": "#/$defs/nullable_string"},
+        "scopes": {"$ref": "#/$defs/names"},
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}, "description": {"$ref": "#/$defs/nullable_string"}, "required": {"type": "boolean"}}
+          }
+        }
+      }
+    },
+    "executor_type": {
+      "type": "object",
+      "required": ["type", "plugin"],
+      "properties": {
+        "type": {"type": "string"},
+        "plugin": {"type": "string"},
+        "class_name": {"$ref": "#/$defs/nullable_string"},
+        "methods": {"$ref": "#/$defs/names"},
+        "doc": {"$ref": "#/$defs/nullable_string"}
+      }
+    },
+    "connector_type": {
+      "type": "object",
+      "required": ["type", "plugin", "class_name", "is_instance", "is_thread_safe"],
+      "properties": {
+        "type": {"type": "string"},
+        "plugin": {"type": "string"},
+        "class_name": {"type": "string"},
+        "is_instance": {"type": "boolean"},
+        "is_thread_safe": {"type": "boolean"},
+        "is_streaming": {"type": "boolean"},
+        "required_attributes": {"$ref": "#/$defs/names"},
+        "optional_attributes": {"$ref": "#/$defs/names"},
+        "methods": {"$ref": "#/$defs/names"},
+        "doc": {"$ref": "#/$defs/nullable_string"}
+      }
+    }
+  }
+}

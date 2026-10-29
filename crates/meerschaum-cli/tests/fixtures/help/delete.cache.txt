@@ -1,0 +1,8 @@
+
+Delete local cache or temporary tables or keys from a SQL or Valkey connector.
+
+Examples
+--------
+delete cache
+delete cache valkey:main sql:main
+

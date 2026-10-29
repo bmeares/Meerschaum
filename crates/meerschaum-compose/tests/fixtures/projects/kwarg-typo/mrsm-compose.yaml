@@ -1,0 +1,7 @@
+project_name: kwarg-typo
+pipes:
+  - connector: plugin:typo
+    metric: crash
+    instance: sql:local
+    dtype:
+      value: float64

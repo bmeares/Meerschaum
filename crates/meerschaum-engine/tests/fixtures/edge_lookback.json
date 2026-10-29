@@ -1,0 +1,46 @@
+{
+  "description": "A seven-day rolling aggregate declares `lookback_days: 7` on its parent edge (its row for day d reads the parent over [d − 7 days, d]). One late hour of parent data dirties the eight daily chunks whose windows contain it.",
+  "records": [
+    {"instance": "sql:main", "connector": "plugin:sensors", "metric": "raw_events",
+     "parameters": {"columns": {"datetime": "ts", "id": "station"}, "verify": {"chunk_hours": 1}}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "rolling_7d",
+     "parameters": {"columns": {"datetime": "day", "id": "station"}, "verify": {"chunk_days": 1},
+                    "fetch": {"backtrack_minutes": 0},
+                    "parents": [{"connector": "plugin:sensors", "metric": "raw_events", "lookback_days": 7}],
+                    "sql": "SELECT d.day, r.station, avg(r.value) FROM days d JOIN {{ Pipe('plugin:sensors', 'raw_events') }} r ON r.ts >= d.day - INTERVAL '7 days' AND r.ts < d.day + INTERVAL '1 day' GROUP BY 1, 2"}}
+  ],
+  "selection": {"targets": {"refs": ["sql:main|sql:main|rolling_7d|None"]}, "parents": "all"},
+  "state": {
+    "watermarks": {
+      "sql:main|plugin:sensors|raw_events|None": "2026-10-12T08:00:00Z",
+      "sql:main|sql:main|rolling_7d|None": "2026-10-12T00:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:main|plugin:sensors|raw_events|None": "@current",
+      "sql:main|sql:main|rolling_7d|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {"pipe_ref": "sql:main|plugin:sensors|raw_events|None", "seq": 49, "begin": "2026-10-12T07:00:00Z", "end": "2026-10-12T08:00:00Z"},
+        {"pipe_ref": "sql:main|plugin:sensors|raw_events|None", "seq": 50, "begin": "2026-10-04T13:00:00Z", "end": "2026-10-04T14:00:00Z"}
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {"parent_ref": "sql:main|plugin:sensors|raw_events|None", "child_ref": "sql:main|sql:main|rolling_7d|None", "seq": 49, "parent_watermark_at_cursor": "2026-10-12T08:00:00Z"}
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {"node": "sql:main|plugin:sensors|raw_events|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:main|sql:main|rolling_7d|None", "action": "backfill",
+       "bounds": {"begin": "2026-10-04T00:00:00Z", "end": "2026-10-12T00:00:00Z"},
+       "ranges": [{"begin": "2026-10-04T00:00:00Z", "end": "2026-10-12T00:00:00Z"}],
+       "chunk_count": 8,
+       "provisional": true,
+       "consumes": [{"parent_ref": "sql:main|plugin:sensors|raw_events|None", "state_instance": "sql:main", "seq": 50}],
+       "reason_contains": ["Pipe('plugin:sensors', 'raw_events') has 1 new change"]}
+    ]
+  }
+}

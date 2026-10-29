@@ -259,7 +259,7 @@ def is_read_only_query(query: str) -> Tuple[bool, str]:
 ### wrapper per flavor) if that ever stops being enough.
 
 
-### Per-request context set by the HTTP transport (`meerschaum.api.routes._mcp`)
+### Per-request context set by the HTTP transport (the Rust server's `/mcp` route)
 ### so tools can enforce the API server's permission model. `None` (the default,
 ### and always the case over stdio) means full local trust.
 _MCP_CONTEXT: contextvars.ContextVar = contextvars.ContextVar('mcp_context', default=None)

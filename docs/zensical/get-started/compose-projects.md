@@ -1,178 +1,89 @@
-# 📦️ Compose Projects
+# Save a project
 
-Now that you've got the idea behind pipes, let's write our own plugins and put together a project using <a href="/reference/compose">Meerschaum Compose</a>.
+A Compose project keeps your Pipes, connectors, and plugins in one folder. Put it in version control and run the same workflow again.
 
-!!! tip "Meerschaum Compose Template Repository"
-    If you'd like to jump straight into a Dockerized environment, create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
+This small project collects the same two readings as the beginner tutorial, using a Python function as its source.
 
-Create a new project directory `awesome-sauce`. This is where our code and data will live (for now).
+## Two files
 
-```bash
-mkdir awesome-sauce
-cd awesome-sauce
+Create a new folder with this layout:
+
+```text
+climate-demo/
+├── mrsm-compose.yaml
+└── plugins/
+    └── readings.py
 ```
 
-Paste the following into `mrsm-compose.yaml`. This defines our pipes and runtime environment.
+Download [mrsm-compose.yaml](../assets/examples/climate-demo/mrsm-compose.yaml) and [readings.py](../assets/examples/climate-demo/plugins/readings.py), or copy them below.
 
-??? example "`mrsm-compose.yaml`"
+??? example "mrsm-compose.yaml"
     ```yaml
-    project_name: "awesome-sauce"
-
-    sync:
-      pipes:
-        - connector: "plugin:fred"
-          metric: "price"
-          location: "eggs"
-          target: "price_eggs"
-          columns:
-            datetime: "DATE"
-          dtypes:
-            "PRICE": "float64"
-          parameters:
-            fred:
-              series_id: "APU0000708111"
-
-        - connector: "plugin:fred"
-          metric: "price"
-          location: "chicken"
-          target: "price_chicken"
-          columns:
-            datetime: "DATE"
-          dtypes:
-            "PRICE": "float64"
-          parameters:
-            fred:
-              series_id: "APU0000706111"
-
-        - connector: "sql:tiny"
-          metric: "price"
-          location: "eggs_chicken_a"
-          target: "Food Prices A"
-          columns:
-            datetime: "DATE"
-          parameters:
-            query: |-
-              SELECT
-                e."DATE",
-                e."PRICE" AS "PRICE_EGGS",
-                c."PRICE" AS "PRICE_CHICKEN"
-              FROM "price_eggs" AS e
-              INNER JOIN "price_chicken" AS c
-                ON e."DATE" = c."DATE"
-
-        - connector: "sql:tiny"
-          metric: "price"
-          location: "eggs_chicken_b"
-          target: "Food Prices B"
-          columns:
-            datetime: "DATE"
-            food: "FOOD"
-          parameters:
-            query: |-
-              SELECT
-                "DATE",
-                "PRICE",
-                'eggs' AS "FOOD"
-              FROM "price_eggs"
-              UNION ALL
-              SELECT
-                "DATE",
-                "PRICE",
-                'chicken' AS "FOOD"
-              FROM "price_chicken"
-
+    project_name: climate-demo
+    root_dir: ./root
+    plugins_dir: ./plugins
 
     config:
       meerschaum:
-        instance: "sql:tiny"
+        instance: sql:demo
         connectors:
           sql:
-            tiny:
-              flavor: "sqlite"
-              database: "tiny.db"
+            demo:
+              flavor: sqlite
+              database: climate.db
+
+    sync:
+      pipes:
+        - connector: plugin:readings
+          metric: temperatures
+          columns:
+            datetime: ts
+            primary: id
+          dtypes:
+            ts: datetime
+        - connector: sql:demo
+          metric: fahrenheit
+          columns:
+            datetime: ts
+            primary: id
+          dtypes:
+            ts: datetime
+          parameters:
+            sql: |-
+              SELECT id, ts,
+                     ROUND(temperature * 9.0 / 5 + 32, 1) AS fahrenheit
+              FROM {{ Pipe('plugin:readings', 'temperatures', instance='sql:demo') }}
     ```
 
-There are two <a href="/reference/connectors">Connectors</a> used in this project:
-
-- **`plugin:fred`**  
-  A <a href="/reference/plugins/">plugin</a> we will write shortly. This is the data source for our initial pipes.
-- **`sql:tiny`**  
-  A SQLite file `tiny.db`. It's used as the <a href="/reference/connectors/instance-connectors/">instance connector</a> as well as a data source.
-
-The SQLite database makes sense, but what is `plugin:fred`? [FRED](https://fred.stlouisfed.org/series/APU0000708111) is the data source we want to use for this project, so let's create our first plugin to fetch this data.
-
-Create a new directory `plugins`:
-
-```bash
-mkdir plugins
-cd plugins
-```
-
-And paste the following into `fred.py`:
-
-??? example "`fred.py`"
+??? example "plugins/readings.py"
     ```python
-    import meerschaum as mrsm
+    """A tiny local source for the Meerschaum Compose tutorial."""
 
-    CSV_BASE_URL: str = 'https://fred.stlouisfed.org/graph/fredgraph.csv'
 
-    required = ['pandas']
-
-    def fetch(pipe: mrsm.Pipe, **kwargs) -> 'pd.DataFrame':
-        import pandas as pd
-        series_id = pipe.parameters.get('fred', {}).get('series_id', None)
-        url = f"{CSV_BASE_URL}?id={series_id}"
-        df = pd.read_csv(url)
-        if series_id in df.columns:
-            df['PRICE'] = pd.to_numeric(df[series_id], errors='coerce')
-            del df[series_id]
-        return df
+    def fetch(pipe, **kwargs):
+        return [
+            {'id': 1, 'ts': '2026-01-01 12:00:00', 'temperature': 21.5},
+            {'id': 2, 'ts': '2026-01-01 13:00:00', 'temperature': 22.0},
+        ]
     ```
 
-The plugin provides one function `fetch()` that takes a pipe, pulls an ID from `pipe.parameters`, and returns the appropriate DataFrame.
+The plugin returns ordinary dictionaries. It needs no third-party packages. The SQL Pipe references its parent, just as in [Your first Pipeline](pipelines.md).
 
-Now that we've got our YAML file and project plugin, initialize the built-in <a href="/reference/compose">Compose</a> environment. This installs our dependency (`pandas`) into the project's virtual environment for `plugin:fred`:
+## Run it
+
+From the `climate-demo` folder:
 
 ```bash
-cd ../
 mrsm compose init
-```
-
-<image src="/assets/screenshots/compose-init.png" alt="mrsm compose init"/>
-
-Run the project file to sync the pipes one-at-a-time:
-
-```bash
 mrsm compose run
-```
-
-<image src="/assets/screenshots/compose-run.png" alt="mrsm compose run" />
-
-🎉 Success! You've just run an ETL pipeline to process the following steps:
-
-- **Ingest eggs prices in the US.**
-- **Ingest chicken prices in the US.**
-- **Join the tables on `DATE`.**  
-  Grow the table horizontally by splitting `PRICE` into `PRICE_EGGS` and `PRICE_CHICKEN`.
-- **Union the tables.**  
-  Grow the table vertically by adding the index `FOOD` (`'chicken'` or `'eggs'`).
-
-All other Meerschaum actions are executed within the context of this project. For example, let's verify the most recent data with `show data`:
-
-```bash
 mrsm compose show data
 ```
 
-<image src="/assets/screenshots/compose-show-data.png" alt="mrsm compose show data" />
+Compose runs these Pipes in their declared order. You should see **21.5°C → 70.7°F** and **22.0°C → 71.6°F**. Run it again: the same rows stay in place.
 
-When developing, it's useful to hop into a REPL and test out the [Python API](https://docs.meerschaum.io).
+Compose keeps this project's configuration in `root/` and its SQLite data in `climate.db`. Keep the YAML and plugin in version control; treat the generated root and database as local state.
 
-```bash
-mrsm compose python
-```
+??? tip "Ready for a real source?"
+    Replace the list in `fetch()` with your file or API reader. For larger sources, accept `begin` and `end` and fetch only that window. See [Writing plugins](../reference/plugins/writing-plugins.md).
 
-<image src="/assets/screenshots/compose-python.png" alt="mrsm compose python" />
-
-Thank you for making it through the Getting Started guide! This example was based on the May 2023 [Tech Slam 'N Eggs demo project](https://github.com/bmeares/techslamneggs).
-
-There's plenty more great information, such as the <a href="/reference/plugins/writing-plugins">plugins guide</a>. Have fun building your pipes with Meerschaum!
+[Explore the Compose reference →](../reference/compose.md)

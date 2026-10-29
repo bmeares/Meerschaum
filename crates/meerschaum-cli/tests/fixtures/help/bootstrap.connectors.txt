@@ -1,0 +1,3 @@
+
+Prompt the user for the details necessary to create a Connector.
+

@@ -4,12 +4,13 @@ dist/
 'System Volume Information/'
 test*/
 *.log
-*.bzl
 docs/
-portable/
 .venv/
-.tuna/
-.snakeviz/
-.pylintrc
 .git/
 .github/
+target/
+.venv-ref/
+meerschaum/_core/_native*.so
+meerschaum/_core/_native*.pyd
+meerschaum/_core/_core*.so
+meerschaum/_core/_core*.pyd

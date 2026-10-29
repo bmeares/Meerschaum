@@ -3,30 +3,19 @@
 # vim:fenc=utf-8
 
 """
-Show the jobs' states.
+Define `mrsm compose ps`: a delegation to the native Compose.
 """
 
-from meerschaum.utils.typing import SuccessTuple, Optional, List, Dict, Any
+from meerschaum.utils.typing import Any, Dict, List, Optional, SuccessTuple
 
 
 def _compose_ps(
     compose_config: Dict[str, Any],
-    action: Optional[List[str]] = None,
-    sysargs: Optional[List[str]] = None,
-    nopretty: bool = False,
     debug: bool = False,
-    **kw,
+    **kw: Any
 ) -> SuccessTuple:
     """
-    Execute Meerschaum actions in the isolated environment.
+    Show the project's jobs (`mrsm compose ps`).
     """
-    from meerschaum.compose.utils import run_mrsm_command
-
-    success, msg = run_mrsm_command(
-        ['show', 'jobs'] + (['--nopretty'] if nopretty else []),
-        compose_config,
-        capture_output=False,
-        debug=debug,
-        _replace=False,
-    )
-    return success, msg
+    from meerschaum.compose.subactions import _delegate
+    return _delegate('ps', compose_config, debug=debug, **kw)

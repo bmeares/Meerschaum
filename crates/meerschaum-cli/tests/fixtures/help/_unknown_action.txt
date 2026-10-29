@@ -1,0 +1,9 @@
+                                                                                
+                               Available actions                                
+                                                                                
+  analyze      compose       delete   install     register   sql     tag        
+  api          compress      drop     login       reload     stack   uninstall  
+  attach       copy          edit     partition   restart    start   upgrade    
+  bootstrap    decompress    flush    pause       setup      stop    vacuum     
+  clear        deduplicate   index    python      show       sync    verify     
+                                                                                

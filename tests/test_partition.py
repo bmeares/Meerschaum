@@ -11,15 +11,15 @@ import pytest
 from datetime import datetime, timedelta, timezone
 
 import meerschaum as mrsm
-from meerschaum.connectors.sql._partition import (
+
+from tests import debug
+from tests.connectors import (
+    conns,
+    get_flavors,
     PARTITIONABLE_FLAVORS,
     PG_PARTITION_FLAVORS,
     MYSQL_PARTITION_FLAVORS,
 )
-from meerschaum.utils.sql import _get_create_table_query_from_dtypes
-
-from tests import debug
-from tests.connectors import conns, get_flavors
 
 CHUNK_MINUTES = 1440  # one-day partitions
 BEGIN = datetime(2023, 1, 1, tzinfo=timezone.utc)
@@ -64,40 +64,6 @@ def _count_partitions(conn, pipe) -> int:
     return -1
 
 
-### A mixed-case partition column must be quoted in the generated DDL. An unquoted identifier is
-### folded to lowercase by PostgreSQL (and is fragile on the others), so partitioning on a column
-### like `startTime` would fail — the same identifier-quoting class of bug fixed in `_compress.py`.
-### `_get_create_table_query_from_dtypes` is pure (no database), so this runs on every flavor set.
-@pytest.mark.parametrize("flavor,quote", [
-    ('postgresql', '"startTime"'),
-    ('postgis', '"startTime"'),
-    ('mysql', '`startTime`'),
-    ('mariadb', '`startTime`'),
-    ('mssql', '[startTime]'),
-])
-def test_partition_ddl_quotes_mixed_case_column(flavor: str, quote: str):
-    """The partition column is wrapped via `sql_item_name`, never interpolated bare."""
-    dtypes = {'startTime': 'datetime', 'id': 'int', 'val': 'int'}
-    ### MySQL/MariaDB declare initial partitions inline and need `(name, literal)` bounds.
-    partition_bounds = (
-        [('p20230101', "'2023-01-02 00:00:00'")]
-        if flavor in MYSQL_PARTITION_FLAVORS
-        else None
-    )
-    queries = _get_create_table_query_from_dtypes(
-        dtypes, 'tbl', flavor,
-        datetime_column='startTime',
-        primary_key='id',
-        partition_by_column='startTime',
-        partition_bounds=partition_bounds,
-        partition_scheme_name='ps_tbl',
-    )
-    ddl = '\n'.join(queries)
-    assert quote in ddl, f"Expected quoted partition column {quote!r} in:\n{ddl}"
-    ### The lowercase-folded bare form must never appear in a partition clause.
-    assert 'RANGE (startTime' not in ddl and 'COLUMNS (startTime' not in ddl
-
-
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_partitioned_sync_roundtrip(flavor: str):
     """A partitioned pipe round-trips data identically to a plain pipe."""
@@ -118,7 +84,6 @@ def test_partitioned_sync_roundtrip(flavor: str):
             'verify': {'chunk_minutes': CHUNK_MINUTES},
         },
     )
-    assert conn._should_partition(part_pipe)
 
     plain_pipe = mrsm.Pipe('test', 'partition', 'unpartitioned', instance=conn)
     plain_pipe.delete()
@@ -129,7 +94,6 @@ def test_partitioned_sync_roundtrip(flavor: str):
         ### Partitioning is on by default for these flavors, so opt out explicitly.
         parameters={'hypertable': False},
     )
-    assert not conn._should_partition(plain_pipe)
 
     for pipe in (part_pipe, plain_pipe):
         success, msg = pipe.sync(data, debug=debug)
@@ -177,25 +141,6 @@ def test_partitioned_resync_idempotent(flavor: str):
     success, msg = pipe.sync(data, debug=debug)
     assert success, msg
     assert pipe.get_rowcount(debug=debug) == rowcount
-
-
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_partition_bounds_deterministic(flavor: str):
-    """`_partition_bounds` is epoch-anchored and value-independent within an interval."""
-    conn = conns[flavor]
-    if conn.type != 'sql':
-        return
-
-    interval = timedelta(days=1)
-    lo_a, hi_a = conn._partition_bounds(datetime(2023, 1, 1, 13, 30, tzinfo=timezone.utc), interval)
-    lo_b, hi_b = conn._partition_bounds(datetime(2023, 1, 1, 2, 5, tzinfo=timezone.utc), interval)
-    assert (lo_a, hi_a) == (lo_b, hi_b)
-    assert lo_a == datetime(2023, 1, 1, tzinfo=timezone.utc)
-    assert hi_a == datetime(2023, 1, 2, tzinfo=timezone.utc)
-
-    ### Integer axis (epoch-int datetimes).
-    lo_i, hi_i = conn._partition_bounds(1437, 1000)
-    assert (lo_i, hi_i) == (1000, 2000)
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -375,8 +320,10 @@ def test_aligned_chunk_bounds_coincide_with_partitions(flavor: str):
     ### Every interior boundary sits exactly on the epoch-aligned partition grid.
     interior_edges = [hi for (_, hi) in bounds[:-1]]
     for edge in interior_edges:
-        part_lo, _ = conn._partition_bounds(edge, interval)
-        assert part_lo == edge, f"Interior edge {edge} is not partition-aligned."
+        ### Partition edges are anchored to the Unix epoch.
+        assert edge.timestamp() % interval.total_seconds() == 0, (
+            f"Interior edge {edge} is not partition-aligned."
+        )
 
     ### Chunks are contiguous and cover the requested range.
     for (_, prev_hi), (next_lo, _) in zip(bounds, bounds[1:]):

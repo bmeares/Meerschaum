@@ -1,0 +1,4 @@
+/* A page-contract plugin page (a fragment) inside the console's iframe. */
+body.mrsm-contract-page { padding: 1rem; min-height: 100vh; }
+body.mrsm-contract-page [data-mrsm-figure],
+body.mrsm-contract-page [data-mrsm-map] { min-height: 320px; width: 100%; }

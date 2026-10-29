@@ -9,6 +9,7 @@ Synchronize across config files
 from __future__ import annotations
 import pathlib
 from meerschaum.utils.typing import Optional, List, Tuple
+from meerschaum import _core
 
 
 def sync_yaml_configs(
@@ -104,39 +105,5 @@ def sync_yaml_configs(
 
 
 def sync_files(keys: Optional[List[str]] = None):
-    if keys is None:
-        keys = []
-
-    def _stack():
-        import meerschaum.config.paths as paths
-        from meerschaum.config.stack import _write_initdb
-
-        sync_yaml_configs(
-            ['stack', paths.STACK_COMPOSE_FILENAME],
-            paths.STACK_COMPOSE_PATH,
-            substitute=True,
-            replace_tuples=[
-                ('$', '$$'),
-                ('<DOLLAR>', '$'),
-            ],
-        )
-        sync_yaml_configs(
-            ['stack', 'grafana', 'datasource'],
-            paths.GRAFANA_DATASOURCE_PATH,
-            substitute=True,
-        )
-        sync_yaml_configs(
-            ['stack', 'grafana', 'dashboard'],
-            paths.GRAFANA_DASHBOARD_PATH,
-            substitute=True,
-        )
-        _write_initdb()
-
-    key_functions = {
-        'stack': _stack,
-    }
-    if keys is None:
-        keys = list(key_functions.keys())
-    for k in keys:
-        if k in key_functions:
-            key_functions[k]()
+    _rust = _core.sync_files
+    return _rust(keys)

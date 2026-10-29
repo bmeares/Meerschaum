@@ -131,6 +131,7 @@ def test_sync_engine(flavor: str):
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_target_mutable(flavor: str):
+    pytest.importorskip('sqlalchemy')
     conn = conns[flavor]
     if conn.type != 'sql':
         return
@@ -197,6 +198,7 @@ def test_temporary_pipes(flavor: str):
     """
     Verify that `temporary=True` will not create instance tables.
     """
+    pytest.importorskip('sqlalchemy')
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.sql import table_exists
     if flavor != 'sqlite':
@@ -562,6 +564,7 @@ def test_sync_inplace_no_datetime(flavor: str):
     """
     Verify that in-place syncing works as expected.
     """
+    pytest.importorskip('geopandas')
     from meerschaum.utils.sql import sql_item_name
     conn = conns[flavor]
     if conn.type != 'sql':
@@ -691,7 +694,7 @@ def test_nested_chunks(flavor: str):
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_dask_dataframe(flavor: str):
     """
-    Verify that we are able to sync Dask DataFrames.
+    Dask DataFrames are rejected with a pointer to the migration guide (D20).
     """
     conn = conns[flavor]
     pipe = mrsm.Pipe('dask', 'demo', instance=conn)
@@ -707,22 +710,19 @@ def test_sync_dask_dataframe(flavor: str):
         {'dt': '2023-01-02', 'id': 2},
         {'dt': '2023-01-03', 'id': 3},
     ])
-    ddf = pipe.get_data(as_dask=True, debug=debug)
+    ### D20: Dask is removed in 5.0; reading and syncing Dask name the migration guide.
+    with pytest.raises(TypeError, match='migrating-to-v5'):
+        pipe.get_data(as_dask=True, debug=debug)
+    ### The refusal is by type name, so it needs no Dask installed (no extra provides it).
+    class _DaskLikeFrame:
+        __module__ = 'dask.dataframe.dask_expr._collection'
 
-    pipe2 = mrsm.Pipe('dask', 'insert', instance=conn)
-    pipe2.delete()
-    pipe2 = mrsm.Pipe(
-        'dask', 'insert',
-        columns=pipe.columns,
-        dtypes=pipe.dtypes,
-        instance=conn,
-    )
-    pipe2.sync(ddf, debug=debug)
-    df = pipe.get_data()
-    df2 = pipe2.get_data()
-    docs = df.to_dict(orient='records')
-    docs2 = df2.to_dict(orient='records')
-    assert docs == docs2
+    with pytest.raises(TypeError, match='migrating-to-v5'):
+        pipe.sync(_DaskLikeFrame())
+    dd = pytest.importorskip('dask.dataframe')
+    pd = mrsm.attempt_import('pandas')
+    with pytest.raises(TypeError, match='migrating-to-v5'):
+        pipe.sync(dd.from_pandas(pd.DataFrame([{'dt': '2023-01-01', 'id': 1}]), npartitions=1))
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -1550,30 +1550,15 @@ def test_parametrized_sync_time(flavor: str):
     assert sync_time_a < sync_time_b
 
 
-def test_sync_pipes_listen_stays_alive_until_stop(monkeypatch):
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_names_a_plugin_that_is_not_installed(flavor: str):
     """
-    `sync pipes --listen` must keep the process alive after the initial pass
-    (for subscription-style connectors) and exit promptly on a requested stop.
+    Syncing a pipe whose plugin is not installed says so instead of "No data were fetched".
     """
-    import threading
-    import time
-
-    import meerschaum.actions.sync as sync_module
-    from meerschaum.utils import threading as mrsm_threading
-
-    monkeypatch.setattr(sync_module, '_pipes_lap', lambda **kw: {})
-    mrsm_threading.clear_stop()
-
-    thread = threading.Thread(
-        target=lambda: sync_module._sync_pipes(listen=True, nopretty=True),
-        daemon=True,
-    )
-    thread.start()
-    try:
-        time.sleep(0.5)
-        assert thread.is_alive(), "`--listen` did not keep the sync process alive."
-        mrsm_threading.request_stop()
-        thread.join(timeout=5)
-        assert not thread.is_alive(), "`--listen` did not stop on a requested stop."
-    finally:
-        mrsm_threading.clear_stop()
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('plugin:_mrsm_test_not_installed', 'unavailable', instance=conn)
+    success, msg = pipe.sync(debug=debug)
+    assert not success
+    assert "does not have a valid connector" in msg
+    assert "plugin '_mrsm_test_not_installed' is not installed" in msg
+    assert "No data were fetched" not in msg

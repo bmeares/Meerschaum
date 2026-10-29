@@ -10,7 +10,9 @@ This module contains functions for parsing arguments
 from __future__ import annotations
 import json
 from datetime import timedelta
-from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple, Tuple
+from meerschaum.utils.typing import (
+    List, Dict, Any, Optional, Callable, SuccessTuple, Tuple, Union,
+)
 from meerschaum.utils.threading import RLock
 
 _locks = {
@@ -90,6 +92,117 @@ def _rewrite_python_code_flag(sysargs: List[str]) -> List[str]:
     return ['python', code] + rest + (['--noask'] if '--noask' not in rest else [])
 
 
+def _is_python_script(word: Any) -> bool:
+    """
+    Whether `word` names a Python file for `mrsm python <word>`: a `.py` / `.pyw` name, or an
+    existing file (mirrors `is_python_script` in `crates/meerschaum-cli/src/parse.rs`).
+    """
+    import os
+    if not isinstance(word, str) or not word or word.startswith('-') or '\n' in word:
+        return False
+    lower = word.lower()
+    if (lower.endswith('.py') or lower.endswith('.pyw')) and not any(c.isspace() for c in word):
+        return True
+    return os.path.isfile(word)
+
+
+def _option_arity(word: str) -> Union[int, str, None]:
+    """
+    `None` for a positional word, else how many of the words after the option it takes: a count
+    (none for a switch, an unknown option, or a value attached with `=` or to a short option),
+    `'greedy'` (`nargs='+'` / `'*'`) or `'rest'` (`argparse.REMAINDER`, `-A`). Mirrors
+    `Parser::option_arity` in `crates/meerschaum-cli/src/argparse.rs`.
+    """
+    import argparse
+    import re
+    from meerschaum._internal.arguments._parser import parser
+    if not word or word[0] != '-' or len(word) == 1:
+        return None
+    actions = parser._option_string_actions
+    action, attached = actions.get(word, None), False
+    if action is None:
+        option, sep, _ = word.partition('=')
+        if sep and option in actions:
+            action, attached = actions[option], True
+        elif word.startswith('--'):
+            matches = {id(a): a for opt, a in actions.items() if opt.startswith(option)}
+            if len(matches) == 1:
+                action, attached = next(iter(matches.values())), bool(sep)
+            elif matches:
+                return 0
+        elif word[:2] in actions:
+            action, attached = actions[word[:2]], True
+    if action is None:
+        if re.match(r'^-\d+$|^-\d*\.\d+$', word) or ' ' in word:
+            return None
+        return 0
+    nargs = action.nargs
+    if nargs == argparse.REMAINDER:
+        return 'rest'
+    if nargs == 0 or attached:
+        return 0
+    if nargs is None:
+        return 1
+    if isinstance(nargs, int):
+        return nargs
+    if nargs in ('*', '+'):
+        return 'greedy'
+    return 0
+
+
+def _positional_words(sysargs: List[str]) -> List[Tuple[int, str]]:
+    """
+    The positional words of `sysargs` with their indices, as `parse_known_args` sees them:
+    options, the values they take and `[decorated]` sub-arguments are skipped, and the walk stops
+    at `--` and `-A` (mirrors `positional_words` in `crates/meerschaum-cli/src/parse.rs`).
+    """
+    from meerschaum._internal.static import STATIC_CONFIG
+    begin, end = STATIC_CONFIG['system']['arguments']['sub_decorators']
+    positionals = []
+    i = 0
+    while i < len(sysargs):
+        word = str(sysargs[i])
+        if word == '--':
+            break
+        if word.startswith(begin):
+            close = next(
+                (j for j in range(i, len(sysargs)) if str(sysargs[j]).endswith(end)),
+                None,
+            )
+            if close is not None:
+                i = close + 1
+                continue
+        arity = _option_arity(word)
+        if arity is None:
+            positionals.append((i, word))
+            i += 1
+            continue
+        if arity == 'rest':
+            break
+        if arity == 'greedy':
+            i += 1
+            while i < len(sysargs) and _option_arity(str(sysargs[i])) is None:
+                i += 1
+            continue
+        i += 1 + arity
+    return positionals
+
+
+def _python_script_index(sysargs: List[str]) -> Optional[Tuple[int, int]]:
+    """
+    `[options] python [options] <file> [args ...]`: the indices of `python` and `<file>` (the
+    first two action words). Meerschaum reads the words up to the file; every word after it
+    belongs to the script, unchanged and in order, as with `python script.py ...` (mirrors
+    `python_script_index` in `parse.rs`).
+    """
+    positionals = _positional_words(sysargs)
+    if len(positionals) < 2 or positionals[0][1] != 'python':
+        return None
+    if not _is_python_script(positionals[1][1]):
+        return None
+    return positionals[0][0], positionals[1][0]
+
+
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     """
     Parse a list of arguments into standard Meerschaum arguments.
@@ -117,6 +230,22 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
         if not _loaded_plugins_args:
             load_plugin_args()
             _loaded_plugins_args = True
+
+    ### `python file.py [args ...]`: the words after the file are the script's, untouched; they
+    ### follow the file in `action` (and the sysargs) and are never parsed as flags. The file
+    ### follows `python` in the words to parse: `parse_known_args` keeps only the action words
+    ### before the first option, so `python --venv x script.py` would lose the file.
+    full_sysargs = list(sysargs)
+    script_args = []
+    indices = _python_script_index(sysargs)
+    if indices is not None:
+        python_ix, script_ix = indices
+        script_args = list(sysargs[script_ix + 1:])
+        sysargs = (
+            list(sysargs[:python_ix + 1])
+            + [sysargs[script_ix]]
+            + list(sysargs[python_ix + 1:script_ix])
+        )
 
     sub_arguments = []
     sub_arg_indices = []
@@ -166,12 +295,14 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
             if str(a).startswith('-'):
                 break
             _action.append(a)
-        args_dict = {'action': _action, 'sysargs': sysargs}
+        args_dict = {'action': _action, 'sysargs': full_sysargs}
         try:
-            args_dict['text'] = shlex.join(sysargs)
+            args_dict['text'] = shlex.join(full_sysargs)
         except Exception as _e:
-            args_dict['text'] = ' '.join(sysargs)
+            args_dict['text'] = ' '.join(full_sysargs)
         args_dict[STATIC_CONFIG['system']['arguments']['failure_key']] = e
+    if script_args:
+        args_dict['action'] = list(args_dict.get('action', None) or []) + script_args
 
     ### Compose options live on the legacy flat parser, but native Compose makes them
     ### permanently registered. Give options back to unrelated actions as subprocess
@@ -206,8 +337,8 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     for arg in false_flags:
         _ = args_dict.pop(arg, None)
 
-    args_dict['sysargs'] = sysargs
-    args_dict['filtered_sysargs'] = filtered_sysargs
+    args_dict['sysargs'] = full_sysargs
+    args_dict['filtered_sysargs'] = filtered_sysargs + script_args
     ### append decorated arguments to sub_arguments list
     if 'sub_args' not in args_dict:
         args_dict['sub_args'] = []
@@ -313,9 +444,19 @@ def parse_dict_to_sysargs(
     import shlex
     from meerschaum._internal.arguments._parser import get_arguments_triggers
 
-    action = args_dict.get('action', None)
+    action = list(args_dict.get('action', None) or [])
     sysargs: List[str] = []
-    sysargs.extend(action or [])
+    ### `python file.py [args ...]`: the file and the script's words go last, after the flags
+    ### and the interpreter's `[sub-arguments]`, so parsing the line again gives the script the
+    ### same words (`_python_script_index`).
+    script = len(action) >= 2 and action[0] == 'python' and _is_python_script(action[1])
+    script_words: List[str] = []
+    interpreter_args: List[str] = []
+    if script:
+        sysargs.append(action[0])
+        script_words.extend(str(word) for word in action[1:])
+    else:
+        sysargs.extend(action)
     allow_none_args = {'location_keys', 'begin', 'end', 'executor_keys'}
 
     triggers = get_arguments_triggers()
@@ -332,7 +473,10 @@ def parse_dict_to_sysargs(
             ### Add list flags
             if isinstance(args_dict[a], (list, tuple)):
                 if len(args_dict[a]) > 0:
-                    if a == 'sub_args' and args_dict[a] != ['']:
+                    if a == 'sub_args' and script:
+                        if args_dict[a] != ['']:
+                            interpreter_args.extend(f"[{item}]" for item in args_dict[a])
+                    elif a == 'sub_args' and args_dict[a] != ['']:
                         sysargs.extend(
                             [
                                 '-A',
@@ -372,6 +516,8 @@ def parse_dict_to_sysargs(
             elif (args_dict[a] is not None) or (args_dict[a] is None and a in allow_none_args):
                 sysargs += [t[0], str(args_dict[a])]
 
+    sysargs.extend(interpreter_args)
+    sysargs.extend(script_words)
     return sysargs
 
 
@@ -530,7 +676,11 @@ def get_pipeline_sysargs(
     _patch_args: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """
-    Parse `sysargs` and `pipeline_args` into a single `start pipeline` sysargs.
+    Serialize an action chain (`sysargs` with `+`, and the `pipeline_args` after `:`) into one
+    command line: `chain <pipeline_args> -P '{"sub_args_line": ..., "patch_args": ...}'`.
+
+    Meerschaum 4.1 wrote the same payload under `start pipeline`, which now starts saved
+    Pipelines; that form still runs as a chain.
     """
     import shlex
     start_pipeline_params = {
@@ -538,7 +688,7 @@ def get_pipeline_sysargs(
         'patch_args': _patch_args,
     }
     return (
-        ['start', 'pipeline']
+        ['chain']
         + [str(arg) for arg in pipeline_args]
         + ['-P', json.dumps(start_pipeline_params, separators=(',', ':'))]
     )
@@ -546,18 +696,25 @@ def get_pipeline_sysargs(
 
 def compress_pipeline_sysargs(pipeline_sysargs: List[str]) -> List[str]:
     """
-    Given a `start pipeline` sysargs, return a condensed syntax rendition.
+    Given a serialized action chain (`chain ...`, or 4.1's `start pipeline ...`), return a
+    condensed syntax rendition (`a + b : --loop`).
     """
     import shlex
 
-    if pipeline_sysargs[:2] != ['start', 'pipeline']:
+    if pipeline_sysargs[:1] == ['chain']:
+        action_len = 1
+    elif pipeline_sysargs[:2] == ['start', 'pipeline']:
+        action_len = 2
+    else:
         return pipeline_sysargs
 
     if '-P' not in pipeline_sysargs:
         return pipeline_sysargs
 
     params_ix = pipeline_sysargs.index('-P')
-    pipeline_args = pipeline_sysargs[2:params_ix]
+    if params_ix < action_len:
+        return pipeline_sysargs
+    pipeline_args = pipeline_sysargs[action_len:params_ix]
     params_str = pipeline_sysargs[-1]
     try:
         start_pipeline_params = json.loads(params_str)

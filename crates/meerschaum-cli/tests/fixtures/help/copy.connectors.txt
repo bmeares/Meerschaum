@@ -1,0 +1,3 @@
+
+Create a new connector from an existing one.
+

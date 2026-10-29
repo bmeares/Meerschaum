@@ -1,0 +1,5 @@
+{
+  "description": "Every top-level key, both host reference forms, MRSM{} symlinks, {MRSM_ROOT_DIR}, {__file__}, ${VAR} and $VAR from .env.",
+  "width": 120,
+  "runs": "all"
+}

@@ -3,11 +3,25 @@
 """Manage isolated Meerschaum projects from a Compose YAML file."""
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional
+from meerschaum.utils.typing import Any, List, Optional, SuccessTuple
 from meerschaum.compose.sync import sync
-from meerschaum.actions.compose import compose, complete_compose
 
 _warned_about_plugin = False
+
+
+def compose(action: Optional[List[str]] = None, **kw: Any) -> SuccessTuple:
+    """
+    Manage isolated Meerschaum projects from a Compose YAML file (`mrsm compose`).
+    The action runs in the native dispatcher.
+    """
+    from meerschaum import _core
+    from meerschaum._internal.entry import adhoc_context
+    return _core.run_action(['compose', *(action or [])], kw, adhoc_context())
+
+
+def complete_compose(*args: Any, **kw: Any) -> List[str]:
+    """Completion of `compose` subactions and files happens in the native shell."""
+    return []
 
 
 def has_compose_plugin() -> bool:

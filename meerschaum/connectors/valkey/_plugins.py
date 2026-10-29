@@ -2,15 +2,13 @@
 # vim:fenc=utf-8
 
 """
-Define methods for registering plugins.
+Define methods for registering plugins (the Rust client, `meerschaum._core.ValkeyConnector`).
 """
 
 from __future__ import annotations
 
-import json
-
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Any, List, SuccessTuple, Dict, Union
+from meerschaum.utils.typing import Any, SuccessTuple, Dict, Union
 
 PLUGINS_TABLE: str = "mrsm_plugins"
 PLUGIN_PREFIX: str = "mrsm_plugin"
@@ -34,7 +32,8 @@ def get_plugin_key(cls, plugin_name: str, sub_key: str) -> str:
     """
     Return the key for a plugin's attribute.
     """
-    return cls.get_entity_key(PLUGIN_PREFIX, plugin_name, sub_key)
+    from meerschaum import _core
+    return _core.ValkeyConnector.get_plugin_key(plugin_name, sub_key)
 
 
 @classmethod
@@ -58,19 +57,8 @@ def get_plugin_keys_vals(
     -------
     A dictionary mapping a plugins's keys to values.
     """
-    plugin_attributes_str = json.dumps(plugin.attributes, separators=(',', ':'))
-    mutable_keys_vals = {
-        cls.get_plugin_key(plugin.name, 'attributes'): plugin_attributes_str,
-        cls.get_plugin_key(plugin.name, 'version'): plugin.version,
-    }
-    if mutable_only:
-        return mutable_keys_vals
-
-    immutable_keys_vals = {
-        cls.get_plugin_key(plugin.name, 'user_id'): plugin.user_id,
-    }
-
-    return {**immutable_keys_vals, **mutable_keys_vals}
+    from meerschaum import _core
+    return _core.ValkeyConnector.get_plugin_keys_vals(plugin, mutable_only)
 
 
 def register_plugin(
@@ -80,43 +68,10 @@ def register_plugin(
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
-    """Register a new plugin to the `mrsm_plugins` "table"."""
-    from meerschaum.utils.misc import generate_password
-
-    plugins_pipe = self.get_plugins_pipe()
-    keys_vals = self.get_plugin_keys_vals(plugin)
-
-    try:
-        sync_success, sync_msg = plugins_pipe.sync(
-            [
-                {
-                    'plugin_name': plugin.name,
-                    'user_id': plugin.user_id,
-                },
-            ],
-            check_existing=False,
-            debug=debug,
-        )
-        if not sync_success:
-            return sync_success, sync_msg
-
-        for key, val in keys_vals.items():
-            if val is not None:
-                self.set(key, val)
-
-        success, msg = True, "Success"
-    except Exception as e:
-        success = False
-        msg = f"Failed to register plugin '{plugin.name}':\n{e}"
-
-    if not success:
-        for key in keys_vals:
-            try:
-                self.client.delete(key)
-            except Exception:
-                pass
-
-    return success, msg
+    """
+    Register a new plugin to the `mrsm_plugins` "table".
+    """
+    return self._rust_client().register_plugin(plugin, force)
 
 
 def get_plugin_id(
@@ -125,26 +80,20 @@ def get_plugin_id(
     debug: bool = False
 ) -> Union[str, None]:
     """
-    Return a plugin's ID.
+    Return a plugin's ID (its name when it is registered).
     """
-    user_id = self.get_plugin_user_id(plugin, debug=debug)
-    return plugin.name if user_id is not None else None
+    return self._rust_client().get_plugin_id(plugin)
 
 
 def get_plugin_version(
     self,
     plugin: 'mrsm.core.Plugin',
-    debug: bool = False,
+    debug: bool = False
 ) -> Union[str, None]:
     """
-    Return a plugin's version.
+    Return the version for a plugin.
     """
-    version_key = self.get_plugin_key(plugin.name, 'version')
-
-    try:
-        return self.get(version_key)
-    except Exception:
-        return None
+    return self._rust_client().get_plugin_version(plugin)
 
 
 def get_plugin_user_id(
@@ -153,33 +102,20 @@ def get_plugin_user_id(
     debug: bool = False
 ) -> Union[str, None]:
     """
-    Return a plugin's user ID.
+    Return the user ID for a plugin's owner.
     """
-    user_id_key = self.get_plugin_key(plugin.name, 'user_id')
-
-    try:
-        return self.get(user_id_key)
-    except Exception:
-        return None
+    return self._rust_client().get_plugin_user_id(plugin)
 
 
 def get_plugin_username(
     self,
     plugin: 'mrsm.core.Plugin',
     debug: bool = False
-) -> Union[str]:
+) -> Union[str, None]:
     """
-    Return the username of a plugin's owner.
+    Return the username for a plugin's owner.
     """
-    user_id = self.get_plugin_user_id(plugin, debug=debug)
-    if user_id is None:
-        return None
-
-    username_key = self.get_user_key(user_id, 'username')
-    try:
-        return self.get(username_key)
-    except Exception:
-        return None
+    return self._rust_client().get_plugin_username(plugin)
 
 
 def get_plugin_attributes(
@@ -190,14 +126,7 @@ def get_plugin_attributes(
     """
     Return the attributes of a plugin.
     """
-    attributes_key = self.get_plugin_key(plugin.name, 'attributes')
-    try:
-        attributes_str = self.get(attributes_key)
-        if not attributes_str:
-            return {}
-        return json.loads(attributes_str)
-    except Exception:
-        return {}
+    return self._rust_client().get_plugin_attributes(plugin)
 
 
 def delete_plugin(
@@ -207,35 +136,6 @@ def delete_plugin(
     **kw: Any
 ) -> SuccessTuple:
     """
-    Delete a plugin from the plugins table.
+    Delete a plugin's registration.
     """
-    plugins_pipe = self.get_plugins_pipe()
-    clear_success, clear_msg = plugins_pipe.clear(params={'plugin_name': plugin.name}, debug=debug)
-    if not clear_success:
-        return clear_success, clear_msg
-
-    keys_vals = self.get_plugin_keys_vals(plugin)
-    try:
-        old_keys_vals = {
-            key: self.get(key)
-            for key in keys_vals
-        }
-    except Exception as e:
-        return False, f"Failed to delete plugin '{plugin.name}':\n{e}"
-
-    try:
-        for key in keys_vals:
-            self.client.delete(key)
-        success, msg = True, "Success"
-    except Exception as e:
-        success = False
-        msg = f"Failed to delete plugin '{plugin.name}':\n{e}"
-
-    if not success:
-        try:
-            for key, old_val in old_keys_vals.items():
-                self.set(key, old_val)
-        except Exception:
-            pass
-
-    return success, msg
+    return self._rust_client().delete_plugin(plugin)

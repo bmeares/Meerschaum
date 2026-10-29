@@ -1,0 +1,12 @@
+
+Duplicate connectors or pipes.
+
+Command:
+    `copy {pipes, connectors}`
+
+Example:
+    `copy pipes`
+
+
+    Options:
+        `copy [connectors, pipes]`

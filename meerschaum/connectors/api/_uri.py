@@ -6,8 +6,8 @@
 Create an APIConnector from a URI string.
 """
 
-from meerschaum.utils.typing import Optional, Dict, Any, Union
-from meerschaum.utils.warnings import warn, error
+from meerschaum.utils.typing import Optional, Dict, Union
+
 
 @classmethod
 def from_uri(
@@ -39,16 +39,6 @@ def from_uri(
     -------
     A new APIConnector object or a dictionary of attributes (if `as_dict` is `True`).
     """
-    from meerschaum.connectors.sql import SQLConnector
-    params = SQLConnector.parse_uri(uri)
-    if 'host' not in params:
-        error("No host was found in the provided URI.")
-    params['protocol'] = params.pop('flavor')
-    params['label'] = label or (
-        (
-            (params['username'] + '@' if 'username' in params else '')
-            + params['host']
-        ).lower()
-    )
-
+    from meerschaum import _core
+    params = _core.api_uri_params(uri, label)
     return cls(**params) if not as_dict else params

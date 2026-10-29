@@ -1,0 +1,37 @@
+[package]
+name = "meerschaum-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the Python worker pool, its RPC protocol, the PythonConnector adapter and plugin manifests"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-worker"
+keywords = ["meerschaum", "python", "plugins", "rpc", "etl"]
+categories = ["asynchronous", "external-ffi-bindings"]
+include = ["src/**/*", "python/**/*", "schema/**/*", "/LICENSE", "/NOTICE"]
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+arrow = { workspace = true }
+# Crate-private: MessagePack values (control messages) and source-tree fingerprints.
+rmpv = "1"
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+meerschaum-connector-sql = { workspace = true }
+tempfile = "3"

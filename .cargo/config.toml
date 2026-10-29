@@ -1,0 +1,14 @@
+# Shared build directory for every crate so Polars/Arrow are compiled once.
+# Agents and CI must not override CARGO_TARGET_DIR: disk on the self-hosted runner is limited.
+[build]
+target-dir = "target"
+
+# Disk budget: the self-hosted runner has little free space. Dependencies are built
+# without debug info (Polars alone is ~1 GB per feature set with it) and lightly optimized;
+# workspace crates keep line tables so backtraces stay readable.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 1
+debug = false

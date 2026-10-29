@@ -1,0 +1,107 @@
+[package]
+name = "meerschaum-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the CLI library behind `mrsm` (clap CLI, shell, native actions); install `meerschaum`, not this crate"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-cli"
+keywords = ["meerschaum", "mrsm", "cli", "etl", "pipelines"]
+categories = ["command-line-utilities", "database"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[lib]
+name = "meerschaum_cli"
+path = "src/lib.rs"
+
+[[bin]]
+# Internal: what this crate's integration tests run (`CARGO_BIN_EXE_mrsm-cli`). The `mrsm` users
+# install is the `meerschaum` front crate's binary (`cargo install meerschaum`) or the Python
+# wheel's console script; naming this one `mrsm` as well would make `cargo build --workspace`
+# write both to `target/<profile>/mrsm` (cargo's "output filename collision").
+name = "mrsm-cli"
+path = "src/main.rs"
+
+[package.metadata.docs.rs]
+# docs.rs has no Oracle client: document the lean build.
+no-default-features = true
+
+[features]
+# D13: the `mrsm` binary ships the DuckDB and Oracle drivers, like the `meerschaum._core` extension.
+# DuckDB's own shared library is loaded at run time (downloaded on first use, `MRSM_DUCKDB_LIB`;
+# nothing of DuckDB is compiled in), so it is always available: the SQL crate's default `duckdb`
+# feature adds only the small loader. `oracle` only needs Oracle Instant Client at runtime
+# (`libclntsh`), never at build time. `--no-default-features` gives the lean binary.
+default = ["oracle"]
+oracle = ["meerschaum-connector-sql/oracle"]
+
+[dependencies]
+reqwest = { workspace = true }
+tempfile = "3"
+toml = { workspace = true }
+meerschaum-core = { workspace = true }
+meerschaum-compose = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+meerschaum-connector-sql = { workspace = true }
+meerschaum-connector-valkey = { workspace = true }
+meerschaum-connector-api = { workspace = true, features = ["client"] }
+meerschaum-jobs = { workspace = true }
+meerschaum-worker = { workspace = true }
+meerschaum-engine = { workspace = true }
+meerschaum-server = { workspace = true }
+meerschaum-plugin = { workspace = true }
+meerschaum-web = { workspace = true }
+axum = "0.8"
+async-trait = "0.1"
+rmpv = "1"
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+fancy-regex = "0.19"
+terminal_size = "0.4"
+unicode-width = "0.2"
+reedline = "0.52"
+# The versions reedline 0.52 uses (already in the lock file): key events, styles, graphemes.
+crossterm = "0.29"
+nu-ansi-term = "0.50"
+# Full-screen views (`watch run`, `watch jobs`, shell F2/F3): ratatui over the same crossterm.
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
+unicode-segmentation = "1"
+# `install plugins`: plugin archives are gzip-compressed tarballs.
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
+sha2 = { workspace = true }
+hex = { workspace = true }
+fs4 = "1.1"
+
+[target.'cfg(unix)'.dependencies]
+# `timed_input`: poll stdin with a timeout (no reader thread that outlives the call);
+# `setsid` for the timed pipeline step; `fs` for `doctor` (`access`, `statvfs`); `termios` for
+# the single key presses of the inline live view of graph runs (`format/live.rs`).
+rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs", "termios"] }
+# The SIGINT / SIGTERM watcher (`shell/interrupt.rs`, which also erases the progress line), a safe
+# API. `extended-siginfo` says whether a signal came from the terminal (Ctrl-C, which the programs
+# of the foreground process group got too) or from `kill` (which they did not: it is forwarded).
+signal-hook = { version = "0.4", features = ["extended-siginfo"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
+# The pty harness of tests/shell_screens.rs: drive `mrsm` in a pseudo-terminal and render it.
+portable-pty = "0.9"
+vt100 = "0.16"
+# Self-signed certificates for `start api --keyfile/--certfile` (`server.rs`, tests/https_api.rs).
+rcgen = "0.14"

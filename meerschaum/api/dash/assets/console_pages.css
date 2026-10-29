@@ -1,0 +1,181 @@
+/* The console's Jobs, Users, Plugins and Tokens pages (dark theme, phone-first). */
+.console-page { padding-top: 16px; padding-bottom: 32px; }
+.console-page-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.console-page-header h3 { margin: 0; }
+.console-page-header .console-page-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.console-empty { text-align: center; padding: 3em 1em; }
+.console-empty h4, .console-empty h5 { margin-bottom: 1em; }
+.console-search { max-width: 420px; margin-bottom: 16px; }
+.console-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+.console-table th { font-weight: 600; white-space: nowrap; }
+.console-table td, .console-table th { vertical-align: middle; }
+.console-table code { color: #dceaf6; }
+
+/* Jobs. */
+.jobs-toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.jobs-toolbar .nav-tabs { flex: 1 1 auto; }
+.jobs-toolbar-actions { margin-left: auto; padding-bottom: 6px; }
+.jobs-filter { display: flex; align-items: center; gap: 8px; max-width: 560px; margin-bottom: 16px; }
+.jobs-filter .form-control { flex: 1 1 auto; max-width: 420px; }
+#jobs-status-filter-clear { white-space: nowrap; }
+.jobs-empty { text-align: center; padding: 3em 1em; }
+.jobs-empty h5 { margin-bottom: 1em; }
+.job-card { margin-bottom: 16px; }
+.job-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.job-card-status { min-width: 0; }
+.job-status-line { margin: 0; overflow-wrap: anywhere; }
+/* The health states in the Overview's colors (stalled amber, failing red). */
+.job-status-line.job-state-stalled { color: #e0a526; }
+.job-status-line.job-state-failing, .job-status-line.job-state-failed { color: #ff7b72; }
+.job-title { margin-bottom: 0.5em; overflow-wrap: anywhere; }
+/* A job's or a user's name, linking to its page. */
+.console-name-link { color: inherit; text-decoration: none; }
+.console-name-link:hover { text-decoration: underline; }
+.job-card-command { white-space: pre-wrap; margin-bottom: 0.75em; }
+.job-card-command code { color: #dceaf6; overflow-wrap: break-word; }
+.job-actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.job-actions .btn { width: 100%; }
+.jobs-table td, .jobs-table th { vertical-align: middle; }
+/* A short name keeps its line next to a long status (names break only past this width). */
+.job-row-name { min-width: 10rem; overflow-wrap: anywhere; }
+.job-row-name .job-title { font-weight: 600; margin: 0; }
+.job-row-status .job-status-line { font-size: 0.95rem; }
+.job-row-command { max-width: 420px; }
+.job-row-command code { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #dceaf6; }
+.job-row-menu-cell { width: 1%; text-align: right; }
+.job-row-menu-toggle { text-decoration: none; font-size: 1.3rem; line-height: 1; padding: 4px 12px; color: var(--bs-light); }
+.job-row-menu-toggle::after { display: none; }
+.new-job-field { margin-bottom: 14px; }
+.new-job-field > label { display: block; margin-bottom: 4px; color: #a8becf; }
+.new-job-keys { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.new-job-repeat .form-check-inline { margin-right: 1.25rem; }
+.new-job-preview { white-space: pre-wrap; overflow-wrap: anywhere; background: #17212b; color: #dceaf6; padding: 10px 12px; border-radius: 6px; margin: 0; min-height: 2.6em; }
+.new-job-preview-invalid { color: #f5c26b; font-family: inherit; }
+
+/* The login page of an instance without users: Create admin account. */
+.first-admin { max-width: 520px; margin: 0 auto; }
+.first-admin #first-admin-title { margin-bottom: 16px; }
+.first-admin #first-admin-button { width: 100%; }
+
+/* Users & Teams. */
+.users-tabs { margin-bottom: 12px; }
+.user-type-badge { font-weight: 500; }
+.users-table .user-email { overflow-wrap: anywhere; }
+.users-row-menu-cell { width: 1%; text-align: right; }
+.user-role-default { font-weight: 500; vertical-align: 1px; }
+.user-team { display: inline-block; margin-right: 10px; white-space: nowrap; }
+.user-team-role { color: #a8becf; font-size: 0.85em; }
+/* The Edit dialog's permissions: one box per group. */
+.users-permissions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 14px; margin: 4px 0 14px; }
+.users-permissions-group { border: 1px solid #47515c; border-radius: 6px; padding: 8px 10px 4px; margin: 0; min-width: 0; }
+.users-permissions-legend { float: none; width: auto; font-size: 0.85rem; font-weight: 700; color: #a8becf; margin: 0 0 4px; padding: 0; }
+.users-permissions-checklist .form-check { margin-bottom: 2px; }
+/* Teams: the members dialog's Add row. */
+.teams-table .team-name { font-weight: 600; }
+.team-members-table { margin-bottom: 10px; }
+.team-members-table .custom-select { max-width: 160px; }
+.team-add-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto; gap: 8px; align-items: center; }
+
+/* Plugins. */
+.plugins-tabs { margin-bottom: 16px; }
+.plugins-table .plugin-provides .badge { margin: 0 4px 4px 0; font-weight: 500; }
+.plugin-kind { white-space: nowrap; }
+.plugin-packages-missing { color: #f5a623; }
+.plugin-row-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.plugin-load-error { color: tomato; overflow-wrap: anywhere; }
+.plugin-card-actions { margin-top: 0.5em; }
+
+/* Tokens. */
+#tokens-controls-div { align-items: center; }
+.tokens-form-row { margin-bottom: 16px; }
+.tokens-grant-all { margin-bottom: 12px; }
+.tokens-scopes-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tokens-scopes-header .btn-link { text-decoration: none; padding: 0 4px; }
+.tokens-scopes-checklist { column-count: 3; column-gap: 16px; }
+.tokens-scopes-checklist .form-check { break-inside: avoid; }
+.tokens-modal-id { overflow-wrap: anywhere; }
+@media (max-width: 575.98px) {
+    .tokens-scopes-checklist { column-count: 2; }
+}
+
+@media (max-width: 767px) {
+    #first-admin-container .form-control, #login-container .form-control { min-height: 44px; }
+    .console-page { padding-left: 16px; padding-right: 16px; }
+    .jobs-page .btn, .users-page .btn, .plugins-page .btn, .tokens-page .btn,
+    .jobs-page .dropdown-toggle, .users-page .dropdown-toggle, .plugins-page .dropdown-toggle,
+    .jobs-page .dropdown-item, .users-page .dropdown-item, .plugins-page .dropdown-item,
+    .jobs-page .nav-link, .plugins-page .nav-link,
+    #new-job-modal .btn, .users-modal .btn, .tokens-modal .btn { min-height: 44px; }
+    .jobs-page .form-control, .users-page .form-control, .plugins-page .form-control,
+    #new-job-modal .form-control, .users-modal .form-control, .tokens-modal .form-control { min-height: 44px; }
+    .tokens-scopes-checklist .form-check { min-height: 44px; display: flex; align-items: center; gap: 0.5em; }
+    .users-permissions-checklist .form-check, .users-modal .form-check { min-height: 44px; display: flex; align-items: center; gap: 0.5em; }
+    .users-permissions-checklist .form-check .form-check-input, .users-modal .form-check .form-check-input { margin-top: 0; }
+    .users-modal .custom-select, .users-modal .dash-dropdown, .users-tabs .nav-link { min-height: 44px; }
+    .team-add-row { grid-template-columns: minmax(0, 1fr); }
+    .tokens-scopes-checklist .form-check .form-check-input { margin-top: 0; }
+    .tokens-modal .dash-datepicker-input-wrapper { min-height: 42px; }
+    .tokens-modal .dash-datepicker-clear {
+        display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 42px;
+    }
+    /* Names are links with a 44 px tap area. */
+    .console-name-link { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+    /* The compact jobs table as a list: each job's name with its status under it and the ⋮
+       menu beside them, so a name has the width of the row. */
+    .jobs-table, .jobs-table > tbody { display: block; width: 100%; }
+    .jobs-table > thead { display: none; }
+    .jobs-table tr.job-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        column-gap: 8px;
+        border-bottom: var(--bs-border-width) solid var(--bs-border-color);
+    }
+    .jobs-table tr.job-row > td { display: block; border-bottom-width: 0; padding: 0 4px; }
+    .jobs-table tr.job-row > td.job-row-name { grid-column: 1; grid-row: 1; min-width: 0; }
+    .jobs-table tr.job-row > td.job-row-status { grid-column: 1; grid-row: 2; padding-bottom: 10px; }
+    .jobs-table tr.job-row > td.job-row-menu-cell { grid-column: 2; grid-row: 1 / span 2; width: auto; }
+    .new-job-keys { grid-template-columns: minmax(0, 1fr); }
+    .jobs-toolbar-actions { margin-left: 0; width: 100%; }
+    .jobs-toolbar-actions .btn { width: 100%; }
+    .console-page-header .console-page-actions .btn { flex: 1 1 auto; }
+    .console-page-header .console-page-actions #tokens-refresh-button { flex: 0 0 auto; min-width: 44px; }
+    .console-page-header .console-page-actions { margin-left: 0; width: 100%; }
+    .console-search, .jobs-filter { max-width: none; }
+    .job-row-menu-toggle { min-width: 44px; }
+    .console-table td { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+    .users-table td { padding-top: 0; padding-bottom: 0; }
+}
+
+/* Dash 4's date picker (the token forms' Expiration) in the dark theme: dbc_dark.css styles
+   Dash's dropdowns only, so its white box showed white text. */
+.dbc_dark .dash-datepicker,
+.dbc_dark .dash-datepicker-content {
+    --Dash-Fill-Inverse-Strong: var(--bs-dark);
+    --Dash-Text-Strong: #fff;
+    --Dash-Text-Weak: #adb5bd;
+    --Dash-Text-Disabled: #6c757d;
+    --Dash-Stroke-Strong: grey;
+    color: #fff;
+}
+.dbc_dark .dash-datepicker { border: 1px solid grey; border-radius: 4px; }
+.dbc_dark .dash-datepicker-content input { color: #fff; background: transparent; }
+
+.plugin-source-browser { margin: 24px 0; min-width: 0; }
+.plugin-source-content {
+    margin-top: 12px;
+    padding: 16px;
+    max-height: 65vh;
+    overflow: auto;
+    white-space: pre;
+    color: #dceaf6;
+    background: #17212b;
+    border: 1px solid #47515c;
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+.connectors-fields { margin: 12px 0 6px; max-width: 36rem; font-size: 0.8rem; }
+.connectors-fields dd { overflow-wrap: anywhere; }
+@media (max-width: 767.98px) {
+    .plugin-source-browser .dash-dropdown-trigger { min-height: 44px; }
+}

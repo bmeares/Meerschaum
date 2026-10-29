@@ -1,0 +1,8 @@
+
+Compress pipes' target tables to reduce disk usage.
+
+For TimescaleDB hypertables this enables native compression and installs a
+compression policy so future synced chunks are compressed automatically.
+
+    Options:
+        `compress [pipes]`

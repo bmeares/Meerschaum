@@ -1,0 +1,57 @@
+{
+  "description": "An aggregate child whose watermark (the day floor) is always below its parent's. The cursor shows it consumed everything, so it is skip; a watermark-only rule would never skip it.",
+  "records": [
+    {
+      "instance": "sql:main", "connector": "plugin:sensors", "metric": "raw_events",
+      "parameters": {"columns": {"datetime": "ts", "id": "station"}, "verify": {"chunk_days": 1}}
+    },
+    {
+      "instance": "sql:main", "connector": "sql:main", "metric": "daily_rollup",
+      "parameters": {
+        "columns": {"datetime": "day", "id": "station"},
+        "verify": {"chunk_days": 1},
+        "sql": "SELECT date_trunc('day', ts) AS day, station, count(*) AS n FROM {{ Pipe('plugin:sensors', 'raw_events') }} GROUP BY 1, 2"
+      }
+    }
+  ],
+  "selection": {"targets": {"refs": ["sql:main|sql:main|daily_rollup|None"]}, "parents": "all"},
+  "state": {
+    "watermarks": {
+      "sql:main|plugin:sensors|raw_events|None": "2026-10-12T09:45:00Z",
+      "sql:main|sql:main|daily_rollup|None": "2026-10-12T00:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:main|plugin:sensors|raw_events|None": "@current",
+      "sql:main|sql:main|daily_rollup|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {"pipe_ref": "sql:main|plugin:sensors|raw_events|None", "seq": 40, "begin": "2026-10-11T00:00:00Z", "end": "2026-10-12T00:00:00Z"},
+        {"pipe_ref": "sql:main|plugin:sensors|raw_events|None", "seq": 41, "begin": "2026-10-12T00:00:00Z", "end": "2026-10-13T00:00:00Z"}
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {"parent_ref": "sql:main|plugin:sensors|raw_events|None", "child_ref": "sql:main|sql:main|daily_rollup|None", "seq": 41, "parent_watermark_at_cursor": "2026-10-12T09:45:00Z"}
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {
+        "node": "sql:main|plugin:sensors|raw_events|None",
+        "action": "root",
+        "bounds": {"begin": "", "end": null},
+        "chunks": [],
+        "reason_contains": ["no parents in this run"]
+      },
+      {
+        "node": "sql:main|sql:main|daily_rollup|None",
+        "action": "skip",
+        "bounds": null,
+        "provisional": true,
+        "reason_contains": ["up to date: ", "has no new data (latest 2026-10-12 09:45)"]
+      }
+    ]
+  }
+}

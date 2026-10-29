@@ -25,10 +25,10 @@ The connector is built from connection attributes or a single `uri` string. The 
 
 | Attribute | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `host` | ✅ | — | Valkey/Redis hostname. |
+| `host` | ✅ |, | Valkey/Redis hostname. |
 | `port` | | `6379` | Server port. |
 | `username` | | `default` | Username (Valkey ACL). |
-| `password` | | — | Password. |
+| `password` | |, | Password. |
 | `db` | | `0` | Logical database number. |
 | `socket_timeout` | | `300` | Socket timeout in seconds. |
 
@@ -51,7 +51,7 @@ When a `uri` is set it takes precedence over the individual attributes (the clie
 
 ### Environment Connectors
 
-Like other connectors, you may define a Valkey connector entirely from an [environment variable](/reference/connectors/#-environment-connectors) using the `MRSM_<TYPE>_<LABEL>` convention:
+Like other connectors, you may define a Valkey connector entirely from an [environment variable](/reference/connectors/#environment-connectors) using the `MRSM_<TYPE>_<LABEL>` convention:
 
 ```bash
 export MRSM_VALKEY_REMOTE='valkey://default:mrsm@valkey.example.com:6379/0?timeout=300s'
@@ -93,7 +93,7 @@ The `ValkeyConnector` implements the full [instance connector interface](/refere
 Compared to [`SQLConnector`](/reference/connectors/sql-connectors/):
 
 - **Filtering** via `params`, `begin`, and `end` is applied **in-memory** after reading candidate documents (datetime ranges are narrowed at the store level via the sorted-set score, but column `params` are filtered client-side).
-- There are **no SQL features** — no joins, no in-place syncs, no native partitioning/hypertables.
+- There are **no SQL features**, no joins, no in-place syncs, no native partitioning/hypertables.
 - **Thread safety:** the connector inherits `IS_THREAD_SAFE = False`, so it is not used for concurrent-read connection pools the way a thread-safe SQL connector is.
 
 ## Example
@@ -102,7 +102,7 @@ Register a pipe on a `valkey:` instance and sync some data:
 
 ```python
 import meerschaum as mrsm
-import pandas as pd
+import polars as pl
 
 pipe = mrsm.Pipe(
     'demo', 'temperature', 'home',
@@ -111,7 +111,7 @@ pipe = mrsm.Pipe(
 )
 pipe.register()
 
-pipe.sync(pd.DataFrame([
+pipe.sync(pl.DataFrame([
     {'timestamp': '2025-01-01 00:00:00', 'sensor': 'a', 'value': 20.5},
     {'timestamp': '2025-01-01 01:00:00', 'sensor': 'a', 'value': 21.0},
 ]))

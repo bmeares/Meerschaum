@@ -7,7 +7,6 @@ Enforce data types for a pipe's underlying table.
 """
 
 from __future__ import annotations
-from io import StringIO
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, Optional
 from typing import TYPE_CHECKING
@@ -23,96 +22,36 @@ def enforce_dtypes(
     enforce: bool = True,
     safe_copy: bool = True,
     dtypes: Optional[Dict[str, str]] = None,
-    as_polars: bool = False,
+    as_polars: Optional[bool] = None,
     debug: bool = False,
+    as_pandas: Optional[bool] = None,
 ) -> 'pd.DataFrame':
     """
     Cast the input dataframe to the pipe's registered data types.
     If the pipe does not exist and dtypes are not set, return the dataframe.
+
+    The result is the library `df` came in (a Polars frame stays Polars, a pandas frame
+    pandas); documents, dictionaries and Arrow data come back in the library of the
+    `meerschaum:dataframe` setting. `as_polars=True` / `as_pandas=True` ask for one library.
     """
-    import traceback
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.dataframe import (
-        parse_df_datetimes,
-        enforce_dtypes as _enforce_dtypes,
-        parse_simple_lines,
-        to_pandas,
-        to_polars,
-    )
-    from meerschaum.utils.dtypes import are_dtypes_equal
-    from meerschaum.utils.packages import import_pandas
-    pd = import_pandas(debug=debug)
-    if df is None:
-        if debug:
-            dprint(
-                "Received None instead of a DataFrame.\n"
-                + "    Skipping dtype enforcement..."
-            )
-        return df
-
-    if not self.enforce:
-        enforce = False
-
-    explicit_dtypes = self.get_dtypes(infer=False, debug=debug) if enforce else {}
-    pipe_dtypes = self.get_dtypes(infer=True, debug=debug) if not dtypes else dtypes
-
-    try:
-        if isinstance(df, str):
-            if df.strip() and df.strip()[0] not in ('{', '['):
-                df = parse_df_datetimes(
-                    parse_simple_lines(df),
-                    ignore_cols=[
-                        col
-                        for col, dtype in pipe_dtypes.items()
-                        if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
-                    ],
-                )
-            else:
-                df = parse_df_datetimes(
-                    pd.read_json(StringIO(df)),
-                    ignore_cols=[
-                        col
-                        for col, dtype in pipe_dtypes.items()
-                        if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
-                    ],
-                    ignore_all=(not enforce),
-                    strip_timezone=(self.tzinfo is None),
-                    chunksize=chunksize,
-                    debug=debug,
-                )
-        elif isinstance(df, (dict, list, tuple)):
-            df = parse_df_datetimes(
-                df,
-                ignore_cols=[
-                    col
-                    for col, dtype in pipe_dtypes.items()
-                    if (not enforce or not are_dtypes_equal(str(dtype), 'datetime'))
-                ],
-                strip_timezone=(self.tzinfo is None),
-                chunksize=chunksize,
-                debug=debug,
-            )
-    except Exception as e:
-        warn(f"Unable to cast incoming data as a DataFrame...:\n{e}\n\n{traceback.format_exc()}")
-        return None
-
-    if not pipe_dtypes:
-        if debug:
-            dprint(
-                f"Could not find dtypes for {self}.\n"
-                + "Skipping dtype enforcement..."
-            )
-        return to_polars(df) if as_polars else to_pandas(df)
-
-    return _enforce_dtypes(
+    from meerschaum import _core
+    from meerschaum.core.Pipe._data import _rust_context
+    from meerschaum.core.Pipe._sync import is_accepted_data, unsupported_data_error
+    from meerschaum.utils.dataframe import output_library_for, ensure_dataframe_library
+    context = _rust_context(self, debug=debug)
+    if df is not None and not is_accepted_data(df):
+        raise unsupported_data_error(df, f"enforce the dtypes of {self}")
+    library = output_library_for(df, as_polars=as_polars, as_pandas=as_pandas)
+    if df is not None:
+        ensure_dataframe_library(library)
+    as_polars = library == 'polars'
+    return _core.pipe_enforce_dtypes(
+        self,
+        context,
         df,
-        pipe_dtypes,
-        explicit_dtypes=explicit_dtypes,
+        enforce=enforce,
         safe_copy=safe_copy,
-        strip_timezone=(self.tzinfo is None),
-        coerce_numeric=self.mixed_numerics,
-        coerce_timezone=enforce,
+        dtypes=dtypes,
         as_polars=as_polars,
         debug=debug,
     )
@@ -142,27 +81,13 @@ def infer_dtypes(
     -------
     A dictionary of strings containing the pandas data types for this Pipe.
     """
-    if not self.exists(debug=debug):
-        return {}
-
-    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
-    from meerschaum.utils.dtypes import to_pandas_dtype
-
-    ### NOTE: get_columns_types() may return either the types as
-    ###       PostgreSQL- or Pandas-style.
-    columns_types = self.get_columns_types(refresh=refresh, debug=debug)
-
-    remote_pd_dtypes = {
-        c: (
-            get_pd_type_from_db_type(t, allow_custom_dtypes=True)
-            if str(t).isupper()
-            else to_pandas_dtype(t)
-        )
-        for c, t in columns_types.items()
-    } if columns_types else {}
-    if not persist:
+    from meerschaum import _core
+    from meerschaum.core.Pipe._data import _rust_context
+    context = _rust_context(self, debug=debug, refresh=refresh)
+    remote_pd_dtypes = _core.pipe_infer_dtypes(self, context, refresh=refresh, debug=debug)
+    ### A table that does not exist has no dtypes to persist.
+    if not persist or not remote_pd_dtypes:
         return remote_pd_dtypes
-
     parameters = self.get_parameters(refresh=refresh, debug=debug)
     dtypes = parameters.get('dtypes', {})
     dtypes.update({

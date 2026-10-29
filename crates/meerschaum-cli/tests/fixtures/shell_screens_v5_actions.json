@@ -1,0 +1,211 @@
+{
+  "menu_subactions": {
+    "typed show p": {
+      "rows": {
+        "9": {"line": "                                      pipelines", "styles": [[37, 38, "000000", "bcbcbc", ""], [38, 39, "blue", "bcbcbc", "B"], [39, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "10": {"line": "                                      pipes", "styles": [[37, 38, "000000", "bcbcbc", ""], [38, 39, "blue", "bcbcbc", "B"], [39, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "11": {"line": "                                      plugins", "styles": [[37, 38, "000000", "bcbcbc", ""], [38, 39, "blue", "bcbcbc", "B"], [39, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]}
+      }
+    },
+    "typed show pi": {
+      "rows": {
+        "7": {"line": "                                       pipelines", "styles": [[38, 39, "000000", "bcbcbc", ""], [39, 41, "blue", "bcbcbc", "B"], [41, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "8": {"line": "                                       pipes", "styles": [[38, 39, "000000", "bcbcbc", ""], [39, 41, "blue", "bcbcbc", "B"], [41, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]}
+      }
+    },
+    "tab": {
+      "rows": {
+        "6": {"line": " [ (no username)@sql:local ] ➤ show pipelines", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]},
+        "7": {"line": "                                       pipelines", "styles": [[38, 39, "878787", "ffffff", "R"], [39, 41, "blue", "ffffff", "BR"], [41, 49, "878787", "ffffff", "R"], [49, 50, "000000", "444444", ""]]},
+        "8": {"line": "                                       pipes", "styles": [[38, 39, "000000", "bcbcbc", ""], [39, 41, "blue", "bcbcbc", "B"], [41, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]}
+      },
+      "cursor": [6, 45]
+    },
+    "enter": {
+      "rows": {
+        "0": {"line": "No pipelines registered on sql:local.", "styles": []},
+        "1": {"line": "", "styles": []},
+        "2": {"line": " [ (no username)@sql:local ] ➤", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]},
+        "3": {"line": "", "styles": []}
+      },
+      "cursor": [2, 31]
+    }
+  },
+  "menu_space": {
+    "typed show space": {
+      "rows": {
+        "10": {"line": "                                     completions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "11": {"line": "                                     config", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "12": {"line": "                                     connectors", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "13": {"line": "                                     daemons", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "14": {"line": "                                     data", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "15": {"line": "                                     drivers", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "16": {"line": "                                     environment", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "17": {"line": "                                     graph", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "18": {"line": "                                     help", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "19": {"line": "                                     jobs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "20": {"line": "                                     logs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "21": {"line": "                                     packages", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "22": {"line": "                                     partitions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]}
+      }
+    },
+    "tab": {
+      "rows": {
+        "10": {"line": "                                     completions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "11": {"line": "                                     config", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "12": {"line": "                                     connectors", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "13": {"line": "                                     daemons", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "14": {"line": "                                     data", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "15": {"line": "                                     drivers", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "16": {"line": "                                     environment", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "17": {"line": "                                     graph", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "18": {"line": "                                     help", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "19": {"line": "                                     jobs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "20": {"line": "                                     logs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "21": {"line": "                                     packages", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "22": {"line": "                                     partitions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]}
+      }
+    }
+  },
+  "ctrl_c": {
+    "typed": {
+      "rows": {
+        "7": {"line": "                                        pipelines", "styles": [[39, 40, "000000", "bcbcbc", ""], [40, 43, "blue", "bcbcbc", "B"], [43, 50, "000000", "bcbcbc", ""], [50, 51, "000000", "444444", ""]]},
+        "8": {"line": "                                        pipes", "styles": [[39, 40, "000000", "bcbcbc", ""], [40, 43, "blue", "bcbcbc", "B"], [43, 50, "000000", "bcbcbc", ""], [50, 51, "000000", "444444", ""]]}
+      }
+    }
+  },
+  "long_output": {
+    "after help": {
+      "rows": {
+        "3": {"line": "  analyze      compose       deduplicate    flush        pause       repo      stack       upgrade", "styles": []},
+        "4": {"line": "  api          compress      delete         index        plan        restart   start       vacuum", "styles": []},
+        "5": {"line": "  attach       copy          doctor         install      prune       restore   stop        verify", "styles": []},
+        "6": {"line": "  backup       daemon        drop           instance     python      setup     sync        watch", "styles": []},
+        "7": {"line": "  bootstrap    debug         edit           login        register    show      tag", "styles": []},
+        "8": {"line": "  clear        decompress    executor       partition    reload      sql       uninstall", "styles": []},
+        "10": {"line": "", "styles": []},
+        "11": {"line": " [ (no username)@sql:local ] ➤", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]}
+      },
+      "cursor": [11, 31]
+    },
+    "typed seq": {
+      "rows": {
+        "3": {"line": "  analyze      compose       deduplicate    flush        pause       repo      stack       upgrade", "styles": []},
+        "4": {"line": "  api          compress      delete         index        plan        restart   start       vacuum", "styles": []},
+        "5": {"line": "  attach       copy          doctor         install      prune       restore   stop        verify", "styles": []},
+        "6": {"line": "  backup       daemon        drop           instance     python      setup     sync        watch", "styles": []},
+        "7": {"line": "  bootstrap    debug         edit           login        register    show      tag", "styles": []},
+        "8": {"line": "  clear        decompress    executor       partition    reload      sql       uninstall", "styles": []},
+        "10": {"line": "", "styles": []},
+        "11": {"line": " [ (no username)@sql:local ] ➤ sh seq 1 60", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]}
+      },
+      "cursor": [11, 42]
+    }
+  },
+  "menu_scroll": {
+    "typed show space": {
+      "rows": {
+        "10": {"line": "                                     completions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "11": {"line": "                                     config", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "12": {"line": "                                     connectors", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "13": {"line": "                                     daemons", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "14": {"line": "                                     data", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "15": {"line": "                                     drivers", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "16": {"line": "                                     environment", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "17": {"line": "                                     graph", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "18": {"line": "                                     help", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "19": {"line": "                                     jobs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "20": {"line": "                                     logs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "21": {"line": "                                     packages", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "22": {"line": "                                     partitions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]}
+      }
+    },
+    "tab x17": {
+      "rows": {
+        "6": {"line": " [ (no username)@sql:local ] ➤ show pipelines", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]},
+        "8": {"line": "                                     completions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "9": {"line": "                                     config", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "10": {"line": "                                     connectors", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "11": {"line": "                                     daemons", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "12": {"line": "                                     data", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "13": {"line": "                                     drivers", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "14": {"line": "                                     environment", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "15": {"line": "                                     graph", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "16": {"line": "                                     help", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "17": {"line": "                                     jobs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "18": {"line": "                                     logs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "19": {"line": "                                     packages", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "20": {"line": "                                     partitions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "21": {"line": "                                     pipelines", "styles": [[36, 49, "878787", "ffffff", "R"], [49, 50, "000000", "a8a8a8", ""]]},
+        "22": {"line": "                                     pipes", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]}
+      }
+    },
+    "tab x24 (last)": {
+      "rows": {
+        "6": {"line": " [ (no username)@sql:local ] ➤ show tags", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]},
+        "7": {"line": "                                     environment", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "8": {"line": "                                     graph", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "9": {"line": "                                     help", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "10": {"line": "                                     jobs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "11": {"line": "                                     logs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "12": {"line": "                                     packages", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "13": {"line": "                                     partitions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "14": {"line": "                                     pipelines", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "15": {"line": "                                     pipes", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "16": {"line": "                                     plugins", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "17": {"line": "                                     rowcounts", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "18": {"line": "                                     runs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "19": {"line": "                                     schedules", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "20": {"line": "                                     sizes", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "21": {"line": "                                     tags", "styles": [[36, 49, "878787", "ffffff", "R"], [49, 50, "000000", "a8a8a8", ""]]},
+        "22": {"line": "                                     targets", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]}
+      },
+      "cursor": [6, 40]
+    },
+    "tab wraps to original": {
+      "rows": {
+        "6": {"line": " [ (no username)@sql:local ] ➤ show targets", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]},
+        "7": {"line": "                                     graph", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "8": {"line": "                                     help", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "9": {"line": "                                     jobs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "10": {"line": "                                     logs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "11": {"line": "                                     packages", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "12": {"line": "                                     partitions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "13": {"line": "                                     pipelines", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "14": {"line": "                                     pipes", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "15": {"line": "                                     plugins", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "16": {"line": "                                     rowcounts", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "17": {"line": "                                     runs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "18": {"line": "                                     schedules", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "19": {"line": "                                     sizes", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "20": {"line": "                                     tags", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "21": {"line": "                                     targets", "styles": [[36, 49, "878787", "ffffff", "R"], [49, 50, "000000", "a8a8a8", ""]]},
+        "22": {"line": "                                     tokens", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]}
+      },
+      "cursor": [6, 43]
+    },
+    "shift-tab to last": {
+      "rows": {
+        "6": {"line": " [ (no username)@sql:local ] ➤ show tags", "styles": [[0, 3, "green", "default", ""], [3, 16, "white", "default", ""], [16, 17, "green", "default", ""], [17, 26, "cyan", "default", ""], [26, 31, "green", "default", ""]]},
+        "7": {"line": "                                     graph", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "8": {"line": "                                     help", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "9": {"line": "                                     jobs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "10": {"line": "                                     logs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "11": {"line": "                                     packages", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "12": {"line": "                                     partitions", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "13": {"line": "                                     pipelines", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "14": {"line": "                                     pipes", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "15": {"line": "                                     plugins", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "16": {"line": "                                     rowcounts", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "17": {"line": "                                     runs", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "18": {"line": "                                     schedules", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "19": {"line": "                                     sizes", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "444444", ""]]},
+        "20": {"line": "                                     tags", "styles": [[36, 49, "878787", "ffffff", "R"], [49, 50, "000000", "444444", ""]]},
+        "21": {"line": "                                     targets", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]},
+        "22": {"line": "                                     tokens", "styles": [[36, 49, "000000", "bcbcbc", ""], [49, 50, "000000", "a8a8a8", ""]]}
+      },
+      "cursor": [6, 40]
+    }
+  }
+}

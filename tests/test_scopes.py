@@ -2,184 +2,23 @@
 # vim:fenc=utf-8
 
 """
-Test how scopes are granted and checked, with a SQLite instance and no API server.
+Test how the Python API host and web console grant and check scopes (no API server).
 
 - A literal `*` grants every scope, including custom and future scopes, so it is stored as is.
 - `*` satisfies the scopes which are necessary to execute actions and jobs.
-- Stopping a job requires `jobs:stop` (the legacy misspelling `josb:stop` is still accepted).
+- The web console's token forms grant all scopes with a literal `*`.
+
+The `edit` / `register` actions and the `/jobs/{name}/stop` route are native in Meerschaum 5
+(`crates/meerschaum-cli/src/native/{tokens,users}.rs`, `crates/meerschaum-server/tests/routes.rs`).
 """
 
 import json
-import pathlib
-import uuid
 from types import SimpleNamespace
 
 import pytest
 
 import meerschaum as mrsm
-from meerschaum import get_connector
-from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum.core import User, Token
-
-
-@pytest.fixture
-def instance(tmp_path):
-    """
-    A SQLite instance with one registered user.
-    """
-    label = f"scopes_{uuid.uuid4().hex[:8]}"
-    conn = get_connector(
-        'sql', label,
-        flavor='sqlite',
-        database=str(tmp_path / 'scopes.db'),
-    )
-    user = User('scope_user', 'test1234', email='none@none.com', instance=conn)
-    success, msg = conn.register_user(user)
-    assert success, msg
-
-    yield SimpleNamespace(conn=conn, keys=str(conn), user=user)
-    conn.engine.dispose()
-
-
-def _fake_prompts(monkeypatch, scopes_answer: str):
-    """
-    Answer the scope prompt, keep every other default, and decline every question.
-    """
-    import meerschaum.utils.prompt as prompt_module
-
-    def fake_prompt(question, default_editable=None, **kw):
-        if 'cope' in question:
-            return scopes_answer
-        return default_editable or ''
-
-    monkeypatch.setattr(prompt_module, 'prompt', fake_prompt)
-    monkeypatch.setattr(prompt_module, 'yes_no', lambda *a, **kw: False)
-    monkeypatch.setattr(prompt_module, 'choose', lambda question, choices, **kw: choices[0])
-
-
-class FakeTokenInstance:
-    """
-    An in-memory instance for tokens (a SQLite instance does not round-trip token scopes).
-    """
-    type = 'fake'
-
-    def __init__(self):
-        self.tokens = {}
-        self.label = f"fake{uuid.uuid4().hex[:6]}"
-
-    def __str__(self):
-        return f"fake:{self.label}"
-
-    def get_users(self, debug=False):
-        return ['scope_user']
-
-    def get_user_id(self, user, debug=False):
-        return 1
-
-    def register_token(self, token, debug=False):
-        token.generate_credentials()
-        self.tokens[token.id] = token.to_model(refresh=False)
-        return True, "Success"
-
-    def get_tokens(self, labels=None, ids=None, debug=False):
-        return [
-            Token(**dict(model), instance=str(self))
-            for model in self.tokens.values()
-            if (not labels or model.label in labels) and (not ids or model.id in ids)
-        ]
-
-    def get_token_model(self, token_id, debug=False):
-        return self.tokens.get(token_id, None)
-
-    def token_exists(self, token_id, debug=False):
-        return token_id in self.tokens
-
-    def edit_token(self, token, debug=False):
-        self.tokens[token.id] = token.to_model(refresh=False)
-        return True, "Success"
-
-    def scopes(self, token_id):
-        return list(self.tokens[token_id].scopes)
-
-
-@pytest.fixture
-def tokens_instance(monkeypatch):
-    fake = FakeTokenInstance()
-    import meerschaum.connectors.parse as parse_module
-    monkeypatch.setattr(parse_module, 'parse_instance_keys', lambda *a, **kw: fake)
-    return fake
-
-
-def _register_token(fake, scopes=None) -> Token:
-    token = Token(
-        label=f"token-{uuid.uuid4().hex[:6]}",
-        user=User('scope_user', user_id=1),
-        scopes=scopes,
-        instance=str(fake),
-    )
-    success, msg = token.register()
-    assert success, msg
-    return token
-
-
-def test_edit_tokens_stores_a_star_literally(tokens_instance, monkeypatch):
-    from meerschaum.actions.edit import _edit_tokens
-    token = _register_token(tokens_instance, scopes=['pipes:read'])
-    _fake_prompts(monkeypatch, '*')
-    success, msg = _edit_tokens(action=[str(token.id)], mrsm_instance=str(tokens_instance))
-    assert success, msg
-    assert tokens_instance.scopes(token.id) == ['*']
-
-
-def test_edit_tokens_keeps_other_scopes(tokens_instance, monkeypatch):
-    from meerschaum.actions.edit import _edit_tokens
-    token = _register_token(tokens_instance)
-    _fake_prompts(monkeypatch, 'pipes:read custom:read')
-    success, msg = _edit_tokens(action=[str(token.id)], mrsm_instance=str(tokens_instance))
-    assert success, msg
-    assert tokens_instance.scopes(token.id) == ['pipes:read', 'custom:read']
-
-
-def test_edit_users_stores_a_star_literally(instance, monkeypatch):
-    from meerschaum.actions.edit import _edit_users
-    _fake_prompts(monkeypatch, '*')
-    success, msg = _edit_users(
-        action=['scope_user'],
-        mrsm_instance=instance.keys,
-        noask=True,
-    )
-    assert success, msg
-    assert User('scope_user', instance=instance.conn).get_scopes(refresh=True) == ['*']
-
-
-def test_register_tokens_keeps_a_star_literally(tokens_instance, monkeypatch):
-    from meerschaum.actions.register import _register_tokens
-    _fake_prompts(monkeypatch, '')
-    success, msg = _register_tokens(
-        mrsm_instance=str(tokens_instance),
-        name='star-token',
-        scopes=['*'],
-    )
-    assert success, msg
-    (token_id,) = tokens_instance.tokens
-    assert tokens_instance.scopes(token_id) == ['*']
-
-
-def test_default_scopes_are_the_built_in_list(tokens_instance, monkeypatch):
-    """
-    A token created without scopes still gets every built-in scope (not `*`).
-    """
-    from meerschaum.actions.register import _register_tokens
-    default_scopes = list(STATIC_CONFIG['tokens']['scopes'])
-    assert Token(label='defaults').scopes == default_scopes
-    _fake_prompts(monkeypatch, '')
-    success, msg = _register_tokens(
-        mrsm_instance=str(tokens_instance),
-        name='default-token',
-    )
-    assert success, msg
-    (token_id,) = tokens_instance.tokens
-    assert tokens_instance.scopes(token_id) == default_scopes
+from meerschaum.core import Token
 
 
 def test_token_request_model_keeps_a_star():
@@ -225,79 +64,6 @@ def test_admins_and_no_auth_are_allowed(non_admin_allowed):
     assert is_user_allowed_to_execute(None)[0]
 
 
-@pytest.fixture
-def api(monkeypatch):
-    """
-    The API app (which needs its optional dependencies), authenticated as whichever scopes
-    the test sets.
-    """
-    pytest.importorskip('fastapi')
-    pytest.importorskip('httpx')
-    from fastapi.testclient import TestClient
-    import meerschaum.api._oauth2 as oauth2
-    from meerschaum.api import app
-
-    granted = SimpleNamespace(scopes=[])
-
-    async def load_user_or_token(request):
-        return None
-
-    monkeypatch.setattr(oauth2, 'load_user_or_token', load_user_or_token)
-    monkeypatch.setattr(oauth2, 'get_granted_scopes', lambda request, principal, **kw: granted.scopes)
-    client = TestClient(app, raise_server_exceptions=False)
-    client.granted = granted
-    return client
-
-
-@pytest.fixture
-def stopped_job():
-    from meerschaum._internal.entry import entry
-    from meerschaum.utils.daemon import Daemon
-    name = f"scopetest-{uuid.uuid4().hex[:8]}"
-    daemon = Daemon(
-        target=entry,
-        target_args=[['show', 'version']],
-        target_kw={},
-        daemon_id=name,
-        label='show version',
-        properties={'process': {'began': '2020-01-01T00:00:00', 'ended': '2020-01-01T00:00:01'}},
-    )
-    daemon.path.mkdir(parents=True, exist_ok=True)
-    assert daemon.write_properties()[0]
-    assert daemon.write_pickle()[0]
-    yield name
-    daemon.cleanup()
-
-
-@pytest.mark.parametrize(
-    'scopes,status_code',
-    [
-        (['*'], 200),
-        (['jobs:execute', 'jobs:stop'], 200),
-        (['jobs:execute', 'josb:stop'], 200),
-        (['jobs:execute'], 403),
-        (['jobs:stop'], 403),
-        (['josb:stop'], 403),
-        (['pipes:read'], 403),
-    ],
-)
-def test_stop_route_needs_jobs_stop(api, stopped_job, scopes, status_code):
-    api.granted.scopes = scopes
-    response = api.post(f'/jobs/{stopped_job}/stop')
-    assert response.status_code == status_code, response.text
-    if status_code == 403:
-        assert 'Missing required scope' in response.text
-        assert "'jobs:stop'" in response.text or "'jobs:execute'" in response.text
-
-
-def test_stop_route_names_the_current_scope(api, stopped_job):
-    api.granted.scopes = ['jobs:execute']
-    response = api.post(f'/jobs/{stopped_job}/stop')
-    assert response.status_code == 403
-    assert "Missing required scope: 'jobs:stop'" in response.text
-    assert 'josb' not in response.text
-
-
 def test_dash_token_form_grants_all_scopes_with_a_star():
     """
     The console's "Grant all scopes" switch registers a literal `*`.
@@ -311,16 +77,27 @@ def test_dash_token_form_grants_all_scopes_with_a_star():
 
     code = (
         "import json\n"
+        "from types import SimpleNamespace\n"
+        "from dash.exceptions import PreventUpdate\n"
         "import meerschaum.api.dash.callbacks.tokens as t\n"
+        "from meerschaum.api.dash import access\n"
         "captured = []\n"
         "class FakeToken:\n"
         "    def __init__(self, **kw):\n"
         "        captured.append(kw['scopes'])\n"
         "t.Token = FakeToken\n"
         "t.build_tokens_register_output_modal = lambda token: ['modal']\n"
-        "t.get_user_from_session = lambda session_id: None\n"
-        "t.register_token_click(1, 'all', ['pipes:read'], True, None, {})\n"
-        "t.register_token_click(1, 'some', ['pipes:read'], False, None, {})\n"
+        "t.get_user_from_session = lambda session_id: SimpleNamespace(username='scope-admin')\n"
+        "access.get_viewer = lambda *a, **kw: access.make_viewer('scope-admin', admin=True)\n"
+        "t.register_token_click(1, 'all', ['pipes:read'], True, None, {'session-id': 'signed-in'})\n"
+        "t.register_token_click(1, 'some', ['pipes:read'], False, None, {'session-id': 'signed-in'})\n"
+        "access.get_viewer = lambda *a, **kw: access.ANONYMOUS\n"
+        "try:\n"
+        "    t.register_token_click(1, 'anonymous', ['pipes:read'], True, None, {})\n"
+        "except PreventUpdate:\n"
+        "    pass\n"
+        "else:\n"
+        "    raise AssertionError('An anonymous request registered a token.')\n"
         "print('SCOPES=' + json.dumps(captured))\n"
     )
     result = subprocess.run(
@@ -332,27 +109,6 @@ def test_dash_token_form_grants_all_scopes_with_a_star():
     lines = [line for line in result.stdout.splitlines() if line.startswith('SCOPES=')]
     assert lines, result.stderr[-2000:]
     assert json.loads(lines[0][len('SCOPES='):]) == [['*'], ['pipes:read']]
-
-
-def test_register_tokens_nopretty_prints_json(tokens_instance, monkeypatch, capsys):
-    """
-    `register tokens --nopretty` prints the token (with its UUID and datetimes) as JSON.
-    """
-    from meerschaum.actions.register import _register_tokens
-    _fake_prompts(monkeypatch, '')
-    success, msg = _register_tokens(
-        mrsm_instance=str(tokens_instance),
-        name='json-token',
-        scopes=['*'],
-        nopretty=True,
-    )
-    assert success, msg
-    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    (token_id,) = tokens_instance.tokens
-    assert printed['id'] == str(token_id)
-    assert printed['label'] == 'json-token'
-    assert printed['scopes'] == ['*']
-    assert printed['secret']
 
 
 def test_dash_edit_token_form_keeps_a_star():

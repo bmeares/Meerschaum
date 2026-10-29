@@ -4,6 +4,12 @@
 
 """
 Meerschaum API backend. Start an API instance with `start api`.
+
+The API server is the native `mrsm` server (Rust). This package is the Python side of it: the
+helpers `@api_plugin` functions import (`app`, `get_api_connector`, `get_pipe`, `ScopedAuth`,
+`session_user`, `optional_session_user`, `mount_static`, ...)
+and the API host (`meerschaum.api.host`), which serves what only Python can: `@api_plugin` routes,
+plugin MCP tools and the Dash web console with the plugin pages that register into it.
 """
 from __future__ import annotations
 
@@ -18,6 +24,8 @@ from meerschaum.utils.typing import Dict, Any, Optional, PipesDict
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
 from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.venv import ensure_default_venvs
+ensure_default_venvs()
 from meerschaum.utils import get_pipes as _get_pipes
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn, dprint
@@ -31,44 +39,71 @@ __doc__ = """The Meerschaum Web API lets you manage your pipes over the Internet
 
 _locks = defaultdict(lambda: RLock())
 
-### Skip verifying packages in the docker image.
-CHECK_UPDATE = os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 'docker'
+### The Python API host (`python -m meerschaum.api.host`, v5 §7.3) serves only what plugins add:
+### the Rust server serves the core routes, the console and `/mcp`. In host mode the server's
+### options come from `MRSM_API_HOST_CONFIG` instead of the uvicorn config file, and the core
+### routes, events, websockets and Dash console below are not imported.
+def _is_host_process() -> bool:
+    """
+    Return whether this process is the API host: `MRSM_API_HOST` is set, or the interpreter was
+    started as `python -m meerschaum.api.host` (which imports this package before the host's
+    `__main__` runs, so the environment cannot be set in time).
+    """
+    import sys
+    if os.environ.get('MRSM_API_HOST', '').lower() not in ('', '0', 'false'):
+        return True
+    argv = list(getattr(sys, 'orig_argv', None) or [])
+    for i, arg in enumerate(argv[:-1]):
+        if arg == '-m' and argv[i + 1] == 'meerschaum.api.host':
+            os.environ['MRSM_API_HOST'] = '1'
+            return True
+    return False
+
+
+_host_mode = _is_host_process()
+
+### Skip verifying packages in the docker image. Outside the API host (an `@api_plugin` helper
+### imported elsewhere) nothing is checked, installed or reported: the packages are the host's.
+CHECK_UPDATE = (
+    _host_mode and os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 'docker'
+)
+_IMPORT_KW = {} if _host_mode else {'install': False, 'warn': False}
 
 endpoints = STATIC_CONFIG['api']['endpoints']
 
-uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
+### Everything the host imports is in the `api` extra (`fastapi`, `uvicorn`, `a2wsgi`,
+### `python-multipart`, `PyJWT`; FastAPI brings `starlette` and `anyio`): `fastapi-login`,
+### `python-jose` and `aiofiles` are not needed (the login manager is `_login.LoginManager`).
 (
     fastapi,
-    aiofiles,
     starlette_responses,
-    multipart,
-    packaging_version,
-    importlib_metadata,
 ) = attempt_import(
     'fastapi',
-    'aiofiles',
     'starlette.responses',
-    'multipart',
-    'packaging.version',
-    'importlib_metadata',
     lazy=False,
     check_update=CHECK_UPDATE,
+    **_IMPORT_KW,
 )
-(
-    typing_extensions,
-    uvicorn_workers,
-) = attempt_import(
-    'typing_extensions',
-    'uvicorn.workers',
-    lazy=False,
-    check_update=CHECK_UPDATE,
-    venv=None,
-)
+if fastapi is None:
+    raise ImportError(
+        "`meerschaum.api` needs FastAPI: install the `api` extra "
+        "(`pip install \"meerschaum[api]\"`). The API server itself is the native `mrsm start api`."
+    )
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 from meerschaum.api._exceptions import APIPermissionError
 uvicorn_config_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
 uvicorn_config = None
+
+if _host_mode:
+    import json as _json
+    uvicorn_config = {
+        'no_dash': True,
+        'no_webterm': True,
+        'mrsm_instance': get_config('meerschaum', 'api_instance'),
+        **_json.loads(os.environ.get('MRSM_API_HOST_CONFIG', None) or '{}'),
+    }
+
 sys_config = get_config('api')
 permissions_config = get_config('api', 'permissions')
 
@@ -83,6 +118,9 @@ def get_uvicorn_config() -> Dict[str, Any]:
                 with open(uvicorn_config_path, 'r', encoding='utf-8') as f:
                     uvicorn_config = json.load(f)
                 _uvicorn_config = uvicorn_config
+            except FileNotFoundError:
+                ### No server wrote a config: outside a running server this is the normal case.
+                _uvicorn_config = sys_config.get('uvicorn', None)
             except Exception:
                 import traceback
                 traceback.print_exc()
@@ -92,6 +130,7 @@ def get_uvicorn_config() -> Dict[str, Any]:
                 _uvicorn_config = {}
             if 'mrsm_instance' not in _uvicorn_config:
                 _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance')
+            uvicorn_config = _uvicorn_config
     return _uvicorn_config
 
 debug = get_uvicorn_config().get('debug', False)
@@ -103,6 +142,48 @@ production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
 _include_webterm = (not no_webterm) and _include_dash
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
+
+### An explicitly empty allowlist means "serve no core route groups";
+### only a MISSING (or null) allowlist falls back to serving everything.
+_allowed_route_group_patterns = permissions_config.get('routes', {}).get('allowlist', None)
+if _allowed_route_group_patterns is None:
+    _allowed_route_group_patterns = ['*']
+
+### The public preset (`api:permissions:preset: public`, or `start api --public` through the
+### host configuration): only login, health, version, plugin routes and plugin pages are served,
+### so the console's own pages are not (the login page and plugin pages still are).
+public_preset = bool(get_uvicorn_config().get('public', False)) or (
+    str(permissions_config.get('preset', None) or '').strip().lower() == 'public'
+)
+_PUBLIC_ROUTE_GROUPS = ('version', 'misc')
+
+
+def route_group_is_allowed(route_group: str) -> bool:
+    """
+    Return whether a group of core routes (or the console's own pages, group `dash`) may be served,
+    according to the patterns in `api:permissions:routes:allowlist`. Under the public preset only
+    the public groups are, plus the ones the allowlist names explicitly (any pattern but `*`).
+    """
+    if any(fnmatch(route_group, pattern) for pattern in permissions_config.get(
+        'routes', {}).get('disabled', [])):
+        return False
+    if public_preset:
+        return route_group in _PUBLIC_ROUTE_GROUPS or any(
+            fnmatch(route_group, pattern)
+            for pattern in _allowed_route_group_patterns
+            if pattern != '*'
+        )
+    return any(
+        fnmatch(route_group, pattern)
+        for pattern in _allowed_route_group_patterns
+    )
+
+
+### The public preset serves no API docs, nor the schema they read, unless the allowlist names
+### the `docs` group (as on the Rust server, which never forwards those paths to the host then).
+openapi_enabled = (not public_preset) or route_group_is_allowed('docs')
+docs_enabled = docs_enabled and openapi_enabled
+
 
 ### Meerschaum's own MCP server at `/mcp`, authenticated per-tool by OAuth2 scope.
 mcp_enabled = sys_config.get('mcp', {}).get('enabled', True)
@@ -307,7 +388,7 @@ app = fastapi.FastAPI(
     },
     docs_url=(None if not docs_enabled else endpoints['docs']),
     redoc_url=(None if not docs_enabled else endpoints['redoc']),
-    openapi_url=endpoints['openapi'],
+    openapi_url=(endpoints['openapi'] if openapi_enabled else None),
     openapi_tags=[
         {
             'name': 'Pipes',
@@ -374,31 +455,12 @@ def __getattr__(name: str):
     raise AttributeError(f"Could not import '{name}'.")
 
 ### Import everything else within the API.
-from meerschaum.api._oauth2 import manager, ScopedAuth
-import meerschaum.api.routes as routes
-import meerschaum.api._events
-import meerschaum.api._websockets
+from meerschaum.api._oauth2 import manager, ScopedAuth, CurrentScopes
+### For `@api_plugin` routes: the web console's signed-in user and static directories.
+from meerschaum.api._plugin_helpers import session_user, optional_session_user, mount_static
 
-### Skip importing the dash if `--no-dash` is provided.
-if _include_dash:
-    import meerschaum.api.dash
-
-### The `mcp` plugin predates the built-in `/mcp` endpoint and registers a route
-### at the same path. Routes registered above win, so the plugin's route is
-### unreachable rather than conflicting — but say so plainly instead of leaving
-### two implementations installed.
-if mcp_enabled:
-    from meerschaum.mcp import has_mcp_plugin
-    if has_mcp_plugin():
-        warn(
-            "The 'mcp' plugin is superseded by Meerschaum's built-in MCP endpoint, "
-            "which is now serving '/mcp'. The plugin's route is unreachable; "
-            "uninstall it with `mrsm uninstall plugin mcp`.",
-            stack=False,
-        )
-
-### Execute the API plugins functions.
-for module_name, functions_list in _api_plugins.items():
+### Execute the API plugins functions (the API host runs them itself, in plugin order).
+for module_name, functions_list in ({} if _host_mode else _api_plugins).items():
     plugin_name = (
         module_name.split('.')[1]
         if module_name and module_name.startswith('plugins.')

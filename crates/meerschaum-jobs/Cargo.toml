@@ -1,0 +1,42 @@
+[package]
+name = "meerschaum-jobs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: job supervision (daemons, schedules, laps, local, systemd and remote executors)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-jobs"
+keywords = ["meerschaum", "jobs", "daemon", "scheduler", "supervisor"]
+categories = ["os", "asynchronous"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[[bin]]
+# The detached job supervisor. Hosts (the `mrsm` binary) may instead call
+# `meerschaum_jobs::supervisor::run_if_requested()` at the top of `main` and re-exec themselves.
+name = "mrsm-job-supervisor"
+path = "src/bin/mrsm-job-supervisor.rs"
+test = false
+doc = false
+
+[dependencies]
+meerschaum-core = { workspace = true }
+chrono = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+getrandom = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", features = ["fs", "process", "signal", "poll"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }

@@ -1,0 +1,14 @@
+
+Start the API server.
+
+Usage:
+    `start api {options}`
+
+Options:
+    - `-p, --port {number}`
+        Port to bind the API server to.
+
+    - `-w, --workers {number}`
+        How many worker threads to run.
+        Defaults to the number of CPU cores or 1 on Android.
+

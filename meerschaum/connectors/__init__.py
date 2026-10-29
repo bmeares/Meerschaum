@@ -31,6 +31,7 @@ __all__ = (
     "APIConnector",
     "get_connector",
     "is_connected",
+    "allow_protected",
     "poll",
     "api",
     "sql",
@@ -54,6 +55,7 @@ _locks: Dict[str, RLock] = {
     'plugins_types'            : RLock(),
     '_loaded_plugin_connectors': RLock(),
     'instance_types'           : RLock(),
+    'native_types'             : RLock(),
 }
 
 ### Fill this with objects only when connectors are first referenced.
@@ -63,6 +65,12 @@ plugins_types: Dict[str, List[str]] = {}
 _known_custom_types: set = set()
 _loaded_plugin_connectors: bool = False
 
+### Connector types declared by native (Rust) plugins: `{type: info}` from the core, read on the
+### first lookup of a type Python does not know, and the plugin of each type registered here.
+_native_types: Optional[Dict[str, Dict[str, Any]]] = None
+_native_types_refresh: bool = False
+_native_type_plugins: Dict[str, str] = {}
+
 
 def get_connector(
     type: str = None,
@@ -70,6 +78,7 @@ def get_connector(
     refresh: bool = False,
     debug: bool = False,
     _load_plugins: bool = True,
+    _warn_undefined: bool = True,
     **kw: Any
 ) -> Connector:
     """
@@ -139,6 +148,10 @@ def get_connector(
     ### Only fall back to 'main' if the type is provided by the label is omitted.
     label = label if label is not None else STATIC_CONFIG['connectors']['default_label']
 
+    ### A type declared by a native (Rust) plugin is registered on first use.
+    if type not in connectors and _load_plugins and isinstance(type, str):
+        _load_native_connector_type(type)
+
     ### type might actually be a label. Check if so and raise a warning.
     if type not in connectors:
         possibilities, poss_msg = [], ""
@@ -205,6 +218,12 @@ def get_connector(
     ### only create an object if refresh is True
     ### (can be manually specified, otherwise determined above)
     if refresh:
+        ### A connector defined nowhere: say where connectors come from (not "Missing flavor").
+        undefined = _undefined_connector_message(type, label, kw)
+        if undefined is not None:
+            if _warn_undefined:
+                warn(undefined, stack=False)
+            return None
         with _locks['connectors']:
             try:
                 ### will raise an error if configuration is incorrect / missing
@@ -218,10 +237,8 @@ def get_connector(
                 )
                 conn = None
             except Exception as e:
-                from meerschaum.utils.formatting import get_console
-                console = get_console()
-                if console:
-                    console.print_exception()
+                from meerschaum.utils.formatting import print_exception
+                print_exception()
                 warn(
                     f"Exception when creating connector '{type}:{label}'.\n" + str(e),
                     stack = False,
@@ -231,6 +248,100 @@ def get_connector(
             return None
 
     return connectors[type][label]
+
+
+def _undefined_connector_message(
+    type: Optional[str],
+    label: Optional[str],
+    attributes: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """
+    The message for a `sql:`, `api:` or `valkey:` connector defined nowhere: no attributes were
+    passed and the config has no section for it (which includes the `MRSM_<TYPE>_<LABEL>`
+    environment connectors). `None` when the connector is defined. The text is the CLI's
+    (`undefined_connector_message` in `crates/meerschaum-cli/src/native/connectors.rs`).
+    """
+    from meerschaum.config import get_config
+    if type not in ('sql', 'api', 'valkey') or not label or attributes:
+        return None
+    if get_config('meerschaum', 'connectors', type, label, warn=False):
+        return None
+    return (
+        f"Connector '{type}:{label}' is not defined. Add it to the config "
+        f"(`mrsm bootstrap connectors`), set `MRSM_{type.upper()}_{label.upper()}`, "
+        "or install the plugin that provides it."
+    )
+
+
+class allow_protected:
+    """
+    Allow writes to protected connectors (`protected: true`) inside a `with` block.
+
+    Every mutation the core makes through a protected connector (sync, clear, drop, delete,
+    register, edit, `verify schema`, `SQLConnector.exec()` / `to_sql()`) is refused unless writes
+    are allowed: by `--allow-protected` on the command line, by `MRSM_ALLOW_PROTECTED=1` in the
+    environment, or inside this context manager. The allowance is process-wide while the block
+    runs (other threads see it too); child processes need `MRSM_ALLOW_PROTECTED=1`.
+
+    Examples
+    --------
+    >>> import meerschaum as mrsm
+    >>> from meerschaum.connectors import allow_protected
+    >>> pipe = mrsm.Pipe('plugin:noaa', 'weather', instance='sql:prod')
+    >>> with allow_protected():
+    ...     success, msg = pipe.sync(df)
+    """
+
+    def __enter__(self) -> 'allow_protected':
+        from meerschaum import _core
+        _core.allow_protected_enter()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        from meerschaum import _core
+        _core.allow_protected_exit()
+
+
+def is_protected_value(value: Any) -> bool:
+    """
+    Whether a connector attribute value marks the connector protected
+    (`True`, a non-zero number, or a string like `'true'`, `'1'`, `'yes'`).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on', 'y', 't')
+    return False
+
+
+def uri_marks_protected(uri: Any) -> bool:
+    """
+    Whether a connector URI carries `?protected=true` (any truthy value), which marks the
+    connector protected, e.g. `MRSM_VALKEY_PROD='valkey://host:6379/0?protected=true'`.
+    """
+    if not isinstance(uri, str) or '?' not in uri:
+        return False
+    from meerschaum import _core
+    return _core.uri_marks_protected(uri)
+
+
+def protected_refusal(connector: Any, op: str, pipe: Any = None) -> Optional[str]:
+    """
+    The refusal message for a write `op` through `connector` when it is protected and writes
+    are not allowed, else `None`. Meerschaum's own internal pipes (connector keys `mrsm`) are
+    never refused.
+    """
+    if pipe is not None and str(getattr(pipe, 'connector_keys', '')) == 'mrsm':
+        return None
+    if not is_protected_value(getattr(connector, 'protected', False)):
+        return None
+    from meerschaum import _core
+    if _core.protected_allowed():
+        return None
+    what = f"{op} {pipe}" if pipe is not None else op
+    return _core.protected_refusal_message(what, str(connector))
 
 
 def is_connected(keys: str, **kw) -> bool:
@@ -398,6 +509,7 @@ def unload_plugin_connectors(
     custom_types.clear()
     custom_types.update(_known_custom_types)
     _loaded_plugin_connectors = False
+    _unload_native_connector_types()
 
 
 def get_connector_plugin(
@@ -417,6 +529,9 @@ def get_connector_plugin(
     A Plugin, 'mrsm', or None.
     """
     if not hasattr(connector, 'type'):
+        return None
+    ### A native plugin has no virtual environment.
+    if getattr(connector, 'IS_NATIVE', False):
         return None
     plugin_name = (
         connector.__module__.replace('plugins.', '').split('.')[0]
@@ -438,3 +553,80 @@ def _load_builtin_custom_connectors():
     import meerschaum.connectors.valkey
     _known_custom_types.add('valkey')
     _known_custom_types.add('systemd')
+
+
+def get_native_connector_types(refresh: bool = False) -> Dict[str, Dict[str, Any]]:
+    """
+    Return the connector types declared by native (Rust) plugins in the plugins directories,
+    as `{type: {'plugin', 'is_instance', 'is_streaming', 'is_thread_safe', 'methods'}}`.
+    Read once per process (like Python plugins' connector types) until
+    `unload_plugin_connectors()` or `refresh=True`.
+    """
+    global _native_types, _native_types_refresh
+    with _locks['native_types']:
+        if _native_types is not None and not refresh:
+            return _native_types
+        from meerschaum import _core
+        try:
+            _native_types = {
+                str(typ): dict(info)
+                for typ, info in _core.native_connector_types(
+                    refresh or _native_types_refresh
+                ).items()
+            }
+        except Exception as e:
+            from meerschaum.utils.debug import dprint
+            dprint(f"Could not read the native plugins' connector types: {e}")
+            _native_types = {}
+        _native_types_refresh = False
+        return _native_types
+
+
+def _load_native_connector_type(typ: str) -> bool:
+    """
+    Register the native connector type `typ` (a `NativeConnector` class) if a native plugin
+    declares it. Return whether `typ` is now a known type.
+    """
+    info = get_native_connector_types().get(typ, None)
+    if not info:
+        return False
+    from meerschaum.connectors.native import make_native_connector_class
+    cls = make_native_connector_class(typ, info)
+    plugin_name = str(info.get('plugin', ''))
+    with _locks['types']:
+        if typ in types:
+            return True
+        types[typ] = cls
+    with _locks['custom_types']:
+        custom_types.add(typ)
+    with _locks['plugins_types']:
+        plugins_types.setdefault(plugin_name, []).append(typ)
+    _native_type_plugins[typ] = plugin_name
+    with _locks['connectors']:
+        if typ not in connectors:
+            connectors[typ] = {}
+    if getattr(cls, 'IS_INSTANCE', False):
+        with _locks['instance_types']:
+            if typ not in instance_types:
+                instance_types.append(typ)
+    return True
+
+
+def _unload_native_connector_types() -> None:
+    """
+    Forget the native connector types (re-read from the core on the next unknown type).
+    """
+    global _native_types, _native_types_refresh
+    with _locks['native_types']:
+        for typ, plugin_name in list(_native_type_plugins.items()):
+            _ = types.pop(typ, None)
+            _ = connectors.pop(typ, None)
+            custom_types.discard(typ)
+            if typ in instance_types:
+                instance_types.remove(typ)
+            plugin_types = plugins_types.get(plugin_name, [])
+            if typ in plugin_types:
+                plugin_types.remove(typ)
+            _ = _native_type_plugins.pop(typ, None)
+        _native_types = None
+        _native_types_refresh = True

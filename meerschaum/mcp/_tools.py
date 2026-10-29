@@ -806,7 +806,9 @@ def _read_sql(**args) -> Dict[str, Any]:
     ### `silent=True` keeps a failed query from printing a traceback to stdout,
     ### which is the protocol channel under the stdio transport.
     fetch_limit = offset + limit + 1
-    df = connector.read(query, chunksize=fetch_limit, chunks=1, silent=True)
+    ### pandas: `_df_to_records()` serializes with `to_json()` (rc15: `read()` follows the
+    ### `dataframe` setting, Polars by default).
+    df = connector.read(query, chunksize=fetch_limit, chunks=1, silent=True, as_pandas=True)
     if df is None:
         ### `read()` warns and returns `None` on a database error. Without this the
         ### model would be told there were no rows.

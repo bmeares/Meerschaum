@@ -416,7 +416,7 @@ def get_pipe_docs(
 ) -> list[dict[str, Any]]:
     """
     Return a pipe's data as a list of documents.
-    Defaults to `get_pipe_data().to_dict(orient='records')`.
+    Converts either a Polars or pandas frame returned by `get_pipe_data()`.
 
     Parameters
     ----------
@@ -453,8 +453,11 @@ def get_pipe_docs(
         debug=debug,
         **kwargs
     )
-    if df is None or df.empty:
+    if df is None:
         return []
+    to_dicts = getattr(df, 'to_dicts', None)
+    if callable(to_dicts):
+        return to_dicts()
     return df.to_dict(orient='records')
 
 @abc.abstractmethod

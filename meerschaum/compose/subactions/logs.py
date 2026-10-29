@@ -3,29 +3,19 @@
 # vim:fenc=utf-8
 
 """
-Pass all other subactions to `mrsm stack`.
+Define `mrsm compose logs`: a delegation to the native Compose.
 """
 
-from meerschaum.utils.typing import SuccessTuple, Optional, List, Dict, Any
+from meerschaum.utils.typing import Any, Dict, List, Optional, SuccessTuple
 
 
 def _compose_logs(
     compose_config: Dict[str, Any],
-    action: Optional[List[str]] = None,
-    sysargs: Optional[List[str]] = None,
-    nopretty: bool = False,
     debug: bool = False,
-    **kw,
+    **kw: Any
 ) -> SuccessTuple:
     """
-    Execute Meerschaum actions in the isolated environment.
+    Show the project's logs (`mrsm compose logs`).
     """
-    from meerschaum.compose.utils import run_mrsm_command
-
-    success, msg = run_mrsm_command(
-        ['show', 'logs'] + (['--nopretty'] if nopretty else []),
-        compose_config,
-        capture_output = False,
-        debug = debug,
-    )
-    return success, msg
+    from meerschaum.compose.subactions import _delegate
+    return _delegate('logs', compose_config, debug=debug, **kw)

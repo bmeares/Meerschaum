@@ -52,6 +52,10 @@
 }
 .dbc_dark .dash-dropdown {
   border: 1px solid grey;
+  /* The trigger is a button: taller than its grid (e.g. 44px touch targets), its own
+     background would show as light bands above and below the value. */
+  background-color: var(--bs-dark) !important;
+  color: white;
 }
 
 .dbc_dark .form-control {

@@ -1,0 +1,8 @@
+# Built by scripts/rust/build_py.sh; never commit the extension binary.
+_native*.so
+_native*.pyd
+_native*.dylib
+# Pre-rename name (`meerschaum._core._core`).
+_core*.so
+_core*.pyd
+_core*.dylib

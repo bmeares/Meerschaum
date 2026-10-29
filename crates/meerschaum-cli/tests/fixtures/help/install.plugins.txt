@@ -1,0 +1,15 @@
+
+Install a plugin.
+
+By default, install from the main Meerschaum repository (mrsm.io).
+Use a private repository by specifying the API label after the plugin.
+NOTE: the --instance flag is ignored!
+
+Usage:
+    install plugins [plugin]
+
+Examples:
+    - install plugins noaa
+    - install plugins noaa --repo mrsm  (mrsm is the default instance)
+    - install plugins noaa --repo mycustominstance
+

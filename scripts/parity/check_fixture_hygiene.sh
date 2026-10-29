@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Usage: scripts/parity/check_fixture_hygiene.sh [PATH ...]
+#
+# Fails if any committed fixture under crates/*/tests/fixtures (or the given paths) contains
+# machine-specific or sensitive content: process environments captured from v4 job metadata,
+# Claude Code session variables, home directories, hostnames, private repository names, or
+# anything that looks like a credential. Run by the Rust CI parity job and before every commit
+# that touches fixtures. Fixture generators must scrub these at the source (see crates/README.md).
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+
+paths=("$@")
+if [ ${#paths[@]} -eq 0 ]; then
+  mapfile -t paths < <(ls -d crates/*/tests/fixtures 2>/dev/null || true)
+fi
+[ ${#paths[@]} -eq 0 ] && { echo "check_fixture_hygiene: no fixture directories found"; exit 0; }
+
+# Two pattern sets. Python helpers under fixtures/ (generators and their support modules) are
+# excluded because they legitimately name the things they scrub; only recorded data is scanned. Keep the private-name rule in sync with crates/README.md.
+ci_patterns=(            # case-insensitive
+  'CLAUDE_CODE'
+  'CODEX_COMPANION'
+  'MESSAGING_TOKEN'
+  'XDG_SESSION'
+  'DBUS_SESSION'
+  'swamp ?rabbit'
+  'trail-counter'
+  'bikewalk'
+  'greenville'
+  'BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY'
+)
+# JWT shapes are deliberately not scanned: auth fixtures carry deterministic test vectors signed
+# with a fixture-owned secret, and a shape match cannot tell those from a real token. Generators
+# must replace credentials minted during a run with placeholders (see gen_contract.py).
+cs_patterns=(            # case-sensitive (paths, handles, token shapes)
+  '/home/bmeares'
+  'bmeares@'
+  '/Users/[a-z][a-z0-9_-]*/'
+  'AKIA[0-9A-Z]{16}'
+  'ghp_[A-Za-z0-9]{20,}'
+  'sk-[A-Za-z0-9_-]{20,}'
+)
+
+# Allowed by maintainer decision, scoped to one pattern and one file each (never a whole file or
+# pattern): the maintainer's original asciinema recordings under docs/zensical/assets/casts, kept
+# verbatim (jobs.cast names the private city, demo.cast a home path), and the public docs example
+# "Greenville weather" in docs/zensical/reference/pipes/tags.md (Markdown is never scanned), which
+# the generated docs/zensical/llms-full.txt copies.
+allowed_for() {
+  case "$1" in
+    greenville) printf '%s\n' --exclude=jobs.cast --exclude=llms-full.txt ;;
+    /home/bmeares) printf '%s\n' --exclude=demo.cast ;;
+  esac
+}
+
+status=0
+scan() {
+  local flags=$1 pattern=$2 hits
+  local allowed=()
+  mapfile -t allowed < <(allowed_for "$pattern")
+  if hits=$(grep -rIl $flags -E --exclude='*.py' --exclude='*.md' ${allowed[@]+"${allowed[@]}"} -- "$pattern" "${paths[@]}" 2>/dev/null) && [ -n "$hits" ]; then
+    echo "check_fixture_hygiene: pattern '$pattern' found in:"
+    echo "$hits" | sed 's/^/  /'
+    # For path patterns, show where they occur (line number and up to 80 characters BEFORE the
+    # match, never the match or anything after it) so CI logs can locate the leaking field.
+    case "$pattern" in
+      /*)
+        grep -rIn $flags -o -E --exclude='*.py' --exclude='*.md' ${allowed[@]+"${allowed[@]}"} -- ".{0,80}$pattern" "${paths[@]}" 2>/dev/null \
+          | sed -E "s#$pattern\$#<REDACTED>#" | head -n 20 | sed 's/^/    /' || true
+        ;;
+    esac
+    status=1
+  fi
+}
+for pattern in "${ci_patterns[@]}"; do scan -i "$pattern"; done
+for pattern in "${cs_patterns[@]}"; do scan "" "$pattern"; done
+
+if [ $status -ne 0 ]; then
+  echo "check_fixture_hygiene: FAILED. Scrub the generator, regenerate, and never commit these."
+  exit 1
+fi
+echo "check_fixture_hygiene: clean (${#paths[@]} fixture directories)"

@@ -1,0 +1,41 @@
+[package]
+name = "meerschaum-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the dependency-aware Syncing Engine (graph, planner, executor, dirty-range ledger)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-engine"
+keywords = ["meerschaum", "etl", "pipelines", "scheduler", "dag"]
+categories = ["asynchronous", "database"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+meerschaum-worker = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+# Crate-private: the definition hash (§5.4).
+sha2 = { workspace = true }
+# Crate-private: the machine-local lease fallback (interprocess file locks, §5.8).
+fs4 = "1.1"
+
+[dev-dependencies]
+proptest = "1"
+# SQLite-backed end-to-end tests (dev-only: the engine runs against the connector traits).
+meerschaum-connector-sql = { workspace = true }
+# Lease and stream tests against a disposable Valkey (`MRSM_TEST_VALKEY_URI`).
+meerschaum-connector-valkey = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

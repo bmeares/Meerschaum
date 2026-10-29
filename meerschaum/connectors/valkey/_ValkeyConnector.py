@@ -5,14 +5,11 @@
 Define the `ValkeyConnector`.
 """
 
-import shlex
-import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 import meerschaum as mrsm
 from meerschaum.connectors import InstanceConnector, make_connector
 from meerschaum.utils.typing import List, Dict, Any, Optional, Union
-from meerschaum.utils.warnings import dprint
 
 
 @make_connector
@@ -21,6 +18,8 @@ class ValkeyConnector(InstanceConnector):
     Manage a Valkey instance.
 
     Build a `ValkeyConnector` from connection attributes or a URI string.
+    The commands are run by the Rust client (`meerschaum._core.ValkeyConnector`, one per
+    connector and process, connected by the first command).
     """
     REQUIRED_ATTRIBUTES: List[str] = ['host']
     OPTIONAL_ATTRIBUTES: List[str] = [
@@ -82,18 +81,80 @@ class ValkeyConnector(InstanceConnector):
         delete_plugin,
     )
 
+    def _rust_client(self):
+        """
+        Return the `meerschaum._core.ValkeyConnector` of this connector (built once per process:
+        a forked child builds its own connection). It connects on the first command.
+        """
+        import os
+        attributes = {
+            key: value
+            for key, value in self.__dict__.items()
+            if not str(key).startswith('_')
+            and isinstance(value, (str, int, float, bool))
+        }
+        client = self.__dict__.get('_rust_client_obj', None)
+        if (
+            client is not None
+            and self.__dict__.get('_rust_client_pid', None) == os.getpid()
+            and self.__dict__.get('_rust_client_attributes', None) == attributes
+        ):
+            return client
+
+        ### A new process, or credentials / address changed (`conn.password = ...`): build a client
+        ### with the current attributes (it logs in again; the native flows find it by them).
+        from meerschaum import _core
+        client = _core.ValkeyConnector(self.label, attributes)
+        self.__dict__['_rust_client_obj'] = client
+        self.__dict__['_rust_client_pid'] = os.getpid()
+        self.__dict__['_rust_client_attributes'] = attributes
+        return client
+
+        from meerschaum import _core
+        attributes = {
+            key: value
+            for key, value in self.__dict__.items()
+            if not str(key).startswith('_')
+            and isinstance(value, (str, int, float, bool))
+        }
+        client = _core.ValkeyConnector(self.label, attributes)
+        self.__dict__['_rust_client_obj'] = client
+        self.__dict__['_rust_client_pid'] = os.getpid()
+        return client
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for key in ('_rust_client_obj', '_rust_client_pid', '_rust_client_attributes', '_client'):
+            state.pop(key, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     @property
     def client(self):
         """
-        Return the Valkey client.
+        Return a client for raw commands (`get`, `set`, `keys`, `delete`, ...).
+
+        When the `valkey` package is installed (Meerschaum does not depend on it and never
+        installs it) this is a `valkey.Valkey` client; otherwise it is a small built-in client
+        over the Rust connector which supports the commands of `ValkeyClient`.
         """
         if '_client' in self.__dict__:
             return self.__dict__['_client']
 
-        valkey = mrsm.attempt_import('valkey')
+        valkey = mrsm.attempt_import('valkey', install=False, warn=False, lazy=False)
+        if valkey is None:
+            from ._client import ValkeyClient
+            self._client = ValkeyClient(self)
+            return self._client
 
         if 'uri' in self.__dict__:
-            self._client = valkey.Valkey.from_url(self.__dict__.get('uri'))
+            ### `?protected=true` is Meerschaum's (`Connector.protected`), not the client's.
+            from meerschaum.connectors.sql._SQLConnector import _strip_uri_param
+            self._client = valkey.Valkey.from_url(
+                _strip_uri_param(self.__dict__.get('uri'), 'protected')
+            )
             return self._client
 
         optional_kwargs = {
@@ -114,68 +175,44 @@ class ValkeyConnector(InstanceConnector):
         """
         Return the connection URI for this connector.
         """
-        import urllib.parse
-
-        if 'uri' in self.__dict__:
-            return self.__dict__.get('uri')
-
-        uri = "valkey://"
-        if 'username' in self.__dict__:
-            uri += urllib.parse.quote_plus(self.username) + ':'
-
-        if 'password' in self.__dict__:
-            uri += urllib.parse.quote_plus(self.password) + '@'
-
-        if 'host' in self.__dict__:
-            uri += self.host
-
-        if 'port' in self.__dict__:
-            uri += f':{self.port}'
-
-        if 'db' in self.__dict__:
-            uri += f"/{self.db}"
-
-        if 'socket_timeout' in self.__dict__:
-            uri += f"?timeout={self.socket_timeout}s"
-
-        return uri
+        return self._rust_client().uri
 
     def set(self, key: str, value: Any, **kwargs: Any) -> bool:
         """
         Set the `key` to `value`.
+        `ex` sets an expiration in seconds; other keyword arguments (`px`, `nx`) go to `client`.
         """
+        if set(kwargs) <= {'ex'}:
+            return self._rust_client().set(key, value, **kwargs)
         return self.client.set(key, value, **kwargs)
 
     def get(self, key: str, decode: bool = True) -> Union[str, None]:
         """
         Get the value for `key`.
         """
-        val = self.client.get(key)
-        if val is None:
-            return None
-
-        return val.decode('utf-8') if decode else val
+        return self._rust_client().get(key, decode)
 
     def test_connection(self) -> bool:
         """
         Return whether a connection may be established.
         """
-        return self.client.ping()
+        return self._rust_client().test_connection()
 
     @classmethod
     def quote_table(cls, table: str) -> str:
         """
         Return a quoted key.
         """
-        return shlex.quote(table)
+        from meerschaum import _core
+        return _core.ValkeyConnector.quote_table(table)
 
     @classmethod
     def get_counter_key(cls, table: str) -> str:
         """
         Return the counter key for a given table.
         """
-        table_name = cls.quote_table(table)
-        return f"{table_name}:counter"
+        from meerschaum import _core
+        return _core.ValkeyConnector.get_counter_key(table)
 
     def push_df(
         self,
@@ -202,15 +239,7 @@ class ValkeyConnector(InstanceConnector):
         -------
         The current index counter value (how many docs have been pushed).
         """
-        from meerschaum.utils.dataframe import to_json
-        docs_str = to_json(df)
-        docs = json.loads(docs_str)
-        return self.push_docs(
-            docs,
-            table,
-            datetime_column=datetime_column,
-            debug=debug,
-        )
+        return self._rust_client().push_df(df, table, datetime_column)
 
     def push_docs(
         self,
@@ -233,83 +262,19 @@ class ValkeyConnector(InstanceConnector):
 
         datetime_column: Optional[str], default None
             If set, create a sorted set with this datetime column as the index.
-            Otherwise push the docs to a list.
+            Otherwise push the docs to a set.
 
         Returns
         -------
         The current index counter value (how many docs have been pushed).
         """
-        from meerschaum.utils.dtypes import json_serialize_value
-        table_name = self.quote_table(table)
-        datetime_column_key = self.get_datetime_column_key(table)
-        remote_datetime_column = self.get(datetime_column_key)
-        datetime_column = datetime_column or remote_datetime_column
-        dateutil_parser = mrsm.attempt_import('dateutil.parser')
-
-        old_len = (
-            self.client.zcard(table_name)
-            if datetime_column
-            else self.client.scard(table_name)
-        )
-        for doc in docs:
-            original_dt_val = (
-                doc[datetime_column]
-                if datetime_column and datetime_column in doc
-                else 0
-            )
-            dt_val = (
-                dateutil_parser.parse(str(original_dt_val))
-                if not isinstance(original_dt_val, int)
-                else int(original_dt_val)
-            ) if datetime_column else None
-            ts = (
-                int(dt_val.replace(tzinfo=timezone.utc).timestamp())
-                if isinstance(dt_val, datetime)
-                else int(dt_val)
-            ) if datetime_column else None
-            doc_str = json.dumps(
-                doc,
-                default=json_serialize_value,
-                separators=(',', ':'),
-                sort_keys=True,
-            )
-            if datetime_column:
-                self.client.zadd(table_name, {doc_str: ts})
-            else:
-                self.client.sadd(table_name, doc_str)
-
-        if datetime_column:
-            self.set(datetime_column_key, datetime_column)
-        new_len = (
-            self.client.zcard(table_name)
-            if datetime_column
-            else self.client.scard(table_name)
-        )
-
-        return new_len - old_len
-
-    def _push_hash_docs_to_list(self, docs: List[Dict[str, Any]], table: str) -> int:
-        table_name = self.quote_table(table)
-        next_ix = max(self.client.llen(table_name) or 0, 1)
-        for i, doc in enumerate(docs):
-            doc_key = f"{table_name}:{next_ix + i}"
-            self.client.hset(
-                doc_key,
-                mapping={
-                    str(k): str(v)
-                    for k, v in doc.items()
-                },
-            )
-            self.client.rpush(table_name, doc_key)
-
-        return next_ix + len(docs)
+        return self._rust_client().push_docs(docs, table, datetime_column)
 
     def get_datetime_column_key(self, table: str) -> str:
         """
         Return the key to store the datetime index for `table`.
         """
-        table_name = self.quote_table(table)
-        return f'{table_name}:datetime_column'
+        return self._rust_client().get_datetime_column_key(table)
 
     def read(
         self,
@@ -320,10 +285,13 @@ class ValkeyConnector(InstanceConnector):
         datetime_column: Optional[str] = None,
         select_columns: Optional[List[str]] = None,
         omit_columns: Optional[List[str]] = None,
-        debug: bool = False
+        debug: bool = False,
+        as_polars: Optional[bool] = None,
+        as_pandas: Optional[bool] = None,
     ) -> Union['pd.DataFrame', None]:
         """
-        Query the table and return the result dataframe.
+        Query the table and return the result dataframe (of the `meerschaum:dataframe` library;
+        `as_polars=True` / `as_pandas=True` choose one).
 
         Parameters
         ----------
@@ -351,31 +319,21 @@ class ValkeyConnector(InstanceConnector):
 
         Returns
         -------
-        A Pandas DataFrame of the result, or `None`.
+        A DataFrame of the result, or `None`.
         """
-        from meerschaum.utils.dataframe import parse_df_datetimes, query_df
-        docs = self.read_docs(
+        from meerschaum.utils.dataframe import frame_from_arrow, frame_library_of
+        df = self._rust_client().read(
             table,
             begin=begin,
             end=end,
-            debug=debug,
-        )
-        df = parse_df_datetimes(docs)
-        datetime_column_key = self.get_datetime_column_key(table)
-        datetime_column = datetime_column or self.get(datetime_column_key)
-
-        return query_df(
-            df,
-            begin=(begin if datetime_column is not None else None),
-            end=(end if datetime_column is not None else None),
             params=params,
             datetime_column=datetime_column,
             select_columns=select_columns,
             omit_columns=omit_columns,
-            inplace=True,
-            reset_index=True,
-            debug=debug,
         )
+        if frame_library_of(df) is None:
+            return df
+        return frame_from_arrow(df, as_polars=as_polars, as_pandas=as_pandas)
 
     def read_docs(
         self,
@@ -390,144 +348,35 @@ class ValkeyConnector(InstanceConnector):
         Parameters
         ----------
         table: str
-            The "table" name (root key) under which the docs were pushed.
+            The "table" name (root key) from which to read docs.
 
         begin: Union[datetime, int, str, None], default None
             If provided and the table was created with a datetime index, only return documents
-            newer than this datetime.
-            If the table was not created with a datetime index and `begin` is an `int`,
-            return documents with a positional index greater than or equal to this value.
+            newer than this datetime. If the table was not created with a datetime index
+            and `begin` is an `int`, return documents with a positional index
+            greater than or equal to this value.
 
         end: Union[datetime, int, str, None], default None
             If provided and the table was created with a datetime index, only return documents
-            older than this datetime.
-            If the table was not created with a datetime index and `begin` is an `int`,
-            return documents with a positional index less than this value.
+            older than this datetime (inclusive, as `ZRANGEBYSCORE` is).
 
         Returns
         -------
-        A list of dictionaries, where all keys and values are strings.
+        A list of dictionaries, one for each document.
         """
-        from meerschaum.utils.dtypes import coerce_timezone
-        table_name = self.quote_table(table)
-        datetime_column_key = self.get_datetime_column_key(table)
-        datetime_column = self.get(datetime_column_key)
-
-        if debug:
-            dprint(f"Reading documents from '{table}' with {begin=}, {end=}")
-
-        if not datetime_column:
-            return [
-                json.loads(doc_bytes.decode('utf-8'))
-                for doc_bytes in self.client.smembers(table_name)
-            ]
-
-        dateutil_parser = mrsm.attempt_import('dateutil.parser')
-
-        if isinstance(begin, str):
-            begin = coerce_timezone(dateutil_parser.parse(begin))
-
-        if isinstance(end, str):
-            end = coerce_timezone(dateutil_parser.parse(end))
-
-        begin_ts = (
-            (
-                int(begin.replace(tzinfo=timezone.utc).timestamp())
-                if isinstance(begin, datetime)
-                else int(begin)
-            )
-            if begin is not None else '-inf'
-        )
-        end_ts = (
-            (
-                int(end.replace(tzinfo=timezone.utc).timestamp())
-                if isinstance(end, datetime)
-                else int(end)
-            )
-            if end is not None else '+inf'
-        )
-
-        if debug:
-            dprint(f"Reading documents with {begin_ts=}, {end_ts=}")
-
-        return [
-            json.loads(doc_bytes.decode('utf-8'))
-            for doc_bytes in self.client.zrangebyscore(
-                table_name,
-                begin_ts,
-                end_ts,
-                withscores=False,
-            )
-        ]
-
-    def _read_docs_from_list(
-        self,
-        table: str,
-        begin_ix: Optional[int] = 0,
-        end_ix: Optional[int] = -1,
-        debug: bool = False,
-    ):
-        """
-        Read a list of documents from a "table".
-
-        Parameters
-        ----------
-        table: str
-            The "table" (root key) from which to read docs.
-
-        begin_ix: Optional[int], default 0
-            If provided, only read documents from this starting index.
-
-        end_ix: Optional[int], default -1
-            If provided, only read documents up to (not including) this index.
-
-        Returns
-        -------
-        A list of documents.
-        """
-        if begin_ix is None:
-            begin_ix = 0
-
-        if end_ix == 0:
-            return
-
-        if end_ix is None:
-            end_ix = -1
-        else:
-            end_ix -= 1
-
-        table_name = self.quote_table(table)
-        doc_keys = self.client.lrange(table_name, begin_ix, end_ix)
-        for doc_key in doc_keys:
-            yield {
-                key.decode('utf-8'): value.decode('utf-8')
-                for key, value in self.client.hgetall(doc_key).items()
-            }
+        return self._rust_client().read_docs(table, begin=begin, end=end)
 
     def drop_table(self, table: str, debug: bool = False) -> None:
         """
-        Drop a "table" of documents.
-
-        Parameters
-        ----------
-        table: str
-            The "table" name (root key) to be deleted.
+        Delete a "table" (the root key and its datetime column key).
         """
-        table_name = self.quote_table(table)
-        datetime_column_key = self.get_datetime_column_key(table)
-        self.client.delete(table_name)
-        self.client.delete(datetime_column_key)
+        return self._rust_client().drop_table(table)
 
     @classmethod
     def get_entity_key(cls, *keys: Any) -> str:
         """
-        Return a joined key to set an entity.
+        Join the keys with the key separator (`:`).
+        A key may not contain the separator.
         """
-        if not keys:
-            raise ValueError("No keys to be joined.")
-
-        for key in keys:
-            if cls.KEY_SEPARATOR in str(key):
-                raise ValueError(f"Key cannot contain separator '{cls.KEY_SEPARATOR}'.")
-
-        return cls.KEY_SEPARATOR.join([str(key) for key in keys])
+        from meerschaum import _core
+        return _core.ValkeyConnector.get_entity_key(*keys)

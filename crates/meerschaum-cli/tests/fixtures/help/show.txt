@@ -1,0 +1,10 @@
+Show elements of a certain type.
+
+Command:
+    `show {option}`
+
+Example:
+    `show pipes`
+
+    Options:
+        `show [actions, arguments, columns, config, connectors, daemons, data, environment, help, jobs, logs, packages, partitions, pipes, plugins, rowcounts, schedules, sizes, tags, targets, tokens, users, venvs, version]`

@@ -1,0 +1,5 @@
+
+Start subsystems (API server, background job, etc.).
+
+    Options:
+        `start [api, connectors, daemons, gui, jobs, mcp, pipeline, webterm, worker]`

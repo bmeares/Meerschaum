@@ -1,0 +1,157 @@
+{
+  "description": "The same change in a non-interactive context (a job, --loop, the API) without --yes: the node is `rebuild_pending`, it does not sync, and its descendants run against the stale data. The run is never blocked.",
+  "records": [
+    {
+      "instance": "sql:main",
+      "connector": "plugin:orders",
+      "metric": "orders_raw",
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "order_id"
+        },
+        "verify": {
+          "chunk_days": 1
+        }
+      }
+    },
+    {
+      "instance": "sql:main",
+      "connector": "sql:main",
+      "metric": "orders_clean",
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "order_id"
+        },
+        "verify": {
+          "chunk_days": 1
+        },
+        "parents": [
+          "Pipe('plugin:orders', 'orders_raw')"
+        ],
+        "dtypes": {
+          "amount": "numeric"
+        },
+        "sql": "SELECT ts, order_id, amount::numeric AS amount FROM orders_raw_view WHERE status <> 'void'"
+      }
+    },
+    {
+      "instance": "sql:main",
+      "connector": "sql:main",
+      "metric": "orders_report",
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "verify": {
+          "chunk_days": 1
+        },
+        "parents": [
+          "Pipe('sql:main', 'orders_clean')"
+        ]
+      }
+    }
+  ],
+  "selection": {
+    "targets": {
+      "refs": [
+        "sql:main|sql:main|orders_report|None"
+      ]
+    },
+    "parents": "all"
+  },
+  "options": {
+    "interactive": false,
+    "yes": false
+  },
+  "state": {
+    "watermarks": {
+      "sql:main|plugin:orders|orders_raw|None": "2026-10-12T10:00:00Z",
+      "sql:main|sql:main|orders_clean|None": "2026-10-12T09:00:00Z",
+      "sql:main|sql:main|orders_report|None": "2026-10-12T08:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:main|plugin:orders|orders_raw|None": "@current",
+      "sql:main|sql:main|orders_clean|None": "v1:hash-of-the-previous-sql-definition",
+      "sql:main|sql:main|orders_report|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {
+          "pipe_ref": "sql:main|plugin:orders|orders_raw|None",
+          "seq": 5,
+          "begin": "2026-10-12T00:00:00Z",
+          "end": "2026-10-13T00:00:00Z"
+        },
+        {
+          "pipe_ref": "sql:main|sql:main|orders_clean|None",
+          "seq": 12,
+          "begin": "2026-10-12T00:00:00Z",
+          "end": "2026-10-13T00:00:00Z"
+        }
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {
+          "parent_ref": "sql:main|plugin:orders|orders_raw|None",
+          "child_ref": "sql:main|sql:main|orders_clean|None",
+          "seq": 5,
+          "parent_watermark_at_cursor": "2026-10-12T10:00:00Z"
+        },
+        {
+          "parent_ref": "sql:main|sql:main|orders_clean|None",
+          "child_ref": "sql:main|sql:main|orders_report|None",
+          "seq": 12,
+          "parent_watermark_at_cursor": "2026-10-12T08:00:00Z"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {
+        "node": "sql:main|plugin:orders|orders_raw|None",
+        "action": "root",
+        "bounds": {
+          "begin": "",
+          "end": null
+        }
+      },
+      {
+        "node": "sql:main|sql:main|orders_clean|None",
+        "action": "rebuild_pending",
+        "bounds": null,
+        "provisional": true,
+        "consumes": [],
+        "reason_contains": [
+          "its definition changed",
+          "pipes downstream use its current data"
+        ]
+      },
+      {
+        "node": "sql:main|sql:main|orders_report|None",
+        "action": "incremental",
+        "bounds": {
+          "begin": "2026-10-11T08:00:00Z",
+          "end": "2026-10-12T09:00:00Z"
+        },
+        "chunks": [
+          {
+            "begin": "2026-10-11T08:00:00Z",
+            "end": "2026-10-12T00:00:00Z"
+          },
+          {
+            "begin": "2026-10-12T00:00:00Z",
+            "end": "2026-10-12T09:00:00Z"
+          }
+        ],
+        "provisional": false,
+        "reason_contains": [
+          "Pipe('sql:main', 'orders_clean') has new data (its latest data moved from 2026-10-12 08:00 to 2026-10-12 09:00)"
+        ]
+      }
+    ]
+  }
+}

@@ -11,7 +11,8 @@ import dash.dcc as dcc
 from meerschaum.plugins import web_page
 
 
-@web_page('password-reset', login_required=True, page_group='Settings')
+### The user menu's Settings: a console page, under the console's top navigation.
+@web_page('password-reset', login_required=True, page_group='Settings', navbar=True)
 def page_layout():
     """
     Return the layout for the password reset page.

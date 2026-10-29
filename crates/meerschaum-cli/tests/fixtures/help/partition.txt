@@ -1,0 +1,20 @@
+
+Repartition pipes' target tables to a new chunk (partition) width.
+
+Only natively range-partitioned pipes are affected — those created on PostgreSQL / PostGIS,
+MySQL / MariaDB, or MSSQL with `hypertable: True` — plus TimescaleDB hypertables. Set the new
+width with `--chunk-minutes` (defaults to each pipe's `verify.chunk_minutes`, 30 days). On
+TimescaleDB this changes the chunk interval for FUTURE chunks (existing chunks are unchanged);
+on the other flavors the table is rebuilt at the new width (read, dropped, and re-synced).
+
+Usage:
+- partition pipes -m weather --chunk-minutes 10080
+    - Rebuild the 'weather' pipes' tables to 7-day partitions.
+- partition pipes -i sql:main --chunk-minutes 1440 -y
+    - Rebuild all partitioned pipes on `sql:main` to 1-day partitions, skipping the prompt.
+- partition pipes -t production
+    - Repartition tagged pipes to each one's configured `verify.chunk_minutes`.
+
+
+    Options:
+        `partition [pipes]`

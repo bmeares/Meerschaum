@@ -161,6 +161,45 @@ a {
 #get-items-menu {
   width: 100%;
 }
+/* The dashboard's action buttons: columns follow the card's width, never a label's wrap. */
+.console-actions-card {
+  container-type: inline-size;
+}
+.console-actions {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.console-actions .btn {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.console-actions-exec {
+  width: 100%;
+}
+.console-actions-exec #go-button {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.console-actions-exec #show-webterm-button {
+  flex: 0 0 2.75rem;
+  padding-left: 0;
+  padding-right: 0;
+}
+.console-actions-more {
+  grid-column: 1 / -1;
+}
+@container (max-width: 28rem) {
+  .console-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 13rem) {
+  .console-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .instance-select {
   background-color : var(--bs-secondary) !important;
   color: white;
@@ -220,4 +259,36 @@ a {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
   margin-left: -1px;
+}
+
+/* The output of `Exec` and `Follow logs` on the dashboard (v5). */
+#exec-view {
+  overflow-y: scroll;
+  max-height: 83vh;
+  height: 78vh;
+  color: white;
+  background-color: black;
+  padding: 0.5em;
+}
+#exec-view pre {
+  color: inherit;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.exec-header {
+  padding: 0.25em 0.5em;
+  font-size: 0.9em;
+}
+
+/* A job's logs ("Logs" > "View"): opened at the end, following new lines while scrolled there. */
+.job-logs-view {
+  height: 75vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.5em;
+  color: white;
+  background-color: black;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

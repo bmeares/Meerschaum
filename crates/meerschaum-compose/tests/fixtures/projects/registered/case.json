@@ -1,0 +1,18 @@
+{
+  "description": "A fake instance with registered pipes (up to date, outdated, added parameters, registered under another project, stale) and existing jobs.",
+  "width": 140,
+  "registered": [
+    {"connector": "plugin:reg", "metric": "uptodate", "instance": "sql:local", "id": 1, "parameters": {"tags": ["reg"]}},
+    {"connector": "plugin:reg", "metric": "outdated", "instance": "sql:local", "id": 2, "parameters": {"columns": {"datetime": "timestamp"}, "tags": ["reg"]}},
+    {"connector": "plugin:reg", "metric": "added", "instance": "sql:local", "id": 3, "parameters": {"tags": ["reg"], "fetch": {"backtrack_minutes": 10}, "extra": true}},
+    {"connector": "plugin:reg", "metric": "untagged", "instance": "sql:local", "id": 4, "parameters": {"tags": ["other-project"], "custom": 1}},
+    {"connector": "plugin:reg", "metric": "stale", "instance": "sql:local", "id": 5, "parameters": {"tags": ["reg", "shared"]}}
+  ],
+  "jobs": {
+    "reg sync (sql:local)": {"sysargs": ["sync", "pipes", "-i", "sql:local", "-t", "reg", "--name", "reg sync (sql:local)", "-f", "--loop"], "env": {"MRSM__COMPOSE_PROJECT": "reg"}, "status": "running", "restart": true},
+    "manual": {"sysargs": ["show", "version"], "env": {}, "status": "stopped", "restart": false},
+    "foreign": {"sysargs": ["sync", "pipes"], "env": {"MRSM__COMPOSE_PROJECT": "beta"}, "status": "stopped", "restart": false},
+    "tagged-old": {"sysargs": ["sync", "pipes", "-t", "reg", "--loop"], "env": {}, "status": "paused", "restart": false}
+  },
+  "runs": "all"
+}

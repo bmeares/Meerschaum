@@ -1,0 +1,859 @@
+{
+ "scenarios": {
+  "main": {
+   "scenario": "main",
+   "files_before": [
+    "root/w9v.db"
+   ],
+   "runs": [
+    {
+     "name": "explain",
+     "sysargs": [
+      "compose",
+      "explain"
+     ],
+     "result": [
+      true,
+      "Success"
+     ],
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      }
+     ],
+     "messages": [],
+     "warnings": [],
+     "explain": "                                         Pipes in 'w9proj'                                          \n                                   ╷                                  ╷                             \n  Defined Pipes                    │Compose Parameters                │Remote Parameters            \n╶──────────────────────────────────┼──────────────────────────────────┼────────────────────────────╴\n  ╭────────── Instance ──────────╮ │                                  │                             \n  │ sql:w9v                      │ │                                  │                             \n  ╰──────────────────────────────╯ │                                  │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'alpha')         │{                                 │                             \n                                   │  \"columns\": {                    │                             \n  ✅ Up-to-date                    │    \"datetime\": \"ts\",             │                             \n                                   │    \"id\": \"sensor\"                │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ],                              │                             \n                                   │  \"target\": \"w9_alpha_tbl\"        │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'beta')          │{                                 │{                            \n                                   │  \"fetch\": {                      │  \"columns\": {               \n  🟨 Params added                  │    \"backtrack_minutes\": 30       │    \"datetime\": \"ts\",        \n                                   │  },                              │    \"id\": \"sensor\"           \n                                   │  \"columns\": {                    │  },                         \n                                   │    \"datetime\": \"ts\",             │  \"fetch\": {                 \n                                   │    \"id\": \"sensor\"                │    \"backtrack_minutes\": 10  \n                                   │  },                              │  },                         \n                                   │  \"tags\": [                       │  \"tags\": [                  \n                                   │    \"w9proj\"                      │    \"w9proj\"                 \n                                   │  ]                               │  ]                          \n                                   │}                                 │}                            \n                                   │                                  │                             \n  Pipe('sql:w9v', 'gamma')         │{                                 │{                            \n                                   │  \"columns\": {                    │  \"columns\": {               \n  🟨 Params added                  │    \"datetime\": \"ts\"              │    \"datetime\": \"ts\"         \n                                   │  },                              │  },                         \n                                   │  \"tags\": [                       │  \"upsert\": true,            \n                                   │    \"w9proj\"                      │  \"tags\": [                  \n                                   │  ]                               │    \"w9proj\"                 \n                                   │}                                 │  ]                          \n                                   │                                  │}                            \n                                   │                                  │                             \n  Pipe('sql:w9v', 'theta')         │{                                 │{                            \n                                   │  \"upsert\": true,                 │  \"columns\": {               \n  ❌ Outdated                      │  \"columns\": {                    │    \"datetime\": \"ts\"         \n                                   │    \"datetime\": \"ts\"              │  },                         \n                                   │  },                              │  \"tags\": [                  \n                                   │  \"tags\": [                       │    \"w9proj\"                 \n                                   │    \"w9proj\"                      │  ]                          \n                                   │  ]                               │}                            \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'delta',         │{                                 │                             \n  'north')                         │  \"columns\": {                    │                             \n                                   │    \"datetime\": \"ts\"              │                             \n  ⭕ Not registered                │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'epsilon')       │{                                 │                             \n                                   │  \"sql\": \"SELECT * FROM {{ Pipe(… │                             \n  ⭕ Not registered                │  \"columns\": {                    │                             \n                                   │    \"datetime\": \"ts\"              │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'zeta')          │{                                 │                             \n                                   │  \"columns\": {                    │                             \n  🔳 Temporary                     │    \"datetime\": \"ts\"              │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   ╵                                  ╵                             \n",
+     "registry": [
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "alpha",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "target": "w9_alpha_tbl",
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "beta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "fetch": {
+         "backtrack_minutes": 10
+        },
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "gamma",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "upsert": true,
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "kappa",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9proj",
+         "w9other"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "theta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9proj"
+        ]
+       }
+      }
+     ],
+     "files": [
+      "root/w9v.db"
+     ]
+    },
+    {
+     "name": "up-dry",
+     "sysargs": [
+      "compose",
+      "up",
+      "--dry"
+     ],
+     "result": [
+      true,
+      "Updated parameters for 7 pipes on 1 instance."
+     ],
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "delta",
+        "-l",
+        "north",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"columns\":{\"datetime\":\"ts\"},\"tags\":[\"w9proj\"]}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "epsilon",
+        "-l",
+        "None",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"sql\":\"SELECT * FROM \\\"w9_alpha_tbl\\\" JOIN \\\"sql_w9v_delta_north\\\"\",\"columns\":{\"datetime\":\"ts\"},\"tags\":[\"w9proj\"]}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      }
+     ],
+     "messages": [
+      [
+       "info",
+       "Updating parameters for Pipe('sql:w9v', 'beta')..."
+      ],
+      [
+       "info",
+       "Updating parameters for Pipe('sql:w9v', 'gamma')..."
+      ],
+      [
+       "info",
+       "Updating parameters for Pipe('sql:w9v', 'theta')..."
+      ],
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'delta', 'north')..."
+      ],
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'epsilon')..."
+      ],
+      [
+       "info",
+       "Pipe('sql:w9v', 'zeta') is temporary, will not modify registration."
+      ],
+      [
+       "info",
+       "Removing tag 'w9proj' from Pipe('sql:w9v', 'kappa')..."
+      ]
+     ],
+     "warnings": [],
+     "explain": null,
+     "registry": [
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "alpha",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "target": "w9_alpha_tbl",
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "beta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "fetch": {
+         "backtrack_minutes": 30
+        },
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "gamma",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "upsert": true,
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "kappa",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9other"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "theta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9proj"
+        ],
+        "upsert": true
+       }
+      }
+     ],
+     "files": [
+      "root/w9v.db"
+     ]
+    },
+    {
+     "name": "explain-after",
+     "sysargs": [
+      "compose",
+      "explain"
+     ],
+     "result": [
+      true,
+      "Success"
+     ],
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      }
+     ],
+     "messages": [],
+     "warnings": [],
+     "explain": "                                         Pipes in 'w9proj'                                          \n                                    ╷                                        ╷                      \n  Defined Pipes                     │Compose Parameters                      │Remote Parameters     \n╶───────────────────────────────────┼────────────────────────────────────────┼─────────────────────╴\n  ╭────────── Instance ───────────╮ │                                        │                      \n  │ sql:w9v                       │ │                                        │                      \n  ╰───────────────────────────────╯ │                                        │                      \n                                    │                                        │                      \n  Pipe('sql:w9v', 'alpha')          │{                                       │                      \n                                    │  \"columns\": {                          │                      \n  ✅ Up-to-date                     │    \"datetime\": \"ts\",                   │                      \n                                    │    \"id\": \"sensor\"                      │                      \n                                    │  },                                    │                      \n                                    │  \"tags\": [                             │                      \n                                    │    \"w9proj\"                            │                      \n                                    │  ],                                    │                      \n                                    │  \"target\": \"w9_alpha_tbl\"              │                      \n                                    │}                                       │                      \n                                    │                                        │                      \n  Pipe('sql:w9v', 'beta')           │{                                       │                      \n                                    │  \"fetch\": {                            │                      \n  ✅ Up-to-date                     │    \"backtrack_minutes\": 30             │                      \n                                    │  },                                    │                      \n                                    │  \"columns\": {                          │                      \n                                    │    \"datetime\": \"ts\",                   │                      \n                                    │    \"id\": \"sensor\"                      │                      \n                                    │  },                                    │                      \n                                    │  \"tags\": [                             │                      \n                                    │    \"w9proj\"                            │                      \n                                    │  ]                                     │                      \n                                    │}                                       │                      \n                                    │                                        │                      \n  Pipe('sql:w9v', 'gamma')          │{                                       │{                     \n                                    │  \"columns\": {                          │  \"columns\": {        \n  🟨 Params added                   │    \"datetime\": \"ts\"                    │    \"datetime\": \"ts\"  \n                                    │  },                                    │  },                  \n                                    │  \"tags\": [                             │  \"upsert\": true,     \n                                    │    \"w9proj\"                            │  \"tags\": [           \n                                    │  ]                                     │    \"w9proj\"          \n                                    │}                                       │  ]                   \n                                    │                                        │}                     \n                                    │                                        │                      \n  Pipe('sql:w9v', 'theta')          │{                                       │                      \n                                    │  \"upsert\": true,                       │                      \n  ✅ Up-to-date                     │  \"columns\": {                          │                      \n                                    │    \"datetime\": \"ts\"                    │                      \n                                    │  },                                    │                      \n                                    │  \"tags\": [                             │                      \n                                    │    \"w9proj\"                            │                      \n                                    │  ]                                     │                      \n                                    │}                                       │                      \n                                    │                                        │                      \n  Pipe('sql:w9v', 'delta', 'north') │{                                       │                      \n                                    │  \"columns\": {                          │                      \n  ⭕ Not registered                 │    \"datetime\": \"ts\"                    │                      \n                                    │  },                                    │                      \n                                    │  \"tags\": [                             │                      \n                                    │    \"w9proj\"                            │                      \n                                    │  ]                                     │                      \n                                    │}                                       │                      \n                                    │                                        │                      \n  Pipe('sql:w9v', 'epsilon')        │{                                       │                      \n                                    │  \"sql\": \"SELECT * FROM {{ Pipe('sql:w… │                      \n  ⭕ Not registered                 │  \"columns\": {                          │                      \n                                    │    \"datetime\": \"ts\"                    │                      \n                                    │  },                                    │                      \n                                    │  \"tags\": [                             │                      \n                                    │    \"w9proj\"                            │                      \n                                    │  ]                                     │                      \n                                    │}                                       │                      \n                                    │                                        │                      \n  Pipe('sql:w9v', 'zeta')           │{                                       │                      \n                                    │  \"columns\": {                          │                      \n  🔳 Temporary                      │    \"datetime\": \"ts\"                    │                      \n                                    │  },                                    │                      \n                                    │  \"tags\": [                             │                      \n                                    │    \"w9proj\"                            │                      \n                                    │  ]                                     │                      \n                                    │}                                       │                      \n                                    ╵                                        ╵                      \n",
+     "registry": [
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "alpha",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "target": "w9_alpha_tbl",
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "beta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "fetch": {
+         "backtrack_minutes": 30
+        },
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "gamma",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "upsert": true,
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "kappa",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9other"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "theta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9proj"
+        ],
+        "upsert": true
+       }
+      }
+     ],
+     "files": [
+      "root/w9v.db"
+     ]
+    }
+   ]
+  },
+  "nodb": {
+   "scenario": "nodb",
+   "files_before": [],
+   "runs": [
+    {
+     "name": "explain",
+     "sysargs": [
+      "compose",
+      "explain"
+     ],
+     "result": [
+      true,
+      "Success"
+     ],
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      }
+     ],
+     "messages": [],
+     "warnings": [],
+     "explain": "                                         Pipes in 'w9proj'                                          \n                                    ╷                                           ╷                   \n  Defined Pipes                     │Compose Parameters                         │Remote Parameters  \n╶───────────────────────────────────┼───────────────────────────────────────────┼──────────────────╴\n  ╭────────── Instance ───────────╮ │                                           │                   \n  │ sql:w9v                       │ │                                           │                   \n  ╰───────────────────────────────╯ │                                           │                   \n                                    │                                           │                   \n  Pipe('sql:w9v', 'alpha')          │{                                          │                   \n                                    │  \"columns\": {                             │                   \n  ⭕ Not registered                 │    \"datetime\": \"ts\",                      │                   \n                                    │    \"id\": \"sensor\"                         │                   \n                                    │  },                                       │                   \n                                    │  \"tags\": [                                │                   \n                                    │    \"w9proj\"                               │                   \n                                    │  ],                                       │                   \n                                    │  \"target\": \"w9_alpha_tbl\"                 │                   \n                                    │}                                          │                   \n                                    │                                           │                   \n  Pipe('sql:w9v', 'beta')           │{                                          │                   \n                                    │  \"fetch\": {                               │                   \n  ⭕ Not registered                 │    \"backtrack_minutes\": 30                │                   \n                                    │  },                                       │                   \n                                    │  \"columns\": {                             │                   \n                                    │    \"datetime\": \"ts\",                      │                   \n                                    │    \"id\": \"sensor\"                         │                   \n                                    │  },                                       │                   \n                                    │  \"tags\": [                                │                   \n                                    │    \"w9proj\"                               │                   \n                                    │  ]                                        │                   \n                                    │}                                          │                   \n                                    │                                           │                   \n  Pipe('sql:w9v', 'gamma')          │{                                          │                   \n                                    │  \"columns\": {                             │                   \n  ⭕ Not registered                 │    \"datetime\": \"ts\"                       │                   \n                                    │  },                                       │                   \n                                    │  \"tags\": [                                │                   \n                                    │    \"w9proj\"                               │                   \n                                    │  ]                                        │                   \n                                    │}                                          │                   \n                                    │                                           │                   \n  Pipe('sql:w9v', 'theta')          │{                                          │                   \n                                    │  \"upsert\": true,                          │                   \n  ⭕ Not registered                 │  \"columns\": {                             │                   \n                                    │    \"datetime\": \"ts\"                       │                   \n                                    │  },                                       │                   \n                                    │  \"tags\": [                                │                   \n                                    │    \"w9proj\"                               │                   \n                                    │  ]                                        │                   \n                                    │}                                          │                   \n                                    │                                           │                   \n  Pipe('sql:w9v', 'delta', 'north') │{                                          │                   \n                                    │  \"columns\": {                             │                   \n  ⭕ Not registered                 │    \"datetime\": \"ts\"                       │                   \n                                    │  },                                       │                   \n                                    │  \"tags\": [                                │                   \n                                    │    \"w9proj\"                               │                   \n                                    │  ]                                        │                   \n                                    │}                                          │                   \n                                    │                                           │                   \n  Pipe('sql:w9v', 'epsilon')        │{                                          │                   \n                                    │  \"sql\": \"SELECT * FROM {{ Pipe('sql:w9v'… │                   \n  ⭕ Not registered                 │  \"columns\": {                             │                   \n                                    │    \"datetime\": \"ts\"                       │                   \n                                    │  },                                       │                   \n                                    │  \"tags\": [                                │                   \n                                    │    \"w9proj\"                               │                   \n                                    │  ]                                        │                   \n                                    │}                                          │                   \n                                    │                                           │                   \n  Pipe('sql:w9v', 'zeta')           │{                                          │                   \n                                    │  \"columns\": {                             │                   \n  🔳 Temporary                      │    \"datetime\": \"ts\"                       │                   \n                                    │  },                                       │                   \n                                    │  \"tags\": [                                │                   \n                                    │    \"w9proj\"                               │                   \n                                    │  ]                                        │                   \n                                    │}                                          │                   \n                                    ╵                                           ╵                   \n",
+     "registry": [],
+     "files": [
+      "root/w9v.db"
+     ]
+    }
+   ]
+  },
+  "nodb_up": {
+   "scenario": "nodb_up",
+   "files_before": [],
+   "runs": [
+    {
+     "name": "up-dry",
+     "sysargs": [
+      "compose",
+      "up",
+      "--dry"
+     ],
+     "result": [
+      true,
+      "Updated parameters for 7 pipes on 1 instance."
+     ],
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "alpha",
+        "-l",
+        "None",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"columns\":{\"datetime\":\"ts\",\"id\":\"sensor\"},\"tags\":[\"w9proj\"],\"target\":\"w9_alpha_tbl\"}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "beta",
+        "-l",
+        "None",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"fetch\":{\"backtrack_minutes\":30},\"columns\":{\"datetime\":\"ts\",\"id\":\"sensor\"},\"tags\":[\"w9proj\"]}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "gamma",
+        "-l",
+        "None",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"columns\":{\"datetime\":\"ts\"},\"tags\":[\"w9proj\"]}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "theta",
+        "-l",
+        "None",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"upsert\":true,\"columns\":{\"datetime\":\"ts\"},\"tags\":[\"w9proj\"]}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "delta",
+        "-l",
+        "north",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"columns\":{\"datetime\":\"ts\"},\"tags\":[\"w9proj\"]}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      },
+      {
+       "sysargs": [
+        "register",
+        "pipes",
+        "-c",
+        "sql:w9v",
+        "-m",
+        "epsilon",
+        "-l",
+        "None",
+        "-i",
+        "sql:w9v",
+        "--params",
+        "{\"sql\":\"SELECT * FROM \\\"sql_w9v_alpha\\\" JOIN \\\"sql_w9v_delta_north\\\"\",\"columns\":{\"datetime\":\"ts\"},\"tags\":[\"w9proj\"]}",
+        "--noask",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": false,
+       "capture_output": false,
+       "replace": false
+      }
+     ],
+     "messages": [
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'alpha')..."
+      ],
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'beta')..."
+      ],
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'gamma')..."
+      ],
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'theta')..."
+      ],
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'delta', 'north')..."
+      ],
+      [
+       "info",
+       "Registering Pipe('sql:w9v', 'epsilon')..."
+      ],
+      [
+       "info",
+       "Pipe('sql:w9v', 'zeta') is temporary, will not modify registration."
+      ]
+     ],
+     "warnings": [],
+     "explain": null,
+     "registry": [],
+     "files": [
+      "root/w9v.db"
+     ]
+    }
+   ]
+  },
+  "envlayer": {
+   "scenario": "envlayer",
+   "files_before": [
+    "root/w9v.db"
+   ],
+   "runs": [
+    {
+     "name": "explain",
+     "sysargs": [
+      "compose",
+      "explain"
+     ],
+     "result": [
+      true,
+      "Success"
+     ],
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      }
+     ],
+     "messages": [],
+     "warnings": [],
+     "explain": "                                         Pipes in 'w9proj'                                          \n                                   ╷                                  ╷                             \n  Defined Pipes                    │Compose Parameters                │Remote Parameters            \n╶──────────────────────────────────┼──────────────────────────────────┼────────────────────────────╴\n  ╭────────── Instance ──────────╮ │                                  │                             \n  │ sql:w9v                      │ │                                  │                             \n  ╰──────────────────────────────╯ │                                  │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'alpha')         │{                                 │                             \n                                   │  \"columns\": {                    │                             \n  ✅ Up-to-date                    │    \"datetime\": \"ts\",             │                             \n                                   │    \"id\": \"sensor\"                │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ],                              │                             \n                                   │  \"target\": \"w9_alpha_tbl\"        │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'beta')          │{                                 │{                            \n                                   │  \"fetch\": {                      │  \"columns\": {               \n  🟨 Params added                  │    \"backtrack_minutes\": 30       │    \"datetime\": \"ts\",        \n                                   │  },                              │    \"id\": \"sensor\"           \n                                   │  \"columns\": {                    │  },                         \n                                   │    \"datetime\": \"ts\",             │  \"fetch\": {                 \n                                   │    \"id\": \"sensor\"                │    \"backtrack_minutes\": 10  \n                                   │  },                              │  },                         \n                                   │  \"tags\": [                       │  \"tags\": [                  \n                                   │    \"w9proj\"                      │    \"w9proj\"                 \n                                   │  ]                               │  ]                          \n                                   │}                                 │}                            \n                                   │                                  │                             \n  Pipe('sql:w9v', 'gamma')         │{                                 │{                            \n                                   │  \"columns\": {                    │  \"columns\": {               \n  🟨 Params added                  │    \"datetime\": \"ts\"              │    \"datetime\": \"ts\"         \n                                   │  },                              │  },                         \n                                   │  \"tags\": [                       │  \"upsert\": true,            \n                                   │    \"w9proj\"                      │  \"tags\": [                  \n                                   │  ]                               │    \"w9proj\"                 \n                                   │}                                 │  ]                          \n                                   │                                  │}                            \n                                   │                                  │                             \n  Pipe('sql:w9v', 'theta')         │{                                 │{                            \n                                   │  \"upsert\": true,                 │  \"columns\": {               \n  ❌ Outdated                      │  \"columns\": {                    │    \"datetime\": \"ts\"         \n                                   │    \"datetime\": \"ts\"              │  },                         \n                                   │  },                              │  \"tags\": [                  \n                                   │  \"tags\": [                       │    \"w9proj\"                 \n                                   │    \"w9proj\"                      │  ]                          \n                                   │  ]                               │}                            \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'delta',         │{                                 │                             \n  'north')                         │  \"columns\": {                    │                             \n                                   │    \"datetime\": \"ts\"              │                             \n  ⭕ Not registered                │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'epsilon')       │{                                 │                             \n                                   │  \"sql\": \"SELECT * FROM {{ Pipe(… │                             \n  ⭕ Not registered                │  \"columns\": {                    │                             \n                                   │    \"datetime\": \"ts\"              │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'zeta')          │{                                 │                             \n                                   │  \"columns\": {                    │                             \n  🔳 Temporary                     │    \"datetime\": \"ts\"              │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   ╵                                  ╵                             \n",
+     "registry": [
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "alpha",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "target": "w9_alpha_tbl",
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "beta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts",
+         "id": "sensor"
+        },
+        "fetch": {
+         "backtrack_minutes": 10
+        },
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "gamma",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "upsert": true,
+        "tags": [
+         "w9proj"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "kappa",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9proj",
+         "w9other"
+        ]
+       }
+      },
+      {
+       "connector_keys": "sql:w9v",
+       "metric_key": "theta",
+       "location_key": null,
+       "parameters": {
+        "columns": {
+         "datetime": "ts"
+        },
+        "tags": [
+         "w9proj"
+        ]
+       }
+      }
+     ],
+     "files": [
+      "root/w9v.db"
+     ]
+    }
+   ]
+  },
+  "envonly": {
+   "scenario": "envonly",
+   "files_before": [],
+   "runs": [
+    {
+     "name": "explain",
+     "sysargs": [
+      "compose",
+      "explain"
+     ],
+     "result": [
+      true,
+      "Success"
+     ],
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9proj"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      }
+     ],
+     "messages": [],
+     "warnings": [],
+     "explain": "                                         Pipes in 'w9proj'                                          \n                                   ╷                                  ╷                             \n  Defined Pipes                    │Compose Parameters                │Remote Parameters            \n╶──────────────────────────────────┼──────────────────────────────────┼────────────────────────────╴\n  ╭────────── Instance ──────────╮ │                                  │                             \n  │ sql:w9v                      │ │                                  │                             \n  ╰──────────────────────────────╯ │                                  │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'alpha')         │{                                 │                             \n                                   │  \"columns\": {                    │                             \n  ✅ Up-to-date                    │    \"datetime\": \"ts\",             │                             \n                                   │    \"id\": \"sensor\"                │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ],                              │                             \n                                   │  \"target\": \"w9_alpha_tbl\"        │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'beta')          │{                                 │{                            \n                                   │  \"fetch\": {                      │  \"columns\": {               \n  🟨 Params added                  │    \"backtrack_minutes\": 30       │    \"datetime\": \"ts\",        \n                                   │  },                              │    \"id\": \"sensor\"           \n                                   │  \"columns\": {                    │  },                         \n                                   │    \"datetime\": \"ts\",             │  \"fetch\": {                 \n                                   │    \"id\": \"sensor\"                │    \"backtrack_minutes\": 10  \n                                   │  },                              │  },                         \n                                   │  \"tags\": [                       │  \"tags\": [                  \n                                   │    \"w9proj\"                      │    \"w9proj\"                 \n                                   │  ]                               │  ]                          \n                                   │}                                 │}                            \n                                   │                                  │                             \n  Pipe('sql:w9v', 'gamma')         │{                                 │{                            \n                                   │  \"columns\": {                    │  \"columns\": {               \n  🟨 Params added                  │    \"datetime\": \"ts\"              │    \"datetime\": \"ts\"         \n                                   │  },                              │  },                         \n                                   │  \"tags\": [                       │  \"upsert\": true,            \n                                   │    \"w9proj\"                      │  \"tags\": [                  \n                                   │  ]                               │    \"w9proj\"                 \n                                   │}                                 │  ]                          \n                                   │                                  │}                            \n                                   │                                  │                             \n  Pipe('sql:w9v', 'theta')         │{                                 │{                            \n                                   │  \"upsert\": true,                 │  \"columns\": {               \n  ❌ Outdated                      │  \"columns\": {                    │    \"datetime\": \"ts\"         \n                                   │    \"datetime\": \"ts\"              │  },                         \n                                   │  },                              │  \"tags\": [                  \n                                   │  \"tags\": [                       │    \"w9proj\"                 \n                                   │    \"w9proj\"                      │  ]                          \n                                   │  ]                               │}                            \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'delta',         │{                                 │                             \n  'north')                         │  \"columns\": {                    │                             \n                                   │    \"datetime\": \"ts\"              │                             \n  ⭕ Not registered                │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'epsilon')       │{                                 │                             \n                                   │  \"sql\": \"SELECT * FROM {{ Pipe(… │                             \n  ⭕ Not registered                │  \"columns\": {                    │                             \n                                   │    \"datetime\": \"ts\"              │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   │                                  │                             \n  Pipe('sql:w9v', 'zeta')          │{                                 │                             \n                                   │  \"columns\": {                    │                             \n  🔳 Temporary                     │    \"datetime\": \"ts\"              │                             \n                                   │  },                              │                             \n                                   │  \"tags\": [                       │                             \n                                   │    \"w9proj\"                      │                             \n                                   │  ]                               │                             \n                                   │}                                 │                             \n                                   ╵                                  ╵                             \n",
+     "registry": null,
+     "files": []
+    }
+   ]
+  },
+  "unreachable": {
+   "scenario": "unreachable",
+   "files_before": [],
+   "runs": [
+    {
+     "name": "explain",
+     "sysargs": [
+      "compose",
+      "explain"
+     ],
+     "error": {
+      "type": "Exception",
+      "message": "\n 🛑 HTTPConnectionPool(host='127.0.0.1', port=1): Max retries exceeded with url: /login (Caused by \nNewConnectionError(\"HTTPConnection(host='127.0.0.1', port=1): Failed to establish a new connection: \n[Errno 111] Connection refused\"))"
+     },
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9bad"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      }
+     ],
+     "messages": [],
+     "warnings": [],
+     "explain": "╭─────────────────────────────── Traceback (most recent call last) ────────────────────────────────╮\n│ {REPO}/.venv-ref/lib64/python3.14/site-packages/meerschaum/connectors/api/_pip │\n│ es.py:176 in fetch_pipes_keys                                                                    │\n│                                                                                                  │\n│    173 │   except Exception as e:                                                                │\n│    174 │   │   import traceback                                                                  │\n│    175 │   │   traceback.print_exc()                                                             │\n│ ❱  176 │   │   error(str(e))                                                                     │\n│    177 │                                                                                         │\n│    178 │   if 'detail' in j:                                                                     │\n│    179 │   │   error(j['detail'], stack=False)                                                   │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\nException:  🛑 HTTPConnectionPool(host='127.0.0.1', port=1): Max retries exceeded with url: /login \n(Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=1): Failed to establish a new \nconnection: [Errno 111] Connection refused\"))\n",
+     "registry": null,
+     "files": []
+    },
+    {
+     "name": "up-dry",
+     "sysargs": [
+      "compose",
+      "up",
+      "--dry"
+     ],
+     "error": {
+      "type": "Exception",
+      "message": "\n 🛑 HTTPConnectionPool(host='127.0.0.1', port=1): Max retries exceeded with url: /login (Caused by \nNewConnectionError(\"HTTPConnection(host='127.0.0.1', port=1): Failed to establish a new connection: \n[Errno 111] Connection refused\"))"
+     },
+     "commands": [
+      {
+       "sysargs": [
+        "show",
+        "version",
+        "--no-daemon",
+        "--tags",
+        "w9bad"
+       ],
+       "subprocess": true,
+       "capture_output": true,
+       "replace": true
+      }
+     ],
+     "messages": [],
+     "warnings": [],
+     "explain": null,
+     "registry": null,
+     "files": []
+    }
+   ]
+  }
+ }
+}

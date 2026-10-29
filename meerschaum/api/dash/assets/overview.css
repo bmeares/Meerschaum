@@ -1,0 +1,421 @@
+/* The Overview (`/dash`, `pages/overview.py`) and the Connectors page (`/dash/connectors`). */
+
+.overview-page,
+.connectors-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 20px 32px;
+}
+.overview-title,
+.connectors-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 4px 0 16px;
+}
+
+/* Tiles: three across (Recent runs below, full width), two on tablets, one on phones. */
+.overview-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.overview-tile-runs {
+  grid-column: 1 / -1;
+}
+.overview-tile {
+  min-width: 0;
+  padding: 16px 18px;
+  background: #2a3037;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+.overview-tile-heading {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.overview-tile-title {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: rgba(255, 255, 255, 0.86);
+  text-decoration: none;
+}
+a.overview-tile-title:hover,
+a.overview-tile-title:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+}
+.overview-tile-body {
+  min-height: 64px;
+}
+.overview-stat-link,
+.overview-stat-link:hover {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: none;
+}
+.overview-stat-value {
+  color: #fff;
+  font-size: 2.25rem;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.overview-substat {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-left: 14px;
+  text-decoration: none;
+  font-weight: 600;
+}
+.overview-substat-bad { color: #ff7b72; }
+.overview-substat-ok { color: #7ee2a8; }
+.overview-substat:hover { text-decoration: underline; }
+.overview-tile-action {
+  margin-left: 14px;
+  min-height: 36px;
+}
+
+/* Lists inside tiles (Pipelines, job states, runs): 44px rows. */
+.overview-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.overview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.overview-pipeline-link,
+.overview-pipe-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.overview-pipeline-link:hover .mrsm-repr-name { text-decoration: underline; }
+.overview-pipe-link code,
+.overview-run-targets code {
+  color: #dceaf6;
+  font-size: 0.875rem;
+}
+.overview-pipe-link:hover code { text-decoration: underline; }
+.overview-when {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+.overview-more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.overview-none {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.6);
+}
+.overview-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  color: #ffb4ad;
+  background: rgba(255, 123, 114, 0.1);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+/* Run and Pipeline statuses. */
+.overview-status {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  color: #d0d7de;
+  background: rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+}
+.overview-status-succeeded { color: #0d1117; background: #7ee2a8; }
+.overview-status-failed,
+.overview-status-error,
+.overview-status-upstream_failed { color: #fff; background: #d1495b; }
+.overview-status-running { color: #0d1117; background: #79c0ff; }
+.overview-status-stopped,
+.overview-status-none { color: #d0d7de; background: rgba(255, 255, 255, 0.12); }
+
+/* Jobs by state. */
+.overview-job-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  color: rgba(255, 255, 255, 0.86);
+  text-decoration: none;
+}
+.overview-job-link:hover { color: #fff; }
+.overview-job-count {
+  margin-left: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.overview-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8b949e;
+}
+.overview-dot-running { background: #7ee2a8; }
+.overview-dot-stalled { background: #e0a526; }
+.overview-dot-failing { background: #ff7b72; }
+.overview-dot-paused { background: #d2a8ff; }
+.overview-dot-stopped { background: #8b949e; }
+
+/* Recent runs: status, what ran, when, how long, what changed. */
+.overview-run {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) 6.5rem 5rem minmax(0, 14rem);
+  gap: 12px;
+}
+.overview-run .overview-when { margin-left: 0; text-align: right; }
+.overview-run .overview-status { justify-self: start; }
+.overview-run-what {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.overview-repeat {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.8rem;
+}
+.overview-duration,
+.overview-counts {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.overview-run-what { min-width: 0; overflow: hidden; }
+.overview-run-what > a,
+.overview-run-what > details { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.overview-run-pipes summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+}
+.overview-run-targets {
+  list-style: none;
+  padding: 0 0 6px 12px;
+  margin: 0;
+}
+.overview-run-failed .overview-run-what { font-weight: 600; }
+
+/* Loading: two pulsing lines. */
+.overview-skeleton-line {
+  height: 14px;
+  margin: 12px 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  animation: overview-pulse 1.4s ease-in-out infinite;
+}
+.overview-skeleton-line.short { width: 55%; }
+@keyframes overview-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview-skeleton-line { animation: none; }
+}
+
+/* An instance without pipes: the Pipes tile's title and actions (the other tiles stay). */
+.overview-empty {
+  padding: 4px 0 2px;
+}
+.overview-empty-title {
+  margin: 4px 0 16px;
+  font-size: 1.375rem;
+  font-weight: 600;
+}
+.overview-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.overview-empty-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 9rem;
+}
+
+@media (max-width: 991.98px) {
+  .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767.98px) {
+  .overview-run {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 2px;
+    padding: 6px 0;
+  }
+  .overview-run .overview-duration,
+  .overview-run .overview-counts {
+    grid-column: 2 / -1;
+  }
+}
+@media (max-width: 575.98px) {
+  .overview-page,
+  .connectors-page {
+    padding: 12px 16px 24px;
+  }
+  .overview-grid { grid-template-columns: minmax(0, 1fr); }
+}
+/* Phones, narrow windows and touch screens: every link and button of the tiles is a 44px target. */
+@media (max-width: 767.98px), (pointer: coarse) {
+  .overview-tile-title { min-height: 44px; }
+  .overview-pipeline-link,
+  .overview-pipe-link {
+    display: block;
+    line-height: 44px;
+  }
+  .overview-tile-action {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
+/* Connectors: a table on wide screens, one card per connector on phones. */
+.connectors-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.connectors-header .connectors-title { margin: 0; }
+.connectors-filter.form-control {
+  flex: 0 1 320px;
+  margin-left: auto;
+  min-height: 36px;
+}
+.connectors-table-wrap { overflow-x: auto; }
+.connectors-table { margin-bottom: 0; }
+.connectors-table td,
+.connectors-table th {
+  vertical-align: middle;
+}
+.connectors-keys {
+  color: #dceaf6;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.connectors-details summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  cursor: pointer;
+}
+.connectors-attributes {
+  max-width: 36rem;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  color: #c9d1d9;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.connectors-type { font-weight: 600; }
+.connectors-plugin,
+.connectors-source-detail {
+  margin-left: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.8rem;
+}
+.connectors-source-detail { color: #dceaf6; }
+.connectors-col-flavor,
+.connectors-col-port,
+.connectors-col-type {
+  white-space: nowrap;
+}
+.connectors-col-host {
+  min-width: 7rem;
+  overflow-wrap: break-word;
+}
+.connectors-col-database {
+  overflow-wrap: anywhere;
+}
+.connectors-test-button.btn {
+  min-height: 36px;
+  white-space: nowrap;
+}
+.connectors-test-result {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.connectors-test-success { color: #7ee2a8; }
+.connectors-test-failure { color: #ff9b94; }
+.connectors-none { color: rgba(255, 255, 255, 0.6); }
+
+@media (max-width: 767.98px) {
+  .connectors-filter.form-control {
+    flex: 1 1 100%;
+    margin-left: 0;
+    min-height: 44px;
+  }
+  .connectors-table thead { display: none; }
+  .connectors-table,
+  .connectors-table tbody,
+  .connectors-table tr,
+  .connectors-table td {
+    display: block;
+    width: 100%;
+  }
+  .connectors-table tr {
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+  }
+  .connectors-table td {
+    display: flex;
+    gap: 12px;
+    padding: 4px 0;
+    border: 0;
+  }
+  .connectors-table td:empty { display: none; }
+  .connectors-table td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 6rem;
+    color: rgba(255, 255, 255, 0.55);
+  }
+  /* The value beside its label: it wraps inside the card (a long variable name, a path). */
+  .connectors-cell {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .connectors-keys { white-space: normal; }
+  .connectors-source-detail {
+    display: inline-block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .connectors-details summary { min-height: 44px; }
+  .connectors-col-test { flex-direction: column; }
+  .connectors-test-button.btn { min-height: 44px; }
+}

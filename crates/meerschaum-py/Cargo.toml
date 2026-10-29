@@ -1,0 +1,79 @@
+[package]
+name = "meerschaum-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Meerschaum v5: PyO3 bindings exposed to Python as `meerschaum._core`"
+build = "build.rs"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Enabled by maturin (see pyproject.toml). Kept off for `cargo test` / `cargo clippy` so the
+# rlib and test binaries can link without libpython.
+extension-module = ["pyo3/extension-module"]
+# The `oracle` flavor of `meerschaum-connector-sql` (D13): the wheels ship it
+# (`scripts/rust/build_py.sh` and the root `pyproject.toml` enable it), so `Pipe.sync()` and the
+# instance methods reach that database natively. `mssql` and `duckdb` are default features of the SQL
+# crate (DuckDB's own library is loaded at run time, not compiled in).
+oracle = ["meerschaum-connector-sql/oracle", "meerschaum-cli/oracle"]
+
+[dependencies]
+async-trait = "0.1"
+rust_decimal = { workspace = true }
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector-sql = { workspace = true }
+meerschaum-connector = { workspace = true }
+meerschaum-engine = { workspace = true }
+# The console uses the API server's exact SQL access guard.
+meerschaum-server = { workspace = true }
+# The connectors a one-pipe sync builds from the Python process's attributes (`facade.rs`) and
+# the worker pool it tells about ad hoc connectors.
+meerschaum-connector-api = { workspace = true, features = ["client"] }
+meerschaum-connector-valkey = { workspace = true }
+meerschaum-worker = { workspace = true }
+# `meerschaum.jobs.Job` and the executors (`jobs_api.rs`).
+meerschaum-jobs = { workspace = true }
+# The extension's `tracing` sink (`logging.rs`): engine warnings reach Python's `warn()`.
+tracing = { workspace = true }
+# `_native.main` (the `mrsm` console script) prints `tracing` events like the binary when `RUST_LOG` is set.
+tracing-subscriber = { workspace = true }
+# `_native.main` keeps the CLI's own SIGINT handler between runs (see `main_api.rs`).
+libc = "0.2"
+# The runtime the instance methods run on (owned by the extension, design §4.2).
+tokio = { workspace = true }
+# Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").
+meerschaum-cli = { path = "../meerschaum-cli", default-features = false }
+# `_core.native_plugin_names` / `native_connector_register` (`native_plugin_api.rs`).
+meerschaum-plugin = { workspace = true }
+# `meerschaum.compose.utils` delegates its configuration helpers (`compose_api.rs`).
+meerschaum-compose = { workspace = true }
+# pyo3, arrow and polars are workspace dependencies that move together (README "Dependency pins").
+# Python <-> Arrow goes through our own PyCapsule code (`ffi_import.rs`, `ffi_export.rs`), and Python
+# polars <-> Rust polars through polars' own Arrow FFI (`polars_bridge.rs`), so no pyo3-arrow or
+# pyo3-polars pins pyo3 to a particular arrow or polars release.
+pyo3 = { workspace = true }
+# The kernel's Polars (same workspace features, so the build is shared): column types at the
+# pandas boundary.
+polars = { workspace = true }
+# Polars' Arrow crate (its C Data Interface) for `polars_roundtrip`; keep it on the `polars` version.
+polars-arrow = "0.55"
+arrow = { workspace = true, features = ["ffi"] }
+toml = { workspace = true }
+indexmap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+num-bigint = "0.5"
+
+[build-dependencies]
+pyo3-build-config = "0.30"

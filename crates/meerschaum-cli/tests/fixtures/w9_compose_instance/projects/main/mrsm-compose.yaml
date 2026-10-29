@@ -1,0 +1,66 @@
+### Synthetic project for the compose instance parity test (wave 9, task V).
+project_name: "w9proj"
+
+config:
+  meerschaum:
+    instance: "sql:w9v"
+    connectors:
+      sql:
+        w9v:
+          flavor: "sqlite"
+          database: "{MRSM_ROOT_DIR}/w9v.db"
+
+pipes:
+  ### Registered, identical parameters.
+  - connector: "sql:w9v"
+    metric: "alpha"
+    columns:
+      datetime: "ts"
+      id: "sensor"
+    target: "w9_alpha_tbl"
+
+  ### Registered, a value differs.
+  - connector: "sql:w9v"
+    metric: "beta"
+    columns:
+      datetime: "ts"
+      id: "sensor"
+    parameters:
+      fetch:
+        backtrack_minutes: 30
+
+  ### Registered, the remote parameters have an extra key.
+  - connector: "sql:w9v"
+    metric: "gamma"
+    columns:
+      datetime: "ts"
+
+  ### Registered, the compose parameters have an extra key.
+  - connector: "sql:w9v"
+    metric: "theta"
+    columns:
+      datetime: "ts"
+    parameters:
+      upsert: true
+
+  ### Not registered (with a location).
+  - connector: "sql:w9v"
+    metric: "delta"
+    location: "north"
+    columns:
+      datetime: "ts"
+
+  ### Not registered, with table references to a registered and an unregistered pipe.
+  - connector: "sql:w9v"
+    metric: "epsilon"
+    parameters:
+      sql: "SELECT * FROM {{ Pipe('sql:w9v', 'alpha') }} JOIN {{ Pipe('sql:w9v', 'delta', 'north') }}"
+      columns:
+        datetime: "ts"
+
+  ### Temporary pipes are never registered.
+  - connector: "sql:w9v"
+    metric: "zeta"
+    temporary: true
+    columns:
+      datetime: "ts"

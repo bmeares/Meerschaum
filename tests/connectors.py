@@ -6,6 +6,7 @@ import os
 from typing import Dict, List
 from meerschaum import get_connector
 from meerschaum.config._paths import ROOT_DIR_PATH
+from tests._ports import service_port
 data_path = ROOT_DIR_PATH / 'data'
 data_path.mkdir(exist_ok=True)
 
@@ -16,7 +17,7 @@ conns = {
         username='test',
         password='test1234',
         database='testdb',
-        port=5439,
+        port=service_port('timescaledb'),
         host='localhost',
         schema='public',
     ),
@@ -26,7 +27,7 @@ conns = {
         username='test',
         password='test1234',
         database='testdb',
-        port=5459,
+        port=service_port('timescaledb_ha'),
         host='localhost',
         schema='public',
     ),
@@ -36,7 +37,7 @@ conns = {
         username='test',
         password='test1234',
         database='testdb',
-        port=5449,
+        port=service_port('postgis'),
         host='localhost',
         schema='public',
     ),
@@ -46,7 +47,7 @@ conns = {
         username='test',
         password='test1234',
         database='testdb',
-        port=3309,
+        port=service_port('mariadb'),
         host='localhost',
     ),
     'mysql': get_connector(
@@ -55,7 +56,7 @@ conns = {
         username='root',
         password='my-secret-pw',
         database='mysql',
-        port=3310,
+        port=service_port('mysql'),
         host='localhost',
     ),
     'mssql': get_connector(
@@ -64,7 +65,7 @@ conns = {
         username='sa',
         password='supersecureSECRETPASSWORD123!',
         database='master',
-        port=1439,
+        port=service_port('mssql'),
         host='localhost',
         schema='dbo',
     ),
@@ -75,7 +76,7 @@ conns = {
         database='xe',
         username='system',
         password='oracle',
-        port=1529,
+        port=service_port('oracle'),
     ),
     'sqlite':  get_connector(
         'sql', 'test_sqlite',
@@ -89,17 +90,35 @@ conns = {
     #  ),
     'api': get_connector(
         'api', 'test_api',
-        port=8989,
+        port=service_port('api'),
         username='test',
         password='test1234',
         host='localhost',
     ),
     'valkey': get_connector(
         'valkey', 'test_valkey',
-        port=6399,
+        port=service_port('valkey'),
         host='localhost',
     ),
 }
+
+### Flavors whose tables support reclaiming disk space (VACUUM / OPTIMIZE / REBUILD).
+VACUUMABLE_FLAVORS = {
+    'timescaledb', 'timescaledb-ha', 'postgresql', 'postgis', 'citus', 'mysql', 'mariadb',
+    'mssql', 'sqlite', 'geopackage',
+}
+### `VACUUM FULL` rewrites the table and reclaims space to the OS (PostgreSQL family only).
+FULL_VACUUM_FLAVORS = {'postgresql', 'postgis', 'citus'}
+### Flavors whose tables support refreshing planner statistics.
+ANALYZABLE_FLAVORS = VACUUMABLE_FLAVORS | {'cockroachdb', 'duckdb'}
+### Flavors whose tables support some form of compression.
+COMPRESSIBLE_FLAVORS = {'timescaledb', 'timescaledb-ha', 'mysql', 'mariadb', 'mssql'}
+### Flavors with declarative range partitioning on a datetime column (TimescaleDB uses chunks).
+PG_PARTITION_FLAVORS = {'postgresql', 'postgis'}
+MYSQL_PARTITION_FLAVORS = {'mysql', 'mariadb'}
+MSSQL_PARTITION_FLAVORS = {'mssql'}
+PARTITIONABLE_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS | MSSQL_PARTITION_FLAVORS
+
 
 def get_dtypes(debug: bool = False) -> Dict[str, Dict[str, 'sqlalchemy.types.Type']]:
     """
@@ -167,5 +186,7 @@ def get_flavors() -> List[str]:
     If `MRSM_TEST_FLAVORS` is set, split on commas and return the value.
     Otherwise return all possible flavors.
     """
-    flavors_str = os.environ.get('MRSM_TEST_FLAVORS', ','.join(list(conns.keys())))
+    flavors_str = os.environ.get('MRSM_TEST_COLLECTION_FLAVORS') or os.environ.get(
+        'MRSM_TEST_FLAVORS', ','.join(list(conns.keys()))
+    )
     return sorted(flavors_str.split(','))

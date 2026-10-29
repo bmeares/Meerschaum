@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Interface with SQL servers using sqlalchemy.
+Interface with SQL servers through native drivers, with optional SQLAlchemy engines.
 """
 
 from __future__ import annotations
@@ -15,10 +15,87 @@ from meerschaum.utils.typing import Optional, Any, Union
 from meerschaum.connectors import InstanceConnector
 from meerschaum.utils.warnings import error, warn
 
+#: Flavors with a Rust driver (`meerschaum-connector-sql`).
+_RUST_FLAVORS = {
+    'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb',
+    'mysql', 'mariadb', 'sqlite', 'geopackage', 'mssql', 'oracle', 'duckdb',
+}
+
+
+#: Flavors that share a driver (and an SQL dialect family), by the first member.
+_FLAVOR_FAMILIES = {
+    'postgresql': 'postgresql', 'timescaledb': 'postgresql', 'timescaledb-ha': 'postgresql',
+    'postgis': 'postgresql', 'citus': 'postgresql', 'cockroachdb': 'postgresql',
+    'mysql': 'mysql', 'mariadb': 'mysql',
+    'sqlite': 'sqlite', 'geopackage': 'sqlite',
+}
+
+
+def _flavor_family(flavor: Optional[str]) -> Optional[str]:
+    """The driver family of a flavor (a flavor of its own is its own family)."""
+    return _FLAVOR_FAMILIES.get(flavor, flavor) if flavor else None
+
+
+def _strip_uri_param(uri: str, key: str) -> str:
+    """`uri` without its `key=...` query parameters (the rest of the query is kept as is)."""
+    from urllib.parse import unquote_plus
+    base, sep, rest = uri.partition('?')
+    if not sep:
+        return uri
+    query, hash_sep, fragment = rest.partition('#')
+    kept = [
+        pair for pair in query.split('&')
+        if pair and unquote_plus(pair.split('=', 1)[0]) != key
+    ]
+    return base + (('?' + '&'.join(kept)) if kept else '') + (hash_sep + fragment)
+
+
+def _remove_memory_directory(directory: str, owner_pid: int) -> None:
+    """
+    Remove the database directory of an in-memory SQLite connector, in the process that created
+    it only: a forked child (a v4 job daemon) that exits normally must not delete its parent's
+    database.
+    """
+    import os
+    import shutil
+    if os.getpid() == owner_pid:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+_ORACLE_CLIENT: Optional[bool] = None
+
+
+def _oracle_client_available() -> bool:
+    """
+    Whether the Oracle client library (`libclntsh`) the Rust `oracle` driver loads is present.
+    Without it `oracle` instances raise an error naming the requirement (`_core_connector`).
+    """
+    global _ORACLE_CLIENT
+    if _ORACLE_CLIENT is None:
+        import ctypes
+        import sys
+        names = {
+            'win32': ('oci.dll',),
+            'darwin': ('libclntsh.dylib',),
+        }.get(sys.platform, ('libclntsh.so',))
+        for name in names:
+            try:
+                ctypes.CDLL(name)
+                _ORACLE_CLIENT = True
+                break
+            except OSError:
+                continue
+        else:
+            _ORACLE_CLIENT = False
+    return _ORACLE_CLIENT
+
 
 class SQLConnector(InstanceConnector):
     """
-    Connect to SQL databases via `sqlalchemy`.
+    Connect to SQL databases through the Rust connector's connection pool.
+
+    Raw SQL and pipe operations need no SQLAlchemy. The optional `.engine` property
+    provides a SQLAlchemy engine for code that explicitly uses that interface.
     
     SQLConnectors may be used as Meerschaum instance connectors.
     Read more about connectors and instances at
@@ -45,45 +122,15 @@ class SQLConnector(InstanceConnector):
         compress_pipe,
         decompress_pipe,
         apply_compression_policy,
-        _get_compress_settings,
-        _is_hypertable,
-        _get_columnstore_settings_query,
-        _get_columnstore_policy_query,
-        _get_columnstore_remove_policy_query,
-        _get_columnstore_disable_query,
-        _get_integer_now_func_queries,
         set_integer_now_func,
     )
     from ._maintenance import (
         vacuum_pipe,
         analyze_pipe,
-        _run_in_autocommit,
-        _get_vacuum_queries,
-        _get_analyze_query,
     )
     from ._partition import (
-        _should_partition,
-        _get_partition_column,
-        _get_partition_count,
-        _get_chunk_count_timescaledb,
         get_partition_info,
         partition_pipe,
-        _partition_bounds,
-        _partition_literal,
-        _partition_name,
-        _get_partition_ranges_for_df,
-        _get_initial_partition_bounds,
-        _create_missing_partitions,
-        _create_missing_partitions_pg,
-        _create_missing_partitions_mysql,
-        _get_mysql_max_partition_bound,
-        _partition_function_name,
-        _partition_scheme_name,
-        _get_partition_boundary_values,
-        _get_mssql_partition_creation_queries,
-        _get_mssql_max_partition_boundary,
-        _create_missing_partitions_mssql,
-        _get_partition_cleanup_queries,
     )
     from ._pipes import (
         fetch_pipes_keys,
@@ -91,8 +138,6 @@ class SQLConnector(InstanceConnector):
         drop_indices,
         get_create_index_queries,
         get_drop_index_queries,
-        get_add_columns_queries,
-        get_alter_columns_queries,
         delete_pipe,
         get_pipe_data,
         get_pipe_docs,
@@ -111,15 +156,12 @@ class SQLConnector(InstanceConnector):
         deduplicate_pipe,
         get_pipe_table,
         get_pipe_columns_types,
-        get_to_sql_dtype,
         get_pipe_schema,
-        create_pipe_table_from_df,
         get_pipe_columns_indices,
         get_temporary_target,
         create_pipe_indices,
         drop_pipe_indices,
         get_pipe_index_names,
-        _init_geopackage_pipe,
     )
     from ._plugins import (
         get_plugins_pipe,
@@ -144,12 +186,6 @@ class SQLConnector(InstanceConnector):
         get_user_attributes,
     )
     from ._uri import from_uri, parse_uri
-    from ._instance import (
-        _log_temporary_tables_creation,
-        _drop_temporary_table,
-        _drop_temporary_tables,
-        _drop_old_temporary_tables,
-    )
 
     def __init__(
         self,
@@ -215,6 +251,10 @@ class SQLConnector(InstanceConnector):
             kw.update(from_uri_params)
             if flavor:
                 kw['flavor'] = flavor
+            ### `?protected=true` marks the connector (`Connector.protected`); the driver must
+            ### not see it.
+            if 'protected' in from_uri_params:
+                kw['uri'] = _strip_uri_param(kw['uri'], 'protected')
 
         ### set __dict__ in base class
         super().__init__(
@@ -238,6 +278,21 @@ class SQLConnector(InstanceConnector):
             ):
                 import meerschaum.config.paths as paths
                 self.database = paths.SQLITE_DB_PATH.as_posix()
+
+        ### A `uri` decides where the connection goes (v4's engine is built from it alone), so
+        ### its scheme must also decide the dialect when it names another driver family than the
+        ### label's configured flavor (`MRSM_SQL_MAIN=sqlite:///x.db` on a `timescaledb-ha`
+        ### default config). v4 kept the configured flavor and generated SQL for the wrong
+        ### dialect; a flavor of the same family (`postgresql://` for `timescaledb-ha`) is kept.
+        if self.__dict__.get('uri') and self.__dict__.get('flavor'):
+            try:
+                uri_flavor = self.parse_uri(self.__dict__['uri']).get('flavor', None)
+            except Exception:
+                uri_flavor = None
+            if (
+                uri_flavor in _FLAVOR_FAMILIES or uri_flavor in _RUST_FLAVORS
+            ) and _flavor_family(uri_flavor) != _flavor_family(self.__dict__['flavor']):
+                self.__dict__['flavor'] = uri_flavor
 
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__:
@@ -293,12 +348,29 @@ class SQLConnector(InstanceConnector):
     @property
     def engine(self):
         """
-        Return the SQLAlchemy engine connected to the configured database.
+        Return the SQLAlchemy engine connected to the configured database (the `sql` extra).
+
+        `read()`, `exec()`, `value()`, `exec_queries()` and `to_sql()` do not use it: they run on the
+        connector's Rust connection pool (see `meerschaum.connectors.sql._native`). The engine
+        opens the database through Python's own driver. On SQLite that is Python's `sqlite3`
+        library, a second copy of SQLite in the process: do not write the connector's file through
+        the engine while the process also reads or writes it through `Pipe` methods or `read()` /
+        `exec()` (two SQLite libraries keep separate lock bookkeeping for one file, which can
+        corrupt it; sqlite.org/howtocorrupt.html, 2.2.1).
         """
         import os
         import threading
+        if self.flavor == 'duckdb':
+            from ._duckdb_transport import guard_sdk
+            guard_sdk()
         if '_engine' not in self.__dict__:
-            self._engine, self._engine_str = self.create_engine(include_uri=True)
+            try:
+                self._engine, self._engine_str = self.create_engine(include_uri=True)
+            except ImportError as e:
+                ### A property must raise `AttributeError` for `hasattr(conn, 'engine')` to be
+                ### `False`; Python cannot make one exception both an `ImportError` and an
+                ### `AttributeError`, so the message names the `sql` extra instead.
+                raise AttributeError(str(e)) from e
 
         same_process = os.getpid() == self._pid
         same_thread = threading.current_thread().ident == self._thread_ident
@@ -321,17 +393,19 @@ class SQLConnector(InstanceConnector):
     @property
     def DATABASE_URL(self) -> str:
         """
-        Return the URI connection string (alias for `SQLConnector.URI`.
+        Return the URI connection string (alias for `SQLConnector.URI`).
         """
-        _ = self.engine
-        return str(self._engine_str)
+        return self.URI
 
     @property
     def URI(self) -> str:
         """
-        Return the URI connection string.
+        Return the URI connection string, built from the connector's attributes
+        (no SQLAlchemy needed).
         """
-        _ = self.engine
+        if '_engine_str' not in self.__dict__:
+            from ._create_engine import get_engine_str
+            self._engine_str = get_engine_str(self)
         return str(self._engine_str)
 
     @property
@@ -342,7 +416,10 @@ class SQLConnector(InstanceConnector):
         if self.flavor in ('duckdb', 'oracle'):
             return False
         if self.flavor in ('sqlite', 'geopackage'):
-            return ':memory:' not in self.URI
+            return (
+                ':memory:' not in self.URI
+                and self.__dict__.get('_memory_path', None) is None
+            )
         return True
 
     @property
@@ -350,8 +427,8 @@ class SQLConnector(InstanceConnector):
         """
         Return the metadata bound to this configured schema.
         """
-        from meerschaum.utils.packages import attempt_import
-        sqlalchemy = attempt_import('sqlalchemy', lazy=False)
+        from ._create_engine import import_sqlalchemy
+        sqlalchemy = import_sqlalchemy()
         if '_metadata' not in self.__dict__:
             self._metadata = sqlalchemy.MetaData(schema=self.schema)
         return self._metadata
@@ -392,7 +469,6 @@ class SQLConnector(InstanceConnector):
                 self._db = databases.Database(url)
             except KeyError:
                 ### Likely encountered an unsupported flavor.
-                from meerschaum.utils.warnings import warn
                 self._db = None
         return self._db
 
@@ -423,9 +499,13 @@ class SQLConnector(InstanceConnector):
             self.__dict__['schema'] = None
             return None
 
-        sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
-        _schema = sqlalchemy.inspect(self.engine).default_schema_name
+        ### Ask the database (`SELECT current_schema()` on the PostgreSQL family, `SELECT
+        ### SCHEMA_NAME()` on MSSQL), natively and once: a role's `search_path` or a login's
+        ### default schema is what v4's `sqlalchemy.inspect(engine).default_schema_name`
+        ### reports, and the base wheel has no SQLAlchemy. Raises when the database is unreachable.
+        _schema = self._core_connector().discover_schema()
         self.__dict__['schema'] = _schema
+        self.__dict__['_schema_pending'] = False
         return _schema
 
     def get_metadata_cache_path(self, kind: str = 'json') -> pathlib.Path:
@@ -441,10 +521,229 @@ class SQLConnector(InstanceConnector):
         return paths.SQL_CONN_CACHE_RESOURCES_PATH / filename
 
     def __getstate__(self):
-        return self.__dict__
+        if '_rust_connector' not in self.__dict__:
+            return self.__dict__
+        return {
+            k: v
+            for k, v in self.__dict__.items()
+            if k not in ('_rust_connector', '_rust_connector_pid')
+        }
+
+    def _shared_memory_database(self) -> Optional[str]:
+        """
+        For an in-memory SQLite connector (`database=':memory:'`), the path of the one database
+        file that SQLAlchemy and the Rust pool both open, so `Pipe` methods and `read()` /
+        `exec()` / `.engine` see the same tables. `None` for any other connector.
+
+        The Python `sqlite3` module and the extension each carry their own SQLite library, which
+        cannot share a `cache=shared` memory database, so the "memory" database is a file in a
+        private temporary directory (a RAM disk where the system has one) that is removed when
+        the connector is collected or the process exits.
+        """
+        if self.__dict__.get('flavor', None) != 'sqlite' or self.__dict__.get('uri', None):
+            return None
+        if self.__dict__.get('database', None) != ':memory:':
+            return None
+        path = self.__dict__.get('_memory_path', None)
+        if path is None:
+            import os
+            import tempfile
+            import weakref
+            shm = '/dev/shm'
+            base = shm if os.path.isdir(shm) and os.access(shm, os.W_OK) else None
+            directory = tempfile.mkdtemp(prefix='mrsm_mem_', dir=base)
+            path = os.path.join(directory, 'memory.db')
+            self.__dict__['_memory_path'] = path
+            weakref.finalize(self, _remove_memory_directory, directory, os.getpid())
+        return path
+
+    def _core_connector(self, discover_schema: bool = True):
+        """
+        Return the `meerschaum._core.SqlConnector` behind this connector (built once per process,
+        see `crates/meerschaum-connector-sql`), which implements every pipe, user and plugin method.
+
+        Every flavor has a Rust driver (`mssql` and `oracle` are compiled into the wheels;
+        `duckdb` uses its public Python driver transport when installed, sharing a database
+        anchor with SQLAlchemy while keeping Pipe algorithms in Rust. Standalone / base
+        installs use DuckDB's C API. Explicit `MRSM_DUCKDB_LIB` pins native mode and refuses
+        mixed SQLAlchemy access; unset it and restart to use both). An in-memory SQLite database (`sql:memory`) is one database file that the Rust
+        pool and SQLAlchemy both open (`_shared_memory_database`), so `Pipe` methods and
+        `read()` / `exec()` / `.engine` see the same tables.
+        `read`, `exec`, `exec_queries`, `value` and `to_sql` run on this connector too (raw SQL,
+        rc15 Q53, `_native.NATIVE_SQL_FLAVORS`); only `.engine` (and the calls that hand out or take
+        SQLAlchemy objects) stays SQLAlchemy.
+
+        The Rust connector (and its pool) is built once per process: a forked child (a job
+        daemon) builds its own, like SQLAlchemy engines must.
+
+        Parameters
+        ----------
+        discover_schema: bool, default True
+            Ask the database for its default schema now (when none is configured) so `self.schema`
+            is the one the Rust methods use. `False` returns the connector without touching the
+            database (`meerschaum._internal.entry.adhoc_context`): its methods still ask for the
+            schema before they run.
+
+        Raises
+        ------
+        `RuntimeError` naming the cause when no driver can be built (the Oracle client library,
+        `libclntsh`, is not installed; an unknown flavor; a failed pool setup).
+        """
+        import os
+        rust = self.__dict__.get('_rust_connector', None)
+        if rust is False:
+            raise RuntimeError(self._rust_unavailable())
+        if rust is not None and self.__dict__.get('_rust_connector_pid', None) != os.getpid():
+            rust = None
+        if rust is None:
+            from meerschaum import _core
+            if self.flavor not in _RUST_FLAVORS:
+                self.__dict__['_rust_connector'] = False
+                self.__dict__['_rust_error'] = f"the flavor '{self.flavor}' has no Rust driver"
+                raise RuntimeError(self._rust_unavailable())
+            if self.flavor == 'oracle' and not _oracle_client_available():
+                self.__dict__['_rust_connector'] = False
+                self.__dict__['_rust_error'] = (
+                    "the Oracle client library (libclntsh, e.g. Oracle Instant Client) "
+                    "is not installed; install it and make it loadable "
+                    "(`LD_LIBRARY_PATH` / `ldconfig`) to use `oracle` instances"
+                )
+                raise RuntimeError(self._rust_unavailable())
+            attributes = {
+                key: self.__dict__.get(key, None)
+                for key in (
+                    'flavor', 'uri', 'host', 'port', 'username', 'password', 'database',
+                    'protected',
+                )
+            }
+            ### The core reads `protected` as text (`True` / `'true'` both mark it).
+            if attributes['protected'] is not None:
+                attributes['protected'] = str(attributes['protected'])
+            if self.flavor == 'duckdb':
+                from ._duckdb_transport import prepare_connector
+                attributes['_duckdb_memory_id'] = prepare_connector(self)
+                attributes['_duckdb_database'] = self.__dict__.get('_duckdb_database')
+            if (shared := self._shared_memory_database()) is not None:
+                attributes['database'] = shared
+            ### Only a configured schema: the Rust connector discovers the default itself.
+            attributes['schema'] = self.__dict__.get('schema', None)
+            try:
+                rust = _core.SqlConnector(self.label, attributes)
+            except Exception as e:
+                self.__dict__['_rust_connector'] = False
+                self.__dict__['_rust_error'] = str(e)
+                raise RuntimeError(self._rust_unavailable()) from e
+            self.__dict__['_rust_connector'] = rust
+            self.__dict__['_rust_connector_pid'] = os.getpid()
+            from meerschaum.utils.sql import NO_SCHEMA_FLAVORS
+            self.__dict__['_schema_pending'] = (
+                not attributes['schema'] and self.flavor not in NO_SCHEMA_FLAVORS
+            )
+        if discover_schema and self.__dict__.get('_schema_pending', False):
+            ### The default schema is asked of the database before the first query runs, so the
+            ### Rust methods see the same schema as `self.schema`. While the database cannot be
+            ### asked, nothing runs: the flavor default (`public` / `dbo`) is the wrong schema
+            ### for a role with another `search_path`, and a write would create duplicates.
+            try:
+                self.__dict__['schema'] = rust.discover_schema()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not determine the default schema of '{self}': {e}"
+                ) from e
+            self.__dict__['_schema_pending'] = False
+        return rust
+
+    def _rust_unavailable(self) -> str:
+        """The error text of a connector that has no usable Rust driver."""
+        cause = self.__dict__.get('_rust_error', None)
+        return (
+            f"Cannot use the SQL connector '{self}': no usable Rust driver"
+            + (f" ({cause})." if cause else ".")
+        )
+
+    def _rust_method(self, name: str):
+        """
+        Return the `meerschaum._core.SqlConnector` method `name`. Raises `AttributeError` naming
+        the method when the extension does not define it (raw SQL goes through `_native`, which
+        calls the `sql_*` bindings) and `RuntimeError` when the connector has no usable Rust
+        driver (see `_core_connector`).
+        """
+        rust = self._core_connector()
+        try:
+            method = getattr(rust, name)
+        except AttributeError:
+            raise AttributeError(f"`_core.SqlConnector` has no method '{name}'.") from None
+        ### A façade method called with `debug=True` shows the Rust core's debug output for
+        ### the binding it calls, whether or not it passes `debug` on.
+        try:
+            import sys
+            debug = sys._getframe(1).f_locals.get('debug', False) is True
+        except Exception:
+            debug = False
+        if not debug:
+            return _with_instance_hint(self, method)
+
+        def _debug_call(*args, **kwargs):
+            from meerschaum._core import debugging
+            with debugging():
+                return method(*args, **kwargs)
+
+        return _with_instance_hint(self, _debug_call)
 
     def __setstate__(self, d):
         self.__dict__.update(d)
 
     def __call__(self):
         return self
+
+
+### The next step when the untouched default `sql:main` cannot be reached (rc15 Q9): the CLI's
+### `DEFAULT_INSTANCE_HINT` (`crates/meerschaum-cli/src/native/connectors.rs`), for Python.
+DEFAULT_INSTANCE_HINT: str = (
+    "Start the database with `mrsm stack up -d db`, or use the built-in SQLite instance "
+    "(`instance='sql:local'`, or set `instance:` with `mrsm edit config`)."
+)
+_instance_hint_shown: bool = False
+
+
+def _with_instance_hint(connector: Any, method: Any) -> Any:
+    """
+    `method`, adding `DEFAULT_INSTANCE_HINT` (once per process) to the error of a failed
+    connection to the untouched default `sql:main`; any other connector gets `method` itself.
+    """
+    if connector.__dict__.get('label', None) != 'main':
+        return method
+
+    def _call(*args, **kwargs):
+        try:
+            return method(*args, **kwargs)
+        except RuntimeError as e:
+            _add_instance_hint(connector, e)
+            raise
+
+    return _call
+
+
+def _add_instance_hint(connector: Any, error: BaseException) -> None:
+    """
+    Append `DEFAULT_INSTANCE_HINT` to `error` when nothing answers at the shipped `sql:main`
+    (refused, unreachable or timed out), nobody configured it (no `MRSM_SQL_MAIN`, the shipped
+    host, port and database) and the hint was not shown yet.
+    """
+    import os
+    global _instance_hint_shown
+    message = str(error.args[0]) if error.args else ''
+    if _instance_hint_shown or not message.startswith('sql:main: cannot connect to '):
+        return
+    reasons = ('(connection refused)', '(network unreachable)', '(no response within')
+    if not any(reason in message for reason in reasons):
+        return
+    if (os.environ.get('MRSM_SQL_MAIN', None) or '').strip():
+        return
+    from meerschaum.config._default import default_config
+    shipped = default_config['meerschaum']['connectors']['sql']['main']
+    for key in ('host', 'port', 'database'):
+        if str(connector.__dict__.get(key, None)) != str(shipped.get(key, None)):
+            return
+    _instance_hint_shown = True
+    error.args = (f"{message}\n{DEFAULT_INSTANCE_HINT}",) + tuple(error.args[1:])

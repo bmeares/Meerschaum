@@ -1,0 +1,162 @@
+# One manual candidate run builds shipping artifacts, validates them, then records
+# their exact bytes. Tag pushes only verify that successful candidate; no rebuild
+# and no publishing credentials or registry mutations live in this workflow.
+name: release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        type: string
+        default: ''
+        description: 'Verify an existing candidate without rebuilding (never publishes).'
+      experimental:
+        type: boolean
+        default: false
+        description: 'Also try the optional cp314t wheel; only a passing artifact is retained.'
+  push:
+    # Register this new entrypoint on the v5 train before it reaches the default
+    # branch. A definition-only push runs metadata checks, never release builds.
+    branches: [main, v5]
+    tags: ['v5*']
+    paths: ['.github/workflows/release.yaml']
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  definition:
+    name: release definition metadata
+    if: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, ref: '${{ github.sha }}'}
+      - run: python scripts/check_packaging.py
+
+  wheels:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
+    uses: ./.github/workflows/wheels.yaml
+    with:
+      experimental: ${{ inputs.experimental || false }}
+
+  rust:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
+    uses: ./.github/workflows/rust.yaml
+    with: {full: true, parity: true}
+
+  python:
+    needs: wheels
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
+    uses: ./.github/workflows/pytest.yaml
+    with:
+      profile: release
+      artifacts_run_id: ${{ format('{0}', github.run_id) }}
+      full: true
+      run_console: true
+
+  docs:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
+    uses: ./.github/workflows/docs.yaml
+
+  gate:
+    name: verified release candidate
+    needs: [wheels, rust, python, docs]
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every full gate must succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          results = {name: job['result'] for name, job in json.loads(os.environ['NEEDS']).items()}
+          assert all(value == 'success' for value in results.values()), results
+          PY
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, ref: '${{ github.sha }}'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'wheels-*', path: release-artifacts}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'mrsm-*', path: release-artifacts}
+      - uses: actions/download-artifact@v4
+        with: {name: sdist, path: release-artifacts/sdist}
+      - name: Record exact tested artifact bytes and configurations
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          checks="$(python -c 'import json,os; print(json.dumps({k:v["result"] for k,v in json.loads(os.environ["NEEDS"]).items()}))')"
+          python scripts/ci/release_gate.py create --artifacts release-artifacts --manifest release-candidate.json --checks-json "$checks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-manifest
+          path: release-candidate.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Candidate ready for maintainer review
+        run: |
+          echo 'All required gates passed. Nothing was published.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Use this run’s verified artifacts after maintainer approval; tagging only re-verifies them.' >> "$GITHUB_STEP_SUMMARY"
+
+  verify-tag:
+    name: verify the existing candidate without rebuilding
+    if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.candidate_run_id != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, ref: '${{ github.sha }}'}
+      - name: The tag agrees with the candidate version
+        if: ${{ github.ref_type == 'tag' }}
+        run: |
+          expected="v$(python scripts/check_packaging.py --version)"
+          [ "$GITHUB_REF_NAME" = "$expected" ] || { echo "Tag must be $expected for this source version." >&2; exit 1; }
+      - name: Find a successful complete candidate for this exact commit
+        env:
+          REQUESTED_RUN: ${{ inputs.candidate_run_id }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          repository = os.environ['GITHUB_REPOSITORY']
+          sha = os.environ['GITHUB_SHA']
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', path], text=True))
+          requested = os.environ['REQUESTED_RUN']
+          if requested:
+              assert requested.isdigit(), 'candidate_run_id must be an Actions run ID.'
+              runs = [api(f'repos/{repository}/actions/runs/{requested}')]
+          else:
+              runs = api(f'repos/{repository}/actions/workflows/release.yaml/runs?head_sha={sha}&event=workflow_dispatch&status=success&per_page=100')['workflow_runs']
+          selected = None
+          for run in runs:
+              if (run['head_sha'] != sha or run['conclusion'] != 'success'
+                      or run['event'] != 'workflow_dispatch'
+                      or run['path'].split('@')[0] != '.github/workflows/release.yaml'):
+                  continue
+              outputs = api(f'repos/{repository}/actions/runs/{run["id"]}/artifacts?per_page=100')['artifacts']
+              if any(a['name'] == 'release-candidate-manifest' and not a['expired'] for a in outputs):
+                  selected = run['id']
+                  break
+          assert selected, 'No complete successful candidate at this exact commit; dispatch release.yaml first.'
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'CANDIDATE_RUN={selected}\n')
+          PY
+      - name: Download the already tested candidate
+        run: |
+          gh run download "$CANDIDATE_RUN" --name release-candidate-manifest --dir candidate
+          gh run download "$CANDIDATE_RUN" --pattern 'wheels-*' --pattern 'mrsm-*' --pattern 'sdist' --dir release-artifacts
+      - name: Verify exact commit, profiles, platform coverage and every digest
+        run: python scripts/ci/release_gate.py verify --artifacts release-artifacts --manifest candidate/release-candidate.json
+      - name: Record provenance for the tag
+        run: |
+          echo "Verified candidate run $CANDIDATE_RUN for $GITHUB_SHA; no builds or publication." >> "$GITHUB_STEP_SUMMARY"

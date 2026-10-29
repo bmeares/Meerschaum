@@ -3,433 +3,234 @@
 # vim:fenc=utf-8
 
 """
-Manage running daemons via the Daemon class.
+Manage a job's daemon: its directory, its process and its logs.
+
+`Daemon` is a read and control façade over the native daemon (crate `meerschaum-jobs`, bound as
+`meerschaum._core.Daemon`). A daemon runs a Meerschaum command (`Daemon(sysargs=[...])`, what
+`Job` manages); running an arbitrary Python callable as a daemon (`Daemon(target=...)`) is not
+supported in Meerschaum v5.
 """
 
 from __future__ import annotations
-import os
-import importlib
+
 import pathlib
-import json
-import shutil
-import signal
-import time
-import traceback
-from functools import partial
-from datetime import datetime, timezone
+import shlex
 
-import meerschaum as mrsm
-from meerschaum.utils.typing import (
-    Optional, Dict, Any, SuccessTuple, Callable, List, Union,
-    is_success_tuple, Tuple,
+from meerschaum.utils.typing import Any, Callable, Dict, List, Optional, SuccessTuple, Union
+
+_REMOVED = (
+    "Running a Python callable as a daemon is not supported in Meerschaum v5. "
+    "Use `meerschaum.jobs.Job(name, sysargs)` to run a Meerschaum command in the background "
+    "(see the migration guide, 'Removed in 5.0')."
 )
-from meerschaum.config import get_config
-from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum.config._patch import apply_patch_to_config
-from meerschaum.utils.warnings import warn, error
-from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.venv import venv_exec
-from meerschaum.utils.daemon import _detached
-from meerschaum.utils.daemon._names import get_new_daemon_name
-from meerschaum.utils.daemon.RotatingFile import RotatingFile
-from meerschaum.utils.daemon.StdinFile import StdinFile
-from meerschaum.utils.threading import RepeatTimer
-from meerschaum.__main__ import _close_pools
 
-_daemons = []
-_results = {}
+#: `Daemon.run()` results of this process, by daemon ID (kept for v4's `_results`).
+_results: Dict[str, SuccessTuple] = {}
+
 
 class Daemon:
     """
-    Daemonize Python functions into background processes.
-
-    Examples
-    --------
-    >>> import meerschaum as mrsm
-    >>> from meerschaum.utils.daemons import Daemon
-    >>> daemon = Daemon(print, ('hi',))
-    >>> success, msg = daemon.run()
-    >>> print(daemon.log_text)
-
-    2024-07-29 18:03 | hi
-    2024-07-29 18:03 |
-    >>> daemon.run(allow_dirty_run=True)
-    >>> print(daemon.log_text)
-
-    2024-07-29 18:03 | hi
-    2024-07-29 18:03 |
-    2024-07-29 18:05 | hi
-    2024-07-29 18:05 |
-    >>> mrsm.pprint(daemon.properties)
-    {
-        'label': 'print',
-        'target': {'name': 'print', 'module': 'builtins', 'args': ['hi'], 'kw': {}},
-        'result': None,
-        'process': {'ended': '2024-07-29T18:03:33.752806'}
-    }
-
+    Daemonize Python functions into background processes (v5: Meerschaum commands).
     """
-
-    def __new__(
-        cls,
-        *args,
-        daemon_id: Optional[str] = None,
-        **kw
-    ):
-        """
-        If a daemon_id is provided and already exists, read from its pickle file.
-        """
-        instance = super(Daemon, cls).__new__(cls)
-        if daemon_id is not None:
-            instance.daemon_id = daemon_id
-            if instance.pickle_path.exists():
-                instance = instance.read_pickle()
-        return instance
-
-    @classmethod
-    def from_properties_file(cls, daemon_id: str) -> Daemon:
-        """
-        Return a Daemon from a properties dictionary.
-        """
-        properties_path = cls._get_properties_path_from_daemon_id(daemon_id)
-        if not properties_path.exists():
-            raise OSError(f"Properties file '{properties_path}' does not exist.")
-
-        try:
-            with open(properties_path, 'r', encoding='utf-8') as f:
-                properties = json.load(f)
-        except Exception:
-            properties = {}
-
-        if not properties:
-            raise ValueError(f"No properties could be read for daemon '{daemon_id}'.")
-
-        daemon_id = properties_path.parent.name
-        target_cf = properties.get('target', {})
-        target_module_name = target_cf.get('module', None)
-        target_function_name = target_cf.get('name', None)
-        target_args = target_cf.get('args', None)
-        target_kw = target_cf.get('kw', None)
-        label = properties.get('label', None)
-
-        if None in [
-            target_module_name,
-            target_function_name,
-            target_args,
-            target_kw,
-        ]:
-            raise ValueError("Missing target function information.")
-
-        target_module = importlib.import_module(target_module_name)
-        target_function = getattr(target_module, target_function_name)
-
-        return Daemon(
-            daemon_id=daemon_id,
-            target=target_function,
-            target_args=target_args,
-            target_kw=target_kw,
-            properties=properties,
-            label=label,
-        )
-
 
     def __init__(
         self,
         target: Optional[Callable[[Any], Any]] = None,
-        target_args: Union[List[Any], Tuple[Any], None] = None,
+        target_args: Optional[List[Any]] = None,
         target_kw: Optional[Dict[str, Any]] = None,
         env: Optional[Dict[str, str]] = None,
         daemon_id: Optional[str] = None,
         label: Optional[str] = None,
         properties: Optional[Dict[str, Any]] = None,
         pickle: bool = True,
+        *,
+        sysargs: Optional[List[str]] = None,
     ):
         """
+        Open an existing daemon (`Daemon(daemon_id='name')`) or describe a new one
+        (`Daemon(daemon_id='name', sysargs=[...])`).
+
         Parameters
         ----------
-        target: Optional[Callable[[Any], Any]], default None,
-            The function to execute in a child process.
+        target: Optional[Callable[[Any], Any]], default None
+            Only `meerschaum._internal.entry.entry` (a Meerschaum command, with the sysargs as
+            its first argument) is supported.
 
-        target_args: Union[List[Any], Tuple[Any], None], default None
-            Positional arguments to pass to the target function.
-
-        target_kw: Optional[Dict[str, Any]], default None
-            Keyword arguments to pass to the target function.
+        target_args: Optional[List[Any]], default None
+            The arguments of `target`: `[sysargs]`.
 
         env: Optional[Dict[str, str]], default None
-            If provided, set these environment variables in the daemon process.
+            Environment variables to set in the daemon's process.
 
         daemon_id: Optional[str], default None
-            Build a `Daemon` from an existing `daemon_id`.
-            If `daemon_id` is provided, other arguments are ignored and are derived
-            from the existing pickled `Daemon`.
+            The name of the daemon (and of the job).
 
         label: Optional[str], default None
-            Label string to help identifiy a daemon.
-            If `None`, use the function name instead.
+            The label to show (the joined sysargs).
 
         properties: Optional[Dict[str, Any]], default None
-            Override reading from the properties JSON by providing an existing dictionary.
+            Patch the daemon's properties.
         """
-        _pickle = self.__dict__.get('_pickle', False)
-        if daemon_id is not None:
-            self.daemon_id = daemon_id
-            if not self.pickle_path.exists() and not target and ('target' not in self.__dict__):
+        from meerschaum.jobs import _native
+        core = _native.core()
+        if target is not None:
+            if getattr(target, '__name__', None) != 'entry':
+                raise NotImplementedError(_REMOVED)
+            sysargs = list((target_args or [[]])[0] or [])
 
-                if not self.properties_path.exists():
-                    raise Exception(
-                        f"Daemon '{self.daemon_id}' does not exist. "
-                        + "Pass a target to create a new Daemon."
-                    )
+        if target_kw:
+            raise NotImplementedError(_REMOVED)
 
-                try:
-                    new_daemon = self.from_properties_file(daemon_id)
-                except Exception:
-                    new_daemon = None
+        if daemon_id is None:
+            if sysargs is None:
+                raise ValueError("Pass a `daemon_id` to open an existing daemon.")
+            daemon_id = core.jobs_new_daemon_name()
 
-                if new_daemon is not None:
-                    new_daemon.write_pickle()
-                    target = new_daemon.target
-                    target_args = new_daemon.target_args
-                    target_kw = new_daemon.target_kw
-                    label = new_daemon.label
-                    self._properties = new_daemon.properties
-                else:
-                    try:
-                        self.properties_path.unlink()
-                    except Exception:
-                        pass
-
-                    raise Exception(
-                        f"Could not recover daemon '{self.daemon_id}' "
-                        + "from its properties file."
-                    )
-
-        if 'target' not in self.__dict__:
-            if target is None:
-                error("Cannot create a Daemon without a target.")
-            self.target = target
-
-        self.pickle = pickle
-
-        ### NOTE: We have to check self.__dict__ in case we un-pickling.
-        if '_target_args' not in self.__dict__:
-            self._target_args = target_args
-        if '_target_kw' not in self.__dict__:
-            self._target_kw = target_kw
-
-        if 'label' not in self.__dict__:
-            if label is None:
-                label = (
-                    self.target.__name__ if '__name__' in self.target.__dir__()
-                        else str(self.target)
-                )
-            self.label = label
-        elif label is not None:
-            self.label = label
-
-        if 'daemon_id' not in self.__dict__:
-            self.daemon_id = get_new_daemon_name()
-        if '_properties' not in self.__dict__:
-            self._properties = properties
-        elif properties:
-            if self._properties is None:
-                self._properties = {}
-            self._properties.update(properties)
-        if self._properties is None:
-            self._properties = {}
-
-        self._properties.update({'label': self.label})
         if env:
-            self._properties.update({'env': env})
+            properties = {**(properties or {}), 'env': dict(env)}
 
-        ### Instantiate the process and if it doesn't exist, make sure the stale PID file
-        ### is removed. Without a PID file there is nothing to clean up,
-        ### so don't go looking for a detached process while constructing.
-        if self.pid_path.exists():
-            _ = self.process
+        if sysargs is not None and label is None:
+            label = shlex.join(sysargs)
 
+        self.daemon_id = daemon_id
+        self._core = core.Daemon(daemon_id, sysargs, label, properties)
 
-    def _run_exit(
-        self,
-        keep_daemon_output: bool = True,
-        allow_dirty_run: bool = False,
-    ) -> Any:
-        """Run the daemon's target function.
-        NOTE: This WILL EXIT the parent process!
+    @classmethod
+    def from_properties_file(cls, daemon_id: str) -> 'Daemon':
+        """Open the daemon `daemon_id` from its `properties.json`."""
+        return cls(daemon_id=daemon_id)
 
-        Parameters
-        ----------
-        keep_daemon_output: bool, default True
-            If `False`, delete the daemon's output directory upon exiting.
+    @property
+    def label(self) -> str:
+        return self._core.label
 
-        allow_dirty_run, bool, default False:
-            If `True`, run the daemon, even if the `daemon_id` directory exists.
-            This option is dangerous because if the same `daemon_id` runs twice,
-            the last to finish will overwrite the output of the first.
+    @property
+    def target(self) -> None:
+        return None
 
-        Returns
-        -------
-        Nothing — this will exit the parent process.
-        """
-        import platform
-        import sys
-        import os
-        import traceback
-        from meerschaum.utils.warnings import warn
-        from meerschaum.config import get_config
-        daemon = attempt_import('daemon')
-        lines = get_config('jobs', 'terminal', 'lines')
-        columns = get_config('jobs', 'terminal', 'columns')
+    @property
+    def target_args(self) -> List[List[str]]:
+        """The arguments of the daemon's target: `[sysargs]`."""
+        return [self._core.sysargs]
 
-        if platform.system() == 'Windows':
-            return False, "Windows is no longer supported."
+    @property
+    def target_kw(self) -> Dict[str, Any]:
+        return {}
 
-        self._setup(allow_dirty_run)
+    @property
+    def hidden(self) -> bool:
+        return self._core.hidden
 
-        _daemons.append(self)
+    @property
+    def status(self) -> str:
+        """Return `'running'`, `'paused'` or `'stopped'`."""
+        return self._core.status
 
-        logs_cf = self.properties.get('logs', {})
-        log_refresh_seconds = logs_cf.get('refresh_files_seconds', None)
-        if log_refresh_seconds is None:
-            log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
-        write_timestamps = logs_cf.get('write_timestamps', None)
-        if write_timestamps is None:
-            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+    @property
+    def pid(self) -> Union[int, None]:
+        """Return the PID of the daemon's process, if it has one."""
+        return self._core.pid
 
-        self._log_refresh_timer = RepeatTimer(
-            log_refresh_seconds,
-            partial(self.rotating_log.refresh_files, start_interception=write_timestamps),
+    @property
+    def process(self) -> Union[int, None]:
+        """Return the PID if the process exists (v4 returned a `psutil.Process`)."""
+        return self._core.process
+
+    @property
+    def properties(self) -> Dict[str, Any]:
+        """Return the daemon's properties (`properties.json` patched with this object's)."""
+        return self._core.properties()
+
+    @properties.setter
+    def properties(self, patch: Dict[str, Any]) -> None:
+        self._core.update_properties(patch)
+
+    def read_properties(self) -> Optional[Dict[str, Any]]:
+        """Read `properties.json`."""
+        return self._core.read_properties()
+
+    def write_properties(self) -> SuccessTuple:
+        """Write `properties.json`."""
+        return self._core.write_properties()
+
+    def _paths(self) -> Dict[str, str]:
+        return self._core.paths()
+
+    @property
+    def path(self) -> pathlib.Path:
+        """The daemon's directory (`jobs/<daemon_id>`)."""
+        return pathlib.Path(self._paths()['dir'])
+
+    @property
+    def properties_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['properties'])
+
+    @property
+    def pid_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['pid'])
+
+    @property
+    def pickle_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['pickle'])
+
+    @property
+    def stdin_file_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['stdin'])
+
+    @property
+    def blocking_stdin_file_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['stdin_block'])
+
+    @property
+    def prompt_kwargs_file_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['prompt_kwargs'])
+
+    @property
+    def stop_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['stop'])
+
+    @property
+    def log_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['log'])
+
+    @property
+    def log_offset_path(self) -> pathlib.Path:
+        return pathlib.Path(self._paths()['log_offset'])
+
+    @property
+    def stdin_file(self):
+        """A `StdinFile` for the daemon's stdin FIFO."""
+        from meerschaum.utils.daemon.StdinFile import StdinFile
+        return StdinFile(self.stdin_file_path, self.blocking_stdin_file_path)
+
+    @property
+    def rotating_log(self):
+        """A `RotatingFile` over the daemon's logs."""
+        from meerschaum.utils.daemon.RotatingFile import RotatingFile
+        logs = self.properties.get('logs', {}) or {}
+        return RotatingFile(
+            self.log_path,
+            num_files_to_keep=logs.get('num_files_to_keep'),
+            max_file_size=logs.get('max_file_size'),
+            write_timestamps=bool(logs.get('write_timestamps', False)),
+            timestamp_format=logs.get('timestamp_format'),
         )
 
-        capture_stdin = logs_cf.get('stdin', True)
-        cwd = self.properties.get('cwd', os.getcwd())
+    @property
+    def log_text(self) -> Optional[str]:
+        """The text of the daemon's logs."""
+        return self._core.log_text()
 
-        ### NOTE: The SIGINT handler has been removed so that child processes may handle
-        ###       KeyboardInterrupts themselves.
-        ###       The previous aggressive approach was redundant because of the SIGTERM handler.
-        self._daemon_context = daemon.DaemonContext(
-            pidfile=self.pid_lock,
-            stdout=self.rotating_log,
-            stderr=self.rotating_log,
-            stdin=(self.stdin_file if capture_stdin else None),
-            working_directory=cwd,
-            detach_process=True,
-            files_preserve=list(self.rotating_log.subfile_objects.values()),
-            signal_map={
-                signal.SIGTERM: self._handle_sigterm,
-            },
-        )
+    def readlines(self) -> List[str]:
+        """The log lines since the last call (the cursor is persisted)."""
+        return self._core.readlines()
 
-        if capture_stdin and sys.stdin is None:
-            raise OSError("Cannot daemonize without stdin.")
+    def _read_stop_file(self) -> Optional[Dict[str, Any]]:
+        return self._core.read_stop_file()
 
-        try:
-            os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
-            with self._daemon_context:
-                if capture_stdin:
-                    sys.stdin = self.stdin_file
-                _ = os.environ.pop(STATIC_CONFIG['environment']['systemd_stdin_path'], None)
-                os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
-                os.environ['PYTHONUNBUFFERED'] = '1'
-
-                ### Allow the user to override environment variables.
-                env = self.properties.get('env', {})
-                if env and isinstance(env, dict):
-                    os.environ.update({str(k): str(v) for k, v in env.items()})
-
-                self.rotating_log.refresh_files(start_interception=True)
-                result = None
-                try:
-                    with open(self.pid_path, 'w+', encoding='utf-8') as f:
-                        f.write(str(os.getpid()))
-
-                    ### NOTE: The timer fails to start for remote actions to localhost.
-                    try:
-                        if not self._log_refresh_timer.is_running():
-                            self._log_refresh_timer.start()
-                    except Exception:
-                        pass
-
-                    self.properties['result'] = None
-                    self._capture_process_timestamp('began')
-                    result = self.target(*self.target_args, **self.target_kw)
-                    self.properties['result'] = result
-                except SystemExit as e:
-                    result = (
-                        (True, f"Stopped daemon '{self.daemon_id}'.")
-                        if e.code is None or e.code == 0
-                        else (False, traceback.format_exc())
-                    )
-                except (BrokenPipeError, KeyboardInterrupt):
-                    result = False, traceback.format_exc()
-                except Exception as e:
-                    warn(
-                        f"Exception in daemon target function: {traceback.format_exc()}",
-                    )
-                    result = False, str(e)
-                finally:
-                    _results[self.daemon_id] = result
-                    self.properties['result'] = result
-
-                    if keep_daemon_output:
-                        self._capture_process_timestamp('ended')
-                    else:
-                        self.cleanup()
-
-                    self._log_refresh_timer.cancel()
-                    try:
-                        if self.pid is None and self.pid_path.exists():
-                            self.pid_path.unlink()
-                    except Exception:
-                        pass
-
-                    if is_success_tuple(result):
-                        try:
-                            mrsm.pprint(result)
-                        except BrokenPipeError:
-                            pass
-
-        except Exception:
-            daemon_error = traceback.format_exc()
-            import meerschaum.config.paths as paths
-            with open(paths.DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
-                f.write(
-                    f"Error in Daemon '{self}':\n\n"
-                    f"{sys.stdin=}\n"
-                    f"{self.stdin_file_path=}\n"
-                    f"{self.stdin_file_path.exists()=}\n\n"
-                    f"{daemon_error}\n\n"
-                )
-            warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
-
-    def _capture_process_timestamp(
-        self,
-        process_key: str,
-        write_properties: bool = True,
-    ) -> None:
-        """
-        Record the current timestamp to the parameters `process:<process_key>`.
-
-        Parameters
-        ----------
-        process_key: str
-            Under which key to store the timestamp.
-
-        write_properties: bool, default True
-            If `True` persist the properties to disk immediately after capturing the timestamp.
-        """
-        if 'process' not in self.properties:
-            self.properties['process'] = {}
-
-        if process_key not in ('began', 'ended', 'paused', 'stopped', 'launched'):
-            raise ValueError(f"Invalid key '{process_key}'.")
-
-        self.properties['process'][process_key] = (
-            datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-        )
-        if write_properties:
-            self.write_properties()
+    def mkdir_if_not_exists(self, allow_dirty_run: bool = False) -> SuccessTuple:
+        """Create the daemon's directory."""
+        return self._core.mkdir_if_not_exists(allow_dirty_run)
 
     def run(
         self,
@@ -439,1312 +240,91 @@ class Daemon:
         timeout: Union[int, float] = 4,
         debug: bool = False,
     ) -> SuccessTuple:
-        """Run the daemon as a child process and continue executing the parent.
+        """
+        Run the daemon's command in the background.
 
         Parameters
         ----------
         keep_daemon_output: bool, default True
-            If `False`, delete the daemon's output directory upon exiting.
+            If `False`, delete the daemon's directory and logs when it finishes.
 
         allow_dirty_run: bool, default False
-            If `True`, run the daemon, even if the `daemon_id` directory exists.
-            This option is dangerous because if the same `daemon_id` runs concurrently,
-            the last to finish will overwrite the output of the first.
+            If `True`, run although the daemon's directory exists.
 
-        wait: bool, default True
-            If `True`, block until `Daemon.status` is running (or the timeout expires).
+        wait: bool, default False
+            If `True`, wait up to `timeout` seconds until the daemon's process is running.
 
         timeout: Union[int, float], default 4
-            If `wait` is `True`, block for up to `timeout` seconds before returning a failure.
-
-        Returns
-        -------
-        A SuccessTuple indicating success.
-
+            How long to wait when `wait` is `True`.
         """
-        import platform
-        if platform.system() == 'Windows':
-            return False, "Cannot run background jobs on Windows."
+        result = self._core.run(keep_daemon_output, allow_dirty_run)
+        if wait and result[0]:
+            import time
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline and self.status == 'stopped':
+                time.sleep(0.05)
+            if self.status == 'stopped' and 'result' not in (self.read_properties() or {}):
+                result = False, f"Daemon '{self.daemon_id}' did not start within {timeout} seconds."
+        _results[self.daemon_id] = result
+        return result
 
-        ### The daemon might exist and be paused.
-        if self.status == 'paused':
-            return self.resume()
+    def kill(
+        self,
+        timeout: Union[int, float, None] = 8,
+        debug: bool = False,
+    ) -> SuccessTuple:
+        """Forcibly terminate the daemon."""
+        return self._core.kill(timeout)
 
-        self._remove_stop_file()
-        if self.status == 'running':
-            return True, f"Daemon '{self}' is already running."
-
-        self.mkdir_if_not_exists(allow_dirty_run)
-        _write_pickle_success_tuple = self.write_pickle()
-        if not _write_pickle_success_tuple[0]:
-            return _write_pickle_success_tuple
-
-        ### The PID file does not exist until the new process has started up. Record the launch
-        ### so that a job which completed earlier is not mistaken for a finished one meanwhile.
-        _detached.invalidate(self.daemon_id)
-        if self.properties_path.exists():
-            self._capture_process_timestamp('launched')
-
-        _launch_daemon_code = (
-            "from meerschaum.utils.daemon import Daemon, _daemons; "
-            f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
-            f"_daemons['{self.daemon_id}'] = daemon; "
-            f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
-            "allow_dirty_run=True)"
-        )
-        env = dict(os.environ)
-        _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None, env=env)
-        _detached.invalidate(self.daemon_id)
-        msg = (
-            "Success"
-            if _launch_success_bool
-            else f"Failed to start daemon '{self.daemon_id}'."
-        )
-        if not wait or not _launch_success_bool:
-            return _launch_success_bool, msg
-
-        timeout = self.get_timeout_seconds(timeout)
-        check_timeout_interval = self.get_check_timeout_interval_seconds()
-
-        if not timeout:
-            success = self.status == 'running'
-            msg = "Success" if success else f"Failed to run daemon '{self.daemon_id}'."
-            if success:
-                self._capture_process_timestamp('began')
-            return success, msg
-
-        begin = time.perf_counter()
-        while (time.perf_counter() - begin) < timeout:
-            if self.status == 'running':
-                self._capture_process_timestamp('began')
-                return True, "Success"
-            time.sleep(check_timeout_interval)
-
-        return False, (
-            f"Failed to start daemon '{self.daemon_id}' within {timeout} second"
-            + ('s' if timeout != 1 else '') + '.'
-        )
-
-
-    def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
-        """
-        Forcibly terminate a running daemon.
-        Sends a SIGTERM signal to the process.
-
-        Parameters
-        ----------
-        timeout: Optional[int], default 3
-            How many seconds to wait for the process to terminate.
-
-        Returns
-        -------
-        A SuccessTuple indicating success.
-        """
-        _detached.invalidate(self.daemon_id)
-
-        ### A lost PID file means a detached/orphaned daemon — possibly SEVERAL processes
-        ### sharing this daemon_id (e.g. accumulated across crashed restarts). Reap them
-        ### ALL by daemon_id rather than reporting a false "stopped" and stranding them
-        ### (which forces a manual `pkill meerschaum` or hunting the daemon_id in htop).
-        if not self.pid_path.exists():
-            reaped = self._kill_detached_processes(timeout)
-            self._write_stop_file('kill')
-            self.stdin_file.close()
-            self._remove_blocking_stdin_file()
-            return True, (
-                (f"Reaped {reaped} detached process" + ('es' if reaped != 1 else '') + '.')
-                if reaped
-                else "Process has already stopped."
-            )
-
-        if self.status != 'paused':
-            success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
-            if success:
-                ### Sweep any sibling/detached processes left over for this daemon_id.
-                self._kill_detached_processes(timeout)
-                self._write_stop_file('kill')
-                self.stdin_file.close()
-                self._remove_blocking_stdin_file()
-                return success, msg
-
-        if self.status == 'stopped':
-            reaped = self._kill_detached_processes(timeout)
-            self._write_stop_file('kill')
-            self.stdin_file.close()
-            self._remove_blocking_stdin_file()
-            return True, (
-                (f"Reaped {reaped} detached process" + ('es' if reaped != 1 else '') + '.')
-                if reaped
-                else "Process has already stopped."
-            )
-
-        psutil = attempt_import('psutil')
-        process = self.process
-        try:
-            process.terminate()
-            process.kill()
-            process.wait(timeout=timeout)
-        except Exception as e:
-            return False, f"Failed to kill job {self} ({process}) with exception: {e}"
-
-        try:
-            if process.status():
-                return False, "Failed to stop daemon '{self}' ({process})."
-        except psutil.NoSuchProcess:
-            pass
-
-        if self.pid_path.exists():
-            try:
-                self.pid_path.unlink()
-            except Exception:
-                pass
-
-        self._write_stop_file('kill')
-        self.stdin_file.close()
-        self._remove_blocking_stdin_file()
-        return True, "Success"
-
-    def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
-        """Gracefully quit a running daemon."""
-        _detached.invalidate(self.daemon_id)
-        if self.status == 'paused':
-            return self.kill(timeout)
-
-        ### A lost PID file means a detached/orphaned daemon (possibly several processes);
-        ### the normal signal path can't see them, so reap them all by daemon_id instead
-        ### of returning a false "not running".
-        if not self.pid_path.exists():
-            reaped = self._kill_detached_processes(timeout)
-            self._write_stop_file('quit')
-            self.stdin_file.close()
-            self._remove_blocking_stdin_file()
-            return True, (
-                (f"Reaped {reaped} detached process" + ('es' if reaped != 1 else '') + '.')
-                if reaped
-                else "Process is not running."
-            )
-
-        signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
-        if signal_success:
-            self._write_stop_file('quit')
-            self.stdin_file.close()
-            self._remove_blocking_stdin_file()
-        return signal_success, signal_msg
+    def quit(
+        self,
+        timeout: Union[int, float, None] = None,
+        debug: bool = False,
+    ) -> SuccessTuple:
+        """Gracefully quit the daemon (`SIGINT`)."""
+        return self._core.quit(timeout)
 
     def pause(
         self,
         timeout: Union[int, float, None] = None,
         check_timeout_interval: Union[float, int, None] = None,
+        debug: bool = False,
     ) -> SuccessTuple:
-        """
-        Pause the daemon if it is running.
-
-        Parameters
-        ----------
-        timeout: Union[float, int, None], default None
-            The maximum number of seconds to wait for a process to suspend.
-
-        check_timeout_interval: Union[float, int, None], default None
-            The number of seconds to wait between checking if the process is still running.
-
-        Returns
-        -------
-        A `SuccessTuple` indicating whether the `Daemon` process was successfully suspended.
-        """
-        self._remove_blocking_stdin_file()
-        _detached.invalidate(self.daemon_id)
-
-        if self.process is None:
-            return False, f"Daemon '{self.daemon_id}' is not running and cannot be paused."
-
-        if self.status == 'paused':
-            return True, f"Daemon '{self.daemon_id}' is already paused."
-
-        self._write_stop_file('pause')
-        self.stdin_file.close()
-        self._remove_blocking_stdin_file()
-        try:
-            self.process.suspend()
-        except Exception as e:
-            return False, f"Failed to pause daemon '{self.daemon_id}':\n{e}"
-
-        timeout = self.get_timeout_seconds(timeout)
-        check_timeout_interval = self.get_check_timeout_interval_seconds(
-            check_timeout_interval
-        )
-
-        psutil = attempt_import('psutil')
-
-        if not timeout:
-            try:
-                success = self.process.status() == 'stopped'
-            except psutil.NoSuchProcess:
-                success = True
-            msg = "Success" if success else f"Failed to suspend daemon '{self.daemon_id}'."
-            if success:
-                self._capture_process_timestamp('paused')
-            return success, msg
-
-        begin = time.perf_counter()
-        while (time.perf_counter() - begin) < timeout:
-            try:
-                if self.process.status() == 'stopped':
-                    self._capture_process_timestamp('paused')
-                    return True, "Success"
-            except psutil.NoSuchProcess as e:
-                return False, f"Process exited unexpectedly. Was it killed?\n{e}"
-            time.sleep(check_timeout_interval)
-
-        return False, (
-            f"Failed to pause daemon '{self.daemon_id}' within {timeout} second"
-            + ('s' if timeout != 1 else '') + '.'
-        )
+        """Suspend the daemon's process."""
+        return self._core.pause(timeout, check_timeout_interval)
 
     def resume(
         self,
         timeout: Union[int, float, None] = None,
         check_timeout_interval: Union[float, int, None] = None,
+        debug: bool = False,
     ) -> SuccessTuple:
-        """
-        Resume the daemon if it is paused.
-
-        Parameters
-        ----------
-        timeout: Union[float, int, None], default None
-            The maximum number of seconds to wait for a process to resume.
-
-        check_timeout_interval: Union[float, int, None], default None
-            The number of seconds to wait between checking if the process is still stopped.
-
-        Returns
-        -------
-        A `SuccessTuple` indicating whether the `Daemon` process was successfully resumed.
-        """
-        _detached.invalidate(self.daemon_id)
-        if self.status == 'running':
-            return True, f"Daemon '{self.daemon_id}' is already running."
-
-        if self.status == 'stopped':
-            return False, f"Daemon '{self.daemon_id}' is stopped and cannot be resumed."
-
-        self._remove_stop_file()
-        try:
-            if self.process is None:
-                return False, f"Cannot resume daemon '{self.daemon_id}'."
-
-            self.process.resume()
-        except Exception as e:
-            return False, f"Failed to resume daemon '{self.daemon_id}':\n{e}"
-
-        timeout = self.get_timeout_seconds(timeout)
-        check_timeout_interval = self.get_check_timeout_interval_seconds(
-            check_timeout_interval
-        )
-
-        if not timeout:
-            success = self.status == 'running'
-            msg = "Success" if success else f"Failed to resume daemon '{self.daemon_id}'."
-            if success:
-                self._capture_process_timestamp('began')
-            return success, msg
-
-        begin = time.perf_counter()
-        while (time.perf_counter() - begin) < timeout:
-            if self.status == 'running':
-                self._capture_process_timestamp('began')
-                return True, "Success"
-            time.sleep(check_timeout_interval)
-
-        return False, (
-            f"Failed to resume daemon '{self.daemon_id}' within {timeout} second"
-            + ('s' if timeout != 1 else '') + '.'
-        )
-
-    def _write_stop_file(self, action: str) -> SuccessTuple:
-        """Write the stop file timestamp and action."""
-        if action not in ('quit', 'kill', 'pause'):
-            return False, f"Unsupported action '{action}'."
-
-        if not self.stop_path.parent.exists():
-            self.stop_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(self.stop_path, 'w+', encoding='utf-8') as f:
-            json.dump(
-                {
-                    'stop_time': datetime.now(timezone.utc).isoformat(),
-                    'action': action,
-                },
-                f
-            )
-
-        return True, "Success"
-
-    def _remove_stop_file(self) -> SuccessTuple:
-        """Remove the stop file"""
-        if not self.stop_path.exists():
-            return True, "Stop file does not exist."
-
-        try:
-            self.stop_path.unlink()
-        except Exception as e:
-            return False, f"Failed to remove stop file:\n{e}"
-
-        return True, "Success"
-
-    def _read_stop_file(self) -> Dict[str, Any]:
-        """
-        Read the stop file if it exists.
-        """
-        if not self.stop_path.exists():
-            return {}
-
-        try:
-            with open(self.stop_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return data
-        except Exception:
-            return {}
-
-    def _remove_blocking_stdin_file(self) -> mrsm.SuccessTuple:
-        """
-        Remove the blocking STDIN file if it exists.
-        """
-        try:
-            if self.blocking_stdin_file_path.exists():
-                self.blocking_stdin_file_path.unlink()
-        except Exception as e:
-            return False, str(e)
-
-        return True, "Success"
-
-    def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
-        """
-        Handle `SIGTERM` within the `Daemon` context.
-        This method is injected into the `DaemonContext`.
-        """
-        from meerschaum.utils.process import signal_handler
-        from meerschaum.utils.threading import request_stop, interrupt_threads
-        signal_handler(signal_number, stack_frame)
-
-        ### Tell cooperative loops (e.g. `sync pipes`) to stop, then actively unwind
-        ### any worker threads so they cannot keep the process alive as a zombie.
-        request_stop()
-        interrupt_threads(SystemExit)
-
-        timer = self.__dict__.get('_log_refresh_timer', None)
-        if timer is not None:
-            timer.cancel()
-
-        daemon_context = self.__dict__.get('_daemon_context', None)
-        if daemon_context is not None:
-            daemon_context.close()
-
-        _close_pools()
-        raise SystemExit(0)
-
-    def _send_signal(
-        self,
-        signal_to_send,
-        timeout: Union[float, int, None] = None,
-        check_timeout_interval: Union[float, int, None] = None,
-    ) -> SuccessTuple:
-        """Send a signal to the daemon process.
-
-        Parameters
-        ----------
-        signal_to_send:
-            The signal the send to the daemon, e.g. `signals.SIGINT`.
-
-        timeout: Union[float, int, None], default None
-            The maximum number of seconds to wait for a process to terminate.
-
-        check_timeout_interval: Union[float, int, None], default None
-            The number of seconds to wait between checking if the process is still running.
-
-        Returns
-        -------
-        A SuccessTuple indicating success.
-        """
-        try:
-            pid = self.pid
-            if pid is None:
-                return (
-                    False,
-                    f"Daemon '{self.daemon_id}' is not running, "
-                    + f"cannot send signal '{signal_to_send}'."
-                )
-            
-            os.kill(pid, signal_to_send)
-        except Exception:
-            return False, f"Failed to send signal {signal_to_send}:\n{traceback.format_exc()}"
-
-        timeout = self.get_timeout_seconds(timeout)
-        check_timeout_interval = self.get_check_timeout_interval_seconds(
-            check_timeout_interval
-        )
-
-        if not timeout:
-            return True, f"Successfully sent '{signal_to_send}' to daemon '{self.daemon_id}'."
-
-        begin = time.perf_counter()
-        while (time.perf_counter() - begin) < timeout:
-            if not self.status == 'running':
-                return True, "Success"
-            time.sleep(check_timeout_interval)
-
-        return False, (
-            f"Failed to stop daemon '{self.daemon_id}' (PID: {pid}) within {timeout} second"
-            + ('s' if timeout != 1 else '') + '.'
-        )
-
-    def _get_process_timestamps(self) -> Dict[str, Optional[datetime]]:
-        """
-        Return the `began`, `ended`, and `launched` timestamps recorded for this daemon,
-        read from the properties file (so no process is inspected).
-        """
-        try:
-            properties = self.read_properties()
-        except Exception:
-            properties = None
-        if not properties:
-            properties = self.__dict__.get('_properties', None) or {}
-        process_properties = properties.get('process', None) or {}
-        return {
-            key: _detached.parse_timestamp(process_properties.get(key, None))
-            for key in ('began', 'ended', 'launched')
-        }
-
-    @staticmethod
-    def _is_completed(timestamps: Dict[str, Optional[datetime]]) -> bool:
-        """
-        Return whether the timestamps show that the last run has ended.
-        A job which was restarted has `began` or `launched` later than its stale `ended`.
-        """
-        ended = timestamps.get('ended', None)
-        if ended is None:
-            return False
-        started = [
-            moment
-            for moment in (timestamps.get('began', None), timestamps.get('launched', None))
-            if moment is not None
-        ]
-        return not started or ended >= max(started)
-
-    def _find_detached_pids(
-        self,
-        force: bool = False,
-        verify_began: bool = False,
-    ) -> List[int]:
-        """
-        Return the PIDs of any processes whose command line references this daemon_id.
-
-        A daemon is launched via `venv_exec` with `Daemon(daemon_id='<id>')` embedded in
-        the executed code, so the daemon_id stays visible in the process's command line.
-        When the PID file is lost (e.g. the launcher exited without cleanup, leaving an
-        orphaned/detached daemon), this is the only reliable way to find the process —
-        otherwise stopping the job reports a false "already stopped" and the user must
-        resort to `pkill meerschaum` or hunting the daemon_id in `htop`.
-
-        Scanning the process table is expensive, so unless `force` is `True`
-        no scan happens for a daemon which does not exist or whose last run has ended,
-        one scan is shared by all daemons for a couple of seconds,
-        and a daemon which was not found is not searched for again for a minute.
-
-        Parameters
-        ----------
-        force: bool, default False
-            If `True`, search even if the daemon is recorded as completed or was not found
-            recently (e.g. to stop it).
-
-        verify_began: bool, default False
-            If `True`, ignore processes which started after the daemon recorded
-            that it began (a reused PID).
-        """
-        timestamps = self._get_process_timestamps()
-        fingerprint = tuple(
-            moment.isoformat() if moment is not None else None
-            for moment in (timestamps['began'], timestamps['ended'], timestamps['launched'])
-        )
-        began = timestamps['began']
-        launched = timestamps['launched']
-        in_launch_window = (
-            launched is not None
-            and (began is None or began < launched)
-            and (
-                (datetime.now(timezone.utc).replace(tzinfo=None) - launched).total_seconds()
-                < _detached.LAUNCH_GRACE_SECONDS
-            )
-        )
-        if not force:
-            if not self.path.exists() or self._is_completed(timestamps):
-                return []
-
-            if not in_launch_window and _detached.is_known_missing(
-                self.daemon_id,
-                fingerprint,
-            ):
-                return []
-
-        pids = _detached.find_pids(
-            self.daemon_id,
-            not_older_than=(launched if in_launch_window else None),
-        )
-
-        if verify_began and pids:
-            if began is not None and (launched is None or began >= launched):
-                pids = [
-                    pid
-                    for pid in pids
-                    if not _detached.is_stale_process(
-                        pid,
-                        began,
-                        _detached.CREATE_TIME_SLACK_SECONDS,
-                    )
-                ]
-
-        if not pids and not force and not in_launch_window:
-            _detached.remember_missing(self.daemon_id, fingerprint)
-        return pids
-
-    def _restore_pid_file(self, pid: int) -> None:
-        """
-        Write the PID file again for a running daemon which lost it, so that later reads
-        do not have to search for the process. This is only done once the daemon has
-        recorded that it began, because before that the process found may be the launcher.
-        """
-        timestamps = self._get_process_timestamps()
-        began, launched = timestamps['began'], timestamps['launched']
-        if began is None or (launched is not None and began < launched):
-            return
-        try:
-            if not self.pid_path.exists():
-                with open(self.pid_path, 'w+', encoding='utf-8') as f:
-                    f.write(str(pid))
-        except Exception:
-            pass
-
-    def _kill_detached_processes(self, timeout: Union[int, float, None] = None) -> int:
-        """
-        SIGTERM then SIGKILL any detached processes referencing this daemon_id.
-
-        Fallback for when the PID file is gone but the daemon (or its threads) are still
-        alive. Returns the number of processes that were targeted.
-        """
-        psutil = attempt_import('psutil')
-        pids = self._find_detached_pids(force=True)
-        if not pids:
-            return 0
-
-        procs = []
-        for pid in pids:
-            try:
-                procs.append(psutil.Process(pid))
-            except Exception:
-                continue
-        for proc in procs:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-
-        timeout = self.get_timeout_seconds(timeout)
-        try:
-            _, alive = psutil.wait_procs(procs, timeout=(timeout or 8))
-        except Exception:
-            alive = procs
-        for proc in alive:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-        _detached.invalidate(self.daemon_id)
-        return len(procs)
-
-    def mkdir_if_not_exists(self, allow_dirty_run: bool = False):
-        """Create the Daemon's directory.
-        If `allow_dirty_run` is `False` and the directory already exists,
-        raise a `FileExistsError`.
-        """
-        try:
-            self.path.mkdir(parents=True, exist_ok=True)
-            _already_exists = any(os.scandir(self.path))
-        except FileExistsError:
-            _already_exists = True
-
-        if _already_exists and not allow_dirty_run:
-            error(
-                f"Daemon '{self.daemon_id}' already exists. " +
-                "To allow this daemon to run, do one of the following:\n"
-                + "  - Execute `daemon.cleanup()`.\n"
-                + f"  - Delete the directory '{self.path}'.\n"
-                + "  - Pass `allow_dirty_run=True` to `daemon.run()`.\n",
-                FileExistsError,
-            )
-
-    @property
-    def process(self) -> Union['psutil.Process', None]:
-        """
-        Return the psutil process for the Daemon.
-        """
-        psutil = attempt_import('psutil')
-        pid = self.pid
-        if pid is None:
-            return None
-        if '_process' not in self.__dict__ or self.__dict__['_process'].pid != int(pid):
-            try:
-                self._process = psutil.Process(int(pid))
-                process_exists = True
-            except Exception:
-                process_exists = False
-            if not process_exists:
-                _ = self.__dict__.pop('_process', None)
-                try:
-                    if self.pid_path.exists():
-                        self.pid_path.unlink()
-                except Exception:
-                    pass
-                return None
-        return self._process
-
-    @property
-    def status(self) -> str:
-        """
-        Return the running status of this Daemon.
-        """
-        process = self.process
-        if process is None:
-            return 'stopped'
-
-        psutil = attempt_import('psutil', lazy=False)
-        try:
-            process_status = process.status()
-            if process_status == 'stopped':
-                return 'paused'
-            if process_status == 'zombie':
-                raise psutil.NoSuchProcess(process.pid)
-        except (psutil.NoSuchProcess, AttributeError):
-            if self.pid_path.exists():
-                try:
-                    self.pid_path.unlink()
-                except Exception:
-                    pass
-            return 'stopped'
-
-        return 'running'
-
-    @classmethod
-    def _get_path_from_daemon_id(cls, daemon_id: str) -> pathlib.Path:
-        """
-        Return a Daemon's path from its `daemon_id`.
-        """
-        import meerschaum.config.paths as paths
-        return paths.DAEMON_RESOURCES_PATH / daemon_id
-
-    @property
-    def path(self) -> pathlib.Path:
-        """
-        Return the path for this Daemon's directory.
-        """
-        return self._get_path_from_daemon_id(self.daemon_id)
-
-    @classmethod
-    def _get_properties_path_from_daemon_id(cls, daemon_id: str) -> pathlib.Path:
-        """
-        Return the `properties.json` path for a given `daemon_id`.
-        """
-        return cls._get_path_from_daemon_id(daemon_id) / 'properties.json'
-
-    @property
-    def properties_path(self) -> pathlib.Path:
-        """
-        Return the `propterties.json` path for this Daemon.
-        """
-        return self._get_properties_path_from_daemon_id(self.daemon_id)
-
-    @property
-    def stop_path(self) -> pathlib.Path:
-        """
-        Return the path for the stop file (created when manually stopped).
-        """
-        return self.path / '.stop.json'
-
-    @property
-    def log_path(self) -> pathlib.Path:
-        """
-        Return the log path.
-        """
-        logs_cf = self.properties.get('logs', None) or {}
-        if 'path' not in logs_cf:
-            import meerschaum.config.paths as paths
-            return paths.LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
-
-        return pathlib.Path(logs_cf['path'])
-
-    @property
-    def stdin_file_path(self) -> pathlib.Path:
-        """
-        Return the stdin file path.
-        """
-        return self.path / 'input.stdin'
-
-    @property
-    def blocking_stdin_file_path(self) -> pathlib.Path:
-        """
-        Return the stdin file path.
-        """
-        if '_blocking_stdin_file_path' in self.__dict__:
-            return self._blocking_stdin_file_path
-
-        return self.path / 'input.stdin.block'
-
-    @property
-    def prompt_kwargs_file_path(self) -> pathlib.Path:
-        """
-        Return the file path to the kwargs for the invoking `prompt()`.
-        """
-        return self.path / 'prompt_kwargs.json'
-
-    @property
-    def log_offset_path(self) -> pathlib.Path:
-        """
-        Return the log offset file path.
-        """
-        import meerschaum.config.paths as paths
-        return paths.LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
-
-    @property
-    def log_offset_lock(self) -> 'InterProcessLock':
-        """
-        Return the process lock context manager.
-        """
-        if '_log_offset_lock' in self.__dict__:
-            return self._log_offset_lock
-
-        from meerschaum.utils.locks import InterProcessLock
-        self._log_offset_lock = InterProcessLock(self.log_offset_path)
-        return self._log_offset_lock
-
-    @property
-    def rotating_log(self) -> RotatingFile:
-        """
-        The rotating log file for the daemon's output.
-        """
-        if '_rotating_log' in self.__dict__:
-            return self._rotating_log
-
-        logs_cf = self.properties.get('logs', None) or {}
-        write_timestamps = logs_cf.get('write_timestamps', None)
-        if write_timestamps is None:
-            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
-
-        timestamp_format = logs_cf.get('timestamp_format', None)
-        if timestamp_format is None:
-            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
-
-        num_files_to_keep = logs_cf.get('num_files_to_keep', None)
-        if num_files_to_keep is None:
-            num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
-
-        max_file_size = logs_cf.get('max_file_size', None)
-        if max_file_size is None:
-            max_file_size = get_config('jobs', 'logs', 'max_file_size')
-
-        redirect_streams = logs_cf.get('redirect_streams', True)
-
-        self._rotating_log = RotatingFile(
-            self.log_path,
-            redirect_streams=redirect_streams,
-            write_timestamps=write_timestamps,
-            timestamp_format=timestamp_format,
-            num_files_to_keep=num_files_to_keep,
-            max_file_size=max_file_size,
-        )
-        return self._rotating_log
-
-    @property
-    def stdin_file(self):
-        """
-        Return the file handler for the stdin file.
-        """
-        if (_stdin_file := self.__dict__.get('_stdin_file', None)):
-            return _stdin_file
-
-        self._stdin_file = StdinFile(
-            self.stdin_file_path,
-            lock_file_path=self.blocking_stdin_file_path,
-        )
-        return self._stdin_file
-
-    @property
-    def log_text(self) -> Union[str, None]:
-        """
-        Read the log files and return their contents.
-        Returns `None` if the log file does not exist.
-        """
-        logs_cf = self.properties.get('logs', None) or {}
-        write_timestamps = logs_cf.get('write_timestamps', None)
-        if write_timestamps is None:
-            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
-
-        timestamp_format = logs_cf.get('timestamp_format', None)
-        if timestamp_format is None:
-            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
-
-        num_files_to_keep = logs_cf.get('num_files_to_keep', None)
-        if num_files_to_keep is None:
-            num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
-
-        max_file_size = logs_cf.get('max_file_size', None)
-        if max_file_size is None:
-            max_file_size = get_config('jobs', 'logs', 'max_file_size')
-
-        new_rotating_log = RotatingFile(
-            self.rotating_log.file_path,
-            num_files_to_keep=num_files_to_keep,
-            max_file_size=max_file_size,
-            write_timestamps=write_timestamps,
-            timestamp_format=timestamp_format,
-        )
-        return new_rotating_log.read()
-
-    def readlines(self) -> List[str]:
-        """
-        Read the next log lines, persisting the cursor for later use.
-        Note this will alter the cursor of `self.rotating_log`.
-        """
-        self.rotating_log._cursor = self._read_log_offset()
-        lines = self.rotating_log.readlines()
-        self._write_log_offset()
-        return lines
-
-    def _read_log_offset(self) -> Tuple[int, int]:
-        """
-        Return the current log offset cursor.
-
-        Returns
-        -------
-        A tuple of the form (`subfile_index`, `position`).
-        """
-        if not self.log_offset_path.exists():
-            return 0, 0
-
-        try:
-            with open(self.log_offset_path, 'r', encoding='utf-8') as f:
-                cursor_text = f.read()
-            cursor_parts = cursor_text.split(' ')
-            subfile_index, subfile_position = int(cursor_parts[0]), int(cursor_parts[1])
-            return subfile_index, subfile_position
-        except Exception as e:
-            warn(f"Failed to read cursor:\n{e}")
-        return 0, 0
-
-    def _write_log_offset(self) -> None:
-        """
-        Write the current log offset file.
-        """
-        with self.log_offset_lock:
-            with open(self.log_offset_path, 'w+', encoding='utf-8') as f:
-                subfile_index = self.rotating_log._cursor[0]
-                subfile_position = self.rotating_log._cursor[1]
-                f.write(f"{subfile_index} {subfile_position}")
-
-    @property
-    def pid(self) -> Union[int, None]:
-        """
-        Read the PID file and return its contents.
-        Returns `None` if the PID file does not exist.
-        """
-        if not self.pid_path.exists():
-            ### The PID file can be lost while a detached daemon keeps running (e.g. the
-            ### launcher exited without cleanup). Recover the PID by finding the process
-            ### whose command line embeds this daemon_id, so `status`/`stop`/`kill` see the
-            ### live process instead of reporting a false "stopped" (which would strand the
-            ### orphan, forcing a manual `pkill meerschaum`).
-            detached_pids = self._find_detached_pids(verify_began=True)
-            if not detached_pids:
-                return None
-            self._restore_pid_file(detached_pids[0])
-            return detached_pids[0]
-        try:
-            with open(self.pid_path, 'r', encoding='utf-8') as f:
-                text = f.read()
-            if len(text) == 0:
-                return None
-            pid = int(text.rstrip())
-        except Exception as e:
-            warn(e)
-            text = None
-            pid = None
-        return pid
-
-    @property
-    def pid_path(self) -> pathlib.Path:
-        """
-        Return the path to a file containing the PID for this Daemon.
-        """
-        return self.path / 'process.pid'
-
-    @property
-    def pid_lock(self) -> 'InterProcessLock':
-        """
-        Return the process lock context manager.
-        """
-        if '_pid_lock' in self.__dict__:
-            return self._pid_lock
-
-        from meerschaum.utils.locks import InterProcessLock
-        self._pid_lock = InterProcessLock(self.pid_path)
-        return self._pid_lock
-
-    @property
-    def pickle_path(self) -> pathlib.Path:
-        """
-        Return the path for the pickle file.
-        """
-        return self.path / 'pickle.pkl'
-
-    def read_properties(self) -> Optional[Dict[str, Any]]:
-        """Read the properties JSON file and return the dictionary."""
-        if not self.properties_path.exists():
-            return None
-        try:
-            with open(self.properties_path, 'r', encoding='utf-8') as file:
-                properties = json.load(file)
-        except Exception:
-            properties = {}
-        
-        return properties or {}
-
-    def read_pickle(self) -> Daemon:
-        """Read a Daemon's pickle file and return the `Daemon`."""
-        import pickle
-        import traceback
-        if not self.pickle_path.exists():
-            error(f"Pickle file does not exist for daemon '{self.daemon_id}'.")
-
-        if self.pickle_path.stat().st_size == 0:
-            error(f"Pickle was empty for daemon '{self.daemon_id}'.")
-
-        try:
-            with open(self.pickle_path, 'rb') as pickle_file:
-                daemon = pickle.load(pickle_file)
-            success, msg = True, 'Success'
-        except Exception as e:
-            success, msg = False, str(e)
-            daemon = None
-            traceback.print_exception(type(e), e, e.__traceback__)
-        if not success:
-            error(msg)
-        return daemon
-
-    @property
-    def properties(self) -> Dict[str, Any]:
-        """
-        Return the contents of the properties JSON file.
-        """
-        try:
-            _file_properties = self.read_properties() or {}
-        except Exception:
-            traceback.print_exc()
-            _file_properties = {}
-
-        if not self._properties:
-            self._properties = _file_properties
-
-        if self._properties is None:
-            self._properties = {}
-
-        if (
-            self._properties.get('result', None) is None
-            and _file_properties.get('result', None) is not None
-        ):
-            _ = self._properties.pop('result', None)
-
-        if _file_properties is not None:
-            self._properties = apply_patch_to_config(
-                _file_properties,
-                self._properties,
-            )
-
-        return self._properties
-
-    @property
-    def hidden(self) -> bool:
-        """
-        Return a bool indicating whether this Daemon should be displayed.
-        """
-        return self.daemon_id.startswith('_') or self.daemon_id.startswith('.')
-
-    def write_properties(self) -> SuccessTuple:
-        """Write the properties dictionary to the properties JSON file
-        (only if self.properties exists).
-        """
-        from meerschaum.utils.misc import generate_password
-        success, msg = (
-            False,
-            f"No properties to write for daemon '{self.daemon_id}'."
-        )
-        backup_path = self.properties_path.parent / (generate_password(8) + '.json')
-        props = self.properties
-        if props is not None:
-            try:
-                self.path.mkdir(parents=True, exist_ok=True)
-                if self.properties_path.exists():
-                    self.properties_path.rename(backup_path)
-                with open(self.properties_path, 'w+', encoding='utf-8') as properties_file:
-                    json.dump(props, properties_file)
-                success, msg = True, 'Success'
-            except Exception as e:
-                success, msg = False, str(e)
-
-        try:
-            if backup_path.exists():
-                if not success:
-                    backup_path.rename(self.properties_path)
-                else:
-                    backup_path.unlink()
-        except Exception as e:
-            success, msg = False, str(e)
-
-        return success, msg
-
-    def write_pickle(self) -> SuccessTuple:
-        """Write the pickle file for the daemon."""
-        import pickle
-        import traceback
-        from meerschaum.utils.misc import generate_password
-
-        if not self.pickle:
-            return True, "Success"
-
-        from meerschaum._internal.entry import _shells
-        if _shells:
-            from meerschaum._internal.shell.Shell import revert_input
-            revert_input()
-
-        backup_path = self.pickle_path.parent / (generate_password(7) + '.pkl')
-        try:
-            self.path.mkdir(parents=True, exist_ok=True)
-            if self.pickle_path.exists():
-                self.pickle_path.rename(backup_path)
-            with open(self.pickle_path, 'wb+') as pickle_file:
-                pickle.dump(self, pickle_file)
-            success, msg = True, "Success"
-        except Exception as e:
-            success, msg = False, str(e)
-            traceback.print_exception(type(e), e, e.__traceback__)
-        try:
-            if backup_path.exists():
-                if not success:
-                    backup_path.rename(self.pickle_path)
-                else:
-                    backup_path.unlink()
-        except Exception as e:
-            success, msg = False, str(e)
-        return success, msg
-
-
-    def _setup(
-        self,
-        allow_dirty_run: bool = False,
-    ) -> None:
-        """
-        Update properties before starting the Daemon.
-        """
-        if self.properties is None:
-            self._properties = {}
-
-        self._properties.update({
-            'target': {
-                'name': self.target.__name__,
-                'module': self.target.__module__,
-                'args': self.target_args,
-                'kw': self.target_kw,
-            },
-        })
-        self.mkdir_if_not_exists(allow_dirty_run)
-        _write_properties_success_tuple = self.write_properties()
-        if not _write_properties_success_tuple[0]:
-            error(_write_properties_success_tuple[1])
-
-        _write_pickle_success_tuple = self.write_pickle()
-        if not _write_pickle_success_tuple[0]:
-            error(_write_pickle_success_tuple[1])
-
-    def cleanup(self, keep_logs: bool = False) -> SuccessTuple:
-        """
-        Remove a daemon's directory after execution.
-
-        Parameters
-        ----------
-        keep_logs: bool, default False
-            If `True`, skip deleting the daemon's log files.
-
-        Returns
-        -------
-        A `SuccessTuple` indicating success.
-        """
-        _detached.invalidate(self.daemon_id)
-        if self.path.exists():
-            try:
-                shutil.rmtree(self.path)
-            except Exception as e:
-                msg = f"Failed to clean up '{self.daemon_id}':\n{e}"
-                warn(msg)
-                return False, msg
-        if not keep_logs:
-            self.rotating_log.delete()
-            try:
-                if self.log_offset_path.exists():
-                    self.log_offset_path.unlink()
-            except Exception as e:
-                msg = f"Failed to remove offset file for '{self.daemon_id}':\n{e}"
-                warn(msg)
-                return False, msg
-        return True, "Success"
-
+        """Resume the daemon's process."""
+        return self._core.resume(timeout, check_timeout_interval)
+
+    def cleanup(self, keep_logs: bool = False, debug: bool = False) -> SuccessTuple:
+        """Remove the daemon's directory (and its logs unless `keep_logs`)."""
+        return self._core.cleanup(keep_logs)
 
     def get_timeout_seconds(self, timeout: Union[int, float, None] = None) -> Union[int, float]:
-        """
-        Return the timeout value to use. Use `--timeout-seconds` if provided,
-        else the configured default (8).
-        """
-        if isinstance(timeout, (int, float)):
-            return timeout
-        return get_config('jobs', 'timeout_seconds')
-
+        """Return `timeout`, or the configured `jobs:timeout_seconds`."""
+        return self._core.get_timeout_seconds(timeout)
 
     def get_check_timeout_interval_seconds(
         self,
         check_timeout_interval: Union[int, float, None] = None,
     ) -> Union[int, float]:
-        """
-        Return the interval value to check the status of timeouts.
-        """
-        if isinstance(check_timeout_interval, (int, float)):
-            return check_timeout_interval
-        return get_config('jobs', 'check_timeout_interval_seconds')
+        """Return the interval, or the configured `jobs:check_timeout_interval_seconds`."""
+        return self._core.get_check_timeout_interval_seconds(check_timeout_interval)
 
-    @property
-    def target_args(self) -> Union[Tuple[Any], None]:
-        """
-        Return the positional arguments to pass to the target function.
-        """
-        target_args = (
-            self.__dict__.get('_target_args', None)
-            or self.properties.get('target', {}).get('args', None)
-        )
-        if target_args is None:
-            return tuple([])
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Daemon) and other.daemon_id == self.daemon_id
 
-        return tuple(target_args)
+    def __hash__(self) -> int:
+        return hash(self.daemon_id)
 
-    @property
-    def target_kw(self) -> Union[Dict[str, Any], None]:
-        """
-        Return the keyword arguments to pass to the target function.
-        """
-        target_kw = (
-            self.__dict__.get('_target_kw', None)
-            or self.properties.get('target', {}).get('kw', None)
-        )
-        if target_kw is None:
-            return {}
-
-        return {key: val for key, val in target_kw.items()}
-
-    @staticmethod
-    def _get_target_reference(target) -> Union[Dict[str, str], None]:
-        """
-        If `target` is an importable, top-level function (e.g. `entry`), return a
-        ``{'module': ..., 'qualname': ...}`` reference so it can be re-imported in the
-        daemon process instead of pickled by value.
-
-        Pickling such a target by value serializes its entire global graph, which can
-        reach unpicklable live state (e.g. a connector caching an `_asyncio.Task`) and
-        raise `TypeError: cannot pickle '_asyncio.Task' object`. dill also falls back to
-        by-value pickling whenever it cannot match the function by identity — which
-        happens when two copies of a package are importable (a stale install shadowing
-        a venv), so `byref=True` alone is not enough. Returns `None` for closures,
-        lambdas, and anything not importable, which fall back to dill.
-        """
-        module = getattr(target, '__module__', None)
-        qualname = getattr(target, '__qualname__', None)
-        if not module or not qualname:
-            return None
-        if '<locals>' in qualname or '<lambda>' in qualname:
-            return None
-        return {'module': module, 'qualname': qualname}
-
-    @staticmethod
-    def _load_target_reference(target_ref: Dict[str, str]):
-        """
-        Re-import a target from a `{'module': ..., 'qualname': ...}` reference.
-        """
-        import importlib
-        obj = importlib.import_module(target_ref['module'])
-        for part in target_ref['qualname'].split('.'):
-            obj = getattr(obj, part)
-        return obj
-
-    def __getstate__(self):
-        """
-        Pickle this Daemon.
-        """
-        dill = attempt_import('dill')
-        state = {
-            'target_args': self.target_args,
-            'target_kw': self.target_kw,
-            'daemon_id': self.daemon_id,
-            'label': self.label,
-            'properties': self.properties,
-        }
-        target_ref = self._get_target_reference(self.target)
-        if target_ref is not None:
-            ### Store by reference (re-imported in the daemon process), not by value.
-            state['target'] = None
-            state['target_ref'] = target_ref
-        else:
-            state['target'] = dill.dumps(self.target, byref=True)
-        return state
-
-    def __setstate__(self, _state: Dict[str, Any]):
-        """
-        Restore this Daemon from a pickled state.
-        If the properties file exists, skip the old pickled version.
-        """
-        dill = attempt_import('dill')
-        target_ref = _state.pop('target_ref', None)
-        if target_ref is not None and _state.get('target', None) is None:
-            _state['target'] = self._load_target_reference(target_ref)
-        else:
-            _state['target'] = dill.loads(_state['target'])
-        self._pickle = True
-        daemon_id = _state.get('daemon_id', None)
-        if not daemon_id:
-            raise ValueError("Need a daemon_id to un-pickle a Daemon.")
-
-        properties_path = self._get_properties_path_from_daemon_id(daemon_id)
-        ignore_properties = properties_path.exists()
-        if ignore_properties:
-            _state = {
-                key: val
-                for key, val in _state.items()
-                if key != 'properties'
-            }
-        self.__init__(**_state)
-
-
-    def __repr__(self):
-        return str(self)
-
-    def __str__(self):
+    def __str__(self) -> str:
         return self.daemon_id
 
-    def __eq__(self, other):
-        if not isinstance(other, Daemon):
-            return False
-        return self.daemon_id == other.daemon_id
-
-    def __hash__(self):
-        return hash(self.daemon_id)
+    def __repr__(self) -> str:
+        return str(self)

@@ -182,3 +182,22 @@ def test_round_time(dt, date_delta, to, expected_dt):
     """
     from meerschaum.utils.misc import round_time
     assert round_time(dt, date_delta, to) == expected_dt
+
+
+@pytest.mark.parametrize('seconds,expected', [
+    (0, '0 seconds'),
+    (1, '1 second'),
+    (0.5, '0.5 seconds'),
+    (59.999, '60 seconds'),
+    (60, '1 minute'),
+    (3661, '1 hour, 1 minute and 1 second'),
+    (86400 * 7 * 52 + 86400 * 2 + 3600 * 3, '1 year, 2 days and 3 hours'),
+    (90061.5, '1 day, 1 hour and 1 minute'),
+])
+def test_interval_str_needs_no_package(seconds, expected):
+    """`interval_str` formats like `humanfriendly.format_timespan()` without importing it."""
+    import sys
+    from datetime import timedelta
+    from meerschaum.utils.misc import interval_str
+    assert interval_str(timedelta(seconds=seconds)) == expected
+    assert 'humanfriendly' not in sys.modules

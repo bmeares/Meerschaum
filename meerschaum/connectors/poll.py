@@ -137,7 +137,6 @@ def _wrap_retry_connect(
     from meerschaum.connectors import instance_types, get_connector
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.sql import test_queries
     from meerschaum.utils.misc import timed_input
     from functools import partial
     import platform
@@ -166,9 +165,8 @@ def _wrap_retry_connect(
         elif connector.type == 'sql':
 
             def _connect(_connector):
-                ### Test queries like `SELECT 1`.
-                connect_query = test_queries.get(connector.flavor, test_queries['default'])
-                if _connector.exec(connect_query) is None:
+                ### `SELECT 1` through the Rust connector (no SQLAlchemy engine).
+                if not _connector.test_connection(max_retries=1, warn=warn):
                     raise Exception("Failed to connect.")
 
             try:

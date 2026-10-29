@@ -5,8 +5,8 @@
 """
 Handle MCP JSON-RPC 2.0 messages, independent of transport.
 
-Both the HTTP route (`meerschaum.api.routes._mcp`) and the stdio server
-(`meerschaum.mcp._stdio`) call `handle_message()`. The only thing that differs
+Both the HTTP route (`/mcp`, served by the Rust server: `meerschaum-server`'s `mcp` module) and
+the stdio server (`meerschaum.mcp._stdio`) call `handle_message()`. The only thing that differs
 between them is the caller's scopes: over HTTP those come from the bearer token
 or session, while stdio runs with `['*']` because it inherits the privileges of
 the shell that launched it — the same trust model as the CLI.

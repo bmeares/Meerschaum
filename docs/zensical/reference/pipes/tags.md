@@ -86,7 +86,7 @@ The quickest way to write tags is with the `tag pipes` action:
 mrsm tag pipes production -c sql:main
 ```
 
-Note that new tags must be specified as positional arguments ― the flag `--tags` is used for filtering.
+Note that new tags must be specified as positional arguments, the flag `--tags` is used for filtering.
 
 ## Removing Tags
 

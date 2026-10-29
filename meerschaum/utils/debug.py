@@ -38,9 +38,16 @@ def dprint(
     nopretty: bool = False,
     _progress: Optional['rich.progress.Progress'] = None,
     _task: Optional[int] = None,
+    _package: Optional[str] = None,
+    _lineno: Optional[int] = None,
     **kw
 ) -> None:
-    """Print a debug message."""
+    """
+    Print a debug message to stderr.
+
+    The header names the calling module and line. The Rust core passes its own module path and
+    line as `_package` and `_lineno` (its debug events have no Python caller).
+    """
     import meerschaum.config.paths as paths
     if attrs is None:
         attrs = []
@@ -66,18 +73,24 @@ def dprint(
     logging.basicConfig(format='%(message)s')
     log = logging.getLogger(__name__)
 
-    parent_frame = inspect.stack()[1][0]
-    parent_info = inspect.getframeinfo(parent_frame)
-    parent_lineno = parent_info.lineno
-    parent_globals = parent_frame.f_globals
-    parent_package = parent_globals['__name__']
+    if _package is not None:
+        parent_package = _package
+        parent_lineno = _lineno
+    else:
+        parent_frame = inspect.stack()[1][0]
+        parent_info = inspect.getframeinfo(parent_frame)
+        parent_lineno = parent_info.lineno
+        parent_globals = parent_frame.f_globals
+        parent_package = parent_globals['__name__']
     msg = str(msg)
     premsg = ""
 
     if now:
         premsg = now.isoformat().split('T', maxsplit=1)[-1][:-3] + (' | ' if package else ':')
     if package:
-        premsg = premsg + parent_package + ':' + str(parent_lineno)
+        premsg = premsg + parent_package + (
+            (':' + str(parent_lineno)) if parent_lineno is not None else ''
+        )
     if premsg:
         premsg += "\n"
     if leader and cf is not None:
@@ -113,7 +126,9 @@ def dprint(
         text = rich_text.Text.from_ansi(premsg + msg)
         _progress.console.log(text)
     else:
-        print(premsg + msg)
+        ### v5: debug output goes to stderr (v4 printed to stdout), like warnings and the
+        ### Rust core's debug output. Job logs capture both streams.
+        print(premsg + msg, file=sys.stderr)
 
 
 def _checkpoint(

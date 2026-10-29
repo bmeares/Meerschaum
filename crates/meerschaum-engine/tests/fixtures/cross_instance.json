@@ -1,0 +1,49 @@
+{
+  "description": "A parent on one instance feeding a child on another. The edge's ledger entries and cursor live on the child's instance; the parent's watermark is read through the parent's instance.",
+  "records": [
+    {"instance": "sql:landing", "connector": "plugin:sensors", "metric": "readings",
+     "parameters": {"columns": {"datetime": "ts", "id": "sensor"}, "verify": {"chunk_days": 1}}},
+    {"instance": "sql:warehouse", "connector": "sql:landing", "metric": "readings_hourly",
+     "parameters": {"columns": {"datetime": "hour", "id": "sensor"}, "verify": {"chunk_days": 1},
+                    "parents": ["Pipe('plugin:sensors', 'readings', instance='sql:landing')"]}}
+  ],
+  "selection": {"targets": {"refs": ["sql:warehouse|sql:landing|readings_hourly|None"]}, "parents": "all"},
+  "state": {
+    "watermarks": {
+      "sql:landing|plugin:sensors|readings|None": "2026-10-12T08:30:00Z",
+      "sql:warehouse|sql:landing|readings_hourly|None": "2026-10-12T07:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:landing|plugin:sensors|readings|None": "@current",
+      "sql:warehouse|sql:landing|readings_hourly|None": "@current"
+    },
+    "ledger": {
+      "sql:landing": [
+        {"pipe_ref": "sql:landing|plugin:sensors|readings|None", "seq": 99, "begin": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00Z"}
+      ],
+      "sql:warehouse": [
+        {"pipe_ref": "sql:landing|plugin:sensors|readings|None", "seq": 6, "begin": "2026-10-11T00:00:00Z", "end": "2026-10-12T00:00:00Z"},
+        {"pipe_ref": "sql:landing|plugin:sensors|readings|None", "seq": 7, "begin": "2026-10-12T00:00:00Z", "end": "2026-10-13T00:00:00Z"}
+      ]
+    },
+    "cursors": {
+      "sql:warehouse": [
+        {"parent_ref": "sql:landing|plugin:sensors|readings|None", "child_ref": "sql:warehouse|sql:landing|readings_hourly|None", "seq": 6, "parent_watermark_at_cursor": "2026-10-12T07:30:00Z"}
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {"node": "sql:landing|plugin:sensors|readings|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:warehouse|sql:landing|readings_hourly|None", "action": "incremental",
+       "bounds": {"begin": "2026-10-11T07:00:00Z", "end": "2026-10-12T08:30:00Z"},
+       "chunks": [
+         {"begin": "2026-10-11T07:00:00Z", "end": "2026-10-12T00:00:00Z"},
+         {"begin": "2026-10-12T00:00:00Z", "end": "2026-10-12T08:30:00Z"}
+       ],
+       "provisional": true,
+       "consumes": [{"parent_ref": "sql:landing|plugin:sensors|readings|None", "state_instance": "sql:warehouse", "seq": 7}],
+       "reason_contains": ["Pipe('plugin:sensors', 'readings', instance='sql:landing') has 1 new change"]}
+    ]
+  }
+}

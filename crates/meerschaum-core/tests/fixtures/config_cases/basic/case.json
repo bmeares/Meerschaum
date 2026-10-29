@@ -1,0 +1,24 @@
+{
+  "env": {},
+  "setup_queries": [
+    {"keys": ["formatting"]}
+  ],
+  "queries": [
+    {"keys": ["meerschaum", "instance"]},
+    {"keys": ["meerschaum", "connectors", "sql", "main"]},
+    {"keys": ["meerschaum", "connectors", "api", "remote", "verify"]},
+    {"keys": ["custom"]},
+    {"keys": ["custom", "embedded"]},
+    {"keys": ["custom2"]},
+    {"keys": ["custom2"], "opts": {"substitute": false}},
+    {"keys": ["pipes", "parameters", "verify", "chunk_minutes"]},
+    {"keys": ["pipes", "attributes"]},
+    {"keys": ["does", "not", "exist"]},
+    {"keys": ["meerschaum", "api_instance"]},
+    {"keys": ["meerschaum", "repository"]},
+    {"keys": ["system", "cli", "max_daemons"]},
+    {"keys": ["meerschaum", "connectors", "sql", "main", "nope"], "opts": {"warn": false}},
+    {"keys": ["_symlinks"]},
+    {"keys": []}
+  ]
+}

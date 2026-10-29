@@ -8,6 +8,7 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import functools
 from collections import defaultdict
@@ -16,18 +17,27 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.threading import RLock
 from meerschaum.core.Plugin import Plugin
+from meerschaum.plugins._page import figure, figure_json
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
 _plugins_import_errors: Dict[str, Exception] = {}
 _pre_sync_hooks: Dict[Union[str, None], List[Callable[[Any], Any]]] = {}
 _post_sync_hooks: Dict[Union[str, None], List[Callable[[Any], Any]]] = {}
 _actions_daemon_enabled: Dict[str, bool] = {}
+### The words of each plugin action (`{'weather_wait': ['weather', 'wait']}`):
+### `@make_action(name=...)` sets them, an underscore name (`def weather_wait`) splits on `_`.
+### The plugin manifest carries them so the CLI lists `wait` under `mrsm weather` in help and
+### completion.
+_action_words: Dict[str, List[str]] = {}
+### Tags added to the head of every console page with `add_head()`, by plugin.
+_console_head: Dict[Union[str, None], List[str]] = {}
 _locks = {
     '_api_plugins': RLock(),
     '_dash_plugins': RLock(),
     '_pre_sync_hooks': RLock(),
     '_post_sync_hooks': RLock(),
     '_actions_daemon_enabled': RLock(),
+    '_console_head': RLock(),
     '__path__': RLock(),
     'sys.path': RLock(),
     'internal_plugins': RLock(),
@@ -40,6 +50,8 @@ __all__ = (
     "api_plugin",
     "dash_plugin",
     "web_page",
+    "web_callback",
+    "add_head",
     "import_plugins",
     "from_plugin_import",
     "invalidate_plugins_cache",
@@ -49,6 +61,8 @@ __all__ = (
     "add_plugin_argument",
     "pre_sync_hook",
     "post_sync_hook",
+    "figure",
+    "figure_json",
 )
 __pdoc__ = {
     'venvs': False,
@@ -84,6 +98,29 @@ def _get_plugins_package_name() -> str:
     return pathlib.Path(last_part).stem
 
 
+### Set by the worker program (`crates/meerschaum-worker/python/host.py`).
+_IN_WORKER: bool = False
+
+
+@contextlib.contextmanager
+def plugin_import_guard():
+    """
+    Hold while plugin modules are imported. In a worker's interpreter no worker is started
+    meanwhile (`_core.plugin_import_begin()`): a plugin whose import syncs a `plugin:` pipe or
+    calls `mrsm.entry()` would otherwise start workers without end, each importing it again.
+    Anywhere else this does nothing.
+    """
+    if not _IN_WORKER:
+        yield
+        return
+    from meerschaum import _core
+    _core.plugin_import_begin()
+    try:
+        yield
+    finally:
+        _core.plugin_import_end()
+
+
 def _get_loaded_module(module_name: str) -> Union['ModuleType', None]:
     """
     Return a fully-initialized module from `sys.modules`, else `None`.
@@ -98,27 +135,76 @@ def _get_loaded_module(module_name: str) -> Union['ModuleType', None]:
     return module
 
 
+def _action_name_words(name: Any) -> List[str]:
+    """
+    Return the words of an explicit action name (`'weather wait'` -> `['weather', 'wait']`),
+    or raise a `ValueError` for a name that cannot be typed as an action.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"An action name must be a non-empty string, not {name!r}.")
+    words = name.split()
+    for word in words:
+        if word.startswith('-'):
+            raise ValueError(
+                f"Invalid action name {name!r}: the word '{word}' would be read as a flag."
+            )
+        ### The action is registered as the words joined by `_`, which is how the dispatcher
+        ### finds and strips them: a `_` inside a word would split it there.
+        if '_' in word:
+            raise ValueError(
+                f"Invalid action name {name!r}: write '{word}' as separate words "
+                f"('{word.replace('_', ' ')}') or with a hyphen ('{word.replace('_', '-')}')."
+            )
+    return words
+
+
+def _named_action(func: Callable[[Any], Any], action_key: str) -> Callable[[Any], Any]:
+    """
+    Return `func` registered under `action_key` (its `__name__`), as an underscore action is:
+    the dispatcher strips the action's words from `action` by the function's name.
+    The signature and docstring are `func`'s (`functools.wraps`).
+    """
+    @functools.wraps(func)
+    def _action(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    _action.__name__ = action_key
+    _action.__qualname__ = action_key
+    return _action
+
+
 def make_action(
-    function: Optional[Callable[[Any], Any]] = None,
+    function: Union[Callable[[Any], Any], str, None] = None,
     shell: bool = False,
     activate: bool = True,
     deactivate: bool = True,
     debug: bool = False,
     daemon: bool = True,
     skip_if_loaded: bool = True,
+    name: Optional[str] = None,
     _plugin_name: Optional[str] = None,
 ) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
-    
+
     Parameters
     ----------
     function: Callable[[Any], Any]
         The function to become a Meerschaum action. Must accept all keyword arguments.
-        
+
     shell: bool, default False
         Not used.
-        
+
+    daemon: bool, default True
+        If `False`, the action may not be detached with `-d`.
+
+    name: Optional[str], default None
+        The words that run the action, e.g. `'weather wait'` for `mrsm weather wait` (and
+        `mrsm weather wait other words`, which arrive as `action=['other', 'words']`).
+        Defaults to the function's name, where an underscore separates words: `def weather_wait`
+        also runs as `mrsm weather wait`. `@make_action('weather wait')` is the same as
+        `@make_action(name='weather wait')`.
+
     Returns
     -------
     Another function (this is a decorator function).
@@ -132,29 +218,52 @@ def make_action(
     ...     print('foo')
     ...     return True, "Success"
     >>>
+    >>> @make_action(name='weather wait')
+    ... def wait_for_counts(action=None, **kw):
+    ...     return True, f"Waited for {action}."
+    >>>
     """
+    if isinstance(function, str):
+        name, function = function, None
+    words = _action_name_words(name) if name is not None else None
+
     def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
         from meerschaum.actions import actions, _custom_actions_plugins, _plugins_actions
-        if skip_if_loaded and func.__name__ in actions:
+        action_key = '_'.join(words) if words else func.__name__
+        plugin_name = _plugin_name or _get_parent_plugin(function=func)
+
+        if skip_if_loaded and action_key in actions:
+            existing = actions[action_key]
+            same_function = existing is func or getattr(existing, '__wrapped__', None) is func
+            if words and not same_function and _custom_actions_plugins.get(action_key) != plugin_name:
+                from meerschaum.utils.warnings import warn
+                warn(
+                    f"The action '{' '.join(words)}' already exists; "
+                    f"plugin '{plugin_name}' does not replace it.",
+                    stack=False,
+                )
             return func
 
-        plugin_name = _plugin_name or _get_parent_plugin(function=func)
         plugin = Plugin(plugin_name) if plugin_name else None
 
         if debug:
             from meerschaum.utils.debug import dprint
             dprint(
-                f"Adding action '{func.__name__}' from plugin "
+                f"Adding action '{action_key}' from plugin "
                 f"'{plugin}'..."
             )
 
-        actions[func.__name__] = func
-        _custom_actions_plugins[func.__name__] = plugin_name
+        registered = func if action_key == func.__name__ else _named_action(func, action_key)
+        actions[action_key] = registered
+        _custom_actions_plugins[action_key] = plugin_name
         if plugin_name not in _plugins_actions:
             _plugins_actions[plugin_name] = []
-        _plugins_actions[plugin_name].append(func.__name__)
+        _plugins_actions[plugin_name].append(action_key)
+        _action_words[action_key] = list(words) if words else [
+            word for word in action_key.split('_') if word
+        ] or [action_key]
         if not daemon:
-            _actions_daemon_enabled[func.__name__] = False
+            _actions_daemon_enabled[action_key] = False
         return func
 
     if function is None:
@@ -238,6 +347,150 @@ def post_sync_hook(
     return function
 
 
+### The Bootstrap themes the console ships: `@web_page(theme=...)` names them, or gives the URL of
+### another theme's stylesheet.
+_CONSOLE_THEMES: Dict[str, str] = {
+    'dark': 'dark',
+    'darkly': 'dark',
+    'light': 'light',
+    'flatly': 'light',
+}
+### What `@web_page(head=[...])` and `add_head(...)` may add as a dictionary or a Dash component.
+_HEAD_TAGS = ('meta', 'link', 'script', 'style', 'noscript')
+_VOID_HEAD_TAGS = ('meta', 'link')
+
+
+def _normalize_theme(theme: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Return `(kind, url)` for a `@web_page(theme=...)` value: `('dark', None)`, `('light', None)`,
+    `('url', <stylesheet>)`, or `(None, None)` for the default (a warning names an unknown value).
+    """
+    if theme is None:
+        return None, None
+    text = str(theme).strip()
+    if text.lower() in _CONSOLE_THEMES:
+        return _CONSOLE_THEMES[text.lower()], None
+    if text.startswith(('https://', 'http://', '//', '/')):
+        return 'url', text
+    from meerschaum.utils.warnings import warn
+    warn(
+        f"Unknown web page theme {theme!r}: use 'dark', 'light' or the URL of a Bootstrap "
+        "stylesheet (for example `dash_bootstrap_components.themes.LUX`). Using the default theme.",
+        stack=False,
+    )
+    return None, None
+
+
+def _head_tag_html(tag: Any) -> Union[str, None]:
+    """
+    Return the HTML of one head tag: a string is used as is (one or more tags), a dictionary is
+    `{'tag': 'meta', 'name': ..., 'content': ...}` (text of a `script` or `style` under
+    `children`), and a Dash component (`html.Link(...)`, `html.Meta(...)`, `html.Script(...)`) is
+    rendered from its properties.
+    """
+    import html as html_lib
+    if tag is None:
+        return None
+    if isinstance(tag, str):
+        return tag.strip() or None
+    if not isinstance(tag, dict) and hasattr(tag, 'to_plotly_json'):
+        component = tag.to_plotly_json()
+        props = {
+            key: value
+            for key, value in (component.get('props', {}) or {}).items()
+            if value is not None
+        }
+        tag = {'tag': str(component.get('type', '')).lower(), **props}
+    if not isinstance(tag, dict):
+        raise TypeError(
+            f"A head tag must be an HTML string, a dictionary or a Dash component, not {tag!r}."
+        )
+    attributes = dict(tag)
+    name = str(attributes.pop('tag', '') or '').lower()
+    if name not in _HEAD_TAGS:
+        raise ValueError(
+            f"Unsupported head tag {name!r}: use one of {', '.join(_HEAD_TAGS)}."
+        )
+    text = None
+    for key in ('children', 'content_text', 'text'):
+        if key in attributes:
+            text = attributes.pop(key)
+    renamed = {'className': 'class', 'htmlFor': 'for', 'httpEquiv': 'http-equiv'}
+    parts = [name]
+    for key, value in attributes.items():
+        key = renamed.get(key, key)
+        if value is None or value is False:
+            continue
+        if value is True:
+            parts.append(html_lib.escape(str(key), quote=True))
+            continue
+        parts.append(
+            f'{html_lib.escape(str(key), quote=True)}="{html_lib.escape(str(value), quote=True)}"'
+        )
+    opening = '<' + ' '.join(parts) + '>'
+    if name in _VOID_HEAD_TAGS:
+        return opening
+    body = '' if text is None else str(text)
+    if name in ('script', 'style'):
+        body = body.replace('</', '<\\/')
+    else:
+        body = html_lib.escape(body)
+    return f'{opening}{body}</{name}>'
+
+
+def _head_tags_html(tags: Any) -> List[str]:
+    """
+    Return the HTML of each of `tags` (one tag or a list of them), see `_head_tag_html()`.
+    """
+    if tags is None:
+        return []
+    if isinstance(tags, (str, dict)) or hasattr(tags, 'to_plotly_json'):
+        tags = [tags]
+    out = []
+    for tag in tags:
+        rendered = _head_tag_html(tag)
+        if rendered:
+            out.append(rendered)
+    return out
+
+
+def add_head(*tags: Any) -> None:
+    """
+    Add tags to the `<head>` of every page of the web console (and of the documents of
+    page-contract pages): meta tags, stylesheets, scripts, fonts, a web app manifest...
+
+    Each tag is an HTML string, a dictionary (`{'tag': 'meta', 'name': 'theme-color',
+    'content': '#222'}`; the text of a `script` or `style` goes under `children`) or a Dash
+    component (`html.Link(rel='stylesheet', href='...')`). Call it at the top level of your plugin
+    (it applies when the console starts); `@web_page(head=[...])` adds tags to one page only.
+
+    Examples
+    --------
+    >>> from meerschaum.plugins import add_head
+    >>> add_head(
+    ...     '<meta name="theme-color" content="#222222">',
+    ...     {'tag': 'link', 'rel': 'preconnect', 'href': 'https://fonts.gstatic.com'},
+    ... )
+    """
+    rendered = _head_tags_html(list(tags))
+    if not rendered:
+        return
+    plugin_name = _get_parent_plugin()
+    with _locks['_console_head']:
+        existing = _console_head.setdefault(plugin_name, [])
+        for tag in rendered:
+            if tag not in existing:
+                existing.append(tag)
+
+
+def get_console_head() -> List[str]:
+    """
+    Return the HTML of every tag added with `add_head()`, in the order the plugins added them.
+    """
+    with _locks['_console_head']:
+        return [tag for tags in _console_head.values() for tag in tags]
+
+
 _plugin_endpoints_to_pages = {}
 _plugins_web_pages = {}
 def web_page(
@@ -245,7 +498,9 @@ def web_page(
     login_required: bool = True,
     skip_navbar: bool = False,
     page_group: Optional[str] = None,
-    dark_theme: bool = True,
+    dark_theme: Optional[bool] = None,
+    theme: Optional[str] = None,
+    head: Optional[List[Any]] = None,
     **kwargs
 ) -> Any:
     """
@@ -253,13 +508,43 @@ def web_page(
 
     Parameters
     ----------
-    dark_theme: bool, default True
-        If `True`, apply the Web Console's `dbc_dark` component theme to this page
-        (the default — most plugins want this). Set to `False` to opt out: the
-        `dbc_dark` class is removed from `<body>` while this page is active, so a
-        plugin's own styling applies without competing with the theme's overrides.
-        Note the global base Bootstrap theme (dark background) still applies, so an
-        opted-out page should paint its own background.
+    page: Union[str, None, Callable[[Any], Any]], default None
+        The page's path in the console (`'foo/bar'` is served at `/dash/foo/bar`; sub-paths
+        such as `/dash/foo/bar/1` route to it too). Defaults to the function's name.
+
+    login_required: bool, default True
+        If `True`, visitors without a console session see the login page instead.
+        A public page (`login_required=False`) runs its callbacks for anonymous visitors only if
+        they are public too: register them with `@web_callback(..., public=True)` or inside a
+        `@dash_plugin(public=True)` function.
+
+    skip_navbar: bool, default False
+        If `True`, the console's navigation bar is not added above the page.
+
+    navbar: bool, default False
+        If `True`, the page gets the console's top navigation (its pages, the instance selector
+        and the user menu). By default a plugin's page keeps its own layout under a plain bar
+        (the logo, a link to the Overview, and Sign out).
+
+    page_group: Optional[str], default None
+        The group the page is listed under (defaults to the plugin's name).
+
+    dark_theme: Optional[bool], default None
+        Whether the `dbc_dark` component overrides apply to this page. By default they do for the
+        console's dark theme and do not for `theme='light'` or a custom stylesheet.
+        `dark_theme=False` without a `theme` gives the light theme, as before.
+
+    theme: Optional[str], default None
+        The Bootstrap theme of this page: `'dark'` (the console's theme, the default), `'light'`,
+        or the URL of a Bootstrap stylesheet (for example `dash_bootstrap_components.themes.LUX`,
+        or a file you serve with `meerschaum.api.mount_static`). Exactly one theme stylesheet
+        applies while the page is open, and the console's theme returns on other pages.
+
+    head: Optional[List[Any]], default None
+        Tags to add to the page's `<head>` while it is open: HTML strings, dictionaries
+        (`{'tag': 'link', 'rel': 'stylesheet', 'href': '...'}`) or Dash components
+        (`html.Script(src='...')`). Stylesheets and meta tags apply only while the page is open;
+        a script runs once, the first time the page opens. `add_head()` adds tags to every page.
 
     Examples
     --------
@@ -271,8 +556,28 @@ def web_page(
     >>> def foo_bar():
     ...     return html.Div([html.H1("Hello, World!")])
     >>>
+    >>> @web_page('reports', theme='light', head=['<meta name="robots" content="noindex">'])
+    >>> def reports():
+    ...     return html.Div([html.H1("Reports")])
+    >>>
     """
     page_str = None
+    theme_kind, theme_url = _normalize_theme(theme)
+    if theme_kind in ('dark', 'light'):
+        if dark_theme is not None and dark_theme != (theme_kind == 'dark'):
+            from meerschaum.utils.warnings import warn
+            warn(
+                f"`@web_page(theme={theme!r}, dark_theme={dark_theme})`: "
+                f"the {theme_kind} theme applies.",
+                stack=False,
+            )
+        resolved_dark = theme_kind == 'dark'
+    elif theme_kind == 'url':
+        resolved_dark = bool(dark_theme) if dark_theme is not None else False
+    else:
+        resolved_dark = True if dark_theme is None else bool(dark_theme)
+    resolved_theme = theme_url if theme_kind == 'url' else ('dark' if resolved_dark else 'light')
+    head_tags = _head_tags_html(head)
 
     def _decorator(_func: Callable[[Any], Any]) -> Callable[[Any], Any]:
         nonlocal page_str, page_group
@@ -298,7 +603,7 @@ def web_page(
                 ]
             )
         )
- 
+
         plugin_name = _get_parent_plugin(function=_func)
         page_group = page_group or plugin_name
         if page_group not in _plugin_endpoints_to_pages:
@@ -307,8 +612,12 @@ def web_page(
             'function': _func,
             'login_required': login_required,
             'skip_navbar': skip_navbar,
+            ### The console's top navigation instead of the plain bar (`build_plugin_navbar`).
+            'navbar': bool(kwargs.get('navbar', False)),
             'page_key': page_key,
-            'dark_theme': dark_theme,
+            'dark_theme': resolved_dark,
+            'theme': resolved_theme,
+            'head': list(head_tags),
         }
         if plugin_name not in _plugins_web_pages:
             _plugins_web_pages[plugin_name] = []
@@ -325,21 +634,275 @@ def web_page(
     return decorator_to_return
 
 
-_dash_plugins = {}
-def dash_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
+### Dash callbacks are public (served without a console session) when their function carries this
+### attribute: `@web_callback(..., public=True)`, the callbacks a `@dash_plugin(public=True)` function
+### registers, and the console's login and registration callbacks. The API host's guard
+### (`meerschaum.api.host._callbacks`) follows `__wrapped__` from the function Dash calls.
+_PUBLIC_CALLBACK_ATTR: str = '_mrsm_public_callback'
+
+
+def _mark_public_callback(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
     """
-    Execute the function when starting the Dash application.
+    Mark a Dash callback function as public and return it.
     """
-    with _locks['_dash_plugins']:
-        plugin_name = _get_parent_plugin(function=function)
+    for target in (func, getattr(func, '__func__', None)):
+        if target is None:
+            continue
         try:
+            setattr(target, _PUBLIC_CALLBACK_ATTR, True)
+            return func
+        except (AttributeError, TypeError):
+            continue
+    from meerschaum.utils.warnings import warn
+    warn(f"Could not mark the callback {func!r} as public.", stack=False)
+    return func
+
+
+def _is_public_callback(func: Any) -> bool:
+    """
+    Return whether the function Dash calls for a callback (or one it wraps) is marked public.
+    """
+    for _ in range(32):
+        if func is None:
+            return False
+        if getattr(func, _PUBLIC_CALLBACK_ATTR, False) is True:
+            return True
+        func = getattr(func, '__wrapped__', None) or getattr(func, '__func__', None)
+    return False
+
+
+def _built_dash_app() -> Any:
+    """
+    Return the console's Dash app if this process built it (never builds it).
+    """
+    import sys
+    module = sys.modules.get('meerschaum.api.dash', None)
+    if module is None:
+        return None
+    return module.__dict__.get('dash_app', None)
+
+
+def _callback_registrations(dash_app: Any) -> Dict[str, Any]:
+    """
+    Snapshot the places a Dash callback can be registered in: the app's callback map, the
+    `dash_extensions` blueprint of a `DashProxy` app, and the global `dash.callback` and
+    `dash_extensions.enrich.callback` registries.
+    """
+    import sys
+    dash_callback = sys.modules.get('dash._callback', None)
+    enrich = sys.modules.get('dash_extensions.enrich', None)
+    blueprint = getattr(dash_app, 'blueprint', None)
+    global_blueprint = getattr(enrich, 'GLOBAL_BLUEPRINT', None)
+    return {
+        'map': dict(getattr(dash_app, 'callback_map', None) or {}),
+        'global_map': dict(getattr(dash_callback, 'GLOBAL_CALLBACK_MAP', None) or {}),
+        'blueprint': list(getattr(blueprint, 'callbacks', None) or []),
+        'global_blueprint': list(getattr(global_blueprint, 'callbacks', None) or []),
+    }
+
+
+@contextlib.contextmanager
+def _registering_public_callbacks(dash_app: Any):
+    """
+    Mark every Dash callback registered inside this block public (whichever way it was
+    registered: `dash_app.callback`, `dash.callback` or `dash_extensions.enrich.callback`).
+    """
+    before = _callback_registrations(dash_app)
+    try:
+        yield
+    finally:
+        after = _callback_registrations(dash_app)
+        functions = []
+        for key in ('blueprint', 'global_blueprint'):
+            known = {id(item) for item in before[key]}
+            functions.extend(
+                getattr(item, 'f', None) for item in after[key] if id(item) not in known
+            )
+        for key in ('map', 'global_map'):
+            functions.extend(
+                (spec or {}).get('callback', None)
+                for callback_id, spec in after[key].items()
+                if callback_id not in before[key]
+            )
+        for func in functions:
+            if callable(func):
+                _mark_public_callback(func)
+
+
+_dash_plugins = {}
+def dash_plugin(
+    function: Optional[Callable[[Any], Any]] = None,
+    *,
+    public: bool = False,
+) -> Callable[[Any], Any]:
+    """
+    Execute the function when starting the Dash application (the web console), with the console's
+    `dash_app` as its argument: register your callbacks in it with `@dash_app.callback(...)`.
+
+    Parameters
+    ----------
+    public: bool, default False
+        Every callback the function registers runs without a console session. By default a
+        callback answers only signed-in visitors (`api:dash:callbacks_require_session`); make
+        callbacks public only for pages anyone may use (`@web_page(login_required=False)`), and
+        use `@web_callback(..., public=True)` to choose callbacks one at a time.
+
+    Examples
+    --------
+    >>> from meerschaum.plugins import dash_plugin
+    >>>
+    >>> @dash_plugin(public=True)
+    ... def init_dash(dash_app):
+    ...     from dash import Input, Output
+    ...     @dash_app.callback(Output('greeting', 'children'), Input('name', 'value'))
+    ...     def greet(name):
+    ...         return f"Hello, {name}!"
+    """
+    def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
+        registered = func
+        if public:
+            @functools.wraps(func)
+            def _public_dash_plugin(dash_app, *args, **kwargs):
+                with _registering_public_callbacks(dash_app):
+                    return func(dash_app, *args, **kwargs)
+            registered = _public_dash_plugin
+
+        with _locks['_dash_plugins']:
+            plugin_name = _get_parent_plugin(function=func)
+            try:
+                if plugin_name not in _dash_plugins:
+                    _dash_plugins[plugin_name] = []
+                _dash_plugins[plugin_name].append(registered)
+            except Exception as e:
+                from meerschaum.utils.warnings import warn
+                warn(e)
+        return func
+
+    if function is not None:
+        if not callable(function):
+            raise TypeError("`@dash_plugin` decorates a function.")
+        return _decorator(function)
+    return _decorator
+
+
+def _dash_dependencies(kind: str, specs: Any) -> List[Any]:
+    """
+    Return Dash dependencies for `web_callback(output=..., inputs=..., state=...)`: each spec is an
+    `'id.property'` string, an `(id, property)` tuple or a Dash dependency (kept as is).
+    """
+    from dash.dependencies import Input, Output, State
+    dependency_class = {'output': Output, 'inputs': Input, 'state': State}[kind]
+    if isinstance(specs, (str, tuple)):
+        specs = [specs]
+    out = []
+    for spec in specs:
+        if isinstance(spec, str):
+            component_id, dot, prop = spec.strip().rpartition('.')
+            if not dot or not component_id or not prop:
+                raise ValueError(
+                    f"`@web_callback({kind}=...)` takes 'component-id.property' strings, not {spec!r}."
+                )
+            out.append(dependency_class(component_id, prop))
+        elif isinstance(spec, tuple) and len(spec) == 2:
+            out.append(dependency_class(*spec))
+        else:
+            out.append(spec)
+    return out
+
+
+def web_callback(
+    *args: Any,
+    public: bool = False,
+    output: Any = None,
+    inputs: Any = None,
+    state: Any = None,
+    **kwargs: Any
+) -> Callable[[Any], Any]:
+    """
+    Register a Dash callback on the web console: `@web_callback(...)` takes what
+    `@dash_app.callback(...)` takes (outputs, inputs, states, `prevent_initial_call`, ...),
+    at the top level of your plugin, without a `@dash_plugin` function.
+
+    Parameters
+    ----------
+    public: bool, default False
+        If `True`, the callback runs for visitors without a console session (for a page with
+        `@web_page(login_required=False)`). Otherwise the console answers it only for signed-in
+        visitors and sends the others to the login page.
+
+    output: Union[str, List[str], None], default None
+        The outputs as `'component-id.property'` strings (instead of `Output(...)` arguments), so
+        your plugin need not import Dash: it is imported when the console starts.
+
+    inputs: Union[str, List[str], None], default None
+        The inputs, likewise (`'my-button.n_clicks'`).
+
+    state: Union[str, List[str], None], default None
+        The states, likewise (`'session-store.data'`).
+
+    Examples
+    --------
+    >>> from meerschaum.plugins import web_page, web_callback
+    >>>
+    >>> @web_callback(output='visits.children', inputs='visit-button.n_clicks', public=True)
+    ... def count_visits(n_clicks):
+    ...     return f"{n_clicks or 0} visits"
+    >>>
+    >>> from dash import Input, Output
+    >>> @web_callback(Output('clock', 'children'), Input('tick', 'n_intervals'))
+    ... def clock(n_intervals):
+    ...     return str(n_intervals)
+    """
+    if (
+        len(args) == 1 and not kwargs and output is None and inputs is None and state is None
+        and callable(args[0]) and not hasattr(args[0], 'component_id')
+    ):
+        raise TypeError(
+            "`@web_callback` takes the callback's outputs and inputs, e.g. "
+            "`@web_callback(output='out.children', inputs='button.n_clicks')`."
+        )
+
+    def _arguments() -> Tuple[List[Any], Dict[str, Any]]:
+        """The positional and keyword arguments for `dash_app.callback` (Dash imported now)."""
+        dependencies = list(args)
+        flexible = dict(kwargs)
+        for kind, specs in (('output', output), ('inputs', inputs), ('state', state)):
+            if specs is None:
+                continue
+            if isinstance(specs, dict):
+                flexible[kind] = specs
+                continue
+            dependencies.extend(_dash_dependencies(kind, specs))
+        return dependencies, flexible
+
+    def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
+        if public:
+            _mark_public_callback(func)
+        dash_app = _built_dash_app()
+        if dash_app is not None:
+            dependencies, flexible = _arguments()
+            dash_app.callback(*dependencies, **flexible)(func)
+            return func
+
+        ### The console is built later (by the API host): register the callback then, as the
+        ### `@dash_plugin` functions are.
+        def _register(app):
+            dependencies, flexible = _arguments()
+            app.callback(*dependencies, **flexible)(func)
+
+        for attr in ('__module__', '__name__', '__qualname__', '__doc__'):
+            try:
+                setattr(_register, attr, getattr(func, attr))
+            except (AttributeError, TypeError):
+                pass
+        with _locks['_dash_plugins']:
+            plugin_name = _get_parent_plugin(function=func)
             if plugin_name not in _dash_plugins:
                 _dash_plugins[plugin_name] = []
-            _dash_plugins[plugin_name].append(function)
-        except Exception as e:
-            from meerschaum.utils.warnings import warn
-            warn(e)
-    return function
+            _dash_plugins[plugin_name].append(_register)
+        return func
+
+    return _decorator
 
 
 def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
@@ -557,9 +1120,14 @@ def import_plugins(
     import importlib
     import meerschaum.config.paths as paths
     from meerschaum.utils.misc import flatten_list
-    from meerschaum.utils.venv import is_venv_active, activate_venv, deactivate_venv, Venv
+    from meerschaum.utils.venv import (
+        is_venv_active, activate_venv, deactivate_venv, Venv, ensure_default_venvs,
+    )
     from meerschaum.utils.warnings import warn as _warn
     plugins_to_import = list(plugins_to_import)
+    ### PARITY: v4 had already activated the shared 'mrsm' venv (`attempt_import`) before the first
+    ### plugin was imported, so plugin code with its own `required` venv still saw it.
+    ensure_default_venvs()
     prepended_sys_path = False
     with _locks['sys.path']:
 
@@ -584,7 +1152,8 @@ def import_plugins(
             for plugin_name in plugins_names:
                 activate_venv(plugin_name)
             try:
-                imported_plugins = importlib.import_module(paths.PLUGINS_RESOURCES_PATH.stem)
+                with plugin_import_guard():
+                    imported_plugins = importlib.import_module(paths.PLUGINS_RESOURCES_PATH.stem)
             except ImportError as e:
                 _warn(f"Failed to import the plugins module:\n    {e}")
                 import traceback
@@ -600,7 +1169,7 @@ def import_plugins(
             for plugin_name in flatten_list(plugins_to_import):
                 plugin = Plugin(plugin_name)
                 try:
-                    with Venv(plugin, init_if_not_exists=False):
+                    with Venv(plugin, init_if_not_exists=False), plugin_import_guard():
                         imported_plugins.append(
                             importlib.import_module(
                                 f'{paths.PLUGINS_RESOURCES_PATH.stem}.{plugin_name}'
@@ -614,8 +1183,8 @@ def import_plugins(
                         + f"{e}\n\nHere's a stacktrace:",
                         stack = False,
                     )
-                    from meerschaum.utils.formatting import get_console
-                    get_console().print_exception(
+                    from meerschaum.utils.formatting import print_exception
+                    print_exception(
                         suppress = [
                             'meerschaum/plugins/__init__.py',
                             importlib,
@@ -707,15 +1276,16 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
             raise ImportError(f"Unable to import plugin '{plugin}'.")
 
         try:
-            submodule = importlib.import_module(submodule_import_name)
+            with plugin_import_guard():
+                submodule = importlib.import_module(submodule_import_name)
         except ImportError as e:
             _warn(
                 f"Failed to import plugin '{submodule_import_name}':\n    "
                 + f"{e}\n\nHere's a stacktrace:",
                 stack=False,
             )
-            from meerschaum.utils.formatting import get_console
-            get_console().print_exception(
+            from meerschaum.utils.formatting import print_exception
+            print_exception(
                 suppress=[
                     'meerschaum/plugins/__init__.py',
                     importlib,
@@ -750,12 +1320,13 @@ def load_plugins(
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
 
-    _plugins_names, plugins_modules = get_modules_from_package(
-        import_plugins(),
-        names = True,
-        recursive = True,
-        modules_venvs = True
-    )
+    with plugin_import_guard():
+        _plugins_names, plugins_modules = get_modules_from_package(
+            import_plugins(),
+            names = True,
+            recursive = True,
+            modules_venvs = True
+        )
 
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
@@ -796,27 +1367,18 @@ def unload_custom_actions(plugins: Optional[List[str]] = None, debug: bool = Fal
         _custom_actions_plugins,
         _plugins_actions,
     )
-    from meerschaum._internal.entry import _shell
-    import meerschaum._internal.shell as shell_pkg
 
     plugins = plugins if plugins is not None else list(_plugins_actions)
 
     for plugin in plugins:
         action_names = _plugins_actions.get(plugin, [])
-        actions_to_remove = {
-            action_name: actions.get(action_name, None)
-            for action_name in action_names
-        }
         for action_name in action_names:
             _ = actions.pop(action_name, None)
             _ = _custom_actions_plugins.pop(action_name, None)
             _ = _actions_daemon_enabled.pop(action_name, None)
+            _ = _action_words.pop(action_name, None)
 
         _ = _plugins_actions.pop(plugin, None)
-        shell_pkg._remove_shell_actions(
-            _shell=_shell,
-            actions=actions_to_remove,
-        )
     
 
 def unload_plugins(
@@ -878,6 +1440,8 @@ def unload_plugins(
         ### Unload API endpoints and pages.
         _ = _dash_plugins.pop(plugin_name, None)
         _ = _api_plugins.pop(plugin_name, None)
+        with _locks['_console_head']:
+            _ = _console_head.pop(plugin_name, None)
         web_page_funcs = _plugins_web_pages.pop(plugin_name, None) or []
         page_groups_to_pop = []
         for page_group, page_functions in _plugin_endpoints_to_pages.items():

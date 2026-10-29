@@ -1,0 +1,8 @@
+{
+  "description": "Lint targets: an unknown top-level key, a missing plugins_dir entry, a stale {{ Pipe() }} reference, dtype:/tag: typos, string-typed tags.",
+  "width": 120,
+  "runs": [
+    {"name": "explain", "action": ["explain"]},
+    {"name": "explain-narrow", "action": ["explain"], "width": 80}
+  ]
+}

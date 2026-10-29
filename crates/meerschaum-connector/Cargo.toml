@@ -1,0 +1,37 @@
+[package]
+name = "meerschaum-connector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the Connector and InstanceConnector traits shared by every instance connector and the engine"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-connector"
+keywords = ["meerschaum", "etl", "pipelines", "connector", "database"]
+categories = ["database", "asynchronous"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# The sync status recorder (`sync_status`): its time bound, debounce timer and per-pipe write lock.
+tokio = { workspace = true }
+# Object-safe async traits (`Arc<dyn InstanceConnector>`); re-exported as
+# `meerschaum_connector::async_trait` so implementors need no direct dependency.
+async-trait = "0.1"
+
+[features]
+# `meerschaum_connector::testing`: the access-model checks every instance crate's tests run.
+testing = []

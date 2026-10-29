@@ -1,0 +1,314 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+
+"""
+The worker loop: connect to the host's socket, say hello, and serve calls one at a time.
+
+A reader thread demultiplexes incoming messages: `call` messages are queued for the main thread,
+`cb_result` messages wake the thread waiting on that callback (plugin code may call `pipe.sync()`
+from any thread, e.g. an MQTT client's network thread), and `shutdown` ends the loop. Writes are
+serialized by a lock so callbacks from other threads never interleave with a response.
+
+When the host goes away the worker exits with `os._exit()` so stray plugin threads cannot keep
+the process alive, after `release_multiprocessing()` has run the `multiprocessing` exit work
+(named semaphores, pools) that `os._exit()` would skip.
+"""
+
+from __future__ import annotations
+
+import itertools
+import os
+import queue
+import socket
+import sys
+import threading
+import traceback
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from meerschaum.worker import PROTOCOL_VERSION
+from meerschaum.worker._frames import encode_message, read_message
+
+Handler = Callable[['Connection', int, Dict[str, Any], List[bytes]], Tuple[Any, List[bytes]]]
+
+
+class WorkerCallError(Exception):
+    """Raised inside the worker when the host answers a callback with an error."""
+
+
+class _Slot:
+    __slots__ = ('event', 'value', 'error', 'frames')
+
+    def __init__(self):
+        self.event = threading.Event()
+        self.value = None
+        self.error = None
+        self.frames: List[bytes] = []
+
+
+class Connection:
+    """One connection to the host."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.write_lock = threading.Lock()
+        self.calls: 'queue.Queue[Optional[Tuple[Dict[str, Any], List[bytes]]]]' = queue.Queue()
+        self.pending: Dict[int, _Slot] = {}
+        self.pending_lock = threading.Lock()
+        self.cb_ids = itertools.count(1)
+        self.current_call_id: int = 0
+        self.closed = threading.Event()
+
+    def send(self, message: Dict[str, Any], frames: List[bytes] = ()) -> None:
+        """Send a control message followed by its data frames."""
+        data = encode_message(message, list(frames))
+        with self.write_lock:
+            self.stream.write(data)
+            self.stream.flush()
+
+    def reader(self) -> None:
+        """Read messages until the host disconnects."""
+        try:
+            while True:
+                message, frames = read_message(self.stream)
+                t = message.get('t', None)
+                if t == 'call':
+                    self.calls.put((message, frames))
+                elif t == 'cb_result':
+                    with self.pending_lock:
+                        slot = self.pending.pop(int(message.get('cb', 0)), None)
+                    if slot is not None:
+                        slot.value = message.get('value', None)
+                        slot.error = message.get('error', None)
+                        slot.frames = frames
+                        slot.event.set()
+                elif t == 'shutdown':
+                    break
+        except EOFError:
+            pass
+        except Exception:
+            traceback.print_exc()
+        finally:
+            self.closed.set()
+            with self.pending_lock:
+                for slot in self.pending.values():
+                    slot.error = "The host closed the connection."
+                    slot.event.set()
+                self.pending.clear()
+            self.calls.put(None)
+
+    def callback(
+        self,
+        op: str,
+        args: Dict[str, Any],
+        frames: List[bytes] = (),
+    ) -> Tuple[Any, List[bytes]]:
+        """Ask the host to run `op` (e.g. `sync`) and wait for its answer."""
+        if self.closed.is_set():
+            raise WorkerCallError("The host closed the connection.")
+        cb_id = next(self.cb_ids)
+        slot = _Slot()
+        with self.pending_lock:
+            self.pending[cb_id] = slot
+        self.send(
+            {'t': 'callback', 'id': self.current_call_id, 'cb': cb_id, 'op': op, 'args': args},
+            frames,
+        )
+        slot.event.wait()
+        if slot.error is not None:
+            raise WorkerCallError(str(slot.error))
+        return slot.value, slot.frames
+
+
+_DEFINED_CONNECTORS: Dict[str, Any] = {}
+
+
+def _define_connectors(defined: Optional[Dict[str, Dict[str, Any]]]) -> None:
+    """
+    Build the connectors the host defined (`mrsm.get_connector('sql', 'x', flavor='sqlite', ...)`
+    in the host process: attributes that are in no config file) so that the keys the host sends
+    (`sql:x`, a pipe's `instance_keys`) resolve in this worker too. Idempotent: a connector is
+    built again only when its attributes changed.
+    """
+    if not defined or not isinstance(defined, dict):
+        return
+    import meerschaum as mrsm
+    for keys, attributes in defined.items():
+        if not isinstance(attributes, dict) or ':' not in str(keys):
+            continue
+        if _DEFINED_CONNECTORS.get(keys, None) == attributes:
+            continue
+        typ, label = str(keys).split(':', maxsplit=1)
+        try:
+            mrsm.get_connector(typ, label, **{str(k): v for k, v in attributes.items()})
+        except Exception:
+            traceback.print_exc()
+            continue
+        _DEFINED_CONNECTORS[keys] = attributes
+
+
+def _connect(address: str):
+    if address.startswith('\\\\.\\pipe\\'):
+        ### Windows named pipe: the host created it; open it like a file.
+        return open(address, 'r+b', buffering=0)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(address)
+    return sock.makefile('rwb', buffering=1024 * 1024)
+
+
+def serve(address: str) -> int:
+    """Connect to the host at `address` and serve calls until shutdown."""
+    import platform
+    stream = _connect(address)
+    conn = Connection(stream)
+    import signal
+    interruptible = False
+
+    def interrupt_active_call(signum, frame):
+        # The Rust host owns terminal cancellation. Idle workers share its process group
+        # and must survive SIGINT, including during handshake and between protocol writes.
+        if interruptible:
+            raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, interrupt_active_call)
+
+    import meerschaum as mrsm
+    from meerschaum.worker import _ops
+    from meerschaum.worker._ops import HANDLERS, error_message
+    from meerschaum.worker._msgpack import USING_FALLBACK
+    from meerschaum.utils.venv import ensure_default_venvs
+
+    conn.send({
+        't': 'hello',
+        'protocol': PROTOCOL_VERSION,
+        'pid': os.getpid(),
+        'python': platform.python_version(),
+        'meerschaum': mrsm.__version__,
+        'msgpack': ('stdlib' if USING_FALLBACK else 'msgpack'),
+    })
+
+    reader = threading.Thread(target=conn.reader, name='mrsm-worker-reader', daemon=True)
+    reader.start()
+
+    while True:
+        item = conn.calls.get()
+        if item is None:
+            break
+        message, frames = item
+        call_id = int(message.get('id', 0))
+        op = message.get('op', None)
+        args = message.get('args', None) or {}
+        conn.current_call_id = call_id
+        handler = HANDLERS.get(op, None)
+        if handler is None:
+            conn.send({
+                't': 'error',
+                'id': call_id,
+                'kind': 'BadRequest',
+                'message': f"Unknown worker operation '{op}'.",
+                'traceback': None,
+            })
+            continue
+        if op == 'shutdown':
+            conn.send({'t': 'result', 'id': call_id, 'value': True})
+            break
+        allow_protected = bool(message.get('allow_protected', False))
+        try:
+            try:
+                interruptible = True
+                _ops.CALL_DEBUG = bool(message.get('debug', False))
+                if allow_protected:
+                    _allow_protected(True)
+                ### v4 plugin code always saw the shared `mrsm` venv (see `ensure_default_venvs`);
+                ### a previous call may have deactivated it (`op_action` ends by deactivating
+                ### every venv, as v4's `entry_with_args()` does before the process exits).
+                ensure_default_venvs()
+                _define_connectors(args.get('connector_attributes', None))
+                value, out_frames = handler(conn, call_id, args, frames)
+            finally:
+                interruptible = False
+                _ops.CALL_DEBUG = False
+                if allow_protected:
+                    _allow_protected(False)
+            conn.send({'t': 'result', 'id': call_id, 'value': value}, out_frames)
+        except (Exception, KeyboardInterrupt) as e:
+            try:
+                conn.send(error_message(call_id, e))
+            except Exception:
+                break
+        finally:
+            conn.current_call_id = 0
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+    try:
+        release_multiprocessing()
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(0)
+    return 0
+
+
+def _allow_protected(enter: bool) -> None:
+    """
+    Enter (or leave) the host's `--allow-protected` allowance for one call: the plugin code
+    the call runs may write to protected connectors.
+    """
+    from meerschaum import _core
+    if enter:
+        _core.allow_protected_enter()
+    else:
+        _core.allow_protected_exit()
+
+
+def release_multiprocessing(timeout: float = 1.5) -> None:
+    """
+    Run what `multiprocessing` runs at a normal interpreter exit, which `os._exit()` skips.
+
+    Where the default start method is not `fork` (`forkserver` on Linux since Python 3.14, `spawn`
+    on macOS), every `multiprocessing` lock is a *named* POSIX semaphore registered with the
+    resource tracker and unlinked by a `util.Finalize` at exit; that includes the `SimpleQueue`
+    that `multiprocessing.pool.Pool.__init__` builds even for a `ThreadPool` (e.g. the pool
+    `SQLConnector.read()` takes from `meerschaum.utils.pool.get_pool()`). Skipping those finalizers
+    makes the tracker print "There appear to be N leaked semaphore objects to clean up at
+    shutdown" after the worker exits; v4 exited through `sys.exit()` and printed nothing.
+
+    CPython's order is kept: the higher-priority finalizers first (pool teardown, priority 15),
+    then the semaphores (priority 0), then child processes and the rest. Pool teardown and the
+    rest run in a daemon thread and share `timeout` (well under the host's 5 s grace), so a
+    plugin thread or child that never returns still cannot keep the worker alive (the reason the
+    worker ends with `os._exit`); the semaphores are unlinked in any case (`sem_unlink` +
+    unregister never blocks, and a live lock keeps working on an unlinked name).
+    """
+    import time
+    mp_util = sys.modules.get('multiprocessing.util', None)
+    if mp_util is None:
+        return
+    deadline = time.monotonic() + max(timeout, 0.0)
+
+    def bounded(func: Optional[Callable[[], Any]]) -> None:
+        if func is None:
+            return
+        thread = threading.Thread(target=func, name='mrsm-worker-mp-exit', daemon=True)
+        try:
+            thread.start()
+            thread.join(max(deadline - time.monotonic(), 0.0))
+        except Exception:
+            pass
+
+    run_finalizers = getattr(mp_util, '_run_finalizers', None)
+    if run_finalizers is not None:
+        bounded(lambda: run_finalizers(1))
+
+    try:
+        from multiprocessing.synchronize import SemLock
+        cleanup = getattr(SemLock, '_cleanup', None)
+        registry = getattr(mp_util, '_finalizer_registry', None) or {}
+        for finalizer in list(registry.values()):
+            if cleanup is not None and getattr(finalizer, '_callback', None) is cleanup:
+                finalizer()
+    except Exception:
+        pass
+
+    bounded(getattr(mp_util, '_exit_function', None))

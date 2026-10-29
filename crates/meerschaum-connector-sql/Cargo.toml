@@ -1,0 +1,78 @@
+[package]
+name = "meerschaum-connector-sql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the SQL connector (PostgreSQL, MySQL, SQLite, MSSQL, DuckDB, Oracle) with per-flavor query builders"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-connector-sql"
+keywords = ["meerschaum", "sql", "etl", "postgres", "timeseries"]
+categories = ["database", "asynchronous"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[package.metadata.docs.rs]
+# The default features (`mssql`, `duckdb`); `oracle` needs a client library. Stated explicitly so a
+# later change of the defaults cannot pull `oracle` in.
+features = ["mssql", "duckdb"]
+
+[features]
+default = ["mssql", "duckdb"]
+# The non-`sqlx` drivers (D13). `mssql` (pure Rust, `tiberius` + rustls) is on by default.
+# `duckdb` loads DuckDB's own shared library at run time (nothing of DuckDB is compiled in): the
+# feature only adds the downloader (`zip`, `fs4`, `reqwest`), so it is on by default.
+# `oracle` needs Oracle Instant Client at runtime (as v4's thick mode did): opt-in.
+mssql = ["dep:tiberius", "dep:tokio-util", "dep:aws-lc-sys"]
+oracle = ["dep:oracle"]
+duckdb = ["dep:zip", "dep:fs4", "dep:reqwest", "dep:aws-lc-sys"]
+
+[dependencies]
+sha2 = { workspace = true }
+hex = { workspace = true }
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+arrow = { workspace = true }
+sqlx = { workspace = true }
+# Crate-private: stream combinators for the Arrow record-batch stream.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+async-trait = "0.1"
+# The same `libsqlite3-sys` sqlx links, for registering the GeoPackage SQL functions.
+libsqlite3-sys = { version = "0.37", default-features = false }
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono", "rust_decimal"], optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
+# `dlopen` (the DuckDB library, the Oracle client probe) and, behind the `duckdb` feature, the checked
+# download of the official DuckDB library.
+libloading = "0.9"
+zip = { version = "9", default-features = false, features = ["deflate"], optional = true }
+fs4 = { version = "1.1", optional = true }
+# reqwest 0.13 verifies certificates against the operating system's trust store (rustls-platform-verifier),
+# so the installer works behind a TLS-intercepting corporate proxy whose CA is installed system-wide.
+reqwest = { workspace = true, optional = true }
+oracle = { version = "0.6", features = ["chrono"], optional = true }
+
+# aws-lc-rs (tiberius, reqwest) assembles with NASM on Windows x86_64; the prebuilt objects make the
+# build need no extra tool (a NASM on the PATH is still preferred). Keep this minor equal to the
+# `aws-lc-sys` in Cargo.lock (one aws-lc-sys per tree): bump it together with `aws-lc-rs`.
+[target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
+aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"], optional = true }
+
+[dev-dependencies]
+meerschaum-connector = { workspace = true, features = ["testing"] }
+tempfile = "3"
+filetime = "0.2"
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }

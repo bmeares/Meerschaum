@@ -1,0 +1,4 @@
+
+Drop and resync pipes.
+Equivalent to `drop pipes + sync pipes`.
+

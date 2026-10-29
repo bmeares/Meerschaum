@@ -46,6 +46,12 @@ def delete(
             + "You may want to call `pipe.drop()` instead."
         )
 
+    ### Deleting drops the table first: a `drop` or `delete` lock refuses it before anything
+    ### changes, whatever the instance.
+    refusal = self._lock_refusal('delete_and_drop' if drop else 'delete', always=True, debug=debug)
+    if refusal:
+        return False, refusal
+
     if drop:
         drop_success, drop_msg = self.drop(debug=debug)
         if not drop_success:
@@ -60,5 +66,7 @@ def delete(
     if result[0]:
         self._invalidate_cache(hard=True, debug=debug)
         self._clear_cache_key('_id', debug=debug)
+        from meerschaum.core.Pipeline._engine import forget_engine_state
+        forget_engine_state(self, 'delete_pipe')
 
     return result

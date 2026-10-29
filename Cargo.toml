@@ -1,0 +1,153 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/meerschaum",
+    "crates/meerschaum-core",
+    "crates/meerschaum-kernel",
+    "crates/meerschaum-connector",
+    "crates/meerschaum-connector-sql",
+    "crates/meerschaum-connector-valkey",
+    "crates/meerschaum-connector-api",
+    "crates/meerschaum-engine",
+    "crates/meerschaum-jobs",
+    "crates/meerschaum-compose",
+    "crates/meerschaum-server",
+    "crates/meerschaum-web",
+    "crates/meerschaum-plugin",
+    "crates/meerschaum-cli",
+    "crates/meerschaum-py",
+    "crates/meerschaum-worker",
+]
+
+[workspace.package]
+version = "5.0.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/bmeares/Meerschaum"
+homepage = "https://meerschaum.io"
+authors = ["Bennett Meares <bennett.meares@gmail.com>"]
+# The highest `rust_version` of any resolved registry/git package (`cargo metadata`, all platforms):
+# reedline 0.52 and sysinfo 0.39 need 1.95, sqlx 0.9 needs 1.94. Recompute after dependency upgrades.
+rust-version = "1.95"
+
+# Shared dependency versions. Crates opt in with `foo = { workspace = true }`.
+# Add new shared entries here only when two or more crates need the same dependency;
+# crate-private dependencies go in the crate's own Cargo.toml with an explicit version.
+[workspace.dependencies]
+# Workspace crates are versioned in lockstep: every `version = "=X"` below must equal
+# `[workspace.package] version` (scripts/check_packaging.py checks it; cargo cannot inherit it here).
+meerschaum-core = { path = "crates/meerschaum-core", version = "=5.0.0" }
+meerschaum-kernel = { path = "crates/meerschaum-kernel", version = "=5.0.0" }
+meerschaum-connector = { path = "crates/meerschaum-connector", version = "=5.0.0" }
+meerschaum-connector-sql = { path = "crates/meerschaum-connector-sql", version = "=5.0.0" }
+meerschaum-connector-valkey = { path = "crates/meerschaum-connector-valkey", version = "=5.0.0" }
+meerschaum-connector-api = { path = "crates/meerschaum-connector-api", version = "=5.0.0", default-features = false }
+meerschaum-engine = { path = "crates/meerschaum-engine", version = "=5.0.0" }
+meerschaum-jobs = { path = "crates/meerschaum-jobs", version = "=5.0.0" }
+meerschaum-compose = { path = "crates/meerschaum-compose", version = "=5.0.0" }
+meerschaum-server = { path = "crates/meerschaum-server", version = "=5.0.0" }
+meerschaum-web = { path = "crates/meerschaum-web", version = "=5.0.0" }
+meerschaum-plugin = { path = "crates/meerschaum-plugin", version = "=5.0.0" }
+meerschaum-worker = { path = "crates/meerschaum-worker", version = "=5.0.0" }
+# The CLI library: the front crate's `cli` feature (`cargo install meerschaum`) and `meerschaum-py`. Its features are chosen by the dependent.
+meerschaum-cli = { path = "crates/meerschaum-cli", version = "=5.0.0", default-features = false }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+# `preserve_order`: `static.toml` is compared key order included (toml 0.8 kept document order; 1.x sorts by default).
+toml = { version = "1", features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
+regex = "1"
+once_cell = "1"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+rust_decimal = { version = "1", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+# RustCrypto: every crate below sits on `digest` 0.11, so the workspace carries one digest stack.
+sha2 = "0.11"
+sha1 = "0.11"
+sha3 = "0.12"
+md-5 = "0.11"
+blake2 = "0.11"
+ripemd = "0.2"
+sm3 = "0.5"
+hmac = "0.13"
+pbkdf2 = { version = "0.13", default-features = false }
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# arrow, polars and pyo3 move together (crates/meerschaum-py/README.md "Dependency pins"): RecordBatches
+# cross between the kernel, the plugin ABI and the extension, and only one pyo3 can link libpython.
+# Arrow 60 needs Rust 1.88.
+arrow = "60"
+# Only the Polars features a code path needs (17b, sizes in crates/meerschaum-py/PERF.md): the
+# kernel uses eager frames, IPC (its Arrow bridge), string and temporal kernels and time zones.
+polars = { version = "0.55", features = ["dtype-full", "ipc", "strings", "temporal", "timezones"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "system-proxy"] }
+clap = { version = "4", features = ["derive", "env", "string"] }
+# `extension-module` is a feature of meerschaum-py (maturin turns it on), so `cargo test` links libpython.
+pyo3 = { version = "0.30", features = ["abi3-py311"] }
+# The webterm PTY bridge (`meerschaum-server`): a PTY on Unix, ConPTY on Windows.
+portable-pty = "0.9"
+
+# sqlx 0.9.0 (2026-05-21) dropped `TCP_NODELAY` (upstream issue #4335, fixed by #4336 on main, not yet
+# released): every statement's `Close` + `Ping` pair then waits on Nagle / delayed ACK (~40 ms), so a
+# non-persistent statement keeps its pooled connection busy and the next acquire opens a new one
+# (MySQL: 152 connections vs 42 for the instance sync tests, `Too many connections`; PostgreSQL ~+10%).
+# Pinned to the fix commit, whose crates are still version 0.9.0. Delete this section once sqlx 0.9.1
+# (or later) is on crates.io and `cargo update -p sqlx` resolves to it.
+# Last checked 2026-10-19 (wave 18): crates.io's newest `sqlx` / `sqlx-core` is still 0.9.0 and upstream has no
+# `v0.9.1` tag (`git ls-remote --tags https://github.com/launchbadge/sqlx`), so the pin stays. 5.0.0 does not wait for 0.9.1
+# (user decision 2026-10-19): the PyPI wheels, Docker images and release binaries use this pin; crates.io builds
+# use plain 0.9.0 with the persistent-statement mitigation; a 5.0.x release drops the pin once 0.9.1 ships.
+[patch.crates-io]
+sqlx = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-core = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-macros = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-macros-core = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-mysql = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-postgres = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-sqlite = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+
+# Release profile, shared by the PyPI wheels (wheels.yaml), the Docker images and
+# `scripts/rust/build_py.sh --release`. Measured for the `mrsm` binary on the same tree (40-core
+# host; CPU-s is user time of `cargo build`, sync_1M is the native `mrsm sync pipes` of 1M rows
+# into SQLite, median of 15 runs):
+#
+#   profile                         binary    CPU-s   wall    sync_1M
+#   default (cgu 16, no LTO)        83.4 MB   3826    236 s   10.9 s
+#   lto = "thin"                    81.3 MB   3212    237 s   10.8 s
+#   lto = "thin", cgu = 1           65.3 MB   2765    460 s   10.5 s   <- this profile
+#   lto = "fat",  cgu = 1           58.5 MB   2209    688 s   10.8 s (2-9% slower on the small cases)
+#   thin, cgu = 1, opt-level = "s"  51.4 MB   1730    313 s   13.2 s (+20%: rejected)
+#
+# `mrsm --version` and `import meerschaum._core` start-up are unchanged (9.5 vs 10.2 ms). The wall
+# time doubles only on a many-core machine (the biggest crates then compile serially); the CPU time,
+# which is what a 4-vCPU CI runner pays, drops by 28%. The largest rustc peaks at ~6 GB (fat: 5 GB).
+# The smaller binaries are what let the `slim` image fit 200 MB (docs/design/v5.0.0.md §12.1).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# CI profile: a working build that is quick to produce, for the jobs that only need the code to run
+# (the pytest job's `_core` extension: `scripts/rust/build_py.sh --profile ci`). It inherits `release`
+# (no debug assertions or overflow checks, the same `panic` strategy, so the behavior the tests see is
+# the release behavior) and drops what makes a release build slow: no LTO, 256 codegen units, opt-level
+# 1. Never used for anything that ships: the wheels, the Docker images and the release binaries build
+# `--release` (tests/test_workflows_packaging.py enforces it). Artifacts go to `target/ci/`.
+[profile.ci]
+inherits = "release"
+opt-level = 1
+lto = false
+codegen-units = 256
+debug = "line-tables-only"
+incremental = false
+
+# Dependencies carry no debug info (Polars alone is ~1 GB per feature set with it), as in `[profile.dev]`.
+[profile.ci.package."*"]
+debug = false

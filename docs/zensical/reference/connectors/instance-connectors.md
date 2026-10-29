@@ -7,7 +7,7 @@ To use your custom connector type as an instance connector, inherit from `Instan
 !!! note "Implementing `get_pipe_data` or `get_pipe_docs`"
     For reading data from a pipe's target table, you may implement **either** [`get_pipe_data()`](#get_pipe_data) **or** [`get_pipe_docs()`](#get_pipe_docs):
 
-    - Implement `get_pipe_data()` to return a `pd.DataFrame` (recommended for SQL-based connectors).
+    - Implement `get_pipe_data()` to return a DataFrame (Polars or pandas; recommended for SQL-based connectors).
     - Implement `get_pipe_docs()` to return a `list[dict]` (recommended for document stores and connectors that produce JSON natively). This avoids DataFrame construction overhead when callers use [`Pipe.get_docs()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_docs) or `Pipe.get_data(as_docs=True)`.
 
     The default `get_pipe_data()` calls `get_pipe_docs()` and wraps the result in a DataFrame. The default `get_pipe_docs()` calls `get_pipe_data()` and converts to records. You only need to implement one.
@@ -40,7 +40,7 @@ To use your custom connector type as an instance connector, inherit from `Instan
     ])
     print(query_df(df, {'color': 'red'}))
     #           ts color
-    # 0 2024-01-01   red 
+    # 0 2024-01-01   red
     print(query_df(df, begin='2024-02-01', datetime_column='ts'))
     #                    ts  color
     # 1 2024-02-02 02:00:00   blue
@@ -52,16 +52,16 @@ To use your custom connector type as an instance connector, inherit from `Instan
     ```python
     >>> build_query({'a': 1})
     {'a': {'$eq': 1}}
-    >>> 
+    >>>
     >>> build_query({'a': '_b'})
     {'a': {'$ne': 'b'}}
-    >>> 
+    >>>
     >>> build_query({'a': ['c', '_d']})
     {'a': {'$eq': 'c', {'$neq': 'd'}}}
-    >>> 
+    >>>
     >>> build_query({'a': [1, 2, 3]})
     {'a': {'$nin': [1, 2, 3]}}
-    >>> 
+    >>>
     >>> build_query({'a': []})
     {}
     ```
@@ -74,9 +74,9 @@ The attributes row of a pipe includes the pipe's keys (immutable) and parameters
 
 - `connector_keys` (`str`)
 - `metric_key` (`str`)
-- `location_key` (`str | None`)  
+- `location_key` (`str | None`)
   You may store `"None"` in place of `None`.
-- `parameters` (`dict[str, Any]`)  
+- `parameters` (`dict[str, Any]`)
   You can access the in-memory parameters with `#!python pipe._attributes.get('parameters', {})`.
 
 ??? example "`#!python def register_pipe():`"
@@ -264,7 +264,7 @@ Returning the parameters lets Meerschaum hydrate every pipe in a single round-tr
 It also lets Meerschaum apply the `--targets` and `--datetime-dtypes` filters client-side (both are derived from `parameters`), so you only need to implement the `connector_keys`, `metric_keys`, `location_keys`, and `tags` filters here.
 
 !!! note "Legacy return values"
-    For backwards compatibility, you may also return a plain **list of tuples**, and tuples may be length 3 (omitting `parameters`). These forms are supported but lose the single-round-trip benefit above — prefer the dictionary form for new connectors.
+    For backwards compatibility, you may also return a plain **list of tuples**, and tuples may be length 3 (omitting `parameters`). These forms are supported but lose the single-round-trip benefit above, prefer the dictionary form for new connectors.
 
 ??? example "`#!python def fetch_pipes_keys():`"
     ```python
@@ -422,12 +422,20 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
 !!! note ""
     The values of the `pipe.columns` dictionary are immutable indices to be used for upserts. You may improve performance by indexing these columns after an initial sync (i.e. `#!python pipe.exists() is False`).
 
+!!! info "Which DataFrame `sync_pipe()` receives"
+    `df` is a DataFrame of the `meerschaum:dataframe` library of the process that runs the sync
+    (Polars for a new root, pandas for a root created before 5.0.0rc15; `MRSM_DATAFRAME`
+    overrides it, see [DataFrame library](/reference/pipes/reading/#dataframe-library)). A
+    connector that needs one library can convert:
+    `meerschaum.utils.dataframe.to_pandas(df)` or `meerschaum.utils.dataframe.to_polars(df)`
+    return a frame unchanged when it is already of that library.
+
 ??? example "`#!python def sync_pipe():`"
     ```python
     def sync_pipe(
         self,
         pipe: mrsm.Pipe,
-        df: 'pd.DataFrame',
+        df: 'pl.DataFrame',
         debug: bool = False,
         **kwargs: Any
     ) -> mrsm.SuccessTuple:
@@ -439,8 +447,8 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
         pipe: mrsm.Pipe
             The pipe whose collection should receive the new documents.
 
-        df: pd.DataFrame
-            The data to be synced.
+        df: pl.DataFrame
+            The data to be synced (a pandas DataFrame on a root set to `dataframe: pandas`).
 
         Returns
         -------
@@ -490,7 +498,7 @@ Delete a pipe's data within a bounded or unbounded interval without dropping the
 
         end: datetime | int | None, default None
             If provided, remove rows < `end`.
-           
+
         params: dict[str, Any] | None, default None
             If provided, only remove rows which match the `params` filter.
 
@@ -564,10 +572,10 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
 
         ### TODO Write a query to fetch from `table_name`
         ###      and apply the filters `begin`, `end`, and `params`.
-        ### 
+        ###
         ###      To improve performance, add logic to only read from
         ###      `select_columns` and not `omit_columns` (if provided).
-        ### 
+        ###
         ### SELECT {', '.join(cols_to_select)}
         ### FROM "{table_name}"
         ### WHERE "{dt_col}" >= '{begin}'
@@ -675,7 +683,7 @@ Return the largest (or smallest) value in target table, according to the `params
 
         Returns
         -------
-        The largest `datetime` or `int` value of the `datetime` axis. 
+        The largest `datetime` or `int` value of the `datetime` axis.
         """
 		### TODO write a query to get the largest value for `dt_col`.
         ### If `newest` is `False`, return the smallest value.
@@ -711,7 +719,7 @@ You may take advantage of automatic dtype enforcement by implementing this metho
         table_name = pipe.target
         ### TODO write a query to fetch the columns contained in `table_name`.
         columns_types = {}
-        
+
         ### Return a dictionary mapping the columns
         ### to their Pandas dtypes, e.g.:
         ### `{'foo': 'int64'`}`
@@ -925,7 +933,7 @@ Reclaim dead-tuple disk space from a pipe's target table (for the action `vacuum
 
 ### `#!python analyze_pipe()` (optional)
 
-Refresh the database planner's statistics for a pipe's target table (for the action `analyze pipes` and [`#!python Pipe.analyze()`](https://docs.meerschaum.io/meerschaum.html#Pipe.analyze)). Unlike `vacuum_pipe()`, this does not reclaim disk space — it helps the query planner choose better plans after large syncs. The default implementation returns a failure `SuccessTuple` indicating analysis is unsupported. See the [`#!python SQLConnector.analyze_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.analyze_pipe) method for reference.
+Refresh the database planner's statistics for a pipe's target table (for the action `analyze pipes` and [`#!python Pipe.analyze()`](https://docs.meerschaum.io/meerschaum.html#Pipe.analyze)). Unlike `vacuum_pipe()`, this does not reclaim disk space, it helps the query planner choose better plans after large syncs. The default implementation returns a failure `SuccessTuple` indicating analysis is unsupported. See the [`#!python SQLConnector.analyze_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.analyze_pipe) method for reference.
 
 ??? example "`#!python def analyze_pipe():`"
     ```python

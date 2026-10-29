@@ -1,0 +1,3 @@
+
+Show the packages in dependency groups, or as a list with `--nopretty`.
+

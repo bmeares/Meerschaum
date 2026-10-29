@@ -9,13 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Callable
 import re
-import json
 import ast
 import copy
-import uuid
 
 from meerschaum.utils.typing import PipesDict, Optional
 import meerschaum as mrsm
+from meerschaum import _core
 
 
 def get_pipe_from_value(
@@ -169,102 +168,12 @@ def evaluate_pipe_access_chain(access_chain: str, pipe: mrsm.Pipe, _pipe=None):
 
 
 
-def _evaluate_pipe_access_chain_from_match(pipe_match: re.Match, _pipe=None) -> Any:
-    """
-    Helper function to evaluate a pipe from a regex match object.
-    """
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.misc import parse_arguments_str
-    from meerschaum.utils.sql import sql_item_name
-    try:
-        if 'self' in pipe_match.group(0) and _pipe is not None:
-            pipe = _pipe
-            access_chain = pipe_match.group(1)
-        else:
-            args_str = pipe_match.group(1)
-            access_chain = pipe_match.group(2)
-            args, kwargs = parse_arguments_str(args_str)
-            if (
-                _pipe is not None
-                and not (
-                    'instance' in kwargs
-                    or 'mrsm_instance' in kwargs
-                    or 'instance_keys' in kwargs
-                )
-            ):
-                kwargs['instance'] = _pipe.instance_keys
-            pipe = mrsm.Pipe(*args, **kwargs)
-    except Exception as e:
-        warn(f"Failed to parse pipe from template string:\n{e}")
-        raise e
-
-    if not access_chain:
-        target = pipe.target
-        schema = (
-            pipe.instance_connector.get_pipe_schema(pipe)
-            if hasattr(pipe.instance_connector, 'get_pipe_schema')
-            else None
-        )
-        return (
-            sql_item_name(target, pipe.instance_connector.flavor, schema)
-            if pipe.instance_connector.type == 'sql'
-            else pipe.target
-        )
-
-    return evaluate_pipe_access_chain(access_chain, pipe, _pipe=_pipe)
-
-
 def replace_pipes_syntax(text: str, _pipe=None) -> Any:
     """
     Parse a string containing the `{{ Pipe() }}` syntax.
     """
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.dtypes import json_serialize_value
-    pattern = r'\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'
-    self_pattern = r'\{\{\s*self((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'
-
-    matches = list(re.finditer(pattern, text))
-    if _pipe is not None:
-        self_matches = list(re.finditer(self_pattern, text))
-        matches.extend(self_matches)
-    if not matches:
-        return text
-
-    placeholders = {}
-    for match in matches:
-        placeholder = f"__mrsm_pipe_placeholder_{uuid.uuid4().hex}__"
-        placeholders[placeholder] = match
-
-    substituted_text = text
-    for placeholder, match in placeholders.items():
-        substituted_text = substituted_text.replace(match.group(0), placeholder)
-
-    resolved_values = {}
-    for placeholder, match in placeholders.items():
-        try:
-            resolved_values[placeholder] = _evaluate_pipe_access_chain_from_match(
-                match,
-                _pipe=_pipe,
-            )
-        except Exception:
-            import traceback
-            warn(f"Failed to resolve pipe syntax '{match.group(0)}': {traceback.format_exc()}")
-            resolved_values[placeholder] = match.group(0)
-
-    if len(matches) == 1:
-        match = matches[0]
-        placeholder = list(placeholders.keys())[0]
-        if text.strip() == match.group(0):
-            return resolved_values[placeholder]
-
-    final_text = substituted_text
-    for placeholder, value in resolved_values.items():
-        if isinstance(value, (dict, list, bool, int, float)) or value is None:
-            final_text = final_text.replace(placeholder, json.dumps(value, default=json_serialize_value))
-        else:
-            final_text = final_text.replace(placeholder, str(value))
-
-    return final_text
+    _rust = _core.replace_pipes_syntax
+    return _rust(text, _pipe=_pipe)
 
 
 def replace_pipes_in_dict(

@@ -124,56 +124,6 @@ def parse_executor_keys(executor_keys_str: str) -> Union[str, None]:
     return executor_keys_str
 
 
-def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
-    """Parse the `--help` flag to determine which help message to print."""
-    from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_line
-    from meerschaum.actions import actions, get_subactions
-    import textwrap
-    from copy import deepcopy
-    if isinstance(sysargs, list):
-        args = parse_arguments(sysargs)
-    elif isinstance(sysargs, dict):
-        args = sysargs
-    elif isinstance(sysargs, str):
-        args = parse_line(sysargs)
-    _args = deepcopy(args)
-    del _args['action']
-    if len(args['action']) == 0:
-        return actions['show'](['help'], **_args)
-    if args['action'][0] not in actions:
-        return actions['show'](['actions'], **_args)
-
-    ### Check for subactions.
-    if len(args['action']) > 1:
-        try:
-            subactions = get_subactions(args['action'][0])
-            subaction_name = args['action'][1]
-            if subaction_name not in subactions:
-                subaction_name = subaction_name + 's'
-            subaction = subactions[subaction_name]
-        except Exception:
-            subaction = None
-        if subaction is not None:
-            return print(textwrap.dedent(subaction.__doc__))
-
-    try:
-        doc = actions[args['action'][0]].__doc__
-    except Exception:
-        doc = None
-    if doc is None:
-        doc = "No help available for '" + f"{args['action'][0]}" + "'."
-    return print(textwrap.dedent(doc))
-
-
-def parse_version(sysargs: List[str]):
-    """Print the Meerschaum version."""
-    from meerschaum.config import __version__ as version
-    from meerschaum.config import __doc__ as doc
-    if '--nopretty' in sysargs:
-        return print(version)
-    return print(doc)
-
-
 def parse_name(name_str: str) -> Union[str, None]:
     """
     Ensure that `--name` is not an empty string.
@@ -222,7 +172,8 @@ groups['actions'].add_argument(
 )
 groups['actions'].add_argument(
     '--loop',
-    action="store_true", help="Loop the specified action forever (only for select actions)"
+    action="store_true",
+    help="Repeat the action until it is stopped, waiting `--min-seconds` between laps.",
 )
 groups['actions'].add_argument(
     '-y', '--yes', action="store_true", help="Agree to the default choices for prompts"
@@ -232,7 +183,7 @@ groups['actions'].add_argument(
 )
 groups['actions'].add_argument(
     '--noask', '--no-ask', action='store_true',
-    help="Automatically choose the defaults answers to questions. Does not result in data loss.",
+    help="Automatically choose the default answers to questions. Does not result in data loss.",
 )
 groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,
@@ -256,9 +207,10 @@ groups['jobs'].add_argument(
 groups['jobs'].add_argument(
     '-s', '--schedule', '--cron', type=str,
     help = (
-        "Continue executing the action according to a schedule (e.g. 'every 1 seconds'). \n"
-        + "Often used with `-d`. See this page for scheduling syntax:\n "
-        + "https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html"
+        "Run the action on a schedule, e.g. 'every 10 minutes', 'daily starting 00:00' or a "
+        + "cron expression ('0 * * * *'). Often used with `-d`; check a schedule with "
+        + "`mrsm show schedule '<schedule>'`. Syntax: "
+        + "https://meerschaum.io/reference/background-jobs/#schedules"
     )
 )
 groups['jobs'].add_argument(
@@ -288,8 +240,9 @@ groups['pipes'].add_argument(
 )
 groups['pipes'].add_argument(
     '-i', '-I', '--mrsm-instance', '--instance', help=(
-        "Connector Keys (type:label) to the Meerschaum instance for Pipe objects. " +
-        "If label is omitted, use the configured default interface (usually 'sql:main')"
+        "The instance (connector keys `type:label`) where pipes are registered, e.g. " +
+        "`sql:local` or `api:main`. A bare type uses its `main` label. Defaults to the " +
+        "configured instance (`sql:main` unless changed with `mrsm edit config`)."
     )
 )
 groups['pipes'].add_argument(
@@ -332,12 +285,15 @@ groups['pipes'].add_argument(
 ### Sync options
 groups['sync'].add_argument(
     '--min-seconds', '--cooldown', type=float, help=(
-        "The minimum number of seconds between syncing laps. Defaults to 1."
+        "The minimum number of seconds between laps of `--loop`. Defaults to 1."
     )
 )
 groups['sync'].add_argument(
     '--timeout-seconds', '--timeout', type=float,
-    help="The maximum number of seconds before cancelling a pipe's syncing job. Defaults to 300."
+    help=(
+        "How many seconds to wait before giving up: on a job to stop (`stop jobs`, "
+        "`pause jobs`), or on each step of an action chain (`... : --timeout 60`)."
+    ),
 )
 groups['sync'].add_argument(
     '--listen', action="store_true", help=(
@@ -356,7 +312,7 @@ groups['sync'].add_argument(
     '--begin', type=parse_datetime, help="The begin datetime when syncing, fetching data."
 )
 groups['sync'].add_argument(
-    '--end', type=parse_datetime, help="The end datetime when syncing, fetching data."
+    '--end', type=parse_datetime, help="The end datetime (exclusive) when syncing, fetching data."
 )
 groups['sync'].add_argument(
     '--chunksize', type=int, help="How many rows per chunk. Defaults to 100,000."
@@ -374,7 +330,7 @@ groups['sync'].add_argument(
 )
 groups['sync'].add_argument(
     '--chunk-hours', type=int, help=(
-        "Specify the chunk interval in days for verification syncs. See `--chunk-minutes`."
+        "Specify the chunk interval in hours for verification syncs. See `--chunk-minutes`."
     ),
 )
 groups['sync'].add_argument(
@@ -437,8 +393,14 @@ groups['sync'].add_argument(
 groups['sync'].add_argument(
     '--cache', action='store_true',
     help=(
-        "Sync pipes' metadata to disk."
+        "No effect; accepted so that older commands keep working."
     )
+)
+groups['sync'].add_argument(
+    '--replace', action='store_true',
+    help=(
+        "Replace the rows between --begin and --end with the fetched rows in one transaction."
+    ),
 )
 
 ### API options
@@ -451,7 +413,10 @@ groups['api'].add_argument(
 )
 groups['api'].add_argument(
     '--webterm-port', type=int,
-    help="The port on which to run the webterm server.",
+    help=(
+        "No effect: the API serves the web terminal on its own port "
+        "(`start webterm -p` for a standalone one). Accepted so that older commands keep working."
+    ),
 )
 groups['api'].add_argument(
     '-w', '--workers', type=int,
@@ -459,7 +424,7 @@ groups['api'].add_argument(
 )
 groups['api'].add_argument(
     '--no-dash', '--nodash', action='store_true',
-    help = 'When starting the API, do not start the Web Console dashboard.',
+    help = 'When starting the API, do not serve the web console.',
 )
 groups['api'].add_argument(
     '--no-webterm', '--nowebterm', action='store_true',
@@ -479,15 +444,28 @@ groups['api'].add_argument(
 )
 groups['api'].add_argument(
     '--production', '--gunicorn', action='store_true',
-    help = 'Start the API with the Gunicorn process manager.'
+    help = (
+        "Start the API in production mode: the interactive API docs (`/docs`, `/redoc`) "
+        "are not served unless `api:endpoints:docs_in_production` is set."
+    ),
 )
 groups['api'].add_argument(
     '--keyfile', type=str,
-    help = "Start the API server with this keyfile (requires --certfile).",
+    help = (
+        "Serve the API over HTTPS with this private key (PEM; requires --certfile). "
+        "Defaults to `api:server:ssl_keyfile`."
+    ),
 )
 groups['api'].add_argument(
     '--certfile', type=str,
-    help = "Start the API server with this certfile (requires --keyfile).",
+    help = (
+        "Serve the API over HTTPS with this certificate chain (PEM, the server's certificate "
+        "first; requires --keyfile). Defaults to `api:server:ssl_certfile`."
+    ),
+)
+groups['api'].add_argument(
+    '--public', action='store_true',
+    help="Serve only public routes: login, health, version and plugin routes and pages.",
 )
 
 ### Plugins options
@@ -564,7 +542,7 @@ groups['debug'].add_argument(
 )
 groups['debug'].add_argument(
     '--trace', action="store_true",
-    help="Trace execution and open browser windows to visualize the stack."
+    help="No effect; accepted so that older commands keep working. Use `--debug` instead."
 )
 
 ### Miscellaneous arguments
@@ -586,15 +564,17 @@ groups['misc'].add_argument(
     '--skip-deps', action="store_true", help="Skip dependencies when installing plugins.",
 )
 groups['misc'].add_argument(
-    '--dry-run', action="store_true", help="Preview package installation without making changes.",
+    '--dry-run', action="store_true", help=(
+        "Show what the action would change without changing anything "
+        "(e.g. `install packages`, `verify schema`)."
+    ),
 )
 groups['misc'].add_argument(
     '-P', '--params', type=string_to_dict, help=(
         "Parameters dictionary in JSON format or simple format. " +
         "Simple format is for one-depth dictionaries and does not need braces or quotes." +
         "\nJSON Example:\n" +
-        "--params '{\"meerschaum\" : { \"connectors\" : " +
-        "\"main\" : { \"host\" : \"localhost\" } } }'" +
+        "--params '{\"columns\": {\"datetime\": \"timestamp\", \"id\": \"station\"}}'" +
         "\n\nSimple example:\n" +
         "--params key1:value1,key2:value2"
     )
@@ -609,7 +589,7 @@ groups['misc'].add_argument(
 )
 groups['misc'].add_argument(
     '--gui', action='store_true',
-    help="Open a DataFrame in an interactive pandasgui or matplotlib window."
+    help="No effect; accepted so that older commands keep working. See `mrsm start gui`."
 )
 groups['misc'].add_argument(
     '--shell', action='store_true',
@@ -617,16 +597,28 @@ groups['misc'].add_argument(
 )
 groups['misc'].add_argument(
     '--use-bash', action='store_true',
-    help="Execute non-implemented actions via `bash -c`. Default behavior is to execute directly."
+    help=(
+        "No effect (commands that are not actions always run with `bash -c`); "
+        "accepted so that older commands keep working."
+    ),
 )
 groups['misc'].add_argument(
     '--allow-shell-job', action='store_true',
-    help = (
-        "Allow shell commands to be run as background jobs. "
-        + "Default behavior is to only allow recognized actions."
-    )
+    help=(
+        "No effect (a job may run any command, e.g. `mrsm echo hi -d`); "
+        "accepted so that older commands keep working."
+    ),
 )
 groups['misc'].add_argument(
     '--no-daemon', action='store_true',
-    help="Do not use the Meerschaum CLI daemon to execute the action.",
+    help=(
+        "No effect (actions always run in this process); "
+        "accepted so that older commands keep working."
+    ),
+)
+### Added since 4.1 (`crates/meerschaum-cli/src/spec.rs::V5_ONLY_DESTS`), declared last so the
+### older arguments keep their order.
+groups['actions'].add_argument(
+    '--allow-protected', action='store_true',
+    help="Allow writes to connectors marked `protected: true`.",
 )

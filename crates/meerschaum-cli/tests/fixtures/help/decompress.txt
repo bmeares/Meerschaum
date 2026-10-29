@@ -1,0 +1,8 @@
+
+Decompress pipes' target tables, the inverse of `compress pipes`.
+
+For TimescaleDB hypertables this removes the compression policy and converts compressed
+chunks back to row-store so future synced chunks stay uncompressed.
+
+    Options:
+        `decompress [pipes]`

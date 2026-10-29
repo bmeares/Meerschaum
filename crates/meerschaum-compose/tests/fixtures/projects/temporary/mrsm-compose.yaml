@@ -1,0 +1,19 @@
+project_name: temp
+config:
+  meerschaum:
+    instance: sql:local
+pipes:
+  - connector: plugin:temp
+    metric: scratch
+    temporary: true
+    columns: [ts, id]
+  - connector: plugin:temp
+    metric: kept
+    location: null
+    mrsm_instance: sql:memory
+  - connector: plugin:temp
+    metric: unicode
+    instance: sql:local
+    parameters:
+      label: "café ☕ – ünïcode"
+      long_text: "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."

@@ -251,10 +251,12 @@ STATIC_CONFIG: Dict[str, Any] = {
         'noask': 'MRSM_NOASK',
         'noninteractive': 'MRSM_NONINTERACTIVE',
         'no_auto_install': 'MRSM_NO_AUTO_INSTALL',
+        'dataframe': 'MRSM_DATAFRAME',
         'id': 'MRSM_SERVER_ID',
         'test_flavors': 'MRSM_TEST_FLAVORS',
         'daemon_id': 'MRSM_DAEMON_ID',
         'compose_project': 'MRSM__COMPOSE_PROJECT',
+        'compose_root': 'MRSM__COMPOSE_ROOT',
         'systemd_log_path': 'MRSM_SYSTEMD_LOG_PATH',
         'systemd_stdin_path': 'MRSM_SYSTEMD_STDIN_PATH',
         'systemd_result_path': 'MRSM_SYSTEMD_RESULT_PATH',
@@ -370,6 +372,11 @@ STATIC_CONFIG: Dict[str, Any] = {
             'users:write': "Write metadata for the associated account.",
             'users:register': "Register new user accounts.",
             'users:delete': "Delete the associated user account (or other users for admins).",
+            'pipes:register': "Register new pipes.",
+            'pipes:define_sql': (
+                "Set or change pipes' SQL definitions and the fetch parameters of `sql:` connectors."
+            ),
+            'webterm:use': "Use the web terminal.",
         },
     },
 }

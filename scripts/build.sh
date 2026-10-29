@@ -12,9 +12,20 @@ cd "$PARENT"
 ### Build documentation.
 ./scripts/docs.sh
 
-### Update the requirements text files.
+### Update requirements/<extra>.txt and the extras table compiled into `mrsm` from pyproject.toml.
 ./scripts/docker/update_requirements.sh
 
-### Build the pip package for uploading to PyPI.
+### Check that the Cargo version, the console scripts and the extras agree.
+python scripts/check_packaging.py || exit 1
+
+### Build the package for uploading to PyPI (the maturin backend; needs a Rust toolchain): the one
+### `meerschaum` wheel, whose `mrsm` console script runs the CLI from the extension (D8, revised).
+### This local wheel is `linux_x86_64`, which PyPI rejects: never upload it. The release wheels are the
+### per-platform CI artifacts of .github/workflows/wheels.yaml (.agents/skills/release/SKILL.md, "5.x").
+### The standalone binary is
+### `cargo install meerschaum`.
 python -m build
 
+### The built wheel agrees with Cargo: the METADATA version, no dependencies, the `_version.py` inside
+### the wheel, the `mrsm` / `meerschaum` console scripts, and no native binary in it.
+python scripts/check_packaging.py --wheels dist || exit 1

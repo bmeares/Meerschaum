@@ -1,0 +1,446 @@
+{
+  "create": [
+    {
+      "commands": [
+        "daemon-reload",
+        "enable mrsm-sync-weather.service",
+        "start mrsm-sync-weather.service"
+      ],
+      "files": {
+        "home/systemd/user/mrsm-sync-weather.service": {
+          "dangling": false,
+          "target": "{TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service",
+          "type": "symlink"
+        },
+        "root/jobs/sync-weather/.externally-managed": {
+          "text": "",
+          "type": "text"
+        },
+        "root/jobs/sync-weather/pickle.pkl": {
+          "type": "pickle"
+        },
+        "root/jobs/sync-weather/properties.json": {
+          "text": "{\"externally_managed\": true, \"label\": \"sync pipes -c plugin:noaa --loop --min-seconds 3600\", \"restart\": true}",
+          "type": "json"
+        },
+        "root/systemd/services/sync-weather/mrsm-sync-weather.service": {
+          "text": "[Unit]\nDescription=Run the job 'sync-weather'\n\n[Service]\nExecStart={PYTHON} -m meerschaum sync pipes -c plugin:noaa --loop --min-seconds 3600\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier=mrsm-sync-weather.service\nEnvironment=MRSM_ROOT_DIR={TMP}/root\nEnvironment=MRSM_PLUGINS_DIR={TMP}/plugins\nEnvironment=MRSM_VENVS_DIR={TMP}/venvs\nEnvironment=MRSM_NO_AUTO_INSTALL=1\nEnvironment=MRSM_CONFIG='{\"jobs\": {\"timeout_seconds\": 0.3, \"check_timeout_interval_seconds\": 0.05}}'\nEnvironment=MRSM_DAEMON_ID=sync-weather\nEnvironment=MRSM_SYSTEMD_LOG_PATH={TMP}/root/systemd/logs/mrsm-sync-weather.service.log\nEnvironment=MRSM_SYSTEMD_RESULT_PATH={TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service.result.json\nEnvironment=MRSM_SYSTEMD_STDIN_PATH={TMP}/root/systemd/services/sync-weather/mrsm-sync-weather.service.stdin\nEnvironment=MRSM_SYSTEMD_DELETE_JOB=0\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=LINES=40\nEnvironment=COLUMNS=70\nEnvironment=MRSM_NONINTERACTIVE=true\n\n[Install]\nWantedBy=default.target\n",
+          "type": "text"
+        },
+        "root/systemd/services/sync-weather/mrsm-sync-weather.service.stdin": {
+          "type": "fifo"
+        }
+      },
+      "name": "sync-weather",
+      "result": [
+        true,
+        "Started job 'sync-weather' via systemd."
+      ],
+      "sysargs": [
+        "sync",
+        "pipes",
+        "-c",
+        "plugin:noaa",
+        "--loop",
+        "--min-seconds",
+        "3600"
+      ]
+    },
+    {
+      "commands": [
+        "daemon-reload",
+        "enable mrsm-my-job.service",
+        "start mrsm-my-job.service"
+      ],
+      "files": {
+        "home/systemd/user/mrsm-my-job.service": {
+          "dangling": false,
+          "target": "{TMP}/root/systemd/services/my job/mrsm-my-job.service",
+          "type": "symlink"
+        },
+        "root/jobs/my job/.externally-managed": {
+          "text": "",
+          "type": "text"
+        },
+        "root/jobs/my job/pickle.pkl": {
+          "type": "pickle"
+        },
+        "root/jobs/my job/properties.json": {
+          "text": "{\"env\": {\"FOO\": \"bar baz\", \"QUOTE\": \"it's\"}, \"externally_managed\": true, \"label\": \"show version --nopretty\"}",
+          "type": "json"
+        },
+        "root/systemd/services/my job/mrsm-my-job.service": {
+          "text": "[Unit]\nDescription=Run the job 'my job'\n\n[Service]\nExecStart={PYTHON} -m meerschaum show version --nopretty\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier=mrsm-my-job.service\nEnvironment=MRSM_ROOT_DIR={TMP}/root\nEnvironment=MRSM_PLUGINS_DIR={TMP}/plugins\nEnvironment=MRSM_VENVS_DIR={TMP}/venvs\nEnvironment=MRSM_NO_AUTO_INSTALL=1\nEnvironment=MRSM_CONFIG='{\"jobs\": {\"timeout_seconds\": 0.3, \"check_timeout_interval_seconds\": 0.05}}'\nEnvironment=MRSM_DAEMON_ID='my job'\nEnvironment=MRSM_SYSTEMD_LOG_PATH={TMP}/root/systemd/logs/mrsm-my-job.service.log\nEnvironment=MRSM_SYSTEMD_RESULT_PATH='{TMP}/root/systemd/services/my job/mrsm-my-job.service.result.json'\nEnvironment=MRSM_SYSTEMD_STDIN_PATH='{TMP}/root/systemd/services/my job/mrsm-my-job.service.stdin'\nEnvironment=MRSM_SYSTEMD_DELETE_JOB=0\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=LINES=40\nEnvironment=COLUMNS=70\nEnvironment=MRSM_NONINTERACTIVE=true\nEnvironment=FOO='bar baz'\nEnvironment=QUOTE='it'\"'\"'s'\n\n[Install]\nWantedBy=default.target\n",
+          "type": "text"
+        },
+        "root/systemd/services/my job/mrsm-my-job.service.stdin": {
+          "type": "fifo"
+        }
+      },
+      "name": "my job",
+      "properties": {
+        "env": {
+          "FOO": "bar baz",
+          "QUOTE": "it's"
+        },
+        "externally_managed": true
+      },
+      "result": [
+        true,
+        "Started job 'my job' via systemd."
+      ],
+      "sysargs": [
+        "show",
+        "version",
+        "--nopretty"
+      ]
+    },
+    {
+      "commands": [
+        "daemon-reload",
+        "enable mrsm-cleanup.service",
+        "start mrsm-cleanup.service"
+      ],
+      "files": {
+        "home/systemd/user/mrsm-cleanup.service": {
+          "dangling": false,
+          "target": "{TMP}/root/systemd/services/cleanup/mrsm-cleanup.service",
+          "type": "symlink"
+        },
+        "root/jobs/cleanup/.externally-managed": {
+          "text": "",
+          "type": "text"
+        },
+        "root/jobs/cleanup/pickle.pkl": {
+          "type": "pickle"
+        },
+        "root/jobs/cleanup/properties.json": {
+          "text": "{\"delete_after_completion\": true, \"externally_managed\": true, \"label\": \"delete pipes -c sql:main -y\"}",
+          "type": "json"
+        },
+        "root/systemd/services/cleanup/mrsm-cleanup.service": {
+          "text": "[Unit]\nDescription=Run the job 'cleanup'\n\n[Service]\nExecStart={PYTHON} -m meerschaum delete pipes -c sql:main -y\nKillSignal=SIGTERM\nRestart=always\nRestartPreventExitStatus=0\nSyslogIdentifier=mrsm-cleanup.service\nEnvironment=MRSM_ROOT_DIR={TMP}/root\nEnvironment=MRSM_PLUGINS_DIR={TMP}/plugins\nEnvironment=MRSM_VENVS_DIR={TMP}/venvs\nEnvironment=MRSM_NO_AUTO_INSTALL=1\nEnvironment=MRSM_CONFIG='{\"jobs\": {\"timeout_seconds\": 0.3, \"check_timeout_interval_seconds\": 0.05}}'\nEnvironment=MRSM_DAEMON_ID=cleanup\nEnvironment=MRSM_SYSTEMD_LOG_PATH={TMP}/root/systemd/logs/mrsm-cleanup.service.log\nEnvironment=MRSM_SYSTEMD_RESULT_PATH={TMP}/root/systemd/services/cleanup/mrsm-cleanup.service.result.json\nEnvironment=MRSM_SYSTEMD_STDIN_PATH={TMP}/root/systemd/services/cleanup/mrsm-cleanup.service.stdin\nEnvironment=MRSM_SYSTEMD_DELETE_JOB=1\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=LINES=40\nEnvironment=COLUMNS=70\nEnvironment=MRSM_NONINTERACTIVE=true\n\n[Install]\nWantedBy=default.target\n",
+          "type": "text"
+        },
+        "root/systemd/services/cleanup/mrsm-cleanup.service.stdin": {
+          "type": "fifo"
+        }
+      },
+      "name": "cleanup",
+      "properties": {
+        "delete_after_completion": true,
+        "externally_managed": true
+      },
+      "result": [
+        true,
+        "Started job 'cleanup' via systemd."
+      ],
+      "sysargs": [
+        "delete",
+        "pipes",
+        "-c",
+        "sql:main",
+        "-y"
+      ]
+    }
+  ],
+  "create_failures": [
+    {
+      "commands": [
+        "daemon-reload",
+        "enable mrsm-failing.service",
+        "start mrsm-failing.service"
+      ],
+      "fail": [
+        "enable"
+      ],
+      "result": [
+        true,
+        "Started job 'failing' via systemd."
+      ]
+    },
+    {
+      "commands": [
+        "daemon-reload",
+        "enable mrsm-failing.service",
+        "start mrsm-failing.service"
+      ],
+      "fail": [
+        "daemon-reload",
+        "enable"
+      ],
+      "result": [
+        false,
+        "Failed to reload systemd."
+      ]
+    },
+    {
+      "commands": [
+        "daemon-reload",
+        "enable mrsm-failing.service",
+        "start mrsm-failing.service"
+      ],
+      "fail": [
+        "daemon-reload",
+        "enable",
+        "start"
+      ],
+      "result": [
+        false,
+        "Failed to reload systemd."
+      ]
+    }
+  ],
+  "exists": [
+    true,
+    false
+  ],
+  "lifecycle": [
+    {
+      "commands": [
+        "is-active mrsm-lifecycle.service",
+        "start mrsm-lifecycle.service"
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "start_inactive"
+    },
+    {
+      "commands": [
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "kill -s SIGCONT mrsm-lifecycle.service"
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "start_paused"
+    },
+    {
+      "commands": [
+        "kill -s SIGINT mrsm-lifecycle.service",
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "is-active mrsm-lifecycle.service"
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "stop_graceful"
+    },
+    {
+      "commands": [
+        "kill -s SIGINT mrsm-lifecycle.service",
+        "is-active mrsm-lifecycle.service"
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "stop_already_stopped"
+    },
+    {
+      "commands": [
+        "kill -s SIGINT mrsm-lifecycle.service",
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "is-active mrsm-lifecycle.service",
+        "show mrsm-lifecycle.service --property=MainPID",
+        "stop mrsm-lifecycle.service"
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "stop_timeout"
+    },
+    {
+      "commands": [
+        "kill -s SIGSTOP mrsm-lifecycle.service"
+      ],
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "pause"
+    },
+    {
+      "commands": [
+        "kill -s SIGINT mrsm-lifecycle.service",
+        "is-active mrsm-lifecycle.service",
+        "disable mrsm-lifecycle.service",
+        "is-active mrsm-lifecycle.service",
+        "daemon-reload"
+      ],
+      "files": {
+        "home/systemd/user/mrsm-lifecycle.service": {
+          "dangling": true,
+          "target": "{TMP}/root/systemd/services/lifecycle/mrsm-lifecycle.service",
+          "type": "symlink"
+        }
+      },
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "delete"
+    },
+    {
+      "commands": [
+        "is-active mrsm-cleanup.service",
+        "daemon-reload"
+      ],
+      "files": {
+        "home/systemd/user/mrsm-cleanup.service": {
+          "dangling": true,
+          "target": "{TMP}/root/systemd/services/cleanup/mrsm-cleanup.service",
+          "type": "symlink"
+        },
+        "home/systemd/user/mrsm-lifecycle.service": {
+          "dangling": true,
+          "target": "{TMP}/root/systemd/services/lifecycle/mrsm-lifecycle.service",
+          "type": "symlink"
+        }
+      },
+      "result": [
+        true,
+        "Success"
+      ],
+      "scenario": "delete_after_completion"
+    }
+  ],
+  "metadata": {
+    "daemon": {
+      "pid": null,
+      "properties": {
+        "restart": true
+      },
+      "status": "stopped"
+    },
+    "restart": true,
+    "result": [
+      false,
+      "No result available."
+    ],
+    "sysargs": [
+      "sync",
+      "pipes",
+      "--loop"
+    ]
+  },
+  "names": [
+    "meta"
+  ],
+  "pid": [
+    4242,
+    null
+  ],
+  "restart": true,
+  "result": {
+    "broken": [
+      false,
+      "Could not read result for Job 'meta'."
+    ],
+    "missing": [
+      false,
+      "No result available."
+    ],
+    "present": [
+      true,
+      "done"
+    ]
+  },
+  "status": [
+    {
+      "is_active": "activating",
+      "pid": "0",
+      "process": null,
+      "status": "running"
+    },
+    {
+      "is_active": "active",
+      "pid": "4242",
+      "process": "running",
+      "status": "running"
+    },
+    {
+      "is_active": "active",
+      "pid": "4242",
+      "process": "stopped",
+      "status": "paused"
+    },
+    {
+      "is_active": "active",
+      "pid": "0",
+      "process": null,
+      "status": "stopped"
+    },
+    {
+      "is_active": "active",
+      "pid": "4242",
+      "process": "gone",
+      "status": "stopped"
+    },
+    {
+      "is_active": "inactive",
+      "pid": "0",
+      "process": null,
+      "status": "stopped"
+    },
+    {
+      "is_active": "failed",
+      "pid": "0",
+      "process": null,
+      "status": "stopped"
+    },
+    {
+      "is_active": "",
+      "pid": "0",
+      "process": null,
+      "status": "stopped"
+    }
+  ],
+  "sysargs": [
+    "sync",
+    "pipes",
+    "--loop"
+  ],
+  "timestamps": [
+    {
+      "output": "ActiveEnterTimestamp=Tue 2000-01-04 10:00:00 UTC",
+      "value": "2000-01-04T10:00:00+00:00"
+    },
+    {
+      "output": "ActiveEnterTimestamp=Mon 2024-02-29 23:59:59 UTC",
+      "value": "2024-02-29T23:59:59+00:00"
+    },
+    {
+      "output": "ActiveEnterTimestamp=Tue 2000-01-04 10:00:00 GMT",
+      "value": "2000-01-04T10:00:00+00:00"
+    },
+    {
+      "output": "ActiveEnterTimestamp=",
+      "value": null
+    },
+    {
+      "output": "ActiveEnterTimestamp=n/a",
+      "value": null
+    },
+    {
+      "output": "InactiveEnterTimestamp=Wed 2026-10-14 01:02:03 UTC",
+      "value": "2026-10-14T01:02:03+00:00"
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+ "case": {
+  "description": "String-typed `tags:` on a pipe make compose fail while appending the project tag, as in Python; the lint reports it.",
+  "width": 100,
+  "runs": [
+   {
+    "name": "explain",
+    "action": [
+     "explain"
+    ]
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 100,
+   "error": {
+    "type": "AttributeError",
+    "message": "'str' object has no attribute 'append'"
+   },
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "string-tags"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "project_name": "string-tags",
+    "pipes": [
+     {
+      "connector": "plugin:tags",
+      "metric": "crash",
+      "instance": "sql:local",
+      "tags": "single-string-tag"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "string-tags"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"string-tags\",\"pipes\":[{\"connector\":\"plugin:tags\",\"metric\":\"crash\",\"instance\":\"sql:local\",\"tags\":\"single-string-tag\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"string-tags\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "string-tags",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"string-tags\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": "",
+   "written_files": {},
+   "config_hash_normalized": "fd43e23043a69e326925cb0fb67cfc8aecde64e6b14c800d7e8173f18b2cc840"
+  }
+ ]
+}

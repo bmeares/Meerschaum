@@ -1,20 +1,22 @@
 [project]
 site_name = "Meerschaum Documentation"
 site_url = "https://meerschaum.io"
-site_description = "Craft elegant data pipes with Meerschaum."
+site_description = "Incremental data pipelines in SQL and Python."
 site_author = "Bennett Meares"
 copyright = "&copy; 2026 Bennett Meares"
 docs_dir = "zensical"
 site_dir = "site"
-dev_addr = "localhost:8000"
+dev_addr = "127.0.0.1:18784"
 repo_url = "https://github.com/bmeares/Meerschaum"
 nav = [
   {"Home" = "index.md"},
   {"Get Started" = [
-    {"🛠️ Setup" = "get-started/index.md"},
-    {"🏗️ Building a Pipe" = "get-started/bootstrap.md"},
-    {"📦️ Compose Projects" = "get-started/compose-projects.md"},
-    {"🖥️ Web Console" = "get-started/start-api.md"},
+    {"Install and set up" = "get-started/index.md"},
+    {"Your first Pipe" = "get-started/bootstrap.md"},
+    {"Sync new rows" = "get-started/incremental-sync.md"},
+    {"Your first Pipeline" = "get-started/pipelines.md"},
+    {"Explore the console" = "get-started/start-api.md"},
+    {"Save a project" = "get-started/compose-projects.md"},
   ]},
   {"Reference" = [
     "reference/index.md",
@@ -27,6 +29,13 @@ nav = [
       {"🧩 Parameters" = "reference/pipes/parameters.md"},
       {"🔤 Data Types" = "reference/pipes/dtypes.md"},
       {"🧹 Maintenance" = "reference/pipes/maintenance.md"},
+      {"🔒 Access and Locks" = "reference/pipes/access-and-locks.md"},
+    ]},
+    {"🕸️ Pipelines" = [
+      "reference/pipelines/index.md",
+      {"🗃️ Engine State" = "reference/pipelines/state.md"},
+      {"♾️ Continuous Mode" = "reference/pipelines/continuous.md"},
+      {"📊 Visualization" = "reference/pipelines/visualization.md"},
     ]},
     {"🔌 Connectors" = [
       "reference/connectors/index.md",
@@ -35,13 +44,18 @@ nav = [
       {"🗝️ Valkey Connectors" = "reference/connectors/valkey.md"},
       {"❓ Other Connector Types" = "reference/connectors/other-connectors.md"},
     ]},
-    {"🐍 Python API" = "reference/python-api.md"},
-    {"🥞 Stack" = "reference/stack.md"},
+    {"🥞 Stack" = [
+      "reference/stack/index.md",
+      {"Upgrades and backups" = "reference/stack/upgrades.md"},
+    ]},
     {"🌐 API Instance" = [
       "reference/api-instance/index.md",
       {"Security and Tokens" = "reference/api-instance/tokens.md"},
+      {"Permissions and Rate Limits" = "reference/api-instance/permissions.md"},
+      {"Pipelines, Access and Actions over HTTP" = "reference/api-instance/routes.md"},
       {"NGINX" = "reference/api-instance/nginx.md"},
       {"Web Console" = "reference/api-instance/web-console.md"},
+      {"Sync Metrics" = "reference/api-instance/sync-metrics.md"},
     ]},
     {"🤖 MCP Server" = [
       "reference/mcp/index.md",
@@ -49,34 +63,79 @@ nav = [
       {"Security" = "reference/mcp/security.md"},
     ]},
     {"🎼 Compose" = "reference/compose.md"},
-    {"⏯️ Actions" = "reference/actions/index.md"},
-    {"👷 Background Jobs" = "reference/background-jobs.md"},
+    {"⏯️ Actions" = [
+      "reference/actions/index.md",
+      {"📺 Watch and Shell Shortcuts" = "reference/actions/watch.md"},
+      {"👥 Teams, Access and Locks" = "reference/actions/teams-and-access.md"},
+    ]},
+    {"👷 Background Jobs" = [
+      "reference/background-jobs/index.md",
+      {"Schedules" = "reference/background-jobs/schedules.md"},
+      {"Executors" = "reference/background-jobs/executors.md"},
+      {"Access" = "reference/background-jobs/access.md"},
+      {"Automatic Runs" = "reference/background-jobs/runs.md"},
+      {"Health" = "reference/background-jobs/health.md"},
+      {"Startup stagger" = "reference/background-jobs/startup.md"},
+    ]},
     {"🔧 Data Analysis Tools" = "reference/data-analysis-tools.md"},
     {"➕ Plugins" = [
       "reference/plugins/index.md",
       {"✍️ Writing Your Own" = "reference/plugins/writing-plugins.md"},
       {"🤔 Types of Plugins" = "reference/plugins/types-of-plugins.md"},
+      {"🖥️ Web Pages and Routes" = "reference/plugins/web-pages.md"},
+      {"🗃️ Caching" = "reference/plugins/caching.md"},
+      {"🧪 Testing Plugins" = "reference/plugins/testing.md"},
+      {"🦀 Rust Plugins" = [
+        "reference/plugins/rust-plugins.md",
+        {"Advanced" = "reference/plugins/rust-plugins/advanced.md"},
+        {"Routes and MCP" = "reference/plugins/rust-plugins/routes-and-mcp.md"},
+        {"Executors and Streams" = "reference/plugins/rust-plugins/executors-and-streams.md"},
+      ]},
       {"🚀 Repositories" = "reference/plugins/repositories.md"},
     ]},
     {"🌳 Environment Variables" = "reference/environment.md"},
     {"🩺 Troubleshooting" = "reference/troubleshooting.md"},
+    {"⬆️ Migrating to v5" = "reference/migrating-to-v5.md"},
     {"📖 Glossary" = "reference/glossary.md"},
-    {"💼 Portable" = "reference/meerschaum-portable.md"},
   ]},
   {"Tutorials" = "tutorials/index.md"},
-  {"Docs" = "https://docs.meerschaum.io"},
-  {"News" = [
-    {"🪵 Changelog" = "news/changelog.md"},
-    {"📢 Announcements" = "news/announcements.md"},
-    {"🌠 To-Do / Wish List" = "news/to-do.md"},
-    {"🤗 Acknowledgements" = "news/acknowledgements.md"},
+  {"Docs" = [
+    "docs/index.md",
+    {"Python" = [
+      "docs/python/index.md",
+      {"Pipes" = "docs/python/pipes.md"},
+      {"Pipelines" = "docs/python/pipelines.md"},
+      {"Plugins" = "docs/python/plugins.md"},
+    ]},
+    {"Rust" = [
+      "docs/rust/index.md",
+      {"Embedding" = "docs/rust/embedding.md"},
+      {"Pipes" = "docs/rust/pipes.md"},
+      {"Pipelines" = "docs/rust/pipelines.md"},
+      {"Plugins" = "docs/rust/plugins.md"},
+    ]},
+  ]},
+  {"Changelog" = [
+    "changelog/index.md",
+    {"v5" = "changelog/v5.md"},
+    {"v4" = "changelog/v4.md"},
+    {"v3" = "changelog/v3.md"},
+    {"v2" = "changelog/v2.md"},
+    {"v1" = "changelog/v1.md"},
+    {"v0" = "changelog/v0.md"},
   ]},
 ]
-extra_css = ["stylesheets/extra.css"]
+extra_css = ["assets/vendor/asciinema-player.css", "stylesheets/extra.css"]
+extra_javascript = ["assets/vendor/asciinema-player.min.js", "assets/js/media.js"]
 
 [project.theme]
 features = [
   "navigation.tabs",
+  "navigation.instant",
+  "navigation.instant.progress",
+  "navigation.footer",
+  "navigation.top",
+  "announce.dismiss",
   "navigation.path",
   "navigation.prune",
   "navigation.indexes",
@@ -87,7 +146,7 @@ logo = "assets/logo_500x500.png"
 favicon = "assets/logo.ico"
 palette.primary = "deep orange"
 palette.accent = "amber"
-custom_dir = "zensical/overrides"
+custom_dir = "overrides"
 
 [project.theme.icon]
 repo = "fontawesome/brands/github"
@@ -98,6 +157,9 @@ permalink = true
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
 

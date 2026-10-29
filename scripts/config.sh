@@ -12,8 +12,10 @@ export tags=( "minimal" "full" )
 export base_name="meerschaum"
 export image="$dockerhub_user/$base_name"
 export python_image="fedora:44"
-export platforms="linux/amd64"
-# export platforms="linux/amd64,linux/arm64"
+### The final-release architectures (scripts/docker/buildx.sh --merge joins one `-<arch>` image per entry;
+### docker-build.yaml uses self-hosted x86_64 runners, with QEMU for arm64).
+### Prereleases select linux/amd64 only in buildx.sh and scripts/ci/release_matrix.py.
+export platforms="linux/amd64,linux/arm64"
 # export platforms="linux/amd64,linux/arm64,linux/arm/v7"
 export DOCKER_CLI_EXPERIMENTAL=enabled
 # export platforms="linux/amd64,linux/arm64,linux/riscv64,linux/ppc64le,linux/386,linux/arm/v7,linux/arm/v6,linux/s390x"

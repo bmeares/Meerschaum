@@ -1,0 +1,82 @@
+//! Parity: `static.toml` equals the Python `STATIC_CONFIG` (dumped by `fixtures/gen_static.py`).
+
+mod common;
+
+use meerschaum_core::static_config::{STATIC_TOML, StaticConfig, parse_static_toml};
+
+#[test]
+fn static_toml_matches_python() {
+    let fixture = common::load_fixture("static_config.json");
+    let cpu = fixture.get("__cpu_count__").and_then(|v| v.as_i64());
+    let expected = fixture.get("static_config").expect("static_config key");
+    let mut actual = parse_static_toml(STATIC_TOML, cpu).expect("valid static.toml");
+    // Overlay: the keys v5 adds to the v4 table (never edit the generated fixture). W18-FX4-001:
+    // `environment.compose_root`, the `MRSM__COMPOSE_ROOT` label of jobs started from a root
+    // compose file.
+    let environment = actual
+        .as_map_mut()
+        .and_then(|m| m.get_mut("environment"))
+        .and_then(|e| e.as_map_mut())
+        .expect("environment table");
+    assert!(environment.shift_remove("compose_root").is_some());
+    // rc15 (Q54, PARITY.md RC15-R3-001): `environment.dataframe`, `MRSM_DATAFRAME`.
+    assert!(environment.shift_remove("dataframe").is_some());
+    // 5.0's permissions (the access model): `pipes:register`, `pipes:define_sql` and
+    // `webterm:use` follow v4's scopes.
+    let scopes = actual
+        .as_map_mut()
+        .and_then(|m| m.get_mut("tokens"))
+        .and_then(|t| t.as_map_mut())
+        .and_then(|t| t.get_mut("scopes"))
+        .and_then(|s| s.as_map_mut())
+        .expect("tokens.scopes table");
+    for scope in meerschaum_core::access::NEW_PERMISSIONS {
+        assert!(scopes.shift_remove(scope).is_some(), "{scope}");
+    }
+    common::assert_same(&actual, expected, "static.toml");
+}
+
+#[test]
+fn typed_static_config_parses() {
+    let cfg = StaticConfig::from_toml(STATIC_TOML, Some(4)).expect("typed");
+    assert_eq!(
+        cfg.users.password_hash.pbkdf2_sha256_default_rounds,
+        1_000_000
+    );
+    assert_eq!(cfg.environment.root, "MRSM_ROOT_DIR");
+    assert_eq!(cfg.config.symlinks_key, "_symlinks");
+    // v4's 23 scopes and 5.0's three permissions.
+    assert_eq!(cfg.tokens.scopes.len(), 26);
+    assert_eq!(
+        cfg.scope_names(),
+        meerschaum_core::access::ALL_PERMISSIONS
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        cfg.sql.create_engine_flavors["mssql"].to_sql.get("method"),
+        Some(&meerschaum_core::Value::Null)
+    );
+    assert_eq!(
+        cfg.get(&["sql", "default_create_engine_args", "pool_size"])
+            .and_then(|v| v.as_i64()),
+        Some(4)
+    );
+    assert_eq!(
+        cfg.system.success.ignore,
+        vec![
+            Some("Success".to_string()),
+            Some("successSucceeded".to_string()),
+            Some(String::new()),
+            None
+        ]
+    );
+    // `os.cpu_count()` returning `None` falls back to the marker's default.
+    let none = StaticConfig::from_toml(STATIC_TOML, None).expect("typed");
+    assert_eq!(
+        none.get(&["sql", "default_create_engine_args", "max_overflow"])
+            .and_then(|v| v.as_i64()),
+        Some(10)
+    );
+}

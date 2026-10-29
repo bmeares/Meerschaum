@@ -1,0 +1,76 @@
+[package]
+name = "meerschaum-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the axum HTTP API server (OAuth2/JWT, tokens, websockets, MCP, extension-host proxy)"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-server"
+keywords = ["meerschaum", "api", "axum", "mcp", "etl"]
+categories = ["web-programming::http-server", "database"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+# Only the shared route/auth models (`models`, `routes`, `wire`); no HTTP client.
+meerschaum-connector-api = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+async-trait = "0.1"
+# Crate-private: the HTTP stack.
+axum = { version = "0.8", features = ["ws", "multipart"] }
+# Crate-private: conflict checks of native plugin routes (the matcher axum itself uses).
+matchit = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["fs"] }
+# `server` + `http2`: the HTTPS listener (`tls`) serves HTTP/1.1 and HTTP/2 itself.
+hyper = { version = "1", features = ["client", "http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
+# Crate-private: native HTTPS (`tls`, `start api --keyfile/--certfile`). aws-lc-rs, as the rest
+# of the tree (the explicit provider: `ServerConfig::builder()` panics when ring is compiled in too).
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws-lc-rs"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+# Crate-private: OpenAPI (`/openapi.json`, `/docs`).
+utoipa = "6"
+# Crate-private: HS256 JWTs (byte-identical to PyJWT) and the API-key base64.
+hmac = { workspace = true }
+sha2 = { workspace = true }
+base64 = "0.23"
+# Crate-private: the web terminal PTY bridge (`webterm`).
+portable-pty = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
+# aws-lc-rs (rustls) assembles with NASM on Windows x86_64; the prebuilt objects make the build need
+# no extra tool. Keep this minor equal to the `aws-lc-sys` in Cargo.lock (one aws-lc-sys per tree).
+[target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
+aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"] }
+
+[dev-dependencies]
+# Certificates for the HTTPS tests (`aws_lc_rs`: RSA keys too).
+rcgen = { version = "0.14", features = ["aws_lc_rs"] }
+tokio = { workspace = true, features = ["test-util"] }
+tempfile = "3"
+regex = { workspace = true }
+tokio-tungstenite = "0.30"
+# Real-instance tests: a SQLite / PostgreSQL-family instance behind the router, driven by the client.
+meerschaum-connector-sql = { workspace = true }
+# A Valkey instance (in memory) behind the router: its read errors must fail closed too.
+meerschaum-connector-valkey = { workspace = true }
+meerschaum-connector-api = { workspace = true, features = ["client"] }

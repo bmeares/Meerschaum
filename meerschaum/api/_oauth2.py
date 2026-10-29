@@ -12,16 +12,27 @@ import functools
 import inspect
 from typing import Dict, List, Optional, Union
 
-from meerschaum.api import endpoints, CHECK_UPDATE, no_auth, debug
+from meerschaum.api import endpoints, CHECK_UPDATE, _IMPORT_KW, no_auth, debug
 from meerschaum.api._tokens import optional_token, get_token_from_authorization
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.packages import attempt_import
 from meerschaum.core import User, Token
 
-fastapi, starlette = attempt_import('fastapi', 'starlette', lazy=False, check_update=CHECK_UPDATE)
-fastapi_responses = attempt_import('fastapi.responses', lazy=False, check_update=CHECK_UPDATE)
-fastapi_login = attempt_import('fastapi_login', check_update=CHECK_UPDATE)
-jose_jwt, jose_exceptions = attempt_import('jose.jwt', 'jose.exceptions', lazy=False, check_update=CHECK_UPDATE)
+fastapi, starlette = attempt_import(
+    'fastapi', 'starlette', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+)
+fastapi_responses = attempt_import(
+    'fastapi.responses', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+)
+jwt = attempt_import(
+    'jwt', lazy=False, check_update=CHECK_UPDATE, **_IMPORT_KW,
+)
+if jwt is None:
+    raise ImportError(
+        "`meerschaum.api` needs `PyJWT`: install the `api` extra "
+        "(`pip install \"meerschaum[api]\"`)."
+    )
+### v4 validated with `python-jose`; PyJWT validates the same HS256 tokens.
 from fastapi import Depends, HTTPException, Request
 from starlette import status
 
@@ -73,7 +84,6 @@ async def optional_user(request: Request) -> Optional[User]:
     """
     if no_auth:
         return None
-    return await manager(request)
     try:
         return await manager(request)
     except HTTPException:
@@ -99,7 +109,7 @@ async def load_user_or_token(
     if not authorization.startswith('mrsm-key:'):
         if not users:
             raise HTTPException(
-                status=status.HTTP_401_UNAUTHORIZED,
+                status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Users not authenticated for this endpoint.",
             )
 
@@ -171,8 +181,8 @@ def get_granted_scopes(
         )
 
     try:
-        payload = jose_jwt.decode(token_str, SECRET, algorithms=['HS256'])
-    except jose_exceptions.JWTError:
+        payload = decode_jwt(token_str)
+    except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid access token.",
@@ -252,7 +262,17 @@ def ScopedAuth(scopes: List[str], aliases: Optional[Dict[str, str]] = None):
     return _authenticate
 
 
-LoginManager = fastapi_login.LoginManager
+from meerschaum.api._login import LoginManager
+
+
+def decode_jwt(token: str) -> dict:
+    """
+    Validate a JWT signed with the API secret (HS256) and return its claims.
+    Raises `jwt.PyJWTError` when the signature, expiry or format is invalid.
+    """
+    return jwt.decode(token, SECRET, algorithms=['HS256'])
+
+
 def generate_secret_key() -> bytes:
     """
     Read or generate the secret keyfile.

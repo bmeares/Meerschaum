@@ -1,0 +1,14 @@
+// Future component interface, deliberately not built. Native data uses Arrow C Stream;
+// the future sandboxed wasm path substitutes Arrow IPC batches (a copy).
+package meerschaum:plugin@1.0.0;
+interface native-contract {
+    record metadata { name: string, version: string, abi-version: u32, manifest-json: string }
+    record request { method: string, connector-type: string, label: string, config-json: string, context-json: string }
+    record reply { value-json: string, arrow-ipc: option<list<u8>> }
+    record failure { status: u32, message: string }
+    describe: func() -> result<metadata, failure>;
+    // fetch, sync, register, setup, subscribe; all instance methods; action,
+    // pre_sync_hook and post_sync_hook use the same method names as ABI v1.
+    invoke: func(context: request, arrow-ipc: option<list<u8>>) -> result<reply, failure>;
+}
+world plugin { export native-contract; }

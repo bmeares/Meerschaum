@@ -43,7 +43,7 @@ Syncs to a MongoDB cluster. Allows you to read from existing collections as well
 !!! example "Connector config"
 
     ```yaml
-    uri: mongodb://localhost:27017 
+    uri: mongodb://localhost:27017
     database: foo
     ```
 

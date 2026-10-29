@@ -1,0 +1,202 @@
+# Release artifacts only: no tag-triggered rebuild and no registry publication.
+# A caller and its nested platform jobs share one run_id; every checkout stays on github.sha.
+# Standard platforms are required; cp314t is opt-in and staged only after its smoke passes.
+name: wheels
+'on':
+  workflow_call:
+    inputs:
+      experimental:
+        type: boolean
+        default: false
+        description: Build and test the optional Linux cp314t wheel.
+  workflow_dispatch:
+    inputs:
+      experimental:
+        type: boolean
+        default: false
+        description: Build and test the optional Linux cp314t wheel.
+permissions:
+  contents: read
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  metadata:
+    name: packaging metadata
+    outputs:
+      wheels: ${{ steps.matrix.outputs.wheels }}
+      binaries: ${{ steps.matrix.outputs.binaries }}
+      smoke: ${{ steps.matrix.outputs.smoke }}
+      smoke_musl: ${{ steps.matrix.outputs.smoke_musl }}
+      experimental_wheels: ${{ steps.matrix.outputs.experimental_wheels }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - name: Cargo version, pyproject pins and extras agree
+      run: python scripts/check_packaging.py
+    - name: Select release platforms
+      id: matrix
+      run: python scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"
+  build:
+    name: wheel (${{ matrix.target }})
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.wheels) }}
+    uses: ./.github/workflows/wheel-platform.yaml
+    with:
+      os: ${{ matrix.os }}
+      manylinux: ${{ matrix.manylinux }}
+      target: ${{ matrix.target }}
+      artifact: ${{ matrix.artifact || format('wheels-{0}', matrix.os) }}
+      smoke-os: ${{ matrix.smoke_os || matrix.os }}
+      wheel-arch: ${{ matrix.wheel_arch || '' }}
+      musl: ${{ matrix.musl == true }}
+      experimental: false
+  experimental:
+    name: experimental wheel (${{ matrix.target }})
+    needs: metadata
+    if: ${{ inputs.experimental }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.experimental_wheels) }}
+    uses: ./.github/workflows/wheel-platform.yaml
+    with:
+      os: ${{ matrix.os }}
+      manylinux: ${{ matrix.manylinux }}
+      target: ${{ matrix.target }}
+      artifact: ${{ matrix.artifact || format('wheels-{0}', matrix.os) }}
+      smoke-os: ${{ matrix.smoke_os || matrix.os }}
+      wheel-arch: ${{ matrix.wheel_arch || '' }}
+      musl: ${{ matrix.musl == true }}
+      experimental: true
+  sdist:
+    name: build (sdist)
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - name: Build the meerschaum sdist
+      uses: PyO3/maturin-action@v1
+      with:
+        command: sdist
+        args: --out dist
+    - name: Record exact-commit source provenance
+      run: python scripts/ci/artifacts.py create --kind sdist --profile release --target source --artifact-dir dist --output dist/provenance.json
+    - uses: actions/upload-artifact@v4
+      with:
+        name: sdist
+        path: dist/*
+        if-no-files-found: error
+  binaries:
+    name: binary (${{ matrix.target }})
+    needs: metadata
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.binaries) }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      EXT: ${{ matrix.ext }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      with:
+        shared-key: binary-${{ matrix.target }}-release
+        save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+    - name: Versions (PEP 440 for the file name, Cargo for `mrsm --version`)
+      run: |
+        echo "VERSION=$(python scripts/check_packaging.py --version)" >> "$GITHUB_ENV"
+        echo "CARGO_VERSION=$(python -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")" >> "$GITHUB_ENV"
+    - name: Build mrsm (manylinux_2_28 container)
+      if: ${{ matrix.container_arch }}
+      run: |
+        docker run --rm -v "$GITHUB_WORKSPACE:/io" -w /io \
+          -e BUILD_CONSOLE_FIXTURE="${{ matrix.target == 'x86_64-unknown-linux-gnu' && '1' || '0' }}" \
+          -e CONSOLE_FIXTURE_UID="$(id -u)" -e CONSOLE_FIXTURE_GID="$(id -g)" \
+          "quay.io/pypa/manylinux_2_28_${{ matrix.container_arch }}:latest" \
+          bash -euxc 'curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+            && . "$HOME/.cargo/env" \
+            && rustc -Vv > binary-toolchain.txt \
+            && { cargo build --release --locked -p meerschaum --bin mrsm --message-format=json-render-diagnostics > cli-build.jsonl || { cat cli-build.jsonl; exit 1; }; } \
+            && if [ "$BUILD_CONSOLE_FIXTURE" = 1 ]; then \
+              /opt/python/cp313-cp313/bin/python scripts/ci/console_fixture.py build \
+                --messages cli-build.jsonl --binary target/release/mrsm \
+                --output console-native-fixture --profile release \
+              && chown -R --no-dereference -- "$CONSOLE_FIXTURE_UID:$CONSOLE_FIXTURE_GID" console-native-fixture; fi'
+    - name: Build mrsm (macOS)
+      if: ${{ runner.os == 'macOS' }}
+      env:
+        MACOSX_DEPLOYMENT_TARGET: '11.0'
+      run: |-
+        rustc -Vv > binary-toolchain.txt
+        cargo build --release --locked -p meerschaum --bin mrsm
+    - name: Build mrsm (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      env:
+        RUSTFLAGS: -C target-feature=+crt-static
+      run: |-
+        rustc -Vv > binary-toolchain.txt
+        cargo build --release --locked -p meerschaum --bin mrsm
+    - name: Check the glibc floor (Linux)
+      if: ${{ runner.os == 'Linux' }}
+      run: |
+        max=$(objdump -T target/release/mrsm | grep -o 'GLIBC_[0-9]\+\.[0-9]\+' | sed 's/GLIBC_//' | sort -V | tail -1)
+        echo "highest GLIBC symbol version needed: ${max:-none}"
+        if [ -n "$max" ] && [ "$(printf '%s\n2.28\n' "$max" | sort -V | tail -1)" != 2.28 ]; then
+          echo "needs glibc $max, newer than manylinux_2_28" >&2; exit 1
+        fi
+        file target/release/mrsm || true
+    - name: Stage the binary and its SHA-256
+      run: |
+        mkdir out
+        name="mrsm-$VERSION-${{ matrix.target }}$EXT"
+        cp "target/release/mrsm$EXT" "out/$name"
+        cd out
+        if command -v sha256sum >/dev/null; then sha256sum "$name" > "$name.sha256"; else shasum -a 256 "$name" > "$name.sha256"; fi
+        ls -l .; cat "$name.sha256"
+    - name: Smoke the binary (version, show version)
+      run: |
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins" MRSM_NO_AUTO_INSTALL=1
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        cd "$RUNNER_TEMP"
+        bin="$GITHUB_WORKSPACE/out/mrsm-$VERSION-${{ matrix.target }}$EXT"
+        chmod +x "$bin"
+        "$bin" --version | tee version.txt
+        grep -Fq "$CARGO_VERSION" version.txt
+        "$bin" show version | tee show-version.txt
+        grep -Fq "$CARGO_VERSION" show-version.txt
+    - name: Record exact-commit binary provenance
+      run: |
+        python scripts/ci/artifacts.py create --kind binary --profile release --target "${{ matrix.target }}" --artifact-dir out --output out/provenance.json --toolchain-file binary-toolchain.txt
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mrsm-${{ env.VERSION }}-${{ matrix.target }}
+        path: out/*
+        if-no-files-found: error
+    - name: Record the matching console fixture provenance
+      if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+      run: python scripts/ci/console_fixture.py record --output console-native-fixture --profile release --toolchain-file binary-toolchain.txt
+    - uses: actions/upload-artifact@v4
+      if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+      with:
+        name: console-native-fixture-release
+        path: console-native-fixture/**
+        if-no-files-found: error

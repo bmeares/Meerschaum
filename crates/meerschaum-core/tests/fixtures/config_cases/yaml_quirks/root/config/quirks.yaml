@@ -1,0 +1,26 @@
+base: &base
+  host: base.test
+  port: 1
+  tags: [a, b]
+other: &other
+  port: 2
+  extra: true
+merged:
+  <<: [*base, *other]
+  port: 3
+alias: *base
+dup: 1
+dup: 2
+bools: [yes, No, ON, off, true, False]
+nulls: [~, null, Null, ""]
+ints: [0b101, 0x1F, 017, 1_000, +5, -0]
+floats: [1.5, .5, -1.0e-2, 1_0.5]
+strings: ['yes', "017", 1e5, '2024-01-01T00:00:00']
+sexagesimal_float: 12:30:45.5
+quoted_key: {"a b": 1, 'c': 2}
+block: |
+  line one
+  line two
+folded: >
+  folded
+  text

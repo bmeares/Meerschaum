@@ -1,0 +1,241 @@
+{
+ "case": {
+  "description": "A misspelled pipe keyword (dtype:) outside of parameters makes Pipe() raise, as in Python; the lint still reports it.",
+  "width": 100,
+  "runs": [
+   {
+    "name": "explain",
+    "action": [
+     "explain"
+    ]
+   },
+   {
+    "name": "up-dry",
+    "action": [
+     "up"
+    ],
+    "flags": {
+     "dry": true
+    }
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 100,
+   "error": {
+    "type": "TypeError",
+    "message": "Pipe.__init__() got an unexpected keyword argument 'dtype'. Did you mean 'dtypes'?"
+   },
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "kwarg-typo"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "project_name": "kwarg-typo",
+    "pipes": [
+     {
+      "connector": "plugin:typo",
+      "metric": "crash",
+      "instance": "sql:local",
+      "dtype": {
+       "value": "float64"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "kwarg-typo"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"kwarg-typo\",\"pipes\":[{\"connector\":\"plugin:typo\",\"metric\":\"crash\",\"instance\":\"sql:local\",\"dtype\":{\"value\":\"float64\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"kwarg-typo\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "kwarg-typo",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"kwarg-typo\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:typo",
+     "metric": "crash",
+     "instance": "sql:local",
+     "dtype": {
+      "value": "float64"
+     },
+     "tags": [
+      "kwarg-typo"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": null,
+   "explain": "",
+   "written_files": {},
+   "config_hash_normalized": "f1b81a31fe8dfd7420473aab81d4ceb72b3fdee8bfbfa7d211befe39640b8573"
+  },
+  {
+   "name": "up-dry",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "dry": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--dry"
+   ],
+   "width": 100,
+   "error": {
+    "type": "TypeError",
+    "message": "Pipe.__init__() got an unexpected keyword argument 'dtype'. Did you mean 'dtypes'?"
+   },
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "kwarg-typo"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "project_name": "kwarg-typo",
+    "pipes": [
+     {
+      "connector": "plugin:typo",
+      "metric": "crash",
+      "instance": "sql:local",
+      "dtype": {
+       "value": "float64"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "kwarg-typo"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"kwarg-typo\",\"pipes\":[{\"connector\":\"plugin:typo\",\"metric\":\"crash\",\"instance\":\"sql:local\",\"dtype\":{\"value\":\"float64\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"kwarg-typo\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "kwarg-typo",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"kwarg-typo\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:typo",
+     "metric": "crash",
+     "instance": "sql:local",
+     "dtype": {
+      "value": "float64"
+     },
+     "tags": [
+      "kwarg-typo"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "f1b81a31fe8dfd7420473aab81d4ceb72b3fdee8bfbfa7d211befe39640b8573"
+  }
+ ]
+}

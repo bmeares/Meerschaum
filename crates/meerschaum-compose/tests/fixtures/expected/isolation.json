@@ -1,0 +1,2513 @@
+{
+ "case": {
+  "description": "isolation: subprocess, daemon: false, environment overrides of the directory variables, explicit jobs.",
+  "width": 120,
+  "runs": "all"
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:iso",
+     "metric": "data",
+     "instance": "sql:local",
+     "tags": [
+      "isolated-project"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:iso', 'data', instance='sql:local')",
+     "connector_keys": "plugin:iso",
+     "metric_key": "data",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "isolated-project"
+      ]
+     }
+    }
+   ],
+   "explain": "                                              Pipes in 'isolated-project'                                               \n                                                                 ╷                              ╷                       \n  Defined Pipes                                                  │Compose Parameters            │Remote Parameters      \n╶────────────────────────────────────────────────────────────────┼──────────────────────────────┼──────────────────────╴\n  ╭───────────────────────── Instance ─────────────────────────╮ │                              │                       \n  │ sql:local                                                  │ │                              │                       \n  ╰────────────────────────────────────────────────────────────╯ │                              │                       \n                                                                 │                              │                       \n  Pipe('plugin:iso', 'data', instance='sql:local')               │{                             │                       \n                                                                 │  \"tags\": [                   │                       \n  ⭕ Not registered                                              │    \"isolated-project\"        │                       \n                                                                 │  ]                           │                       \n                                                                 │}                             │                       \n                                                                 ╵                              ╵                       \n",
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "up-dry",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "dry": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--dry"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Updated parameters for 1 pipe on 1 instance."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-m",
+      "data",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"isolated-project\"]}",
+      "--noask",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:iso', 'data', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:iso",
+     "metric": "data",
+     "instance": "sql:local",
+     "tags": [
+      "isolated-project"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:iso', 'data', instance='sql:local')",
+     "connector_keys": "plugin:iso",
+     "metric_key": "data",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "isolated-project"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "up",
+   "action": [
+    "up"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Running 5 background jobs.\nRun `mrsm compose logs` or pass `-f` to follow logs output."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-m",
+      "data",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"isolated-project\"]}",
+      "--noask",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "start",
+      "api",
+      "--port",
+      "9000",
+      "-t",
+      "isolated-project",
+      "--name",
+      "api",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "sql:local",
+      "-t",
+      "recompute",
+      "--loop",
+      "--name",
+      "tagged",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "--name",
+      "custom-name",
+      "--loop",
+      "-t",
+      "isolated-project",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-t",
+      "isolated-project",
+      "+",
+      "sync",
+      "pipes",
+      "-c",
+      "sql:local",
+      ":",
+      "--loop",
+      "--min-seconds",
+      "600",
+      "-w",
+      "1",
+      "--name",
+      "compound",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sql",
+      "local",
+      "exec",
+      "SELECT 1",
+      "-d",
+      "-t",
+      "isolated-project",
+      "--name",
+      "quoted",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:iso', 'data', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Starting job 'api'..."
+    ],
+    [
+     "info",
+     "Starting job 'tagged'..."
+    ],
+    [
+     "info",
+     "Starting job 'custom-name'..."
+    ],
+    [
+     "info",
+     "Starting job 'compound'..."
+    ],
+    [
+     "info",
+     "Starting job 'quoted'..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:iso",
+     "metric": "data",
+     "instance": "sql:local",
+     "tags": [
+      "isolated-project"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:iso', 'data', instance='sql:local')",
+     "connector_keys": "plugin:iso",
+     "metric_key": "data",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "isolated-project"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "up-follow",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "force": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "-f"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Running 5 background jobs."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-m",
+      "data",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"isolated-project\"]}",
+      "--noask",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "start",
+      "api",
+      "--port",
+      "9000",
+      "-t",
+      "isolated-project",
+      "--name",
+      "api",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "sql:local",
+      "-t",
+      "recompute",
+      "--loop",
+      "--name",
+      "tagged",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "--name",
+      "custom-name",
+      "--loop",
+      "-t",
+      "isolated-project",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-t",
+      "isolated-project",
+      "+",
+      "sync",
+      "pipes",
+      "-c",
+      "sql:local",
+      ":",
+      "--loop",
+      "--min-seconds",
+      "600",
+      "-w",
+      "1",
+      "--name",
+      "compound",
+      "-d",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sql",
+      "local",
+      "exec",
+      "SELECT 1",
+      "-d",
+      "-t",
+      "isolated-project",
+      "--name",
+      "quoted",
+      "-f",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "api",
+      "tagged",
+      "custom-name",
+      "compound",
+      "quoted",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:iso', 'data', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Starting job 'api'..."
+    ],
+    [
+     "info",
+     "Starting job 'tagged'..."
+    ],
+    [
+     "info",
+     "Starting job 'custom-name'..."
+    ],
+    [
+     "info",
+     "Starting job 'compound'..."
+    ],
+    [
+     "info",
+     "Starting job 'quoted'..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:iso",
+     "metric": "data",
+     "instance": "sql:local",
+     "tags": [
+      "isolated-project"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:iso', 'data', instance='sql:local')",
+     "connector_keys": "plugin:iso",
+     "metric_key": "data",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "isolated-project"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "up-presync-no-jobs",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "presync": true,
+    "no_jobs": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--presync",
+    "--no-jobs"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Synced 1 pipe across 1 instance."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-m",
+      "data",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"isolated-project\"]}",
+      "--noask",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-m",
+      "data",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:iso', 'data', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:iso', 'data', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:iso",
+     "metric": "data",
+     "instance": "sql:local",
+     "tags": [
+      "isolated-project"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:iso', 'data', instance='sql:local')",
+     "connector_keys": "plugin:iso",
+     "metric_key": "data",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "isolated-project"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "run",
+   "action": [
+    "run"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "run"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Synced 1 pipe across 1 instance."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-m",
+      "data",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"isolated-project\"]}",
+      "--noask",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:iso",
+      "-m",
+      "data",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:iso', 'data', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:iso', 'data', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:iso",
+     "metric": "data",
+     "instance": "sql:local",
+     "tags": [
+      "isolated-project"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:iso', 'data', instance='sql:local')",
+     "connector_keys": "plugin:iso",
+     "metric_key": "data",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "isolated-project"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "down",
+   "action": [
+    "down"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "down-volumes",
+   "action": [
+    "down"
+   ],
+   "flags": {
+    "drop": true,
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down",
+    "-v",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    false,
+    "No pipes to delete."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:iso",
+     "metric": "data",
+     "instance": "sql:local",
+     "tags": [
+      "isolated-project"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:iso', 'data', instance='sql:local')",
+     "connector_keys": "plugin:iso",
+     "metric_key": "data",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "isolated-project"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "ps",
+   "action": [
+    "ps"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "ps"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "jobs",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "logs",
+   "action": [
+    "logs"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "logs"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "sync-pipes",
+   "action": [
+    "sync",
+    "pipes"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "sync",
+    "pipes"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'sync pipes' in compose project 'isolated-project'..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "start-jobs",
+   "action": [
+    "start",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "jobs",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "No jobs in compose project 'isolated-project'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "stop-jobs",
+   "action": [
+    "stop",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "stop",
+    "jobs",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "No jobs in compose project 'isolated-project'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "delete-jobs",
+   "action": [
+    "delete",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "delete",
+    "jobs",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "No jobs in compose project 'isolated-project'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "start-api",
+   "action": [
+    "start",
+    "api"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "api"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "start",
+      "api",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'start api' in compose project 'isolated-project'..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "shell",
+   "action": [],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Starting a shell in compose project 'isolated-project'..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  },
+  {
+   "name": "init",
+   "action": [
+    "init"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "init"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Finished initializing project 'isolated-project'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "isolated-project",
+      "--no-daemon"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "environment": {
+     "MRSM_PLUGINS_DIR": "[\"./plugins\", \"./more-plugins\"]",
+     "MRSM_ROOT_DIR": "./env-root",
+     "MRSM_WORK_DIR": "./work",
+     "OTHER": "1",
+     "EMPTY": null
+    },
+    "project_name": "isolated-project",
+    "pipes": [
+     {
+      "connector": "plugin:iso",
+      "metric": "data",
+      "instance": "sql:local"
+     }
+    ],
+    "jobs": {
+     "api": "start api --port 9000",
+     "tagged": "sync pipes -c sql:local -t recompute --loop",
+     "named": "sync pipes --name custom-name --loop",
+     "compound": "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1",
+     "quoted": "sql local exec 'SELECT 1' -d"
+    },
+    "isolation": "subprocess",
+    "daemon": false,
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "isolated-project"
+     }
+    },
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/more-plugins"
+    ]
+   },
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/env-root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "isolated-project",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}}",
+    "MRSM_WORK_DIR": "{PROJECT}/work",
+    "OTHER": "1",
+    "EMPTY": ""
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "eb4839bb7311411819d7ccca8f2bfa0c8ab1976ed24875b1b536ad2565c47520"
+  }
+ ]
+}

@@ -40,16 +40,16 @@ def pprint(
     modify = True
     rich_pprint = None
     if ANSI and not nopretty:
-        rich = import_rich()
-        if rich is not None:
-            rich_pretty = attempt_import('rich.pretty')
-        if rich_pretty is not None:
+        ### `rich` is not a dependency of the base wheel: without it, output is not styled.
+        rich = import_rich(lazy=False)
+        rich_pretty = attempt_import('rich.pretty', lazy=False) if rich is not None else None
+        if rich_pretty is not None and get_console() is not None:
             def _rich_pprint(*args, **kw):
                 _console = get_console()
                 _kw = filter_keywords(_console.print, **kw)
                 _console.print(*args, **_kw)
             rich_pprint = _rich_pprint
-    elif not nopretty:
+    if rich_pprint is None and not nopretty:
         pprintpp = attempt_import('pprintpp', warn=False)
         try:
             _pprint = pprintpp.pprint

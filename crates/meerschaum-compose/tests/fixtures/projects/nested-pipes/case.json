@@ -1,0 +1,5 @@
+{
+  "description": "sync.pipes nested by mistake (loaded before the top-level pipes), a .yml file found by default, the project name from the directory, two instances.",
+  "width": 100,
+  "runs": "all"
+}

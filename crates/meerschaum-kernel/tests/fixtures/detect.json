@@ -1,0 +1,3013 @@
+{
+ "generator": "gen_detect.py",
+ "meerschaum_version": "4.1.4",
+ "pandas_version": "3.0.0",
+ "cases": [
+  {
+   "name": "ints",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "nullable_ints",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "na"
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "na"
+       },
+       {
+        "t": "int",
+        "v": 5
+       },
+       {
+        "t": "int",
+        "v": 6
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "floats",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.5
+       },
+       {
+        "t": "float",
+        "v": "nan"
+       },
+       {
+        "t": "float",
+        "v": 3.25
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "bools",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "flag",
+      "dtype": "boolean",
+      "crs": null,
+      "values": [
+       true,
+       false,
+       {
+        "t": "na"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": [
+      "flag"
+     ]
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "flag": "bool"
+     }
+    }
+   }
+  },
+  {
+   "name": "strings",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "name",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "a",
+       {
+        "t": "float",
+        "v": "nan"
+       },
+       "c"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "datetimes_utc",
+   "df": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "nat"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {
+      "dt": [
+       "UTC",
+       "microsecond"
+      ]
+     }
+    },
+    "get_datetime_cols_types": {
+     "ok": {
+      "dt": "datetime64[us, UTC]"
+     }
+    },
+    "get_date_cols": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "dt": "datetime64[us, UTC]"
+     }
+    }
+   }
+  },
+  {
+   "name": "datetimes_naive",
+   "df": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T12:30:00",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {
+      "dt": [
+       null,
+       "microsecond"
+      ]
+     }
+    },
+    "get_datetime_cols_types": {
+     "ok": {
+      "dt": "datetime64[us]"
+     }
+    },
+    "get_date_cols": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "dt": "datetime64[us]"
+     }
+    }
+   }
+  },
+  {
+   "name": "datetimes_ny",
+   "df": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, America/New_York]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00-05:00",
+        "tz": "America/New_York"
+       },
+       {
+        "t": "dt",
+        "v": "2024-06-02T12:30:00-04:00",
+        "tz": "America/New_York"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {
+      "dt": [
+       "America/New_York",
+       "microsecond"
+      ]
+     }
+    },
+    "get_datetime_cols_types": {
+     "ok": {
+      "dt": "datetime64[us, America/New_York]"
+     }
+    },
+    "get_date_cols": {
+     "ok": [
+      "dt"
+     ]
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "dt": "datetime64[us, America/New_York]"
+     }
+    }
+   }
+  },
+  {
+   "name": "epochs",
+   "df": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1700000000.0
+       },
+       {
+        "t": "float",
+        "v": 1700000060.0
+       },
+       {
+        "t": "float",
+        "v": "nan"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "numerics",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.10"
+       },
+       {
+        "t": "dec",
+        "v": "2"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": [
+      "num"
+     ]
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "num": "numeric"
+     }
+    }
+   }
+  },
+  {
+   "name": "uuids",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "u",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "uuid",
+        "v": "12345678-1234-5678-1234-567812345678"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": [
+      "u"
+     ]
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "u": "uuid"
+     }
+    }
+   }
+  },
+  {
+   "name": "json",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "meta",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "json",
+        "v": {
+         "b": 1,
+         "a": [
+          1,
+          2
+         ]
+        }
+       },
+       {
+        "t": "json",
+        "v": [
+         1,
+         "x"
+        ]
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": [
+      "meta"
+     ]
+    },
+    "get_json_cols": {
+     "ok": [
+      "meta"
+     ]
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "meta": "json"
+     }
+    }
+   }
+  },
+  {
+   "name": "bytes",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "blob",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "bytes",
+        "v": "AAFhYmM="
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": [
+      "blob"
+     ]
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "blob": "bytes"
+     }
+    }
+   }
+  },
+  {
+   "name": "dates",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "d",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "date",
+        "v": "2024-01-01"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": [
+      "d"
+     ]
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "d": "date"
+     }
+    }
+   }
+  },
+  {
+   "name": "geometry",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "geom",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT (1 2)",
+        "wkb": "0101000000000000000000F03F0000000000000040"
+       },
+       {
+        "t": "geom",
+        "wkt": "LINESTRING (0 0, 1 1)",
+        "wkb": "01020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": [
+      "geom"
+     ]
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {
+      "geom": [
+       "geometry",
+       0
+      ]
+     }
+    },
+    "get_geometry_cols_types": {
+     "ok": {
+      "geom": "geometry"
+     }
+    },
+    "get_special_cols": {
+     "ok": {
+      "geom": "geometry"
+     }
+    }
+   }
+  },
+  {
+   "name": "empty",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "no_cols",
+   "df": {
+    "columns": [],
+    "index": []
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "mixed_num",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "all_null",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null,
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {}
+    }
+   }
+  },
+  {
+   "name": "first_row_null",
+   "df": {
+    "columns": [
+     {
+      "name": "meta",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null,
+       {
+        "t": "json",
+        "v": {
+         "a": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null,
+       {
+        "t": "dec",
+        "v": "1.5"
+       }
+      ]
+     },
+     {
+      "name": "u",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null,
+       {
+        "t": "uuid",
+        "v": "12345678-1234-5678-1234-567812345678"
+       }
+      ]
+     },
+     {
+      "name": "b",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null,
+       {
+        "t": "bytes",
+        "v": "eA=="
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": [
+      "meta"
+     ]
+    },
+    "get_numeric_cols": {
+     "ok": [
+      "num"
+     ]
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": [
+      "u"
+     ]
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": [
+      "b"
+     ]
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "meta": "json",
+      "u": "uuid",
+      "b": "bytes",
+      "num": "numeric"
+     }
+    }
+   }
+  },
+  {
+   "name": "object_datetimes",
+   "df": {
+    "columns": [
+     {
+      "name": "aware",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       null
+      ]
+     },
+     {
+      "name": "naive",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       },
+       null
+      ]
+     },
+     {
+      "name": "offset",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-06-01T08:00:00-04:00",
+        "tz": "UTC-04:00"
+       },
+       null
+      ]
+     },
+     {
+      "name": "d",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "date",
+        "v": "2024-01-01"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": [
+      "aware",
+      "naive",
+      "offset"
+     ]
+    },
+    "get_datetime_cols_aware": {
+     "ok": [
+      "aware",
+      "offset"
+     ]
+    },
+    "get_datetime_cols_naive": {
+     "ok": [
+      "naive"
+     ]
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {
+      "aware": [
+       "UTC",
+       "microsecond"
+      ],
+      "naive": [
+       null,
+       "microsecond"
+      ],
+      "offset": [
+       "UTC-04:00",
+       "microsecond"
+      ]
+     }
+    },
+    "get_datetime_cols_types": {
+     "ok": {
+      "aware": "datetime64[us, UTC]",
+      "naive": "datetime64[us]",
+      "offset": "datetime64[us, UTC-04:00]"
+     }
+    },
+    "get_date_cols": {
+     "ok": [
+      "aware",
+      "naive",
+      "offset",
+      "d"
+     ]
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "aware": "datetime64[us, UTC]",
+      "naive": "datetime64[us]",
+      "offset": "datetime64[us, UTC-04:00]",
+      "d": "date"
+     }
+    }
+   }
+  },
+  {
+   "name": "geo_types",
+   "df": {
+    "columns": [
+     {
+      "name": "pts",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT (0 0)",
+        "wkb": "010100000000000000000000000000000000000000"
+       },
+       {
+        "t": "geom",
+        "wkt": "POINT (1 1)",
+        "wkb": "0101000000000000000000F03F000000000000F03F"
+       }
+      ]
+     },
+     {
+      "name": "mixed",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT (0 0)",
+        "wkb": "010100000000000000000000000000000000000000"
+       },
+       {
+        "t": "geom",
+        "wkt": "LINESTRING (0 0, 1 1)",
+        "wkb": "01020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+       }
+      ]
+     },
+     {
+      "name": "z",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT Z (0 0 1)",
+        "wkb": "010100008000000000000000000000000000000000000000000000F03F"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": [
+      "pts",
+      "mixed",
+      "z"
+     ]
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {
+      "pts": [
+       "Point",
+       0
+      ],
+      "mixed": [
+       "geometry",
+       0
+      ],
+      "z": [
+       "PointZ",
+       0
+      ]
+     }
+    },
+    "get_geometry_cols_types": {
+     "ok": {
+      "pts": "geometry[Point]",
+      "mixed": "geometry",
+      "z": "geometry[PointZ]"
+     }
+    },
+    "get_special_cols": {
+     "ok": {
+      "pts": "geometry[Point]",
+      "mixed": "geometry",
+      "z": "geometry[PointZ]"
+     }
+    }
+   }
+  },
+  {
+   "name": "geodataframe_4326",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "geom",
+      "dtype": "geometry",
+      "crs": "EPSG:4326",
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT (0 0)",
+        "wkb": "010100000000000000000000000000000000000000"
+       },
+       {
+        "t": "geom",
+        "wkt": "POINT (1 1)",
+        "wkb": "0101000000000000000000F03F000000000000F03F"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": [
+      "geom"
+     ]
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {
+      "geom": [
+       "Point",
+       4326
+      ]
+     }
+    },
+    "get_geometry_cols_types": {
+     "ok": {
+      "geom": "geometry[Point, 4326]"
+     }
+    },
+    "get_special_cols": {
+     "ok": {
+      "geom": "geometry[Point, 4326]"
+     }
+    }
+   }
+  },
+  {
+   "name": "geodataframe_2263",
+   "df": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "geom",
+      "dtype": "geometry",
+      "crs": "EPSG:2263",
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+        "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": [
+      "geom"
+     ]
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {
+      "geom": [
+       "Polygon",
+       2263
+      ]
+     }
+    },
+    "get_geometry_cols_types": {
+     "ok": {
+      "geom": "geometry[Polygon, 2263]"
+     }
+    },
+    "get_special_cols": {
+     "ok": {
+      "geom": "geometry[Polygon, 2263]"
+     }
+    }
+   }
+  },
+  {
+   "name": "arrow_types",
+   "df": {
+    "columns": [
+     {
+      "name": "b",
+      "dtype": "binary[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "bytes",
+        "v": "YQ=="
+       },
+       {
+        "t": "na"
+       }
+      ]
+     },
+     {
+      "name": "d",
+      "dtype": "date32[day][pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "date",
+        "v": "2024-01-01"
+       },
+       {
+        "t": "na"
+       }
+      ]
+     },
+     {
+      "name": "ts",
+      "dtype": "timestamp[ms, tz=UTC][pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "na"
+       }
+      ]
+     },
+     {
+      "name": "flag",
+      "dtype": "bool[pyarrow]",
+      "crs": null,
+      "values": [
+       true,
+       {
+        "t": "na"
+       }
+      ]
+     },
+     {
+      "name": "i",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "na"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": [
+      "flag"
+     ]
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": [
+      "ts"
+     ]
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": [
+      "ts"
+     ]
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {
+      "ts": [
+       "UTC",
+       "millisecond"
+      ]
+     }
+    },
+    "get_datetime_cols_types": {
+     "ok": {
+      "ts": "datetime64[ms, UTC]"
+     }
+    },
+    "get_date_cols": {
+     "ok": [
+      "d",
+      "ts"
+     ]
+    },
+    "get_bytes_cols": {
+     "ok": [
+      "b"
+     ]
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "b": "bytes",
+      "flag": "bool",
+      "d": "date",
+      "ts": "datetime64[ms, UTC]"
+     }
+    }
+   }
+  },
+  {
+   "name": "dt_units",
+   "df": {
+    "columns": [
+     {
+      "name": "ns_utc",
+      "dtype": "datetime64[ns, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "ms_naive",
+      "dtype": "datetime64[ms]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "s_ny",
+      "dtype": "datetime64[s, America/New_York]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00-05:00",
+        "tz": "America/New_York"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": []
+    },
+    "get_json_cols": {
+     "ok": []
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": [
+      "ns_utc",
+      "ms_naive",
+      "s_ny"
+     ]
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": [
+      "ns_utc",
+      "ms_naive",
+      "s_ny"
+     ]
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {
+      "ns_utc": [
+       "UTC",
+       "nanosecond"
+      ],
+      "ms_naive": [
+       null,
+       "millisecond"
+      ],
+      "s_ny": [
+       "America/New_York",
+       "second"
+      ]
+     }
+    },
+    "get_datetime_cols_types": {
+     "ok": {
+      "ns_utc": "datetime64[ns, UTC]",
+      "ms_naive": "datetime64[ms]",
+      "s_ny": "datetime64[s, America/New_York]"
+     }
+    },
+    "get_date_cols": {
+     "ok": [
+      "ns_utc",
+      "ms_naive",
+      "s_ny"
+     ]
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "ns_utc": "datetime64[ns, UTC]",
+      "ms_naive": "datetime64[ms]",
+      "s_ny": "datetime64[s, America/New_York]"
+     }
+    }
+   }
+  },
+  {
+   "name": "first_row_json",
+   "df": {
+    "columns": [
+     {
+      "name": "a",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "json",
+        "v": [
+         1
+        ]
+       },
+       null
+      ]
+     },
+     {
+      "name": "b",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null,
+       {
+        "t": "json",
+        "v": {
+         "x": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "c",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "results": {
+    "get_unhashable_cols": {
+     "ok": [
+      "a"
+     ]
+    },
+    "get_json_cols": {
+     "ok": [
+      "a",
+      "b"
+     ]
+    },
+    "get_numeric_cols": {
+     "ok": []
+    },
+    "get_bool_cols": {
+     "ok": []
+    },
+    "get_uuid_cols": {
+     "ok": []
+    },
+    "get_datetime_cols": {
+     "ok": []
+    },
+    "get_datetime_cols_aware": {
+     "ok": []
+    },
+    "get_datetime_cols_naive": {
+     "ok": []
+    },
+    "get_datetime_cols_tz_precision": {
+     "ok": {}
+    },
+    "get_datetime_cols_types": {
+     "ok": {}
+    },
+    "get_date_cols": {
+     "ok": []
+    },
+    "get_bytes_cols": {
+     "ok": []
+    },
+    "get_geometry_cols": {
+     "ok": []
+    },
+    "get_geometry_cols_types_srids": {
+     "ok": {}
+    },
+    "get_geometry_cols_types": {
+     "ok": {}
+    },
+    "get_special_cols": {
+     "ok": {
+      "a": "json",
+      "b": "json"
+     }
+    }
+   }
+  }
+ ]
+}

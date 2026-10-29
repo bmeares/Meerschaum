@@ -3,7 +3,9 @@
 # vim:fenc=utf-8
 
 """
-Callbacks for the main dashboard.
+The console's router (`update_page_layout_div` and its routing tables `_paths`, `_required_login`
+and `_pages`), the Terminal page's callbacks (v4's dashboard: the action builder beside the web
+terminal) and the callbacks of the pipe cards it shows.
 """
 
 from __future__ import annotations
@@ -17,8 +19,7 @@ from dash.exceptions import PreventUpdate
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import List, Optional, Any, Tuple
-from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
-from meerschaum.api.routes import route_group_is_allowed
+from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE, route_group_is_allowed
 from meerschaum.api.dash import dash_app, debug
 from meerschaum.api.dash.sessions import (
     is_session_active,
@@ -36,17 +37,17 @@ from meerschaum.api.dash.pipes import (
     get_backtrack_text,
 )
 from meerschaum.api.dash.jobs import get_jobs_cards
-from meerschaum.api.dash.plugins import get_plugins_cards
-from meerschaum.api.dash.users import get_users_cards
-from meerschaum.api.dash.graphs import get_graphs_cards
+from meerschaum.api.dash.pipeline_cards import get_pipeline_cards
 from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
     alert_from_success_tuple,
     console_div,
     build_cards_grid,
-    build_pages_offcanvas_children,
+    console_nav_context,
+    personalize_navbar,
 )
 from meerschaum.api.dash.keys import build_flags_row, build_flags_options
+from meerschaum.api.dash.execute import omit_actions
 from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
@@ -54,7 +55,7 @@ from meerschaum.utils.misc import filter_keywords, flatten_list, string_to_dict
 from meerschaum.utils.yaml import yaml
 from meerschaum.utils.warnings import warn
 from meerschaum.actions import get_subactions, actions
-from meerschaum.connectors.sql._fetch import set_pipe_query, get_pipe_query
+from meerschaum.api.dash._support import set_pipe_query, get_pipe_query
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
@@ -79,48 +80,109 @@ keys_state = (
 )
 
 
-omit_actions = {
-    'api',
-    'sh',
-    'os',
-    'sql',
-    'stack',
-    'reload',
-    'repo',
-    'instance',
-}
+### The actions the console does not offer come from the server (`GET /execute/policy`), which
+### also refuses them to non-administrators (`meerschaum.api.dash.execute.omit_actions`).
 
 ### Map endpoints to page layouts.
 ### The console's own pages are gated by the `dash` route group of
-### `api:permissions:routes:allowlist`; unknown paths render the error page.
+### `api:permissions:routes:allowlist`; an unknown path renders the Overview (v4's router
+### rendered its dashboard), or the error page when the console's pages are not served.
 ### The login page is always served so plugin pages requiring a login keep an
 ### auth entrypoint, and plugin pages (`add_plugin_pages`) register regardless
 ### of the allowlist.
+###
+### A layout is a component (or list), or a function `(pathname, href)` building the page per
+### request. A list whose first item is the console's navbar (`build_pages_navbar`) gets that
+### navbar rebuilt for each request (`components.personalize_navbar`).
 _console_pages_allowed = route_group_is_allowed('dash')
 _paths = {
     '/dash/login'   : pages.login.layout,
     **({
-        '/dash'         : pages.dashboard.layout,
+        ### The Overview (`pages.overview.route`): the instance's pipes, Pipelines, jobs and runs.
+        '/dash'          : pages.overview.route,
+        ### v4's dashboard: the action builder beside the web terminal (`/dash/webterm` was its URL).
+        '/dash/terminal' : pages.terminal.layout,
+        '/dash/webterm'  : pages.terminal.layout,
+        '/dash/connectors': pages.connectors.route,
         '/dash/plugins' : pages.plugins.layout,
+        ### Users & Teams: the Users tab (`/dash/users`, a user's page `/dash/users/<name>`) and
+        ### the Teams tab (`/dash/teams`).
         '/dash/users'   : pages.users.layout,
+        '/dash/teams'   : pages.users.layout,
         '/dash/tokens'  : pages.tokens.layout,
         '/dash/register': pages.register.layout,
         '/dash/pipes'   : pages.pipes.layout,
         '/dash/jobs'    : pages.jobs.layout,
+        '/dash/runs'    : pages.jobs.layout,
+        ### Pipelines pages are built per request (`pages.pipelines.route`).
+        '/dash/pipelines': pages.pipelines.route,
+        '/dash/performance': pages.performance.route,
     } if _console_pages_allowed else {}),
 }
-_required_login = {'', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes'}
+_required_login = {
+    '', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes',
+    '/dash/pipelines', '/dash/runs', '/dash/terminal', '/dash/webterm', '/dash/connectors',
+    '/dash/users', '/dash/teams', '/dash/plugins',
+    '/dash/performance',
+}
+### The permission a console page needs (`access.Viewer.can`): without it the page shows that it
+### is not available (its link is not in the navigation either: `components.NAV_PERMISSIONS`).
+_required_permission = {
+    '/dash/pipes': 'pipes:read',
+    '/dash/pipelines': 'pipes:read',
+    '/dash/performance': 'pipes:read',
+    '/dash/jobs': 'jobs:read',
+    '/dash/runs': 'jobs:read',
+    '/dash/terminal': 'webterm:use',
+    '/dash/webterm': 'webterm:use',
+    '/dash/connectors': 'connectors:read',
+    '/dash/plugins': 'plugins:read',
+}
 ### Endpoints (plugin pages with `@web_page(dark_theme=False)`) that opt out of the
 ### `dbc_dark` component theme; populated by `add_plugin_pages`.
 _paths_without_dbc_dark = set()
+### The console's pages by name; `add_plugin_pages` adds the plugins' (the navbar's Pages menu).
 _pages = {
-    'Web Console': '/dash/',
+    'Overview': '/dash',
     'Pipes': '/dash/pipes',
+    'Pipelines': '/dash/pipelines',
+    'Performance': '/dash/performance',
+    'Jobs': '/dash/jobs',
+    'Connectors': '/dash/connectors',
     'Plugins': '/dash/plugins',
+    'Terminal': '/dash/terminal',
     'Users': '/dash/users',
     'Tokens': '/dash/tokens',
-    'Jobs': '/dash/jobs',
 } if _console_pages_allowed else {}
+
+#: The Terminal page's paths.
+TERMINAL_PATHS = frozenset({'/dash/terminal', '/dash/webterm'})
+
+#: Query parameters of a link into v4's dashboard (its action builder): `/dash?...` with any of
+#: them opens the Terminal page with the same query.
+TERMINAL_QUERY_KEYS = frozenset({
+    'action', 'subaction', 'subactions', 'connector_keys', 'metric_keys', 'location_keys',
+    'tags', 'flags',
+})
+
+
+def terminal_redirect(path: str, href: Optional[str]) -> Optional[str]:
+    """
+    Where a link into v4's dashboard goes: `/dash?action=...` (or any of `TERMINAL_QUERY_KEYS`)
+    is the Terminal page with the same query; any other path stays (`None`).
+    """
+    from urllib.parse import urlparse, parse_qs
+    if path != '/dash' or not href:
+        return None
+    url = urlparse(href)
+    if url.path.rstrip('/') != '/dash':
+        return None
+    query = url.query
+    if not query:
+        return None
+    if not set(parse_qs(query, keep_blank_values=True)) & TERMINAL_QUERY_KEYS:
+        return None
+    return '/dash/terminal?' + query
 
 
 @dash_app.callback(
@@ -189,7 +251,35 @@ def update_page_layout_div(
         )
     )
     layout = _paths.get(path, pages.error.layout)
+    permission = _required_permission.get(path, None)
+    if permission and not no_auth and path != '/dash/login':
+        from meerschaum.api.dash.access import get_viewer
+        try:
+            allowed = get_viewer(session_store_data).can(permission)
+        except Exception:
+            allowed = False
+        if not allowed:
+            layout = pages.error.not_available
     apply_dbc_dark = path not in _paths_without_dbc_dark
+    ### A link into v4's dashboard opens the Terminal page (`assets/global_instance.js` follows it).
+    redirect = terminal_redirect(path, location_href)
+    if redirect:
+        marker = html.Div(**{'data-mrsm-redirect': redirect})
+        return html.Div([marker], key='page-content::redirect'), session_store_to_return, True
+
+    ### The navbar names the viewer and marks the current page (`components.build_pages_navbar`).
+    nav_session_id = (
+        session_store_data.get('session-id', None)
+        if isinstance(session_store_data, dict)
+        else None
+    )
+    with console_nav_context(pathname=pathname, session_id=nav_session_id):
+        if callable(layout):
+            layout = layout(pathname, location_href)
+            ### Each Pipeline (and the list, wizard and explorer) is its own page.
+            path = pathname.rstrip('/')
+        else:
+            layout = personalize_navbar(layout)
 
     ### Wrap the page in a path-keyed container so React fully remounts the page on
     ### navigation. React reconciles by type + position (not by Dash id), so without a
@@ -231,10 +321,8 @@ dash_app.clientside_callback(
     Input('go-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
     Input('get-jobs-button', 'n_clicks'),
+    Input('get-pipelines-button', 'n_clicks'),
     Input('show-webterm-button', 'n_clicks'),
-    Input('get-plugins-button', 'n_clicks'),
-    Input('get-users-button', 'n_clicks'),
-    Input('get-graphs-button', 'n_clicks'),
     Input('instance-select', 'value'),
     State('mrsm-location', 'href'),
     State('session-store', 'data'),
@@ -243,9 +331,10 @@ dash_app.clientside_callback(
 )
 def update_content(*args):
     """
-    Determine which trigger is seeking to update the content div,
+    Determine which trigger is seeking to update the content div of the Terminal page,
     and execute the appropriate function.
     """
+    from urllib.parse import urlparse
     ctx = dash.callback_context
     session_id = ctx.states['session-store.data'].get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
@@ -260,12 +349,9 @@ def update_content(*args):
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
     session_data = args[-1]
-    mrsm_location_href = session_data.get('mrsm-location.href', None)
-    if (
-        initial_load
-        and mrsm_location_href
-        and not mrsm_location_href.rstrip('/').endswith('/dash')
-    ):
+    ### Only the Terminal page (or its old `/dash/webterm` URL) opens the terminal on load.
+    current_path = urlparse(ctx.states.get('mrsm-location.href', None) or '').path.rstrip('/')
+    if initial_load and current_path and current_path not in TERMINAL_PATHS:
         raise PreventUpdate
 
     ### NOTE: functions MUST return a list of content and a list of alerts
@@ -274,34 +360,33 @@ def update_content(*args):
         'show-webterm-button': lambda x: ([], []),
         'get-pipes-button': get_pipes_cards,
         'get-jobs-button': get_jobs_cards,
-        'get-plugins-button': get_plugins_cards,
-        'get-users-button': get_users_cards,
-        'get-graphs-button': get_graphs_cards,
+        'get-pipelines-button': get_pipeline_cards,
         'instance-select': lambda x: ([], []),
     }
     ### Defaults to 3 if not in dict.
     trigger_num_cols = {
-        'get-graphs-button': 1,
         'get-pipes-button': 1,
+        'get-pipelines-button': 1,
         'get-jobs-button': 2,
     }
 
     ### Trigger functions return (content, alerts), but some return extra trailing
-    ### values (e.g. get_plugins_cards returns page/count for pagination) — take the
-    ### first two.
+    ### values — take the first two.
     result = triggers[trigger](
         ctx.states,
         **filter_keywords(triggers[trigger], session_data=session_data)
     )
     content, alerts = result[0], result[1]
+    dash.set_props('content-div-right', {'style': {'display': 'block' if trigger.startswith('get-') else 'none'}})
+    ### Exec uses the mounted terminal; server management actions have their own output pane.
     webterm_style = {
         'display': (
             'none'
             if trigger not in (
                 'instance-select',
                 'cancel-button',
-                'go-button',
                 'show-webterm-button',
+                'go-button',
             )
             else 'block'
         )
@@ -325,60 +410,7 @@ def update_content(*args):
     return content, alerts, webterm, webterm_style
 
 
-dash_app.clientside_callback(
-    """
-    function(
-        n_clicks,
-        url,
-        connector_keys,
-        metric_keys,
-        location_keys,
-        tags,
-        flags,
-        input_flags,
-        input_flags_texts,
-        instance,
-    ){
-        if (!n_clicks){ return dash_clientside.no_update; }
-        iframe = document.getElementById('webterm-iframe');
-        if (!iframe){ return dash_clientside.no_update; }
-
-        // Actions must be obtained from the DOM because of dynamic subactions.
-        action = document.getElementById('action-dropdown').value;
-        subaction = document.getElementById('subaction-dropdown').value;
-        subaction_text = document.getElementById('subaction-dropdown-text').value;
-
-        iframe.contentWindow.postMessage(
-            {
-                action: action,
-                subaction: subaction,
-                subaction_text: subaction_text,
-                connector_keys: connector_keys,
-                metric_keys: metric_keys,
-                location_keys: location_keys,
-                tags: tags,
-                flags: flags,
-                input_flags: input_flags,
-                input_flags_texts: input_flags_texts,
-                instance: instance,
-            },
-            url
-        );
-        return dash_clientside.no_update;
-    }
-    """,
-    Output('mrsm-location', 'href'),
-    Input('go-button', 'n_clicks'),
-    State('mrsm-location', 'href'),
-    State('connector-keys-dropdown', 'value'),
-    State('metric-keys-dropdown', 'value'),
-    State('location-keys-dropdown', 'value'),
-    State('tags-dropdown', 'value'),
-    State('flags-dropdown', 'value'),
-    State({'type': 'input-flags-dropdown', 'index': ALL}, 'value'),
-    State({'type': 'input-flags-dropdown-text', 'index': ALL}, 'value'),
-    State('instance-select', 'value'),
-)
+### The `Exec` button runs the action through the server: see `callbacks/execute.py`.
 
 @dash_app.callback(
     Output('action-dropdown', 'value'),
@@ -396,13 +428,14 @@ def update_actions(action: str, subaction: str):
     if not action:
         action, subaction = 'show', 'pipes'
         trigger = None
+    _omitted_actions = omit_actions()
     _actions_options = sorted([
         {
             'label': a.replace('_', ' '),
             'value': a.replace('_', ' '),
             'title': (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
-        for a, f in actions.items() if a not in omit_actions
+        for a, f in actions.items() if a not in _omitted_actions
     ], key=lambda k: k['label'])
     _subactions_options = sorted([
         {
@@ -412,8 +445,10 @@ def update_actions(action: str, subaction: str):
         }
         for sa, f in get_subactions(action).items()
     ], key=lambda k: k['label'])
-    _subactions = [o['label'] for o in _subactions_options]
-    if subaction is None:
+    _subactions = [o['value'] for o in _subactions_options]
+    ### A subaction the new action does not offer (`watch` has no `pipes`) becomes its first one,
+    ### so Exec sends what the dropdown shows, not the previous action's subaction.
+    if subaction not in _subactions:
         subaction = _subactions[0] if _subactions else ''
 
     return (
@@ -489,7 +524,9 @@ def update_keys_options(
     if not instance_keys:
         ### NOTE: Set to `session_instance` to restore the last used session.
         ###       Choosing not to do this in order to keep the dashboard and webterm in sync.
-        instance_keys = str(get_api_connector())
+        ### The console's global instance (chosen on any page) comes first.
+        from meerschaum.api.dash.engine import global_instance_keys
+        instance_keys = global_instance_keys() or str(get_api_connector())
         update_instance_keys = True
 
     if not trigger and not update_instance_keys:
@@ -516,37 +553,37 @@ def update_keys_options(
     _lk_alone = (location_keys and num_filter == 1) or instance_click
     _tags_alone = (tags and num_filter == 1) or instance_click
 
-    from meerschaum.utils import fetch_pipes_keys
+    from meerschaum.api.dash import access
 
     try:
-        _all_keys = fetch_pipes_keys('registered', get_web_connector(ctx.states))
-        if isinstance(_all_keys, dict):
-            _all_keys = list(_all_keys.values())
-        _keys = fetch_pipes_keys(
-            'registered',
-            get_web_connector(ctx.states),
+        ### Only the pipes the viewer may see name their keys and tags here.
+        viewer = access.get_viewer(ctx.states.get('session-store.data', None))
+        instance_connector = get_web_connector(ctx.states)
+        _all_visible = [
+            (ck, mk, lk, parameters)
+            for ck, mk, lk, parameters in access.registered_pipes(instance_connector)
+            if access.can_see_pipe(viewer, parameters)
+        ]
+        _all_keys = [(ck, mk, lk) for ck, mk, lk, _ in _all_visible]
+        _selected = access.visible_pipes(viewer, mrsm.get_pipes(
             connector_keys=connector_keys,
             metric_keys=metric_keys,
             location_keys=location_keys,
             tags=tags,
-        )
-        if isinstance(_keys, dict):
-            _keys = list(_keys.values())
-        _tags_pipes = mrsm.get_pipes(
-            connector_keys=connector_keys,
-            metric_keys=metric_keys,
-            location_keys=location_keys,
-            tags=tags,
-            instance=get_web_connector(ctx.states),
-            as_tags_dict=True,
-        )
+            instance=instance_connector,
+            as_list=True,
+        ))
+        _keys = [
+            (str(pipe.connector_keys), str(pipe.metric_key), pipe.location_key)
+            for pipe in _selected
+        ]
+        _tags_pipes = {str(tag) for pipe in _selected for tag in (pipe.tags or [])}
         _all_tags = list(
-            set(
-                mrsm.get_pipes(
-                    instance=get_web_connector(ctx.states),
-                    as_tags_dict=True,
-                )
-            ).union(tags or [])
+            {
+                str(tag)
+                for _, _, _, parameters in _all_visible
+                for tag in (parameters.get('tags', None) or [])
+            }.union(tags or [])
         ) if _tags_alone else []
     except Exception as e:
         import traceback
@@ -698,6 +735,7 @@ dash_app.clientside_callback(
 
         // Track state explicitly and drive width via inline styles so the column's
         // responsive classes (col-md-12 col-lg-6) are preserved, not clobbered.
+        // The button's icon follows `data-fullscreen` (`assets/nav.css`).
         const fullscreen = rightCol.getAttribute('data-fullscreen') === '1';
         if (fullscreen) {
             leftCol.style.display = '';
@@ -705,14 +743,14 @@ dash_app.clientside_callback(
             rightCol.style.maxWidth = '';
             rightCol.style.width = '';
             rightCol.removeAttribute('data-fullscreen');
-            button.innerHTML = "⛶";
+            if (button) { button.title = 'Fullscreen'; }
         } else {
             leftCol.style.display = 'none';
             rightCol.style.flex = '0 0 100%';
             rightCol.style.maxWidth = '100%';
             rightCol.style.width = '100%';
             rightCol.setAttribute('data-fullscreen', '1');
-            button.innerHTML = "🀲";
+            if (button) { button.title = 'Exit fullscreen'; }
         }
 
         // The terminal sizes itself to its width on resize; nudge it to refit now
@@ -849,7 +887,8 @@ def download_pipe_csv(n_clicks, session_store_data):
     """
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         raise PreventUpdate
     ctx = dash.callback_context.triggered
     if ctx[0]['value'] is None:
@@ -861,7 +900,7 @@ def download_pipe_csv(n_clicks, session_store_data):
     begin, end = bounds[-1]
     filename = str(pipe.target) + f" {begin} - {end}.csv"
     try:
-        df = pipe.get_data(begin=begin, end=end, debug=debug)
+        df = pipe.get_data(begin=begin, end=end, as_pandas=True, debug=debug)
     except Exception as e:
         warn(f"Failed to fetch data for CSV download of {pipe}:\n{e}", stack=False)
         df = None
@@ -890,8 +929,9 @@ def update_pipe_accordion(item, session_store_data):
     if pipe is None:
         raise PreventUpdate
 
-    session_id = session_store_data.get('session-id', None)
-    authenticated = is_session_authenticated(str(session_id))
+    ### Its editors (parameters, rows, parents and children) are for those who may change it.
+    from meerschaum.api.dash import access
+    authenticated = access.can_edit_pipe(access.get_viewer(session_store_data), pipe)
     return accordion_items_from_pipe(pipe, active_items=[item], authenticated=authenticated)
 
 
@@ -903,10 +943,13 @@ def update_pipe_accordion(item, session_store_data):
     prevent_initial_call=True,
 )
 def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store_data):
+    """Save the parameters editor (edit rights, access, locks and SQL checks: `pipe_writes`)."""
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
-        return alert_from_success_tuple((False, "You are not authenticated."))
+    from meerschaum.api.dash import pipes_access, pipe_writes
+    allowed, reason = pipes_access.can_write_pipes(session_store_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -917,17 +960,23 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store
     if parameters_editor_text is None:
         success, msg = False, f"Unable to update parameters for {pipe}."
     else:
+        text_format = 'JSON' if parameters_editor_text.lstrip().startswith('{') else 'YAML'
         try:
-            text_format = 'JSON' if parameters_editor_text.lstrip().startswith('{') else 'YAML'
             params = (
                 json.loads(parameters_editor_text)
                 if text_format == 'JSON'
                 else yaml.load(parameters_editor_text)
             )
-            pipe.parameters = params
-            success, msg = pipe.edit(debug=debug)
         except Exception as e:
+            params = None
             success, msg = False, f"Invalid {text_format}:\n{e}"
+        if params is not None:
+            try:
+                success, msg = pipe_writes.save_parameters(
+                    pipe, params, viewer=pipes_access.viewer(session_store_data),
+                )
+            except Exception as e:
+                success, msg = False, str(e)
 
     return alert_from_success_tuple((success, msg))
 
@@ -940,10 +989,13 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store
     prevent_initial_call=True,
 )
 def update_pipe_sql_click(n_clicks, sql_editor_text, session_store_data):
+    """Save a pipe's SQL definition (`pipes:define_sql` and the SQL guard: `pipe_writes`)."""
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
-        return alert_from_success_tuple((False, "You are not authenticated."))
+    from meerschaum.api.dash import pipes_access, pipe_writes
+    allowed, reason = pipes_access.can_write_pipes(session_store_data)
+    if not allowed:
+        return alert_from_success_tuple((False, reason))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -955,7 +1007,12 @@ def update_pipe_sql_click(n_clicks, sql_editor_text, session_store_data):
         success, msg = False, f"Unable to update SQL definition for {pipe}."
     else:
         try:
-            success, msg = set_pipe_query(pipe, sql_editor_text)
+            success, msg = set_pipe_query(
+                pipe, sql_editor_text,
+                save=lambda patch: pipe_writes.update_parameters(
+                    pipe, patch, viewer=pipes_access.viewer(session_store_data),
+                ),
+            )
         except Exception as e:
             success, msg = False, f"Invalid SQL query:\n{e}"
 
@@ -974,7 +1031,8 @@ def toggle_sql_symlinks(value, session_store_data):
         raise PreventUpdate
 
     ### The pipe's SQL definition is not public.
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         raise PreventUpdate
 
     pipe = pipe_from_ctx(triggered, 'value')
@@ -993,9 +1051,12 @@ def toggle_sql_symlinks(value, session_store_data):
     prevent_initial_call=True,
 )
 def sync_documents_click(n_clicks, sync_editor_text, session_store_data):
+    """Sync rows into the pipe: `pipes:write`, edit rights and no `sync` lock."""
     if not n_clicks:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access, access
+    viewer = pipes_access.viewer(session_store_data)
+    if not viewer.signed_in and not viewer.no_auth:
         return alert_from_success_tuple((False, "You are not authenticated."))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
@@ -1003,6 +1064,9 @@ def sync_documents_click(n_clicks, sync_editor_text, session_store_data):
     pipe = pipe_from_ctx(triggered, 'n_clicks')
     if pipe is None:
         raise PreventUpdate
+    allowed, reason = access.may_run_pipe_action(viewer, pipe, 'sync')
+    if not allowed:
+        return alert_from_success_tuple((False, reason))
 
     try:
         msg = '... '
@@ -1052,7 +1116,8 @@ def query_data_click(
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         return alert_from_success_tuple((False, "You are not authenticated."))
     pipe = pipe_from_ctx(triggered, 'n_clicks')
     if pipe is None:
@@ -1066,14 +1131,19 @@ def query_data_click(
     if limit_value is None:
         limit_value = 100
 
-    df = pipe.get_data(
-        params=params_query,
-        begin=begin,
-        end=end,
-        limit=limit_value,
-        order='desc',
-        debug=debug,
-    )
+    ### Database errors raise (rc15): show them instead of failing the callback.
+    try:
+        df = pipe.get_data(
+            params=params_query,
+            begin=begin,
+            end=end,
+            limit=limit_value,
+            order='desc',
+            as_pandas=True,
+            debug=debug,
+        )
+    except Exception as e:
+        return alert_from_success_tuple((False, f"Failed to read {pipe}:\n{e}"))
     if df is None:
         return [html.P("No data returned.")]
     df = df.astype(str)
@@ -1097,6 +1167,8 @@ dash_app.clientside_callback(
 
         const triggered_id = dash_clientside.callback_context.triggered_id;
         const action = triggered_id["action"];
+        // Every other action of the menu runs through the server (callbacks/execute.py).
+        if (action != "python"){ return dash_clientside.no_update; }
         const pipe_meta = JSON.parse(triggered_id["index"]);
 
         iframe = document.getElementById('webterm-iframe');
@@ -1141,30 +1213,19 @@ dash_app.clientside_callback(
     State('mrsm-location', 'href'),
 )
 
-@dash_app.callback(
+### Open or close the navbar's links on a narrow screen (the toggler). Clientside: it needs no
+### session, so the menu also opens on public pages for visitors who are not signed in.
+dash_app.clientside_callback(
+    """
+    function(n_clicks, is_open){
+        if (!n_clicks) { return Boolean(is_open); }
+        return !is_open;
+    }
+    """,
     Output("navbar-collapse", "is_open"),
     Input("navbar-toggler", "n_clicks"),
     State("navbar-collapse", "is_open"),
 )
-def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
-    """
-    Toggle the Instance selection collapse in the navbar.
-
-    Parameters
-    ----------
-    n_clicks: Optional[int]
-        The number of times the toggler was clicked.
-
-    is_open: bool
-        The current state of the collapse.
-
-    Returns
-    -------
-    The toggled state of the collapse.
-    """
-    if n_clicks:
-        return not is_open
-    return is_open
 
 
 @dash_app.callback(
@@ -1260,45 +1321,6 @@ def sync_as_json_or_lines_click(
 
 
 @dash_app.callback(
-    Output('pages-offcanvas', 'is_open'),
-    Output('pages-offcanvas', 'children'),
-    Input('logo-img', 'n_clicks'),
-    State('pages-offcanvas', 'is_open'),
-    State('mrsm-location', 'pathname'),
-    prevent_initial_call=True,
-)
-def toggle_pages_offcanvas(
-    n_clicks: Optional[int],
-    is_open: bool = False,
-    pathname: Optional[str] = None,
-):
-    """
-    Toggle the pages sidebar when the logo is clicked.
-    """
-    pages_children = build_pages_offcanvas_children(active_path=pathname)
-    if n_clicks:
-        return not is_open, pages_children
-    ### The logo remounts on navigation (its n_clicks resets), which fires this
-    ### callback with a falsy n_clicks. Leave `is_open` alone then so it doesn't
-    ### fight the close-on-navigation callback and re-open the sidebar.
-    return dash.no_update, pages_children
-
-
-@dash_app.callback(
-    Output('pages-offcanvas', 'is_open'),
-    Input('mrsm-location', 'pathname'),
-    prevent_initial_call=True,
-)
-def close_pages_offcanvas_on_nav(pathname: Optional[str]):
-    """
-    Close the pages sidebar when a page is selected. Kept separate from the toggle
-    callback so navigation never references `logo-img`, which is not in the layout
-    on the initial load (it lives inside the routed page).
-    """
-    return False
-
-
-@dash_app.callback(
     Output({'type': 'calculate-rowcount-div', 'index': MATCH}, 'children'),
     Input({'type': 'calculate-rowcount-button', 'index': MATCH}, 'n_clicks'),
     State('session-store', 'data'),
@@ -1311,7 +1333,8 @@ def calculate_rowcount_button_click(n_clicks: int, session_store_data):
     if not n_clicks:
         raise PreventUpdate
 
-    if not is_state_authenticated(session_store_data):
+    from meerschaum.api.dash import pipes_access
+    if not pipes_access.can_read(session_store_data):
         raise PreventUpdate
 
     triggered = dash.callback_context.triggered
@@ -1329,3 +1352,40 @@ def calculate_rowcount_button_click(n_clicks: int, session_store_data):
         return (
             alert_from_success_tuple((False, f"Failed to calculate row count: {e}"))
         )
+
+
+@dash_app.callback(
+    Output({'type': 'pipeline-card-details', 'index': MATCH}, 'children'),
+    Input({'type': 'pipeline-card-accordion', 'index': MATCH}, 'active_item'),
+    State('session-store', 'data'), prevent_initial_call=True,
+)
+def expand_pipeline_card(active, session):
+    if not active or not is_state_authenticated(session):
+        raise PreventUpdate
+    from meerschaum.api.dash import engine
+    from meerschaum.api.dash.callbacks.pipelines import build_runs_table
+    meta = json.loads(dash.ctx.triggered_id['index'])
+    return build_runs_table(engine.get_runs(engine.get_instance(meta['instance'], strict=True),
+        limit=20, run_name=meta['name']), table_id='pipeline-card-history-' + meta['name'],
+        registry=meta['instance'], pipeline=meta['name'])
+
+
+@dash_app.callback(
+    Output('exec-store', 'data', allow_duplicate=True),
+    Input({'type': 'manage-pipeline-card', 'name': ALL, 'instance': ALL, 'action': ALL}, 'n_clicks'),
+    State('session-store', 'data'), prevent_initial_call=True,
+)
+def manage_pipeline_card(clicks, session):
+    if not any(clicks or []) or not is_state_authenticated(session):
+        raise PreventUpdate
+    import shlex
+    import time
+    from meerschaum.api.dash import execute
+    from meerschaum.api.dash.sessions import get_username_from_session
+    trigger = dash.ctx.triggered_id
+    args = [trigger['action'], 'pipelines', trigger['name'], '-i', trigger['instance']]
+    allowed = execute.execution_request('/execute/validate',
+        get_username_from_session((session or {}).get('session-id')), method='POST', body={'sysargs': args})
+    if not allowed or not allowed[0]:
+        raise PreventUpdate
+    return {'terminal': True, 'command': shlex.join(args), 'request_id': str(uuid.uuid4()), 'started': time.time()}

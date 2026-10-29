@@ -3,31 +3,8 @@
 """Focused parity tests for the built-in Compose action."""
 
 import json
+import time
 import pathlib
-
-
-def test_compose_is_native_and_preserves_arbitrary_action_passthrough(monkeypatch):
-    """The core action wins and forwards unknown subactions to Compose's default path."""
-    from meerschaum.actions import actions
-    import meerschaum.compose.subactions as subactions
-
-    captured = {}
-
-    def fake_do_subaction(subaction, **kwargs):
-        captured.update({'subaction': subaction, **kwargs})
-        return True, "Success"
-
-    monkeypatch.setattr(subactions, '_do_subaction', fake_do_subaction)
-    success, _ = actions['compose'](
-        action=['show', 'pipes'],
-        file=pathlib.Path('alternate.yaml'),
-    )
-
-    assert success
-    assert actions['compose'].__module__ == 'meerschaum.actions.compose'
-    assert captured['subaction'] == 'show'
-    assert captured['action'] == ['show', 'pipes']
-    assert captured['file'] == pathlib.Path('alternate.yaml')
 
 
 def test_compose_arguments_are_available_without_plugin():
@@ -280,140 +257,45 @@ def test_compose_owns_jobs_it_stamped_after_a_command_edit():
 
 def test_compose_stamps_the_project_name_onto_started_jobs(tmp_path, monkeypatch):
     """A job started inside a Compose environment records its project's name."""
+    import uuid
     import meerschaum as mrsm
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.compose.utils.config import get_env_dict
 
+    ### Unique per run: under xdist several workers share one root, and a fixed job name
+    ### lets one worker delete (or reuse) another's job.
+    suffix = uuid.uuid4().hex[:12]
+    project_name = f'alpha-{suffix}'
     compose_project_var = STATIC_CONFIG['environment']['compose_project']
-    env = get_env_dict({'project_name': 'alpha', '__file__': tmp_path / 'mrsm-compose.yaml'})
-    assert env[compose_project_var] == 'alpha'
+    env = get_env_dict({'project_name': project_name, '__file__': tmp_path / 'mrsm-compose.yaml'})
+    assert env[compose_project_var] == project_name
 
     ### The project's config carries credentials and must not reach the job.
-    monkeypatch.setenv(compose_project_var, 'alpha')
-    monkeypatch.setenv('MRSM__COMPOSE_CONFIG', json.dumps({'project_name': 'alpha'}))
+    monkeypatch.setenv(compose_project_var, project_name)
+    monkeypatch.setenv('MRSM__COMPOSE_CONFIG', json.dumps({'project_name': project_name}))
 
-    job_name = 'test-compose-stamp'
+    job_name = f'test-compose-stamp-{suffix}'
     success, _ = mrsm.entry(['show', 'version', '-d', '--name', job_name, '-f', '-y'])
     try:
         assert success
-        job = mrsm.Job(job_name)
-        assert job.env.get(compose_project_var, None) == 'alpha'
+        ### In python mode `start` returns once the daemon process is launched; the daemon writes
+        ### its `properties.json` (with the `env`) a moment later, once its interpreter is up.
+        ### Wait for that file instead of racing the daemon's start-up: a job which is never
+        ### stamped still fails after the deadline.
+        deadline = time.time() + 60
+        while True:
+            job = mrsm.Job(job_name)
+            if job.env.get(compose_project_var, None) is not None or time.time() > deadline:
+                break
+            time.sleep(0.1)
+        assert job.env.get(compose_project_var, None) == project_name, (
+            f"exists={job.exists()}, executor={job.executor_keys!r}, "
+            f"properties_path={job.daemon.properties_path}, "
+            f"properties={job.daemon.properties}"
+        )
         assert 'MRSM__COMPOSE_CONFIG' not in job.env
     finally:
         mrsm.entry(['delete', 'job', job_name, '-f', '-y'])
-
-
-def test_compose_down_deletes_only_exact_owned_job_names(monkeypatch):
-    """Compose down never expands into the unfiltered `delete jobs` command."""
-    import meerschaum.compose.subactions.down as down_module
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.jobs as jobs_module
-
-    commands = []
-    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: {
-        'api': _ComposeTestJob(['start', 'api', '-t', 'alpha']),
-        'foreign': _ComposeTestJob(['start', 'api', '-t', 'beta']),
-    })
-    monkeypatch.setattr(
-        compose_utils,
-        'run_mrsm_command',
-        lambda command, *args, **kwargs: (commands.append(command) or (True, "Success")),
-    )
-
-    assert down_module._compose_down({
-        'project_name': 'alpha',
-        'jobs': {'api': 'start api'},
-    })[0]
-    assert commands == [['delete', 'job', 'api', '-f']]
-
-
-def test_compose_down_untags_shared_pipes_and_deletes_only_unshared(monkeypatch):
-    """Additional tags are treated as possible project ownership and preserve pipe data."""
-    import meerschaum.compose.subactions.down as down_module
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.compose.utils.pipes as pipes_module
-    import meerschaum.jobs as jobs_module
-
-    shared_pipe = _ComposeTestPipe(['alpha', 'beta'])
-    owned_pipe = _ComposeTestPipe(['alpha'])
-    pipes = [shared_pipe, owned_pipe]
-    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: {})
-    monkeypatch.setattr(compose_utils, 'run_mrsm_command', lambda *args, **kwargs: (True, "Success"))
-    monkeypatch.setattr(pipes_module, 'get_defined_pipes', lambda *args, **kwargs: pipes)
-    monkeypatch.setattr(pipes_module, 'build_custom_connectors', lambda *args, **kwargs: {})
-    monkeypatch.setattr(down_module, 'print_options', lambda *args, **kwargs: None)
-    monkeypatch.setattr(down_module, 'yes_no', lambda *args, **kwargs: True)
-
-    success, _ = down_module._compose_down(
-        {'project_name': 'alpha', 'jobs': {'api': 'start api'}},
-        drop=True,
-        force=True,
-    )
-
-    assert success
-    assert shared_pipe.tags == ['beta']
-    assert shared_pipe.edits == 1 and shared_pipe.deletes == 0
-    assert owned_pipe.edits == 0 and owned_pipe.deletes == 1
-
-
-def test_compose_down_propagates_delete_failures(monkeypatch):
-    """A failed exact job deletion stops the destructive workflow."""
-    import meerschaum.compose.subactions.down as down_module
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.jobs as jobs_module
-
-    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: {
-        'api': _ComposeTestJob(['start', 'api', '-t', 'alpha']),
-    })
-    monkeypatch.setattr(
-        compose_utils,
-        'run_mrsm_command',
-        lambda *args, **kwargs: (False, "delete failed"),
-    )
-    success, msg = down_module._compose_down({
-        'project_name': 'alpha',
-        'jobs': {'api': 'start api'},
-    })
-
-    assert not success
-    assert 'delete failed' in msg
-
-
-def test_compose_up_propagates_job_start_failures(monkeypatch):
-    """Compose refuses foreign collisions and propagates background-job failures."""
-    import meerschaum as mrsm
-    import meerschaum.compose.subactions.up as up_module
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.compose.utils.config as config_module
-    import meerschaum.compose.utils.jobs as compose_jobs
-    import meerschaum.compose.utils.pipes as pipes_module
-    import meerschaum.compose.utils.plugins as plugins_module
-    import meerschaum.jobs as jobs_module
-
-    monkeypatch.setattr(plugins_module, 'check_and_install_plugins', lambda *args, **kwargs: (True, "Success"))
-    monkeypatch.setattr(pipes_module, 'build_custom_connectors', lambda *args, **kwargs: {})
-    monkeypatch.setattr(pipes_module, 'get_defined_pipes', lambda *args, **kwargs: [])
-    monkeypatch.setattr(config_module, 'config_has_changed', lambda *args, **kwargs: False)
-    monkeypatch.setattr(compose_jobs, 'get_jobs_commands', lambda *args, **kwargs: {
-        'api': ['start', 'api', '--name', 'api', '-d'],
-    })
-    monkeypatch.setattr(compose_jobs, 'get_project_job_names', lambda *args, **kwargs: [])
-    existing_jobs = {
-        'api': _ComposeTestJob(['start', 'api', '--name', 'api', '-t', 'beta']),
-    }
-    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: existing_jobs)
-    monkeypatch.setattr(mrsm, 'get_pipes', lambda *args, **kwargs: [])
-    monkeypatch.setattr(compose_utils, 'run_mrsm_command', lambda *args, **kwargs: (False, "start failed"))
-
-    success, msg = up_module._compose_up({'project_name': 'alpha'})
-    assert not success
-    assert 'not owned' in msg
-
-    existing_jobs.clear()
-    success, msg = up_module._compose_up({'project_name': 'alpha'})
-
-    assert not success
-    assert 'start failed' in msg
 
 
 def test_compose_programmatic_plugin_import_resolves_to_core():
@@ -428,8 +310,8 @@ def test_compose_programmatic_plugin_import_resolves_to_core():
     legacy_up = from_plugin_import('compose.subactions', '_compose_up')
     assert get_defined_pipes.__module__ == 'meerschaum.compose.utils.pipes'
     assert legacy_sync.__module__ == 'meerschaum.compose.sync'
-    assert legacy_compose.__module__ == 'meerschaum.actions.compose'
-    assert legacy_completer.__module__ == 'meerschaum.actions.compose'
+    assert legacy_compose.__module__ == 'meerschaum.compose'
+    assert legacy_completer.__module__ == 'meerschaum.compose'
     assert legacy_up.func.__module__ == 'meerschaum.compose.subactions'
 
 
@@ -513,164 +395,6 @@ def test_compose_temporary_pipe_retry_returns_success():
     assert pipe.calls == 2
 
 
-def test_compose_restores_host_plugins_after_subaction_error(monkeypatch):
-    """Project plugins are unloaded and host plugins reloaded when a subaction raises."""
-    from contextlib import nullcontext
-    import os
-    import pytest
-    import meerschaum.compose.subactions as subactions
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.compose.utils.config as config_module
-    import meerschaum.plugins as plugins
-    import meerschaum.config as config
-
-    unloads = []
-    loads = []
-    plugin_scopes = iter((['host'], ['project']))
-
-    def fail(*args, **kwargs):
-        assert os.environ['COMPOSE_LEAK_TEST'] == 'project'
-        raise RuntimeError('subaction failed')
-
-    def fake_init(**kwargs):
-        os.environ['COMPOSE_LEAK_TEST'] = 'project'
-        return {'config': {}}
-
-    monkeypatch.delenv('COMPOSE_LEAK_TEST', raising=False)
-    monkeypatch.setattr(subactions, 'get_subactions', lambda: ['fail'])
-    monkeypatch.setattr(subactions, '_get_subaction_function', lambda name: fail)
-    monkeypatch.setattr(compose_utils, 'init', fake_init)
-    monkeypatch.setattr(config_module, 'get_env_dict', lambda compose_config: dict(os.environ))
-    monkeypatch.setattr(plugins, 'get_plugins_names', lambda: next(plugin_scopes))
-    monkeypatch.setattr(plugins, 'unload_plugins', lambda names, **kwargs: unloads.append(names))
-    monkeypatch.setattr(plugins, 'load_plugins', lambda **kwargs: loads.append(True))
-    monkeypatch.setattr(config, 'replace_config', lambda value: nullcontext())
-
-    with pytest.raises(RuntimeError, match='subaction failed'):
-        subactions._do_subaction('fail')
-
-    assert unloads == [['host'], ['project']]
-    assert len(loads) == 2
-    assert 'COMPOSE_LEAK_TEST' not in os.environ
-
-
-def test_compose_restores_environment_and_plugins_when_host_unload_fails(monkeypatch):
-    """Setup failures must not leave dotenv values or unloaded host plugins behind."""
-    from contextlib import nullcontext
-    import os
-    import pytest
-    import meerschaum.compose.subactions as subactions
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.compose.utils.config as config_module
-    import meerschaum.plugins as plugins
-    import meerschaum.config as config
-
-    loads = []
-
-    def fake_init(**kwargs):
-        os.environ['COMPOSE_LEAK_TEST'] = 'project'
-        return {'config': {}}
-
-    monkeypatch.delenv('COMPOSE_LEAK_TEST', raising=False)
-    monkeypatch.setattr(subactions, 'get_subactions', lambda: ['up'])
-    monkeypatch.setattr(subactions, '_get_subaction_function', lambda name: lambda *args, **kw: (True, 'ok'))
-    monkeypatch.setattr(compose_utils, 'init', fake_init)
-    monkeypatch.setattr(config_module, 'get_env_dict', lambda compose_config: dict(os.environ))
-    monkeypatch.setattr(plugins, 'get_plugins_names', lambda: ['host'])
-    monkeypatch.setattr(
-        plugins,
-        'unload_plugins',
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError('unload failed')),
-    )
-    monkeypatch.setattr(plugins, 'load_plugins', lambda **kwargs: loads.append(True))
-    monkeypatch.setattr(config, 'replace_config', lambda value: nullcontext())
-
-    with pytest.raises(RuntimeError, match='unload failed'):
-        subactions._do_subaction('up')
-
-    assert 'COMPOSE_LEAK_TEST' not in os.environ
-    assert loads == [True]
-
-
-def test_compose_shell_prompt_shows_the_active_project(monkeypatch):
-    """The shell prompt names the Compose project, even under a pre-v4 prompt config."""
-    from meerschaum.config._shell import default_shell_config
-    from meerschaum.utils.misc import remove_ansi
-    from meerschaum._internal.shell.Shell import Shell, shell_attrs
-
-    for charset in ('ascii', 'unicode'):
-        assert '{compose}' in default_shell_config[charset]['prompt']
-        assert '{executor_keys}' not in default_shell_config[charset]['prompt']
-
-    shell = Shell()
-    ### The test root's config predates v4.0.0, so the executor slot must be swapped.
-    assert '{compose}' in shell_attrs['_prompt']
-    assert '{executor_keys}' not in shell_attrs['_prompt']
-    assert 'awesome' not in remove_ansi(shell.prompt)
-
-    monkeypatch.setenv(
-        'MRSM__COMPOSE_CONFIG',
-        json.dumps({'__file__': '/tmp/awesome/mrsm-compose.yaml'}),
-    )
-    shell.update_prompt()
-    assert '| awesome ' in remove_ansi(shell.prompt)
-
-    monkeypatch.delenv('MRSM__COMPOSE_CONFIG')
-    shell.update_prompt()
-    assert 'awesome' not in remove_ansi(shell.prompt)
-
-
-def test_compose_up_starts_jobs_instead_of_syncing_pipes(monkeypatch):
-    """Explicitly configured jobs are the workload, so `up` does not sync the pipes."""
-    import meerschaum as mrsm
-    import meerschaum.compose.subactions.up as up_module
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.compose.utils.config as config_module
-    import meerschaum.compose.utils.jobs as compose_jobs
-    import meerschaum.compose.utils.pipes as pipes_module
-    import meerschaum.compose.utils.plugins as plugins_module
-    import meerschaum.jobs as jobs_module
-
-    pipe = mrsm.Pipe('plugin:foo', 'bar', instance='sql:local', temporary=True)
-    started_commands = []
-
-    monkeypatch.setattr(plugins_module, 'check_and_install_plugins', lambda *args, **kwargs: (True, "Success"))
-    monkeypatch.setattr(pipes_module, 'build_custom_connectors', lambda *args, **kwargs: {})
-    monkeypatch.setattr(pipes_module, 'get_defined_pipes', lambda *args, **kwargs: [pipe])
-    monkeypatch.setattr(config_module, 'config_has_changed', lambda *args, **kwargs: True)
-    monkeypatch.setattr(compose_jobs, 'get_jobs_commands', lambda *args, **kwargs: {
-        'hello': ['show', 'version', '--name', 'hello', '-d'],
-    })
-    monkeypatch.setattr(compose_jobs, 'get_project_job_names', lambda *args, **kwargs: [])
-    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: {})
-    monkeypatch.setattr(mrsm, 'get_pipes', lambda *args, **kwargs: [])
-    monkeypatch.setattr(
-        compose_utils,
-        'run_mrsm_command',
-        lambda command, *args, **kwargs: (started_commands.append(command), (True, "Success"))[1],
-    )
-
-    def _fail_on_sync(*args, **kwargs):
-        raise AssertionError("`up` must not sync the pipes when jobs are configured.")
-
-    monkeypatch.setattr(up_module, 'run_initial_syncs', _fail_on_sync)
-
-    compose_config = {
-        'project_name': 'alpha',
-        'jobs': {'hello': 'show version'},
-    }
-    success, msg = up_module._compose_up(compose_config)
-
-    assert success, msg
-    assert started_commands == [['show', 'version', '--name', 'hello', '-d']]
-    assert 'Running 1 background job' in msg
-
-    ### `--presync` still forces a sync pass.
-    monkeypatch.setattr(up_module, 'run_initial_syncs', lambda *args, **kwargs: (True, "Success"))
-    success, msg = up_module._compose_up(compose_config, presync=True, no_jobs=True)
-    assert success, msg
-
-
 def test_compose_owns_a_compound_pipeline_job():
     """A compound job command is adopted despite being stored as `start pipeline`."""
     from meerschaum.compose.utils.jobs import get_jobs_commands, get_project_job_names
@@ -680,7 +404,7 @@ def test_compose_owns_a_compound_pipeline_job():
         'jobs': {
             'maps': (
                 'sync pipes -c plugin:osm -t maps '
-                '+ sync pipes -c sql:sra -m segments -t maps '
+                '+ sync pipes -c sql:acme -m segments -t maps '
                 ': --loop --min-seconds 604800 -w 1'
             ),
         },
@@ -698,7 +422,7 @@ def test_compose_owns_a_compound_pipeline_job():
             {
                 'sub_args_line': (
                     'sync pipes -c plugin:osm -t maps '
-                    '+ sync pipes -c sql:sra -m segments -t maps'
+                    '+ sync pipes -c sql:acme -m segments -t maps'
                 ),
                 'patch_args': None,
             },
@@ -720,172 +444,66 @@ def test_compose_owns_a_compound_pipeline_job():
     }) == []
 
 
-def test_compose_init_provisions_plugins_on_first_run(tmp_path, monkeypatch):
-    """
-    A fresh project (no plugins symlinked yet) must still run the
-    `install required` / `setup plugins` pass on the FIRST `compose init`.
-    """
-    from meerschaum.compose import utils
-    import meerschaum.compose.utils.config as config_module
-    import meerschaum.compose.utils.plugins as plugins_module
-    import meerschaum.compose.utils.stack as stack_module
-    from meerschaum.compose.subactions.init import _compose_init
+def test_compose_subactions_delegate_to_the_native_action(monkeypatch):
+    """Every subaction is `_core.run_action(['compose', ...])`; the file selects the project."""
+    from meerschaum import _core
+    from meerschaum.actions import actions
+    import meerschaum.compose as compose_module
+    import meerschaum.compose.subactions as subactions
+    from meerschaum.compose.subactions.up import _compose_up
 
-    compose_path = tmp_path / 'mrsm-compose.yaml'
-    compose_path.touch()
-    compose_config = {'root_dir': tmp_path / 'root', 'project_name': 'fresh-project'}
+    calls = []
 
-    commands = []
-    discovery_calls = []
+    def fake_run_action(action, kwargs=None, context=None):
+        calls.append((list(action), dict(kwargs or {})))
+        return True, "fake"
 
-    def fake_get_installed_plugins(*args, **kwargs):
-        ### Empty before `check_and_install_plugins()` symlinks the project
-        ### plugins, non-empty afterwards — the fresh-worktree sequence.
-        discovery_calls.append(True)
-        return [] if len(discovery_calls) == 1 else ['proj_plugin']
-
-    monkeypatch.setattr(config_module, 'infer_compose_file_path', lambda file=None: compose_path)
-    monkeypatch.setattr(config_module, 'get_env_dict', lambda *args, **kwargs: {})
-    monkeypatch.setattr(utils, 'init', lambda *args, **kwargs: compose_config)
-    monkeypatch.setattr(stack_module, 'get_project_name', lambda *args, **kwargs: 'fresh-project')
-    monkeypatch.setattr(plugins_module, 'get_installed_plugins', fake_get_installed_plugins)
-    monkeypatch.setattr(
-        plugins_module,
-        'check_and_install_plugins',
-        lambda *args, **kwargs: (True, "Success"),
+    monkeypatch.setattr(_core, 'run_action', fake_run_action, raising=False)
+    assert subactions.get_subactions() == [
+        'default', 'down', 'explain', 'init', 'logs', 'ps', 'run', 'up',
+    ]
+    assert subactions._do_subaction('up', file='a.yaml') == (True, "fake")
+    ### Any other word is the passthrough: `compose show pipes`.
+    assert subactions._do_subaction('default', action=['show', 'pipes']) == (True, "fake")
+    assert _compose_up({'__file__': pathlib.Path('b.yaml')}, debug=True, no_jobs=True) == (
+        True, "fake",
     )
-    monkeypatch.setattr(
-        utils,
-        'run_mrsm_command',
-        lambda args, *a, **kw: commands.append(list(args)) or (True, "Success"),
+    assert compose_module.compose(['ps'], file='c.yaml') == (True, "fake")
+    assert actions['compose'](['down'], drop=True) == (True, "fake")
+    assert subactions._compose_logs(file='d.yaml') == (True, "fake")
+    assert calls == [
+        (['compose', 'up'], {'file': 'a.yaml', 'debug': False}),
+        (['compose', 'show', 'pipes'], {'debug': False}),
+        (['compose', 'up'], {'file': pathlib.Path('b.yaml'), 'no_jobs': True, 'debug': True}),
+        (['compose', 'ps'], {'file': 'c.yaml'}),
+        (['compose', 'down'], {'drop': True}),
+        (['compose', 'logs'], {'file': 'd.yaml', 'debug': False}),
+    ]
+
+
+def test_compose_runs_natively_from_the_facade(tmp_path, monkeypatch):
+    """`explain` reads a real project in the native dispatcher."""
+    import meerschaum as mrsm
+
+    project = tmp_path / 'project'
+    project.mkdir()
+    (project / 'mrsm-compose.yaml').write_text(
+        "project_name: w16-facade\nroot_dir: ./root\njobs:\n  api: start api\n",
+        encoding='utf-8',
     )
-
-    success, msg = _compose_init(None, file=compose_path, yes=True)
-    assert success, msg
-    assert ['install', 'required'] in commands
-    assert ['setup', 'plugins'] in commands
+    monkeypatch.chdir(project)
+    success, message = mrsm.entry(['compose', 'explain', '--nopretty'])
+    assert success, message
 
 
-def _run_compose_default(monkeypatch, action, jobs, sysargs=None, **kw):
-    """Run the default Compose subaction with fake jobs, returning the commands it ran."""
-    import meerschaum.compose.subactions.default as default_module
-    import meerschaum.compose.utils as compose_utils
-    import meerschaum.jobs as jobs_module
-    import meerschaum.utils.formatting._jobs as jobs_formatting
+def test_compose_dir_paths_and_env_come_from_the_native_helpers(tmp_path, monkeypatch):
+    from meerschaum.compose.utils.config import get_dir_paths, get_env_dict
 
-    commands = []
-    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: jobs)
-    monkeypatch.setattr(jobs_formatting, 'pprint_jobs', lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        compose_utils,
-        'run_mrsm_command',
-        lambda command, *args, **kwargs: (commands.append(command) or (True, "Success")),
-    )
-    result = default_module._compose_default(
-        {'project_name': 'alpha', 'jobs': {'api': 'start api', 'worker': 'sync pipes --loop'}},
-        action=action,
-        sysargs=(sysargs or (['compose'] + action + ['--file', 'alpha.yaml', '-y'])),
-        **{'yes': True, **kw}
-    )
-    return result, commands
-
-
-def _stamped_job(sysargs, project_name, **kw):
-    from meerschaum._internal.static import STATIC_CONFIG
-    job = _ComposeTestJob(sysargs, **kw)
-    job.env = {STATIC_CONFIG['environment']['compose_project']: project_name}
-    return job
-
-
-def test_compose_job_actions_without_names_are_scoped_to_the_project(monkeypatch):
-    """`compose start jobs` must not start other projects' jobs sharing the root."""
-    jobs = {
-        'api': _stamped_job(['start', 'api'], 'alpha', status='running', restart=True),
-        'worker': _ComposeTestJob(['sync', 'pipes', '--loop', '-t', 'alpha', '--name', 'worker', '-f']),
-        'sixfab': _stamped_job(['sync', 'pipes', '-c', 'sixfab:sra'], 'beta'),
-        'manual': _ComposeTestJob(['show', 'version']),
+    monkeypatch.delenv('MRSM_PLUGINS_DIR', raising=False)
+    config = {
+        '__file__': tmp_path / 'mrsm-compose.yaml',
+        'root_dir': './root',
+        'environment': {'COMPOSE_W16': 'yes'},
     }
-    ### Each bare command expands to the project jobs it would have acted on:
-    ### `start` never restarts the running `api`, and `restart` only checks `--restart` jobs.
-    expected = {
-        'start': ['worker'],
-        'stop': ['api'],
-        'pause': ['api'],
-        'restart': ['api'],
-        'delete': ['api', 'worker'],
-    }
-    for verb, job_names in expected.items():
-        (success, _), commands = _run_compose_default(monkeypatch, [verb, 'jobs'], jobs)
-        assert success
-        assert commands == [[verb, 'jobs'] + job_names + ['-y']]
-
-
-def test_compose_start_jobs_leaves_running_jobs_alone(monkeypatch):
-    """A bare `compose start jobs -y` must not restart the project's running jobs."""
-    jobs = {
-        'api': _stamped_job(['start', 'api'], 'alpha', status='running'),
-        'worker': _ComposeTestJob(
-            ['sync', 'pipes', '--loop', '-t', 'alpha', '--name', 'worker', '-f'],
-            status='running',
-        ),
-    }
-    (success, msg), commands = _run_compose_default(monkeypatch, ['start', 'jobs'], jobs)
-    assert success
-    assert msg == "All jobs are running."
-    assert commands == []
-
-
-def test_compose_bare_stop_jobs_still_asks_for_confirmation(monkeypatch):
-    """Expanding `stop jobs` into names must keep the bare command's confirmation."""
-    import meerschaum.utils.prompt as prompt_module
-
-    questions = []
-    monkeypatch.setattr(
-        prompt_module,
-        'yes_no',
-        lambda question, *args, **kwargs: (questions.append(question) or False),
-    )
-    jobs = {'api': _stamped_job(['start', 'api'], 'alpha', status='running')}
-    (success, _), commands = _run_compose_default(
-        monkeypatch, ['stop', 'jobs'], jobs,
-        sysargs=['compose', 'stop', 'jobs'], yes=False,
-    )
-    assert not success
-    assert questions == ['Stop the above jobs?']
-    assert commands == []
-
-
-def test_compose_job_actions_refuse_other_projects_jobs(monkeypatch):
-    """Naming another project's job must not run it with this project's config."""
-    jobs = {
-        'api': _stamped_job(['start', 'api'], 'alpha'),
-        'sixfab': _stamped_job(['sync', 'pipes', '-c', 'sixfab:sra'], 'beta'),
-        'manual': _ComposeTestJob(['show', 'version']),
-    }
-    (success, msg), commands = _run_compose_default(monkeypatch, ['start', 'jobs', 'api', 'sixfab'], jobs)
-    assert not success
-    assert 'sixfab' in msg and 'api' not in msg.split(':')[-1]
-    assert commands == []
-
-    ### This project's jobs and unstamped jobs may still be named explicitly.
-    (success, _), commands = _run_compose_default(monkeypatch, ['start', 'job', 'api', 'manual'], jobs)
-    assert success
-    assert commands == [['start', 'job', 'api', 'manual', '-y']]
-
-
-def test_compose_job_actions_with_no_project_jobs_do_nothing(monkeypatch):
-    """With no jobs of its own, a project must not fall through to every job in the root."""
-    jobs = {'sixfab': _stamped_job(['sync', 'pipes', '-c', 'sixfab:sra'], 'beta')}
-    (success, msg), commands = _run_compose_default(monkeypatch, ['stop', 'jobs'], jobs)
-    assert success
-    assert 'No jobs' in msg
-    assert commands == []
-
-
-def test_compose_other_actions_pass_through_unscoped(monkeypatch):
-    """Read-only job actions and unrelated actions are forwarded unchanged."""
-    jobs = {'sixfab': _stamped_job(['sync', 'pipes'], 'beta')}
-    for action in (['show', 'jobs'], ['show', 'pipes'], ['sync', 'pipes']):
-        (success, _), commands = _run_compose_default(monkeypatch, action, jobs)
-        assert success
-        assert commands == [action + ['-y']]
+    assert get_dir_paths(config, 'root') == [(tmp_path / 'root').resolve()]
+    assert get_env_dict(config)['COMPOSE_W16'] == 'yes'

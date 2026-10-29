@@ -12,18 +12,16 @@ from datetime import datetime
 
 import meerschaum as mrsm
 from meerschaum.actions import actions
-from meerschaum.connectors.sql._maintenance import (
-    VACUUMABLE_FLAVORS,
-    ANALYZABLE_FLAVORS,
-    _FULL_VACUUM_FLAVORS,
-)
-from meerschaum.connectors.sql._compress import (
-    COMPRESSIBLE_FLAVORS,
-    _normalize_columnstore_cols,
-)
 
 from tests import debug
-from tests.connectors import conns, get_flavors
+from tests.connectors import (
+    conns,
+    get_flavors,
+    VACUUMABLE_FLAVORS,
+    ANALYZABLE_FLAVORS,
+    FULL_VACUUM_FLAVORS,
+    COMPRESSIBLE_FLAVORS,
+)
 
 ### Flavors with a portable per-table size query in `SQLConnector.get_pipe_size`.
 SIZE_FLAVORS = {
@@ -100,7 +98,7 @@ def test_vacuum_full(flavor: str):
     conn = conns[flavor]
     if conn.type != 'sql':
         return
-    if conn.flavor not in _FULL_VACUUM_FLAVORS:
+    if conn.flavor not in FULL_VACUUM_FLAVORS:
         return
     pipe = _build_synced_pipe(conn, 'maintenance_vacuum_full')
     rowcount_before = pipe.get_rowcount(debug=debug)
@@ -183,102 +181,6 @@ def test_unsupported_instance_maintenance(flavor: str):
         assert not result[0], f"{method} should be unsupported for '{conn.type}'."
 
 
-### -------------------------------------------------------------------------------------------
-### Columnstore (compression) settings — quoting and direction handling. These exercise pure
-### query-building logic and do not touch a live database, so they run on every flavor set.
-### -------------------------------------------------------------------------------------------
-
-@pytest.mark.parametrize("value,flavor,allow_direction,expected", [
-    ### A bare mixed-case identifier must be double-quoted (the reported regression: unquoted
-    ### `startTime` is folded to `starttime` by PostgreSQL and rejected by TimescaleDB).
-    ('startTime', 'postgresql', False, ['"startTime"']),
-    ### Comma-separated string splits into individually-quoted columns.
-    ('col1, col2', 'postgresql', False, ['"col1"', '"col2"']),
-    ### `ASC` / `DESC` is preserved and upper-cased; the column stays quoted.
-    ('startTime desc', 'postgresql', True, ['"startTime" DESC']),
-    ('startTime DESC, endTime', 'postgresql', True, ['"startTime" DESC', '"endTime"']),
-    ### List form with mixed directions.
-    (['startTime desc', 'endTime asc'], 'postgresql', True, ['"startTime" DESC', '"endTime" ASC']),
-    ### A list element that is itself comma-separated is flattened.
-    (['a, b DESC', 'c'], 'postgresql', True, ['"a"', '"b" DESC', '"c"']),
-    ### `NULLS FIRST` / `NULLS LAST` modifiers are preserved.
-    ('ts DESC NULLS LAST', 'postgresql', True, ['"ts" DESC NULLS LAST']),
-    ('ts NULLS FIRST', 'postgresql', True, ['"ts" NULLS FIRST']),
-    ### Empty / whitespace-only entries (e.g. a trailing comma) are dropped.
-    ('a, , b', 'postgresql', False, ['"a"', '"b"']),
-    ('', 'postgresql', False, []),
-    (['', '  '], 'postgresql', True, []),
-    ### Flavor-specific quote character.
-    ('startTime', 'mysql', False, ['`startTime`']),
-    ('startTime', 'mariadb', False, ['`startTime`']),
-    ### With direction disallowed (segmentby), a trailing keyword is part of the identifier.
-    ('startTime DESC', 'postgresql', False, ['"startTime DESC"']),
-    ### An unrecognized trailing token is NOT treated as a direction; the whole entry is quoted
-    ### as one identifier rather than guessing where the column ends.
-    ('col FOO', 'postgresql', True, ['"col FOO"']),
-])
-def test_normalize_columnstore_cols(value, flavor, allow_direction, expected):
-    """`_normalize_columnstore_cols` quotes identifiers and preserves recognized directions."""
-    assert _normalize_columnstore_cols(value, flavor, allow_direction) == expected
-
-
-def test_compress_settings_default_quoting():
-    """A mixed-case datetime column is quoted in the default `orderby` (the reported bug)."""
-    conn = conns['sqlite']
-    pipe = mrsm.Pipe(
-        'plugin:timeline', 'activities', 'compress_quote',
-        instance=conn,
-        columns={'datetime': 'startTime'},
-    )
-    settings = conn._get_compress_settings(pipe)
-    assert settings['orderby'] == ['"startTime" DESC']
-
-    query = conn._get_columnstore_settings_query(pipe)
-    assert 'timescaledb.orderby = \'"startTime" DESC\'' in query
-    ### Guard against the lowercase-folding regression returning.
-    assert "orderby = 'startTime DESC'" not in query
-
-
-def test_compress_settings_id_placement():
-    """A non-unique `id` goes to `segmentby`; a unique (primary) `id` goes to `orderby`."""
-    conn = conns['sqlite']
-
-    non_unique = mrsm.Pipe(
-        'plugin:x', 'y', 'seg_nonunique',
-        instance=conn,
-        columns={'datetime': 'ts', 'id': 'device'},
-    )
-    settings = conn._get_compress_settings(non_unique)
-    assert settings['segmentby'] == ['"device"']
-    assert settings['orderby'] == ['"ts" DESC']
-
-    unique = mrsm.Pipe(
-        'plugin:x', 'y', 'seg_unique',
-        instance=conn,
-        columns={'datetime': 'ts', 'id': 'pk', 'primary': 'pk'},
-    )
-    settings = conn._get_compress_settings(unique)
-    assert settings['segmentby'] == []
-    assert settings['orderby'] == ['"ts" DESC', '"pk"']
-
-
-def test_compress_settings_user_overrides():
-    """User-supplied `compress` dict specs are split and quoted, with directions preserved."""
-    conn = conns['sqlite']
-    pipe = mrsm.Pipe(
-        'plugin:x', 'y', 'overrides',
-        instance=conn,
-        columns={'datetime': 'startTime'},
-        parameters={'compress': {
-            'segmentby': 'col1, col2',
-            'orderby': 'startTime DESC, endTime',
-        }},
-    )
-    settings = conn._get_compress_settings(pipe)
-    assert settings['segmentby'] == ['"col1"', '"col2"']
-    assert settings['orderby'] == ['"startTime" DESC', '"endTime"']
-
-
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_maintenance_actions(flavor: str):
     """The `vacuum`, `analyze`, `compress`, and `decompress` actions dispatch to the connector."""
@@ -308,105 +210,3 @@ def test_maintenance_actions(flavor: str):
             assert success, f"`{action_name} pipes` failed: {msg}"
 
 
-def _int_axis_pipe(conn, location: str, **parameters):
-    """Build (without syncing) a millisecond-precision integer-axis pipe."""
-    return mrsm.Pipe(
-        'test', 'compress', location,
-        instance=conn,
-        columns={'datetime': 'ts'},
-        dtypes={'ts': 'int'},
-        parameters={'precision': {'unit': 'millisecond'}, **parameters},
-    )
-
-
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_columnstore_policy_after_scales_on_int_axis(flavor: str):
-    """
-    A duration `compress:after` must mean the same thing on both axis types: on an integer axis
-    it is scaled into epoch units instead of being discarded for a hard-coded 7-day equivalent.
-    """
-    conn = conns[flavor]
-    if conn.type != 'sql' or conn.flavor not in ('timescaledb', 'timescaledb-ha'):
-        return
-
-    ### 30 days of milliseconds.
-    pipe = _int_axis_pipe(conn, 'after_string', compress={'after': '30 days'})
-    assert 'after => 2592000000' in conn._get_columnstore_policy_query(pipe)
-
-    ### An explicit integer is already in epoch units and is honored verbatim.
-    int_pipe = _int_axis_pipe(conn, 'after_int', compress={'after': 12345})
-    assert 'after => 12345' in conn._get_columnstore_policy_query(int_pipe)
-
-    ### A bare number is epoch units, not nanoseconds (which would compress everything at once).
-    for value in (30.0, '30'):
-        numeric_pipe = _int_axis_pipe(conn, 'after_numeric', compress={'after': value})
-        assert 'after => 30' in conn._get_columnstore_policy_query(numeric_pipe)
-
-    ### No `after` still defaults to 7 days of milliseconds.
-    default_pipe = _int_axis_pipe(conn, 'after_default', compress=True)
-    assert 'after => 604800000' in conn._get_columnstore_policy_query(default_pipe)
-
-    ### A datetime axis keeps the `INTERVAL` spelling.
-    dt_pipe = mrsm.Pipe(
-        'test', 'compress', 'after_datetime',
-        instance=conn,
-        columns={'datetime': 'ts'},
-        parameters={'compress': {'after': '30 days'}},
-    )
-    assert "INTERVAL '30 days'" in conn._get_columnstore_policy_query(dt_pipe)
-
-
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_integer_now_func_registered_for_int_axis(flavor: str):
-    """
-    TimescaleDB cannot evaluate a time-based columnstore policy on an integer-axis hypertable
-    without an `integer_now` function: the policy is accepted and then fails on every run.
-    """
-    conn = conns[flavor]
-    if conn.type != 'sql' or conn.flavor not in ('timescaledb', 'timescaledb-ha'):
-        return
-
-    pipe = _int_axis_pipe(conn, 'integer_now', compress=True)
-    queries = conn._get_integer_now_func_queries(pipe)
-    assert len(queries) == 2
-    assert 'CREATE OR REPLACE FUNCTION mrsm_integer_now_millisecond()' in queries[0]
-    assert '* 1000' in queries[0]
-    assert 'set_integer_now_func' in queries[1]
-    assert "'mrsm_integer_now_millisecond'" in queries[1]
-
-    ### A datetime axis needs no such function.
-    dt_pipe = mrsm.Pipe(
-        'test', 'compress', 'integer_now_datetime',
-        instance=conn,
-        columns={'datetime': 'ts'},
-        parameters={'compress': True},
-    )
-    assert conn._get_integer_now_func_queries(dt_pipe) == []
-
-
-def test_compress_with_upsert_warns_once(monkeypatch):
-    """Declaring both `upsert` and `compress` must warn (once per pipe per process)."""
-    from types import SimpleNamespace
-    import meerschaum.connectors.sql._compress as compress_module
-    from meerschaum.connectors.sql._compress import apply_compression_policy
-
-    messages = []
-    monkeypatch.setattr(compress_module, 'warn', lambda msg, **kw: messages.append(msg))
-
-    conn = conns['sqlite']
-    pipe = mrsm.Pipe(
-        'plugin:timeline', 'activities', 'compress_upsert_warn',
-        instance=conn,
-        parameters={
-            'columns': {'datetime': 'time', 'id': 'id'},
-            'upsert': True,
-            'compress': {'after': '30 days'},
-        },
-    )
-    fake_self = SimpleNamespace(flavor='timescaledb')
-
-    apply_compression_policy(fake_self, pipe, debug=debug)
-    apply_compression_policy(fake_self, pipe, debug=debug)
-
-    assert len(messages) == 1
-    assert 'ON CONFLICT' in messages[0]

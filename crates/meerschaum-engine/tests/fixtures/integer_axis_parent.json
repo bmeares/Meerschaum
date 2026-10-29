@@ -1,0 +1,63 @@
+{
+  "description": "Integer-axis landing pipes (epoch milliseconds with precision, and epoch seconds without, declared through an `axis: {unit: s}` edge override) feeding a datetime child. Ledger ranges and watermarks are converted before mapping onto the child's daily grid.",
+  "records": [
+    {"instance": "sql:main", "connector": "plugin:landing", "metric": "meter_readings",
+     "parameters": {"columns": {"datetime": "ts_ms", "id": "meter"}, "dtypes": {"ts_ms": "int"},
+                    "precision": "millisecond", "verify": {"chunk_days": 1}}},
+    {"instance": "sql:main", "connector": "plugin:landing", "metric": "gauge_readings",
+     "parameters": {"columns": {"datetime": "ts_s", "id": "gauge"}, "dtypes": {"ts_s": "int"},
+                    "verify": {"chunk_days": 1}}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "meter_daily",
+     "parameters": {"columns": {"datetime": "day", "id": "meter"}, "verify": {"chunk_days": 1},
+                    "fetch": {"backtrack_minutes": 0},
+                    "parents": [{"connector": "plugin:landing", "metric": "gauge_readings", "axis": {"unit": "s"}}],
+                    "sql": "SELECT to_timestamp(ts_ms / 1000)::date AS day, meter, sum(kwh) FROM {{ Pipe('plugin:landing', 'meter_readings') }} GROUP BY 1, 2"}}
+  ],
+  "selection": {"targets": {"refs": ["sql:main|sql:main|meter_daily|None"]}, "parents": "all"},
+  "state": {
+    "watermarks": {
+      "sql:main|plugin:landing|meter_readings|None": 1791784800000,
+      "sql:main|plugin:landing|gauge_readings|None": 1791781200,
+      "sql:main|sql:main|meter_daily|None": "2026-10-12T00:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:main|plugin:landing|meter_readings|None": "@current",
+      "sql:main|plugin:landing|gauge_readings|None": "@current",
+      "sql:main|sql:main|meter_daily|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {"pipe_ref": "sql:main|plugin:landing|meter_readings|None", "seq": 9, "begin": 1791158400000, "end": 1791244800000},
+        {"pipe_ref": "sql:main|plugin:landing|gauge_readings|None", "seq": 4, "begin": 1791331200, "end": 1791332640}
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {"parent_ref": "sql:main|plugin:landing|meter_readings|None", "child_ref": "sql:main|sql:main|meter_daily|None", "seq": 8, "parent_watermark_at_cursor": 1791784800000},
+        {"parent_ref": "sql:main|plugin:landing|gauge_readings|None", "child_ref": "sql:main|sql:main|meter_daily|None", "seq": 3, "parent_watermark_at_cursor": 1791781200}
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {"node": "sql:main|plugin:landing|meter_readings|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:main|plugin:landing|gauge_readings|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:main|sql:main|meter_daily|None", "action": "backfill",
+       "bounds": {"begin": "2026-10-05T00:00:00Z", "end": "2026-10-08T00:00:00Z"},
+       "ranges": [
+         {"begin": "2026-10-05T00:00:00Z", "end": "2026-10-06T00:00:00Z"},
+         {"begin": "2026-10-07T00:00:00Z", "end": "2026-10-08T00:00:00Z"}
+       ],
+       "chunks": [
+         {"begin": "2026-10-05T00:00:00Z", "end": "2026-10-06T00:00:00Z"},
+         {"begin": "2026-10-07T00:00:00Z", "end": "2026-10-08T00:00:00Z"}
+       ],
+       "provisional": true,
+       "consumes": [
+         {"parent_ref": "sql:main|plugin:landing|gauge_readings|None", "state_instance": "sql:main", "seq": 4},
+         {"parent_ref": "sql:main|plugin:landing|meter_readings|None", "state_instance": "sql:main", "seq": 9}
+       ],
+       "reason_contains": ["Pipe('plugin:landing', 'meter_readings') has 1 new change", "Pipe('plugin:landing', 'gauge_readings') has 1 new change"]}
+    ]
+  }
+}

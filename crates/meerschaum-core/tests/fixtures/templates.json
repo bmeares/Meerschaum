@@ -1,0 +1,570 @@
+{
+  "registered": [
+    [
+      "sql:main",
+      "src",
+      null,
+      {
+        "columns": {
+          "datetime": "ts",
+          "id": "station"
+        },
+        "dtypes": {
+          "value": "float64",
+          "meta": "JSON"
+        },
+        "target": "source_table",
+        "tags": [
+          "raw",
+          "hourly"
+        ],
+        "upsert": true,
+        "fetch": {
+          "backtrack_minutes": 30
+        },
+        "n": 7,
+        "f": 1.5,
+        "big": 1e+16
+      }
+    ],
+    [
+      "sql:main",
+      "idx",
+      null,
+      {
+        "columns": {
+          "datetime": "ts"
+        },
+        "indices": {
+          "geo": "shape"
+        }
+      }
+    ],
+    [
+      "sql:main",
+      "uni",
+      null,
+      {
+        "columns": {
+          "id": "estación"
+        }
+      }
+    ],
+    [
+      "sql:main",
+      "clone",
+      null,
+      {
+        "columns": "{{ Pipe('sql:main', 'src').columns }}",
+        "dtypes": "{{ Pipe('sql:main', 'src').dtypes }}",
+        "sql": "SELECT * FROM {{ Pipe('sql:main', 'src') }}"
+      }
+    ],
+    [
+      "sql:main",
+      "clone2",
+      null,
+      {
+        "columns": "{{ Pipe('sql:main', 'clone').columns }}",
+        "target": "clone_of_clone"
+      }
+    ],
+    [
+      "sql:main",
+      "child",
+      null,
+      {
+        "reference": "Pipe('sql:main', 'src')",
+        "target": "child_table",
+        "tags": [
+          "child"
+        ]
+      }
+    ],
+    [
+      "plugin:me",
+      "me",
+      null,
+      {
+        "a": {
+          "b": 5
+        },
+        "x": "y"
+      }
+    ],
+    [
+      "sql:main",
+      "selfref",
+      null,
+      {
+        "sql": "SELECT * FROM {{ self }} WHERE x = {{ self.parameters[\"x\"] }}",
+        "x": 1,
+        "target": "self_table"
+      }
+    ]
+  ],
+  "replace": [
+    {
+      "text": "SELECT * FROM {{ Pipe('sql:main', 'src') }}",
+      "self": null,
+      "value": "SELECT * FROM source_table",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').columns }}",
+      "self": null,
+      "value": {
+        "datetime": "ts",
+        "id": "station"
+      },
+      "failures": 0
+    },
+    {
+      "text": "  {{ Pipe('sql:main', 'src').columns }}\n",
+      "self": null,
+      "value": {
+        "datetime": "ts",
+        "id": "station"
+      },
+      "failures": 0
+    },
+    {
+      "text": "x={{ Pipe('sql:main','src').columns['datetime'] }} y={{ Pipe('sql:main', 'src').columns }}",
+      "self": null,
+      "value": "x=ts y={\"datetime\": \"ts\", \"id\": \"station\"}",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').dtypes }}",
+      "self": null,
+      "value": {
+        "value": "float64",
+        "meta": "json",
+        "ts": "datetime"
+      },
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').target }}",
+      "self": null,
+      "value": "source_table",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'idx').indices }}",
+      "self": null,
+      "value": {
+        "datetime": "ts",
+        "geo": "shape"
+      },
+      "failures": 0
+    },
+    {
+      "text": "tags: {{ Pipe('sql:main', 'src').tags }}",
+      "self": null,
+      "value": "tags: [\"raw\", \"hourly\"]",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').parameters['fetch']['backtrack_minutes'] }}",
+      "self": null,
+      "value": 30,
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src')['columns'] }}",
+      "self": null,
+      "value": {
+        "datetime": "ts",
+        "id": "station"
+      },
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src')['metric'] }}",
+      "self": null,
+      "value": "src",
+      "failures": 0
+    },
+    {
+      "text": "{{Pipe('sql:main','src').metric}}-{{ Pipe('sql:main', 'src').connector_keys }}",
+      "self": null,
+      "value": "src-sql:main",
+      "failures": 0
+    },
+    {
+      "text": "{{ mrsm.Pipe('sql:main', 'src', instance='sql:other') }}",
+      "self": null,
+      "value": "sql_main_src",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe(\"sql:main\", \"src\", None) }}",
+      "self": null,
+      "value": "source_table",
+      "failures": 0
+    },
+    {
+      "text": "u={{ Pipe('sql:main','src').upsert }} n={{ Pipe('sql:main','src').parameters['n'] }} f={{ Pipe('sql:main','src').parameters['f'] }} big={{ Pipe('sql:main','src').parameters['big'] }}",
+      "self": null,
+      "value": "u=true n=7 f=1.5 big=1e+16",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').parameters['big'] }}",
+      "self": null,
+      "value": 1e+16,
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src')[-1] }}",
+      "self": null,
+      "value": "{{ Pipe('sql:main', 'src')[-1] }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').columns['missing'] }}",
+      "self": null,
+      "value": "{{ Pipe('sql:main', 'src').columns['missing'] }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe() }}",
+      "self": null,
+      "value": "{{ Pipe() }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe('only_connector') }}",
+      "self": null,
+      "value": "{{ Pipe('only_connector') }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').columns.datetime }}",
+      "self": null,
+      "value": "{{ Pipe('sql:main', 'src').columns.datetime }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').tags[1] }}",
+      "self": null,
+      "value": "hourly",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').tags[5] }}",
+      "self": null,
+      "value": "{{ Pipe('sql:main', 'src').tags[5] }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').target[0] }}",
+      "self": null,
+      "value": "s",
+      "failures": 0
+    },
+    {
+      "text": "cols={{ Pipe('sql:main', 'uni').columns }}",
+      "self": null,
+      "value": "cols={\"id\": \"estaci\\u00f3n\"}",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'clone').columns }}",
+      "self": null,
+      "value": {
+        "datetime": "ts",
+        "id": "station"
+      },
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'clone2').columns }}",
+      "self": null,
+      "value": {
+        "datetime": "ts",
+        "id": "station"
+      },
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'clone').parameters['sql'] }}",
+      "self": null,
+      "value": "SELECT * FROM source_table",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'child').columns['id'] }}",
+      "self": null,
+      "value": "station",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'child').tags }}",
+      "self": null,
+      "value": [
+        "child"
+      ],
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'child') }}",
+      "self": null,
+      "value": "child_table",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('sql:main','src') }},{{ Pipe('sql:main','src') }}",
+      "self": null,
+      "value": "source_table,source_table",
+      "failures": 0
+    },
+    {
+      "text": "no templates here",
+      "self": null,
+      "value": "no templates here",
+      "failures": 0
+    },
+    {
+      "text": "{{ self.metric }}",
+      "self": null,
+      "value": "{{ self.metric }}",
+      "failures": 0
+    },
+    {
+      "text": "{{ self.parameters['a']['b'] }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": 5,
+      "failures": 0
+    },
+    {
+      "text": "m={{ self.metric }} c={{ self.connector_keys }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "m=me c=plugin:me",
+      "failures": 0
+    },
+    {
+      "text": "{{ self.parameters }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": {
+        "a": {
+          "b": 5
+        },
+        "x": "y"
+      },
+      "failures": 0
+    },
+    {
+      "text": "{{ self['parameters']['x'] }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "y",
+      "failures": 0
+    },
+    {
+      "text": "{{ self }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "plugin_me_me",
+      "failures": 0
+    },
+    {
+      "text": "{{ self.location }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": null,
+      "failures": 0
+    },
+    {
+      "text": "loc={{ self.location }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "loc=null",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('myself', 'x') }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "{{ Pipe('myself', 'x') }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src') }} and {{ self.metric }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "source_table and me",
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('plugin:me', 'me').parameters['a'] }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": {
+        "b": 5
+      },
+      "failures": 0
+    },
+    {
+      "text": "{{ Pipe('plugin:me', 'me', instance='sql:main').parameters['x'] }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "y",
+      "failures": 0
+    },
+    {
+      "text": "{{ self.parameters_x }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": "{{ self.parameters_x }}",
+      "failures": 1
+    },
+    {
+      "text": "{{ Pipe('sql:main', 'src').columns }}",
+      "self": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "value": {
+        "datetime": "ts",
+        "id": "station"
+      },
+      "failures": 0
+    }
+  ],
+  "resolve": [
+    {
+      "keys": [
+        "sql:main",
+        "clone",
+        null
+      ],
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "station"
+        },
+        "dtypes": {
+          "value": "float64",
+          "meta": "json",
+          "ts": "datetime"
+        },
+        "sql": "SELECT * FROM source_table"
+      },
+      "failures": 0
+    },
+    {
+      "keys": [
+        "sql:main",
+        "clone2",
+        null
+      ],
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "station"
+        },
+        "target": "clone_of_clone"
+      },
+      "failures": 0
+    },
+    {
+      "keys": [
+        "sql:main",
+        "child",
+        null
+      ],
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "station"
+        },
+        "dtypes": {
+          "value": "float64",
+          "meta": "JSON"
+        },
+        "target": "child_table",
+        "tags": [
+          "child"
+        ],
+        "upsert": true,
+        "fetch": {
+          "backtrack_minutes": 30
+        },
+        "n": 7,
+        "f": 1.5,
+        "big": 1e+16,
+        "reference": "Pipe('sql:main', 'src')"
+      },
+      "failures": 0
+    },
+    {
+      "keys": [
+        "plugin:me",
+        "me",
+        null
+      ],
+      "parameters": {
+        "a": {
+          "b": 5
+        },
+        "x": "y"
+      },
+      "failures": 0
+    },
+    {
+      "keys": [
+        "sql:main",
+        "selfref",
+        null
+      ],
+      "parameters": {
+        "sql": "SELECT * FROM self_table WHERE x = 1",
+        "x": 1,
+        "target": "self_table"
+      },
+      "failures": 1
+    }
+  ]
+}

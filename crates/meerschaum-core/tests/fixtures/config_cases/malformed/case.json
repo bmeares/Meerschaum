@@ -1,0 +1,8 @@
+{
+  "env": {},
+  "queries": [
+    {"keys": ["pipes", "parameters", "fetch", "backtrack_minutes"]},
+    {"keys": ["custom"]},
+    {"keys": ["custom", "a"]}
+  ]
+}

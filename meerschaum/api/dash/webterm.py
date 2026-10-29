@@ -3,30 +3,25 @@
 # vim:fenc=utf-8
 
 """
-Functions for interacting with the Webterm via the dashboard.
+The web terminal in the console: an iframe of the native terminal, `/webterm/<session id>`, which
+the Rust server serves (xterm.js over a PTY; the API host never serves it).
 """
 
-import time
 from typing import Optional, Tuple, Any
 
 import meerschaum as mrsm
-from meerschaum.api import CHECK_UPDATE, get_api_connector, webterm_port
+from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
-from meerschaum.api.dash.components import alert_from_success_tuple, console_div
+from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_icon
 from meerschaum.utils.typing import WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum._internal.term.tools import is_webterm_running
-from meerschaum.utils.threading import Thread, RLock
 from meerschaum.utils.misc import is_tmux_available
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 
-MAX_WEBTERM_ATTEMPTS: int = 10
 TMUX_IS_ENABLED: bool = (
     is_tmux_available() and mrsm.get_config('api', 'webterm', 'tmux', 'enabled')
 )
-
-_locks = {'webterm_thread': RLock()}
 
 ### Termux-style extra keys for mobile: index -> (label, tooltip).
 WEBTERM_EXTRA_KEYS = {
@@ -110,17 +105,36 @@ def build_webterm_extra_keys_row() -> Any:
     )
 
 
-def get_webterm(state: WebState) -> Tuple[Any, Any]:
+def webterm_enabled() -> bool:
     """
-    Start the webterm and return its iframe.
+    Return whether the Rust server serves the terminal (the host config's `webterm`, which
+    `--no-webterm` turns off).
     """
-    from meerschaum.api import _include_webterm
-    if not _include_webterm:
+    from meerschaum.api.host import get_host_config
+    return bool(get_host_config().get('webterm', False))
+
+
+def build_webterm_iframe(session_id: str, id: str = 'webterm-iframe') -> Any:
+    """
+    Return the terminal's iframe for a session.
+    """
+    return html.Iframe(src=f"/webterm/{session_id}", id=id)
+
+
+def get_webterm(state: WebState, fullscreen_button: bool = True) -> Tuple[Any, Any]:
+    """
+    Return the terminal's iframe (and its controls), or the console banner when there is none.
+    The dashboard's controls include fullscreen (it takes the whole row), which has no meaning
+    on the terminal's own page (`fullscreen_button=False`).
+    """
+    if not webterm_enabled():
         return console_div, []
 
     session_id = state['session-store.data'].get('session-id', None)
     username = get_username_from_session(session_id)
-    if not is_session_authenticated(session_id):
+    from meerschaum.api.dash.access import get_viewer
+    viewer = get_viewer(session_id=(str(session_id) if session_id else None))
+    if not (viewer.no_auth or (viewer.signed_in and viewer.can('webterm:use'))):
         msg = f"User '{username}' is not authorized to access the webterm."
         return (
             html.Div(
@@ -129,129 +143,63 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
             ),
             [alert_from_success_tuple((
                 False,
-                "This Meerschaum instance only allows administrators to access the Webterm."
+                "Your account may not use the terminal."
             ))]
         )
 
-    for i in range(MAX_WEBTERM_ATTEMPTS):
-        if is_webterm_running('localhost', webterm_port, session_id=(username or session_id)):
-            return (
+    return (
+        [
+            html.Div(
                 [
+                    ### Termux-style keys on the left (mobile only): ESC/CTRL/
+                    ### SHIFT/TAB then the arrow keys.
+                    build_webterm_extra_keys_row(),
+                    ### Terminal controls on the right, same row.
                     html.Div(
                         [
-                            ### Termux-style keys on the left (mobile only): ESC/CTRL/
-                            ### SHIFT/TAB then the arrow keys.
-                            build_webterm_extra_keys_row(),
-                            ### Terminal controls on the right, same row.
-                            html.Div(
-                                [
-                                    dbc.Button(
-                                        "⟳",
-                                        color='black',
-                                        size='sm',
-                                        id='webterm-refresh-button',
-                                        title='Refresh terminal',
-                                    ),
-                                    dbc.Button(
-                                        '⛶',
-                                        color='black',
-                                        size='sm',
-                                        id='webterm-fullscreen-button',
-                                        title='Toggle fullscreen',
-                                    ),
-                                ] + [
-                                    dbc.Button(
-                                        html.B('+'),
-                                        color='black',
-                                        size='sm',
-                                        id='webterm-new-tab-button',
-                                        title='New terminal tab',
-                                    ),
-                                ] if TMUX_IS_ENABLED else [],
-                                id='webterm-controls-div',
-                                style={'margin-left': 'auto', 'text-align': 'right'},
+                            dbc.Button(
+                                build_icon('refresh'),
+                                color='black',
+                                size='sm',
+                                id='webterm-refresh-button',
+                                title='Refresh terminal',
                             ),
-                        ],
-                        style={
-                            'display': 'flex',
-                            'align-items': 'flex-end',
-                            'gap': '8px',
-                        },
-                    ),
-                    html.Iframe(
-                        src=f"/webterm/{session_id}",
-                        id="webterm-iframe",
+                        ] + (
+                            [
+                                ### The icon follows the column's `data-fullscreen` (nav.css).
+                                dbc.Button(
+                                    [
+                                        build_icon('fullscreen', 'webterm-icon-enter'),
+                                        build_icon('fullscreen-exit', 'webterm-icon-exit'),
+                                    ],
+                                    color='black',
+                                    size='sm',
+                                    id='webterm-fullscreen-button',
+                                    title='Fullscreen',
+                                ),
+                            ] if fullscreen_button else []
+                        ) + (
+                            [
+                                dbc.Button(
+                                    build_icon('plus'),
+                                    color='black',
+                                    size='sm',
+                                    id='webterm-new-tab-button',
+                                    title='New terminal tab',
+                                ),
+                            ] if TMUX_IS_ENABLED else []
+                        ),
+                        id='webterm-controls-div',
+                        style={'margin-left': 'auto', 'text-align': 'right'},
                     ),
                 ],
-                []
-            )
-        time.sleep(1)
-    return console_div, [alert_from_success_tuple((False, "Could not start the webterm server."))]
-
-
-webterm_procs = {}
-def start_webterm(webterm_port: Optional[int] = None) -> None:
-    """
-    Start the webterm thread.
-    """
-    from meerschaum.utils.packages import run_python_package
-
-    def run():
-        conn = get_api_connector()
-        _ = run_python_package(
-            'meerschaum',
-            (
-                ['start', 'webterm', '-i', str(conn)]
-                + (
-                    []
-                    if not webterm_port
-                    else ['-p', str(webterm_port)]
-                )
+                style={
+                    'display': 'flex',
+                    'align-items': 'flex-end',
+                    'gap': '8px',
+                },
             ),
-            capture_output=True,
-            as_proc=True,
-            store_proc_dict=webterm_procs,
-            store_proc_key='process',
-            venv=None,
-        )
-
-    with _locks['webterm_thread']:
-        if webterm_procs.get('thread', None) is None:
-            webterm_thread = Thread(target=run)
-            webterm_procs['thread'] = webterm_thread
-            webterm_thread.start()
-
-
-def stop_webterm() -> None:
-    """
-    Stop the webterm thread and tear down its tmux session (if any).
-
-    `webterm_proc.terminate()` only signals the `start webterm` tornado process. When
-    tmux is enabled the shell runs inside a detached tmux session (`...--<port>`) owned
-    by the tmux server, which OUTLIVES that process — so the webterm keeps serving after
-    the API stops and blocks the next start. Kill the Meerschaum tmux session(s) bound to
-    the webterm port directly; this is robust even if the process was already gone or
-    `SIGKILL`ed. No-ops cleanly when tmux is unavailable (`tmux ls` fails → no sessions).
-    """
-    from meerschaum.api import webterm_port
-    from meerschaum._internal.term.tools import get_mrsm_tmux_sessions, kill_tmux_session
-
-    webterm_thread = webterm_procs.get('thread', None)
-    webterm_proc = webterm_procs.get('process', None)
-    with _locks['webterm_thread']:
-        if webterm_proc is not None:
-            webterm_proc.terminate()
-            try:
-                webterm_proc.wait(timeout=5)
-            except Exception:
-                try:
-                    webterm_proc.kill()
-                except Exception:
-                    pass
-        if webterm_thread is not None:
-            webterm_thread.join()
-        try:
-            for session in get_mrsm_tmux_sessions(port=webterm_port):
-                kill_tmux_session(session)
-        except Exception:
-            pass
+            build_webterm_iframe(session_id),
+        ],
+        []
+    )

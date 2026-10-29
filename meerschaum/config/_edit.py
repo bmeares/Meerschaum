@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 from meerschaum.utils.typing import Optional, Any, SuccessTuple, Dict, List, Union
+from meerschaum import _core
 
 
 def edit_config(
@@ -20,7 +21,7 @@ def edit_config(
 ) -> SuccessTuple:
     """Edit the configuration files."""
     import meerschaum.config.paths as paths
-    from meerschaum.config import get_config, config
+    from meerschaum.config import get_config, _config
     from meerschaum.config._read_config import get_keyfile_path, read_config, revert_symlinks_config
     from meerschaum.config._backup import backup_config_key, restore_config_backup
     from meerschaum._internal.static import STATIC_CONFIG
@@ -40,6 +41,7 @@ def edit_config(
         backup_path = backup_config_key(key, debug=debug)
         while True:
             ### If defined in default, create the config file.
+            config = _config()
             symlinks_key_config = config.get(symlinks_key, {}).get(key, {})
             key_config = revert_symlinks_config({
                 key: config.pop(key, {}),
@@ -50,7 +52,7 @@ def edit_config(
 
             edit_file(get_keyfile_path(key, create_new=True))
 
-            ### TODO: verify that the file is valid. Retry if not.
+            ### Parse the edited file; offer the backup when it does not parse.
             try:
                 new_key_config = read_config(
                     paths.CONFIG_DIR_PATH,
@@ -60,7 +62,7 @@ def edit_config(
                 )
             except Exception:
                 if key_config:
-                    config[key] = key_config
+                    _config()[key] = key_config
                 warn(f"Could not parse key '{key}'.", stack=False)
                 if backup_path is not None and yes_no(
                     f"Restore '{key}' from the backup taken before editing?",
@@ -121,86 +123,8 @@ def write_config(
     A bool indicating success.
 
     """
-    if directory is None:
-        import meerschaum.config.paths as paths
-        directory = paths.CONFIG_DIR_PATH
-
-    from meerschaum.config import _allow_write_missing
-    from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.config._default import default_header_comment
-    from meerschaum.config._read_config import get_keyfile_path, revert_symlinks_config
-    from meerschaum.utils.yaml import yaml
-    from meerschaum.utils.misc import filter_keywords
-    import json
-    import os
-    if config_dict is None:
-        from meerschaum.config import _config
-        cf = _config(allow_replaced=False)
-        config_dict = cf
-
-    if not _allow_write_missing:
-        return False
-
-    default_filetype = STATIC_CONFIG['config']['default_filetype']
-    filetype_dumpers = {
-        'yml' : yaml.dump,
-        'yaml' : yaml.dump,
-        'json' : json.dump,
-    }
-
-    config_dict = revert_symlinks_config(config_dict)
-
-    def determine_filetype(k, v):
-        if k == 'meerschaum':
-            return 'yaml'
-        if isinstance(v, dict) and 'filetype' in v:
-            return v['filetype']
-        path = get_keyfile_path(k, create_new=False, directory=directory)
-        if path is None:
-            return default_filetype
-        filetype = path.suffix[1:]
-        if not isinstance(filetype, str) or filetype not in filetype_dumpers:
-            print(f"Invalid filetype '{filetype}' for '{k}'. Assuming {default_filetype}...")
-            filetype = default_filetype
-        return filetype
-
-    for k, v in config_dict.items():
-        filetype = determine_filetype(k, v)        
-        filename = str(k) + '.' + str(filetype)
-        filepath = os.path.join(directory, filename)
-        pathlib.Path(filepath).parent.mkdir(exist_ok=True)
-        with open(filepath, 'w+') as f:
-            try:
-                if k == 'meerschaum':
-                    f.write(default_header_comment)
-                filetype_dumpers[filetype](
-                    v, f,
-                    **filter_keywords(
-                        filetype_dumpers[filetype],
-                        sort_keys = False,
-                        indent = 2
-                    )
-                )
-                success = True
-            except Exception as e:
-                success = False
-                print("FAILED TO WRITE!")
-                print(e)
-                print(filter_keywords(
-                    filetype_dumpers[filetype],
-                    sort_keys=False,
-                    indent = 2
-                ))
-
-            if not success:
-                try:
-                    if os.path.exists(filepath):
-                        os.remove(filepath)
-                except Exception:
-                    print(f"Failed to write '{k}'")
-                return False
-
-    return True
+    _rust = _core.write_config
+    return _rust(config_dict, directory=directory, debug=debug)
 
 def general_write_yaml_config(
     files: Optional[Dict[pathlib.Path, Dict[str, Any]]] = None,
@@ -268,21 +192,6 @@ def general_edit_config(
     edit_file(file_to_edit)
 
     return True, "Success"
-
-def copy_default_to_config(debug : bool = False):
-    """Copy the default config directory to the main config directory.
-    NOTE: This function is now depreciated in favor of the new patch system.
-    """
-    import meerschaum.config.paths as paths
-    import shutil
-    try:
-        shutil.copytree(paths.DEFAULT_CONFIG_DIR_PATH, paths.CONFIG_DIR_PATH)
-    except FileNotFoundError:
-        write_default_config(debug=debug)
-        return copy_default_to_config(debug=debug)
-    except Exception as e:
-        print("exception:", e)
-    return True
 
 def write_default_config(
     debug: bool = False,

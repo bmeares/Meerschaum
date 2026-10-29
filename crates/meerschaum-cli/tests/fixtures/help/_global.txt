@@ -1,0 +1,211 @@
+usage: mrsm [actions] {options}
+
+Create and Build Pipes with Meerschaum.
+
+Actions options:
+  action                Actions list to execute. E.g. `start api`
+  -h, --help            Print a help message for an action.
+  --loop                Loop the specified action forever (only for select
+                        actions)
+  -y, --yes             Agree to the default choices for prompts
+  -f, --force           Override safety checks
+  --noask, --no-ask     Automatically choose the defaults answers to
+                        questions. Does not result in data loss.
+  -A, --sub-args ...    Provide a list of arguments for subprocesses. You can
+                        also type sub-arguments in [] instead. E.g. `stack
+                        -A='--version'`, `ls [-lh]`, `echo -A these are sub-
+                        arguments`
+
+Jobs options:
+  -d, --daemon          Run an action as a background daemon to create a job.
+  --name, --job-name NAME
+                        Assign a name to a job. If no name is provided, a
+                        random name will be assigned.
+  -s, --schedule, --cron SCHEDULE
+                        Continue executing the action according to a schedule
+                        (e.g. 'every 1 seconds'). Often used with `-d`. See
+                        this page for scheduling syntax: https://red-engine.re
+                        adthedocs.io/en/stable/condition_syntax/index.html
+  --restart             Restart a job if not stopped manually.
+  -e, --executor-keys EXECUTOR_KEYS
+                        Execute jobs locally or remotely. Supported values are
+                        'local', 'systemd', and 'api:{label}'.
+  --rm                  Delete a job once it has finished executing.
+
+Pipes options:
+  -c, -C, --connector-keys CONNECTOR_KEYS [CONNECTOR_KEYS ...]
+                        List of connector keys to search for. e.g. -c sql:main
+                        api:main
+  -m, -M, --metric-keys METRIC_KEYS [METRIC_KEYS ...]
+                        List of metric keys to include in the search
+  -l, -L, --location-keys LOCATION_KEYS [LOCATION_KEYS ...]
+                        List of location keys to include in the search
+  -i, -I, --mrsm-instance, --instance MRSM_INSTANCE
+                        Connector Keys (type:label) to the Meerschaum instance
+                        for Pipe objects. If label is omitted, use the
+                        configured default interface (usually 'sql:main')
+  -t, --tags TAGS [TAGS ...]
+                        Only include pipes with these tags.
+  --targets, --target TARGETS [TARGETS ...]
+                        Filter pipes by targets. May be negated with `_`.
+  --datetime-dtypes, --datetime-dtype, --dtype, --dtypes {datetime,int,None,_datetime,_int,_None} [{datetime,int,None,_datetime,_int,_None} ...]
+                        Only select pipes with the corresponding datetime
+                        dtypes (`datetime`, `int`, or `None`). May be negated
+                        with `_`.
+  --no-policy, --nopolicy
+                        Leave the compression (columnstore) policy untouched.
+                        With `compress pipes`, compress existing chunks now
+                        without installing a policy; with `decompress pipes`,
+                        decompress existing chunks now without removing the
+                        policy (they will be recompressed on schedule).
+                        TimescaleDB only.
+  --full                When running `vacuum pipes`, run `VACUUM FULL` to
+                        return freed space to the OS. Takes an exclusive lock.
+                        PostgreSQL family only.
+
+Sync options:
+  --min-seconds, --cooldown MIN_SECONDS
+                        The minimum number of seconds between syncing laps.
+                        Defaults to 1.
+  --timeout-seconds, --timeout TIMEOUT_SECONDS
+                        The maximum number of seconds before cancelling a
+                        pipe's syncing job. Defaults to 300.
+  --listen              Keep the process alive after the initial sync pass so
+                        subscription-style connectors (e.g. MQTT) continue
+                        syncing via callbacks. Stops on `stop jobs` or CTRL-C.
+  --unblock             Run the action asynchronously, if possible.
+  --async               Run the action asynchronously, if possible. Alias for
+                        --unblock
+  --begin BEGIN         The begin datetime when syncing, fetching data.
+  --end END             The end datetime when syncing, fetching data.
+  --chunksize CHUNKSIZE
+                        How many rows per chunk. Defaults to 100,000.
+  --batchsize BATCHSIZE
+                        How many chunks to process in parallel. Defaults to
+                        number of CPUs.
+  --chunk-minutes CHUNK_MINUTES
+                        Specify the chunk interval in minutes for verification
+                        syncs (and `partition pipes`). Defaults to 43200 (30
+                        days).
+  --chunk-hours CHUNK_HOURS
+                        Specify the chunk interval in days for verification
+                        syncs. See `--chunk-minutes`.
+  --chunk-days CHUNK_DAYS
+                        Specify the chunk interval in days for verification
+                        syncs. See `--chunk-minutes`.
+  --verify              Completely resync a pipe's entire interval.
+  --deduplicate, --dedup
+                        Remove duplicate rows from a pipe's table.
+  --bounded, --bound    When verifying, do not sync outside the existing
+                        oldest and newest datetime bounds.
+  --skip-check-existing, --allow-duplicates
+                        Skip checking for duplicate rows when syncing. This
+                        improves performance when all rows to be synced are
+                        unique.
+  --skip-enforce-dtypes
+                        Skip enforcing incoming data to a pipe's dtypes. This
+                        improves performance when all rows are expected to
+                        already be of the correct type.
+  --skip-chunks-with-greater-rowcounts
+                        When verifying, skip chunks with rowcounts greater
+                        than the remote's.
+  --check-rowcounts-only
+                        Only compare row-counts when verifying pipes.
+  --skip-hooks          Skip calling the sync hooks.
+  --sync-data {nothing,backtrack,incremental,all,filter}
+                        When copying pipes, specify what data to sync into
+                        destination pipes. 'backtrack' uses the source pipe's
+                        sync time; 'incremental' uses the destination pipe's
+                        sync time (both apply the backtrack interval).
+                        'filter' uses --begin, --end, and --params to restrict
+                        the range. Defaults to 'nothing' (copy pipe
+                        definitions only).
+  --cache               Sync pipes' metadata to disk.
+
+API options:
+  -p, --port PORT       The port on which to run the Web API server
+  --host HOST           The host address to bind to for the API server.
+                        Defaults to '0.0.0.0'.
+  --webterm-port WEBTERM_PORT
+                        The port on which to run the webterm server.
+  -w, --workers WORKERS
+                        How many workers to run a concurrent action (e.g.
+                        running the API or syncing pipes)
+  --no-dash, --nodash   When starting the API, do not start the Web Console
+                        dashboard.
+  --no-webterm, --nowebterm
+                        When starting the API, do not start the Webterm.
+  --private, --private-mode
+                        Require authentication for all endpoints.
+  --secure              Start the API in secure mode, only allowing `admin`
+                        users to execute actions.
+  --no-auth, --noauth, --insecure
+                        When starting the API, do not require authentication.
+                        WARNING: This is dangerous!
+  --production, --gunicorn
+                        Start the API with the Gunicorn process manager.
+  --keyfile KEYFILE     Start the API server with this keyfile (requires
+                        --certfile).
+  --certfile CERTFILE   Start the API server with this certfile (requires
+                        --keyfile).
+
+Plugins options:
+  -r, --repository, --repo REPOSITORY
+                        Meerschaum plugins repository to connect to. Specify
+                        an API label (default: 'mrsm')
+
+Tokens options:
+  --ttl-days TTL_DAYS   For how many days should a token be valid.
+  --scopes, --scope SCOPES [SCOPES ...]
+                        Which scope permissions to grant to a token.
+
+Packages options:
+  --venv VENV           Choose which virtual environment to target when
+                        installing or removing packages.
+
+Compose options:
+  --file, --compose-file FILE
+                        Specify an alternate compose file (default: mrsm-
+                        compose.yaml).
+  --env-file ENV_FILE   Specify an alternate environment file (default: .env).
+  --dry                 Update project pipes without syncing.
+  --drop, -v, --volumes
+                        Drop named pipes when running `mrsm compose down`.
+  --presync             Run syncs before bringing up jobs.
+  --no-jobs             Exit before starting background jobs.
+  --isolated            Execute Compose commands in subprocesses.
+
+Debugging options:
+  --debug               Print debug statements (max verbosity)
+  --trace               Trace execution and open browser windows to visualize
+                        the stack.
+
+Miscellaneous options:
+  -V, --version         Print the Meerschaum version and exit. Has no effect
+                        from within the shell.
+  --patch               Patch parameters instead of overwriting.
+  --nopretty            Print elements without 'pretty' formatting
+  --rollback, --restore
+                        When editing config, restore a key from its most
+                        recent backup instead of editing.
+  --skip-deps           Skip dependencies when installing plugins.
+  --dry-run             Preview package installation without making changes.
+  -P, --params PARAMS   Parameters dictionary in JSON format or simple format.
+                        Simple format is for one-depth dictionaries and does
+                        not need braces or quotes. JSON Example: --params
+                        '{"meerschaum" : { "connectors" : "main" : { "host" :
+                        "localhost" } } }' Simple example: --params
+                        key1:value1,key2:value2
+  --temporary, --temp   Skip creating or modifying instance tables when
+                        working with pipes (plugins and users still trigger
+                        table creation).
+  --gui                 Open a DataFrame in an interactive pandasgui or
+                        matplotlib window.
+  --shell               Open the Meerschaum shell and execute the provided
+                        action.
+  --use-bash            Execute non-implemented actions via `bash -c`. Default
+                        behavior is to execute directly.
+  --allow-shell-job     Allow shell commands to be run as background jobs.
+                        Default behavior is to only allow recognized actions.
+  --no-daemon           Do not use the Meerschaum CLI daemon to execute the
+                        action.

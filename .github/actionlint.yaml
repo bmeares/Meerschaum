@@ -1,0 +1,8 @@
+# actionlint configuration (https://github.com/rhysd/actionlint). The runner labels below are valid GitHub-hosted
+# images that older actionlint releases do not know yet; `mrsm-ci` is the custom label of the self-hosted runners
+# (docs/design/v5-build.md "Parallel self-hosted runners").
+self-hosted-runner:
+  labels:
+    - windows-11-arm
+    - macos-15-intel
+    - mrsm-ci

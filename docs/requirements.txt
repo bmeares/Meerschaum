@@ -1,0 +1,2 @@
+# Documentation tooling, independent of the package's runtime extras.
+zensical==0.0.73

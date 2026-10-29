@@ -1,0 +1,5 @@
+{
+  "description": "compose init in a directory without a compose file.",
+  "width": 100,
+  "runs": [{"name": "init", "action": ["init"], "flags": {"yes": true}}, {"name": "init-no", "action": ["init"], "flags": {"noask": true}}]
+}

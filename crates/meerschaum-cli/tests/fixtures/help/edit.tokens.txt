@@ -1,0 +1,3 @@
+
+Edit tokens registered to an instance.
+

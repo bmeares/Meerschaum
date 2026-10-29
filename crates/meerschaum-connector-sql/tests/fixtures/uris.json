@@ -1,0 +1,1449 @@
+{
+  "uris": [
+    {
+      "uri": "postgresql+psycopg://test:test1234@localhost:5559/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5559,
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5559,
+          "flavor": "postgresql",
+          "uri": "postgresql+psycopg://test:test1234@localhost:5559/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5559/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 5559,
+            "flavor": "postgresql"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5559/testdb"
+        }
+      }
+    },
+    {
+      "uri": "postgresql://test:test1234@localhost:5559/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5559,
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5559,
+          "flavor": "postgresql",
+          "uri": "postgresql://test:test1234@localhost:5559/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5559/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 5559,
+            "flavor": "postgresql"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5559/testdb"
+        }
+      }
+    },
+    {
+      "uri": "postgres://test:test1234@localhost/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "flavor": "postgresql",
+          "uri": "postgres://test:test1234@localhost/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "postgresql+psycopg://test:test1234@localhost/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "flavor": "postgresql",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost/testdb"
+        }
+      }
+    },
+    {
+      "uri": "timescaledb://test:test1234@localhost:5439/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5439,
+          "flavor": "timescaledb"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5439,
+          "flavor": "timescaledb",
+          "uri": "timescaledb://test:test1234@localhost:5439/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5439/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 5439,
+            "flavor": "timescaledb"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5439/testdb"
+        }
+      }
+    },
+    {
+      "uri": "timescaledb-ha://test:test1234@localhost:5459/testdb",
+      "parse_uri": {
+        "error": "ArgumentError: Could not parse SQLAlchemy URL from given URL string"
+      },
+      "from_uri": {
+        "error": "ArgumentError: Could not parse SQLAlchemy URL from given URL string"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5459/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 5459,
+            "flavor": "timescaledb-ha"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5459/testdb"
+        }
+      }
+    },
+    {
+      "uri": "postgis://test:test1234@localhost:5449/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5449,
+          "flavor": "postgis"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 5449,
+          "flavor": "postgis",
+          "uri": "postgis://test:test1234@localhost:5449/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5449/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 5449,
+            "flavor": "postgis"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5449/testdb"
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://test:test1234@localhost:5449/postgis_db",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "postgis_db",
+          "username": "test",
+          "password": "test1234",
+          "port": 5449,
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "postgis_db",
+          "username": "test",
+          "password": "test1234",
+          "port": 5449,
+          "flavor": "postgresql",
+          "uri": "postgresql+psycopg://test:test1234@localhost:5449/postgis_db",
+          "label": "test@localhost/postgis_db"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/postgis_db",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5449/postgis_db",
+            "host": "localhost",
+            "database": "postgis_db",
+            "username": "test",
+            "password": "test1234",
+            "port": 5449,
+            "flavor": "postgresql"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5449/postgis_db"
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://u:p%40ss%3Aw%2Frd@db.example.com:5432/mydb",
+      "parse_uri": {
+        "ok": {
+          "host": "db.example.com",
+          "database": "mydb",
+          "username": "u",
+          "password": "p@ss:w/rd",
+          "port": 5432,
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "db.example.com",
+          "database": "mydb",
+          "username": "u",
+          "password": "p@ss:w/rd",
+          "port": 5432,
+          "flavor": "postgresql",
+          "uri": "postgresql+psycopg://u:p%40ss%3Aw%2Frd@db.example.com:5432/mydb",
+          "label": "u@db.example.com/mydb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "u@db.example.com/mydb",
+            "uri": "postgresql+psycopg://u:p%40ss%3Aw%2Frd@db.example.com:5432/mydb",
+            "host": "db.example.com",
+            "database": "mydb",
+            "username": "u",
+            "password": "p@ss:w/rd",
+            "port": 5432,
+            "flavor": "postgresql"
+          },
+          "engine_str": "postgresql+psycopg://u:p%40ss%3Aw%2Frd@db.example.com:5432/mydb"
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://u:p+s%20s@[::1]:5432/mydb",
+      "parse_uri": {
+        "ok": {
+          "host": "::1",
+          "database": "mydb",
+          "username": "u",
+          "password": "p+s s",
+          "port": 5432,
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "::1",
+          "database": "mydb",
+          "username": "u",
+          "password": "p+s s",
+          "port": 5432,
+          "flavor": "postgresql",
+          "uri": "postgresql+psycopg://u:p+s%20s@[::1]:5432/mydb",
+          "label": "u@::1/mydb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "u@::1/mydb",
+            "uri": "postgresql+psycopg://u:p+s%20s@[::1]:5432/mydb",
+            "host": "::1",
+            "database": "mydb",
+            "username": "u",
+            "password": "p+s s",
+            "port": 5432,
+            "flavor": "postgresql"
+          },
+          "engine_str": "postgresql+psycopg://u:p+s%20s@[::1]:5432/mydb"
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://u:pw@localhost/mydb?options=--search_path%3Dfoo",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "username": "u",
+          "password": "pw",
+          "flavor": "postgresql",
+          "options": "--search_path=foo",
+          "schema": "foo"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "username": "u",
+          "password": "pw",
+          "flavor": "postgresql",
+          "options": "--search_path=foo",
+          "schema": "foo",
+          "uri": "postgresql+psycopg://u:pw@localhost/mydb?options=--search_path%3Dfoo",
+          "label": "u@localhost/mydb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "u@localhost/mydb",
+            "uri": "postgresql+psycopg://u:pw@localhost/mydb?options=--search_path%3Dfoo",
+            "host": "localhost",
+            "database": "mydb",
+            "username": "u",
+            "password": "pw",
+            "flavor": "postgresql",
+            "options": "--search_path=foo",
+            "schema": "foo",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://u:pw@localhost/mydb?options=--search_path%3Dfoo"
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://u:pw@localhost/mydb?sslmode=require&application_name=mrsm&empty=",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "username": "u",
+          "password": "pw",
+          "flavor": "postgresql",
+          "sslmode": "require",
+          "application_name": "mrsm"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "username": "u",
+          "password": "pw",
+          "flavor": "postgresql",
+          "sslmode": "require",
+          "application_name": "mrsm",
+          "uri": "postgresql+psycopg://u:pw@localhost/mydb?sslmode=require&application_name=mrsm&empty=",
+          "label": "u@localhost/mydb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "u@localhost/mydb",
+            "uri": "postgresql+psycopg://u:pw@localhost/mydb?sslmode=require&application_name=mrsm&empty=",
+            "host": "localhost",
+            "database": "mydb",
+            "username": "u",
+            "password": "pw",
+            "flavor": "postgresql",
+            "sslmode": "require",
+            "application_name": "mrsm",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://u:pw@localhost/mydb?sslmode=require&application_name=mrsm&empty="
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://u@localhost/mydb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "username": "u",
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "username": "u",
+          "flavor": "postgresql",
+          "uri": "postgresql+psycopg://u@localhost/mydb",
+          "label": "u@localhost/mydb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "u@localhost/mydb",
+            "uri": "postgresql+psycopg://u@localhost/mydb",
+            "host": "localhost",
+            "database": "mydb",
+            "username": "u",
+            "flavor": "postgresql",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://u@localhost/mydb"
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://localhost/mydb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "mydb",
+          "flavor": "postgresql",
+          "uri": "postgresql+psycopg://localhost/mydb",
+          "label": "localhost/mydb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "localhost/mydb",
+            "uri": "postgresql+psycopg://localhost/mydb",
+            "host": "localhost",
+            "database": "mydb",
+            "flavor": "postgresql",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://localhost/mydb"
+        }
+      }
+    },
+    {
+      "uri": "mysql+pymysql://test:test1234@localhost:3310/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3310,
+          "flavor": "mysql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3310,
+          "flavor": "mysql",
+          "uri": "mysql+pymysql://test:test1234@localhost:3310/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "mysql+pymysql://test:test1234@localhost:3310/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 3310,
+            "flavor": "mysql"
+          },
+          "engine_str": "mysql+pymysql://test:test1234@localhost:3310/testdb"
+        }
+      }
+    },
+    {
+      "uri": "mysql://test:test1234@localhost:3310/testdb?charset=utf8mb4",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3310,
+          "flavor": "mysql",
+          "charset": "utf8mb4"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3310,
+          "flavor": "mysql",
+          "charset": "utf8mb4",
+          "uri": "mysql://test:test1234@localhost:3310/testdb?charset=utf8mb4",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "mysql://test:test1234@localhost:3310/testdb?charset=utf8mb4",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 3310,
+            "flavor": "mysql",
+            "charset": "utf8mb4"
+          },
+          "engine_str": "mysql://test:test1234@localhost:3310/testdb?charset=utf8mb4"
+        }
+      }
+    },
+    {
+      "uri": "mariadb://test:test1234@localhost:3309/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3309,
+          "flavor": "mariadb"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3309,
+          "flavor": "mariadb",
+          "uri": "mariadb://test:test1234@localhost:3309/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "mariadb://test:test1234@localhost:3309/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 3309,
+            "flavor": "mariadb"
+          },
+          "engine_str": "mariadb://test:test1234@localhost:3309/testdb"
+        }
+      }
+    },
+    {
+      "uri": "mariadb+pymysql://test:test1234@localhost:3309/testdb",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3309,
+          "flavor": "mariadb"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "testdb",
+          "username": "test",
+          "password": "test1234",
+          "port": 3309,
+          "flavor": "mariadb",
+          "uri": "mariadb+pymysql://test:test1234@localhost:3309/testdb",
+          "label": "test@localhost/testdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "test@localhost/testdb",
+            "uri": "mariadb+pymysql://test:test1234@localhost:3309/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 3309,
+            "flavor": "mariadb"
+          },
+          "engine_str": "mariadb+pymysql://test:test1234@localhost:3309/testdb"
+        }
+      }
+    },
+    {
+      "uri": "sqlite:////tmp/abs/Path.db",
+      "parse_uri": {
+        "ok": {
+          "database": "/tmp/abs/Path.db",
+          "flavor": "sqlite"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "database": "/tmp/abs/Path.db",
+          "flavor": "sqlite",
+          "uri": "sqlite:////tmp/abs/Path.db",
+          "label": "path.db"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "path.db",
+            "uri": "sqlite:////tmp/abs/Path.db",
+            "database": "/tmp/abs/Path.db",
+            "flavor": "sqlite"
+          },
+          "engine_str": "sqlite:////tmp/abs/Path.db"
+        }
+      }
+    },
+    {
+      "uri": "sqlite:///rel.db",
+      "parse_uri": {
+        "ok": {
+          "database": "rel.db",
+          "flavor": "sqlite"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "database": "rel.db",
+          "flavor": "sqlite",
+          "uri": "sqlite:///rel.db",
+          "label": "rel.db"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rel.db",
+            "uri": "sqlite:///rel.db",
+            "database": "rel.db",
+            "flavor": "sqlite"
+          },
+          "engine_str": "sqlite:///rel.db"
+        }
+      }
+    },
+    {
+      "uri": "sqlite:///:memory:",
+      "parse_uri": {
+        "ok": {
+          "database": ":memory:",
+          "flavor": "sqlite"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "database": ":memory:",
+          "flavor": "sqlite",
+          "uri": "sqlite:///:memory:",
+          "label": "memory_sqlite"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "memory_sqlite",
+            "uri": "sqlite:///:memory:",
+            "database": ":memory:",
+            "flavor": "sqlite"
+          },
+          "engine_str": "sqlite:///:memory:"
+        }
+      }
+    },
+    {
+      "uri": "sqlite://",
+      "parse_uri": {
+        "ok": {
+          "flavor": "sqlite"
+        }
+      },
+      "from_uri": {
+        "error": "Exception: \n\u001b[1;31m \ud83d\uded1 Unable to determine the database from the provided URI.\u001b[0m"
+      },
+      "connector": {
+        "error": "Exception: \n\u001b[1;31m \ud83d\uded1 Unable to determine the database from the provided URI.\u001b[0m"
+      }
+    },
+    {
+      "uri": "mssql+pyodbc://sa:supersecureSECRETPASSWORD123!@localhost:1439/master?driver=ODBC+Driver+17+for+SQL+Server",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "master",
+          "username": "sa",
+          "password": "supersecureSECRETPASSWORD123!",
+          "port": 1439,
+          "flavor": "mssql",
+          "driver": "ODBC Driver 17 for SQL Server"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "master",
+          "username": "sa",
+          "password": "supersecureSECRETPASSWORD123!",
+          "port": 1439,
+          "flavor": "mssql",
+          "driver": "ODBC Driver 17 for SQL Server",
+          "uri": "mssql+pyodbc://sa:supersecureSECRETPASSWORD123!@localhost:1439/master?driver=ODBC+Driver+17+for+SQL+Server",
+          "label": "sa@localhost/master"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "sa@localhost/master",
+            "uri": "mssql+pyodbc://sa:supersecureSECRETPASSWORD123!@localhost:1439/master?driver=ODBC+Driver+17+for+SQL+Server",
+            "host": "localhost",
+            "database": "master",
+            "username": "sa",
+            "password": "supersecureSECRETPASSWORD123!",
+            "port": 1439,
+            "flavor": "mssql",
+            "driver": "ODBC Driver 17 for SQL Server",
+            "options": "driver=ODBC Driver 18 for SQL Server&UseFMTONLY=Yes&TrustServerCertificate=yes&Encrypt=no&MARS_Connection=yes"
+          },
+          "engine_str": "mssql+pyodbc://sa:supersecureSECRETPASSWORD123!@localhost:1439/master?driver=ODBC+Driver+17+for+SQL+Server"
+        }
+      }
+    },
+    {
+      "uri": "mssql+pyodbc://sa:pw@localhost:1439/master?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes&driver=dup",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "master",
+          "username": "sa",
+          "password": "pw",
+          "port": 1439,
+          "flavor": "mssql",
+          "driver": "ODBC Driver 18 for SQL Server",
+          "TrustServerCertificate": "yes"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "master",
+          "username": "sa",
+          "password": "pw",
+          "port": 1439,
+          "flavor": "mssql",
+          "driver": "ODBC Driver 18 for SQL Server",
+          "TrustServerCertificate": "yes",
+          "uri": "mssql+pyodbc://sa:pw@localhost:1439/master?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes&driver=dup",
+          "label": "sa@localhost/master"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "sa@localhost/master",
+            "uri": "mssql+pyodbc://sa:pw@localhost:1439/master?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes&driver=dup",
+            "host": "localhost",
+            "database": "master",
+            "username": "sa",
+            "password": "pw",
+            "port": 1439,
+            "flavor": "mssql",
+            "driver": "ODBC Driver 18 for SQL Server",
+            "TrustServerCertificate": "yes",
+            "options": "driver=ODBC Driver 18 for SQL Server&UseFMTONLY=Yes&TrustServerCertificate=yes&Encrypt=no&MARS_Connection=yes"
+          },
+          "engine_str": "mssql+pyodbc://sa:pw@localhost:1439/master?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes&driver=dup"
+        }
+      }
+    },
+    {
+      "uri": "oracle+oracledb://system:oracle@localhost:1529/?service_name=XEPDB1",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "username": "system",
+          "password": "oracle",
+          "port": 1529,
+          "flavor": "oracle",
+          "service_name": "XEPDB1"
+        }
+      },
+      "from_uri": {
+        "error": "Exception: \n\u001b[1;31m \ud83d\uded1 Unable to determine the database from the provided URI.\u001b[0m"
+      },
+      "connector": {
+        "error": "Exception: \n\u001b[1;31m \ud83d\uded1 Unable to determine the database from the provided URI.\u001b[0m"
+      }
+    },
+    {
+      "uri": "oracle+oracledb://system:oracle@localhost:1529/xe",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "xe",
+          "username": "system",
+          "password": "oracle",
+          "port": 1529,
+          "flavor": "oracle"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "xe",
+          "username": "system",
+          "password": "oracle",
+          "port": 1529,
+          "flavor": "oracle",
+          "uri": "oracle+oracledb://system:oracle@localhost:1529/xe",
+          "label": "system@localhost/xe"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "system@localhost/xe",
+            "uri": "oracle+oracledb://system:oracle@localhost:1529/xe",
+            "host": "localhost",
+            "database": "xe",
+            "username": "system",
+            "password": "oracle",
+            "port": 1529,
+            "flavor": "oracle"
+          },
+          "engine_str": "oracle+oracledb://system:oracle@localhost:1529/xe"
+        }
+      }
+    },
+    {
+      "uri": "duckdb:///x.duckdb",
+      "parse_uri": {
+        "ok": {
+          "database": "x.duckdb",
+          "flavor": "duckdb"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "database": "x.duckdb",
+          "flavor": "duckdb",
+          "uri": "duckdb:///x.duckdb",
+          "label": "x.duckdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "x.duckdb",
+            "uri": "duckdb:///x.duckdb",
+            "database": "x.duckdb",
+            "flavor": "duckdb"
+          },
+          "engine_str": "duckdb:///x.duckdb"
+        }
+      }
+    },
+    {
+      "uri": "duckdb:///:memory:",
+      "parse_uri": {
+        "ok": {
+          "database": ":memory:",
+          "flavor": "duckdb"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "database": ":memory:",
+          "flavor": "duckdb",
+          "uri": "duckdb:///:memory:",
+          "label": "memory_duckdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "memory_duckdb",
+            "uri": "duckdb:///:memory:",
+            "database": ":memory:",
+            "flavor": "duckdb"
+          },
+          "engine_str": "duckdb:///:memory:"
+        }
+      }
+    },
+    {
+      "uri": "cockroachdb://root@localhost:26257/defaultdb?sslmode=disable",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "defaultdb",
+          "username": "root",
+          "port": 26257,
+          "flavor": "cockroachdb",
+          "sslmode": "disable"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "defaultdb",
+          "username": "root",
+          "port": 26257,
+          "flavor": "cockroachdb",
+          "sslmode": "disable",
+          "uri": "cockroachdb://root@localhost:26257/defaultdb?sslmode=disable",
+          "label": "root@localhost/defaultdb"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "root@localhost/defaultdb",
+            "uri": "cockroachdb://root@localhost:26257/defaultdb?sslmode=disable",
+            "host": "localhost",
+            "database": "defaultdb",
+            "username": "root",
+            "port": 26257,
+            "flavor": "cockroachdb",
+            "sslmode": "disable",
+            "password": "admin"
+          },
+          "engine_str": "cockroachdb://root@localhost:26257/defaultdb?sslmode=disable"
+        }
+      }
+    },
+    {
+      "uri": "citus://u:p@localhost:5432/db",
+      "parse_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "db",
+          "username": "u",
+          "password": "p",
+          "port": 5432,
+          "flavor": "citus"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "localhost",
+          "database": "db",
+          "username": "u",
+          "password": "p",
+          "port": 5432,
+          "flavor": "citus",
+          "uri": "citus://u:p@localhost:5432/db",
+          "label": "u@localhost/db"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "u@localhost/db",
+            "uri": "citus://u:p@localhost:5432/db",
+            "host": "localhost",
+            "database": "db",
+            "username": "u",
+            "password": "p",
+            "port": 5432,
+            "flavor": "citus"
+          },
+          "engine_str": "citus://u:p@localhost:5432/db"
+        }
+      }
+    },
+    {
+      "uri": "postgresql+psycopg://user:pw@host:5432/db#frag?x=1",
+      "parse_uri": {
+        "ok": {
+          "host": "host",
+          "database": "db#frag",
+          "username": "user",
+          "password": "pw",
+          "port": 5432,
+          "flavor": "postgresql"
+        }
+      },
+      "from_uri": {
+        "ok": {
+          "host": "host",
+          "database": "db#frag",
+          "username": "user",
+          "password": "pw",
+          "port": 5432,
+          "flavor": "postgresql",
+          "uri": "postgresql+psycopg://user:pw@host:5432/db#frag?x=1",
+          "label": "user@host/db#frag"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "user@host/db#frag",
+            "uri": "postgresql+psycopg://user:pw@host:5432/db#frag?x=1",
+            "host": "host",
+            "database": "db#frag",
+            "username": "user",
+            "password": "pw",
+            "port": 5432,
+            "flavor": "postgresql"
+          },
+          "engine_str": "postgresql+psycopg://user:pw@host:5432/db#frag?x=1"
+        }
+      }
+    }
+  ],
+  "attributes": [
+    {
+      "label": "rs_fixture_0",
+      "flavor": "postgresql",
+      "attributes": {
+        "host": "localhost",
+        "username": "mrsm",
+        "password": "mrsm",
+        "database": "meerschaum"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_0",
+            "host": "localhost",
+            "username": "mrsm",
+            "password": "mrsm",
+            "database": "meerschaum",
+            "flavor": "postgresql",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://mrsm:mrsm@localhost:5432/meerschaum"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_1",
+      "flavor": "timescaledb",
+      "attributes": {
+        "host": "localhost",
+        "port": 5439,
+        "username": "test",
+        "password": "p@ss w/rd",
+        "database": "testdb"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_1",
+            "host": "localhost",
+            "port": 5439,
+            "username": "test",
+            "password": "p@ss w/rd",
+            "database": "testdb",
+            "flavor": "timescaledb"
+          },
+          "engine_str": "postgresql+psycopg://test:p%40ss+w%2Frd@localhost:5439/testdb"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_2",
+      "flavor": "timescaledb-ha",
+      "attributes": {
+        "host": "localhost",
+        "port": 5459,
+        "username": "test",
+        "password": "test1234",
+        "database": "testdb"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_2",
+            "host": "localhost",
+            "port": 5459,
+            "username": "test",
+            "password": "test1234",
+            "database": "testdb",
+            "flavor": "timescaledb-ha"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5459/testdb"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_3",
+      "flavor": "postgis",
+      "attributes": {
+        "host": "localhost",
+        "username": "test",
+        "password": "test1234",
+        "database": "testdb",
+        "options": {
+          "sslmode": "disable"
+        }
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_3",
+            "host": "localhost",
+            "username": "test",
+            "password": "test1234",
+            "database": "testdb",
+            "options": {
+              "sslmode": "disable"
+            },
+            "flavor": "postgis",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5432/testdb?sslmode=disable"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_4",
+      "flavor": "citus",
+      "attributes": {
+        "host": "localhost",
+        "username": "test",
+        "password": "test1234",
+        "database": "testdb"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_4",
+            "host": "localhost",
+            "username": "test",
+            "password": "test1234",
+            "database": "testdb",
+            "flavor": "citus",
+            "port": 5432
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5432/testdb"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_5",
+      "flavor": "cockroachdb",
+      "attributes": {
+        "host": "localhost"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_5",
+            "host": "localhost",
+            "flavor": "cockroachdb",
+            "port": 26257,
+            "database": "defaultdb",
+            "username": "root",
+            "password": "admin"
+          },
+          "engine_str": "cockroachdb://root:admin@localhost:26257/defaultdb"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_6",
+      "flavor": "mysql",
+      "attributes": {
+        "host": "localhost",
+        "port": 3310,
+        "username": "test",
+        "password": "test1234",
+        "database": "testdb"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_6",
+            "host": "localhost",
+            "port": 3310,
+            "username": "test",
+            "password": "test1234",
+            "database": "testdb",
+            "flavor": "mysql"
+          },
+          "engine_str": "mysql+pymysql://test:test1234@localhost:3310/testdb"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_7",
+      "flavor": "mariadb",
+      "attributes": {
+        "host": "localhost",
+        "username": "test",
+        "password": "test1234",
+        "database": "testdb",
+        "options": "charset=utf8mb4&empty="
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_7",
+            "host": "localhost",
+            "username": "test",
+            "password": "test1234",
+            "database": "testdb",
+            "options": "charset=utf8mb4&empty=",
+            "flavor": "mariadb",
+            "port": 3306
+          },
+          "engine_str": "mysql+pymysql://test:test1234@localhost:3306/testdb?charset=utf8mb4"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_8",
+      "flavor": "mssql",
+      "attributes": {
+        "host": "localhost",
+        "port": 1439,
+        "username": "sa",
+        "password": "supersecureSECRETPASSWORD123!",
+        "database": "master"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_8",
+            "host": "localhost",
+            "port": 1439,
+            "username": "sa",
+            "password": "supersecureSECRETPASSWORD123!",
+            "database": "master",
+            "flavor": "mssql",
+            "options": "driver=ODBC Driver 18 for SQL Server&UseFMTONLY=Yes&TrustServerCertificate=yes&Encrypt=no&MARS_Connection=yes"
+          },
+          "engine_str": "mssql+pyodbc://sa:supersecureSECRETPASSWORD123%21@localhost:1439/master?driver=ODBC+Driver+18+for+SQL+Server&UseFMTONLY=Yes&TrustServerCertificate=yes&Encrypt=no&MARS_Connection=yes"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_9",
+      "flavor": "oracle",
+      "attributes": {
+        "host": "localhost",
+        "port": 1529,
+        "username": "system",
+        "password": "oracle",
+        "database": "xe"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_9",
+            "host": "localhost",
+            "port": 1529,
+            "username": "system",
+            "password": "oracle",
+            "database": "xe",
+            "flavor": "oracle"
+          },
+          "engine_str": "oracle+oracledb://system:oracle@localhost:1529/xe"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_10",
+      "flavor": "sqlite",
+      "attributes": {
+        "database": "/tmp/mrsm_test.db"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_10",
+            "database": "/tmp/mrsm_test.db",
+            "flavor": "sqlite"
+          },
+          "engine_str": "sqlite:////tmp/mrsm_test.db"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_11",
+      "flavor": "geopackage",
+      "attributes": {
+        "database": "/tmp/mrsm_test.gpkg"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_11",
+            "database": "/tmp/mrsm_test.gpkg",
+            "flavor": "geopackage"
+          },
+          "engine_str": "sqlite:////tmp/mrsm_test.gpkg"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_12",
+      "flavor": "duckdb",
+      "attributes": {
+        "database": "/tmp/mrsm_test.duckdb"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_12",
+            "database": "/tmp/mrsm_test.duckdb",
+            "flavor": "duckdb"
+          },
+          "engine_str": "duckdb:////tmp/mrsm_test.duckdb"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_13",
+      "flavor": "postgresql",
+      "attributes": {
+        "host": "localhost",
+        "username": "u",
+        "database": "db"
+      },
+      "connector": {
+        "error": "InvalidAttributesError: \n\u001b[1;31m \ud83d\uded1 Missing 'password' for connector 'sql:rs_fixture_13'.\u001b[0m"
+      }
+    },
+    {
+      "label": "rs_fixture_14",
+      "flavor": "timescaledb",
+      "attributes": {
+        "uri": "postgresql+psycopg://test:test1234@localhost:5439/testdb"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_14",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5439/testdb",
+            "host": "localhost",
+            "database": "testdb",
+            "username": "test",
+            "password": "test1234",
+            "port": 5439,
+            "flavor": "timescaledb"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5439/testdb"
+        }
+      }
+    },
+    {
+      "label": "rs_fixture_15",
+      "flavor": "postgis",
+      "attributes": {
+        "uri": "postgresql+psycopg://test:test1234@localhost:5449/postgis"
+      },
+      "connector": {
+        "ok": {
+          "attributes": {
+            "label": "rs_fixture_15",
+            "uri": "postgresql+psycopg://test:test1234@localhost:5449/postgis",
+            "host": "localhost",
+            "database": "postgis",
+            "username": "test",
+            "password": "test1234",
+            "port": 5449,
+            "flavor": "postgis"
+          },
+          "engine_str": "postgresql+psycopg://test:test1234@localhost:5449/postgresql"
+        }
+      }
+    }
+  ]
+}

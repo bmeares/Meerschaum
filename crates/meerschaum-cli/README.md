@@ -1,0 +1,260 @@
+# meerschaum-cli
+
+> The CLI of [Meerschaum](https://meerschaum.io) as a library: `pip install meerschaum` (the `mrsm` console
+> script runs it from the wheel's extension) or `cargo install meerschaum --locked` (the front crate's `cli` feature
+> builds the standalone `mrsm`). This crate is **internal** and may change in any minor release;
+> depend on the [`meerschaum`](https://crates.io/crates/meerschaum) crate for the Rust API.
+
+**Features.** `oracle` (default, D13) forwards to the same feature of `meerschaum-connector-sql`, so the binary
+can use Oracle instances like the `meerschaum._core` extension; it needs Oracle Instant Client at runtime only.
+`--no-default-features` gives the lean binary. DuckDB is not a feature of this crate: the SQL crate's default `duckdb`
+feature adds only a loader for DuckDB's own shared library, which `mrsm` finds through `MRSM_DUCKDB_LIB` or the
+`<root>/drivers` cache and downloads on first use (`mrsm install driver duckdb` does it on purpose,
+`mrsm uninstall driver duckdb` removes it, `mrsm show drivers` reports it). `MRSM_NO_AUTO_INSTALL` forbids the implicit
+download.
+
+`run_main()` (`src/run.rs`) is the whole process: the front crate's `mrsm` binary and the Python extension's
+`_native.main` both call it. This crate's own `[[bin]]` is named `mrsm-cli` (`CARGO_BIN_EXE_mrsm-cli` in the
+integration tests) so that `cargo build --workspace` never writes two `target/*/mrsm`.
+
+The CLI: the argument parser (`spec`, `argparse`, `parse`), action dispatch, the native
+actions, the formatting toolkit, and the interactive shell. Design: `docs/design/v5.0.0.md` §4.3.
+
+## The interactive shell (`src/shell/`)
+
+`mrsm` (or `mrsm shell`) reproduces v4.1.4's prompt_toolkit shell on `reedline`:
+
+| Module | Ported from |
+|---|---|
+| `shell/mod.rs` | `Shell.py`: banner, prompt, `precmd`, shell commands, history file, the read loop |
+| `shell/completer.rs` | `ShellCompleter.get_completions`, `_check_complete_keys`, `default_action_completer`, `Shell.complete_*`, the `_complete_*` functions in `meerschaum/actions/*.py` |
+| `shell/editor.rs` | `PromptSession(complete_while_typing=True, reserve_space_for_menu=False)`: completion state, Tab / Shift-Tab / Up / Down, `ValidAutoSuggest`, reverse-i-search, the menu and toolbar rendering |
+| `shell/toolbar.rs` | `input_with_sigint.bottom_toolbar()` |
+| `shell/updates.rs` | `updates.py`: the version check thread and the update messages |
+| `shell/interrupt.rs` | (v5) Ctrl-C while an action runs: the signal watcher, cooperative cancellation (`Session::block_on` drops its future and unwinds; the dispatcher turns that into `Interrupted.`), the stop-flag and child-program regimes |
+| `shell/suggest.rs` | (v5) the filtering dropdown prompt of `bootstrap pipes` |
+
+### How the toolbar and the completion menu are drawn
+
+reedline has no toolbar, no complete-while-typing, and its menus only change the buffer on accept,
+so the shell keeps prompt_toolkit's own state machine in `editor::Shared` and uses three reedline
+extension points (details in the `editor.rs` module docs):
+
+- **Hook menus**: never-active menus whose `update_values(&mut Editor, ..)` reedline calls
+  synchronously when a `ReedlineEvent::Menu(name)` is handled (quick completions on). The edit mode
+  (emacs plus routing) sends Tab, Shift-Tab, Up/Down, suggestion accepts, every text insertion and
+  the search keys to these hooks, which update the buffer exactly as prompt_toolkit's `Buffer` would.
+- **The hinter**: reedline prints the hint after the buffer on every paint and counts its lines
+  when it scrolls. The hint carries the ghost text, the menu rows below the cursor (one line each,
+  placed with `CHA`), and a last line that jumps to the bottom row (`CUP`) and draws the toolbar.
+  reedline therefore keeps the prompt above the toolbar exactly as prompt_toolkit does (scrolling
+  after long output), and every repaint, including resize and Ctrl-L, redraws the toolbar in the
+  same frame. On submit reedline repaints without the hint, which removes the menu and toolbar the
+  way prompt_toolkit does when input is accepted; command output then scrolls normally.
+- **The prompt**: when there is no room below the cursor, prompt_toolkit opens the menu above it,
+  over the prompt's leading blank line; those rows are drawn as part of the prompt string. The
+  prompt is also where `(reverse-i-search)` appears.
+
+The hinter tracks the prompt's screen row like reedline's painter (measured once per prompt with a
+cursor position query, then scrolled by the same rule) and applies prompt_toolkit's float placement
+(`FloatContainer._draw_float`) and menu scrolling (`Window` scroll offsets, `ScrollbarMargin`).
+
+### Venv accounting (`src/native/venvs.rs`, D20)
+
+`attempt_import` and `pip_install` record who requested each package in
+`venvs/<name>/.mrsm_requests.json` (schema in `meerschaum/utils/venv/_requests.py`). `show venvs`
+lists each venv's path, size on disk and packages with versions and requesters. `prune venvs`
+(v5-only; `--dry` lists, asks unless `-y`/`-f`/`--noask`) removes packages whose recorded
+requesters are all uninstalled plugins and that nothing needed depends on (`Requires-Dist`),
+through `uninstall packages --venv`. Packages with no ledger entry, `pip`/`setuptools`/`wheel`/`uv`/
+`PyYAML`, anything requested by `meerschaum` and anything in an installed plugin's `required` list
+are kept. `upgrade` prints the same plan afterwards. `prune` is in `actions::V5_ONLY_ACTIONS`: it
+resolves and completes subactions, but `show actions` and the top-level completion list keep v4's
+contents for the parity fixtures.
+
+### Engine surfaces (`src/native/engine_views.rs`, `src/native/sync.rs`)
+
+- `plan pipes` prints the engine's plan (spec 5.3) without syncing; `show graph` draws the
+  selection as a styled box-drawing tree (`src/format/graph.rs`: the engine keeps the
+  `Subgraph`, the CLI owns the look; `--full` / `--debug` list collapsed fan-outs); `show runs [--last N]` lists recorded runs and `show run <id>` (or
+  `show runs <id>`) draws a run's Gantt chart. All take the `sync pipes` selection and bound
+  flags; `--nopretty` prints JSON.
+- A graph `sync pipes` run (`--parents`, `--children`, `--resume`) with more than one node ends
+  with the Gantt chart; on a terminal (`Runtime::live`, set only by `Runtime::system`) it also
+  shows the run inline while it goes (below). Flat runs and `--nopretty` keep v4's output.
+
+### Inline live view of graph runs (`src/format/live.rs`, `src/native/sync_live.rs`)
+
+Graph `sync pipes` runs and `sync pipelines` on an ANSI terminal (not `--nopretty` / `--debug`)
+keep a region at the bottom of the terminal: a header and one row per running node (chunks, rows so
+far, rows/s, attempt). `LiveRun` is the pure model (engine `Event`s in, permanent lines and region
+lines out; unit-tested with synthetic event sequences); `Region` is the process-wide painter,
+erased and redrawn around every `Runtime::print` / `eprint`, prompt and forwarded worker output
+through the hooks in `progress.rs` (`suspend` / `resume`), and cleared by the signal watcher. The
+run itself goes on in a Tokio task; `sync_live::run` waits in short interruptible `block_on`
+steps (Ctrl-C aborts the task before the lease drain), so it can open `tui::run_monitor` on `w`
+between steps. The events come through a `RunOptions::on_event` sink into an unbounded channel
+(`--loop` / `--listen` drain their broadcast receiver on a task), so nothing is lost while the
+monitor is open; a lag there hides the rows until their next event, and the final lines are
+resynced from `RunResult::outcomes` and `RunResult::record`. Overlapping writers nest
+`suspend` / `resume` (the region is drawn when the last one is done). `Keys` turns off canonical
+input and echo only (never raw mode: SIGINT still works; blocking reads so a worker never reads
+end-of-file) and takes them again after something gave them back. Python workers started for such
+a run forward their output through this process (like in the shell), so it is printed above the
+region; output that ends without a newline (an `input()` prompt) gives the terminal back to the
+worker until it writes a full line, and output written while the monitor is open is held (1 MiB)
+and printed when it closes. SIGTSTP erases the region, restores the terminal and stops the
+process. `--loop` / `--listen` show the rows only (`LoopView`), under the laps' v4 lines.
+Terminals without ANSI keep one line per node transition.
+`tests/live_sync_pty.rs` drives it in a pseudo-terminal.
+- `--chunk-pipelining` and `--last N` (only for `show run[s]`) are parsed by
+  `parse::engine_arguments` like `--parents`. `parameters['schedule']` reaches the engine through
+  a `Cadence` built on `meerschaum-jobs` (`native/engine.rs`).
+- `show plugins` lists native (C-ABI) plugins as `name (native)` (bare names with `--nopretty`).
+
+### Full-screen views (`src/tui/`)
+
+`watch run` and `watch jobs` (v5, `docs/zensical/reference/actions/watch.md`) and the shell's F2 /
+F3 keys draw full-screen views with `ratatui` on the same `crossterm` as `reedline`.
+
+| Module | Role |
+|---|---|
+| `tui/mod.rs` | `VIEWS` (the registry: a view is a `watch` subaction plus an optional default shell key), `available`, `run_monitor` / `RunFeed` / `MonitorExit` (what `sync_live` opens on `w`) |
+| `tui/app.rs` | the shared loop: alternate screen and raw mode (restored on return, panic and Ctrl-C), resize, title and footer, `q` / Esc, `?` help, yes/no confirmations; `draw_frame` renders without a terminal for unit tests |
+| `tui/theme.rs` | colors and glyphs from `FormatSettings` (`NO_COLOR`: monochrome, `formatting:unicode: false`: ASCII) |
+| `tui/run_view.rs` | `RunState`, a reducer over engine `Event`s (live broadcast or persisted rows read with `after_seq`; late older events never move a node back, the log stays in `seq` order), and the run monitor (timeline, nodes, events, details). A live feed holds broadcast events back until the persisted ones reach them (`SEED_WAIT` at most) |
+| `tui/jobs_view.rs` | the jobs monitor: listing, log follower and job commands on background threads |
+| `tui/watch.rs` | the `watch` action and its line output off a terminal |
+| `tui/keys.rs` | `shell:keybindings` (default F2 `watch run`, F3 `watch jobs`); the shell runs a bound command through `reedline`'s `ExecuteHostCommand`: it erases the prompt's rows first, then starts a new editor with the typed line (reedline would put a resumed prompt back on its old rows, over short output) |
+
+Adding a view: a `ViewDef` in `VIEWS`, its subaction in `actions.rs` (`CORE_ACTIONS` and
+`V5_ONLY_SUBACTIONS`) and its docstring in `action_docs.rs` (a unit test checks they agree).
+`tests/tui_pty.rs` drives the views and the shell keys in a pseudo-terminal.
+
+### Waiting feedback (`src/format/progress.rs`)
+
+One process-wide spinner / progress line on **stderr** for actions that wait on I/O (`Progress::start(rt,
+args, "Counting rows")`, then `set_total` / `counter().inc()` for `12/40` and a bar). A thread of its own
+redraws it every 100 ms, so a blocked `block_on` still animates; nothing is drawn for the first 250 ms.
+It is off unless `Runtime::progress` says otherwise: `Runtime::system` turns it on only when stderr is a
+terminal, `Runtime::new` (tests) never does, `--nopretty` disables it, `--debug` prints one
+`message...` line per slow stage instead of redrawing, `formatting:unicode` off gives `|/-\` frames and
+`NO_COLOR` / `formatting:ansi` off drops the colors. `Runtime::print` / `eprint` and the prompts erase
+the line while they write. Once a Python worker is spawned (`meerschaum_worker::worker::set_spawn_hook`:
+its output reaches the terminal directly) spinners stop redrawing and print plain `message...` lines.
+The Python entry draws through `sys.stderr` and takes `live` (colors) from `sys.stdout`, each only when
+it is a TTY; a call given up on after a second Ctrl-C erases and disables its spinner. The `start api` /
+MCP backends build their runtimes with progress off and `live = false`.
+Covered: `show rowcounts|sizes|partitions|columns|data|graph|runs|plugins <repo>|jobs`, `plan pipes`,
+the pipe lookup every pipes action starts with, `register|drop|delete|clear pipes`, the plugin manifest
+load at startup and the `sync`/`verify` graph build. Not covered on purpose: the run phase of
+`sync|verify|deduplicate pipes` (plugin code prints straight to the terminal there).
+
+### v5-only actions, subactions and flags
+
+v4's listings are fixtures, so v5 additions stay out of them: `actions::V5_ONLY_ACTIONS`
+(`prune`, `plan`) and `actions::V5_ONLY_SUBACTIONS` (`show graph`, `show runs`) resolve and run
+but are left out of `show actions`, the bare top-level and `show <TAB>` completions and the registry
+parity test (they complete once a prefix is typed). v5-only flags are listed in
+`help::v5_additions`: `mrsm sync pipes --help` prints v4's text, then a `v5 additions (not in v4):`
+block; `help::strip_v5_additions` removes it so the help fixtures still compare byte for byte.
+
+### The CLI daemon
+
+v5 has no CLI daemon: `mrsm` dispatches actions directly and pools any Python workers within
+the process. `daemon` keeps v4's toggle and message (`CLI daemon mode is on.`), reads its initial
+state from `system:experimental:cli_daemon`, and adds one info line saying the daemon is not used
+in v5. The toolbar keeps showing the instance (v4 shows `daemon` there while the mode is on).
+`--no-daemon` is accepted and has nothing to disable.
+
+### Plugin completers
+
+The process session owns one `WorkerPool` and refreshes `ensure_manifest` at startup. An empty
+plugin directory and a fresh cache need no Python process. Manifest actions, data connectors,
+arguments, docstrings and `complete_<action>` functions feed help and shell completion. Plugin
+argument parsing uses the plugin's Python argparse declarations. Actions run through the pool,
+with stdout/stderr streamed to the CLI and `Pipe.sync` calls forwarded into the native engine.
+
+`native/sync.rs` runs selected pipes through the engine, including graph traversal, bounds,
+worker limits and continuous/listening mode. `native/engine.rs` resolves native connectors and
+wraps them in `PythonRegistry`. Same-instance SQL uses a compatibility adapter which preserves
+v4's in-place output and writes the engine's delta ledger around the commit.
+
+`server.rs` hosts `start api` and `start mcp`: native HTTP/MCP backends, a shared worker session,
+and a supervised Python API host selected by the manifest. MCP stdout contains protocol messages
+only. Every standard action is native (`src/native/`); Python runs only a plugin's own code,
+through the worker. `python` keeps its native interpreter launch.
+
+### Tests and fixtures
+
+- `tests/shell_completions.rs`: every input in `fixtures/shell_completions.json` (239 inputs:
+  actions, subactions, flags, flag `choices`, connector keys, config keys, jobs, compose, the
+  empty fallback, chained `+` and `:` pipelines) must give v4's completions exactly: text, start
+  position, display and highlighted prefix.
+- `tests/shell_screens.rs`: drives `mrsm` in a pseudo-terminal (`portable-pty`), renders it with
+  `vt100`, and compares every snapshot of the 23 scenarios in `fixtures/shell_screens.json`
+  (recorded from v4 with `pexpect` + `pyte`) cell by cell: text, cursor, and styles (colors in
+  pyte's vocabulary, bold, reverse, underline). Scenarios: startup with the toolbar, the menu for
+  `sh` / `show p` / `show ` / `sync pipes --` / flag choices, Tab / Shift-Tab / Up / Down cycling
+  and scrolling, typing after a selection, Backspace, auto-suggest with Right and End, `instance`
+  updating the prompt and toolbar, Ctrl-C, Ctrl-D, `exit`, resize, a 40x8 terminal, long output
+  with the menu opening above the prompt, Ctrl-L, reverse-i-search, a trailing backslash, `daemon`,
+  no ANSI, the update message, and the toolbar disabled.
+
+Regenerate both fixtures with the reference harness (`pexpect`, `pyte` and `prompt-toolkit` are
+pinned in `scripts/parity/requirements.txt`):
+
+```bash
+scripts/parity/run.sh crates/meerschaum-cli/tests/fixtures/gen_shell_screens.py [scenario ...]
+scripts/parity/check_fixture_hygiene.sh crates/meerschaum-cli/tests/fixtures
+```
+
+Both the generator and the tests run every process with `MRSM_ROOT_DIR` and `HOME` in a fresh
+temporary directory, an empty temporary `MRSM_PLUGINS_DIR`, SQLite connectors only (`sql:main` is
+pointed at a temporary SQLite file too) and no update checks, and assert that the root is under the
+temporary directory before spawning anything.
+
+### Tolerances
+
+The screen comparison is exact except for these, each applied only where named in
+`tests/shell_screens.rs`:
+
+1. **Version string.** `v4.1.4` and `v5.x` differ in length, so the banner's version line is
+   compared with leading spaces trimmed. In the 40-column scenario (`tiny`) the banner wraps
+   differently, so only the rows from the prompt down are compared there.
+2. **Reverse-i-search cursor.** prompt_toolkit puts the cursor in the search field; reedline keeps
+   it in the buffer at the match. The cursor is not compared while searching (the text, the match
+   highlight and the toolbar are).
+3. **`daemon`.** The extra info line (see above) moves the prompt down one row and the toolbar
+   shows the instance; while the mode is on only the prompt row is compared.
+4. **No-ANSI toolbar overflow.** v4's no-ANSI toolbar is one cell wider than the terminal (the
+   status icon is counted as one column but is two wide); prompt_toolkit draws the icon half off
+   the edge and v5 clips it, so the icon and the cells after column 97 are not compared in
+   `no_ansi`.
+5. **Additive v5 actions.** The five affected menu/help scenarios (`ctrl_c`, `menu_scroll`,
+   `long_output`, `menu_subactions`, `menu_space`) apply reviewed text, style and cursor overrides
+   from `shell_screens_v5_actions.json`. These assert the visible v5 actions and menu geometry;
+   every other cell still compares to the unchanged v4 recording.
+
+The harness emulates pyte's resize (shrinking deletes lines at the top and keeps the cursor row) so
+both shells are measured against the same terminal model.
+
+### Known gaps
+
+- A menu that must open above the cursor is only drawn over prompt lines; when the rows above the
+  cursor are input (a wrapped or multi-line buffer) it is not shown (prompt_toolkit overlays them).
+  With a wrapped buffer the menu opens below the end of the buffer rather than below the anchor.
+- Ctrl-C leaves a menu drawn above the prompt on screen until the screen is cleared (it is, unless
+  `shell:clear_screen` is off), because reedline does not repaint before returning.
+- In reverse-i-search, keys other than the search keys accept the search and then run (prompt_toolkit
+  edits the search text with them, e.g. Left/Right).
+- Escape-F accepts the next word of a suggestion but does not reopen the completion menu.
+- `api:` executors list no jobs during completion (v4 queries the remote executor).
+
+### Wiring regression tests
+
+`tests/wiring_parity.rs` compares plugin actions, custom flags, fetch results, callback writes,
+and a parent graph run against `tests/fixtures/wiring_transcript.json`. Regenerate it with
+`scripts/parity/run.sh crates/meerschaum-cli/tests/fixtures/gen_actions.py --wiring-only`.
+The original actions transcript remains a separate unchanged fixture. `tests/server_modes.rs`
+checks API startup on a disposable port and MCP stdout isolation with temporary SQLite roots.

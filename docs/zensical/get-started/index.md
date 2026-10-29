@@ -1,84 +1,70 @@
-<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
-<script src="/assets/js/asciinema-player.js"></script>
+# Get started
 
-# 🛠️ Setup
+Your first Pipe needs Python and a few local rows. No database server or Docker setup is required.
 
-## 🐍 Install from [PyPI](https://pypi.org/project/meerschaum/)
+## Install
 
-!!! note inline end ""
-
-    Run Meerschaum commands with `mrsm` (or `python -m meerschaum` if `~/.local/bin/` isn't in your `PATH`).
+Use Python **3.11 or newer** in your usual virtual environment:
 
 ```bash
 python -m pip install --upgrade meerschaum
+mrsm --version
 ```
 
+The package includes the native core and the `mrsm` command. `python -m meerschaum` works too.
 
-??? info "Installing dependencies"
-    Meerschaum will auto-install packages as you use them (into a virtual environment, to preserve your base environment).
-
-    You can manually install these packages in one command:
-
-    ```bash
-    python -m meerschaum upgrade packages api -y
-    ```
-
-    To install the packages into your environment (e.g. you're already using a virtual environment) by adding the name of the [dependency group](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/packages/_packages.py), e.g. `api`:
+??? info "Using DataFrames in Python?"
+    New installations return **Polars** DataFrames. Install the matching extra:
 
     ```bash
-    python -m pip install --upgrade meerschaum[api]
+    python -m pip install 'meerschaum[polars]'
     ```
 
-## 🥞 Start the [Stack](/reference/stack/)
+    For pandas, install `meerschaum[pandas]` and choose `dataframe: pandas` in `meerschaum.yaml`. Existing roots from v4 keep pandas. You can also read rows as plain dictionaries with `pipe.get_data(as_docs=True)`.
 
-!!! note inline end ""
-    You'll need [Docker](https://docs.docker.com/engine/install/) to start the stack.
+    See [Reading data](../reference/pipes/reading.md#dataframe-library).
+
+## Make a workspace
+
+Keep the tutorial's configuration and SQLite database together:
+
+=== "Linux / macOS"
+
+    ```bash
+    mkdir mrsm-demo
+    cd mrsm-demo
+    mkdir .meerschaum
+    export MRSM_ROOT_DIR="$PWD/.meerschaum"
+    ```
+
+=== "PowerShell"
+
+    ```powershell
+    mkdir mrsm-demo
+    cd mrsm-demo
+    mkdir .meerschaum
+    $env:MRSM_ROOT_DIR = "$PWD/.meerschaum"
+    ```
+
+`sql:local` is a built-in SQLite connector. It stores your data inside this workspace:
 
 ```bash
-mrsm stack up -d
+mrsm show pipes -i sql:local
 ```
 
-??? example "📽️ Watch an example"
-    <asciinema-player src="/assets/casts/stack.cast" size="small" preload="true" rows="10"></asciinema-player>
+You should see **No pipes to show**. Keep this terminal open for the next steps.
 
-This will start the pre-configured TimescaleDB instance (`sql:main`).
+[Build your first Pipe →](bootstrap.md){ .md-button .md-button--primary }
 
-??? note "Don't have Docker or want to use your own database?"
-    You can use a built-in SQLite database with the keys `sql:local`, or you may use your own database by [creating a new connector](/reference/connectors/#creating-a-connector). Read more about the [`SQLConnector` here](/reference/connectors/sql-connectors/).
+??? info "Other ways to run Meerschaum"
+    **Your database:** add a [SQL connector](../reference/connectors/sql-connectors.md). The [stack](../reference/stack/index.md) supplies a ready-to-use TimescaleDB database through Docker.
 
-    ??? example "📽️ Watch an example"
-        <asciinema-player src="/assets/casts/bootstrap-connector.cast" size="small" preload="true"></asciinema-player>
+    **Standalone command:** `cargo install meerschaum --locked` builds the stable release's native CLI. Prebuilt binaries are listed on [GitHub Releases](https://github.com/bmeares/Meerschaum/releases).
 
-    ??? info "`MRSM_SQL_<LABEL>` environment variables"
+    **Docker:** see the [image variants](../reference/stack/index.md#docker-images).
 
-        You can also define connectors in your environment. Set an environment variable `MRSM_SQL_<LABEL>` to your database URI:
+    **macOS binaries:** downloaded binaries are unsigned. If Gatekeeper blocks one, remove its quarantine flag with `xattr -d com.apple.quarantine ./mrsm-<version>-<target>`, then run `chmod +x` on the file. The pip installation does not need this step.
 
-        ```bash
-        MRSM_SQL_FOO=sqlite:////tmp/foo.db \
-          python -m meerschaum start connector sql:foo
-        ```
+    **Windows:** run commands in the foreground. Background jobs need Linux, macOS, Docker, or WSL.
 
-## ⚡ Connect to Your Instance
-
-![Meerschaum instance prompt](/assets/screenshots/prompt.png){ align=left }
-
-Open the Meerschaum shell with `mrsm` or `python -m meerschaum`.
-
-Your default instance is `sql:main` from the [pre-configured stack](/reference/stack/). Connect to a different instance with `instance sql:<label>`.
-
-To test the connection, run the command `mrsm show pipes`. A successful connection should return the message:
-<div style="background-color: black; padding: 15px;">
-<pre style="color: #66ff00"><b>🎉 No pipes to show.</b></pre>
-</div>
-??? tip "Change your default instance"
-
-    The `instance` command temporarily changes your connected instance. To permanently change your default instance:
-
-    1. Open your configuration with `mrsm edit config`.
-    2. Navigate to the key `instance:` at the bottom of the file.
-    3. Edit the value to the keys of your new instance (`mrsm show connectors` to see registered connectors).
-
-    ??? example "Watch an example"
-        <asciinema-player src="/assets/casts/change-instance.cast" size="small" preload="true"></asciinema-player>
-
-If you've successfully connected, try [building a pipe](bootstrap/) to get that data flowing!
+Upgrading an existing installation? Read [Migrating to v5](../reference/migrating-to-v5.md) first.

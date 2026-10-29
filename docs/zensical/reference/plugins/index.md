@@ -15,6 +15,10 @@ Run `bootstrap plugin` to get started:
 mrsm bootstrap plugin
 ```
 
+!!! tip "Rust plugins"
+
+    Prefer Rust? [Create a single-file plugin](/reference/plugins/rust-plugins/) to add actions, data sources, and connectors. Python and Rust plugins can share the same plugins directory. The [advanced Rust guide](/reference/plugins/rust-plugins/advanced/) covers packaging and other native extensions.
+
 !!! question "What can I do with plugins?"
 
     Plugins are just Python modules, so the sky is the limit as to what's possible. The main idea behind plugins is to connect to any arbitrary data source: read more about the [types of plugins](/reference/plugins/types-of-plugins/) to get into the specifics.
@@ -23,14 +27,14 @@ mrsm bootstrap plugin
 
     Of course you can still use Meerschaum in typical Python packages. The plugins system provides these benefits for your convenience, however:
 
-    - **No boilerplate.**  
+    - **No boilerplate.**
       You might only need to define a short `fetch()` function. Skip `setup.py` / `pyproject.toml` and write only what you need.
 
-    - **Fearless refactoring.**  
+    - **Fearless refactoring.**
       Plugins are self-contained and portable, which means you can safely refactor your plugins without worrying about breaking imports somewhere else in your codebase.
 
-    - **Get core functionality for free.**  
-      Writing your module as a plugin unlocks access to the rest of the Meerschaum system, e.g. [connector management](/reference/connectors), [date-bounded syncing](/reference/pipes/syncing/), integration with the [Web Console](/referenc/api-instance/web-console) and the [Meerschaum Compose workflow](/reference/compose/).
+    - **Get core functionality for free.**
+      Writing your module as a plugin unlocks access to the rest of the Meerschaum system, e.g. [connector management](/reference/connectors), [date-bounded syncing](/reference/pipes/syncing/), integration with the [Web Console](/reference/api-instance/web-console/) and the [Meerschaum Compose workflow](/reference/compose/).
 
 !!! question "Ok, I think I understand. How do I make my own plugins?"
 

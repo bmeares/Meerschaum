@@ -1,451 +1,310 @@
 # CLAUDE.md
 
-Guidance for Claude Code (claude.ai/code) working in this repo.
+Guidance for Claude Code working on **Meerschaum 5** (the `v5` branch). The design is
+`docs/design/v5.0.0.md` (read §4, §5, §6.1, §7, §8, §9, §11, §12, §14 and decisions D12/D14/D16/D20
+before changing architecture); build, CI and Docker are in `docs/design/v5-build.md`; crate conventions
+and layering are in `crates/README.md`; the user-facing story is `docs/zensical/reference/migrating-to-v5.md`.
+
+## What v5 is
+
+- **A Rust core.** `Pipe`, parameters, config, `{{ Pipe() }}` templating, the Arrow/Polars data kernel,
+  the `sql:` / `valkey:` / `api:` connectors, the dependency-aware Syncing Engine, jobs, compose, the
+  `axum` HTTP API + MCP server and the `mrsm` CLI/shell are Rust crates under `crates/`. There is one
+  implementation and no Python fallback.
+- **Python is the SDK, the façade and one extension host.** The `meerschaum` wheel = the `_core` PyO3
+  extension + a façade (`mrsm.Pipe`, connectors, `get_config`, actions dispatch) + the plugin SDK
+  (`attempt_import`, `Venv`, `@make_action`, hooks, `warn`/`error`/`info`/`dprint`) + the **API host**
+  (`python -m meerschaum.api.host`: `@api_plugin` routes, plugin MCP tools and the one Plotly Dash console
+  at `/dash`, proxied by the Rust server over a Unix socket, or loopback TCP + per-start token on Windows)
+  + the Python worker (`python -m meerschaum.worker`, which runs Python plugins for the Rust host).
+- **Public surfaces do not change** (§11): pipe keys and every `parameters` key, config YAML layout,
+  `MRSM_SQL_<LABEL>` env connectors, instance tables, the job directory layout, compose files, every HTTP
+  route, and the Python public API. `SQLConnector.read/exec/exec_queries/value/to_sql()` and catalog
+  helpers use Rust on every flavor (D16). Explicit `.engine`, caller-provided SQLAlchemy connections
+  and helpers returning SQLAlchemy `Table` objects (`get_tables`) need `meerschaum[sql]`.
+  The base wheel has **no runtime dependencies** (D20).
+- **`meerschaum._core` is required.** An unbuilt tree raises `CoreNotBuiltError` naming
+  `scripts/rust/build_py.sh`. A deleted v4 module raises a `ModuleNotFoundError` naming its replacement
+  (`meerschaum/_internal/_removed.py`: add an entry when you delete a module).
+- **One wheel, one CLI.** The `mrsm` / `meerschaum` console scripts and `python -m meerschaum` call
+  `_native.main(argv)` (`_meerschaum_mrsm.py` -> `meerschaum/__main__.py` -> `_internal/binary.py`), which
+  runs the whole CLI inside the extension; `cargo install meerschaum` builds the same CLI as a standalone
+  binary (`meerschaum_cli::run_main`); `MRSM_BIN` makes Python exec a standalone binary instead. Anything
+  that re-launches `mrsm` (jobs, compose, systemd units, the web terminal) asks
+  `meerschaum_core::self_exe::self_command()`. `import meerschaum` is eager except in the CLI process,
+  where it is lazy (PEP 562, `_internal/_facade.py`). `meerschaum.entry([...])` runs the native dispatcher
+  in-process.
+- **v4 is the reference** only through the `.venv-ref` parity fixtures and the recordings in
+  `tests/oracle/` (`tests/_oracle.py`).
+
+## Isolation rules (read before running anything)
+
+- **Always set a scratch root and plugins dir.** Every build (debug and release) uses the real default
+  root (`~/.config/meerschaum`) when `MRSM_ROOT_DIR` is unset; nothing refuses it for you. Use
+  `MRSM_ROOT_DIR=./test_root` or a fresh directory under `~/.cache/mrsm-<you>/` (not `/tmp`: it is a
+  small tmpfs), which must exist, and `MRSM_PLUGINS_DIR=./tests/plugins` (or an empty directory). Delete
+  scratch roots by literal path when done.
+- **`PYTHONPATH=$(pwd)` for every Python invocation.** A stale `meerschaum` under `~/.local` shadows the
+  working tree; check `meerschaum.__file__` when a result looks impossible.
+- **Parity generators never use the ambient interpreter.** `scripts/parity/run.sh` runs
+  `.venv-ref/bin/python -s -E` (released `meerschaum==4.1.4`, built by `scripts/parity/setup_reference.sh`);
+  cross-implementation Rust tests use `MRSM_TEST_PYTHON` (default `.venv-ref/bin/python`).
+- **Never set `CARGO_TARGET_DIR`.** Every crate shares `target/` (Polars/Arrow compile once). Several
+  sessions may share the tree: concurrent builds block on the directory lock, `scripts/rust/build_py.sh`
+  takes its own lock (`target/.build-py.lock`; never wrap it in `flock`), and never `git stash` /
+  `checkout` / `restore` / `clean` / `reset`.
+- **Verify on a fresh root, like CI** (`git clean -ffdx`): tests that need plugin venvs create them in
+  fixtures. Leave no processes behind (`pgrep -af 'target/debug/mrsm|meerschaum'`).
+- **Never run two `scripts/test.sh` invocations (or `test.sh` + an `api`-flavor pytest) at once**: they
+  share `test_root` and the test API on port 8989.
 
 ## Commands
 
-### Development CLI
-
-`./scripts/mrsm.sh <args>` runs `python -m meerschaum` with `MRSM_ROOT_DIR=./test_root` and `MRSM_PLUGINS_DIR=./tests/plugins` — never touches real config.
-
-### Running Tests
-
 ```bash
-# Run all tests (requires Docker for databases)
-./scripts/test.sh db "" <pytest-args>
-
-# Run a single test file (no Docker needed for sqlite-only tests)
-MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins python -m pytest tests/test_pipes.py -v
-
-# Run a specific test
-MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins python -m pytest tests/test_pipes.py::test_sync -v
-
-# Limit to specific DB flavors (skips others)
-MRSM_TEST_FLAVORS=sqlite python -m pytest tests/ -v
-```
-
-Test connectors in `tests/connectors.py`. Default flavor set: `api,timescaledb`; set `MRSM_TEST_FLAVORS=sqlite` for fast local runs without Docker.
-
-**Test-harness gotchas (learned the hard way):**
-- **⚠️ Plain `python -m pytest` imports the STALE `~/.local` install, not the repo.** There is a separate `meerschaum` installed at `~/.local/lib/pythonX.Y/site-packages/meerschaum` (e.g. v3.3.1) that shadows the working tree under a bare `python -m pytest`. It silently lacks new modules (`connectors/sql/_partition.py`) and has older behavior, so tests fail/pass for reasons that have nothing to do with your changes. **Always force the repo onto the path: prefix `PYTHONPATH=$(pwd)`** (or just use `scripts/test.sh`, which sets things up correctly). Verify with a throwaway test asserting `meerschaum.__file__` / `meerschaum.__version__`. This single confound can burn hours — check it FIRST when a test result seems impossible.
-- **Flavor keys ≠ SQL flavor names.** `tests/connectors.py` defines `timescaledb`, `timescaledb_ha`, `postgis`, `mariadb`, `mysql`, `mssql`, `oracle`, `sqlite`, `api`, `valkey`. There is **no `postgresql` key** — the PostgreSQL-family test connector is `postgis` (and `timescaledb`). `MRSM_TEST_FLAVORS=postgresql` resolves to an empty connector set and `test.sh` exits before pytest runs.
-- **`scripts/test.sh` hardcodes `--ff` and `-n=auto`** (line ~134-135), so it requires `pytest-cache` and `pytest-xdist`. Passing `-p no:cacheprovider` to it breaks `--ff` (`unrecognized arguments: --ff`). To run a single test with non-default pytest flags, invoke `PYTHONPATH=$(pwd) python -m pytest` directly with the `MRSM_*` env vars exported (don't go through `test.sh`).
-- **`test.sh` runs one flavor at a time** and shares `test_root` + the test-API port 8989 — never run two `test.sh` invocations (or a `test.sh` + a direct API-flavor pytest) concurrently; they collide on the API server and DB tables (the symptom is a flood of `Connection refused` / pool-exhaustion failures that look like real bugs but are pure contention).
-### Fixed in this cycle: `get_sync_time(params=...)` on partitioned MariaDB
-
-The v3.4.0 `hypertable=True` default auto-partitions datetime pipes. On **MariaDB** specifically, `SQLConnector.get_sync_time` returned `None` for a populated, partitioned pipe when `params` were passed (broke `test_parametrized_sync_time[mariadb]` and, via a `None` min bound, `test_get_data_iterator[mariadb]`). Root cause: a MariaDB 12.x optimizer bug where the CTE-wrapped `... ORDER BY <dt> DESC LIMIT 1` over a `RANGE COLUMNS`-partitioned table with a `WHERE` clause does a partition index scan that stops early and returns zero rows. (The data and DB are fine — raw `WHERE id='a'` returns the row; only the ordered-LIMIT-1 form on the partitioned table fails. MySQL/PostgreSQL/MSSQL/TimescaleDB do **not** exhibit it — MariaDB-only.) **Fix** (`meerschaum/connectors/sql/_pipes.py`, in `get_sync_time` just before `wrap_query_with_cte`): for `self.flavor == 'mariadb' and not remote and self._should_partition(pipe)`, compute the bound with `MAX(dt)` / `MIN(dt)` (which scans pruned partitions correctly) instead of `ORDER BY ... LIMIT 1`. Flavor-gated, so every other flavor and non-partitioned MariaDB keep the original path.
-
-**Test-running lesson:** `get_sync_time` drives every incremental sync — verify changes to it with the full sqlite `test_sync.py`+`test_verify.py`+`test_pipe_data.py` AND per-flavor partition runs, not just the failing tests. (And read pytest summaries carefully: "N passed, 2 warnings" is not "2 failed".)
-
-### Docs
-
-```bash
-./scripts/zensical.sh   # serve the user-facing docs at docs/zensical/
-./scripts/pdoc.sh       # build the Python API reference docs
+export PATH="$HOME/.cargo/bin:$PATH"       # rustup toolchain from rust-toolchain.toml
+export CARGO_INCREMENTAL=0                 # what CI uses; optional locally
 ```
 
 ### Build
 
+| Command | What it does |
+|---|---|
+| `cargo build -p meerschaum --bin mrsm` | the debug standalone `mrsm` at `target/debug/mrsm` (what `cargo install meerschaum` builds; `tests/console` runs it). `cargo build -p meerschaum-cli` builds only `target/debug/mrsm-cli` for that crate's integration tests |
+| `scripts/rust/build_py.sh [--debug \| --profile ci]` | builds the extension with maturin into `meerschaum/_core/_native.abi3.so` (release by default, ~10 min; `--profile ci` takes 2 to 4 min and is what to use for everyday Python test runs). Needs `maturin` and Python >= 3.11 (`PYTHON=...`; keep it stable between runs or Polars rebuilds) |
+| `scripts/rust/clean_py.sh [--cargo]` | removes the built extension |
+| `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` |
+
+### Checks (CI; `scripts/rust/ci.sh <step>` reproduces each job)
+
 ```bash
-./scripts/build.sh      # cleans, builds docs, generates requirements, runs python -m build
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+scripts/rust/ci.sh doc           # rustdoc with -D warnings (broken intra-doc links; docs.rs builds after publish)
+cargo test -p <crate>            # `cargo test --workspace` is the CI job (CI uses nextest + `cargo test --doc`)
+scripts/rust/ci.sh               # fmt clippy test build
+scripts/rust/ci.sh parity        # regenerate every crates/*/tests/fixtures/gen_*.py with v4.1.4 and diff
+scripts/parity/check_fixture_hygiene.sh [PATH ...]   # before committing fixtures or any public file
+python scripts/check_packaging.py            # versions, console scripts, extras, lockstep pins, crates.io metadata
+python scripts/check_packaging.py --write    # regenerate requirements/<extra>.txt and crates/meerschaum-cli/src/extras.rs
+scripts/rust/ci.sh frontcrate | package | publish-dry-run   # see crates/README.md "Publishing"
 ```
 
-## Architecture Overview
+Crate integration tests skip unless their service URI is set (an empty value counts as set):
+`MRSM_TEST_PG_URI`, `MRSM_TEST_TIMESCALE_URI`, `MRSM_TEST_POSTGIS_URI`, `MRSM_TEST_TIMESCALE_HA_URI`
+(`timescaledb-ha://`), `MRSM_TEST_MYSQL_URI`, `MRSM_TEST_MARIADB_URI`, `MRSM_TEST_MSSQL_URI`,
+`MRSM_TEST_ORACLE_URI` (`--features oracle`, needs Instant Client), `MRSM_TEST_GPKG_DIR`,
+`MRSM_TEST_DUCKDB_PATH` / `MRSM_TEST_DUCKDB_LIB`, `MRSM_TEST_VALKEY_URI`, `MRSM_TEST_MQTT_URI`,
+`MRSM_TEST_PYTHON` / `MRSM_TEST_KEEP=1`. The databases come from `tests/docker-compose.yaml`; host ports
+are in `tests/connectors.py` and `crates/meerschaum-connector-sql/README.md`. `MRSM_DUCKDB_LIB` pins the
+native DuckDB library for a process (otherwise it is found in `<root>/drivers`, the system loader, or
+downloaded on first use); see the connector README before changing DuckDB loading.
 
-ETL framework centered on **pipes** — named data streams synced into tables. Each pipe: three keys, metadata managed by **instance connector**, data from **source connector**.
+### Python tests (pytest; need the built extension)
 
-### Core Abstractions
+```bash
+mkdir -p test_root   # the root must exist; use absolute paths (compose and spawned processes change directory)
+MRSM_TEST_FLAVORS=sqlite PYTHONPATH=$(pwd) MRSM_ROOT_DIR=$(pwd)/test_root MRSM_PLUGINS_DIR=$(pwd)/tests/plugins \
+  python -m pytest tests/ -q -p no:cacheprovider \
+    --ignore=tests/test_jobs.py --ignore=tests/test_mcp.py --ignore=tests/test_listen_shutdown.py \
+    --ignore=tests/api_host --ignore=tests/console
 
-**`SuccessTuple`** (`Tuple[bool, str]`) — universal return type for all actions, pipe methods, connector methods. Return `(True, "Success")` or `(False, "reason")`. Never raise from action-level code — catch and return `SuccessTuple`.
-
-**`warn(msg)` / `error(msg, exception)` / `info(msg)` / `dprint(msg, debug=debug)`** — use from `meerschaum.utils.warnings` not `print()`. `warn`: Python warnings system (stackable). `error`: raises `Exception`. `dprint`: debug-only, requires `debug=debug`. `info`: user-facing status.
-
----
-
-## Pipes in Depth
-
-### Identity
-
-Pipe = three string keys:
-
-| Key | Arg in constructor | Meaning |
-|---|---|---|
-| `connector_keys` | 1st positional or `connector=` | Data source (e.g. `'sql:main'`, `'plugin:noaa'`) |
-| `metric_key` | 2nd positional or `metric=` | Label for the data stream (e.g. `'weather'`) |
-| `location_key` | 3rd positional or `location=` | Optional tag/shard (default `None`) |
-
-4th arg (or `instance=` / `mrsm_instance=`) = **instance connector** — where metadata and data are stored.
-
-### Target Table Name
-
-`pipe.target` = table name. Default: `{connector_keys.replace(':', '_')}_{metric_key}` (plus `_{location_key}` if set). Override via `parameters['target']`, `parameters['target_name']`, or `parameters['target_table']`. Long names truncated per-flavor. SQL instances: full name is `schema.target`.
-
-### The `parameters` Dictionary
-
-`pipe.parameters` — central metadata dict. Top-level keys:
-
-| Key | Type | Purpose |
-|---|---|---|
-| `columns` | `Dict[str, str]` | Maps semantic role → column name. Key roles: `datetime`, `id`, `primary`, `value`. |
-| `indices` / `indexes` | `Dict[str, str\|List[str]]` | Additional non-unique indices for performance. |
-| `dtypes` | `Dict[str, str]` | Explicit column dtypes. Values are Meerschaum dtype strings (see below). |
-| `tags` | `List[str]` | Labels for grouping pipes. |
-| `fetch` | `Dict` | Source-specific fetch config. `backtrack_minutes` (int) controls how far before sync time to re-fetch. |
-| `verify` | `Dict` | Config for verification syncs. `chunk_minutes` (default 43200 — 30 days) is also the authoritative native-partition width; aliases `chunk_hours`/`chunk_days`/`chunk_weeks`/`chunk_years`/`chunk_seconds` (first set wins, like `bound_*`). Integer axis: `chunk_range` is used verbatim (else convert via `precision`, else minutes verbatim — legacy). Also `bound_days`. Resolved by `Pipe.get_chunk_interval()`. |
-| `sql` | `str` | SQL definition for SQL-connector pipes. Supports `{{ Pipe(...) }}` syntax. |
-| `target` | `str` | Override the table name. |
-| `upsert` | `bool` | If `True`, create a unique index on `columns` and upsert rows. |
-| `static` | `bool` | If `True`, never alter the schema (no new columns added). |
-| `autoincrement` | `bool` | If `True`, add an auto-incrementing primary key column. |
-| `autotime` | `bool` | If `True`, automatically add a `datetime` timestamp column on insert. |
-| `hypertable` | `bool` | Defaults to `True`. On TimescaleDB, creates the target as a hypertable. On other flavors supporting native range partitioning (`postgresql`/`postgis`, `mysql`/`mariadb`, `mssql`), datetime-axis pipes are range-partitioned on the datetime column by default; set `False` to opt out. Only newly created tables are affected — pre-existing plain tables aren't retroactively partitioned (`_create_missing_partitions_pg` skips a non-partitioned parent). Width reuses `verify.chunk_minutes`, boundaries epoch-aligned (deterministic). Per-sync partition-creation cap `system.connectors.sql.instance.max_partitions_per_sync` (default 10,000). `Pipe.verify()` calls `get_chunk_bounds(align=True)` so its chunk edges coincide with these partition edges (`get_chunk_bounds` defaults `align=False` — `begin`-anchored — elsewhere). Partitions auto-created in `sync_pipe` before insert (PostgreSQL: `PARTITION OF ... FOR VALUES FROM/TO`; MySQL: inline at create + `ALTER TABLE ADD PARTITION`; MSSQL: partition function+scheme + `SPLIT RANGE`, dropped with the table). |
-| `hypercore` | `bool` | TimescaleDB only. If `True` (default), enable the Hypercore columnstore at `CREATE TABLE` (`tsdb.segmentby`/`tsdb.orderby`), auto-creating a columnstore policy. `False` = plain row-store hypertable. |
-| `compress` | `bool\|Dict` | If truthy, install a columnstore (compression) policy. Dict overrides `segmentby`, `orderby`, `after`. The columnstore policy *is* the compression policy (`add_columnstore_policy` ≡ legacy `add_compression_policy`). |
-| `enforce` | `bool` | If `False`, skip dtype enforcement on incoming data. |
-| `null_indices` | `bool` | If `True`, allow `NULL` values in index columns. |
-| `precision` | `str\|Dict` | Datetime precision unit: `'ns'`, `'us'`, `'ms'`, `'s'`, `'m'`, `'h'`, `'d'`. Aliases defined in `MRSM_PRECISION_UNITS_ALIASES`. |
-| `mixed_numerics` | `bool` | If `False`, prevent int→float columns from being coerced to `numeric`. |
-| `reference` | `str\|Dict\|Pipe` | A single reference pipe whose parameters are inherited. |
-| `references` | `List[str\|Dict\|Pipe]` | Same as `parents`/`children` — multiple reference pipes whose parameters are merged. |
-| `parents` / `children` | `List[str\|Dict\|Pipe]` | Pipe relationship graph (informational and for SQL pushdown). |
-| `parent` / `child` | `str\|Dict\|Pipe` | Singular alias for first parent/child. |
-
-Mutate in memory: `pipe.update_parameters({'key': value}, persist=False)` or assign like `pipe.upsert = True`. Persist: call `pipe.edit()` or pass `persist=True`.
-
-**Key convenience attributes and methods:**
-- `pipe.metric` / `pipe.location` — aliases for `metric_key` / `location_key`
-- `pipe.tzinfo` — returns the `tzinfo` of the datetime column (`UTC`, `None`, etc.)
-- `pipe.get_value(col, params=None, ...)` — single scalar from `get_data()`
-- `pipe.get_doc(params=None, ...)` — single row as `dict`
-- `pipe.filter_existing(df, enforce_dtypes=False, ...)` — accepts `enforce_dtypes=True` to suppress dtype mismatch warnings
-
-### Columns and Dtypes
-
-`pipe.columns` shortcut to `pipe.parameters['columns']`. `'datetime'` column drives incremental sync (begin/end window). `'id'` column forms composite uniqueness key. Pipes without `'datetime'` work but lose incremental behavior.
-
-Supported dtypes (stored in `parameters['dtypes']`):
-- `'datetime'` — timezone-aware timestamp (stored as `TIMESTAMPTZ` or equivalent)
-- `'int'` — integer (used when the datetime axis is an integer epoch)
-- `'numeric'` — arbitrary-precision decimal (`NUMERIC` in SQL)
-- `'uuid'` — UUID columns
-- `'json'` — JSON/JSONB
-- `'bytes'` — binary / bytea
-- `'geometry[srid]'` — PostGIS geometry (e.g. `'geometry[EPSG:4326]'`, `'geometry[ESRI:102003]'`)
-- Any Pandas dtype string is also valid (e.g. `'Int64'`, `'float64'`, `'bool'`, `'object'`)
-
-Dtype mapping in `meerschaum/utils/dtypes/sql.py` (`get_pd_type_from_db_type`, `get_db_type_from_pd_type`).
-
-### Sync Flow
-
-`pipe.sync(df=None, begin='', end=None, ...)` — main entry point. Flow:
-
-1. **Fetch** — if `df` not provided, calls `pipe.fetch()` → `pipe.connector.fetch(pipe, begin, end, ...)`. SQL: executes metadefinition. Plugin: calls `fetch()`. API: hits remote.
-2. **Dtype enforcement** — `pipe.enforce_dtypes(df)` casts to registered dtypes.
-3. **Filter existing** — `pipe.filter_existing(df)` fetches overlapping window (`get_backtrack_data`), diffs via `filter_unseen_df()` to find new/changed rows.
-4. **Sync to instance** — `instance_connector.sync_pipe(pipe, df)` writes filtered rows. SQL: INSERT/UPDATE (or UPSERT if `upsert=True`).
-
-`begin=''` = use sync time minus backtrack. `None` = no lower bound. Explicit datetime/int overrides.
-
-### SQL Connector Fetch (Metadefinition)
-
-For `connector_keys` starting with `'sql:'`, `get_pipe_metadef()` builds:
-
-```
-WITH "definition" AS (
-    <pipe.parameters['sql'] or pipe.parameters['fetch']['definition']>
-)
-SELECT * FROM "definition"
-WHERE "<dt_col>" >= <begin - backtrack>
-  AND "<dt_col>" < <end>
+./scripts/test.sh db "" <pytest-args>            # full harness: Docker DBs, test API on 8989, --ff, -n=auto
+MRSM_TEST_FLAVORS=sqlite ./scripts/test.sh db ""
 ```
 
-If `parent` pipe set, pushdown `WHERE` hits parent's table (allows SQL dtype conversion). `{{ Pipe('connector', 'metric') }}` resolved to target table at query time.
+- A few tests use a standalone `mrsm` (`MRSM_TEST_BIN`, else the newest `target/{release,debug}/mrsm`
+  outside CI; `tests/_binary.py` checks its version and age).
+- Tests needing the extension fail (never skip) when it is not built.
+- `MRSM_PLUGINS_DIR` must be `./tests/plugins` (synthetic `stress` and `w7_*` plugins live there).
+- **Flavor keys != SQL flavor names**: `timescaledb`, `timescaledb_ha`, `postgis`, `mariadb`, `mysql`,
+  `mssql`, `oracle`, `sqlite`, `api`, `valkey` (no `postgresql`). `test.sh` defaults to `api,timescaledb`,
+  needs `pytest-xdist` and `pytest-cache`, and exits before pytest on an unknown key.
+- Oracle recordings (`tests/oracle/*.json`) replay the deleted parity-phase Python mode and cannot be
+  re-recorded; pandas-major-dependent tests list themselves in `pandas_dependent`.
+- `tests/console` (Playwright, opt-in with `MRSM_TEST_CONSOLE=1`) starts real `mrsm start api` servers on
+  random ports with the `w7_*` plugins; it needs `target/debug/mrsm`, `meerschaum[dash,sql,pandas]` and
+  Chromium (`tests/console/build_native.sh` builds the native page plugin). `tests/api_host` runs in process.
+- Tests that wait for jobs started by `compose up` or a bulk start pass `--no-stagger` (see Gotchas).
 
-### `{{ Pipe() }}` Syntax
+### Other
 
-Reference other pipes with `{{ Pipe('ck', 'mk', 'lk') }}`. Resolved by `replace_pipes_syntax()` in `meerschaum/utils/pipes.py`. Attribute chains: `{{ Pipe('a', 'b').columns['datetime'] }}`. Self-reference: `{{ self.parameters['key'] }}`.
-
-### `MRSM{}` Config Symlinks
-
-Reference config values from pipe parameters with `MRSM{key1:key2:key3}` syntax:
-
-```python
-pipe = mrsm.Pipe('demo', 'cfg', parameters={
-    'username': 'MRSM{meerschaum:connectors:sql:main:username}',
-})
-print(pipe.parameters['username'])  # resolved at access time
+```bash
+python scripts/bench/run.py --label <name>       # sync benchmarks, v4.1.4 vs v5 (release binary; results in scripts/bench/results/)
+scripts/transition/run.sh [--flavors ...]        # v4 -> v5 upgrade harness (README there)
+./scripts/zensical.sh                             # serve docs/zensical/; ./scripts/pdoc.sh builds the Python API reference
+./scripts/build.sh                                # docs, check_packaging --write, wheel + sdist (never upload its wheel)
 ```
 
-### `params` Filter
+`MRSM_CORE_TRACE=1` prints per-stage timings of each boundary call to stderr. Releases follow
+`.claude/skills/release/SKILL.md`.
 
-`params: Dict[str, Any]` passed to `get_data()`, `get_backtrack_data()`, `get_rowcount()`, `get_sync_time()`, `get_pipes()`, `build_where()`, etc. generates `WHERE` clause via `meerschaum.utils.sql.build_where()`. Values:
-- Single value: `{'color': 'red'}` → `WHERE color = 'red'`
-- List: `{'color': ['red', 'blue']}` → `WHERE color IN ('red', 'blue')`
-- Negation prefix `_`: `{'color': '_red'}` → `WHERE color != 'red'`
-- Negation list: `{'color': ['_red', '_blue']}` → `WHERE color NOT IN ('red', 'blue')`
-- Mixed list: `{'color': ['red', '_blue']}` → `WHERE color IN ('red') AND color NOT IN ('blue')`
-- Null: `{'color': 'None'}` or `{'color': None}` → `WHERE color IS NULL`
-- Negated null: `{'color': '_None'}` → `WHERE color IS NOT NULL`
-- Dict value: `{'meta': {'k': 'v'}}` → `WHERE CAST(meta AS TEXT) = '{"k": "v"}'`
+## Architecture map
 
-**Column validation for SQL pipes:** `pipe.enforce=True` (default) filters `params` to existing columns before building `WHERE` — unknown columns dropped. Pass `pipe.enforce=False` to skip.
+### Crates (`crates/`, edition 2024; the workspace version in the root `Cargo.toml` is the single source of truth)
 
-In-memory filtering: `meerschaum.utils.dataframe.query_df(df, params)` — same negation semantics.
+Dependencies point down only; `meerschaum-core` is a leaf; `cli` and `py` are the top layer.
 
-### Verification Syncs
-
-`pipe.verify(begin, end, chunk_interval, ...)` re-syncs historical range in chunks (default 43200 min — 30 days). Uses `pipe.get_rowcount()` to compare remote vs local; re-syncs only mismatched chunks. Configured via `parameters['verify']`.
-
-### Native Partitioning Internals (non-obvious)
-
-The `hypertable=True` default (v3.4.0) makes a *lot* of datetime-axis pipes partitioned on PG/MySQL/MSSQL. Two interactions are easy to break:
-
-- **Upsert conflict target must include the partition column.** A partitioned table (TimescaleDB hypertable *or* native range-partitioned PG/MySQL/MSSQL) folds the `datetime` column into a composite primary key (`_get_create_table_query_from_dtypes` in `meerschaum/utils/sql.py`). So the upsert `ON CONFLICT (...)` / join columns **must** include `dt_col` — `ON CONFLICT (primary_key)` alone has no matching unique constraint and PostgreSQL rejects it. The `join_cols` logic in `SQLConnector.sync_pipe` (`connectors/sql/_pipes.py`, the `partition_upsert` branch) extends the historical TimescaleDB-only `[dt_col, primary_key]` rule to any `self._should_partition(pipe)` table. A non-partitioned upsert pipe with a `primary` key keeps the historical primary-key-only conflict target.
-- **Dask DataFrames give lazy scalars.** In `connectors/sql/_partition.py`, `series.min()`/`series.max()` on a *Dask* DataFrame return a lazy `dask...Scalar` (no `to_pydatetime`, not a real number). Partition-range helpers must materialize them (`_materialize_scalar`, which calls `.compute()`) before `int()`/datetime coercion, or `_create_missing_partitions_*` raises `TypeError: int() argument must be ... not 'Scalar'`.
-- **`get_chunk_bounds(align=True)`** (used by `Pipe.verify()`) anchors interior chunk edges to the Unix-epoch grid so they coincide with partition boundaries; it defaults to `align=False` (begin-anchored) everywhere else.
-
-### Maintenance operations (v3.4.0)
-
-`vacuum` / `analyze` / `compress` / `decompress` / `get_size` / `repartition` are a uniform family: each is a `Pipe` method (`core/Pipe/_maintenance.py`, `_compress.py`, `_data.py`) delegating to an instance-connector `<op>_pipe()` method. Implemented for `SQLConnector` (per-flavor in `connectors/sql/_compress.py`, `_maintenance.py`, `_partition.py`), stubbed on the base `InstanceConnector` (return a failure `SuccessTuple`), and wired through `APIConnector` (`connectors/api/_pipes.py` + `api/routes/_pipes.py`, all six symmetric — `get_pipe_size`, `compress_pipe`, `decompress_pipe`, `vacuum_pipe`, `analyze_pipe`, `partition_pipe`). User-facing actions: `vacuum/analyze/compress/decompress/partition pipes`, `show sizes`, `show partitions`. Docs: `docs/zensical/reference/pipes/maintenance.md`.
-
----
-
-## SQL Security Patterns
-
-### `clean()` — keyword blocklist
-
-`clean(substring)` in `meerschaum/utils/sql.py` raises on banned SQL keywords (`;`, `--`, `drop`, `union`, `insert`, `update`, `delete`, `create`, `alter`, `truncate`, `exec`, `/*`). **Keyword blocklist only** — quote-only payloads like `' OR '1'='1` not caught. Use parameterized queries for user input; `clean()` for internal names (tables, columns).
-
-### `dateadd_str()` — `datepart` whitelist
-
-`datepart` validated against `_VALID_DATEPARTS = frozenset({'year', 'month', 'day', 'hour', 'minute', 'second'})`. **Exception:** `datepart=None` valid when `begin` is int — returns early before `datepart` used. Whitelist check must come after `isinstance(begin, int)` early-return.
-
-### Table name escaping in `.format()` queries
-
-Functions building queries via `.format()` (e.g. `get_table_cols_types()`, `get_table_cols_indices()` in `meerschaum/utils/sql.py`) escape table/schema names with `s.replace("'", "''")` before interpolation. Never skip for new format-based queries.
-
----
-
-## API Server Pipe Cache
-
-API server keeps shared `pipes_dict` (in `meerschaum/api/__init__.py`) caching live `Pipe` objects between requests. Two behaviors:
-
-- `get_pipe(refresh=False)` — returns **shared** `pipes_dict` object (mutations/cache clears persist across requests).
-- `get_pipe(refresh=True)` — creates **throwaway** `Pipe` not stored in `pipes_dict`; cache cleared on it has no effect on future requests.
-
-**Stale column-types cache:** After dtype-changing sync, `pipes_dict` object retains `_columns_types` up to 60 s (`columns_types_cache_seconds`). `DELETE /pipes/{ck}/{mk}/{lk}/cache` (added 2025-05) clears it via `pipe._invalidate_cache(hard=True)` on the shared object. `APIConnector.sync_pipe` calls `self.delete_pipe_cache(pipe)` after every sync.
-
----
-
-## Connector Hierarchy
-
-```
-Connector                         (meerschaum/connectors/_Connector.py)
-└── InstanceConnector             (meerschaum/connectors/instance/_InstanceConnector.py)
-    ├── SQLConnector              (meerschaum/connectors/sql/)
-    ├── APIConnector              (meerschaum/connectors/api/)
-    └── ValkeyConnector           (meerschaum/connectors/valkey/)
-```
-
-`Connector` reads config from `MRSM_ROOT_DIR/config/connectors.yaml` keyed by `type:label`. `REQUIRED_ATTRIBUTES` lists required keys. Cast to string returns `"type:label"`.
-
-`InstanceConnector` adds pipes/users/plugins/tokens interface. `IS_INSTANCE = True` makes connector usable as instance. `IS_THREAD_SAFE = True` enables concurrent reads (used by `get_pool`). Custom connector with `IS_INSTANCE = True` auto-adds its `type` to `meerschaum.connectors.instance_types`.
-
-All major connector classes compose methods via class-level imports:
-
-```python
-class SQLConnector(InstanceConnector):
-    from ._pipes import fetch_pipes_keys, sync_pipe, get_pipe_data, ...
-    from ._sql import read, to_sql, exec_queries, ...
-    from ._fetch import fetch, get_pipe_metadef
-```
-
-Each logical group of methods lives in separate `_*.py`. New methods go in appropriate file, not class definition.
-
-### Adding a Custom Connector
-
-```python
-import meerschaum as mrsm
-from meerschaum.connectors import InstanceConnector, make_connector
-
-@make_connector
-class FooConnector(InstanceConnector):
-    IS_INSTANCE = True
-    IS_THREAD_SAFE = False
-    REQUIRED_ATTRIBUTES = ['host', 'port']
-    # Implement all InstanceConnector abstract methods...
-```
-
-See `meerschaum/connectors/instance/_InstanceConnector.py` for full interface and `docs/zensical/reference/connectors/instance-connectors.md` for method-by-method guide.
-
-`fetch_pipes_keys()` returns list of key tuples or dict (pipe ID → key tuple, optional params/tags appended). Dict form returns full pipe attributes in one round-trip.
-
----
-
-## Actions
-
-Top-level actions (`sync`, `show`, `register`, `copy`, etc.) are modules in `meerschaum/actions/`. Receive `**kwargs` matching argparse namespace from `meerschaum/_internal/arguments/_parser.py`.
-
-Common kwargs:
-- `connector_keys: List[str]`, `metric_keys: List[str]`, `location_keys: List[str]`
-- `mrsm_instance: str` — instance connector keys
-- `begin: datetime`, `end: datetime`
-- `params: Dict[str, Any]`
-- `tags: List[str]`
-- `debug: bool`
-- `yes: bool`, `force: bool`, `noask: bool`
-
-Subactions auto-discovered by naming convention (e.g. `sync_pipes` in `actions/sync.py`). Add: define `def <action>_<subaction>(**kwargs) -> SuccessTuple` — no registration needed.
-
-Plugin actions use `@make_action` from `meerschaum.plugins` or `meerschaum.actions`.
-
----
-
-## Code Composition Patterns
-
-### Mixin-via-Import Pattern
-
-`Pipe` and connectors compose methods via class-level `from ._file import func` imports. When adding to `Pipe`:
-- Data retrieval → `meerschaum/core/Pipe/_data.py`
-- Sync logic → `meerschaum/core/Pipe/_sync.py`
-- Attributes/properties → `meerschaum/core/Pipe/_attributes.py`
-- Cache → `meerschaum/core/Pipe/_cache.py`
-- Then add the import to `meerschaum/core/Pipe/__init__.py`
-
-### Lazy Imports with `attempt_import`
-
-Never import heavy packages at module level. Use:
-
-```python
-from meerschaum.utils.packages import attempt_import
-
-pandas = attempt_import('pandas')                        # installs into 'mrsm' venv if missing
-dateutil = attempt_import('dateutil', venv='mrsm')
-shapely = attempt_import('shapely', venv='mrsm')
-```
-
-For packages in plugin venv:
-```python
-requests = attempt_import('requests', venv='my_plugin')
-```
-
-For type hints on heavy types:
-```python
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    pd = attempt_import('pandas')
-```
-
-### `Venv` Context Manager
-
-When calling plugin/connector code using plugin's venv:
-```python
-from meerschaum.utils.venv import Venv
-from meerschaum.connectors import get_connector_plugin
-
-with Venv(get_connector_plugin(pipe.connector)):
-    result = pipe.connector.fetch(pipe, begin=begin)
-```
-
-### `filter_arguments` / `filter_keywords`
-
-Connectors/plugins may not accept all kwargs:
-```python
-from meerschaum.utils.misc import filter_arguments, filter_keywords
-
-# filter_arguments: returns (args, kwargs) filtered to match func's signature
-args, kw = filter_arguments(func, *args, **kwargs)
-result = func(*args, **kw)
-
-# filter_keywords: returns only kwargs accepted by func
-kw = filter_keywords(func, **kwargs)
-result = func(**kw)
-```
-
----
-
-## Pipes Dictionary
-
-`get_pipes()` returns `{connector_keys: {metric_key: {location_key: Pipe}}}` (`location_key` is `None` when absent). Use:
-- `as_list=True` to get `[Pipe, ...]`
-- `flatten_pipes_dict(pipes_dict)` from `meerschaum.utils.pipes`
-- `pipes_dict_from_list(pipes_list)` to reconstruct the hierarchy
-
-### Key Negation
-
-Prefix filter value with `_` to negate. Applies to `connector_keys`, `metric_keys`, `location_keys`, `tags`, `datetime_dtypes`. Via `separate_negation_values()` in `meerschaum.utils.misc`.
-
----
-
-## Config System
-
-`get_config(*keys, patch=False)` reads YAML config registry at `MRSM_ROOT_DIR/config/`. Keys are path segments: `get_config('meerschaum', 'instance')` → `config.meerschaum.instance`.
-
-`STATIC_CONFIG` in `meerschaum/_internal/static.py` holds compile-time constants. Import:
-```python
-from meerschaum._internal.static import STATIC_CONFIG
-prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
-```
-
-Plugin config: `get_plugin_config(*keys)` / `write_plugin_config(value, *keys)` — reads/writes under `plugins.<plugin_name>`.
-
----
-
-## Cache System
-
-`Pipe._cache_value(key, value, memory_only=False)` and `Pipe._get_cached_value(key)` — two-layer cache:
-- **Memory** (always): stored in `pipe.__dict__` under `_<key>`.
-- **Disk** (when `memory_only=False`): pickled to `MRSM_ROOT_DIR/cache/<instance_hash>/<pipe_id>/`.
-
-Keys starting with `_` = memory-only. Cache keyed per instance-hash (derived from connector config); changing host/port invalidates.
-
-Cached values: `'_id'` (row ID), `'attributes'` (full metadata), `'_attributes_sync_time'` (last refresh), `'precision'`.
-
----
-
-## Jobs System
-
-`meerschaum.jobs.Job(name, sysargs, executor_keys='local')` wraps `meerschaum.utils.daemon.Daemon` to run `sysargs` as background process.
-
-- `executor_keys='local'` — managed daemon process under `MRSM_ROOT_DIR/jobs/`
-- `executor_keys='systemd'` — creates a `systemd` user service
-- `executor_keys='api:label'` — posts the job to a remote API instance
-
-Jobs persist across restarts. Logs stream via `job.monitor_logs(callback)`. `job.start()` / `job.stop()` / `job.pause()` return `SuccessTuple`.
-
----
-
-## Plugins System
-
-Plugins: Python files/packages in `MRSM_PLUGINS_DIR`. Recognized functions:
-
-| Function | When called |
+| Crate | Owns |
 |---|---|
-| `register(pipe, **kw) -> dict` | When `mrsm register pipe` runs; return initial `parameters` |
-| `fetch(pipe, begin, end, **kw) -> df\|generator` | During `sync pipes`; return new data |
-| `sync(pipe, **kw) -> SuccessTuple` | Override the full sync process |
-| `setup(**kw) -> SuccessTuple` | On first install / `mrsm setup plugins` |
+| `meerschaum` | the published **front crate**: `pub use` of the public surface behind features (`sql`, `cli` default; `valkey`, `api`, `engine`, `server`, `plugin`, `full`) + `src/main.rs`, the `mrsm` binary. Every other crate is internal (`meerschaum-py` is `publish = false`) |
+| `meerschaum-core` | `Pipe`, config registry + `MRSM{}` symlinks + `static.toml`, dtype vocabulary, template parser, users/tokens/plugins types, `SuccessTuple`/`SyncResult`, `version_ge`, shared Python-behavior helpers (`pyfmt`, `Value`, `shlex`), `self_exe` |
+| `meerschaum-kernel` | Arrow/Polars `Frame`: `enforce_dtypes`, `filter_unseen_df` (`merge_dtype.rs`), `query_df`, special columns (json, uuid, numeric, bytes, geometry as GeoArrow WKB) |
+| `meerschaum-connector` | `Connector` / `InstanceConnector` traits, `DataQuery` / `SyncOptions`, users/plugins/tokens over internal pipes, cross-pipe template resolution |
+| `meerschaum-connector-sql` | `SqlConnector`: per-flavor query builders (`queries/`, golden-tested), `sqlx`, `tiberius`, `oracle` and a runtime-loaded `duckdb` driver; instance methods, partitioning, compression, maintenance, leases, `sync_pipe_inplace`, `facade.rs` |
+| `meerschaum-connector-valkey` / `-api` | `ValkeyConnector` (`fred`); the `APIConnector` client (`reqwest`) + route/auth/JWT models |
+| `meerschaum-engine` | graph, planner (`skip`/`incremental`/`backfill`/`rebuild`/`observe`/`root`), executor (HEFT, leases, retries), dirty-range ledger, edge cursors, run history (`mrsm:engine_*` pipes), `--loop` / `--listen`, events, Gantt data |
+| `meerschaum-worker` | Python worker pool + msgpack/Arrow-IPC protocol, `PythonConnector`, callbacks, supervised streams, plugin manifest (`schema/manifest.schema.json`) |
+| `meerschaum-jobs` / `-compose` | daemon supervision (v4 `jobs/<name>/` layout), `-s` schedules, startup gate; the compose model, `.env`, subactions, `explain` |
+| `meerschaum-server` | `axum` API (every v4 route + `/engine/*` + `POST /execute`), OAuth2/JWT/tokens, rate limits, route allowlists, the API-host proxy (`web.rs`), MCP (`/mcp` + stdio) |
+| `meerschaum-web` | web terminal (`/webterm/...`, vendored xterm.js), job-log SSE, native plugin pages (`/_mrsm/native-pages`), console sessions |
+| `meerschaum-plugin` | native plugin SDK: `Plugin` trait, `export_plugin!`, C ABI (`mrsm_plugin_v1`, Arrow C stream), loader, discovery, single-file `.rs` plugins |
+| `meerschaum-cli` | the CLI library: clap spec/argparse parity, dispatch, native actions (`src/native/`), the reedline shell (`src/shell/`), `start api`/`start mcp`, venv accounting, engine views, self-upgrade |
+| `meerschaum-py` | PyO3 bindings -> `meerschaum._core`; `PARITY.md` logs every Python-vs-Rust discrepancy, `PERF.md` the boundary benchmarks |
 
-Decorator extensions:
-- `@make_action` — register a function as an action
-- `@api_plugin` — add FastAPI routes (receives `app: FastAPI`)
-- `@dash_plugin` — add Dash callbacks (receives `dash_app: Dash`)
-- `@web_page('/path')` — add a page to the web dashboard (nest inside `@dash_plugin`)
-- `@pre_sync_hook` / `@post_sync_hook` — called before/after every sync
+### Python package (`meerschaum/`)
 
-Custom CLI args: `add_plugin_argument('--foo', type=str, help='...')` from `meerschaum.plugins`.
-
-Package dependencies: `required = ['requests>=2.0', 'pandas']`. Install into plugin-named venv.
-
----
-
-## Environment Variables
-
-| Variable | Purpose |
+| Path | Role |
 |---|---|
-| `MRSM_ROOT_DIR` | Isolates all config, data, jobs, and cache |
-| `MRSM_PLUGINS_DIR` | Override plugins directory |
-| `MRSM_SQL_<LABEL>` / `MRSM_API_<LABEL>` | Set connector by URI (e.g. `MRSM_SQL_MAIN=postgresql://...`) |
-| `MRSM_TEST_FLAVORS` | Comma-separated DB flavors to test against |
-| `MRSM_API_TEST` | URI for the test API connector |
-| `PDOC_ALLOW_EXEC` | Must be `1` for pdoc to build the API docs |
+| `_core/` | stdlib-only loader for `_native.abi3.so` (`AVAILABLE`, `LOAD_ERROR`, `CoreNotBuiltError`) |
+| `_internal/` | `binary.py` (CLI entry, `MRSM_BIN`, `self_command()`), `_facade.py`, `entry.py`, `_removed.py`, `arguments/`, `shell/` |
+| `core/Pipe/` | the façade `Pipe` over `_core.Pipe`; `_live_parameters.py` provides the live `pipe.parameters` views |
+| `core/Pipeline/` | `mrsm.Pipeline`, `Plan`, `RunResult`, `pipe.sync(parents=, children=)`, event decoding |
+| `connectors/` | façades; `SQLConnector._rust_method()` builds one `_core.SqlConnector` per connector (rebuilt after a fork) |
+| `plugins/` | SDK decorators, `_page.py` (page-contract figures) |
+| `worker/`, `api/host/`, `api/dash/` | the Python worker; the FastAPI host; the Dash console (`build_dash_app()` builds the one app; `tests/console` drives it) |
+| `api/`, `actions/`, `utils/`, `config/` | what is left of the v4 packages: SDK helpers and façades over `_core`. See "Removed in 5.0" in the migration guide |
+
+### Façade pattern
+
+Façade methods call one `_core` binding each and keep only argument adaptation, caches and the
+pandas/Polars boundary in Python. An instance without a usable Rust driver is an error naming the cause,
+never a silent fallback. `SQLConnector._rust_method` raises `AttributeError` for a name the extension does
+not bind. A result that differs from v4 is a parity bug: fix it at the boundary
+(`src/pandas_bridge.rs` dtype hints) or in the kernel, and add a row to `PARITY.md`.
+
+### Parity fixtures
+
+- `crates/*/tests/fixtures/*.json` are **generated by released v4.1.4** through
+  `scripts/parity/run.sh crates/<crate>/tests/fixtures/gen_<x>.py`; never hand-edit them; commit the
+  generator next to the fixture. CI's `parity` job regenerates them all and fails on any diff. Exception:
+  the engine planner fixtures are written by hand from the spec (v4 has no planner).
+- Fixture data is synthetic. Generators run with a fresh root, an empty plugins dir and no inherited
+  `MRSM_*` variables (v4 reads every `MRSM_<TYPE>_<LABEL>` as a connector); scrub pids, timestamps, paths
+  and credentials at the source.
+- `// PARITY:` marks a v4 quirk reproduced on purpose, with the Python line it comes from.
+
+## Pipe concepts the façade preserves
+
+**`SuccessTuple`** (`(bool, str)`) is the return type of actions, pipe methods and connector methods:
+return `(False, "reason")`, never raise from action-level code. Rust returns `SyncResult`
+(`meerschaum-core/src/success.rs`); Python's `mrsm.SyncResult` is a `tuple` subclass, so
+`success, msg = pipe.sync()` keeps unpacking. Use `warn` / `error` / `info` / `dprint`, not `print()`.
+
+**Identity.** `Pipe(connector_keys, metric_key, location_key=None, instance=...)`; `pipe.target` defaults
+to `{connector_keys with ':'→'_'}_{metric_key}[_{location_key}]`. Constructing a `Pipe` never touches the
+instance. Engine state keys on `pipe_ref` = `"{instance}|{connector_keys}|{metric_key}|{location_key}"`.
+
+**`parameters`** is a live dict (assign then `pipe.edit()`, or `update_parameters({...}, persist=True)`),
+and every key is part of the compatibility contract (§11.1): `columns` (`datetime`, `id`, `primary`,
+`value`), `dtypes` (Meerschaum dtype strings incl. every `geometry[...]` notation, or pandas dtypes;
+role-keyed entries resolve through `columns`), `indices`, `tags`, `target`, `upsert`, `static`,
+`autoincrement`, `autotime`, `null_indices`, `mixed_numerics`, `enforce`, `precision`, `fetch`
+(`backtrack_minutes`, `definition`; top-level `sql` is the same), `verify` (`chunk_minutes` and aliases,
+`bound_days`), `hypertable` / `hypercore` / `compress`, `reference(s)` (inheritance only, not a graph
+edge), `parents` / `children` (engine edges, may carry `lookback_*` / `lookahead_*` / `axis`), `schedule`,
+`min_seconds`, `retry`, `stream`.
+
+**Sync flow** (`pipe.sync(df=None, begin='', end=None, ...)`): fetch, `enforce_dtypes`,
+`filter_existing` (backtrack window + `filter_unseen_df`), `instance.sync_pipe`. `begin=''` = sync time
+minus backtrack; `None` = unbounded. A bare `pipe.sync()` keeps v4 semantics (no graph, no capping);
+`pipe.sync(parents=..., children=...)` and `mrsm.Pipeline(...)` run the engine (children capped at
+`min(parent watermarks)`; definition changes mean `rebuild`, which needs `--yes` / `auto_rebuild`).
+
+**`params` filter**: value = `=`, list = `IN`, `_` prefix negates, `None` / `'None'` = `IS NULL`,
+`'_None'` = `IS NOT NULL`, a dict compares JSON text. With `pipe.enforce=True` unknown columns are dropped
+from `params` on SQL pipes.
+
+**Templating.** `{{ Pipe('ck', 'mk', 'lk', instance=...) }}` resolves to the table reference; attribute
+chains and `{{ self.parameters['x'] }}` into values; `MRSM{a:b:c}` reads config at access time. Implicit
+`{{ Pipe() }}` references are engine edges (`system.engine.implicit_edges`). Raw (persisted) parameters
+keep the templates; resolved parameters are for execution.
+
+**Connectors and plugins.** Custom connectors via `@make_connector` (`IS_INSTANCE`, `IS_THREAD_SAFE`,
+`IS_STREAMING` + `subscribe`, optional lease methods). Python connectors and plugins are reached from Rust
+**only** through the worker; Rust never calls a Python implementation of something it implements itself
+(D12). Rust plugins are single `.rs` files or native directories in the plugins dir.
+
+**Config.** `get_config('a', 'b')` over YAML under `MRSM_ROOT_DIR/config/`; `MRSM_CONFIG` (JSON) patches
+config; engine keys live under `system.engine.*`. `MRSM_PYTHON` picks the interpreter workers run with
+(preflighted once; it must import a `meerschaum` of the same major). `connect_timeout` /
+`MRSM_CONNECT_TIMEOUT` bound the first connection of a command.
+
+## Conventions
+
+### Rust
+
+- Match the surrounding code; `cargo fmt --all`; clippy-clean with `-D warnings` on `--all-targets`.
+  No `unsafe` outside `meerschaum-plugin` and `meerschaum-py` without a `// SAFETY:` comment.
+- Work inside your crate; edit the root `Cargo.toml` only for a `[workspace.dependencies]` entry two or
+  more crates need. Shared Python-behavior helpers belong in `meerschaum-core`.
+- `pyo3`, `arrow` and `polars` are workspace dependencies; upgrade them together. The Python boundary is
+  our own PyCapsule code (`ffi_import.rs`, `ffi_export.rs`, `polars_bridge.rs`), not pyo3-arrow/pyo3-polars.
+- Reproduce observable v4 behavior, quirks included; mark deliberate quirks `// PARITY:`. Rust-only
+  behavior gets a crate test; behavior visible from Python also gets a pytest test.
+- Integration tests isolate themselves: temporary `MRSM_ROOT_DIR`, empty `MRSM_PLUGINS_DIR`, unique table
+  prefixes (`_mrsm_rs_test_*`, random connector labels), cleanup afterwards.
+- Default every dependency and vendored asset to its newest stable release.
+
+### Python
+
+- The public API is frozen (§11.1). New Python code goes in the SDK / façade / host surfaces.
+- `SuccessTuple` returns, `warn`/`error`/`info`/`dprint`, `attempt_import` for anything heavy (never a
+  module-level import of pandas/polars/SQLAlchemy/Dash), `filter_arguments` / `filter_keywords` when
+  calling plugin code, duck typing for pipes and users.
+- The base wheel stays dependency-free: `pyproject.toml` extras and
+  `meerschaum/utils/packages/_packages.py::extras` must agree (`check_packaging.py`); regenerate
+  `requirements/<extra>.txt` with `--write`.
+
+### Commits and public files
+
+Emoji + imperative summary, as in `git log --oneline` (`🦀` release commits, `💚` CI/harness, `📝` docs,
+`🧪` tests, `🐛` fixes, `✨` features, `🛡️` / `🔒` safety and security). Run
+`scripts/parity/check_fixture_hygiene.sh` on any fixture directory or public file you touched: code,
+fixtures and docs must never name private deployments, their organizations, people, home directories,
+hostnames or credentials. Host-specific release settings live in the gitignored `.env`.
+
+## Gotchas (verified)
+
+- **Jobs start through a per-root admission gate** (D23, `meerschaum-jobs/src/startup.rs`): file-lock
+  slots, random jitter and load/memory waits for bulk starts (`compose up`, `restart jobs`, several
+  `start jobs`). `--no-stagger` (or `jobs.startup.enabled: false`) bypasses it; a job "stuck at starting"
+  for 10 to 30 s is the gate.
+- **`SqlDriver::ready()` must stay tiny**: its slow path is `Box::pin(...)`; an inline body overflowed the
+  2 MiB tokio stack in debug builds. `driver::future_size_tests` guards it.
+- **Empty frames export no Arrow batches**: the boundary must import an empty batch carrying the schema.
+- **Polars at the Arrow boundary**: `Null` columns export `n_buffers = 1` (repaired in `ffi_import.rs`);
+  Polars inputs go through `DataFrame.to_arrow()` when pyarrow is present; `ffi_import.rs` calls the
+  private C stream callbacks through a `#[repr(C)]` mirror (see `crates/meerschaum-py/README.md`).
+- **Dtype hints restore pandas backends** (`pandas_bridge.rs`, table in `PARITY.md`): the kernel erases
+  `int64` vs `Int64` vs `int64[pyarrow]`; special columns stay `object`.
+- **Forked job daemons and Tokio**: the extension's runtime is keyed by PID; never `block_on` an inherited
+  runtime.
+- **`get_config` is hot** (~35 calls per sync chunk): the binding reads the live Python dict and caches
+  nothing so `set_config` / env patches are visible at once. Keep it that way.
+- **Partitioned tables fold the datetime column into the primary key**, so an upsert's conflict target
+  must include `dt_col` there.
+- **MariaDB `get_sync_time(params=...)` on a partitioned table** uses `MAX`/`MIN` (an optimizer bug
+  returns zero rows with `ORDER BY ... LIMIT 1`).
+- **`get_chunk_bounds(align=True)`** (verify, ledger grid) anchors edges to the Unix epoch so they match
+  partition boundaries; elsewhere it defaults to `align=False`.
+- **The API server caches `Pipe` objects** (`pipes_dict`); `APIConnector.sync_pipe` clears the shared
+  column-type cache after every sync. The server refuses `mrsm` connector keys on the generic routes.
+- **`clean()` in `meerschaum.utils.sql` is only a keyword blocklist**: bind user values; use `clean()` for
+  internal names.
+- **A connector patch in `MRSM_CONFIG` sits under `meerschaum.connectors.<type>.<label>`**: a top-level
+  `connectors` key is ignored, so `sql:main` keeps pointing at `localhost:5432`. Check the resolved port
+  before mutating anything.
+- **CI keeps `target/` on the self-hosted runners**; `scripts/ci/changes.py` decides which jobs a push
+  runs, and a dispatch or `v5*` tag runs everything (`docs/design/v5-build.md` "CI: what runs when").
+- **Read pytest summaries carefully**: "N passed, 2 warnings" is not "2 failed"; the two `test_worker.py`
+  codec tests are order-dependent.

@@ -1,0 +1,600 @@
+{
+ "analyze": {
+  "accepts_executor_keys": false,
+  "function": "analyze",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_analyze_pipes"
+   }
+  }
+ },
+ "api": {
+  "accepts_executor_keys": false,
+  "function": "api",
+  "subactions": {
+   "start": {
+    "accepts_executor_keys": false,
+    "function": "_api_start"
+   }
+  }
+ },
+ "attach": {
+  "accepts_executor_keys": true,
+  "function": "attach",
+  "subactions": {
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_attach_jobs"
+   },
+   "logs": {
+    "accepts_executor_keys": false,
+    "function": "_attach_logs"
+   }
+  }
+ },
+ "bootstrap": {
+  "accepts_executor_keys": false,
+  "function": "bootstrap",
+  "subactions": {
+   "connectors": {
+    "accepts_executor_keys": false,
+    "function": "_bootstrap_connectors"
+   },
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_bootstrap_jobs"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_bootstrap_pipes"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_bootstrap_plugins"
+   }
+  }
+ },
+ "clear": {
+  "accepts_executor_keys": false,
+  "function": "clear",
+  "subactions": {
+   "cache": {
+    "accepts_executor_keys": false,
+    "function": "_clear_cache"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_clear_pipes"
+   }
+  }
+ },
+ "compose": {
+  "accepts_executor_keys": false,
+  "function": "compose",
+  "subactions": {}
+ },
+ "compress": {
+  "accepts_executor_keys": false,
+  "function": "compress",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_compress_pipes"
+   }
+  }
+ },
+ "copy": {
+  "accepts_executor_keys": false,
+  "function": "copy",
+  "subactions": {
+   "connectors": {
+    "accepts_executor_keys": false,
+    "function": "_copy_connectors"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_copy_pipes"
+   }
+  }
+ },
+ "decompress": {
+  "accepts_executor_keys": false,
+  "function": "decompress",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_decompress_pipes"
+   }
+  }
+ },
+ "deduplicate": {
+  "accepts_executor_keys": false,
+  "function": "deduplicate",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_deduplicate_pipes"
+   }
+  }
+ },
+ "delete": {
+  "accepts_executor_keys": false,
+  "function": "delete",
+  "subactions": {
+   "cache": {
+    "accepts_executor_keys": false,
+    "function": "_delete_cache"
+   },
+   "config": {
+    "accepts_executor_keys": false,
+    "function": "_delete_config"
+   },
+   "connectors": {
+    "accepts_executor_keys": false,
+    "function": "_delete_connectors"
+   },
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_delete_jobs"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_delete_pipes"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_delete_plugins"
+   },
+   "users": {
+    "accepts_executor_keys": false,
+    "function": "_delete_users"
+   },
+   "venvs": {
+    "accepts_executor_keys": false,
+    "function": "_delete_venvs"
+   }
+  }
+ },
+ "drop": {
+  "accepts_executor_keys": false,
+  "function": "drop",
+  "subactions": {
+   "indices": {
+    "accepts_executor_keys": false,
+    "function": "_drop_indices"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_drop_pipes"
+   }
+  }
+ },
+ "edit": {
+  "accepts_executor_keys": false,
+  "function": "edit",
+  "subactions": {
+   "config": {
+    "accepts_executor_keys": false,
+    "function": "_edit_config"
+   },
+   "definition": {
+    "accepts_executor_keys": false,
+    "function": "_edit_definition"
+   },
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_edit_jobs"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_edit_pipes"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_edit_plugins"
+   },
+   "tokens": {
+    "accepts_executor_keys": false,
+    "function": "_edit_tokens"
+   },
+   "users": {
+    "accepts_executor_keys": false,
+    "function": "_edit_users"
+   }
+  }
+ },
+ "flush": {
+  "accepts_executor_keys": false,
+  "function": "flush",
+  "subactions": {
+   "indices": {
+    "accepts_executor_keys": false,
+    "function": "_flush_indices"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_flush_pipes"
+   }
+  }
+ },
+ "index": {
+  "accepts_executor_keys": false,
+  "function": "index",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_index_pipes"
+   }
+  }
+ },
+ "install": {
+  "accepts_executor_keys": false,
+  "function": "install",
+  "subactions": {
+   "packages": {
+    "accepts_executor_keys": false,
+    "function": "_install_packages"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_install_plugins"
+   },
+   "required": {
+    "accepts_executor_keys": false,
+    "function": "_install_required"
+   }
+  }
+ },
+ "login": {
+  "accepts_executor_keys": false,
+  "function": "login",
+  "subactions": {}
+ },
+ "os": {
+  "accepts_executor_keys": false,
+  "function": "os",
+  "subactions": {}
+ },
+ "partition": {
+  "accepts_executor_keys": false,
+  "function": "partition",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_partition_pipes"
+   }
+  }
+ },
+ "pause": {
+  "accepts_executor_keys": false,
+  "function": "pause",
+  "subactions": {
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_pause_jobs"
+   }
+  }
+ },
+ "python": {
+  "accepts_executor_keys": true,
+  "function": "python",
+  "subactions": {}
+ },
+ "register": {
+  "accepts_executor_keys": false,
+  "function": "register",
+  "subactions": {
+   "connectors": {
+    "accepts_executor_keys": false,
+    "function": "_register_connectors"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_register_pipes"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_register_plugins"
+   },
+   "tokens": {
+    "accepts_executor_keys": false,
+    "function": "_register_tokens"
+   },
+   "users": {
+    "accepts_executor_keys": false,
+    "function": "_register_users"
+   }
+  }
+ },
+ "reload": {
+  "accepts_executor_keys": false,
+  "function": "reload",
+  "subactions": {}
+ },
+ "restart": {
+  "accepts_executor_keys": true,
+  "function": "restart",
+  "subactions": {
+   "daemons": {
+    "accepts_executor_keys": false,
+    "function": "_restart_daemons"
+   },
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_restart_jobs"
+   }
+  }
+ },
+ "setup": {
+  "accepts_executor_keys": false,
+  "function": "setup",
+  "subactions": {
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_setup_plugins"
+   }
+  }
+ },
+ "sh": {
+  "accepts_executor_keys": false,
+  "function": "sh",
+  "subactions": {}
+ },
+ "show": {
+  "accepts_executor_keys": false,
+  "function": "show",
+  "subactions": {
+   "actions": {
+    "accepts_executor_keys": false,
+    "function": "_show_actions"
+   },
+   "arguments": {
+    "accepts_executor_keys": false,
+    "function": "_show_arguments"
+   },
+   "columns": {
+    "accepts_executor_keys": false,
+    "function": "_show_columns"
+   },
+   "config": {
+    "accepts_executor_keys": false,
+    "function": "_show_config"
+   },
+   "connectors": {
+    "accepts_executor_keys": false,
+    "function": "_show_connectors"
+   },
+   "daemons": {
+    "accepts_executor_keys": false,
+    "function": "_show_daemons"
+   },
+   "data": {
+    "accepts_executor_keys": false,
+    "function": "_show_data"
+   },
+   "environment": {
+    "accepts_executor_keys": false,
+    "function": "_show_environment"
+   },
+   "help": {
+    "accepts_executor_keys": false,
+    "function": "_show_help"
+   },
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_show_jobs"
+   },
+   "logs": {
+    "accepts_executor_keys": true,
+    "function": "_show_logs"
+   },
+   "packages": {
+    "accepts_executor_keys": false,
+    "function": "_show_packages"
+   },
+   "partitions": {
+    "accepts_executor_keys": false,
+    "function": "_show_partitions"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_show_pipes"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_show_plugins"
+   },
+   "rowcounts": {
+    "accepts_executor_keys": false,
+    "function": "_show_rowcounts"
+   },
+   "schedules": {
+    "accepts_executor_keys": false,
+    "function": "_show_schedules"
+   },
+   "sizes": {
+    "accepts_executor_keys": false,
+    "function": "_show_sizes"
+   },
+   "tags": {
+    "accepts_executor_keys": false,
+    "function": "_show_tags"
+   },
+   "targets": {
+    "accepts_executor_keys": false,
+    "function": "_show_targets"
+   },
+   "tokens": {
+    "accepts_executor_keys": false,
+    "function": "_show_tokens"
+   },
+   "users": {
+    "accepts_executor_keys": false,
+    "function": "_show_users"
+   },
+   "venvs": {
+    "accepts_executor_keys": false,
+    "function": "_show_venvs"
+   },
+   "version": {
+    "accepts_executor_keys": false,
+    "function": "_show_version"
+   }
+  }
+ },
+ "sql": {
+  "accepts_executor_keys": false,
+  "function": "sql",
+  "subactions": {}
+ },
+ "stack": {
+  "accepts_executor_keys": false,
+  "function": "stack",
+  "subactions": {}
+ },
+ "start": {
+  "accepts_executor_keys": false,
+  "function": "start",
+  "subactions": {
+   "api": {
+    "accepts_executor_keys": false,
+    "function": "_start_api"
+   },
+   "connectors": {
+    "accepts_executor_keys": false,
+    "function": "_start_connectors"
+   },
+   "daemons": {
+    "accepts_executor_keys": false,
+    "function": "_start_daemons"
+   },
+   "gui": {
+    "accepts_executor_keys": false,
+    "function": "_start_gui"
+   },
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_start_jobs"
+   },
+   "mcp": {
+    "accepts_executor_keys": false,
+    "function": "_start_mcp"
+   },
+   "pipeline": {
+    "accepts_executor_keys": false,
+    "function": "_start_pipeline"
+   },
+   "webterm": {
+    "accepts_executor_keys": false,
+    "function": "_start_webterm"
+   },
+   "worker": {
+    "accepts_executor_keys": false,
+    "function": "_start_worker"
+   }
+  }
+ },
+ "stop": {
+  "accepts_executor_keys": false,
+  "function": "stop",
+  "subactions": {
+   "daemons": {
+    "accepts_executor_keys": false,
+    "function": "_stop_daemons"
+   },
+   "jobs": {
+    "accepts_executor_keys": true,
+    "function": "_stop_jobs"
+   }
+  }
+ },
+ "sync": {
+  "accepts_executor_keys": false,
+  "function": "sync",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_sync_pipes"
+   }
+  }
+ },
+ "tag": {
+  "accepts_executor_keys": false,
+  "function": "tag",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_tag_pipes"
+   }
+  }
+ },
+ "uninstall": {
+  "accepts_executor_keys": false,
+  "function": "uninstall",
+  "subactions": {
+   "packages": {
+    "accepts_executor_keys": false,
+    "function": "_uninstall_packages"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_uninstall_plugins"
+   }
+  }
+ },
+ "upgrade": {
+  "accepts_executor_keys": false,
+  "function": "upgrade",
+  "subactions": {
+   "meerschaum": {
+    "accepts_executor_keys": false,
+    "function": "_upgrade_meerschaum"
+   },
+   "packages": {
+    "accepts_executor_keys": false,
+    "function": "_upgrade_packages"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_upgrade_plugins"
+   }
+  }
+ },
+ "vacuum": {
+  "accepts_executor_keys": false,
+  "function": "vacuum",
+  "subactions": {
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_vacuum_pipes"
+   }
+  }
+ },
+ "verify": {
+  "accepts_executor_keys": false,
+  "function": "verify",
+  "subactions": {
+   "packages": {
+    "accepts_executor_keys": false,
+    "function": "_verify_packages"
+   },
+   "pipes": {
+    "accepts_executor_keys": false,
+    "function": "_verify_pipes"
+   },
+   "plugins": {
+    "accepts_executor_keys": false,
+    "function": "_verify_plugins"
+   },
+   "rowcounts": {
+    "accepts_executor_keys": false,
+    "function": "_verify_rowcounts"
+   },
+   "venvs": {
+    "accepts_executor_keys": false,
+    "function": "_verify_venvs"
+   }
+  }
+ }
+}

@@ -1,0 +1,1 @@
+Manage an isolated Meerschaum environment with Meerschaum Compose.

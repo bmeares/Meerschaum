@@ -20,12 +20,9 @@ def get_installed_plugins(
     """
     Return a list of plugins in the configured `plugins` directories.
     """
-    from meerschaum.config.environment import replace_env
-    from meerschaum.plugins import get_plugins_names
-    from meerschaum.compose.utils.config import get_env_dict
-
-    with replace_env(get_env_dict(compose_config)):
-        return get_plugins_names()
+    from meerschaum import _core
+    from meerschaum.compose.utils.config import _plain
+    return _core.compose_installed_plugins(_plain(compose_config))
 
 
 def install_plugins(

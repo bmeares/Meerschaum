@@ -1,5 +1,7 @@
 # ✍️ Writing Your Own Plugins
 
+Rust plugins can be a single `.rs` file for actions, data sources, or connectors. See the [Rust quickstart](/reference/plugins/rust-plugins/) to get started, or the [advanced guide](/reference/plugins/rust-plugins/advanced/) for packaging and the full SDK. The examples below use Python.
+
 > This tutorial explains how to extend Meerschaum with plugins. For general information, consult the [Types of Plugins reference page](/reference/plugins/types-of-plugins/).
 
 Meerschaum's plugin system is designed to be simple so you can get your plugins working quickly. Plugins are Python packages defined in the Meerschaum configuration `plugins` directory and are imported at startup under the global namespace `plugins`.
@@ -10,20 +12,20 @@ Meerschaum's plugin system is designed to be simple so you can get your plugins 
 
 To create your plugin, follow these steps:
 
-1. **Navigate to your Meerschaum `plugins` directory.**  
+1. **Navigate to your Meerschaum `plugins` directory.**
 
     === "Linux / MacOS"
-        `~/.config/meerschaum/plugins`  
-    
+        `~/.config/meerschaum/plugins`
+
     === "Windows"
         `%APPDATA%\Meerschaum\plugins`
-    
+
     === "Meerschaum Compose"
         `plugins/`
 
     > If you have set [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir) or [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir), navigate to your designated plugins directory.
 
-2. **Create your Python module.**  
+2. **Create your Python module.**
     Create either `<name>.py` or `<name>/__init__.py`.
 
     > Plugins may have hyphenated names, e.g. `mongodb-connector`:
@@ -40,7 +42,7 @@ To create your plugin, follow these steps:
     __version__ = '0.0.1'
     ```
 
-4. ***(Optional)* Define your required dependencies.**  
+4. ***(Optional)* Define your required dependencies.**
 
     Your plugin will be run from a virtual environment and therefore may not be able to import packages that aren't declared.
 
@@ -50,11 +52,11 @@ To create your plugin, follow these steps:
         Dependencies that start with `plugin:` are Meerschaum plugins. To require a plugin from another repository, add add the repository's keys after the plugin name (e.g. `plugin:foo@api:bar`).
 
     ```python
-    required = ['rich>=9.8.0', 'pandas', 'plugin:foo']
+    required = ['rich>=9.8.0', 'polars', 'plugin:foo']
     ```
 
-5. **Write your functions.**  
-    
+5. **Write your functions.**
+
     Special functions are `#!python fetch()`, `#!python sync()`, `#!python register()`, `#!python setup()`, and `#!python <package_name>()`, and you can use the `#!python @make_action` decorator to designate additional functions as actions. Below is more information on these functions.
 
     !!! warning "Don't forget keyword arguments!"
@@ -63,18 +65,18 @@ To create your plugin, follow these steps:
         You may find the supplied arguments useful for your implementation (e.g. `begin` and `end` `#!python datetime.datetime` objects). Run `mrsm -h` or `mrsm show help` to see the available keyword arguments.
 
 !!! info "Imports impact performance"
-    For optimal performance, keep module-level code to a minimum ― especially heavy imports.
+    For optimal performance, keep module-level code to a minimum, especially heavy imports.
     ```python hl_lines="2"
     ### BAD - DON'T DO THIS
-    import pandas as pd
+    import polars as pl
     def fetch(pipe, **kw):
-        return pd.read_csv('data.csv')
+        return pl.read_csv('data.csv')
     ```
     ```python hl_lines="3"
     ### GOOD - DO THIS INSTEAD
     def fetch(pipe, **kw):
-        import pandas as pd
-        return pd.read_csv('data.csv')
+        import polars as pl
+        return pl.read_csv('data.csv')
     ```
 
 
@@ -82,23 +84,23 @@ To create your plugin, follow these steps:
 
 Plugins are just modules with functions. This section explains the roles of the following special functions:
 
-- **`#!python register(pipe: mrsm.Pipe, **kwargs)`**  
+- **`#!python register(pipe: mrsm.Pipe, **kwargs)`**
   Return a pipe's initial parameters dictionary.
-- **`#!python fetch(pipe: mrsm.Pipe, **kwargs)`**  
-  Return a DataFrame, list of dictionaries, or generator of DataFrame-like chunks.
-- **`#!python sync(pipe: mrsm.Pipe, **kwargs)`**  
+- **`#!python fetch(pipe: mrsm.Pipe, **kwargs)`**
+  Return a DataFrame (Polars, pandas or Arrow), list of dictionaries, or generator of DataFrame-like chunks.
+- **`#!python sync(pipe: mrsm.Pipe, **kwargs)`**
   Override a pipe's `sync` process for finer-grained control.
-- **`#!python @make_connector`**  
+- **`#!python @make_connector`**
   Create new [connector](/reference/connectors/) types.
-- **`#!python @make_action`**  
+- **`#!python @make_action`**
   Create new commands.
-- **`#!python @api_plugin`**  
+- **`#!python @api_plugin`**
   Create new FastAPI endpoints.
-- **`#!python @dash_plugin` and `#!python @web_page`**  
+- **`#!python @dash_plugin` and `#!python @web_page`**
   Create new Dash pages on the Web Console.
-- **`#!python @pre_sync_hook` and `#!python @post_sync_hook`**  
+- **`#!python @pre_sync_hook` and `#!python @post_sync_hook`**
   Inject callbacks when pipes are synced by the `sync pipes` action.
-- **`#!python setup(**kwargs)`**  
+- **`#!python setup(**kwargs)`**
   Executed during plugin installation or with `mrsm setup plugins <plugin>`.
 
 ### **The `#!python register()` Function**
@@ -140,7 +142,7 @@ Below is an example of a simple fetch plugin:
 
     __version__ = '0.0.1'
     required = []
-        
+
     import random
     from datetime import datetime
     import meerschaum as mrsm
@@ -176,21 +178,21 @@ def fetch(pipe, **kw) -> Generator[List[Dict[str, Any]]]:
 Chunking handles any iterable, so you may return a simple generator or `#!python yield` the chunks yourself.
 
 ```python
-def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
-    import pandas as pd
-    return pd.read_csv('very-large.csv', chunksize=10_000)
+def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pl.DataFrame']:
+    import polars as pl
+    return pl.scan_csv('very-large.csv').collect_batches(chunk_size=10_000)
 ```
 
 ```python
-def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
-    import pandas as pd
+def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pl.DataFrame']:
+    import polars as pl
     for file_name in ['a.csv', 'b.csv', 'c.csv']:
-        yield pd.read_csv(file_name)
+        yield pl.read_csv(file_name)
 ```
 
 #### Robust Fetch Patterns
 
-Real-world data sources fail intermittently, rate-limit, and page their responses. The patterns below keep a `#!python fetch()` resilient. They're plain Python — Meerschaum doesn't impose a retry helper — so adapt them to your source.
+Real-world data sources fail intermittently, rate-limit, and page their responses. The patterns below keep a `#!python fetch()` resilient. They're plain Python (Meerschaum doesn't impose a retry helper) so adapt them to your source.
 
 **Retry with exponential backoff.**
 Wrap transient failures (timeouts, `5xx` responses) in a bounded retry loop. Raising from `#!python fetch()` lets Meerschaum mark the sync as failed; only raise once retries are exhausted.
@@ -258,13 +260,13 @@ def fetch(pipe: mrsm.Pipe, begin=None, end=None, **kw):
 ```
 
 !!! tip "Handle partial data gracefully"
-    If you've already `#!python yield`ed several chunks and a later page fails, those earlier chunks are *already synced* — Meerschaum processes each yielded chunk as it arrives. On the next sync run, the `datetime`-axis [incremental window](/reference/pipes/syncing/) picks up where the last successful chunk left off, so transient failures self-heal without duplicating committed rows.
+    If you've already `#!python yield`ed several chunks and a later page fails, those earlier chunks are *already synced*, Meerschaum processes each yielded chunk as it arrives. On the next sync run, the `datetime`-axis [incremental window](/reference/pipes/syncing/) picks up where the last successful chunk left off, so transient failures self-heal without duplicating committed rows.
 
 <a id="sync-plugins"></a>
 
 ### **The `#!python sync()` Function**
 
-The `#!python sync()` function makes `sync pipes` override the built-in syncing process and behaves more like an [action](/reference/plugins/types-of-plugins/#-action-plugins), returning only a `SuccessTuple` (e.g. `#!python True, "Success"`).
+The `#!python sync()` function makes `sync pipes` override the built-in syncing process and behaves more like an [action](/reference/plugins/types-of-plugins/#action-plugins), returning only a `SuccessTuple` (e.g. `#!python True, "Success"`).
 
 Sync plugins allow for much more flexibility than fetch plugins, so what you come up with may differ from the following example. In any case, below is a simple sync plugin.
 
@@ -281,7 +283,7 @@ Sync plugins allow for much more flexibility than fetch plugins, so what you com
 
     __version__ = '0.0.1'
 
-    required = ['requests', 'pandas']
+    required = ['requests', 'polars']
 
     def sync(
             pipe: meerschaum.Pipe,
@@ -313,7 +315,7 @@ Sync plugins allow for much more flexibility than fetch plugins, so what you com
         """
 
         ### Get data from somewhere. You decide how!
-        import pandas as pd
+        import polars as pl
         import requests
         import meerschaum as mrsm
 
@@ -325,7 +327,7 @@ Sync plugins allow for much more flexibility than fetch plugins, so what you com
             params['end'] = end.isoformat()
 
         try:
-            df = pd.read_json(requests.get(url, params=params).text)
+            df = pl.DataFrame(requests.get(url, params=params).json())
         except Exception as e:
             df = None
 
@@ -370,7 +372,7 @@ For example, the following creates a new connector of type `foo`:
 
         def fetch(
             self,
-            pipe: mrsm.Pipe, 
+            pipe: mrsm.Pipe,
             begin: Optional[datetime] = None,
             end: Optional[datetime] = None,
             **kwargs: Any
@@ -407,7 +409,7 @@ For example, the following creates a new connector of type `foo`:
 
 You can register new `foo` connectors via `mrsm bootstrap connector`, which would prompt the user for each attribute in `REQUIRED_ATTRIBUTES` (username, password).
 
-You may also define your new `foo` connectors as [environment variables](/reference/connectors/#-environment-connectors), e.g.:
+You may also define your new `foo` connectors as [environment variables](/reference/connectors/#environment-connectors), e.g.:
 
 ```bash
 export MRSM_FOO_BAR='{
@@ -430,14 +432,14 @@ export MRSM_FOO_BAZ='{
 
 Your plugin may extend Meerschaum by providing additional actions. Actions are regular Python functions but with perks:
 
-1. *Actions are integrated into the larger Meerschaum system.*  
+1. *Actions are integrated into the larger Meerschaum system.*
     Actions from plugins may be executed as background jobs, via the web console, or via the API, just like standard actions.
-2. *Actions inherit the standard Meerschaum keyword arguments.*  
+2. *Actions inherit the standard Meerschaum keyword arguments.*
     You can use flags such as `--begin`, `--end`, etc., or even [add your own custom flags](#keyword-arguments).
 
 !!! tip "Sub-Actions"
 
-    Actions with underscores are a good way to add sub-actions (e.g. `foo_bar` is the same as `foo bar`).
+    Actions with underscores are a good way to add sub-actions (e.g. `foo_bar` is the same as `foo bar`). To choose the words yourself, pass `name`: `#!python @make_action(name='sing chorus')` runs as `mrsm sing chorus`, whatever the function is called, and help and completion list `chorus` under `mrsm sing`. Words after the action's own arrive in `action` (`mrsm sing chorus twice` passes `action=['twice']`).
 
 ??? example "Action Plugin Example"
 
@@ -453,6 +455,11 @@ Your plugin may extend Meerschaum by providing additional actions. Actions are r
     @make_action(daemon=False)
     def sing_tune(**kw):
         return True, "The action `sing tune` will not be executed in the CLI daemon context."
+
+    @make_action(name='sing chorus')
+    def repeat_the_chorus(action=None, **kw):
+        times = action[0] if action else 'once'
+        return True, f"This action is called 'sing chorus' (sung {times})."
 
     def sing(**kw):
         """
@@ -487,10 +494,10 @@ Meerschaum plugins may also extend the web API by accessing the [`FastAPI`](http
 
 The only argument for the initalization function should be `app` for the FastAPI application.
 
-For your endpoints, arguments will be used as HTTP parameters, and to require that the user must be logged in, import `manager` from `meerschaum.api` and add the argument `curr_user = fastapi.Depends(manager)`:
+For your endpoints, arguments will be used as HTTP parameters, and to require that the user must be logged in, import `manager` from `meerschaum.api` and add the argument `curr_user = fastapi.Depends(manager)` (a bearer token from `/login`). For routes your console pages call, `fastapi.Depends(session_user)` is the user signed in to the web console, and `mount_static` serves a folder of files: see [Web Pages, Callbacks and Routes](/reference/plugins/web-pages/).
 
 !!! tip "Swagger Endpoint Tester"
-    
+
     Navigate to [https://localhost:8000/docs](https://localhost:8000/docs) to test your endpoint in the browser.
 
 ??? example "API Plugin Example"
@@ -533,6 +540,10 @@ Like `#!python @api_plugin`, `#!python @dash_app` designates an initialization f
 
 Functions decorated with `#!python @web_page` return a [Dash layout](https://dash.plotly.com/layout). These don't need to reside within the `#!python @dash_app`-decorated function, but this is recommended to improve lazy-loading performance.
 
+!!! note "Callbacks answer signed-in visitors"
+
+    A callback runs only for a visitor signed in to the console. On a page anyone may open (`#!python login_required=False`), make its callbacks public too, with `#!python @dash_plugin(public=True)` as below or `#!python @web_callback(..., public=True)`: see [who may run a callback](/reference/plugins/web-pages/#who-may-run-a-callback).
+
 ??? example "Dash Plugin Example"
 
     ```python
@@ -540,7 +551,8 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
 
     from meerschaum.plugins import dash_plugin, web_page
 
-    @dash_plugin
+    ### The page is public (`login_required=False`), so its callbacks are too.
+    @dash_plugin(public=True)
     def init_dash(dash_app):
 
         import dash.html as html
@@ -605,9 +617,19 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
             return html.P(f"You're looking at item '{item_id}'.")
     ```
 
+#### The Navigation Bar
+
+Your page keeps its own layout: the console puts a plain bar above it (the Meerschaum logo, which opens the Overview, and **Sign out**). Pass `#!python navbar=True` to give the page the console's top navigation instead (the console's pages, the instance selector and the user menu), or `#!python skip_navbar=True` for no bar at all. Every page is listed in the navigation's **Pages** menu, under its `page_group` (by default, your plugin's name).
+
+```python
+@web_page('/reports/daily', page_group='Reports', navbar=True)
+def daily_report():
+    return dbc.Container([html.H1("Daily report")])
+```
+
 #### Styling Your Page
 
-The Web Console is **dark** by default (the Bootswatch *Darkly* theme plus the `dbc_dark` component overrides), and your page inherits that look automatically — most plugins don't need to do anything.
+The Web Console is **dark** by default (the Bootswatch *Darkly* theme plus the `dbc_dark` component overrides), and your page inherits that look automatically, most plugins don't need to do anything.
 
 If you'd rather start from a clean **light** theme, opt out per page with `#!python @web_page(dark_theme=False)`:
 
@@ -617,11 +639,13 @@ def my_page():
     return dbc.Container([html.H1("My light-themed page")])
 ```
 
-While that page is active, the Web Console switches the Bootstrap theme to the light *Flatly* build and drops the `dbc_dark` class — and switches back to dark for the console and every other page (including on in-app navigation). Both are Bootswatch themes, so standard `dash-bootstrap-components` markup looks right either way; you can layer your own CSS on top.
+While that page is active, the Web Console switches the Bootstrap theme to the light *Flatly* build and drops the `dbc_dark` class, and switches back to dark for the console and every other page (including on in-app navigation). Both are Bootswatch themes, so standard `dash-bootstrap-components` markup looks right either way; you can layer your own CSS on top.
 
 ??? note "How the theme switch works"
 
-    The dark (Darkly) and light (Flatly) Bootstrap stylesheets are both loaded, and exactly one is enabled at a time. The toggle is per route (it follows the URL as the user navigates), so it is a per-page setting — there is no plugin-wide switch. The dark theme also carries `#!html <body class="dbc_dark">`, under which `dbc_dark.css` scopes its extra component overrides; the light theme runs without that class.
+    The dark (Darkly) and light (Flatly) Bootstrap stylesheets are both loaded, and exactly one is enabled at a time. The toggle is per route (it follows the URL as the user navigates), so it is a per-page setting, there is no plugin-wide switch. The dark theme also carries `#!html <body class="dbc_dark">`, under which `dbc_dark.css` scopes its extra component overrides; the light theme runs without that class.
+
+Any other Bootstrap theme works per page too (`#!python @web_page('my-page', theme=dbc.themes.LUX)`), and `head=[...]` adds meta tags, stylesheets and scripts to a page's `<head>`; `add_head(...)` adds them to every page. See [Styling a page](/reference/plugins/web-pages/#styling-a-page).
 
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 
@@ -629,31 +653,31 @@ You can tap into the built-in syncing engine via the `sync pipes` action by deco
 
 Add `**kwargs` (optional) for additional context of sync, e.g.:
 
-- **`sync_method`** (`Callable[[], mrsm.SuccessTuple]`)  
+- **`sync_method`** (`Callable[[], mrsm.SuccessTuple]`)
   A bound function of either `pipe.sync()`, `pipe.verify()`, or `pipe.deduplicate()`.
-- **`sync_timestamp`** (`datetime`)  
+- **`sync_timestamp`** (`datetime`)
   The UTC datetime captured right before the sync began. This value is the same for pre- and post-syncs.
 
 The following keywords arguments are available only for `#!python @post_sync_hook` callbacks:
 
-- **`success_tuple`** (`mrsm.SuccessTuple`)   
+- **`success_tuple`** (`mrsm.SuccessTuple`)
   The return value of `sync_method` (`SuccessTuple` i.e. `Tuple[bool, str]`) to indicate whether the sync completed successfully.
-- **`sync_complete_timestamp`** (`datetime`)  
+- **`sync_complete_timestamp`** (`datetime`)
   The UTC datetime captured right after the sync completed.
-- **`sync_duration`** (`float`)  
+- **`sync_duration`** (`float`)
   The duration of the sync in seconds.
 
 All other keyword arguments correspond to the flags used to initiate the sync. See the following useful arguments:
 
-- **`name`** (`str`)  
+- **`name`** (`str`)
   If the sync was spawned by a background job with a `--name` argument, you may track the job's syncs with `name`.
-- **`schedule`** (`str`)  
+- **`schedule`** (`str`)
   If you spawn your syncing jobs with `-s`, you may see the job's cadence with `schedule`.
-- **`min_seconds`** (`float`)  
+- **`min_seconds`** (`float`)
   If you run continous syncs (i.e. with `--loop`), the value of `--min-seconds` will be available as `min_seconds`.
-- **`begin`** and **`end`** (`datetime` | `int`)  
+- **`begin`** and **`end`** (`datetime` | `int`)
   The values for `--begin` and `--end`.
-- **`params`** (`dict[str, Any]`)  
+- **`params`** (`dict[str, Any]`)
   The value for `--params`.
 
 Sync hooks don't need to return anything, but if a `SuccessTuple` is returned from your callback function, it will be pretty-printed alongside the normal success messages.
@@ -663,17 +687,17 @@ Sync hooks don't need to return anything, but if a `SuccessTuple` is returned fr
 For each pipe synced by `sync pipes`, the engine:
 
 1. Captures `sync_timestamp` (UTC), then runs **all** registered `#!python @pre_sync_hook` callbacks and prints any returned `SuccessTuple`s.
-2. Runs the chosen `sync_method` (`pipe.sync`, `pipe.verify`, or `pipe.deduplicate` — verification and deduplication are selected by the `--verify` / `--deduplicate` flags).
+2. Runs the chosen `sync_method` (`pipe.sync`, `pipe.verify`, or `pipe.deduplicate`, verification and deduplication are selected by the `--verify` / `--deduplicate` flags).
 3. Computes `sync_duration` and captures `sync_complete_timestamp`, then runs **all** registered `#!python @post_sync_hook` callbacks and prints any returned `SuccessTuple`s.
 
 !!! note "Hooks run concurrently and are isolated"
-    Hooks are dispatched through a worker pool, so callbacks from different plugins (and multiple hooks within one plugin) run **concurrently** — don't rely on ordering between separate hooks. Each hook executes inside its plugin's virtual environment. Your callback only receives the keyword arguments it actually declares (arguments are filtered to your function's signature), so it's safe to accept just the few you need plus `**kwargs`.
+    Hooks are dispatched through a worker pool, so callbacks from different plugins (and multiple hooks within one plugin) run **concurrently**, don't rely on ordering between separate hooks. Each hook executes inside its plugin's virtual environment. Your callback only receives the keyword arguments it actually declares (arguments are filtered to your function's signature), so it's safe to accept just the few you need plus `**kwargs`.
 
-    If a hook raises an exception, it is caught and converted to a failure `SuccessTuple` (and a warning) — a misbehaving hook will **not** abort the sync. Hooks are also skipped entirely when the sync is invoked with `skip_hooks=True`.
+    If a hook raises an exception, it is caught and converted to a failure `SuccessTuple` (and a warning), a misbehaving hook will **not** abort the sync. Hooks are also skipped entirely when the sync is invoked with `skip_hooks=True`.
 
 Because the same function may be registered as both a pre- and a post-hook, branch on whether `success_tuple` is `None` (it is only set for post-syncs) to tell the two phases apart.
 
-??? example "`#!python @pre_sync_hook` — validate / log before syncing"
+??? example "`#!python @pre_sync_hook`, validate / log before syncing"
 
     A pre-sync hook is a good place to log intent, enforce a precondition, or record a start time. Returning a failure `SuccessTuple` does not cancel the sync (it is only printed), so use it for observability rather than as a gate.
 
@@ -695,7 +719,7 @@ Because the same function may be registered as both a pre- and a post-hook, bran
         return True, "Success"
     ```
 
-??? example "`#!python @post_sync_hook` — notify on the result"
+??? example "`#!python @post_sync_hook`, notify on the result"
 
     A post-sync hook receives the `success_tuple` returned by the sync plus timing context, making it ideal for notifications, metrics, or alerting on failure.
 
@@ -744,7 +768,7 @@ Because the same function may be registered as both a pre- and a post-hook, bran
         if success_tuple is None:
             print(f"About to sync {pipe} at {sync_timestamp}...")
             return True, "Success"
-        
+
         success, message = success_tuple
         prefix = "successfully" if success else "fail to"
 
@@ -762,7 +786,7 @@ Because the same function may be registered as both a pre- and a post-hook, bran
 - when the plugin is first **installed** (`mrsm install plugin <plugin>`), and
 - when you explicitly re-run it with `mrsm setup plugins <plugin>`.
 
-It is **not** called on every sync or action — use it strictly for work that should happen once at install time. It must return a `SuccessTuple` (a `#!python (bool, str)` tuple); a `#!python False` result is reported to the user and signals that setup failed.
+It is **not** called on every sync or action, use it strictly for work that should happen once at install time. It must return a `SuccessTuple` (a `#!python (bool, str)` tuple); a `#!python False` result is reported to the user and signals that setup failed.
 
 If dependency installation or `#!python setup()` fails during a plugin upgrade, Meerschaum restores the previous plugin source and virtual environment.
 
@@ -808,7 +832,7 @@ There are a many useful command line arguments provided to plugins as keyword ar
 
 ### Useful Command Line and Keyword Arguments
 
-You can see the available command line options with the command `mrsm show help` or `mrsm --help`. Expand the table below to see more information about usefult builtin arguments.
+You can see the available command line options with the command `mrsm help` (or `mrsm --help`). Expand the table below to see more information about useful built-in arguments.
 
 ??? info "Useful Keyword Arguments"
 
@@ -817,7 +841,7 @@ You can see the available command line options with the command `mrsm show help`
     | `action`                    | Positional arguments                        | `Optional[List[str]]`                | `['foo', 'bar']`                      | The positional action arguments following the action are passed into the `action` list. For example, the command `mrsm example foo bar` will be parsed into the list `['foo', 'bar']` for the action function `example(action : Optional[List[str]] = None)`. |
     | `yes`                       | `-y`, `--yes`                               | `Bool = False`                       | `False` (default), `True`             | When a user provides the `-y` flag, yes/no prompts should default to the `yes` option. You can easily use this functionality with the builtin [`#!python yes_no()` function](https://docs.meerschaum.io/utils/prompt.html). |
     | `force`                     | `-f`, `--force`                             | `Bool = False`                       | `False` (default), `True`             | The `-f` flag implies `-y`. Generally, when `-f` is passed, you may skip asking for confirmation altogether. |
-    | `loop`                      | `--loop`                                    | `Bool = False`                       | `False` (default), `True`             | The `--loop`  flag implies that the action should be continuously executed. The exact looping logic is left up to the action developer and therefore is only used in certain contexts (such as in `sync pipes`). |
+    | `loop`                      | `--loop`                                    | `Bool = False`                       | `False` (default), `True`             | With `--loop`, Meerschaum repeats your action `--min-seconds` apart and calls it once per run with `loop=False`, so it needs no loop of its own (see [Repeating Any Action](/reference/actions/#repeating-any-action)). An action whose function names a `loop` parameter keeps the older contract: it receives `loop=True` and repeats by itself. |
     | `begin`                     | `--begin`                                   | `Optional[datetime.datetime] = None` | `datetime.datetime(2021, 1, 1, 0, 0)` | A user may provide a `begin` datetime. Consult `sync pipes` or `show data` for examples. |
     | `end`                       | `--end`                                     | `Optional[datetime.datetime] = None` | `datetime.datetime(2021, 1, 1, 0, 0)` | A user may provide an `end` datetime. Consult `sync pipes` or `show data` for examples. |
     | `connector_keys`            | `-c`, `-C`, `--connector-keys`              | `Optional[List[str]] = None`         | `['sql:main', 'sql:remote']`          | The list of [connectors](/reference/connectors) is used to filter [pipes](/reference/pipes). This filtering is done with the [`get_pipes()` function](https://docs.meerschaum.io/utils/get_pipes.html). |
@@ -839,7 +863,7 @@ add_plugin_argument('--foo', type=int, help="This is my help text!")
 
 ```
 
-The above code snippet will produce append the following text to the `--help` or `show help` text:
+The above code snippet adds the following group to the `--help` (or `show help`) text, after the built-in options:
 
 ```
 Plugin 'example' options:
@@ -863,7 +887,7 @@ Generally, using built-in or custom arguments mentioned above should cover almos
 
 ## Working With Plugins
 
-Plugins are just Python modules, so you can write custom code and share it amongst other plugins (i.e. a [library plugin](/reference/plugins/types-of-plugins/#-library-plugins)).
+Plugins are just Python modules, so you can write custom code and share it amongst other plugins (i.e. a [library plugin](/reference/plugins/types-of-plugins/#library-plugins)).
 
 At run time, plugins are imported under the global `plugins` namespace, but you'll probably be testing plugins directly when the `plugins` namespace isn't created. That's where [`Plugin` objects](https://docs.meerschaum.io/#meerschaum.Plugin) come in handy: they contain a number of convenience functions so you can cross-pollinate between plugins.
 
@@ -871,15 +895,15 @@ Actions, hooks, API endpoints, and web pages defined in submodules belong to the
 
 ### Package Management
 
-Meerschaum plugins only need to be modules ― no package metadata required. But if you plan on managing your plugins as proper packages (e.g. to publish to repositories like [PyPI](https://pypi.org/)), simply add the [entry point](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata) `meerschaum.plugins` to your package metadata:
+Meerschaum plugins only need to be modules, no package metadata required. But if you plan on managing your plugins as proper packages (e.g. to publish to repositories like [PyPI](https://pypi.org/)), simply add the [entry point](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata) `meerschaum.plugins` to your package metadata:
 
 ??? note "Creating Plugins from a Package Entry Point"
 
     === "`setup.py`"
-    
+
         ```python
         from setuptools import setup
-        
+
         setup(
             ...,
             entry_points = {
@@ -891,7 +915,7 @@ Meerschaum plugins only need to be modules ― no package metadata required. But
         ```
 
     === "`pyproject.toml`"
-    
+
         ```toml
         [project.entry-points."meerschaum.plugins"]
         foo = "foo"
@@ -920,7 +944,7 @@ Plugins run from virtual environments, so to import your plugin in a REPL, you'l
 
 ### Plugins in Scripts
 
-You can also pass a plugin to the [`Venv` virtual environment manager](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.Venv), which handles activating and deactivating environments. 
+You can also pass a plugin to the [`Venv` virtual environment manager](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.Venv), which handles activating and deactivating environments.
 
 ```python
 from meerschaum.utils.venv import Venv
@@ -929,3 +953,11 @@ plugin = Plugin('foo')
 with Venv(plugin):
     foo = plugin.module
 ```
+
+### Caching Results
+
+Cache what is slow to compute (a query, a chart, another service's API) with `#!python @cache(ttl=300, pipes=[pipe])` from `meerschaum.utils.cache`: results are shared through Valkey when it is configured and forgotten when a listed pipe syncs. See [Caching](/reference/plugins/caching/).
+
+### Testing Plugins
+
+Add `#!python pytest_plugins = ['meerschaum.testing']` to your `conftest.py` and your tests get a temporary root, a SQLite instance per test, pipes that clean up after themselves, your API routes and your console pages: see [Testing Plugins](/reference/plugins/testing/).

@@ -13,6 +13,9 @@ from meerschaum.utils.debug import dprint
 import sys
 import warnings
 
+#: Set (process-wide, like `warnings.catch_warnings`) while warnings are being recorded.
+_RECORDING: bool = False
+
 __all__ = (
     'warn',
     'info',
@@ -57,8 +60,10 @@ def warn(*args, stacklevel=2, stack=True, color: bool = True, **kw) -> None:
     if color:
         try:
             from meerschaum.utils.formatting import (
-                CHARSET, ANSI, colored, fill_ansi, highlight_pipes, _init
+                CHARSET, colored, fill_ansi, highlight_pipes, _init, stderr_ansi
             )
+            ### Warnings go to stderr: styled by stderr's own terminal check.
+            ANSI = stderr_ansi()
         except ImportError:
             CHARSET = 'ascii'
             ANSI = False
@@ -86,16 +91,20 @@ def warn(*args, stacklevel=2, stack=True, color: bool = True, **kw) -> None:
     if color:
         if ANSI:
             _init()
-            a[0] = fill_ansi(highlight_pipes(a[0]), **warn_config['ansi']['rich'])
+            a[0] = fill_ansi(highlight_pipes(a[0]), ansi=True, **warn_config['ansi']['rich'])
 
     ### Optionally omit the warning location.
     def _no_stack_sw(message, category, filename, lineno, file=None, line=None):
         sys.stderr.write(str(message) + '\n')
 
-    if not stack:
+    ### While a caller records warnings (`_RECORDING`, the worker's quiet connector builds), a
+    ### stackless warning goes through `warnings` like any other, so it can be recorded instead
+    ### of being written straight to stderr.
+    swap = not stack and not _RECORDING
+    if swap:
         warnings.showwarning = _no_stack_sw
     warnings.warn(*a, stacklevel=stacklevel, **kw)
-    if not stack:
+    if swap:
         warnings.showwarning = _old_sw
 
 

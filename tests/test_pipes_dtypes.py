@@ -49,6 +49,7 @@ def test_dtype_enforcement(flavor: str):
     """
     Test that incoming rows are enforced to the correct data type.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     pipe = mrsm.Pipe('dtype', 'enforcement', instance=conn)
     pipe.delete(debug=debug)
@@ -1012,7 +1013,7 @@ def test_parse_date_bounds(flavor: str):
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_distant_datetimes(flavor: str):
     """
-    Test that extremely distant datetimes may be synced.
+    Test that extremely distant datetimes may be synced and compared with existing rows.
     """
     conn = conns[flavor]
     pipe = mrsm.Pipe('test', 'datetimes', 'distant', instance=conn)
@@ -1036,6 +1037,10 @@ def test_distant_datetimes(flavor: str):
 
     df = pipe.get_data(debug=debug)
     assert df['ts'][0].year == 1
+    ### The existing-table comparison must not subtract past Python's minimum into year zero.
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == 1
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -1143,6 +1148,7 @@ def test_geometry_dtype(flavor: str):
     """
     Test syncing the `geometry` dtype.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     shapely = mrsm.attempt_import('shapely')
     pipe = mrsm.Pipe(
@@ -1186,6 +1192,7 @@ def test_geography_dtype(flavor: str):
     """
     Test syncing the `geography` dtype.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     shapely = mrsm.attempt_import('shapely')
     pipe = mrsm.Pipe(
@@ -1229,6 +1236,7 @@ def test_geometry_custom_srid(flavor: str):
     """
     Test syncing the `geometry` dtype with a custom SRID.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     shapely = mrsm.attempt_import('shapely')
     pipe = mrsm.Pipe(
@@ -1271,6 +1279,7 @@ def test_geometry_esri_srid(flavor: str):
     """
     Test support for ESRI CRS.
     """
+    pytest.importorskip('geopandas')
     conn = conns[flavor]
     pipe = mrsm.Pipe('test', 'geometry', 'esri', instance=conn)
     pipe.delete()

@@ -31,6 +31,11 @@ def drop(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
+    ### A `drop` lock refuses it (the core checks its own instances).
+    refusal = self._lock_refusal('drop', debug=debug)
+    if refusal:
+        return False, refusal
+
     self._clear_cache_key('_exists', debug=debug)
 
     with Venv(get_connector_plugin(self.instance_connector)):
@@ -47,6 +52,10 @@ def drop(
 
     self._clear_cache_key('_exists', debug=debug)
     self._clear_cache_key('_exists_timestamp', debug=debug)
+
+    if isinstance(result, tuple) and result and result[0]:
+        from meerschaum.core.Pipeline._engine import forget_engine_state
+        forget_engine_state(self, 'drop_pipe')
 
     return result
 
@@ -75,6 +84,11 @@ def drop_indices(
     """
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
+
+    ### Dropping indices changes the table's schema: a `drop` lock refuses it.
+    refusal = self._lock_refusal('schema', debug=debug)
+    if refusal:
+        return False, refusal
 
     self._clear_cache_key('_columns_indices', debug=debug)
     self._clear_cache_key('_columns_indices_timestamp', debug=debug)

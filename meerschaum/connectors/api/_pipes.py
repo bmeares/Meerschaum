@@ -3,23 +3,22 @@
 # vim:fenc=utf-8
 
 """
-Register or fetch Pipes from the API
+Register or fetch Pipes from the API.
+
+Every method is the Rust client (`meerschaum._core.ApiConnector`): the same routes, query parameters
+and request bodies as v4.
 """
 
 from __future__ import annotations
-import time
+
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import meerschaum as mrsm
-from meerschaum.utils.debug import dprint
-from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, List, Dict, Tuple
 
 
-def pipe_r_url(
-    pipe: mrsm.Pipe
-) -> str:
+def pipe_r_url(pipe: mrsm.Pipe) -> str:
     """Return a relative URL path from a Pipe's keys."""
     from meerschaum._internal.static import STATIC_CONFIG
     location_key = pipe.location_key
@@ -36,39 +35,19 @@ def get_pipe_instance_keys(self, pipe: mrsm.Pipe) -> Union[str, None]:
     Return the configured instance keys for a pipe if set,
     else fall back to the default `instance_keys` for this `APIConnector`.
     """
-    return pipe._attributes.get('parameters', {}).get('instance_keys', self.instance_keys)
+    return self._rust_client().get_pipe_instance_keys(pipe)
 
 
 def register_pipe(
     self,
     pipe: mrsm.Pipe,
-    debug: bool = False
+    debug: bool = False,
 ) -> SuccessTuple:
-    """Submit a POST to the API to register a new Pipe object.
+    """
+    Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict).
     """
-    from meerschaum.utils.debug import dprint
-    r_url = pipe_r_url(pipe)
-    response = self.post(
-        r_url + '/register',
-        json=pipe._attributes.get('parameters', {}),
-        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    if not response:
-        return False, response.text
-
-    response_data = response.json()
-    if isinstance(response_data, list):
-        response_tuple = response_data[0], response_data[1]
-    elif 'detail' in response.json():
-        response_tuple = response.__bool__(), response_data['detail']
-    else:
-        response_tuple = response.__bool__(), response.text
-    return response_tuple
+    return self._rust_client().register_pipe(pipe)
 
 
 def edit_pipe(
@@ -77,31 +56,11 @@ def edit_pipe(
     patch: bool = False,
     debug: bool = False,
 ) -> SuccessTuple:
-    """Submit a PATCH to the API to edit an existing Pipe object.
+    """
+    Submit a PATCH to the API to edit an existing Pipe object.
     Returns a tuple of (success_bool, response_dict).
     """
-    from meerschaum.utils.debug import dprint
-    ### NOTE: if `parameters` is supplied in the Pipe constructor,
-    ###       then `pipe.parameters` will exist and not be fetched from the database.
-    r_url = pipe_r_url(pipe)
-    response = self.patch(
-        r_url + '/edit',
-        params={'patch': patch, 'instance_keys': self.get_pipe_instance_keys(pipe)},
-        json=pipe.get_parameters(apply_symlinks=False),
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    response_data = response.json()
-
-    if isinstance(response.json(), list):
-        response_tuple = response_data[0], response_data[1]
-    elif 'detail' in response.json():
-        response_tuple = response.__bool__(), response_data['detail']
-    else:
-        response_tuple = response.__bool__(), response.text
-    return response_tuple
+    return self._rust_client().edit_pipe(pipe, patch=patch)
 
 
 def fetch_pipes_keys(
@@ -138,52 +97,17 @@ def fetch_pipes_keys(
         (e.g. `{'connector_keys': 'plugin:foo'}`).
         Not recommeded to be used.
 
-    debug: bool, default False
-        Verbosity toggle.
-
     Returns
     -------
     A dictionary mapping pipe IDs to key tuples, or a list of key tuples for older servers.
     """
-    from meerschaum._internal.static import STATIC_CONFIG
-    if connector_keys is None:
-        connector_keys = []
-    if metric_keys is None:
-        metric_keys = []
-    if location_keys is None:
-        location_keys = []
-    if tags is None:
-        tags = []
-
-    r_url = STATIC_CONFIG['api']['endpoints']['pipes'] + '/keys'
-    try:
-        j = self.get(
-            r_url,
-            params={
-                'connector_keys': json.dumps(connector_keys),
-                'metric_keys': json.dumps(metric_keys),
-                'location_keys': json.dumps(location_keys),
-                'tags': json.dumps(tags),
-                'params': json.dumps(params),
-                'instance_keys': self.instance_keys,
-                'as_dict': True,
-            },
-            debug=debug
-        ).json()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        error(str(e))
-
-    if 'detail' in j:
-        error(j['detail'], stack=False)
-
-    if isinstance(j, dict):
-        return {
-            (int(k) if str(k).isdigit() else k): tuple(v)
-            for k, v in j.items()
-        }
-    return [tuple(r) for r in j]
+    return self._rust_client().fetch_pipes_keys(
+        connector_keys,
+        metric_keys,
+        location_keys,
+        tags,
+        params,
+    )
 
 
 def sync_pipe(
@@ -194,126 +118,13 @@ def sync_pipe(
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
-    """Sync a DataFrame into a Pipe."""
-    from decimal import Decimal
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.dtypes import json_serialize_value
-    from meerschaum.utils.misc import items_str, interval_str
-    from meerschaum.config import get_config
-    from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dataframe import get_special_cols, to_json
-    begin = time.perf_counter()
-    more_itertools = attempt_import('more_itertools')
-    if df is None:
-        msg = f"DataFrame is `None`. Cannot sync {pipe}."
-        return False, msg
-
-    def get_json_str(c):
-        if isinstance(c, str):
-            return c
-        if isinstance(c, (dict, list, tuple)):
-            return json.dumps(c, default=json_serialize_value)
-        return to_json(c, orient='columns', geometry_format='wkb_hex')
-
-    df = json.loads(df) if isinstance(df, str) else df
-
-    _chunksize: Optional[int] = (1 if chunksize is None else (
-        get_config('system', 'connectors', 'sql', 'chunksize') if chunksize == -1
-        else chunksize
-    ))
-    keys: List[str] = list(df.columns)
-    chunks = []
-    if hasattr(df, 'index'):
-        df = df.reset_index(drop=True)
-        is_dask = 'dask' in df.__module__
-        chunks = (
-            (df.iloc[i] for i in more_itertools.chunked(df.index, _chunksize))
-            if not is_dask
-            else [partition.compute() for partition in df.partitions]
-        )
-
-    elif isinstance(df, dict):
-        ### `_chunks` is a dict of lists of dicts.
-        ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
-        _chunks = {k: [] for k in keys}
-        for k in keys:
-            chunk_iter = more_itertools.chunked(df[k], _chunksize)
-            for l in chunk_iter:
-                _chunks[k].append({k: l})
-
-        ### `chunks` is a list of dicts (e.g. orient by rows in pandas JSON).
-        for k, l in _chunks.items():
-            for i, c in enumerate(l):
-                try:
-                    chunks[i].update(c)
-                except IndexError:
-                    chunks.append(c)
-    elif isinstance(df, list):
-        chunks = (df[i] for i in more_itertools.chunked(df, _chunksize))
-
-    ### Send columns in case the user has defined them locally.
-    request_params = kw.copy()
-    if pipe.columns:
-        request_params['columns'] = json.dumps(pipe.columns)
-    request_params['instance_keys'] = self.get_pipe_instance_keys(pipe)
-    r_url = pipe_r_url(pipe) + '/data'
-
-    rowcount = 0
-    num_success_chunks = 0
-    for i, c in enumerate(chunks):
-        if debug:
-            dprint(f"[{self}] Posting chunk {i} to {r_url}...")
-        if len(c) == 0:
-            if debug:
-                dprint(f"[{self}] Skipping empty chunk...")
-            continue
-        json_str = get_json_str(c)
-
-        try:
-            response = self.post(
-                r_url,
-                params=request_params,
-                data=json_str,
-                debug=debug,
-            )
-        except Exception as e:
-            msg = f"Failed to post a chunk to {pipe}:\n{e}"
-            warn(msg)
-            return False, msg
-            
-        if not response:
-            return False, f"Failed to sync a chunk:\n{response.text}"
-
-        try:
-            j = json.loads(response.text)
-        except Exception as e:
-            return False, f"Failed to parse response from syncing {pipe}:\n{e}"
-
-        if isinstance(j, dict) and 'detail' in j:
-            return False, j['detail']
-
-        try:
-            j = tuple(j)
-        except Exception:
-            return False, response.text
-
-        if debug:
-            dprint("Received response: " + str(j))
-        if not j[0]:
-            return j
-
-        rowcount += len(c)
-        num_success_chunks += 1
-
-    self.delete_pipe_cache(pipe, debug=debug)
-    success_tuple = True, (
-        f"It took {interval_str(timedelta(seconds=(time.perf_counter() - begin)))} "
-        + f"to sync {rowcount:,} row"
-        + ('s' if rowcount != 1 else '')
-        + f" across {num_success_chunks:,} chunk" + ('s' if num_success_chunks != 1 else '') +
-        f" to {pipe}."
-    )
-    return success_tuple
+    """
+    Sync a DataFrame (or documents, or a dictionary of lists) into a Pipe.
+    Keyword arguments are sent to the API as query parameters.
+    """
+    if isinstance(df, str):
+        df = json.loads(df)
+    return self._rust_client().sync_pipe(pipe, df, chunksize=chunksize, **kw)
 
 
 def delete_pipe_cache(
@@ -323,19 +134,7 @@ def delete_pipe_cache(
     **kw: Any
 ) -> SuccessTuple:
     """Invalidate the server-side cache for a pipe."""
-    r_url = pipe_r_url(pipe)
-    response = self.delete(
-        r_url + '/cache',
-        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
-        debug=debug,
-    )
-    if not response.ok:
-        return False, f"Failed to invalidate cache for {pipe}: {response.text}"
-    try:
-        data = response.json()
-        return tuple(data) if isinstance(data, list) else (response.ok, response.text)
-    except Exception:
-        return response.ok, response.text
+    return self._rust_client().delete_pipe_cache(pipe)
 
 
 def delete_pipe(
@@ -345,24 +144,8 @@ def delete_pipe(
 ) -> SuccessTuple:
     """Delete a Pipe and drop its table."""
     if pipe is None:
-        error("Pipe cannot be None.")
-    r_url = pipe_r_url(pipe)
-    response = self.delete(
-        r_url + '/delete',
-        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    response_data = response.json()
-    if isinstance(response.json(), list):
-        response_tuple = response_data[0], response_data[1]
-    elif 'detail' in response.json():
-        response_tuple = response.__bool__(), response_data['detail']
-    else:
-        response_tuple = response.__bool__(), response.text
-    return response_tuple
+        raise ValueError("Pipe cannot be None.")
+    return self._rust_client().delete_pipe(pipe)
 
 
 def get_pipe_data(
@@ -375,56 +158,27 @@ def get_pipe_data(
     params: Optional[Dict[str, Any]] = None,
     as_chunks: bool = False,
     debug: bool = False,
+    as_polars: Optional[bool] = None,
+    as_pandas: Optional[bool] = None,
     **kw: Any
-) -> Union[pandas.DataFrame, None]:
-    """Fetch data from the API."""
-    r_url = pipe_r_url(pipe)
-    while True:
-        try:
-            response = self.get(
-                r_url + "/data",
-                params={
-                    'select_columns': json.dumps(select_columns),
-                    'omit_columns': json.dumps(omit_columns),
-                    'begin': begin,
-                    'end': end,
-                    'params': json.dumps(params, default=str),
-                    'instance': self.get_pipe_instance_keys(pipe),
-                    'as_chunks': as_chunks,
-                },
-                debug=debug
-            )
-            if not response.ok:
-                return None
-            j = response.json()
-        except Exception as e:
-            warn(f"Failed to get data for {pipe}:\n{e}")
-            return None
-        if isinstance(j, dict) and 'detail' in j:
-            return False, j['detail']
-        break
-
-    from meerschaum.utils.dataframe import parse_df_datetimes, add_missing_cols_to_df
-    from meerschaum.utils.dtypes import are_dtypes_equal
-    try:
-        df = parse_df_datetimes(
-            j,
-            ignore_cols=[
-                col
-                for col, dtype in pipe.dtypes.items()
-                if not are_dtypes_equal(str(dtype), 'datetime')
-            ],
-            strip_timezone=(pipe.tzinfo is None),
-            debug=debug,
-        )
-    except Exception as e:
-        warn(f"Failed to parse response for {pipe}:\n{e}")
-        return None
-
-    if len(df.columns) == 0:
-        return add_missing_cols_to_df(df, pipe.dtypes)
-
-    return df
+) -> Union['pd.DataFrame', None]:
+    """
+    Fetch data from the API, as a DataFrame of the `meerschaum:dataframe` library
+    (`as_polars=True` / `as_pandas=True` choose one).
+    """
+    from meerschaum.utils.dataframe import frame_from_arrow, frame_library_of
+    df = self._rust_client().get_pipe_data(
+        pipe,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        as_chunks=as_chunks,
+    )
+    if frame_library_of(df) is None:
+        return df
+    return frame_from_arrow(df, as_polars=as_polars, as_pandas=as_pandas)
 
 
 def get_pipe_id(
@@ -433,25 +187,7 @@ def get_pipe_id(
     debug: bool = False,
 ) -> Union[int, str, None]:
     """Get a Pipe's ID from the API."""
-    from meerschaum.utils.misc import is_int
-    r_url = pipe_r_url(pipe)
-    response = self.get(
-        r_url + '/id',
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(f"Got pipe ID: {response.text}")
-    try:
-        if is_int(response.text):
-            return int(response.text)
-        if response.text and response.text[0] != '{':
-            return response.text
-    except Exception as e:
-        warn(f"Failed to get the ID for {pipe}:\n{e}")
-    return None
+    return self._rust_client().get_pipe_id(pipe)
 
 
 def get_pipe_attributes(
@@ -459,33 +195,20 @@ def get_pipe_attributes(
     pipe: mrsm.Pipe,
     debug: bool = False,
 ) -> Dict[str, Any]:
-    """Get a Pipe's attributes from the API
+    """
+    Get a Pipe's attributes from the API.
 
     Parameters
     ----------
     pipe: meerschaum.Pipe
         The pipe whose attributes we are fetching.
-        
+
     Returns
     -------
     A dictionary of a pipe's attributes.
     If the pipe does not exist, return an empty dictionary.
     """
-    r_url = pipe_r_url(pipe)
-    response = self.get(
-        r_url + '/attributes',
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug
-    )
-    response.raise_for_status()
-    attributes = json.loads(response.text)
-    if not isinstance(attributes, dict) or (
-        attributes and not isinstance(attributes.get('parameters'), dict)
-    ):
-        raise ValueError(f"Invalid attributes response for {pipe}.")
-    return attributes
+    return self._rust_client().get_pipe_attributes(pipe)
 
 
 def get_sync_time(
@@ -495,7 +218,8 @@ def get_sync_time(
     newest: bool = True,
     debug: bool = False,
 ) -> Union[datetime, int, None]:
-    """Get a Pipe's most recent datetime value from the API.
+    """
+    Get a Pipe's most recent datetime value from the API.
 
     Parameters
     ----------
@@ -514,37 +238,7 @@ def get_sync_time(
     The most recent (or oldest if `newest` is `False`) datetime of a pipe,
     rounded down to the closest minute.
     """
-    from meerschaum.utils.misc import is_int
-    from meerschaum.utils.warnings import warn
-    r_url = pipe_r_url(pipe)
-    response = self.get(
-        r_url + '/sync_time',
-        json=params,
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-            'newest': newest,
-            'debug': debug,
-        },
-        debug=debug,
-    )
-    if not response:
-        warn(f"Failed to get the sync time for {pipe}:\n" + response.text)
-        return None
-
-    j = response.json()
-    if j is None:
-        dt = None
-    else:
-        try:
-            dt = (
-                datetime.fromisoformat(j)
-                if not is_int(j)
-                else int(j)
-            )
-        except Exception as e:
-            warn(f"Failed to parse the sync time '{j}' for {pipe}:\n{e}")
-            dt = None
-    return dt
+    return self._rust_client().get_sync_time(pipe, params=params, newest=newest)
 
 
 def pipe_exists(
@@ -552,59 +246,33 @@ def pipe_exists(
     pipe: mrsm.Pipe,
     debug: bool = False
 ) -> bool:
-    """Check the API to see if a Pipe exists.
+    """
+    Check the API to see if a Pipe exists.
 
     Parameters
     ----------
     pipe: 'meerschaum.Pipe'
         The pipe which were are querying.
-        
+
     Returns
     -------
     A bool indicating whether a pipe's underlying table exists.
     """
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
-    r_url = pipe_r_url(pipe)
-    response = self.get(
-        r_url + '/exists',
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    if not response:
-        warn(f"Failed to check if {pipe} exists:\n{response.text}")
-        return False
-    if debug:
-        dprint("Received response: " + str(response.text))
-    j = response.json()
-    if isinstance(j, dict) and 'detail' in j:
-        warn(j['detail'])
-    return j
+    return self._rust_client().pipe_exists(pipe)
 
 
 def create_metadata(
     self,
     debug: bool = False
 ) -> bool:
-    """Create metadata tables.
+    """
+    Create metadata tables.
 
     Returns
     -------
     A bool indicating success.
     """
-    from meerschaum.utils.debug import dprint
-    from meerschaum._internal.static import STATIC_CONFIG
-    r_url = STATIC_CONFIG['api']['endpoints']['metadata']
-    response = self.post(r_url, debug=debug)
-    if debug:
-        dprint("Create metadata response: {response.text}")
-    try:
-        _ = json.loads(response.text)
-    except Exception as e:
-        warn(f"Failed to create metadata on {self}:\n{e}")
-    return False
+    return self._rust_client().create_metadata()
 
 
 def get_pipe_rowcount(
@@ -616,13 +284,14 @@ def get_pipe_rowcount(
     remote: bool = False,
     debug: bool = False,
 ) -> int:
-    """Get a pipe's row count from the API.
+    """
+    Get a pipe's row count from the API.
 
     Parameters
     ----------
     pipe: 'meerschaum.Pipe':
         The pipe whose row count we are counting.
-        
+
     begin: Union[str, datetime, int, None], default None
         If provided, bound the count by this datetime.
 
@@ -640,26 +309,13 @@ def get_pipe_rowcount(
     The number of rows in the pipe's table, bound the given parameters.
     If the table does not exist, return 0.
     """
-    r_url = pipe_r_url(pipe)
-    response = self.get(
-        r_url + "/rowcount",
-        json = params,
-        params = {
-            'begin': begin,
-            'end': end,
-            'remote': remote,
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug = debug
+    return self._rust_client().get_pipe_rowcount(
+        pipe,
+        begin=begin,
+        end=end,
+        params=params,
+        remote=remote,
     )
-    if not response:
-        warn(f"Failed to get the rowcount for {pipe}:\n{response.text}")
-        return 0
-    try:
-        return int(json.loads(response.text))
-    except Exception as e:
-        warn(f"Failed to get the rowcount for {pipe}:\n{e}")
-    return 0
 
 
 def drop_pipe(
@@ -674,39 +330,14 @@ def drop_pipe(
     ----------
     pipe: meerschaum.Pipe:
         The pipe to be dropped.
-        
+
     Returns
     -------
     A success tuple (bool, str).
     """
-    from meerschaum.utils.warnings import error
-    from meerschaum.utils.debug import dprint
     if pipe is None:
-        error("Pipe cannot be None.")
-    r_url = pipe_r_url(pipe)
-    response = self.delete(
-        r_url + '/drop',
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    try:
-        data = response.json()
-    except Exception as e:
-        return False, f"Failed to drop {pipe}."
-
-    if isinstance(data, list):
-        response_tuple = data[0], data[1]
-    elif 'detail' in response.json():
-        response_tuple = response.__bool__(), data['detail']
-    else:
-        response_tuple = response.__bool__(), response.text
-
-    return response_tuple
+        raise ValueError("Pipe cannot be None.")
+    return self._rust_client().drop_pipe(pipe)
 
 
 def clear_pipe(
@@ -725,38 +356,21 @@ def clear_pipe(
     ----------
     pipe: meerschaum.Pipe
         The pipe with rows to be deleted.
-        
+
+    begin: Union[str, datetime, int, None], default None
+        Delete rows at or after this datetime.
+
+    end: Union[str, datetime, int, None], default None
+        Delete rows before this datetime.
+
+    params: Optional[Dict[str, Any]], default None
+        Delete rows matching these parameters.
+
     Returns
     -------
     A success tuple.
     """
-    r_url = pipe_r_url(pipe)
-    response = self.delete(
-        r_url + '/clear',
-        params={
-            'begin': begin,
-            'end': end,
-            'params': json.dumps(params),
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    try:
-        data = response.json()
-    except Exception as e:
-        return False, f"Failed to clear {pipe} with constraints {begin=}, {end=}, {params=}."
-
-    if isinstance(data, list):
-        response_tuple = data[0], data[1]
-    elif 'detail' in response.json():
-        response_tuple = response.__bool__(), data['detail']
-    else:
-        response_tuple = response.__bool__(), response.text
-
-    return response_tuple
+    return self._rust_client().clear_pipe(pipe, begin=begin, end=end, params=params)
 
 
 def get_pipe_columns_types(
@@ -774,40 +388,16 @@ def get_pipe_columns_types(
 
     Returns
     -------
-    A dictionary mapping column names to their database types.
-
-    Examples
-    --------
-    >>> {
-    ...   'dt': 'TIMESTAMP WITHOUT TIMEZONE',
-    ...   'id': 'BIGINT',
-    ...   'val': 'DOUBLE PRECISION',
-    ... }
-    >>>
+    A dictionary mapping column names to their database types, or `None` on failure.
     """
-    r_url = pipe_r_url(pipe) + '/columns/types'
-    response = self.get(
-        r_url,
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    j = response.json()
-    if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
-        warn(j['detail'])
-        return None
-    if not isinstance(j, dict):
-        warn(response.text)
-        return None
-    return j
+    return self._rust_client().get_pipe_columns_types(pipe)
 
 
 def get_pipe_columns_indices(
     self,
     pipe: mrsm.Pipe,
     debug: bool = False,
-) -> Union[Dict[str, str], None]:
+) -> Union[Dict[str, List[Dict[str, str]]], None]:
     """
     Fetch the index information for a pipe.
 
@@ -818,24 +408,10 @@ def get_pipe_columns_indices(
 
     Returns
     -------
-    A dictionary mapping column names to a list of associated index information.
+    A dictionary mapping column names to lists of dictionaries with index `name` and `type`,
+    or `None` on failure.
     """
-    r_url = pipe_r_url(pipe) + '/columns/indices'
-    response = self.get(
-        r_url,
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    j = response.json()
-    if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
-        warn(j['detail'])
-        return None
-    if not isinstance(j, dict):
-        warn(response.text)
-        return None
-    return j
+    return self._rust_client().get_pipe_columns_indices(pipe)
 
 
 def get_pipe_docs(
@@ -852,32 +428,16 @@ def get_pipe_docs(
     **kw: Any
 ) -> List[Dict[str, Any]]:
     """Fetch a pipe's data as a list of documents from the API."""
-    r_url = pipe_r_url(pipe)
-    try:
-        response = self.get(
-            r_url + "/docs",
-            params={
-                'select_columns': json.dumps(select_columns),
-                'omit_columns': json.dumps(omit_columns),
-                'begin': begin,
-                'end': end,
-                'params': json.dumps(params, default=str),
-                'order': order,
-                'limit': limit,
-                'instance_keys': self.get_pipe_instance_keys(pipe),
-            },
-            debug=debug,
-        )
-        if not response.ok:
-            warn(f"Failed to get docs for {pipe}:\n{response.text}")
-            return []
-        j = response.json()
-        if isinstance(j, list):
-            return j
-        return []
-    except Exception as e:
-        warn(f"Failed to get docs for {pipe}:\n{e}")
-        return []
+    return self._rust_client().get_pipe_docs(
+        pipe,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        order=order,
+        limit=limit,
+    )
 
 
 def get_pipe_size(
@@ -887,43 +447,9 @@ def get_pipe_size(
     **kw: Any
 ) -> Union[int, None]:
     """
-    Return the on-disk size of a pipe's target table in bytes via the API.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose target table size to measure.
-
-    Returns
-    -------
-    An `int` of the number of bytes occupied by the target table,
-    or `None` if the size could not be determined.
+    Return the size of the pipe's table in bytes, or `None` if it is not available.
     """
-    r_url = pipe_r_url(pipe) + '/size'
-    response = self.get(
-        r_url,
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    if not response:
-        warn(f"Failed to get the size for {pipe}:\n{response.text}")
-        return None
-    try:
-        j = json.loads(response.text)
-    except Exception as e:
-        warn(f"Failed to parse the size for {pipe}:\n{e}")
-        return None
-    if j is None:
-        return None
-    if isinstance(j, dict) and 'detail' in j:
-        warn(j['detail'])
-        return None
-    try:
-        return int(j)
-    except Exception:
-        return None
+    return self._rust_client().get_pipe_size(pipe)
 
 
 def compress_pipe(
@@ -932,39 +458,8 @@ def compress_pipe(
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
-    """
-    Compress a pipe's target table via the API.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose target table to compress.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
-    """
-    r_url = pipe_r_url(pipe) + '/compress'
-    response = self.post(
-        r_url,
-        params={
-            'instance_keys': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    try:
-        data = response.json()
-    except Exception:
-        return False, f"Failed to compress {pipe}."
-
-    if isinstance(data, list):
-        return data[0], data[1]
-    if isinstance(data, dict) and 'detail' in data:
-        return response.__bool__(), data['detail']
-    return response.__bool__(), response.text
+    """Compress a pipe's table on the API instance."""
+    return self._rust_client().compress_pipe(pipe)
 
 
 def decompress_pipe(
@@ -974,43 +469,8 @@ def decompress_pipe(
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
-    """
-    Decompress a pipe's target table via the API, the inverse of `compress_pipe()`.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose target table to decompress.
-
-    no_policy: bool, default False
-        If `True`, decompress existing data now but leave the compression policy in place.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
-    """
-    r_url = pipe_r_url(pipe) + '/decompress'
-    response = self.post(
-        r_url,
-        params={
-            'instance_keys': self.get_pipe_instance_keys(pipe),
-            'no_policy': no_policy,
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    try:
-        data = response.json()
-    except Exception:
-        return False, f"Failed to decompress {pipe}."
-
-    if isinstance(data, list):
-        return data[0], data[1]
-    if isinstance(data, dict) and 'detail' in data:
-        return response.__bool__(), data['detail']
-    return response.__bool__(), response.text
+    """Decompress a pipe's table on the API instance."""
+    return self._rust_client().decompress_pipe(pipe, no_policy=no_policy)
 
 
 def vacuum_pipe(
@@ -1020,43 +480,8 @@ def vacuum_pipe(
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
-    """
-    Vacuum a pipe's target table via the API.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose target table to vacuum.
-
-    full: bool, default False
-        If `True`, run `VACUUM FULL` (PostgreSQL family only).
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
-    """
-    r_url = pipe_r_url(pipe) + '/vacuum'
-    response = self.post(
-        r_url,
-        params={
-            'instance_keys': self.get_pipe_instance_keys(pipe),
-            'full': full,
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    try:
-        data = response.json()
-    except Exception:
-        return False, f"Failed to vacuum {pipe}."
-
-    if isinstance(data, list):
-        return data[0], data[1]
-    if isinstance(data, dict) and 'detail' in data:
-        return response.__bool__(), data['detail']
-    return response.__bool__(), response.text
+    """Vacuum a pipe's table on the API instance."""
+    return self._rust_client().vacuum_pipe(pipe, full=full)
 
 
 def partition_pipe(
@@ -1066,43 +491,8 @@ def partition_pipe(
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
-    """
-    Repartition a pipe's target table to a new chunk width via the API.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The partitioned pipe whose target table to repartition.
-
-    chunk_minutes: Optional[int], default None
-        The new partition width in minutes. Defaults to the pipe's `verify.chunk_minutes`.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
-    """
-    r_url = pipe_r_url(pipe) + '/partition'
-    response = self.post(
-        r_url,
-        params={
-            'instance_keys': self.get_pipe_instance_keys(pipe),
-            **({'chunk_minutes': chunk_minutes} if chunk_minutes is not None else {}),
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    try:
-        data = response.json()
-    except Exception:
-        return False, f"Failed to repartition {pipe}."
-
-    if isinstance(data, list):
-        return data[0], data[1]
-    if isinstance(data, dict) and 'detail' in data:
-        return response.__bool__(), data['detail']
-    return response.__bool__(), response.text
+    """Repartition a pipe's table on the API instance."""
+    return self._rust_client().partition_pipe(pipe, chunk_minutes=chunk_minutes)
 
 
 def analyze_pipe(
@@ -1111,58 +501,14 @@ def analyze_pipe(
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
-    """
-    Analyze a pipe's target table via the API.
-
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose target table to analyze.
-
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
-    """
-    r_url = pipe_r_url(pipe) + '/analyze'
-    response = self.post(
-        r_url,
-        params={
-            'instance_keys': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    if debug:
-        dprint(response.text)
-
-    try:
-        data = response.json()
-    except Exception:
-        return False, f"Failed to analyze {pipe}."
-
-    if isinstance(data, list):
-        return data[0], data[1]
-    if isinstance(data, dict) and 'detail' in data:
-        return response.__bool__(), data['detail']
-    return response.__bool__(), response.text
+    """Analyze a pipe's table on the API instance."""
+    return self._rust_client().analyze_pipe(pipe)
 
 
-def get_pipe_index_names(self, pipe: mrsm.Pipe, debug: bool = False) -> Dict[str, str]:
-    """
-    Return the templated index names.
-    """
-    r_url = pipe_r_url(pipe) + '/indices/names'
-    response = self.get(
-        r_url,
-        params={
-            'instance': self.get_pipe_instance_keys(pipe),
-        },
-        debug=debug,
-    )
-    j = response.json()
-    if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
-        warn(j['detail'])
-        return {}
-    if not isinstance(j, dict):
-        warn(response.text)
-        return {}
-    return j
+def get_pipe_index_names(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Dict[str, str]:
+    """Return the index names of a pipe's table."""
+    return self._rust_client().get_pipe_index_names(pipe)

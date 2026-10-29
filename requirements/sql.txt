@@ -1,0 +1,3 @@
+SQLAlchemy>=2.0.41
+psycopg[binary]>=3.2.9
+PyMySQL>=0.9.0

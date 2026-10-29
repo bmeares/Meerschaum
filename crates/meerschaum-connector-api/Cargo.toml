@@ -1,0 +1,55 @@
+[package]
+name = "meerschaum-connector-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: the APIConnector HTTP client and the shared API route, auth and wire models"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-connector-api"
+keywords = ["meerschaum", "api", "http-client", "etl", "pipelines"]
+categories = ["api-bindings", "web-programming::http-client"]
+include = ["src/**/*", "/LICENSE", "/NOTICE"]
+
+[features]
+default = ["client"]
+# The `APIConnector` HTTP client. Without it the crate only provides the route/auth models
+# (`models`, `routes`, `wire`), so the server can depend on it without pulling in `reqwest`.
+client = ["dep:reqwest", "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util", "dep:rustls", "dep:rustls-platform-verifier", "dep:aws-lc-sys"]
+
+[dependencies]
+meerschaum-connector = { workspace = true }
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true, optional = true, features = ["multipart"] }
+tokio = { workspace = true, optional = true }
+# `rustls-tls-native-roots` only compiles the `wss://` connector type in; the TLS configuration is built
+# in `client::wss` (an explicit crypto provider and the platform verifier, like reqwest), because the
+# crate's own `ClientConfig::builder()` panics when two providers (ring and aws-lc-rs) are compiled in.
+tokio-tungstenite = { version = "0.30", optional = true, features = ["rustls-tls-native-roots"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["std", "tls12", "aws-lc-rs"] }
+rustls-platform-verifier = { version = "0.7", optional = true }
+futures-util = { version = "0.3", optional = true, default-features = false, features = ["std", "sink"] }
+
+# aws-lc-rs (tiberius, reqwest) assembles with NASM on Windows x86_64; the prebuilt objects make the
+# build need no extra tool (a NASM on the PATH is still preferred). Keep this minor equal to the
+# `aws-lc-sys` in Cargo.lock (one aws-lc-sys per tree): bump it together with `aws-lc-rs`.
+[target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
+aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"], optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+base64 = "0.23"
+# The self-signed `wss://` server of `tests/wss.rs`.
+rcgen = "0.14"
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }

@@ -1,0 +1,4 @@
+
+Print a stylized tree of available Meerschaum pipes.
+Respects global ANSI and UNICODE settings.
+

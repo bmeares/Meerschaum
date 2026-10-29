@@ -1,0 +1,47 @@
+[package]
+name = "meerschaum-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Internal crate of Meerschaum: pipes, parameters, the config registry, the dtype vocabulary and Python-compatible helpers"
+readme = "README.md"
+homepage.workspace = true
+documentation = "https://docs.rs/meerschaum-core"
+keywords = ["meerschaum", "etl", "pipelines", "config", "timeseries"]
+categories = ["data-structures", "config"]
+include = ["src/**/*", "static.toml", "/LICENSE", "/NOTICE"]
+
+[dependencies]
+indexmap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+num-bigint = "0.5"
+num-traits = "0.2"
+pep440_rs = "0.7"
+pbkdf2 = { workspace = true, features = ["hmac"] }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+sha1 = { workspace = true }
+sha3 = { workspace = true }
+md-5 = { workspace = true }
+blake2 = { workspace = true }
+ripemd = { workspace = true }
+sm3 = { workspace = true }
+getrandom = "0.4"
+# `dprint!` (`debug.rs`): debug output is a `tracing` event.
+tracing = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# `holder.rs`: the host name in run holders (`uname`).
+rustix = { version = "1", features = ["system"] }
+
+[dev-dependencies]
+tempfile = "3"
