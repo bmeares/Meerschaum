@@ -6,10 +6,13 @@
 import json
 import os
 import pathlib
+import tempfile
 from datetime import datetime, timezone, timedelta
+from functools import wraps
 
 import meerschaum as mrsm
 from meerschaum.connectors import make_connector, Connector, InstanceConnector
+from meerschaum.utils.locks import InterProcessLock
 
 
 @make_connector
@@ -41,10 +44,27 @@ def _load(label: str) -> dict:
 
 def _save(label: str, store: dict) -> None:
     path = _store_path(label)
-    tmp = path.with_suffix('.tmp')
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(store, f, default=str)
-    os.replace(tmp, path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            'w', encoding='utf-8', dir=path.parent, prefix=path.stem + '.',
+            suffix='.tmp', delete=False,
+        ) as stream:
+            temporary = pathlib.Path(stream.name)
+            json.dump(store, stream, default=str)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _transaction(method):
+    """Keep a complete read-modify-write together across worker processes."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with InterProcessLock(_store_path(self.label).with_suffix('.lock')):
+            return method(self, *args, **kwargs)
+    return locked
 
 
 def _key(pipe) -> str:
@@ -58,6 +78,7 @@ class WkmemConnector(InstanceConnector):
     IS_INSTANCE = True
     REQUIRED_ATTRIBUTES = []
 
+    @_transaction
     def register_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         key = _key(pipe)
@@ -85,6 +106,7 @@ class WkmemConnector(InstanceConnector):
         doc = _load(self.label)['pipes'].get(_key(pipe), None)
         return doc['pipe_id'] if doc else None
 
+    @_transaction
     def edit_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         doc = store['pipes'].get(_key(pipe), None)
@@ -94,6 +116,7 @@ class WkmemConnector(InstanceConnector):
         _save(self.label, store)
         return True, "Success"
 
+    @_transaction
     def delete_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         store['pipes'].pop(_key(pipe), None)
@@ -115,6 +138,7 @@ class WkmemConnector(InstanceConnector):
         doc = _load(self.label)['pipes'].get(_key(pipe), None)
         return bool(doc and doc['rows'])
 
+    @_transaction
     def drop_pipe(self, pipe, debug=False, **kwargs):
         store = _load(self.label)
         doc = store['pipes'].get(_key(pipe), None)
@@ -123,6 +147,7 @@ class WkmemConnector(InstanceConnector):
             _save(self.label, store)
         return True, "Success"
 
+    @_transaction
     def sync_pipe(self, pipe, df=None, check_existing=True, debug=False, **kwargs):
         # Native hosts send the configured library, which may differ from this worker's
         # own pandas parity setting. This fixture serializes through pandas in both cases.
@@ -142,6 +167,7 @@ class WkmemConnector(InstanceConnector):
         _save(self.label, store)
         return True, f"Inserted {len(records)} rows (check_existing={check_existing})."
 
+    @_transaction
     def clear_pipe(self, pipe, begin=None, end=None, params=None, debug=False, **kwargs):
         store = _load(self.label)
         doc = store['pipes'].get(_key(pipe), None)

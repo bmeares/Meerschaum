@@ -23,12 +23,6 @@ use common::{TestEnv, assert_same_data, v4_compare};
 /// (`def <plugin_name>()` in the plugin, registered by `load_plugins`) only while the plugin's
 /// venv does not exist yet; once it exists, `mrsm wk hooks` falls through to `sh` (exit code
 /// 127). The worker always runs the action; those cases are asserted separately below.
-fn reference_python() -> std::path::PathBuf {
-    std::env::var_os("MRSM_TEST_PYTHON")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| common::repo_root().join(".venv-ref/bin/python"))
-}
-
 fn v4_entry(env: &TestEnv, cases: &[Vec<&str>]) -> Vec<SuccessTuple> {
     let code = r#"
 import json, sys
@@ -47,15 +41,7 @@ print('\n@@JSON@@' + json.dumps([success, msg]))
         .map(|case| {
             // The reference is the released v4 (`.venv-ref`), run outside the repository: the
             // tree's Python CLI is the native binary now.
-            let mut cmd = std::process::Command::new(reference_python());
-            cmd.args(["-s", "-E", "-c", code])
-                .current_dir(env.root.path())
-                .env_remove("PYTHONPATH");
-            for (k, v) in env.env() {
-                if k != "PYTHONPATH" {
-                    cmd.env(k, v);
-                }
-            }
+            let mut cmd = env.reference_command(code);
             cmd.arg(serde_json::to_string(case).unwrap());
             let out = cmd.output().unwrap();
             let stdout = String::from_utf8_lossy(&out.stdout);

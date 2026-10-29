@@ -1,6 +1,6 @@
 //! Shared harness for the end-to-end worker tests: a temporary root directory and a temporary
-//! plugins directory populated with the synthetic plugins in `tests/plugins/`, and a pool whose
-//! workers run the v4.1.4 package in this repository (`PYTHONPATH=<repo>`).
+//! plugins directory populated with the synthetic plugins in `tests/plugins/`. Workers run the
+//! repository's SDK; comparisons run the released v4.1.4 package from the reference environment.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -178,6 +178,29 @@ impl TestEnv {
         cmd
     }
 
+    /// The released reference, outside the source tree and isolated from Python import overrides.
+    pub fn reference_command(&self, code: &str) -> Command {
+        let python = std::env::var_os("MRSM_TEST_PYTHON")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| repo_root().join(".venv-ref/bin/python"));
+        let guard = "import meerschaum as _reference\n\
+            assert _reference.__version__ == '4.1.4', \
+            f'Expected released Meerschaum 4.1.4, imported {_reference.__version__} from {_reference.__file__}'\n";
+        let mut cmd = Command::new(python);
+        cmd.args(["-s", "-E", "-c", &format!("{guard}{code}")])
+            .current_dir(self.root.path())
+            .env_remove("PYTHONPATH")
+            .env_remove("PYTHONHOME")
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE");
+        for (key, value) in self.env() {
+            if key != "PYTHONPATH" {
+                cmd.env(key, value);
+            }
+        }
+        cmd
+    }
+
     /// Run Python and return stdout (panicking with stderr on failure).
     pub fn run_python(&self, code: &str) -> String {
         let out = self.python_command(code).output().expect("python runs");
@@ -263,7 +286,7 @@ pub fn v4_compare(
     v4_instance: &str,
     rs_instance: &str,
 ) -> serde_json::Value {
-    let mut cmd = env.python_command(V4_COMPARE);
+    let mut cmd = env.reference_command(V4_COMPARE);
     cmd.arg(serde_json::to_string(metrics).unwrap())
         .arg(connector)
         .arg(syncs.to_string())
