@@ -183,6 +183,54 @@ async fn custom_instance_connector_methods() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn custom_instance_concurrent_registration_preserves_all_pipes() {
+    require_python!();
+    let env = TestEnv::new();
+    // One pool per process avoids connector affinity serializing the test's calls.
+    let mut pools = Vec::new();
+    let mut connectors = Vec::new();
+    for _ in 0..4 {
+        let pool = env.pool(1);
+        connectors.push(
+            PythonConnector::connect("wkmem:parallel", pool.clone())
+                .await
+                .unwrap(),
+        );
+        pools.push(pool);
+    }
+    let mut tasks = tokio::task::JoinSet::new();
+    for index in 0..128 {
+        let conn = connectors[index % connectors.len()].clone();
+        tasks.spawn(async move {
+            let pipe = pipe(
+                "test:wk",
+                &format!("registration_{index}"),
+                "wkmem:parallel",
+                "{}",
+            );
+            let result = conn.register_pipe(&pipe).await;
+            assert!(result.success, "{}", result.message);
+            conn.get_pipe_id(&pipe).await.unwrap().unwrap().to_string()
+        });
+    }
+    let mut identities = std::collections::BTreeSet::new();
+    while let Some(result) = tasks.join_next().await {
+        assert!(
+            identities.insert(result.unwrap()),
+            "A registration ID was reused."
+        );
+    }
+    let keys = connectors[0]
+        .fetch_pipes_keys(&PipesKeysQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(keys.len(), 128, "A concurrent registration was lost.");
+    for pool in pools {
+        pool.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn plugin_source_into_custom_instance_matches_v4() {
     require_python!();
     let env = TestEnv::new();
