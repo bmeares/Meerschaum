@@ -284,11 +284,11 @@ jobs:
       - name: DuckDB loader (download, verify, load, query)
         run: scripts/rust/ci.sh duckdb-platform
 
-  # The required status check: always runs, fails only when a job that RAN failed or was cancelled.
+  # Report failures unless the workflow itself was superseded or cancelled.
   # Skipped jobs (nothing they read changed) are fine, so a docs-only push is green with no heavy job.
   summary:
     name: summary
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [ changes, fmt, clippy, test, frontcrate, package, parity, check, duckdb-platforms ]
     runs-on: ubuntu-latest
     timeout-minutes: 5

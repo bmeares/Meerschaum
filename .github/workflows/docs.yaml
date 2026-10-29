@@ -71,7 +71,7 @@ jobs:
 
   summary:
     name: summary
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [changes, build]
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -391,18 +391,19 @@ def test_pytest_builds_once_and_consumes_verified_complete_artifacts(pytest_work
     assert called['profile']['default'] == 'ci' and called['full']['default'] is True
 
 
-def test_every_workflow_job_is_covered_by_a_summary(rust, pytest_workflow):
-    for workflow in (rust, pytest_workflow):
+@pytest.mark.parametrize('cancelled', [False, True])
+def test_every_workflow_job_is_covered_by_a_summary(rust, pytest_workflow, cancelled):
+    for workflow in (rust, pytest_workflow, _load('docs.yaml')):
         jobs = workflow['jobs']
         summary = jobs['summary']
-        assert summary['if'] == '${{ always() }}'
+        assert _evaluate_actions(summary['if'], {'cancelled()': cancelled}) is (not cancelled)
         assert summary['runs-on'] == 'ubuntu-latest'
         assert set(summary['needs']) == set(jobs) - {'summary'}, 'a job missing from the summary is ignored'
 
 
 @pytest.mark.parametrize('status,ok', [('success', True), ('skipped', True), ('failure', False), ('cancelled', False)])
 def test_required_summaries_reject_failed_or_cancelled_work(rust, pytest_workflow, status, ok, tmp_path):
-    for workflow in (rust, pytest_workflow):
+    for workflow in (rust, pytest_workflow, _load('docs.yaml')):
         summary = workflow['jobs']['summary']
         run = next(step['run'] for step in summary['steps'] if "<<'PY'" in step.get('run', ''))
         script = run.split("<<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
@@ -425,10 +426,10 @@ def _evaluate_actions(expression, values):
         token = match.group()
         if token.startswith(("'", '"')) or token == 'fromJSON':
             return token
-        if token in {'true', 'false', 'always()', 'cancelled()'}:
-            return repr(token in {'true', 'always()'})
         if token in values:
             return repr(values[token])
+        if token in {'true', 'false', 'always()', 'cancelled()'}:
+            return repr(token in {'true', 'always()'})
         if re.fullmatch(r'needs\.[\w-]+\.outputs\.[\w-]+', token):
             return repr('true')
         if re.fullmatch(r'needs\.[\w-]+\.result', token):
