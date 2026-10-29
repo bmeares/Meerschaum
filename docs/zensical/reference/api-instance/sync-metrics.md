@@ -43,6 +43,9 @@ Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC dateti
 
 ## In Grafana
 
+??? info "Storage"
+    SQL instances keep measurements in the internal `mrsm_engine_metrics` table, with time, Pipe, run, and registration indexes. TimescaleDB uses 30-day chunks on a microsecond time axis. Upgrading an RC installation corrects undersized intervals for future chunks; retained history stays intact.
+
 The [Stack](../stack/index.md) dashboards show the same affected-row, duration, and failure measurements.
 
 Grafana reads directly with the database credentials configured for its data source. Its visibility follows those database permissions; the console and HTTP API apply their Pipe and team access rules.

@@ -544,6 +544,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
         // Numeric sync outcomes (`crate::sync_metrics`): one row per completed sync.
         "engine_metrics" => {
             r#"{"columns": {"datetime": "ts_us", "primary": "event_id"},
+                    "precision": {"unit": "microsecond"}, "verify": {"chunk_days": 30},
                     "dtypes": {"event_id": "string", "ts_us": "int", "ts": "datetime", "started": "datetime",
                                "pipe_key": "string", "registration_id": "string", "pipe_ref": "string", "instance_keys": "string",
                                "connector_keys": "string", "metric_key": "string", "location_key": "string",
