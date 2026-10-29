@@ -8,7 +8,7 @@
 mod common;
 
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Command;
 use std::sync::Mutex;
 
 use chrono::Utc;
@@ -17,6 +17,31 @@ use meerschaum_jobs::process::cmdline_scans;
 use meerschaum_jobs::{Daemon, Job, JobOptions, JobsContext, Status};
 
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+#[test]
+fn fixture_cleanup_stops_the_supervisor_and_its_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    let child = StandIn::spawn("cleanup", &dir.path().join("jobs"));
+    let parent = child.pid();
+    let mut worker = None;
+    assert!(common::wait_for(5.0, || {
+        worker = meerschaum_jobs::process::children(parent)
+            .and_then(|children| children.first().copied());
+        worker.is_some()
+    }));
+    let worker = worker.unwrap();
+    drop(child);
+    assert!(
+        common::wait_for(5.0, || {
+            matches!(
+                meerschaum_jobs::process::proc_state(worker),
+                meerschaum_jobs::process::ProcState::Gone
+                    | meerschaum_jobs::process::ProcState::Zombie
+            )
+        }),
+        "fixture worker {worker} survived cleanup of {parent}"
+    );
+}
 
 fn ago(seconds: i64) -> String {
     (Utc::now() - chrono::Duration::seconds(seconds))
@@ -59,30 +84,21 @@ fn write_job(
 }
 
 /// A process whose command line looks like a job's supervisor for `jobs_dir`.
-struct StandIn(Child);
+struct StandIn(common::TestProcess);
 
 impl StandIn {
     fn spawn(name: &str, jobs_dir: &Path) -> StandIn {
-        StandIn(
-            Command::new("sh")
-                .args(["-c", "sleep 120; true", "supervisor"])
-                .arg(format!("daemon_id='{name}'"))
-                .arg("--jobs-dir")
-                .arg(jobs_dir)
-                .spawn()
-                .unwrap(),
-        )
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 120; true", "supervisor"])
+            .arg(format!("daemon_id='{name}'"))
+            .arg("--jobs-dir")
+            .arg(jobs_dir);
+        StandIn(common::TestProcess::spawn(command))
     }
 
     fn pid(&self) -> i32 {
         self.0.id() as i32
-    }
-}
-
-impl Drop for StandIn {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
     }
 }
 
@@ -625,12 +641,12 @@ fn without_children_files_a_job_which_lost_its_pid_file_still_reads_running() {
 }
 
 /// A stand-in for a Python (v4) daemon: no `--jobs-dir`, the marker in its command line.
-fn python_daemon(daemon_id: &str, root: &Path) -> Child {
-    Command::new("sh")
+fn python_daemon(daemon_id: &str, root: &Path) -> common::TestProcess {
+    let mut command = Command::new("sh");
+    command
         .args(["-c", "sleep 30; :", &format!("daemon_id='{daemon_id}'")])
-        .env("MRSM_ROOT_DIR", root)
-        .spawn()
-        .unwrap()
+        .env("MRSM_ROOT_DIR", root);
+    common::TestProcess::spawn(command)
 }
 
 #[test]
@@ -640,8 +656,8 @@ fn a_python_daemon_matches_only_the_root_it_was_started_with() {
     let a = tempfile::tempdir().unwrap();
     let b = tempfile::tempdir().unwrap();
     let name = format!("w_root_scope_{}", std::process::id());
-    let mut in_a = python_daemon(&name, a.path());
-    let mut in_b = python_daemon(&name, b.path());
+    let in_a = python_daemon(&name, a.path());
+    let in_b = python_daemon(&name, b.path());
     // Both are in the process table before the scan.
     assert!(common::wait_for(5.0, || {
         meerschaum_jobs::process::process_cmdlines()
@@ -659,10 +675,6 @@ fn a_python_daemon_matches_only_the_root_it_was_started_with() {
     };
     let found_a = found(a.path());
     let found_b = found(b.path());
-    let _ = in_a.kill();
-    let _ = in_b.kill();
-    let _ = in_a.wait();
-    let _ = in_b.wait();
     assert_eq!(found_a, vec![in_a.id() as i32]);
     assert_eq!(found_b, vec![in_b.id() as i32]);
 }

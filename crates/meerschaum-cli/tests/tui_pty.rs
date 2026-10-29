@@ -808,6 +808,27 @@ fn line_output_follows_a_run_until_it_ends() {
 }
 
 #[test]
+fn line_output_finishes_when_event_history_is_disabled() {
+    let mut setup = Setup::new("noevents");
+    let config = setup
+        .env
+        .iter_mut()
+        .find(|(key, _)| key == "MRSM_CONFIG")
+        .unwrap();
+    let mut value: serde_json::Value = serde_json::from_str(&config.1).unwrap();
+    value["system"]["engine"]["events"] = "off".into();
+    config.1 = value.to_string();
+    let run_id = setup.run();
+    let (success, out, err) = mrsm(&setup.env, &["watch", "run", &run_id]);
+    assert!(success, "{out}\n{err}");
+    assert!(out.contains("2 synced"), "{out}");
+    assert!(
+        !out.contains("run started") && !out.contains("run succeeded"),
+        "{out}"
+    );
+}
+
+#[test]
 fn a_run_whose_process_died_is_not_followed_forever() {
     let setup = Setup::new("deadrun");
     setup.slow_chain();

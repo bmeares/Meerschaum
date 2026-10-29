@@ -10,6 +10,8 @@ final-status-level = "slow"
 slow-timeout = { period = "60s", terminate-after = 10 }
 # Run at most this many tests at once (a CI runner shares its host with other services; the default is one per core).
 test-threads = 16
+# A surviving child process is a test failure even when its parent returned success.
+leak-timeout = { period = "100ms", result = "fail" }
 
 # The live Valkey tests of `meerschaum-connector-valkey` share one database of the test server
 # (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`), and `valkey_replay`'s

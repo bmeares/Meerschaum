@@ -32,6 +32,7 @@ mod triggers;
 use crate::events::{Event, EventKind, EventRow, EventSink};
 use crate::executor::{
     ExecuteContext, ExecutorOptions, LeaseHold, LeaseSource, Limits, Priority, execute,
+    execute_deferred, record_finished_run,
 };
 use crate::graph::{Graph, GraphOptions};
 use crate::instance_state::InstanceState;
@@ -1222,11 +1223,13 @@ impl Engine {
                 // that keeps failing gives them up after `MAX_FAILURES` flushes.
                 const MAX_FAILURES: u32 = 20;
                 let mut failures = 0u32;
+                let mut lost = None;
                 loop {
                     let stopped = stop.sleep(every).await;
                     let rows: Vec<EventRow> =
                         std::mem::take(&mut *buf.lock().unwrap_or_else(|e| e.into_inner()));
                     let mut pending = rows;
+                    let mut last_error = None;
                     // At the end, a few quick retries before giving up.
                     let attempts = if stopped { 4 } else { 1 };
                     for attempt in 0..attempts {
@@ -1241,6 +1244,7 @@ impl Engine {
                             Err(e) => {
                                 failures += 1;
                                 tracing::debug!("Cannot persist engine events: {e}");
+                                last_error = Some(e.to_string());
                                 if attempt + 1 < attempts {
                                     tokio::time::sleep(Duration::from_millis(250)).await;
                                 }
@@ -1251,9 +1255,11 @@ impl Engine {
                         let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner());
                         pending.append(&mut guard);
                         *guard = pending;
+                    } else if !pending.is_empty() {
+                        lost = last_error;
                     }
                     if stopped {
-                        return;
+                        return lost.map_or(Ok(()), Err);
                     }
                 }
             })
@@ -1283,7 +1289,7 @@ impl Engine {
             },
         };
         let memory_state;
-        let record = if self.config.persist_runs {
+        let mut record = if self.config.persist_runs {
             let ctx = ExecuteContext {
                 graph: &graph,
                 subgraph: &sub,
@@ -1293,7 +1299,7 @@ impl Engine {
                 sink: sink.clone(),
                 durations: &durations,
             };
-            execute(ctx, the_plan.clone(), &exec_opts).await
+            execute_deferred(ctx, the_plan.clone(), &exec_opts).await
         } else {
             // Run history stays in memory; cursors and hashes still go to the instances.
             memory_state = NoRunHistory(self.state.clone());
@@ -1310,7 +1316,22 @@ impl Engine {
         };
         flusher_stop.stop();
         if let Some(h) = flusher {
-            let _ = h.await;
+            let error = match h.await {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(error),
+                Err(error) => Some(error.to_string()),
+            };
+            if let Some(error) = error {
+                let warning = format!("Cannot persist complete run event history: {error}");
+                tracing::warn!("{warning}");
+                if let Some(message) = record.run.message.as_mut() {
+                    message.push_str(&format!("\nwarning: {warning}"));
+                }
+                warnings.push(warning);
+            }
+        }
+        if self.config.persist_runs {
+            record_finished_run(self.state.as_ref(), &mut record).await;
         }
         // The nodes' sync statuses (written in the background as each node ended).
         self.state

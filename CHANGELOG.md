@@ -59,6 +59,7 @@ Self-registration closes after the first administrator unless configured otherwi
 
 - Replace an authoritative time window with `pipe.sync(rows, begin=..., end=..., replace=True)`.
 - Persist numeric sync metrics across processes, with current access checks before aggregation.
+- Save run events before marking completion, keeping `mrsm watch run` output complete.
 - Keep private history private when a Pipe or Pipeline is deleted, recreated, or its access changes.
 - Bound SQL parent reads before window functions, keeping incremental syncs fast.
 - Use 30-day TimescaleDB metrics partitions and correct undersized RC partitions.

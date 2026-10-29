@@ -2,6 +2,8 @@
 //! removal (`DELETE /jobs/%2E%2E` once resolved to the whole root directory).
 #![cfg(unix)]
 
+mod common;
+
 use meerschaum_jobs::daemon::Daemon;
 use meerschaum_jobs::executor::JobExecutor;
 use meerschaum_jobs::job::{Job, JobOptions};
@@ -87,7 +89,8 @@ fn a_same_named_supervisor_of_another_root_is_not_found() {
     let (dir, ctx) = context();
     let other_jobs = dir.path().join("other-root/jobs");
     std::fs::create_dir_all(&other_jobs).unwrap();
-    let mut child = std::process::Command::new("sh")
+    let mut command = std::process::Command::new("sh");
+    command
         .args([
             "-c",
             "sleep 60; true",
@@ -95,9 +98,8 @@ fn a_same_named_supervisor_of_another_root_is_not_found() {
             "daemon_id='dupe'",
             "--jobs-dir",
         ])
-        .arg(&other_jobs)
-        .spawn()
-        .unwrap();
+        .arg(&other_jobs);
+    let mut child = common::TestProcess::spawn(command);
     // The command line is visible once the shell has exec'ed (a moment).
     // A job is only searched for once it has recorded that it began (and not that it ended).
     let began = |ctx: &JobsContext| {
@@ -126,10 +128,5 @@ fn a_same_named_supervisor_of_another_root_is_not_found() {
     assert_eq!(seen(&ctx), None);
     let daemon = Daemon::new("dupe", vec![], None, Default::default(), &ctx);
     assert_eq!(daemon.kill_detached_processes(None), 0);
-    assert!(
-        child.try_wait().unwrap().is_none(),
-        "the other root's process was killed"
-    );
-    let _ = child.kill();
-    let _ = child.wait();
+    assert!(child.running(), "the other root's process was killed");
 }

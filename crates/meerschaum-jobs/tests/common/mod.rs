@@ -6,6 +6,40 @@ use std::path::{Path, PathBuf};
 use meerschaum_core::value::Value;
 use meerschaum_jobs::{JobsContext, Launcher};
 
+/// A fixture's private process group, including children which inherit the test's pipes.
+#[cfg(unix)]
+pub struct TestProcess(std::process::Child);
+
+#[cfg(unix)]
+impl TestProcess {
+    pub fn spawn(mut command: std::process::Command) -> Self {
+        use std::os::unix::process::CommandExt;
+        command
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .process_group(0);
+        Self(command.spawn().unwrap())
+    }
+
+    pub fn id(&self) -> u32 {
+        self.0.id()
+    }
+
+    pub fn running(&mut self) -> bool {
+        self.0.try_wait().unwrap().is_none()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for TestProcess {
+    fn drop(&mut self) {
+        use nix::sys::signal::{Signal, killpg};
+        use nix::unistd::Pid;
+        let _ = killpg(Pid::from_raw(self.0.id() as i32), Signal::SIGKILL);
+        let _ = self.0.wait();
+    }
+}
+
 /// The crate's fixture directory.
 pub fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
