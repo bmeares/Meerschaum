@@ -152,7 +152,9 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
                 html.Div([
                     html.H4('Members'),
                     html.Ul(preview) if preview else html.P('No visible members'),
-                    html.P('Members sync independently.') if definition.get('graph') is False else None,
+                    (html.P('Members sync independently.')
+                     if definition.get('graph') is False and not definition.get('parents')
+                     and not definition.get('children') else None),
                     html.P(traversal) if traversal else None,
                 ], className='pipeline-member-preview'),
                 html.Div([
