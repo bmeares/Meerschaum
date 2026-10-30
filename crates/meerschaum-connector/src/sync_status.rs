@@ -56,7 +56,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
@@ -1022,9 +1022,21 @@ struct Track {
     /// A writer task writes `queue` (until it is empty).
     writing: bool,
     /// Where the outcomes go: the instance connector and the pipe of the latest outcome.
+    /// Held strongly only while an outcome still needs to be written.
     target: Option<(Arc<dyn InstanceConnector>, Pipe)>,
+    /// Preserve debounce state while the caller still owns this connector.
+    owner: Option<Weak<dyn InstanceConnector>>,
     /// Bumped when the pipe's state is forgotten ([`forget`]): nothing decided before is written.
     epoch: u64,
+}
+
+impl Track {
+    fn take_idle_target(&mut self) -> Option<(Arc<dyn InstanceConnector>, Pipe)> {
+        if self.writing || self.pending.is_some() || !self.queue.is_empty() {
+            return None;
+        }
+        self.target.take()
+    }
 }
 
 /// What [`decide`] says to do with an outcome.
@@ -1060,6 +1072,37 @@ struct State {
     pid: u32,
     tracks: HashMap<TrackKey, Track>,
     locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
+    next_epoch: u64,
+    last_prune: Option<Instant>,
+}
+
+impl State {
+    fn new_epoch(&mut self) -> u64 {
+        self.next_epoch = self.next_epoch.wrapping_add(1);
+        self.next_epoch
+    }
+
+    fn prune_idle(&mut self) {
+        let now = Instant::now();
+        if self
+            .last_prune
+            .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+        {
+            return;
+        }
+        self.last_prune = Some(now);
+        self.tracks.retain(|_, track| {
+            track.writing
+                || track.pending.is_some()
+                || !track.queue.is_empty()
+                || track.target.is_some()
+                || track
+                    .owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.strong_count() > 0)
+        });
+        self.locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+    }
 }
 
 /// The recording state of this process (reset when the process ID changed: a fork).
@@ -1155,7 +1198,14 @@ fn record_in(
     let key = TrackKey::new(conn.as_ref(), &pipe.pipe_ref());
     let (start, timer, _replaced) = {
         let mut state = state();
-        let track = state.tracks.entry(key.clone()).or_default();
+        state.prune_idle();
+        // An old timer must not act on a new connector that reuses a freed address.
+        let epoch = state.new_epoch();
+        let track = state.tracks.entry(key.clone()).or_insert_with(|| Track {
+            epoch,
+            ..Track::default()
+        });
+        track.owner = Some(Arc::downgrade(&conn));
         if track.registration_id != outcome.registration_id {
             track.registration_id = outcome.registration_id.clone();
             track.last_write = None;
@@ -1193,9 +1243,14 @@ struct WriterGuard {
 impl Drop for WriterGuard {
     fn drop(&mut self) {
         if self.armed {
-            if let Some(track) = state().tracks.get_mut(&self.key) {
-                track.writing = false;
-            }
+            let retired = {
+                let mut state = state();
+                state.tracks.get_mut(&self.key).and_then(|track| {
+                    track.writing = false;
+                    track.take_idle_target()
+                })
+            };
+            drop(retired);
             changed().notify_waiters();
         }
     }
@@ -1228,8 +1283,10 @@ async fn write_queue(key: TrackKey, mut guard: WriterGuard) {
             };
             if track.queue.is_empty() {
                 track.writing = false;
+                let retired = track.take_idle_target();
                 guard.armed = false;
                 drop(state);
+                drop(retired);
                 changed().notify_waiters();
                 return;
             }
@@ -1284,12 +1341,19 @@ struct TimerGuard {
 
 impl Drop for TimerGuard {
     fn drop(&mut self) {
-        if self.armed
-            && let Some(track) = state().tracks.get_mut(&self.key)
-            && track.epoch == self.epoch
-        {
-            track.flush_scheduled = false;
-        }
+        let retired = {
+            let mut state = state();
+            match state.tracks.get_mut(&self.key) {
+                Some(track) if track.epoch == self.epoch => {
+                    if self.armed {
+                        track.flush_scheduled = false;
+                    }
+                    track.take_idle_target()
+                }
+                _ => None,
+            }
+        };
+        drop(retired);
     }
 }
 
@@ -1456,17 +1520,27 @@ async fn forget_tracks(
     pipe_ref: &str,
     owner: Option<usize>,
 ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-    for (key, track) in &mut state().tracks {
-        if key.pipe_ref != pipe_ref || owner.is_some_and(|owner| key.owner != owner) {
-            continue;
+    let retired = {
+        let mut state = state();
+        let epoch = state.new_epoch();
+        let mut retired = Vec::new();
+        for (key, track) in &mut state.tracks {
+            if key.pipe_ref != pipe_ref || owner.is_some_and(|owner| key.owner != owner) {
+                continue;
+            }
+            track.epoch = epoch;
+            track.pending = None;
+            track.queue.clear();
+            track.flush_scheduled = false;
+            track.last_write = None;
+            track.last_success = false;
+            if let Some(target) = track.take_idle_target() {
+                retired.push(target);
+            }
         }
-        track.epoch = track.epoch.wrapping_add(1);
-        track.pending = None;
-        track.queue.clear();
-        track.flush_scheduled = false;
-        track.last_write = None;
-        track.last_success = false;
-    }
+        retired
+    };
+    drop(retired);
     changed().notify_waiters();
     let lock = write_lock(pipe_ref);
     tokio::time::timeout(RECORD_TIMEOUT, lock.lock_owned())
@@ -1737,7 +1811,7 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         statuses: Mutex<HashMap<String, SyncStatus>>,
-        writes: AtomicUsize,
+        writes: Arc<AtomicUsize>,
         write_delay: Duration,
         gone: AtomicBool,
         metrics: Mutex<HashMap<String, crate::sync_metrics::SyncMetric>>,
@@ -1904,6 +1978,95 @@ mod tests {
         assert_eq!(fake.writes(), 1);
         let s = fake.stored(&pipe).unwrap();
         assert_eq!((s.success, s.consecutive_failures), (false, 1));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn completed_status_writes_release_transient_connectors() {
+        let _serial = HELD.lock().await;
+        let fake = Fake::slow(Duration::from_millis(20));
+        let writes = fake.writes.clone();
+        let owner = Arc::downgrade(&fake);
+        let pipe = unique_pipe("transient_status_owner");
+        record(fake.clone(), &pipe, outcome(false, 0));
+        drop(fake);
+        assert!(
+            owner.upgrade().is_some(),
+            "the queued write lost its connector"
+        );
+        written(&pipe.pipe_ref()).await;
+        assert_eq!(writes.load(Ordering::SeqCst), 1);
+        for _ in 0..100 {
+            if owner.strong_count() == 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert!(
+            owner.upgrade().is_none(),
+            "completed telemetry retained its connector"
+        );
+    }
+
+    #[tokio::test]
+    async fn held_status_keeps_its_connector_only_until_flushed() {
+        let _serial = HELD.lock().await;
+        let fake = Fake::new();
+        let writes = fake.writes.clone();
+        let owner = Arc::downgrade(&fake);
+        let pipe = unique_pipe("held_transient_owner");
+        let window = Duration::from_secs(60);
+        record_in(fake.clone(), &pipe, outcome(true, 1), window);
+        written(&pipe.pipe_ref()).await;
+        record_in(fake.clone(), &pipe, outcome(true, 2), window);
+        drop(fake);
+        assert!(
+            owner.upgrade().is_some(),
+            "the held success lost its connector"
+        );
+        settle_pipe(&pipe.pipe_ref()).await;
+        assert_eq!(writes.load(Ordering::SeqCst), 2);
+        assert!(
+            owner.upgrade().is_none(),
+            "the flushed success retained its connector"
+        );
+    }
+
+    #[tokio::test]
+    async fn old_timer_cannot_flush_a_recreated_recording_track() {
+        let _serial = HELD.lock().await;
+        let fake = Fake::new();
+        let pipe = unique_pipe("recreated_track");
+        let key = TrackKey::new(fake.as_ref(), &pipe.pipe_ref());
+        let window = Duration::from_secs(60);
+        record_in(fake.clone(), &pipe, outcome(true, 1), window);
+        written(&pipe.pipe_ref()).await;
+        record_in(fake.clone(), &pipe, outcome(true, 2), window);
+        let old_epoch = state().tracks[&key].epoch;
+        settle_pipe(&pipe.pipe_ref()).await;
+        // Recreate the same key, as when an allocator reuses a retired connector's address.
+        state().tracks.remove(&key);
+        record_in(fake.clone(), &pipe, outcome(true, 3), window);
+        written(&pipe.pipe_ref()).await;
+        record_in(fake.clone(), &pipe, outcome(true, 4), window);
+        write_held(
+            key.clone(),
+            Instant::now(),
+            TimerGuard {
+                key,
+                epoch: old_epoch,
+                armed: true,
+            },
+        )
+        .await;
+        written(&pipe.pipe_ref()).await;
+        assert_eq!(
+            fake.writes(),
+            3,
+            "an old timer flushed the new owner's held success"
+        );
+        assert_eq!(fake.stored(&pipe).unwrap().message, "o3");
+        settle_pipe(&pipe.pipe_ref()).await;
+        assert_eq!(fake.stored(&pipe).unwrap().message, "o4");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
