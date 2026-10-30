@@ -504,7 +504,20 @@ impl EngineReader {
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.started.cmp(&b.started))
         });
-        let history = self.state.node_history(None).await.unwrap_or_default();
+        let duration_nodes: Vec<_> = nodes
+            .iter()
+            .map(|node| (node.pipe_ref.clone(), node.action))
+            .collect();
+        let history = self
+            .state
+            .node_duration_history(
+                &duration_nodes,
+                None,
+                Some(run.started),
+                self.config.duration_history_limit(),
+            )
+            .await
+            .unwrap_or_default();
         let estimates = crate::schedule::EwmaDurations::from_history(
             history
                 .iter()

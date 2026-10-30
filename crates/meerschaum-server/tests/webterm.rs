@@ -596,21 +596,52 @@ async fn closing_the_socket_ends_the_shell() {
         .and_then(|l| l.split(':').nth(1))
         .and_then(|n| n.parse().ok())
         .expect("the shell's pid");
+    let mut other = connect(addr, OTHER_ADMIN_SESSION).await;
+    expect_setup(&mut other).await;
+    send_json(&mut other, json!(["stdin", "echo shellpid:$$:end\n"])).await;
+    let out = read_until(&mut other, |out| {
+        has_line_matching(out, "shellpid:", ":end")
+    })
+    .await;
+    let other_pid: i32 = plain(&out)
+        .split(['\r', '\n'])
+        .find(|line| line.starts_with("shellpid:") && line.ends_with(":end"))
+        .and_then(|line| line.split(':').nth(1))
+        .and_then(|pid| pid.parse().ok())
+        .expect("the other shell's pid");
+    let state_dir = state.config.webterm_resources_path.join("shell-state");
+    let readiness = state_dir.join(format!("{pid}.json"));
+    let other_readiness = state_dir.join(format!("{other_pid}.json"));
+    // `sh` has no readiness guard: simulate files left behind by abruptly killed shells.
+    std::fs::write(
+        &readiness,
+        json!({"pid":pid,"idle":true,"empty":true}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        &other_readiness,
+        json!({"pid":other_pid,"idle":true,"empty":true}).to_string(),
+    )
+    .unwrap();
     let alive = |pid: i32| std::path::Path::new(&format!("/proc/{pid}")).exists();
     // (`/proc` is Linux-only; elsewhere the pid check below is skipped.)
     let checkable = alive(pid);
     socket.close(None).await.unwrap();
     drop(socket);
-    if !checkable {
-        return;
-    }
     for _ in 0..100 {
-        if !alive(pid) {
+        if !readiness.exists() && (!checkable || !alive(pid)) {
+            assert!(
+                other_readiness.exists(),
+                "another terminal's readiness was removed"
+            );
+            send_json(&mut other, json!(["stdin", "echo still-alive\n"])).await;
+            read_until(&mut other, |out| has_line(out, "still-alive")).await;
+            other.close(None).await.unwrap();
             return;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    panic!("the shell {pid} outlived its socket");
+    panic!("the shell {pid} or its readiness outlived its socket");
 }
 
 #[tokio::test]

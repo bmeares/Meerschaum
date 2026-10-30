@@ -148,7 +148,7 @@ pub struct Schedule {
 /// The action a node is expected to run. A provisional `skip` (a child planned against state
 /// its running parents are about to change) is re-planned when they finish and usually syncs
 /// then, so it is scheduled as an `incremental`.
-fn expected_action(node: &crate::plan::PlannedNode) -> Action {
+pub(crate) fn expected_action(node: &crate::plan::PlannedNode) -> Action {
     if node.provisional && node.action == Action::Skip {
         Action::Incremental
     } else {

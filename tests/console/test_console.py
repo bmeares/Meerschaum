@@ -368,7 +368,8 @@ def test_exec_preserves_input_typed_while_readiness_is_in_flight(webterm_server,
     assert snapshots, 'The shell did not publish readiness.'
     frame.evaluate("terminal.term.input('exit\\r')")
     frame.wait_for_function("document.querySelector('.xterm-rows').innerText.includes('[CLOSED]')")
-    assert all(not path.exists() for path in snapshots), 'Exited shell retained stale readiness.'
+    remaining = [path.name for path in snapshots if path.exists()]
+    assert not remaining, f'Exited shell retained stale readiness: {remaining}'
     assert _errors(tab) == [], _errors(tab)
     page.close()
 

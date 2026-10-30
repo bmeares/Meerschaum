@@ -1110,7 +1110,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         return;
     }
 
-    let _webterm_state = webterm::Guard;
+    let webterm_state = webterm::Guard;
     webterm::update(false, false);
     let history_path = rt.config().paths().path("SHELL_HISTORY_PATH");
     let max_history = rt
@@ -1131,6 +1131,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
                 break;
             }
         }
+        drop(webterm_state);
         close(rt);
         return;
     }
@@ -1241,6 +1242,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
             }
         }
     }
+    drop(webterm_state);
     close(rt);
 }
 

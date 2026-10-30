@@ -170,6 +170,12 @@ impl Default for EngineConfig {
 }
 
 impl EngineConfig {
+    /// Bound duration samples per pipe while retaining the smoothing factor's recent tail.
+    pub(crate) fn duration_history_limit(&self) -> usize {
+        let alpha = self.ewma_alpha.clamp(f64::EPSILON, 1.0);
+        ((1e-6_f64.ln() / (-alpha).ln_1p()).ceil() as usize).clamp(64, 1024)
+    }
+
     /// Read `system.engine.*` from a config registry; `root_dir` locates the lease fallback.
     pub fn from_config(config: &Config, root_dir: Option<&std::path::Path>) -> EngineConfig {
         let d = EngineConfig::default();
@@ -1157,11 +1163,24 @@ impl Engine {
             );
         }
 
+        let duration_nodes: Vec<_> = the_plan
+            .nodes
+            .iter()
+            .map(|node| {
+                (
+                    node.pipe_ref.clone(),
+                    crate::schedule::expected_action(node),
+                )
+            })
+            .collect();
         let durations = match self
             .state
-            .node_history(Some(
-                Utc::now() - chrono::TimeDelta::days(self.config.run_history_days),
-            ))
+            .node_duration_history(
+                &duration_nodes,
+                Some(Utc::now() - chrono::TimeDelta::days(self.config.run_history_days)),
+                None,
+                self.config.duration_history_limit(),
+            )
             .await
         {
             Ok(rows) => EwmaDurations::from_history(
