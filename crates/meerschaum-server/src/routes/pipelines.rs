@@ -152,6 +152,15 @@ async fn parameters(body: Body, name: &str) -> Result<Map, ApiError> {
             "Pipeline definition name must match the route.",
         ));
     }
+    if definition
+        .get("graph")
+        .is_some_and(|value| !value.is_null() && !value.is_boolean())
+    {
+        return Err(ApiError::new(
+            400,
+            "Pipeline graph must be a boolean or null.",
+        ));
+    }
     if definition.get("targets").is_some_and(|targets| {
         !targets
             .as_array()

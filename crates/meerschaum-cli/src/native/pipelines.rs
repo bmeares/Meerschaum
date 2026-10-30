@@ -141,6 +141,8 @@ pub struct Definition {
     pub targets: Vec<String>,
     pub parents: Json,
     pub children: Json,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<bool>,
     pub description: String,
     pub defaults: BTreeMap<String, Json>,
     pub layout: Json,
@@ -418,7 +420,7 @@ fn resolve_graph(
         Selection::refs(definition.targets.iter().map(PipeRef::from_string))
             .with_parents(super::sync::depth(&effective, "parents"))
             .with_children(super::sync::depth(&effective, "children"))
-            .with_graph(true),
+            .with_graph(definition.graph.unwrap_or(true)),
     );
     let (_, sub, _) = session.block_on(engine.resolve(&opts)).map_err(error)?;
     Ok(sub)
@@ -1297,6 +1299,7 @@ fn save(
                 "targets",
                 "parents",
                 "children",
+                "graph",
                 "description",
                 "defaults",
                 "layout",
@@ -1567,6 +1570,15 @@ fn prepare_run(
     continuous: bool,
 ) -> Result<Option<PreparedRun>, ActionError> {
     let definitions = names(rt, instance, args, true)?;
+    let graph = definitions[0].graph.unwrap_or(true);
+    if definitions
+        .iter()
+        .any(|definition| definition.graph.unwrap_or(true) != graph)
+    {
+        return Err(error(
+            "Combined Pipelines have conflicting graph settings; run them separately.",
+        ));
+    }
     let default_keys: BTreeSet<_> = definitions
         .iter()
         .flat_map(|definition| definition.defaults.keys())
@@ -1615,7 +1627,7 @@ fn prepare_run(
         &super::sync::SyncArgs::from_args(&effective),
     );
     options.selection =
-        Some(Selection::refs(refs.iter().map(PipeRef::from_string)).with_graph(true));
+        Some(Selection::refs(refs.iter().map(PipeRef::from_string)).with_graph(graph));
     options.pipeline_definitions = definitions
         .iter()
         .map(|d| serde_json::to_value(d).unwrap())

@@ -428,6 +428,34 @@ def test_execution_defaults_cannot_override_definition_structure(saved_members):
     assert name not in list_pipelines(conn)
 
 
+def test_saved_execution_mode_survives_edits_copies_and_reload(saved_members):
+    from meerschaum.core.Pipeline._saved import copy_pipeline
+    conn, name, pipes = saved_members
+    pipeline = mrsm.Pipeline(pipes[:1], instance=conn, graph=False)
+    assert pipeline.save(name)[0]
+    assert load_pipeline(name, conn).graph is False
+    save_pipeline(name, pipes[:1], conn, description='Updated')
+    assert load_pipeline(name, conn).graph is False
+    copied = name + '-copy'
+    try:
+        copy_pipeline(name, copied, conn)
+        assert load_pipeline(copied, conn).graph is False
+    finally:
+        delete_pipeline(copied, conn)
+    loaded = load_pipeline(name, conn)
+    loaded.graph = True
+    assert loaded.save()[0]
+    assert load_pipeline(name, conn).graph is True
+
+
+def test_new_named_pipelines_default_to_dependency_scheduling(saved_members):
+    conn, name, pipes = saved_members
+    pipeline = mrsm.Pipeline(pipes[:1], instance=conn)
+    assert pipeline.graph is False
+    assert pipeline.save(name)[0]
+    assert load_pipeline(name, conn).graph is True
+
+
 def test_saved_bounds_used_when_omitted_and_explicit_none_clears(saved_members, monkeypatch):
     import importlib
     module = importlib.import_module('meerschaum.core.Pipeline')

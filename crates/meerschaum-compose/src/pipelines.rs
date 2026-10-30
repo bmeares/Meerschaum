@@ -171,6 +171,7 @@ pub fn defined(
                 "pipes",
                 "parents",
                 "children",
+                "graph",
                 "defaults",
             ]
             .contains(&key.as_str())
@@ -268,6 +269,11 @@ pub fn defined(
             }
         }
         let mut definition = Map::new();
+        let graph = spec.get("graph").cloned().unwrap_or(Value::Bool(true));
+        if !matches!(graph, Value::Bool(_)) {
+            return Err(invalid(&format!("{path}.graph"), "expected a boolean"));
+        }
+        definition.insert("graph".into(), graph);
         definition.insert(
             "targets".into(),
             Value::List(targets.into_iter().map(Value::from).collect()),

@@ -82,6 +82,21 @@ fn exact_members_keep_the_project_instance_when_the_registry_changes() {
         ])
     );
     assert_eq!(specs[0].definition["parents"], Value::Bool(false));
+    assert_eq!(specs[0].definition["graph"], Value::Bool(true));
+}
+
+#[test]
+fn independent_execution_is_explicit_and_boolean() {
+    let body = DECLARATION.replace("description: Daily totals", "graph: false");
+    assert_eq!(
+        Fixture::new(&body).definitions().unwrap()[0].definition["graph"],
+        Value::Bool(false)
+    );
+    assert!(
+        Fixture::new(&body.replace("graph: false", "graph: 'false'"))
+            .definitions()
+            .is_err()
+    );
 }
 
 #[test]

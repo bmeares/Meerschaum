@@ -47,6 +47,7 @@ data. `up` and `run` also apply Pipeline definitions before executing their work
 | `pipes` | Required | Nonempty list of exact member keys. |
 | `instance` | Project instance | Registry that stores this definition. |
 | `description` | Empty | Short explanation of the work. |
+| `graph` | `true` | Respect dependencies between selected members. |
 | `parents`, `children` | `false` | Include dependencies or descendants; a nonnegative integer limits depth. |
 | `defaults` | `{}` | Execution options such as `workers`, `retries`, and `chunksize`. |
 
@@ -85,3 +86,10 @@ A Pipe may belong to several Pipelines.
 
 Listeners, API servers, backups, verification, and custom actions remain ordinary
 Jobs. A Pipeline groups Pipe syncs; it does not replace action chains.
+
+??? tip "Migrating existing independent Jobs"
+
+    Set `graph: false` with `parents` and `children` left at `false` to keep each
+    member syncing independently. Named Pipelines still provide navigation and run
+    history. Preview before enabling dependencies: retained parent changes may be
+    backfilled.

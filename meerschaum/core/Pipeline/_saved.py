@@ -89,6 +89,10 @@ def _normalize(definition, name, registry):
     result.setdefault('defaults', {})
     result.setdefault('layout', {})
     result.setdefault('tag_associations', [])
+    if result.get('graph') is None:
+        result['graph'] = True
+    if not isinstance(result['graph'], bool):
+        raise ValueError('Pipeline graph must be a boolean.')
     return result
 
 
@@ -190,7 +194,7 @@ def _refs(targets, instance):
 @_locked_registry
 def save_pipeline(name, targets, instance=None, parents=None, children=None, *,
                   expected_revision=None, description=None, defaults=None, layout=None, create=False,
-                  access=None, locks=None):
+                  access=None, locks=None, graph=None):
     """Save exact membership; optional expected_revision rejects a stale editor.
 
     `access` and `locks`, when given, are part of the registration's first write. Otherwise
@@ -204,12 +208,15 @@ def save_pipeline(name, targets, instance=None, parents=None, children=None, *,
     if create and exists:
         raise ValueError(f"Pipeline '{name}' already exists.")
     old = _read(name, instance) if exists else {}
+    if graph is not None and not isinstance(graph, bool):
+        raise ValueError('Pipeline graph must be a boolean.')
     if expected_revision is not None and old.get('revision', 0) != expected_revision:
         raise ValueError('Pipeline revision changed; reload the definition before saving.')
     refs = _refs(targets, pipe.instance_keys)
     definition = {**old, 'schema_version': 2, 'name': name, 'registry': pipe.instance_keys,
                   'id': old.get('id', str(uuid.uuid4())), 'revision': old.get('revision', 0) + 1,
                   'targets': refs, 'parents': get_depth(parents), 'children': get_depth(children),
+                  'graph': graph if graph is not None else old.get('graph', True),
                   'description': description if description is not None else old.get('description', ''),
                   'defaults': validate_execution_defaults(defaults if defaults is not None else old.get('defaults', {})),
                   'tag_associations': deepcopy(old.get('tag_associations', [])),
@@ -493,7 +500,8 @@ def copy_pipeline(name, new_name, instance=None, *, access=None):
     parameters = registration(name, instance).get_parameters(apply_symlinks=False, refresh=True) or {}
     return save_pipeline(new_name, old['targets'], instance, old.get('parents'), old.get('children'),
                          description=old.get('description'), defaults=old.get('defaults'),
-                         layout=old.get('layout'), create=True, access=access, locks=parameters.get('locks'))
+                         layout=old.get('layout'), create=True, access=access, locks=parameters.get('locks'),
+                         graph=old.get('graph', True))
 
 
 def load_pipeline(name, instance=None):
