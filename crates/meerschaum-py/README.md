@@ -7,7 +7,7 @@ every discrepancy found while the two implementations ran side by side is tracke
 
 | Symbol | What it does |
 |---|---|
-| `__version__` | Cargo version (`5.0.0-rc.18`); `build_info()['version_pep440']` is the wheel form (`5.0.0rc18`) |
+| `__version__` | Cargo version (`5.0.0-rc.19`); `build_info()['version_pep440']` is the wheel form (`5.0.0rc19`) |
 | `build_info()` | rustc version, profile, opt level, target/host, enabled features, Python ABI (`abi3-py311`) |
 | `static_config()` | `crates/meerschaum-core/static.toml` (D15) as a dict, parsed by `meerschaum_core::static_config` (which embeds it at build time). The file's `{ __null__ = true }` and `{ __cpu_count_or__ = N }` markers are resolved the way `STATIC_CONFIG` does, with Python's own `os.cpu_count()` |
 | `roundtrip_arrow(obj)` | Imports anything with `__arrow_c_stream__` / `__arrow_c_array__` into Rust `RecordBatch`es and returns an `ArrowStream`, a pyarrow-free object that exports the data back through `__arrow_c_stream__` / `__arrow_c_schema__` (`ffi_export.rs`, honoring `requested_schema`) |

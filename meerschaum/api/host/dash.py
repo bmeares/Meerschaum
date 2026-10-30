@@ -391,7 +391,7 @@ def _plugin_names() -> List[str]:
     """
     The plugins with Dash functions or pages: the owners of rc1's `/dash/<plugin>/` paths.
     """
-    from meerschaum.plugins import _dash_plugins, _plugin_endpoints_to_pages, _get_parent_plugin
+    from meerschaum.plugins import _dash_plugins, _plugin_endpoints_to_pages
     from meerschaum.api.host._app import plugin_name_of
     names = []
     for module_name in list(_dash_plugins):
@@ -400,7 +400,8 @@ def _plugin_names() -> List[str]:
             names.append(name)
     for page_group, pages in list(_plugin_endpoints_to_pages.items()):
         for page in pages.values():
-            name = _get_parent_plugin(function=page.get('function')) or page_group
+            module_name = getattr(page.get('function'), '__module__', '')
+            name = plugin_name_of(module_name) if module_name.startswith('plugins.') else page_group
             if name and name not in names:
                 names.append(name)
     return names
@@ -416,10 +417,10 @@ def redirect_target(path: str, query: str = '') -> Optional[str]:
     if len(parts) < 3 or parts[1] != DASH_PREFIX.lstrip('/'):
         return None
     plugin = parts[2]
-    if plugin not in _plugin_names():
-        return None
     ### A page that really is under the plugin's name keeps its path.
     if path.rstrip('/') in _paths:
+        return None
+    if plugin not in _plugin_names():
         return None
     rest = '/'.join(parts[3:])
     target = f"{DASH_PREFIX}/{rest}".rstrip('/') or DASH_PREFIX

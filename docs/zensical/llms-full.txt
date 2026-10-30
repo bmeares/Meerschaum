@@ -16090,6 +16090,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - Bound SQL parent reads before window functions, keeping incremental syncs fast.
 - Use 30-day TimescaleDB metrics partitions and correct undersized RC partitions.
 - Initialize internal tables and indexes safely when workers start together.
+- Keep redirects fast on consoles with many plugin pages.
 - Publish complete Job properties atomically, keeping listings consistent during updates.
 - Release a Pipe lease even when acquisition completes after cancellation.
 - Back up, restore, and upgrade Stack PostgreSQL through guided commands.
