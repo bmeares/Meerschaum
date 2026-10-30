@@ -396,6 +396,14 @@ fn resolve(
     Ok(refs)
 }
 
+/// Keep traversal and induced dependency settings identical in plans and runs.
+fn definition_selection(definition: &Definition, effective: &ArgsMap) -> Selection {
+    Selection::refs(definition.targets.iter().map(PipeRef::from_string))
+        .with_parents(super::sync::depth(effective, "parents"))
+        .with_children(super::sync::depth(effective, "children"))
+        .with_graph(definition.graph.unwrap_or(true))
+}
+
 /// Read dependency metadata without planning a sync or applying membership tags.
 fn resolve_graph(
     rt: &mut Runtime<'_>,
@@ -416,12 +424,7 @@ fn resolve_graph(
         &pipes,
         &super::sync::SyncArgs::from_args(&effective),
     );
-    opts.selection = Some(
-        Selection::refs(definition.targets.iter().map(PipeRef::from_string))
-            .with_parents(super::sync::depth(&effective, "parents"))
-            .with_children(super::sync::depth(&effective, "children"))
-            .with_graph(definition.graph.unwrap_or(true)),
-    );
+    opts.selection = Some(definition_selection(definition, &effective));
     let (_, sub, _) = session.block_on(engine.resolve(&opts)).map_err(error)?;
     Ok(sub)
 }
@@ -1597,7 +1600,10 @@ fn prepare_run(
         }
     }
     let mut refs = BTreeSet::new();
+    let mut dependency_order = graph;
     for definition in &definitions {
+        dependency_order |=
+            !definition_selection(definition, &effective_args(args, definition)?).is_flat();
         refs.extend(resolve(rt, instance, definition, args)?);
     }
     if refs.is_empty() {
@@ -1627,7 +1633,7 @@ fn prepare_run(
         &super::sync::SyncArgs::from_args(&effective),
     );
     options.selection =
-        Some(Selection::refs(refs.iter().map(PipeRef::from_string)).with_graph(graph));
+        Some(Selection::refs(refs.iter().map(PipeRef::from_string)).with_graph(dependency_order));
     options.pipeline_definitions = definitions
         .iter()
         .map(|d| serde_json::to_value(d).unwrap())

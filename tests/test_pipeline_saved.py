@@ -448,6 +448,14 @@ def test_saved_execution_mode_survives_edits_copies_and_reload(saved_members):
     assert load_pipeline(name, conn).graph is True
 
 
+def test_traversal_still_schedules_dependencies_when_induced_graph_is_disabled(saved_members):
+    conn, name, pipes = saved_members
+    save_pipeline(name, pipes[:1], conn, parents=True, graph=False)
+    loaded = load_pipeline(name, conn)
+    assert loaded.graph is False
+    assert loaded.plan().flat is False
+
+
 def test_new_named_pipelines_default_to_dependency_scheduling(saved_members):
     conn, name, pipes = saved_members
     pipeline = mrsm.Pipeline(pipes[:1], instance=conn)

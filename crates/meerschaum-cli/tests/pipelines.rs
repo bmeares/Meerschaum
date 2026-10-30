@@ -176,6 +176,40 @@ fn independent_saved_pipelines_preserve_flat_execution_over_existing_history() {
 }
 
 #[test]
+fn explicit_traversal_retains_dependency_scheduling_with_induced_graph_disabled() {
+    let env = Env::new();
+    env.register_pipe(
+        "source",
+        "sql:local",
+        json!({"columns":{"id":"id"},"sql":"SELECT 1 AS id"}),
+    );
+    env.register_pipe(
+        "report",
+        "sql:local",
+        json!({"columns":{"id":"id"},"sql":"SELECT id FROM {{ Pipe('sql:local', 'source') }}"}),
+    );
+    env.register_pipeline(
+        "follow",
+        json!({"targets":["sql:local|sql:local|report|None"],"parents":true,"graph":false}),
+    );
+    let plan: Value =
+        serde_json::from_str(&env.ok(&["plan", "pipelines", "follow", "--nopretty"])).unwrap();
+    assert_eq!(plan["flat"], false);
+    assert_eq!(plan["nodes"].as_array().unwrap().len(), 2);
+    let plan: Value = serde_json::from_str(&env.ok(&[
+        "plan",
+        "pipelines",
+        "follow",
+        "--parents",
+        "0",
+        "--nopretty",
+    ]))
+    .unwrap();
+    assert_eq!(plan["flat"], true);
+    assert_eq!(plan["nodes"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn registered_lifecycle_is_native_and_does_not_apply_tags_on_reads() {
     let env = Env::new();
     env.register_pipe(
