@@ -27,6 +27,7 @@ COMPOSE_KEYS = [
     'environment',
     'project_name',
     'pipes',
+    'pipelines',
     'jobs',
     'isolation',
     'daemon',

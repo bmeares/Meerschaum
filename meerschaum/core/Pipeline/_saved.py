@@ -140,7 +140,7 @@ def _write(definition, instance=None, create=False, registration_parameters=None
     kept = {}
     if not create:
         current = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
-        kept = {key: current[key] for key in ('access', 'locks') if current.get(key) is not None}
+        kept = {key: current[key] for key in ('access', 'locks', 'compose') if current.get(key) is not None}
     for key in ('access', 'locks'):
         if (registration_parameters or {}).get(key) is not None:
             kept[key] = deepcopy(registration_parameters[key])

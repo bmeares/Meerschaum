@@ -251,6 +251,9 @@ pub struct ComposeFile {
     /// `jobs`: job name to command line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jobs: Option<IndexMap<String, Value>>,
+    /// `pipelines`: names mapped to exact member selections and saved execution defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipelines: Option<IndexMap<String, Value>>,
     /// `isolation` (`subprocess` runs every command in a subprocess).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<Value>,

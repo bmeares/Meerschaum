@@ -59,6 +59,20 @@ def test_saved_pipeline_roundtrip_exact_membership(saved_members):
     assert all(pipe.get_id() is not None for pipe in pipes)
 
 
+def test_saved_pipeline_edit_preserves_compose_ownership(saved_members):
+    from meerschaum.core.Pipeline._saved import registration
+    conn, name, pipes = saved_members
+    save_pipeline(name, pipes[:1], conn)
+    pipe = registration(name, conn)
+    parameters = dict(pipe.get_parameters(apply_symlinks=False, refresh=True))
+    parameters['compose'] = {'project_name': 'example'}
+    pipe.parameters = parameters
+    assert pipe.edit(interactive=False)[0]
+    save_pipeline(name, pipes[:2], conn, description='Edited through the SDK')
+    current = registration(name, conn).get_parameters(apply_symlinks=False, refresh=True)
+    assert current['compose'] == {'project_name': 'example'}
+
+
 def test_saved_pipeline_access_is_atomic_and_copy_rename_keep_their_metadata(saved_members, monkeypatch):
     """A Pipeline starts with access; copying resets access, and renaming preserves it."""
     from copy import deepcopy

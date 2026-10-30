@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meerschaum_connector::DataQuery;
-use meerschaum_core::{Pipe, SuccessTuple, Value};
+use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_engine::{PipeRef, Selection};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
@@ -149,18 +149,7 @@ pub struct Definition {
 
 /// Validate a name consistently with the SDK (ASCII, 1–128 bytes).
 pub fn validate_name(name: &str) -> Result<(), ActionError> {
-    if name.is_empty()
-        || name.len() > 128
-        || !name.as_bytes()[0].is_ascii_alphanumeric()
-        || !name
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
-    {
-        return Err(error(
-            "Use 1–128 letters, numbers, dots, underscores or hyphens, starting with a letter or number.",
-        ));
-    }
-    Ok(())
+    meerschaum_core::pipeline::validate_name(name).map_err(error)
 }
 
 fn metadata(rt: &mut Runtime<'_>, instance: &Instance, name: &str) -> Result<Pipe, ActionError> {
@@ -238,11 +227,24 @@ fn write(
     create: bool,
 ) -> ActionResult {
     let mut pipe = metadata(rt, instance, &definition.name)?;
-    pipe.set_parameters(
-        Value::from_json_str(&json!({"pipeline": definition}).to_string())
-            .map_err(error)?
-            .to_map(),
+    let mut parameters = Map::new();
+    if !create {
+        let attributes = session(rt)
+            .block_on(instance.conn().get_pipe_attributes(&pipe))
+            .map_err(error)?;
+        if let Some(current) = attributes.get("parameters").and_then(Value::as_map) {
+            for key in ["access", "locks", "compose"] {
+                if let Some(value) = current.get(key) {
+                    parameters.insert(key.into(), value.clone());
+                }
+            }
+        }
+    }
+    parameters.insert(
+        "pipeline".into(),
+        Value::from_json_str(&serde_json::to_string(definition).map_err(error)?).map_err(error)?,
     );
+    pipe.set_parameters(parameters);
     let result = if create {
         session(rt).block_on(instance.conn().register_pipe(&pipe))
     } else {
@@ -293,19 +295,7 @@ fn member(rt: &mut Runtime<'_>, reference: &str) -> Result<(Instance, Pipe), Act
     Ok((instance, pipe))
 }
 
-const EXECUTION_DEFAULTS: &[&str] = &[
-    "begin",
-    "end",
-    "workers",
-    "retries",
-    "min_seconds",
-    "chunksize",
-    "check_existing",
-    "enforce_dtypes",
-    "force",
-    "params",
-    "yes",
-];
+use meerschaum_core::pipeline::EXECUTION_DEFAULTS;
 fn validate_execution_defaults(defaults: &BTreeMap<String, Json>) -> Result<(), ActionError> {
     let unknown: Vec<_> = defaults
         .keys()
