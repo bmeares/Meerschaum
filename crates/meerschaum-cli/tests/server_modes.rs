@@ -377,7 +377,13 @@ def wiring_echo(**kw):
             .success()
     );
     await_exit(&mut child.0, 10);
-    assert!(!sandbox.root.path().join("api/host/host.sock").exists());
+    let host_dir = sandbox.root.path().join("api/host");
+    assert!(
+        !host_dir.exists()
+            || std::fs::read_dir(host_dir).unwrap().all(|entry| {
+                entry.unwrap().path().extension() != Some(std::ffi::OsStr::new("sock"))
+            })
+    );
     drop(child);
     let mut stdio = ChildGuard(
         sandbox

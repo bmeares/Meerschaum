@@ -21,7 +21,7 @@ use common::{SECRET, req, send};
 use futures_util::{SinkExt, StreamExt};
 use meerschaum_server::AppState;
 use meerschaum_server::host::{
-    HostLauncher, HostManifest, HostProcess, HostSupervisor, SupervisorOptions,
+    HostLauncher, HostManifest, HostProcess, HostSupervisor, SupervisorOptions, default_socket_path,
 };
 use meerschaum_server::proxy::HostProxy;
 use tokio::sync::oneshot;
@@ -309,6 +309,55 @@ fn opts() -> SupervisorOptions {
         backoff_initial: Duration::from_millis(10),
         backoff_max: Duration::from_millis(50),
     }
+}
+
+#[tokio::test]
+async fn api_and_mcp_hosts_sharing_a_root_keep_separate_sockets() {
+    let root = tempfile::tempdir().unwrap();
+    let manifest = HostManifest {
+        mcp_tools: vec!["example".into()],
+        ..Default::default()
+    };
+    let api = HostSupervisor::new(
+        &manifest,
+        Arc::new(FakeLauncher::default()),
+        default_socket_path(root.path()),
+        opts(),
+    );
+    let mcp = HostSupervisor::new(
+        &manifest,
+        Arc::new(FakeLauncher {
+            launches: Mutex::new(100),
+            ..Default::default()
+        }),
+        default_socket_path(root.path()),
+        opts(),
+    );
+    let (api_app, _api_root) = app_with_proxy(HostProxy::supervised(api.clone()));
+    let (mcp_app, _mcp_root) = app_with_proxy(HostProxy::supervised(mcp.clone()));
+
+    let first_api = send(&api_app, req("GET", "/plugin/echo", None, None)).await;
+    let first_mcp = send(&mcp_app, req("GET", "/plugin/echo", None, None)).await;
+    let concurrent_api = send(&api_app, req("GET", "/plugin/echo", None, None)).await;
+    mcp.shutdown().await;
+    let remaining_api = send(&api_app, req("GET", "/plugin/echo", None, None)).await;
+    api.shutdown().await;
+
+    assert_eq!(first_api.headers["x-host-generation"], "1");
+    assert_eq!(first_mcp.headers["x-host-generation"], "101");
+    assert_eq!(concurrent_api.headers["x-host-generation"], "1");
+    assert_eq!(
+        remaining_api.status,
+        StatusCode::OK,
+        "{}",
+        remaining_api.text()
+    );
+    assert_eq!(remaining_api.headers["x-host-generation"], "1");
+    assert_ne!(api.socket(), mcp.socket());
+    assert!(!api.socket().exists());
+    assert!(!mcp.socket().exists());
+    assert_eq!(api.starts(), 1);
+    assert_eq!(mcp.starts(), 1);
 }
 
 #[tokio::test]
