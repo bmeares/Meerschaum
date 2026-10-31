@@ -32,6 +32,7 @@ pub const COMPOSE_KEYS: &[&str] = &[
     "environment",
     "project_name",
     "pipes",
+    "pipelines",
     "jobs",
     "isolation",
     "daemon",

@@ -335,6 +335,42 @@ fn delete_after_completion_removes_the_job() {
 }
 
 #[test]
+fn deleting_a_finished_worker_waits_for_its_supervisor() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = common::sh_context(dir.path());
+    let mut job = sh_job(&ctx, "finishing", "sleep 1.5 &", JobOptions::default());
+    assert!(job.start().success);
+    // The background child holds the output pipes open after the worker exits. The
+    // supervisor is draining them and has not yet published the result and end time.
+    assert!(common::wait_for(20.0, || job.status() == Status::Stopped
+        && job.began().is_some()));
+    let supervisors = || {
+        meerschaum_jobs::detached::find_pids(
+            "finishing",
+            &ctx.paths.jobs_dir,
+            &ctx.config.detached,
+            None,
+            true,
+        )
+        .into_iter()
+        .filter(|p| p.supervisor)
+        .collect::<Vec<_>>()
+    };
+    assert!(
+        !supervisors().is_empty(),
+        "the supervisor is still finishing"
+    );
+    let result = job.delete();
+    assert!(result.success, "{result}");
+    assert!(
+        supervisors().is_empty(),
+        "deletion raced the final metadata write"
+    );
+    assert!(!dir.path().join("jobs/finishing").exists());
+    assert!(log_files(dir.path(), "finishing").is_empty());
+}
+
+#[test]
 fn executors() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = common::sh_context(dir.path());

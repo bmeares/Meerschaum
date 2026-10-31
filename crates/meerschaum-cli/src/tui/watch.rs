@@ -101,6 +101,7 @@ fn follow_run(
     let session = session(rt);
     let mut after: Option<u64> = None;
     let mut last_activity = Instant::now();
+    let mut completed: Option<(bool, String)> = None;
     loop {
         let rows = match session.block_on(reader.events_after(run_id, after)) {
             Ok(rows) => rows,
@@ -125,14 +126,19 @@ fn follow_run(
             }
         }
         if finished.is_none() && rows.is_empty() {
+            if let Some(outcome) = completed.take() {
+                finished = Some(outcome);
+            }
             // Events may be off (`system.engine.events: off`): the run row says when it ends.
-            if let Ok(Some(detail)) = session.block_on(reader.run_detail(run_id))
+            else if let Ok(Some(detail)) = session.block_on(reader.run_detail(run_id))
                 && detail.summary.status != RunStatus::Running
             {
-                finished = Some((
+                completed = Some((
                     detail.summary.status == RunStatus::Succeeded,
                     detail.summary.run.message.clone().unwrap_or_default(),
                 ));
+                // Completion follows the event flush. Drain again after observing it.
+                continue;
             }
         }
         if let Some((success, message)) = finished {

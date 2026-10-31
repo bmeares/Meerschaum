@@ -21,7 +21,7 @@
 //! the node's lease (two engine runs never sync the same pipe at once) and an in-process lock.
 //! The trait has no atomic counter yet; see the crate README's requests.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, RwLock};
 
 use chrono::{DateTime, Timelike, Utc};
@@ -712,7 +712,96 @@ impl InstanceState {
         Ok(out)
     }
 
-    /// Node rows on the home instance since `since` (oldest first), for duration estimates.
+    /// Recent successful duration samples for selected pipes, preferring the requested action.
+    /// Reads project only scheduling fields and bound each pipe to at most 1024 rows.
+    pub async fn node_duration_history(
+        &self,
+        selection: &[(PipeRef, Action)],
+        since: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+        limit: usize,
+    ) -> Result<Vec<NodeRow>, StateError> {
+        let selection: BTreeSet<_> = selection
+            .iter()
+            .filter(|(_, action)| action.runs())
+            .cloned()
+            .collect();
+        if selection.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn(&self.home)?;
+        let pipe = engine_pipe_on(conn.as_ref(), &self.home, EnginePipe::Nodes)
+            .await
+            .map_err(|error| unreachable(&self.home, error))?;
+        let mut rows = Vec::new();
+        for (pipe_ref, action) in selection {
+            let mut params = str_map(&[
+                ("pipe_ref", Value::Str(pipe_ref.as_str().into())),
+                ("status", Value::Str("succeeded".into())),
+                ("action", Value::Str(action.name().into())),
+            ]);
+            // A new action may use the same pipe's other successful syncs as a fallback.
+            for _ in 0..2 {
+                let query = DataQuery {
+                    select_columns: Some(
+                        [
+                            "run_id",
+                            "pipe_ref",
+                            "action",
+                            "status",
+                            "started",
+                            "actual_started",
+                            "attempts",
+                            "finished",
+                            "duration_seconds",
+                        ]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ),
+                    params: Some(params.clone()),
+                    begin: since.map(DateBound::utc),
+                    // SQL datetime expressions may round to seconds; enforce the exact
+                    // cutoff after reading the bounded page, including its boundary second.
+                    end: before.map(|time| {
+                        DateBound::utc(
+                            time.with_nanosecond(0)
+                                .unwrap_or(time)
+                                .checked_add_signed(chrono::TimeDelta::seconds(1))
+                                .unwrap_or(time),
+                        )
+                    }),
+                    order: Some("desc".into()),
+                    limit: Some(limit.min(1024) as i64),
+                    ..Default::default()
+                };
+                let samples: Vec<_> = match conn.get_pipe_data(&pipe, &query).await {
+                    Ok(Some(frame)) => frame_to_docs(&frame)
+                        .iter()
+                        .filter_map(node_from_doc)
+                        .filter(|row| row.duration_seconds.is_some())
+                        .filter(|row| {
+                            before.is_none_or(|end| row.started.is_some_and(|start| start < end))
+                        })
+                        .collect(),
+                    Ok(None) => Vec::new(),
+                    Err(error) => return Err(unreachable(&self.home, error)),
+                };
+                if !samples.is_empty() {
+                    rows.extend(samples);
+                    break;
+                }
+                params.shift_remove("action");
+            }
+        }
+        let mut seen = BTreeSet::new();
+        rows.retain(|row| seen.insert((row.run_id.clone(), row.pipe_ref.clone(), row.action)));
+        rows.sort_by_key(|row| row.started);
+        Ok(rows)
+    }
+
+    /// Complete successful node rows on the home instance since `since` (oldest first).
+    /// Duration estimates use [`Self::node_duration_history`] instead of scanning this history.
     pub async fn node_history(
         &self,
         since: Option<DateTime<Utc>>,

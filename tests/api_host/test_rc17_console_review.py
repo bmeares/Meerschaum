@@ -183,8 +183,8 @@ code = "raise RuntimeError('INSPECTION_MUST_NOT_EXECUTE')\\n<script>window.revie
 detail = plugin_pages.build_installed_plugin_detail('review_source',admin)
 assert 'plugin-source-content' in str(detail)
 assert source.read_source('installed','review_source','__init__.py',admin) == code
-assert 'INSPECTION_MUST_NOT_EXECUTE' in callbacks.show_plugin_source(
-    '__init__.py',{'kind':'installed','name':'review_source'},admin)
+assert 'INSPECTION_MUST_NOT_EXECUTE' in str(callbacks.show_plugin_source(
+    '__init__.py',{'kind':'installed','name':'review_source'},admin))
 for session in (reader,{'session-id':'unknown','username':'review-source-admin','admin':True},{}):
     result = callbacks.show_plugin_source('__init__.py',{'kind':'installed','name':'review_source'},session)
     assert 'not available' in result and 'INSPECTION_MUST_NOT_EXECUTE' not in result

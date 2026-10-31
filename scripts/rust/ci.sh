@@ -186,7 +186,12 @@ step_disk_guard() {
   fi
 }
 
-step_fmt()    { log "cargo fmt --all --check"; cargo fmt --all --check; }
+step_fmt() {
+  log "cargo fmt --all --check"
+  cargo fmt --all --check
+  log "Packaging metadata and generated dependency tables"
+  python3 -I "$REPO/scripts/check_packaging.py"
+}
 step_clippy() { log "cargo clippy --all-targets -- -D warnings"; cargo clippy --all-targets -- -D warnings; }
 step_doc() {
   log "cargo doc --workspace --no-deps --all-features (-D warnings)"

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meerschaum_connector::DataQuery;
-use meerschaum_core::{Pipe, SuccessTuple, Value};
+use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_engine::{PipeRef, Selection};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
@@ -141,6 +141,8 @@ pub struct Definition {
     pub targets: Vec<String>,
     pub parents: Json,
     pub children: Json,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<bool>,
     pub description: String,
     pub defaults: BTreeMap<String, Json>,
     pub layout: Json,
@@ -149,18 +151,7 @@ pub struct Definition {
 
 /// Validate a name consistently with the SDK (ASCII, 1–128 bytes).
 pub fn validate_name(name: &str) -> Result<(), ActionError> {
-    if name.is_empty()
-        || name.len() > 128
-        || !name.as_bytes()[0].is_ascii_alphanumeric()
-        || !name
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
-    {
-        return Err(error(
-            "Use 1–128 letters, numbers, dots, underscores or hyphens, starting with a letter or number.",
-        ));
-    }
-    Ok(())
+    meerschaum_core::pipeline::validate_name(name).map_err(error)
 }
 
 fn metadata(rt: &mut Runtime<'_>, instance: &Instance, name: &str) -> Result<Pipe, ActionError> {
@@ -238,11 +229,24 @@ fn write(
     create: bool,
 ) -> ActionResult {
     let mut pipe = metadata(rt, instance, &definition.name)?;
-    pipe.set_parameters(
-        Value::from_json_str(&json!({"pipeline": definition}).to_string())
-            .map_err(error)?
-            .to_map(),
+    let mut parameters = Map::new();
+    if !create {
+        let attributes = session(rt)
+            .block_on(instance.conn().get_pipe_attributes(&pipe))
+            .map_err(error)?;
+        if let Some(current) = attributes.get("parameters").and_then(Value::as_map) {
+            for key in ["access", "locks", "compose"] {
+                if let Some(value) = current.get(key) {
+                    parameters.insert(key.into(), value.clone());
+                }
+            }
+        }
+    }
+    parameters.insert(
+        "pipeline".into(),
+        Value::from_json_str(&serde_json::to_string(definition).map_err(error)?).map_err(error)?,
     );
+    pipe.set_parameters(parameters);
     let result = if create {
         session(rt).block_on(instance.conn().register_pipe(&pipe))
     } else {
@@ -293,19 +297,7 @@ fn member(rt: &mut Runtime<'_>, reference: &str) -> Result<(Instance, Pipe), Act
     Ok((instance, pipe))
 }
 
-const EXECUTION_DEFAULTS: &[&str] = &[
-    "begin",
-    "end",
-    "workers",
-    "retries",
-    "min_seconds",
-    "chunksize",
-    "check_existing",
-    "enforce_dtypes",
-    "force",
-    "params",
-    "yes",
-];
+use meerschaum_core::pipeline::EXECUTION_DEFAULTS;
 fn validate_execution_defaults(defaults: &BTreeMap<String, Json>) -> Result<(), ActionError> {
     let unknown: Vec<_> = defaults
         .keys()
@@ -404,6 +396,14 @@ fn resolve(
     Ok(refs)
 }
 
+/// Keep traversal and induced dependency settings identical in plans and runs.
+fn definition_selection(definition: &Definition, effective: &ArgsMap) -> Selection {
+    Selection::refs(definition.targets.iter().map(PipeRef::from_string))
+        .with_parents(super::sync::depth(effective, "parents"))
+        .with_children(super::sync::depth(effective, "children"))
+        .with_graph(definition.graph.unwrap_or(true))
+}
+
 /// Read dependency metadata without planning a sync or applying membership tags.
 fn resolve_graph(
     rt: &mut Runtime<'_>,
@@ -424,12 +424,7 @@ fn resolve_graph(
         &pipes,
         &super::sync::SyncArgs::from_args(&effective),
     );
-    opts.selection = Some(
-        Selection::refs(definition.targets.iter().map(PipeRef::from_string))
-            .with_parents(super::sync::depth(&effective, "parents"))
-            .with_children(super::sync::depth(&effective, "children"))
-            .with_graph(true),
-    );
+    opts.selection = Some(definition_selection(definition, &effective));
     let (_, sub, _) = session.block_on(engine.resolve(&opts)).map_err(error)?;
     Ok(sub)
 }
@@ -1307,6 +1302,7 @@ fn save(
                 "targets",
                 "parents",
                 "children",
+                "graph",
                 "description",
                 "defaults",
                 "layout",
@@ -1577,6 +1573,15 @@ fn prepare_run(
     continuous: bool,
 ) -> Result<Option<PreparedRun>, ActionError> {
     let definitions = names(rt, instance, args, true)?;
+    let graph = definitions[0].graph.unwrap_or(true);
+    if definitions
+        .iter()
+        .any(|definition| definition.graph.unwrap_or(true) != graph)
+    {
+        return Err(error(
+            "Combined Pipelines have conflicting graph settings; run them separately.",
+        ));
+    }
     let default_keys: BTreeSet<_> = definitions
         .iter()
         .flat_map(|definition| definition.defaults.keys())
@@ -1595,7 +1600,10 @@ fn prepare_run(
         }
     }
     let mut refs = BTreeSet::new();
+    let mut dependency_order = graph;
     for definition in &definitions {
+        dependency_order |=
+            !definition_selection(definition, &effective_args(args, definition)?).is_flat();
         refs.extend(resolve(rt, instance, definition, args)?);
     }
     if refs.is_empty() {
@@ -1625,7 +1633,7 @@ fn prepare_run(
         &super::sync::SyncArgs::from_args(&effective),
     );
     options.selection =
-        Some(Selection::refs(refs.iter().map(PipeRef::from_string)).with_graph(true));
+        Some(Selection::refs(refs.iter().map(PipeRef::from_string)).with_graph(dependency_order));
     options.pipeline_definitions = definitions
         .iter()
         .map(|d| serde_json::to_value(d).unwrap())

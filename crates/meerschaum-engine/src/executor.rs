@@ -1163,6 +1163,34 @@ where
     E: SyncExecutor,
     L: LeaseSource,
 {
+    execute_inner(ctx, plan, options, true).await
+}
+
+/// The engine persists the final record after its event flusher has drained.
+pub(crate) async fn execute_deferred<S, E, L>(
+    ctx: ExecuteContext<'_, S, E, L>,
+    plan: Plan,
+    options: &ExecutorOptions,
+) -> RunRecord
+where
+    S: StateSource + StateWriter,
+    E: SyncExecutor,
+    L: LeaseSource,
+{
+    execute_inner(ctx, plan, options, false).await
+}
+
+async fn execute_inner<S, E, L>(
+    ctx: ExecuteContext<'_, S, E, L>,
+    plan: Plan,
+    options: &ExecutorOptions,
+    record_final: bool,
+) -> RunRecord
+where
+    S: StateSource + StateWriter,
+    E: SyncExecutor,
+    L: LeaseSource,
+{
     let run_id = options.run_id.clone().unwrap_or_else(new_run_id);
     let emitter = Emitter::new(&run_id, ctx.sink.clone());
     let sched = schedule(&plan, ctx.durations);
@@ -1677,14 +1705,20 @@ where
         },
         nodes: d.rows.into_values().collect(),
     };
-    if let Err(e) = ctx.state.record_run(&record).await {
+    if record_final {
+        record_finished_run(ctx.state, &mut record).await;
+    }
+    record
+}
+
+pub(crate) async fn record_finished_run<S: StateWriter>(state: &S, record: &mut RunRecord) {
+    if let Err(e) = state.record_run(record).await {
         // The run happened; only its history is missing. Say so (it used to be silent).
-        tracing::warn!("Cannot record engine run {run_id}: {e}");
+        tracing::warn!("Cannot record engine run {}: {e}", record.run.run_id);
         if let Some(message) = record.run.message.as_mut() {
             message.push_str(&format!("\nwarning: cannot record the run: {e}"));
         }
     }
-    record
 }
 
 /// One scripted attempt of the [`FakeExecutor`].

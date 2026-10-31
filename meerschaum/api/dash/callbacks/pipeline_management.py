@@ -634,6 +634,12 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
                     raise PreventUpdate
                 if context.get('action') == 'remove':
                     new['targets'] = [ref for ref in new['targets'] if ref != context['ref']]
+                elif context.get('action') == 'add':
+                    from meerschaum.api.dash import access, pipes_access
+                    ref = context.get('ref')
+                    if not ref or not access.ref_is_visible(pipes_access.viewer(session), ref):
+                        raise PreventUpdate
+                    new['targets'] = list(dict.fromkeys([*new['targets'], ref]))
                 elif context.get('action') == 'edit_pipe':
                     new['pipe_edits'][context['ref']] = context['edit']
                 else:

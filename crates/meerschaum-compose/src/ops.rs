@@ -54,6 +54,33 @@ fn key_matches(filter: &[String], value: &str) -> bool {
 
 /// Pipe registrations on instance connectors.
 pub trait InstanceOps {
+    /// Read a saved Pipeline's registration parameters, propagating backend failures.
+    fn pipeline_parameters(
+        &mut self,
+        spec: &crate::pipelines::PipelineSpec,
+    ) -> Result<Option<Map>, String> {
+        let attributes = self.get_pipe_attributes(&spec.registration())?;
+        if attributes.is_empty() {
+            return Ok(None);
+        }
+        attributes
+            .get("parameters")
+            .and_then(Value::as_map)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| format!("Invalid registration for Pipeline '{}'.", spec.name))
+    }
+
+    /// Save under the shared registry lease, checking the preflight revision again.
+    fn save_pipeline(
+        &mut self,
+        _spec: &crate::pipelines::PipelineSpec,
+        _project: &str,
+        _expected: Option<u64>,
+    ) -> SuccessTuple {
+        SuccessTuple::fail("This instance adapter does not support Compose Pipelines.")
+    }
+
     /// Called by `compose init` before any project exists: the host's configuration scopes the
     /// instance connectors. Fakes ignore it.
     fn configure_host(&mut self, _host: &Host) {}
@@ -187,6 +214,42 @@ pub struct InMemoryInstance {
 }
 
 impl InstanceOps for InMemoryInstance {
+    fn save_pipeline(
+        &mut self,
+        spec: &crate::pipelines::PipelineSpec,
+        project: &str,
+        expected: Option<u64>,
+    ) -> SuccessTuple {
+        let mut pipe = spec.registration();
+        let previous = self.get_parameters(&pipe);
+        let id = self.pipes.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+        let parameters = match spec.registration_parameters(
+            previous.as_ref(),
+            project,
+            expected,
+            &format!("compose-pipeline-{id}"),
+        ) {
+            Ok(Some(parameters)) => parameters,
+            Ok(None) => return SuccessTuple::success(),
+            Err(e) => return SuccessTuple::fail(e),
+        };
+        pipe.set_parameters(parameters.clone());
+        self.events
+            .push(InstanceEvent::Edit(pipe.to_string(), parameters.clone()));
+        if let Some(saved) = self.pipes.iter_mut().find(|r| r.matches(&pipe)) {
+            saved.parameters = parameters;
+        } else {
+            self.pipes.push(RegisteredPipe {
+                connector_keys: "mrsm".into(),
+                metric_key: "pipeline".into(),
+                location_key: Some(spec.name.clone()),
+                instance_keys: spec.instance.clone(),
+                id,
+                parameters,
+            });
+        }
+        SuccessTuple::success()
+    }
     fn get_pipes_matching(&mut self, filters: &PipeFilters) -> Result<Vec<Pipe>, String> {
         Ok(self
             .pipes

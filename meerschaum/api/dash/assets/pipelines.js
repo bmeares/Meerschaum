@@ -5,6 +5,20 @@
  * proposes a parent -> child edge, and the menus offer Add Pipe and Remove from Pipeline. Zoom
  * and pan are remembered per Pipeline in this browser. */
 (function () {
+    let runView = 'timeline';
+    function setRunView(view) {
+        runView = view;
+        document.querySelectorAll('.pipeline-run-detail').forEach(detail => {
+            detail.dataset.runView = view;
+            detail.querySelectorAll('button[data-run-view]').forEach(button => {
+                button.setAttribute('aria-selected', String(button.dataset.runView === view));
+            });
+            if (view === 'timeline') requestAnimationFrame(() => {
+                const plot = detail.querySelector('.js-plotly-plot');
+                if (plot && window.Plotly) window.Plotly.Plots.resize(plot);
+            });
+        });
+    }
     function page() { return document.getElementById('pipelines-page'); }
     function editing() { return page()?.dataset.edit === 'true'; }
     function setView(view) {
@@ -298,8 +312,8 @@
                 for (const [scope, label] of [['this', 'Sync this Pipe'], ['parents', 'Sync with all parents'], ['children', 'Sync with all children']])
                     button(label, () => { setPane('output'); window.dash_clientside.set_props('pipeline-context', {data:{action:'sync', ref:node.dataset.ref, scope, token:Date.now()}}); });
                 button('View output', () => { node.click(); showOutput(node.dataset.ref); });
-                if (editing()) button('Remove from Pipeline', () => {
-                    window.dash_clientside.set_props('pipeline-context', {data:{action:'remove', ref:node.dataset.ref, token:Date.now()}});
+                if (editing()) button(node.dataset.context === 'true' ? 'Add to Pipeline' : 'Remove from Pipeline', () => {
+                    window.dash_clientside.set_props('pipeline-context', {data:{action:node.dataset.context === 'true' ? 'add' : 'remove', ref:node.dataset.ref, token:Date.now()}});
                 });
             } else if (editing()) button('Add Pipe', openEditor);
             if (!menu.children.length) return;
@@ -523,6 +537,8 @@
             document.getElementById('pipeline-canvas')?._mrsmFilter?.();
     });
     document.addEventListener('click', e => {
+        const runViewButton = e.target.closest('.pipeline-run-detail button[data-run-view]');
+        if (runViewButton) setRunView(runViewButton.dataset.runView);
         const runLink = e.target.closest('.pipeline-run-link[data-run-id]');
         if (runLink) { e.preventDefault(); window.dash_clientside.set_props('pipeline-selected-run', {data:runLink.dataset.runId}); return; }
         if (e.target.closest('#pipeline-recent-runs')) {
@@ -544,6 +560,8 @@
         if (viewButton) setView(viewButton.id === 'pipeline-view-runs' ? 'runs' : 'workspace');
         if (!e.target.closest('.pipeline-context-menu')) document.querySelectorAll('.pipeline-context-menu').forEach(menu => menu.remove());
         if (e.target.closest('#pipeline-node-view-output')) showOutput(window._mrsmPipelineSelectedRef);
+        if (e.target.closest('#pipeline-add-related')) window.dash_clientside.set_props('pipeline-context', {
+            data:{action:'add', ref:window._mrsmPipelineSelectedRef, token:Date.now()}});
         if (e.target.closest('#pipeline-inspector-close')) closeInspector();
     });
     document.addEventListener('click', e => {
@@ -554,6 +572,11 @@
         if (e.target.id === 'pipeline-draft-editor')
             document.getElementById('pipeline-add-node')?.setAttribute('aria-expanded', String(e.target.open));
     }, true);
-    new MutationObserver(mount).observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['hidden', 'data-loaded']});
+    new MutationObserver(() => {
+        mount();
+        document.querySelectorAll('.pipeline-run-detail').forEach(detail => {
+            if (detail.dataset.runView !== runView) setRunView(runView);
+        });
+    }).observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['hidden', 'data-loaded']});
     document.addEventListener('DOMContentLoaded', mount);
 })();

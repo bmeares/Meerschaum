@@ -652,8 +652,8 @@ def overview_tab(pipe: mrsm.Pipe, allowed: bool = False) -> Any:
         oldest = pipe.get_sync_time(newest=False) if exists else None
     except Exception:
         newest, oldest = None, None
-    newest_text = pipes_table.sync_time_text(pipes_table._sync_time_fields(newest))
-    oldest_text = pipes_table.sync_time_text(pipes_table._sync_time_fields(oldest))
+    newest_text = pipes_table.sync_time_text(pipes_table._sync_time_fields(newest, pipe=pipe))
+    oldest_text = pipes_table.sync_time_text(pipes_table._sync_time_fields(oldest, pipe=pipe))
     status = pipes_table.get_sync_status(pipe)
     try:
         jobs = pipes_table.get_jobs_index(str(pipe.instance_keys), [pipes_table._row_from_pipe(pipe)]).get(ref, [])
@@ -670,8 +670,8 @@ def overview_tab(pipe: mrsm.Pipe, allowed: bool = False) -> Any:
             ),
             _tile(
                 'Sync time', newest_text,
-                extra=(html.Span(['Oldest ', oldest_text]) if oldest is not None else None),
-                title=str(newest or ''),
+                extra=(html.Span(['Oldest ', oldest_text], title=str(oldest)) if oldest is not None else None),
+                title=(str(newest) if newest is not None else ''),
             ),
             _status_tile(status, has_data=bool(rows) or newest is not None),
         ],

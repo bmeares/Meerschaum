@@ -21,7 +21,9 @@ def route(pathname=None, href=None):
         dcc.Interval(id='performance-interval', interval=30000, n_intervals=0),
         html.Main([
             html.Div([html.H1('Performance'), dbc.Button(
-                'Refresh', id='performance-refresh', size='sm', color='secondary')],
+                'Refresh', id='performance-refresh', size='sm', color='secondary'),
+                html.Span('Refreshing…', id='performance-refresh-status', role='status',
+                          className='performance-refresh-status')],
                 className='console-page-header'),
             dbc.Alert(problem, color='danger') if problem else None,
             html.Div([
@@ -38,8 +40,9 @@ def route(pathname=None, href=None):
                     options=performance.filter_options(value=selected['pipeline'], kind='Pipeline'),
                     placeholder='All Pipelines', clearable=True)]),
             ], className='performance-filters'),
-            dcc.Loading(html.Div('Loading performance…', id='performance-body', role='status'), type='dot',
-                        target_components={'performance-body': 'children'}),
+            html.Div(html.Div([dbc.Spinner(size='sm'), html.Span('Loading performance…')],
+                              className='performance-loading', role='status'),
+                     id='performance-body'),
             html.Nav(dbc.Pagination(
                 id='performance-history-page', active_page=1, max_value=1,
                 first_last=True, previous_next=True, fully_expanded=False, size='sm'),

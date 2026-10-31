@@ -380,16 +380,19 @@ impl ConsoleStatus {
 /// including the terminating NUL.
 pub const MAX_SOCKET_PATH: usize = 100;
 
-/// The host's socket for a root directory: `<root>/api/host/host.sock`, or, when that path is
-/// too long or its directory cannot be made private by this user, a per-user, per-root name
+/// A fresh host socket for a root directory: `<root>/api/host/host-<nonce>.sock`, or, when
+/// that path is too long or its directory cannot be made private by this user, a private name
 /// under `$XDG_RUNTIME_DIR` (else the temporary directory). Existing foreign ownership is
 /// never changed; mounted roots may have been initialized by a different container UID.
+/// Each supervisor keeps its own path: API and MCP servers may share a root, but must never
+/// replace or remove each other's sockets when starting, restarting or shutting down.
 ///
 /// The socket's directory is private (`0700`, see [`HostSupervisor`]): uvicorn makes the socket
 /// itself world-writable, and a local process that could connect to it would bypass the
 /// server's authentication, allowlist and rate limits.
 pub fn default_socket_path(root: &Path) -> PathBuf {
-    let p = root.join("api").join("host").join("host.sock");
+    let filename = format!("host-{}.sock", uuid::Uuid::new_v4().simple());
+    let p = root.join("api").join("host").join(&filename);
     if p.as_os_str().len() <= MAX_SOCKET_PATH && private_dir(p.parent().unwrap()).is_ok() {
         return p;
     }
@@ -398,22 +401,27 @@ pub fn default_socket_path(root: &Path) -> PathBuf {
     root.hash(&mut h);
     #[cfg(unix)]
     rustix::process::geteuid().as_raw().hash(&mut h);
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
+    let mut base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|d| d.is_dir())
         .unwrap_or_else(std::env::temp_dir);
-    let dirname = format!("mrsm-host-{:016x}", h.finish());
-    let mut dir = base.join(&dirname);
-    if dir.join("host.sock").as_os_str().len() > MAX_SOCKET_PATH {
-        dir = std::env::temp_dir().join(&dirname);
+    let dirname = format!("mrsm-host-{:032x}", h.finish());
+    if base.join(&dirname).join(&filename).as_os_str().len() > MAX_SOCKET_PATH {
+        base = std::env::temp_dir();
     }
+    // TMPDIR itself may be a long path (test roots and macOS temporary directories).
+    #[cfg(unix)]
+    if base.join(&dirname).join(&filename).as_os_str().len() > MAX_SOCKET_PATH {
+        base = PathBuf::from("/tmp");
+    }
+    let mut dir = base.join(&dirname);
     if private_dir(&dir).is_err() {
         // An unrelated process may have reserved the predictable name. Never reuse an
         // untrusted directory or socket; choose a fresh private name instead.
-        dir = std::env::temp_dir().join(format!("mrsm-host-{}", uuid::Uuid::new_v4().simple()));
+        dir = base.join(format!("mrsm-host-{}", uuid::Uuid::new_v4().simple()));
         let _ = private_dir(&dir);
     }
-    dir.join("host.sock")
+    dir.join(filename)
 }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {
@@ -1258,15 +1266,27 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn socket_paths() {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in("/tmp").unwrap();
         let short = default_socket_path(root.path());
-        assert_eq!(short, root.path().join("api/host/host.sock"));
+        assert_eq!(short.parent().unwrap(), root.path().join("api/host"));
+        assert_ne!(short, default_socket_path(root.path()));
+        assert!(
+            short
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("host-")
+        );
         let long_root = PathBuf::from(format!("/{}", "x".repeat(200)));
         let long = default_socket_path(&long_root);
-        assert!(long.as_os_str().len() < 108, "{long:?}");
-        assert_eq!(long, default_socket_path(&long_root));
-        assert!(long.ends_with("host.sock"));
+        assert!(long.as_os_str().len() <= MAX_SOCKET_PATH, "{long:?}");
+        let sibling = default_socket_path(&long_root);
+        assert_ne!(long, sibling);
+        assert_eq!(long.parent(), sibling.parent());
+        assert_eq!(long.extension().unwrap(), "sock");
         std::fs::remove_dir(long.parent().unwrap()).unwrap();
     }
 
@@ -1281,7 +1301,9 @@ mod tests {
         std::fs::write(api.join("host"), "leave this alone").unwrap();
         let fallback = default_socket_path(root.path());
         assert!(!fallback.starts_with(root.path()));
-        assert_eq!(fallback, default_socket_path(root.path()));
+        let sibling = default_socket_path(root.path());
+        assert_ne!(fallback, sibling);
+        assert_eq!(fallback.parent(), sibling.parent());
         assert_eq!(
             std::fs::read_to_string(api.join("host")).unwrap(),
             "leave this alone"

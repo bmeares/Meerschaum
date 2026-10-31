@@ -43,6 +43,12 @@ def follow_performance_location(search, path):
     Input('performance-history-page', 'active_page'),
     Input('performance-instance', 'data'),
     State('session-store', 'data'),
+    running=[
+        (Output('performance-interval', 'disabled'), True, False),
+        (Output('performance-refresh', 'disabled'), True, False),
+        (Output('performance-refresh-status', 'className'),
+         'performance-refresh-status is-refreshing', 'performance-refresh-status'),
+    ],
 )
 def render_performance(path, search, window, pipe, pipeline, refresh, interval, page, instance, session):
     if str(path).rstrip('/') != '/dash/performance':

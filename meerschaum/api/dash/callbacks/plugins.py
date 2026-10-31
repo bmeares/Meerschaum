@@ -164,13 +164,34 @@ def show_plugin_source(selected, context, session):
     """Every file selection repeats authentication, membership, and bounded path checks."""
     if not selected or not isinstance(context, dict):
         raise PreventUpdate
-    from meerschaum.api.dash.plugin_sources import read_source
+    from meerschaum.api.dash.plugin_sources import read_source, source_preview
     try:
-        return read_source(context.get('kind'), context.get('name'), selected, session)
+        return source_preview(selected,read_source(context.get('kind'), context.get('name'), selected, session))
     except PermissionError:
         return 'Plugin source is not available to your account.'
     except Exception:
         return 'This file cannot be previewed. Choose another source file.'
+
+
+dash_app.clientside_callback(
+    """
+    function(clicks, ids) {
+        const ctx = dash_clientside.callback_context;
+        const target = ctx.triggered_id;
+        const keep = dash_clientside.no_update;
+        if (!target || typeof target.path !== 'string') return [keep, keep];
+        const position = (ids || []).findIndex(item => item.path === target.path);
+        if (position < 0 || !(clicks || [])[position]) return [keep, keep];
+        return [target.path, ids.map(item => 'plugin-source-file' +
+            (item.path === target.path ? ' active' : ''))];
+    }
+    """,
+    Output('plugin-source-file','value'),
+    Output({'type':'plugin-source-select','path':ALL},'className'),
+    Input({'type':'plugin-source-select','path':ALL},'n_clicks'),
+    State({'type':'plugin-source-select','path':ALL},'id'),
+    prevent_initial_call=True,
+)
 
 
 def _run_alert(message: str, job_name: Optional[str], success: bool = True, running: bool = False):

@@ -554,7 +554,42 @@ pub fn render_explain(f: &Formatter<'_>, model: &ExplainModel) -> String {
             }
         }
     }
-    f.console().print(&table)
+    let mut rendered = f.console().print(&table);
+    if !model.pipelines.is_empty() {
+        let mut selections = Table::new();
+        selections.title = Some(Text::new(
+            &format!("Pipelines in '{}'", model.project_name),
+            "bold",
+        ));
+        selections.box_chars = Some(MINIMAL);
+        for header in ["Pipeline", "Registry", "Members"] {
+            selections.add_column(Column {
+                header: Text::plain_text(header),
+                ..Column::default()
+            });
+        }
+        for spec in &model.pipelines {
+            let targets = spec
+                .definition
+                .get("targets")
+                .and_then(Value::as_list)
+                .expect("resolved members");
+            selections.add_row(vec![
+                Some(Box::new(Text::plain_text(&spec.name))),
+                Some(Box::new(Text::plain_text(&spec.instance))),
+                Some(Box::new(Text::plain_text(
+                    &targets
+                        .iter()
+                        .map(meerschaum_core::pyfmt::py_str)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ))),
+            ]);
+        }
+        rendered.push('\n');
+        rendered.push_str(&f.console().print(&selections));
+    }
+    rendered
 }
 
 /// What the compose command line says that argparse leaves out: the compose flags and action

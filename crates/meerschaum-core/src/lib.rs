@@ -42,6 +42,7 @@ pub mod dtypes;
 pub mod holder;
 pub mod job_access;
 pub mod pipe;
+pub mod pipeline;
 pub mod process_env;
 pub mod protected;
 pub mod pyfmt;

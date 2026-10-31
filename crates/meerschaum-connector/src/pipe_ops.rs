@@ -534,6 +534,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
                                "inserted": "int", "updated": "int",
                                "upserted": "int", "deleted": "int", "message": "string",
                                "planned_start_seconds": "float", "slack_seconds": "float"},
+                    "indices": {"duration_time": ["pipe_ref", "started"]},
                     "upsert": true}"#
         }
         "engine_events" => {

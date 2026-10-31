@@ -217,6 +217,17 @@ def _build(debug: bool = False):
             return ('', 404)
         return None
 
+    @dash_app.server.after_request
+    def _conditional_component_assets(response):
+        """Revalidate unversioned bundles using HTTP's weak ETag comparison."""
+        from flask import request
+        if (request.method in ('GET', 'HEAD')
+            and request.path.startswith(dash_app.config.routes_pathname_prefix + '_dash-component-suites/')
+            and response.status_code == 200 and response.get_etag()[0]):
+            response.cache_control.no_cache = True
+            response.make_conditional(request)
+        return response
+
     ### The callbacks and pages import `dash_app` from this module: publish it first.
     module = sys.modules[__name__]
     module.dash_app = dash_app

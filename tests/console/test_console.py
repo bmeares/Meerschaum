@@ -368,7 +368,8 @@ def test_exec_preserves_input_typed_while_readiness_is_in_flight(webterm_server,
     assert snapshots, 'The shell did not publish readiness.'
     frame.evaluate("terminal.term.input('exit\\r')")
     frame.wait_for_function("document.querySelector('.xterm-rows').innerText.includes('[CLOSED]')")
-    assert all(not path.exists() for path in snapshots), 'Exited shell retained stale readiness.'
+    remaining = [path.name for path in snapshots if path.exists()]
+    assert not remaining, f'Exited shell retained stale readiness: {remaining}'
     assert _errors(tab) == [], _errors(tab)
     page.close()
 
@@ -1041,8 +1042,9 @@ def test_pipelines_page_graph_gantt_and_runs(server, tab):
     assert tab.page.locator('.pipeline-stage').count() == 2
     assert "Pipe(" in tab.page.inner_text('.pipeline-stage >> nth=0')
     tab.page.locator('.pipeline-stage').first.click()
-    _wait_text(tab.page, '#pipeline-inspector', 'Query')
-    assert tab.page.locator('#pipeline-inspector a', has_text='Open Pipe').count() == 1
+    tab.page.wait_for_selector('#pipeline-query-view', timeout=30000)
+    ### The query also has an "Open Pipe editor" link; select the primary card explicitly.
+    assert tab.page.locator('#pipeline-inspector .pipeline-open-pipe').count() == 1
     tab.page.locator('#pipeline-fit').click()
     assert tab.page.locator('#pipeline-canvas svg path').count() == 2
     ### Runs are a separate mounted view, with the latest execution beneath the list.

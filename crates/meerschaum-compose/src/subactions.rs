@@ -168,6 +168,8 @@ pub struct ExplainModel {
     pub default_instance: String,
     /// The pipes grouped by instance.
     pub instances: Vec<ExplainInstance>,
+    /// Exact named selections declared by this project.
+    pub pipelines: Vec<crate::pipelines::PipelineSpec>,
 }
 
 /// The defined pipes of one instance.
@@ -234,6 +236,7 @@ impl CommandRunner for Tee<'_> {
 }
 
 struct Ctx<'a, 'b> {
+    pipeline_revisions: std::collections::BTreeMap<(String, String, String), Option<u64>>,
     host: &'a Host,
     session: &'a mut Session,
     args: &'a ComposeArgs,
@@ -371,6 +374,7 @@ pub fn compose(
         prompter,
     } = services;
     let mut ctx = Ctx {
+        pipeline_revisions: Default::default(),
         host,
         session,
         args,
@@ -531,6 +535,43 @@ fn do_subaction(ctx: &mut Ctx, subaction: &str) -> Result<SuccessTuple, ComposeE
     }
     let run = load_run_tree(ctx, None, selected == "down", selected != "explain")?;
     ctx.multi = run.selected.len() > 1;
+    if matches!(selected, "up" | "run" | "explain") {
+        let mut identities = std::collections::BTreeMap::new();
+        for ix in &run.selected {
+            let project = &run.tree.nodes[*ix].project;
+            let pc = ProjectConfig::new(ctx.host, project)?;
+            let definitions = crate::pipelines::defined(project, &pc)?;
+            for spec in &definitions {
+                if let Some(previous) = identities.insert(
+                    (spec.instance.clone(), spec.name.clone()),
+                    project.project_name(),
+                ) {
+                    return Err(ComposeError::value(format!(
+                        "Pipeline '{}' on '{}' is declared by both '{previous}' and '{}'.",
+                        spec.name,
+                        spec.instance,
+                        project.project_name()
+                    )));
+                }
+            }
+            if selected != "explain" && !definitions.is_empty() {
+                ctx.instance
+                    .try_configure(ctx.host, project)
+                    .map_err(ComposeError::value)?;
+                for spec in definitions {
+                    let previous = ctx
+                        .instance
+                        .pipeline_parameters(&spec)
+                        .map_err(ComposeError::value)?;
+                    let revision = spec
+                        .check_owner(previous.as_ref(), &project.project_name())
+                        .map_err(ComposeError::value)?;
+                    ctx.pipeline_revisions
+                        .insert((project.project_name(), spec.instance, spec.name), revision);
+                }
+            }
+        }
+    }
     if selected == "explain" {
         // The overrides of the projects this run covers (and the tree-wide problems).
         let names: Vec<String> = run
@@ -1104,6 +1145,22 @@ fn compose_up(
         }
     }
 
+    for spec in crate::pipelines::defined(project, pc)? {
+        let revision = ctx
+            .pipeline_revisions
+            .get(&(
+                project_name.clone(),
+                spec.instance.clone(),
+                spec.name.clone(),
+            ))
+            .copied()
+            .unwrap_or(None);
+        let saved = ctx.instance.save_pipeline(&spec, &project_name, revision);
+        if !saved.success {
+            return Ok(saved);
+        }
+    }
+
     if mode.dry {
         return Ok(SuccessTuple::ok(format!(
             "Updated parameters for {} pipe{}{}{} instance{}.",
@@ -1624,6 +1681,7 @@ fn compose_explain(
         project_name: project_name.clone(),
         width,
         default_instance: default_instance.clone(),
+        pipelines: crate::pipelines::defined(project, pc)?,
         instances: Vec::new(),
     };
     let mut rows: Vec<(Vec<Renderable>, bool, bool)> = Vec::new();
@@ -1720,7 +1778,18 @@ fn compose_explain(
         headers,
         rows: table_rows,
     };
-    let rendered = table.render(width);
+    let mut rendered = table.render(width);
+    if !model.pipelines.is_empty() {
+        rendered.push_str(&format!("\nPipelines in '{project_name}':\n"));
+        for spec in &model.pipelines {
+            rendered.push_str(&format!(
+                "{} (registry {})\n{}\n",
+                spec.name,
+                spec.instance,
+                json_rich(&spec.definition)
+            ));
+        }
+    }
     match &mut ctx.out.explain {
         Some(existing) => {
             existing.push('\n');

@@ -277,6 +277,64 @@ fn raised(message: &str) -> String {
 }
 
 impl InstanceOps for ComposeInstance {
+    fn save_pipeline(
+        &mut self,
+        spec: &meerschaum_compose::pipelines::PipelineSpec,
+        project: &str,
+        expected: Option<u64>,
+    ) -> SuccessTuple {
+        let Some(config) = self.config() else {
+            return SuccessTuple::fail("No Compose project is configured.");
+        };
+        let instance = match self.session.instance(&spec.instance, config) {
+            Ok(instance) => instance,
+            Err(e) => return SuccessTuple::fail(e.message),
+        };
+        let registry = match Pipe::builder("mrsm", "pipeline_registry")
+            .instance(&spec.instance)
+            .build()
+        {
+            Ok(pipe) => pipe,
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        };
+        let lease = match super::pipelines::MutationLease::acquire(
+            self.session.clone(),
+            instance.clone(),
+            registry,
+        ) {
+            Ok(lease) => lease,
+            Err(e) => return SuccessTuple::fail(e.message),
+        };
+        let mut pipe = spec.registration();
+        let attributes = match self
+            .session
+            .block_on(instance.conn().get_pipe_attributes(&pipe))
+        {
+            Ok(attributes) => attributes,
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        };
+        let previous = attributes.get("parameters").and_then(Value::as_map);
+        let parameters = match spec.registration_parameters(
+            previous,
+            project,
+            expected,
+            &uuid::Uuid::new_v4().to_string(),
+        ) {
+            Ok(Some(parameters)) => parameters,
+            Ok(None) => return SuccessTuple::success(),
+            Err(e) => return SuccessTuple::fail(e),
+        };
+        pipe.set_parameters(parameters);
+        if let Err(e) = lease.check() {
+            return SuccessTuple::fail(e.message);
+        }
+        if previous.is_none() {
+            self.session.block_on(instance.conn().register_pipe(&pipe))
+        } else {
+            self.session
+                .block_on(instance.conn().edit_pipe(&pipe, false))
+        }
+    }
     fn configure(&mut self, host: &Host, project: &Project) {
         let _ = self.try_configure(host, project);
     }

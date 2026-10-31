@@ -171,6 +171,8 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   Connector keys for the default instance for the project. Alias for `config.meerschaum.instance`.
 - **`pipes`**
   List all of the pipes to be used in this project. See the **The `pipes` Key** section below.
+- **`pipelines`**
+  Define named, exact Pipe selections. Jobs reference these names; dependencies remain in Pipe parameters. See [Pipelines in Compose](pipelines/compose.md).
 - **`sync`**
   Govern the behavior of the syncing process. See **The `sync` Key** section below.
 - **`jobs`**

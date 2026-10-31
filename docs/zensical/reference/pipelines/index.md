@@ -15,6 +15,7 @@ The pipe parameters that configure the engine are `parents` / `children` (the ed
 | **This page** | The pipe graph, selecting a slice of it, the plan, failures and resuming |
 | [Engine State](/reference/pipelines/state/) | Run history, the dirty-range ledger, cursors, leases and the `system.engine.*` settings |
 | [Continuous Mode and Streams](/reference/pipelines/continuous/) | `--loop`, `--listen`, micro-batching and triggering children |
+| [Pipelines in Compose](/reference/pipelines/compose/) | Declare membership and run it from Jobs |
 | [Visualization](/reference/pipelines/visualization/) | The Gantt chart, the DAG view and the `/dash/pipelines` page |
 
 ## Registered Pipelines

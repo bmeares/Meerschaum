@@ -97,6 +97,9 @@ df = pipe.get_data(silent=True)
 `get_rowcount()` and `get_sync_time()` behave the same way (0 and `None` for a never-synced
 pipe, `silent=True` for 0 / `None` on errors).
 
+The console displays integer timestamp sync times in UTC when the Pipe declares `precision`
+(for example, `millisecond`). Hover to see the original integer. Non-time integer axes stay numeric.
+
 ### `get_rowcount()`
 
 The number of rows, optionally between `begin` (inclusive) and `end` (exclusive) and filtered by

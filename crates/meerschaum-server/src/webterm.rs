@@ -198,6 +198,15 @@ impl WebtermConfig {
     pub fn uses_tmux(&self) -> bool {
         self.tmux.is_some()
     }
+
+    fn shell_state_directory(&self) -> Option<&str> {
+        self.shell
+            .env
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "MRSM_WEBTERM_STATE_DIR")
+            .map(|(_, value)| value.as_str())
+    }
 }
 
 /// Meerschaum's tmux configuration for the web terminal's own tmux server.
@@ -836,12 +845,13 @@ fn pty_error(error: impl std::fmt::Display) -> std::io::Error {
     std::io::Error::other(error.to_string())
 }
 
-fn spawn_pty(builder: CommandBuilder) -> std::io::Result<Pty> {
+fn spawn_pty(builder: CommandBuilder, state_dir: Option<PathBuf>) -> std::io::Result<Pty> {
     let pair = native_pty_system()
         .openpty(PtySize::default())
         .map_err(pty_error)?;
     let mut child = pair.slave.spawn_command(builder).map_err(pty_error)?;
     let process_id = child.process_id();
+    let readiness = state_dir.and_then(|dir| process_id.map(|pid| dir.join(format!("{pid}.json"))));
     // The child holds the slave end now; ours must close for EOF to reach the reader.
     drop(pair.slave);
     let killer = KillOnDrop(child.clone_killer());
@@ -851,6 +861,10 @@ fn spawn_pty(builder: CommandBuilder) -> std::io::Result<Pty> {
     let (exited_tx, exited_rx) = std::sync::mpsc::channel::<()>();
     std::thread::spawn(move || {
         let _ = child.wait();
+        // A disconnected plain terminal kills its shell before its own guard can clean up.
+        if let Some(path) = readiness {
+            let _ = std::fs::remove_file(path);
+        }
         let _ = exited_tx.send(());
     });
     let (out_tx, output) = mpsc::channel::<Vec<u8>>(64);
@@ -896,13 +910,7 @@ fn shell_state(
     session: Option<&str>,
     process_id: Option<u32>,
 ) -> Option<Value> {
-    let dir = config
-        .shell
-        .env
-        .iter()
-        .find(|(key, _)| key == "MRSM_WEBTERM_STATE_DIR")?
-        .1
-        .clone();
+    let dir = config.shell_state_directory()?;
     let pid = if let (Some(tmux), Some(session)) = (&config.tmux, session) {
         let mut command = std::process::Command::new(&tmux.binary);
         if let Some(socket) = &tmux.socket {
@@ -926,7 +934,7 @@ fn shell_state(
     } else {
         process_id?
     };
-    read_shell_state(Path::new(&dir), pid)
+    read_shell_state(Path::new(dir), pid)
 }
 
 fn read_shell_state(dir: &Path, pid: u32) -> Option<Value> {
@@ -1002,7 +1010,13 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
     if let Some(cwd) = cwd {
         builder.cwd(cwd);
     }
-    Ok((spawn_pty(builder)?, session))
+    let state_dir = if config.tmux.is_none() {
+        config.shell_state_directory().map(PathBuf::from)
+    } else {
+        // The PTY owns a tmux client; the session's shell survives that client's exit.
+        None
+    };
+    Ok((spawn_pty(builder, state_dir)?, session))
 }
 
 /// The environment variables the tmux path does not carry into the shell.

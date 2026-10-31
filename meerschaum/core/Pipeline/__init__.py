@@ -623,7 +623,7 @@ class Pipeline:
     graph: Optional[bool], default None
         Whether the run respects the dependencies between the members even without traversal
         (a child member waits for its parent member and is capped at its watermark).
-        By default a Pipeline loaded from (or saved to) a name does, like
+        A saved Pipeline keeps its `graph` setting (default `True`), like
         `mrsm sync pipelines NAME`; an unsaved selection without `parents` / `children` syncs
         each member on its own, like `mrsm sync pipes`.
 
@@ -822,7 +822,10 @@ class Pipeline:
         """
         if self._graph is not None:
             return self._graph
-        return bool(self._definitions)
+        if not self._definitions:
+            return False
+        return _common([d.get('graph', True) for d in self._definitions],
+                       'graph', [d['name'] for d in self._definitions])
 
     @graph.setter
     def graph(self, value: Optional[bool]) -> None:
@@ -1127,7 +1130,7 @@ class Pipeline:
         defaults: Optional[Dict[str, Any]] = None,
     ) -> SuccessTuple:
         """
-        Save this selection's members and traversal on its instance under `name`
+        Save this selection's members, traversal and execution mode under `name`
         (default: `self.name`). Saving never changes the members' tags or registrations.
 
         Parameters
@@ -1140,7 +1143,7 @@ class Pipeline:
             `overwrite=True` (its description, defaults and layout are kept unless passed).
             A Pipeline loaded from `name` saves its changes without it, unless someone else
             saved a newer revision since it was loaded (load it again). Saving the same
-            members and traversal again is a no-op success.
+            members, traversal and execution mode again is a no-op success.
 
         description: Optional[str], default None
             Set the saved description.
@@ -1168,6 +1171,7 @@ class Pipeline:
         registry = self.instance
         try:
             members = self._members_to_save()
+            graph = True if self._graph is None and not self._definitions else self.graph
             registration_pipe = registration(name, registry)
             registry_keys = registration_pipe.instance_keys
             exists = registration_pipe.get_id() is not None
@@ -1189,6 +1193,7 @@ class Pipeline:
                     sorted(current.get('targets', None) or []) == _refs(members, registry_keys)
                     and get_depth(current.get('parents', None)) == self.parents
                     and get_depth(current.get('children', None)) == self.children
+                    and current.get('graph', True) == graph
                 )
                 unchanged = (
                     (description is None or description == current.get('description', ''))
@@ -1215,6 +1220,7 @@ class Pipeline:
                     expected_revision=expected_revision,
                     description=description,
                     defaults=defaults,
+                    graph=graph,
                 )
             else:
                 carried = self._settings_to_carry(with_defaults=(defaults is None))
@@ -1224,6 +1230,7 @@ class Pipeline:
                     defaults=(defaults if defaults is not None else carried.get('defaults', None)),
                     layout=carried.get('layout', None),
                     create=True,
+                    graph=graph,
                 )
         except Exception as e:
             return False, f"Failed to save Pipeline '{name}' on '{registry}': {e}"

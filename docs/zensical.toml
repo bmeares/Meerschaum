@@ -33,6 +33,7 @@ nav = [
     ]},
     {"🕸️ Pipelines" = [
       "reference/pipelines/index.md",
+      {"🎼 Compose Definitions" = "reference/pipelines/compose.md"},
       {"🗃️ Engine State" = "reference/pipelines/state.md"},
       {"♾️ Continuous Mode" = "reference/pipelines/continuous.md"},
       {"📊 Visualization" = "reference/pipelines/visualization.md"},

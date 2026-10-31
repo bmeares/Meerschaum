@@ -33,6 +33,7 @@ pub mod jobs;
 pub mod lint;
 pub mod model;
 pub mod ops;
+pub mod pipelines;
 pub mod pipes;
 pub mod plugins;
 pub mod project;

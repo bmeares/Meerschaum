@@ -78,7 +78,9 @@ run_id                      success  message                                    
 01M4VCTFHE91JA00NQ0YHHQDMQ  1.0      1 synced, 2 up to date    4        3          …
 ```
 
-A node row has its `action`, `status`, the planner's `reason`, the window it synced (`begin`, `end`), `num_chunks`, `attempts`, timings and the counts (`inserted`, `updated`, `upserted`, `deleted`), plus `planned_start_seconds` and `slack_seconds` from the critical-path calculation that [the Gantt chart](/reference/pipelines/visualization/) draws. The planner's duration estimates are an exponentially weighted moving average per `(pipe, action)` over past runs (30 seconds for a pipe that has never run).
+A node row has its `action`, `status`, the planner's `reason`, the window it synced (`begin`, `end`), `num_chunks`, `attempts`, timings and the counts (`inserted`, `updated`, `upserted`, `deleted`), plus `planned_start_seconds` and `slack_seconds` from the critical-path calculation that [the Gantt chart](/reference/pipelines/visualization/) draws.
+
+Duration estimates use a weighted average of recent successful runs of the same Pipe and action, or 30 seconds without history. Reads use at most 64 samples per Pipe by default, up to 1,024 when smoothing needs more history.
 
 New run IDs contain the pipeline name, readable UTC start time, and a collision suffix. Earlier ULID run IDs remain valid. Retention is `clear_pipe(end=now − run_history_days)` on runs, nodes and events (default 30 days); consumed ledger entries are pruned alongside. Unconsumed entries are never pruned by age.
 

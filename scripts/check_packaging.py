@@ -4,7 +4,7 @@ Check that the 5.0 packaging metadata agrees with itself (docs/design/v5.0.0.md 
 
     python scripts/check_packaging.py                   # run the source-tree checks
     python scripts/check_packaging.py --version         # print the wheel version (PEP 440)
-    python scripts/check_packaging.py --write           # regenerate requirements/ and extras.rs
+    python scripts/check_packaging.py --write           # regenerate requirements/ and CLI tables
     python scripts/check_packaging.py --wheels DIST     # also check built wheels (see below)
 
 Source-tree checks (exit 1 on any failure):
@@ -24,6 +24,7 @@ Source-tree checks (exit 1 on any failure):
    `--write` (scripts/docker/update_requirements.sh calls it).
 6. `crates/meerschaum-cli/src/extras.rs` (the extras the CLI's `show venvs` / `prune venvs` treat
    as wanted packages) equals the extras in the root pyproject.toml. Regenerate with `--write`.
+   `src/native/packages_table.rs` also matches the dependency groups in `_packages.py`.
 
 Version scheme (checks 1 and 3 use it): Cargo and PEP 440 spell a pre-release differently, so the
 Cargo version `X.Y.Z-aN` / `-bN` / `-rc.N` / `-dev.N` maps to `X.Y.ZaN` / `bN` / `rcN` / `.devN`
@@ -54,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 import tomllib
 import zipfile
@@ -62,6 +64,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 REQUIREMENTS_DIR = ROOT / 'requirements'
 EXTRAS_RS = ROOT / 'crates/meerschaum-cli/src/extras.rs'
+PACKAGES_TABLE = ROOT / 'crates/meerschaum-cli/src/native/packages_table.rs'
 
 
 def cargo_to_pep440(version: str) -> str:
@@ -331,7 +334,7 @@ def check_wheels(dist: Path, pep440: str) -> tuple[list[str], list[str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--version', action='store_true', help="print the wheel version (PEP 440) and exit")
-    parser.add_argument('--write', action='store_true', help="regenerate requirements/ and crates/meerschaum-cli/src/extras.rs")
+    parser.add_argument('--write', action='store_true', help="regenerate requirements/ and the CLI dependency tables")
     parser.add_argument('--wheels', metavar='DIST', type=Path, help="also check the built wheels in DIST")
     args = parser.parse_args()
 
@@ -467,6 +470,21 @@ def main() -> int:
     elif EXTRAS_RS.read_text(encoding='utf-8') != want_extras_rs:
         failures.append(f"{EXTRAS_RS.relative_to(ROOT)} differs from the extras in pyproject.toml (run --write)")
 
+    generated = subprocess.run(
+        [sys.executable, '-I', str(ROOT / 'scripts/rust/gen_packages_table.py')],
+        capture_output=True, text=True,
+    )
+    if generated.returncode:
+        failures.append('CLI dependency table generation failed: ' + generated.stderr.strip())
+    else:
+        current = PACKAGES_TABLE.read_text(encoding='utf-8') if PACKAGES_TABLE.exists() else None
+        if current != generated.stdout:
+            if args.write:
+                PACKAGES_TABLE.write_text(generated.stdout, encoding='utf-8')
+                print('wrote the CLI dependency groups table')
+            else:
+                failures.append('CLI packages_table.rs differs from _packages.py (run --write)')
+
     ### 3. The Python version.
     py_version = read_py_version()
     if py_version != pep440:
@@ -487,7 +505,7 @@ def main() -> int:
     suffix = f"; wheels in {args.wheels} agree" if args.wheels else ""
     print(
         f"packaging ok: Cargo {cargo_version} = _version.py {py_version} = wheel {pep440}; "
-        f"{len(toml_extras)} extras in sync with requirements/ and extras.rs{suffix}"
+        f"{len(toml_extras)} extras in sync with requirements/ and CLI tables{suffix}"
     )
     return 0
 

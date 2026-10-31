@@ -205,6 +205,8 @@ def test_pipeline_page_views_and_stage_table_fit_the_viewport(server, tab, width
     page.locator('#pipeline-view-runs').click()
     page.wait_for_selector('#pipelines-gantt .barlayer .point', timeout=60000)
     stages = page.locator('.pipeline-stages-scroll')
+    assert not stages.is_visible()
+    page.locator('.pipeline-run-detail button[data-run-view=table]').click()
     assert stages.is_visible()
     assert stages.get_attribute('tabindex') == '0'
     assert page.locator('#pipelines-nodes-table tbody tr').count() == 2
@@ -241,8 +243,17 @@ def test_pipeline_toolbar_output_and_run_selection_are_local(server, tab):
     assert page.locator('#pipeline-output-dock').is_visible()
     page.locator('#pipeline-output-close').click()
     assert not page.locator('#pipeline-output-dock').is_visible()
-    page.evaluate("window.mrsmPaintPipelineStatuses(Object.fromEntries(Array.from(document.querySelectorAll('.pipeline-stage')).map(node => [node.dataset.ref, 'running'])))")
-    assert page.locator('.pipeline-stage[data-status=running]').count() >= 2
+    ### Observe the painter in one browser turn before live updates restore the actual statuses.
+    painted = page.evaluate("""() => {
+        const nodes = Array.from(document.querySelectorAll('.pipeline-stage'));
+        window.mrsmPaintPipelineStatuses(Object.fromEntries(nodes.map(node => [node.dataset.ref, 'running'])));
+        return nodes.filter(node => node.dataset.status === 'running').map(node => ({
+            color: node.style.getPropertyValue('--stage-color'),
+            badge: node.querySelector('.pipeline-live-status')?.textContent || ''
+        }));
+    }""")
+    assert len(painted) >= 2
+    assert all(node == {'color': '#3486bd', 'badge': 'running'} for node in painted)
     page.locator('#pipeline-view-runs').click()
     page.wait_for_selector('#pipeline-runs-overview .barlayer .point')
     page.wait_for_function("document.querySelectorAll('#pipelines-runs-table tbody tr').length >= 2")

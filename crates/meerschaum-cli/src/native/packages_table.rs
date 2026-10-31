@@ -8,9 +8,8 @@
 //! python3 scripts/rust/gen_packages_table.py > crates/meerschaum-cli/src/native/packages_table.rs
 //! ```
 //!
-//! `scripts/check_packaging.py` keeps `_packages.py`, `pyproject.toml` and `extras.rs` in step;
-//! this table is the same data for the groups that are not extras. `tests/generated_tables.rs`
-//! fails when this file differs from the generator's output.
+//! `scripts/check_packaging.py --write` keeps both CLI dependency tables in step with Python.
+//! The fast packaging check and `tests/generated_tables.rs` reject stale generated data.
 
 /// One group: `(import_name, install_name)` pairs in definition order.
 pub type Group = &'static [(&'static str, &'static str)];
@@ -192,6 +191,7 @@ pub const GROUPS: &[(&str, Group)] = &[
     ]),
     ("dash", &[
         ("dash", "dash>=4.1.0"),
+        ("pygments", "pygments>=2.21.0"),
         ("dash_bootstrap_components", "dash-bootstrap-components>=2.0.4"),
         ("dash_ace", "dash-ace>=0.2.1"),
         ("dash_extensions", "dash-extensions>=2.0.5"),
@@ -261,7 +261,7 @@ pub const GROUPS: &[(&str, Group)] = &[
         ("pprintpp", "pprintpp>=0.4.0"),
         ("asciitree", "asciitree>=0.3.3"),
         ("typing_extensions", "typing-extensions>=4.7.1"),
-        ("pygments", "pygments>=2.7.2"),
+        ("pygments", "pygments>=2.21.0"),
         ("colorama", "colorama>=0.4.3"),
         ("rich", "rich>=13.4.2"),
         ("more_termcolor", "more-termcolor>=1.1.3"),
@@ -281,7 +281,7 @@ pub const GROUPS: &[(&str, Group)] = &[
         ("pprintpp", "pprintpp>=0.4.0"),
         ("asciitree", "asciitree>=0.3.3"),
         ("typing_extensions", "typing-extensions>=4.7.1"),
-        ("pygments", "pygments>=2.7.2"),
+        ("pygments", "pygments>=2.21.0"),
         ("colorama", "colorama>=0.4.3"),
         ("rich", "rich>=13.4.2"),
         ("more_termcolor", "more-termcolor>=1.1.3"),
@@ -400,7 +400,7 @@ pub const ALL_PACKAGES: Group = &[
     ("pprintpp", "pprintpp>=0.4.0"),
     ("asciitree", "asciitree>=0.3.3"),
     ("typing_extensions", "typing-extensions>=4.7.1"),
-    ("pygments", "pygments>=2.7.2"),
+    ("pygments", "pygments>=2.21.0"),
     ("colorama", "colorama>=0.4.3"),
     ("rich", "rich>=13.4.2"),
     ("more_termcolor", "more-termcolor>=1.1.3"),

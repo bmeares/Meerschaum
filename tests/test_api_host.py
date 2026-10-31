@@ -200,6 +200,37 @@ def test_plugin_registry_excludes_builtins():
         _TOOLS.pop('test_api_host_tool', None)
 
 
+def test_console_redirects_use_registered_page_owners_without_stack_walks(root):
+    code = """
+import inspect
+from meerschaum.api.host import build_app
+from meerschaum.api.host.dash import redirect_target
+from meerschaum.plugins import _plugin_endpoints_to_pages
+build_app()
+def wrapped_page():
+    pass
+wrapped_page.__module__ = 'page_wrappers'
+_plugin_endpoints_to_pages['native_owner'] = {
+    '/native': {'function': None},
+    '/wrapped': {'function': wrapped_page},
+}
+calls = []
+original = inspect.stack
+def counted_stack(*args, **kwargs):
+    calls.append(True)
+    return original(*args, **kwargs)
+inspect.stack = counted_stack
+assert redirect_target('/dash/native_owner/pipes', 'a=1') == '/dash/pipes?a=1'
+assert redirect_target('/dash/hostdemo/pipes') == '/dash/pipes'
+assert redirect_target('/dash/hostdemo/page') is None
+assert redirect_target('/dash/_dash-layout') is None
+assert redirect_target('/dash/assets/logo.svg') is None
+assert not calls, len(calls)
+"""
+    result = _python(root, code)
+    assert result.returncode == 0, result.stderr[-4000:]
+
+
 def test_host_mode_surface(root):
     """`meerschaum.api` keeps its surface in host mode, without the core routes."""
     code = """
