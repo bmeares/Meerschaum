@@ -74,7 +74,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - Isolate Python hosts when API and MCP servers share a configuration root.
 - Bound scheduling estimates to recent history for the selected Pipes.
 - Release completed telemetry connectors, bounding memory for repeated Pipeline calls.
-- Publish complete Job properties atomically, keeping listings consistent during updates.
+- Publish complete Job properties atomically, and finish metadata writes before deleting completed Jobs.
 - Release a Pipe lease even when acquisition completes after cancellation.
 - Back up, restore, and upgrade Stack PostgreSQL through guided commands.
 

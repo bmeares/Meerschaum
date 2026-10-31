@@ -1171,6 +1171,13 @@ impl Daemon {
                 self.daemon_id
             ));
         }
+        // A finished worker reads as stopped before its supervisor has drained the
+        // output and published the final metadata. Wait before removing that metadata
+        // directory, or its atomic staging files can make remove_dir_all fail with
+        // ENOTEMPTY. An unstarted launch is still deleted immediately.
+        if self.status() == Status::Stopped && self.timestamps().current_began().is_some() {
+            self.wait_supervisor_gone(None);
+        }
         if self.paths.dir.exists()
             && let Err(e) = fs::remove_dir_all(&self.paths.dir)
         {
