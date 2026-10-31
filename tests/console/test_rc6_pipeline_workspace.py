@@ -205,6 +205,8 @@ def test_pipeline_page_views_and_stage_table_fit_the_viewport(server, tab, width
     page.locator('#pipeline-view-runs').click()
     page.wait_for_selector('#pipelines-gantt .barlayer .point', timeout=60000)
     stages = page.locator('.pipeline-stages-scroll')
+    assert not stages.is_visible()
+    page.locator('.pipeline-run-detail button[data-run-view=table]').click()
     assert stages.is_visible()
     assert stages.get_attribute('tabindex') == '0'
     assert page.locator('#pipelines-nodes-table tbody tr').count() == 2

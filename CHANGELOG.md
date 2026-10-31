@@ -30,6 +30,7 @@ See [Pipelines in Compose](https://meerschaum.io/reference/pipelines/compose/).
 Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
 
 Performance refreshes keep charts visible. Unchanged chart bundles reuse the browser cache.
+Leaving the Pipes table discards queued statistics refreshes.
 
 Pipelines have a searchable, sortable runbook with member details and recent runs loaded on demand. The canvas keeps View options in a compact popup and supports pinch zoom on phones.
 

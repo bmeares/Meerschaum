@@ -528,6 +528,7 @@ class Tab:
         self.errors: list[str] = []
         self.network_changed = False
         self.network_changed_ever = False
+        self.interrupted_components: set[str] = set()
         page.on('console', self._on_console)
         page.on('pageerror', self._on_pageerror)
         page.on('response', self._on_response)
@@ -537,22 +538,34 @@ class Tab:
         if 'ERR_NETWORK_CHANGED' in str(request.failure):
             self.network_changed = True
             self.network_changed_ever = True
+            self.interrupted_components.update(
+                name for name in ('dash_html_components', 'dash_core_components')
+                if name in request.url
+            )
+
+    def _unloaded_script_error(self, text):
+        return ((self.network_changed_ever and 'is not defined' in text)
+                or any(name+' was not found' in text for name in self.interrupted_components))
 
     def _on_pageerror(self, error):
         ### The scripts of that page never loaded (see `goto`).
-        if self.network_changed_ever and 'is not defined' in str(error):
+        if self._unloaded_script_error(str(error)):
             return
         self.errors.append(f"pageerror: {getattr(error, 'stack', None) or error}")
 
     def _on_console(self, message):
         ### A script that never loaded (see `goto`) leaves its globals undefined.
-        unloaded = self.network_changed_ever and 'is not defined' in message.text
+        unloaded = self._unloaded_script_error(message.text)
         if message.type == 'error' and not unloaded and not any(
             ignored in message.text for ignored in IGNORED_CONSOLE_ERRORS
         ):
             self.errors.append(f"console.error: {message.text} ({message.location})")
 
     def _on_response(self, response):
+        if response.status == 200:
+            self.interrupted_components.difference_update(
+                name for name in tuple(self.interrupted_components) if name in response.url
+            )
         ### Browsers ask for a source map of each Dash bundle; the console answers `404` on purpose.
         if response.url.endswith('.map'):
             return

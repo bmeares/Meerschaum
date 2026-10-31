@@ -260,6 +260,8 @@ dash_app.clientside_callback(
     function(rendered) {
         if (!rendered) return dash_clientside.no_update;
         setTimeout(function () {
+            if (window.location.pathname.replace(/\\/+$/, '') !== '/dash/pipes'
+                || !document.getElementById('pipes-table-body')) return;
             dash_clientside.set_props('pipes-stats-request', {data: rendered});
         }, 0);
         return dash_clientside.no_update;
