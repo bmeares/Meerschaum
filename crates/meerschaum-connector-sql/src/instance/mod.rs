@@ -19,6 +19,7 @@ pub mod indices;
 pub mod inplace;
 mod leases;
 pub mod maintenance;
+mod metrics;
 pub mod partition;
 pub mod pipes;
 pub mod plugins;

@@ -32,11 +32,14 @@ def _time(value):
 
 def get_engine_metrics(instance=None, begin=None, end=None, pipe=None, pipe_ref=None,
                        pipeline=None, limit=1000, buckets=48, visible_refs=None,
-                       visible_pipelines=None):
+                       visible_pipelines=None, summary_only=False):
     """Read numeric sync and Pipeline history on an instance.
 
-    The default window is the last 24 hours; retained history spans 30 days. Queries
-    aggregate at most 5,000 sync rows and return ``truncated`` when more match. Durations
+    The default window is the last 24 hours; retained history spans 30 days.
+    SQL totals and chart buckets cover the authorized window independently of the
+    detailed history limit (at most 5,000 records). ``summary_complete`` identifies
+    whole-window aggregates; ``history_truncated`` identifies capped recent history.
+    Other backends may return explicitly incomplete sample aggregates. Durations
     are seconds, timestamps are UTC, and ``success_rate`` is a fraction from 0 to 1.
     ``rows`` counts changed rows (inserted + updated + upserted + deleted), so
     replacement syncs count both deletions and new rows; unchanged syncs count zero.
@@ -57,6 +60,7 @@ def get_engine_metrics(instance=None, begin=None, end=None, pipe=None, pipe_ref=
         'instance': str(instance), 'begin': _time(begin), 'end': _time(end),
         'pipe_ref': reference, 'pipeline': getattr(pipeline, 'name', pipeline),
         'limit': limit, 'buckets': buckets,
+        'summary_only': bool(summary_only),
         'visible_refs': list(visible_refs) if visible_refs is not None else None,
         'visible_pipelines': list(visible_pipelines) if visible_pipelines is not None else None,
     }

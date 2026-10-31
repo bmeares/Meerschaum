@@ -1,7 +1,7 @@
 """Lazy, independently refreshed Performance page and Overview card."""
 
 import dash
-from dash import Input, Output, State
+from dash import Input, Output, State, MATCH, ClientsideFunction
 from dash.exceptions import PreventUpdate, MissingCallbackContextException
 import dash_bootstrap_components as dbc
 
@@ -42,6 +42,7 @@ def follow_performance_location(search, path):
     Input('performance-interval', 'n_intervals'),
     Input('performance-history-page', 'active_page'),
     Input('performance-instance', 'data'),
+    Input('performance-history-page-size', 'value'),
     State('session-store', 'data'),
     running=[
         (Output('performance-interval', 'disabled'), True, False),
@@ -50,7 +51,7 @@ def follow_performance_location(search, path):
          'performance-refresh-status is-refreshing', 'performance-refresh-status'),
     ],
 )
-def render_performance(path, search, window, pipe, pipeline, refresh, interval, page, instance, session):
+def render_performance(path, search, window, pipe, pipeline, refresh, interval, page, instance, page_size, session):
     if str(path).rstrip('/') != '/dash/performance':
         raise PreventUpdate
     try:
@@ -65,10 +66,10 @@ def render_performance(path, search, window, pipe, pipeline, refresh, interval, 
     try:
         data = performance.metrics(instance, session, window or '24h', pipe, pipeline)
         if trigger in ('performance-window', 'performance-pipe', 'performance-pipeline',
-                       'performance-instance', 'performance-location'):
+                       'performance-instance', 'performance-location', 'performance-history-page-size'):
             page = 1
-        _, page, pages, _ = performance.history_window(data, page)
-        return (performance.build_body(data, data.get('_instance', instance), window or '24h', page),
+        _, page, pages, _ = performance.history_window(data, page, page_size)
+        return (performance.build_body(data, data.get('_instance', instance), window or '24h', page, page_size),
                 performance.filter_options(data.get('_pipe_options'), pipe),
                 performance.filter_options(data.get('_pipeline_options'), pipeline, 'Pipeline'),
                 pages, page, pages <= 1, *selection)
@@ -80,6 +81,19 @@ def render_performance(path, search, window, pipe, pipeline, refresh, interval, 
         return (dbc.Alert('Performance could not be loaded. Try Refresh.', color='warning'),
                 performance.filter_options(value=pipe),
                 performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection)
+
+
+dash_app.clientside_callback(
+    ClientsideFunction(namespace='mrsmPerformance', function_name='groups'),
+    Output({'type': 'performance-group-body', 'group': MATCH}, 'children'),
+    Output({'type': 'performance-group-page', 'group': MATCH}, 'max_value'),
+    Output({'type': 'performance-group-page', 'group': MATCH}, 'active_page'),
+    Output({'type': 'performance-group-range', 'group': MATCH}, 'children'),
+    Input({'type': 'performance-group-data', 'group': MATCH}, 'data'),
+    Input({'type': 'performance-group-search', 'group': MATCH}, 'value'),
+    Input({'type': 'performance-group-sort', 'group': MATCH}, 'value'),
+    Input({'type': 'performance-group-page', 'group': MATCH}, 'active_page'),
+)
 
 
 @dash_app.callback(

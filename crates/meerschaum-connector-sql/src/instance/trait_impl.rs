@@ -452,6 +452,23 @@ impl InstanceConnector for SqlConnector {
         ))
     }
 
+    async fn aggregate_sync_metrics(
+        &self,
+        query: &DataQuery,
+        begin_micros: i64,
+        bucket_width_micros: i64,
+        max_groups: usize,
+    ) -> ConnectorResult<
+        Option<(
+            Vec<meerschaum_connector::sync_metrics::MetricAggregate>,
+            bool,
+        )>,
+    > {
+        self.require_schema().await?;
+        self.aggregate_sync_metrics_query(query, begin_micros, bucket_width_micros, max_groups)
+            .await
+    }
+
     async fn partition_pipe(&self, pipe: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {
         if let Err(e) = self.require_schema().await {
             return SuccessTuple::fail(e.to_string());

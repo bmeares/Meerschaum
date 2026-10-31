@@ -306,7 +306,9 @@ async fn bounds_limits_and_retention_are_enforced_by_the_persisted_store() {
         .unwrap();
     assert!(result.truncated);
     assert_eq!(result.history.len(), 2);
-    assert_eq!(result.summary.rows, 7);
+    assert!(result.summary_complete && result.history_truncated);
+    assert_eq!(result.summary.syncs, 4);
+    assert_eq!(result.summary.rows, 10);
     let storage = sync_metrics::metrics_pipe(env.conn.as_ref()).await.unwrap();
     assert_eq!(
         env.conn
@@ -647,6 +649,20 @@ async fn a_real_pipeline_run_records_each_node_once_with_its_registration_and_ru
     assert!(result.history[0].run_id.is_some());
     assert_eq!(result.pipelines.len(), 1);
     assert_eq!(result.pipelines[0].summary.rows, 1);
+    let unrelated = env.register("unrelated", &json!({})).await;
+    let filtered = env
+        .conn
+        .get_engine_metrics(&MetricsQuery {
+            pipe_ref: Some(unrelated.pipe_ref()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(filtered.summary.syncs, 0);
+    assert!(
+        filtered.pipelines.is_empty(),
+        "a Pipe filter must exclude unrelated Pipeline runs"
+    );
 }
 
 #[tokio::test]

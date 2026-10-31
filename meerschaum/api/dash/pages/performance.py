@@ -43,9 +43,12 @@ def route(pathname=None, href=None):
             html.Div(html.Div([dbc.Spinner(size='sm'), html.Span('Loading performance…')],
                               className='performance-loading', role='status'),
                      id='performance-body'),
-            html.Nav(dbc.Pagination(
+            html.Nav([html.Label('Rows per page', htmlFor='performance-history-page-size'),
+                dbc.Select(id='performance-history-page-size', value='10', size='sm',
+                           options=[{'label': str(n), 'value': str(n)} for n in (10, 25, 50)]),
+                dbc.Pagination(
                 id='performance-history-page', active_page=1, max_value=1,
-                first_last=True, previous_next=True, fully_expanded=False, size='sm'),
+                first_last=True, previous_next=True, fully_expanded=False, size='sm')],
                 id='performance-history-controls', hidden=True,
                 **{'aria-label': 'Sync history pages'}),
         ], id='performance-page', className='console-page performance-page'),

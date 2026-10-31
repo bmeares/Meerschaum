@@ -41,7 +41,7 @@ def test_performance_drilldown_and_back_work_without_a_document_reload(inspectio
         tab.goto('/dash/performance?window=7d', '#performance-page')
         page = tab.page
         page.wait_for_function("document.getElementById('performance-body')?.textContent.includes('rc16_failure')")
-        page.wait_for_function("document.querySelector('#performance-history') !== null")
+        page.locator('#performance-pipes tbody tr').first.wait_for()
         page.evaluate('window.reviewDocument = 17')
         link = page.locator('#performance-body a[href*="window=7d"]', has_text='rc16_parent').first
         link.click()
@@ -93,17 +93,18 @@ else: raise AssertionError('History did not reach the expected65 outcomes.')
         tab.goto('/dash/performance?' + urlencode({'pipe':'sql:w7console|review|history|None'}),
                  '#performance-page')
         page = tab.page
-        wait_visible(page, page.get_by_text('1–50 of 65 syncs in this sample', exact=True),
+        page.get_by_role('tab', name='Recent syncs', exact=True).click()
+        wait_visible(page, page.get_by_text('1–10 of 65 recent syncs', exact=True),
                      'performance-initial-history-failed')
-        page.locator('#performance-history-page .page-link').filter(has_text=re.compile('^2$')).click()
-        page.get_by_text('51–65 of 65 syncs in this sample', exact=True).wait_for()
-        assert page.locator('#performance-history tbody tr').count() == 15
+        page.locator('#performance-history-page .page-item:nth-last-child(2) .page-link').click()
+        page.get_by_text('11–20 of 65 recent syncs', exact=True).wait_for()
+        assert page.locator('#performance-history tbody tr').count() == 10
         page.click('#performance-refresh')
-        page.get_by_text('51–65 of 65 syncs in this sample', exact=True).wait_for()
+        page.get_by_text('11–20 of 65 recent syncs', exact=True).wait_for()
         page.select_option('#performance-window', '7d')
-        page.get_by_text('1–50 of 65 syncs in this sample', exact=True).wait_for()
-        assert page.locator('#performance-history tbody tr').count() == 50
-        targets = page.locator('#performance-history-controls .page-link').evaluate_all(
+        page.get_by_text('1–10 of 65 recent syncs', exact=True).wait_for()
+        assert page.locator('#performance-history tbody tr').count() == 10
+        targets = page.locator('#performance-history-controls .page-link:visible').evaluate_all(
             'nodes => nodes.map(node => {const r=node.getBoundingClientRect();return [r.width,r.height]})')
         assert targets and all(width >= 44 and height >= 44 for width, height in targets), targets
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')

@@ -1333,6 +1333,7 @@ pub fn operations() -> Vec<Operation> {
                 ("pipeline", "query", false, "null|string"),
                 ("limit", "query", false, "integer|null"),
                 ("buckets", "query", false, "integer|null"),
+                ("summary_only", "query", false, "boolean"),
                 ("visible_refs", "query", false, "null|string"),
                 ("visible_pipelines", "query", false, "null|string"),
             ],
@@ -1340,8 +1341,11 @@ pub fn operations() -> Vec<Operation> {
             "Numeric sync and Pipeline performance (`metrics`), filtered by current scopes, \
              teams and object access before aggregation. Bounds are ISO-8601 timestamps with \
              timezones; the default window is 24 hours and the maximum is 30 days. `limit` \
-             defaults to 1000 (maximum 5000), `buckets` to 48 (maximum 200). A bounded view \
-             reports `truncated`. Durations are seconds, timestamps UTC and `success_rate` \
+             caps detailed history at 1000 (maximum 5000); SQL totals and chart buckets \
+             cover the window independently. `buckets` defaults to 48 (maximum 200). \
+             `summary_complete`, `history_truncated` and `pipelines_truncated` report coverage. \
+             `summary_only` omits individual outcomes and Pipeline groups. A bounded view \
+             also reports `truncated`. Durations are seconds, timestamps UTC and `success_rate` \
              a fraction. Rows affected include inserted, updated, upserted and deleted rows. \
              Optional visibility ceilings are JSON string arrays and may only narrow access.",
             READ,

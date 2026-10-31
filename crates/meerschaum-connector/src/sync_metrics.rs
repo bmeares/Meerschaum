@@ -27,8 +27,10 @@ pub const RETENTION_DAYS: i64 = 30;
 pub const MAX_PENDING: usize = 4096;
 /// Largest database write batch.
 pub const BATCH_SIZE: usize = 128;
-/// Maximum sync rows returned or aggregated by one request.
+/// Maximum detailed sync rows returned by one request.
 pub const MAX_ROWS: usize = 5000;
+/// Maximum database-aggregated Pipe/time groups transferred by one request.
+pub const MAX_SUMMARY_GROUPS: usize = 20_000;
 /// Maximum run rows considered by one request.
 pub const MAX_RUNS: usize = 1000;
 /// Maximum node rows considered by one request.
@@ -60,16 +62,23 @@ pub fn observed_registration(pipe: &Pipe) -> Option<String> {
 pub async fn registrations<C: InstanceConnector + ?Sized>(
     conn: &C,
 ) -> ConnectorResult<HashMap<String, String>> {
-    Ok(registration_snapshot(conn).await?.0)
+    Ok(registration_snapshot(conn).await?.stamps)
+}
+
+struct RegistrationSnapshot {
+    stamps: HashMap<String, String>,
+    keys: HashMap<String, (String, String, Option<String>)>,
+    pipelines: HashMap<String, (String, String)>,
 }
 
 async fn registration_snapshot<C: InstanceConnector + ?Sized>(
     conn: &C,
-) -> ConnectorResult<(HashMap<String, String>, HashMap<String, (String, String)>)> {
+) -> ConnectorResult<RegistrationSnapshot> {
     let keys = conn
         .registered_pipes(&crate::PipesKeysQuery::default())
         .await?;
     let mut current = HashMap::new();
+    let mut pipe_keys = HashMap::new();
     let mut pipelines = HashMap::new();
     for (identity, entry) in keys {
         if let Some(identity) = identity {
@@ -95,13 +104,18 @@ async fn registration_snapshot<C: InstanceConnector + ?Sized>(
                 }
                 continue;
             }
+            let key = pipe_key(
+                &entry.connector_keys,
+                &entry.metric_key,
+                entry.location_key.as_deref(),
+            );
             current.insert(
-                pipe_key(
-                    &entry.connector_keys,
-                    &entry.metric_key,
-                    entry.location_key.as_deref(),
-                ),
+                key.clone(),
                 registration_stamp(&identity.to_string(), &parameters),
+            );
+            pipe_keys.insert(
+                key,
+                (entry.connector_keys, entry.metric_key, entry.location_key),
             );
         }
     }
@@ -131,7 +145,11 @@ async fn registration_snapshot<C: InstanceConnector + ?Sized>(
             pipelines.insert(name.clone(), (identity.to_string(), conn.connector_keys()));
         }
     }
-    Ok((current, pipelines))
+    Ok(RegistrationSnapshot {
+        stamps: current,
+        keys: pipe_keys,
+        pipelines,
+    })
 }
 
 /// A pipe reference with or without its instance prefix.
@@ -394,6 +412,9 @@ pub struct MetricsQuery {
     pub limit: Option<usize>,
     /// Time buckets; at most 200.
     pub buckets: Option<usize>,
+    /// Omit individual outcomes and Pipeline groups (for summary-only dashboard cards).
+    #[serde(default)]
+    pub summary_only: bool,
     /// Visible Pipe refs. `Some([])` means no access; `None` is trusted local access.
     pub visible_refs: Option<Vec<String>>,
     /// Visible saved Pipelines, with the same empty/None semantics.
@@ -449,6 +470,34 @@ pub struct MetricSummary {
 }
 
 impl MetricSummary {
+    /// Merge already-authorized aggregates, weighting averages by completed syncs.
+    pub fn merge(&mut self, other: &Self) {
+        self.syncs = self.syncs.saturating_add(other.syncs);
+        self.succeeded = self.succeeded.saturating_add(other.succeeded);
+        self.failed = self.failed.saturating_add(other.failed);
+        self.inserted = self.inserted.saturating_add(other.inserted);
+        self.updated = self.updated.saturating_add(other.updated);
+        self.upserted = self.upserted.saturating_add(other.upserted);
+        self.deleted = self.deleted.saturating_add(other.deleted);
+        self.rows = self
+            .inserted
+            .saturating_add(self.updated)
+            .saturating_add(self.upserted)
+            .saturating_add(self.deleted);
+        self.attempts = self.attempts.saturating_add(other.attempts);
+        self.retries = self.retries.saturating_add(other.retries);
+        self.chunks = self.chunks.saturating_add(other.chunks);
+        self.duration_seconds += other.duration_seconds;
+        self.success_rate = (self.syncs > 0).then(|| self.succeeded as f64 / self.syncs as f64);
+        self.avg_duration_seconds =
+            (self.syncs > 0).then(|| self.duration_seconds / self.syncs as f64);
+        self.rows_per_second =
+            (self.duration_seconds > 0.0).then(|| self.rows as f64 / self.duration_seconds);
+        self.last_sync = self.last_sync.max(other.last_sync);
+        self.last_success = self.last_success.max(other.last_success);
+        self.last_failure = self.last_failure.max(other.last_failure);
+    }
+
     /// Add one already-authorized outcome.
     pub fn add(&mut self, metric: &SyncMetric) {
         self.syncs += 1;
@@ -479,6 +528,58 @@ impl MetricSummary {
         } else {
             self.last_failure = self.last_failure.max(Some(metric.ts));
         }
+    }
+}
+
+/// One database-aggregated registration/time group, before the reader rechecks visibility.
+#[derive(Debug, Clone)]
+pub struct MetricAggregate {
+    /// Stable Pipe key within the instance.
+    pub pipe_key: String,
+    /// Exact current registration/ACL segment.
+    pub registration_id: String,
+    /// Zero-based bucket within the requested window.
+    pub bucket: usize,
+    /// Numeric results for this group.
+    pub summary: MetricSummary,
+}
+
+impl MetricAggregate {
+    /// Decode the fixed aggregate projection returned by a native backend.
+    pub fn from_doc(doc: &Doc) -> Option<Self> {
+        let mut summary = MetricSummary {
+            syncs: doc_u64(doc, "syncs"),
+            succeeded: doc_u64(doc, "succeeded"),
+            failed: doc_u64(doc, "failed"),
+            inserted: doc_u64(doc, "inserted"),
+            updated: doc_u64(doc, "updated"),
+            upserted: doc_u64(doc, "upserted"),
+            deleted: doc_u64(doc, "deleted"),
+            attempts: doc_u64(doc, "attempts"),
+            retries: doc_u64(doc, "retries"),
+            chunks: doc_u64(doc, "chunks"),
+            duration_seconds: doc_f64(doc, "duration_seconds")?,
+            last_sync: doc_str(doc, "last_sync_us")
+                .and_then(|s| s.parse().ok())
+                .and_then(DateTime::from_timestamp_micros),
+            last_success: doc_str(doc, "last_success_us")
+                .and_then(|s| s.parse().ok())
+                .and_then(DateTime::from_timestamp_micros),
+            last_failure: doc_str(doc, "last_failure_us")
+                .and_then(|s| s.parse().ok())
+                .and_then(DateTime::from_timestamp_micros),
+            ..Default::default()
+        };
+        if !summary.duration_seconds.is_finite() || summary.duration_seconds < 0.0 {
+            return None;
+        }
+        summary.merge(&MetricSummary::default());
+        Some(Self {
+            pipe_key: doc_str(doc, "pipe_key")?,
+            registration_id: doc_str(doc, "registration_id")?,
+            bucket: usize::try_from(doc_u64(doc, "bucket")).ok()?,
+            summary,
+        })
     }
 }
 
@@ -537,6 +638,18 @@ pub struct MetricsResponse {
     pub limit: usize,
     /// The requested window contains more rows than this bounded view.
     pub truncated: bool,
+    /// Totals and charts cover every authorized sync in the window, independently of history.
+    #[serde(default)]
+    pub summary_complete: bool,
+    /// More individual syncs match than the detailed history contains.
+    #[serde(default)]
+    pub history_truncated: bool,
+    /// Run/node limits prevent complete Pipeline run totals.
+    #[serde(default)]
+    pub pipelines_truncated: bool,
+    /// Applied number of chart buckets.
+    #[serde(default = "default_bucket_count")]
+    pub buckets: usize,
     /// Storage retention duration.
     pub retention_days: i64,
     /// Numeric Pipe-sync aggregate.
@@ -549,6 +662,10 @@ pub struct MetricsResponse {
     pub pipelines: Vec<PipelineMetricSummary>,
     /// Individual numeric outcomes, newest first.
     pub history: Vec<SyncMetric>,
+}
+
+fn default_bucket_count() -> usize {
+    48
 }
 
 /// Internal storage descriptor, including flavor-specific schema and namespace.
@@ -982,8 +1099,8 @@ async fn read_sync_history<C: InstanceConnector + ?Sized>(
             .read_engine_metric_rows(
                 METRIC,
                 &DataQuery {
-                    begin: Some(DateBound::Int(begin.timestamp_micros())),
-                    end: Some(DateBound::Int(end.timestamp_micros().saturating_add(1))),
+                    begin: Some(DateBound::Int(micros_ceil(begin))),
+                    end: Some(DateBound::Int(micros_ceil(end))),
                     params: Some(params),
                     limit: Some((limit + 1) as i64),
                     order: Some("desc".into()),
@@ -1000,7 +1117,49 @@ async fn read_sync_history<C: InstanceConnector + ?Sized>(
     Ok((history, truncated))
 }
 
-/// Read authorized rows with indexed bounds and limits, then aggregate only that visible set.
+fn micros_ceil(time: DateTime<Utc>) -> i64 {
+    time.timestamp_micros().saturating_add(i64::from(
+        !time.timestamp_subsec_nanos().is_multiple_of(1000),
+    ))
+}
+
+async fn read_summary_groups<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    params: &Map,
+    registrations: &[Value],
+    begin: DateTime<Utc>,
+    end: DateTime<Utc>,
+    width: i64,
+) -> ConnectorResult<Option<(Vec<MetricAggregate>, bool)>> {
+    let mut groups = Vec::new();
+    let mut truncated = false;
+    for identities in registrations.chunks(900) {
+        let remaining = MAX_SUMMARY_GROUPS.saturating_sub(groups.len());
+        if remaining == 0 {
+            truncated = true;
+            break;
+        }
+        let mut params = params.clone();
+        params.insert("registration_id".into(), Value::List(identities.to_vec()));
+        let query = DataQuery {
+            begin: Some(DateBound::Int(micros_ceil(begin))),
+            end: Some(DateBound::Int(micros_ceil(end))),
+            params: Some(params),
+            ..Default::default()
+        };
+        let Some((batch, capped)) = conn
+            .aggregate_sync_metrics(&query, begin.timestamp_micros(), width, remaining)
+            .await?
+        else {
+            return Ok(None);
+        };
+        truncated |= capped || batch.len() > remaining;
+        groups.extend(batch.into_iter().take(remaining));
+    }
+    Ok(Some((groups, truncated)))
+}
+
+/// Read bounded details and authorized whole-window aggregates independently.
 /// Public transports must derive visibility ceilings themselves, never trust request ceilings.
 pub async fn read<C: InstanceConnector + ?Sized>(
     conn: &C,
@@ -1012,6 +1171,10 @@ pub async fn read<C: InstanceConnector + ?Sized>(
         end,
         limit,
         truncated: false,
+        summary_complete: true,
+        history_truncated: false,
+        pipelines_truncated: false,
+        buckets: query.buckets.unwrap_or(48).clamp(1, 200),
         retention_days: RETENTION_DAYS,
         summary: MetricSummary::default(),
         series: Vec::new(),
@@ -1049,7 +1212,11 @@ pub async fn read<C: InstanceConnector + ?Sized>(
     {
         return Ok(response);
     }
-    let (current, current_pipelines) = registration_snapshot(conn).await?;
+    let RegistrationSnapshot {
+        stamps: current,
+        keys: current_keys,
+        pipelines: current_pipelines,
+    } = registration_snapshot(conn).await?;
     if current.is_empty() {
         return Ok(response);
     }
@@ -1074,12 +1241,24 @@ pub async fn read<C: InstanceConnector + ?Sized>(
     if allowed_registrations.is_empty() {
         return Ok(response);
     }
-    let (mut history, capped) = if query.pipeline.is_none() {
-        read_sync_history(conn, &params, &allowed_registrations, begin, end, limit).await?
+    let span = (micros_ceil(end) - begin.timestamp_micros()).max(1);
+    let buckets = response.buckets.min(span as usize);
+    response.buckets = buckets;
+    let width = (span + buckets as i64 - 1) / buckets as i64;
+    let window_aggregates = if query.pipeline.is_none() {
+        read_summary_groups(conn, &params, &allowed_registrations, begin, end, width).await?
     } else {
-        (Vec::new(), false)
+        None
     };
+    let summary_only = query.summary_only && query.pipeline.is_none();
+    let (mut history, capped) =
+        if query.pipeline.is_none() && (!summary_only || window_aggregates.is_none()) {
+            read_sync_history(conn, &params, &allowed_registrations, begin, end, limit).await?
+        } else {
+            (Vec::new(), false)
+        };
     response.truncated |= capped;
+    response.history_truncated |= capped;
     let mut seen_runs = HashSet::new();
     let mut linked_runs: Vec<Value> = history
         .iter()
@@ -1093,29 +1272,31 @@ pub async fn read<C: InstanceConnector + ?Sized>(
         linked_runs.truncate(MAX_RUNS);
     }
     // Pipeline identities and global run timings are visible only when the whole run is visible.
-    let (runs, runs_capped) = if current_pipelines.is_empty() && linked_runs.is_empty() {
-        (Vec::new(), false)
-    } else {
-        engine_docs(
-            conn,
-            "engine_runs",
-            &DataQuery {
-                begin: Some(DateBound::utc(
-                    end.checked_sub_signed(TimeDelta::days(RETENTION_DAYS))
-                        .unwrap_or(DateTime::<Utc>::MIN_UTC),
-                )),
-                end: None,
-                params: current_pipelines
-                    .is_empty()
-                    .then(|| [("run_id".into(), Value::List(linked_runs))].into()),
-                limit: Some(MAX_RUNS as i64),
-                order: Some("desc".into()),
-                ..Default::default()
-            },
-        )
-        .await?
-    };
+    let (runs, runs_capped) =
+        if summary_only || (current_pipelines.is_empty() && linked_runs.is_empty()) {
+            (Vec::new(), false)
+        } else {
+            engine_docs(
+                conn,
+                "engine_runs",
+                &DataQuery {
+                    begin: Some(DateBound::utc(
+                        end.checked_sub_signed(TimeDelta::days(RETENTION_DAYS))
+                            .unwrap_or(DateTime::<Utc>::MIN_UTC),
+                    )),
+                    end: None,
+                    params: current_pipelines
+                        .is_empty()
+                        .then(|| [("run_id".into(), Value::List(linked_runs))].into()),
+                    limit: Some(MAX_RUNS as i64),
+                    order: Some("desc".into()),
+                    ..Default::default()
+                },
+            )
+            .await?
+        };
     response.truncated |= runs_capped;
+    response.pipelines_truncated |= runs_capped;
     let mut candidate_runs = Vec::new();
     for run in runs {
         if doc_dt(&run, "started").is_none_or(|started| started >= end) {
@@ -1185,6 +1366,7 @@ pub async fn read<C: InstanceConnector + ?Sized>(
         )
         .await?;
         response.truncated |= nodes_capped;
+        response.pipelines_truncated |= nodes_capped;
         for node in nodes {
             if let Some(run_id) = doc_str(&node, "run_id") {
                 nodes_by_run.entry(run_id).or_default().push(node);
@@ -1234,6 +1416,16 @@ pub async fn read<C: InstanceConnector + ?Sized>(
                 &conn.connector_keys(),
                 &current,
             )
+        }) {
+            continue;
+        }
+        if selected_key.as_ref().is_some_and(|selected| {
+            !nodes.iter().any(|node| {
+                node_reference(node)
+                    .and_then(|reference| reference_key(&reference))
+                    .as_ref()
+                    == Some(selected)
+            })
         }) {
             continue;
         }
@@ -1306,6 +1498,7 @@ pub async fn read<C: InstanceConnector + ?Sized>(
     }
     if query.pipeline.is_some() {
         if visible_runs.is_empty() {
+            response.summary_complete = !response.pipelines_truncated;
             return Ok(response);
         }
         params.insert(
@@ -1318,6 +1511,7 @@ pub async fn read<C: InstanceConnector + ?Sized>(
             read_sync_history(conn, &params, &allowed_registrations, begin, end, limit).await?;
         history = rows;
         response.truncated |= capped;
+        response.history_truncated |= capped;
     }
     // Recheck the ceiling before every aggregation, even if a custom backend ignores params.
     history.retain(|metric| {
@@ -1339,11 +1533,61 @@ pub async fn read<C: InstanceConnector + ?Sized>(
     });
     history.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| a.event_id.cmp(&b.event_id)));
     response.truncated |= history.len() > limit;
+    response.history_truncated |= history.len() > limit;
     history.truncate(limit);
-    let buckets = query.buckets.unwrap_or(48).clamp(1, 200);
-    let width = ((end - begin).num_milliseconds().max(1) + buckets as i64 - 1) / buckets as i64;
     let mut series: BTreeMap<i64, MetricSummary> = BTreeMap::new();
     let mut pipes: BTreeMap<String, PipeMetricSummary> = BTreeMap::new();
+    let aggregates = if query.pipeline.is_some() {
+        read_summary_groups(conn, &params, &allowed_registrations, begin, end, width).await?
+    } else {
+        window_aggregates
+    };
+    if let Some((groups, capped)) = &aggregates {
+        response.summary_complete =
+            !capped && (query.pipeline.is_none() || !response.pipelines_truncated);
+        response.truncated |= capped;
+        for group in groups {
+            if group.bucket >= buckets
+                || current.get(&group.pipe_key) != Some(&group.registration_id)
+                || visible
+                    .as_ref()
+                    .is_some_and(|keys| !keys.contains(&group.pipe_key))
+                || selected_key
+                    .as_ref()
+                    .is_some_and(|key| key != &group.pipe_key)
+            {
+                continue;
+            }
+            let Some((connector, metric, location)) = current_keys.get(&group.pipe_key) else {
+                continue;
+            };
+            response.summary.merge(&group.summary);
+            series
+                .entry(group.bucket as i64)
+                .or_default()
+                .merge(&group.summary);
+            pipes
+                .entry(group.pipe_key.clone())
+                .or_insert_with(|| PipeMetricSummary {
+                    pipe_ref: format!(
+                        "{}|{}|{}|{}",
+                        conn.connector_keys(),
+                        connector,
+                        metric,
+                        location.as_deref().unwrap_or("None")
+                    ),
+                    connector_keys: connector.clone(),
+                    metric_key: metric.clone(),
+                    location_key: location.clone(),
+                    summary: MetricSummary::default(),
+                })
+                .summary
+                .merge(&group.summary);
+        }
+    } else {
+        response.summary_complete = !response.history_truncated
+            && (query.pipeline.is_none() || !response.pipelines_truncated);
+    }
     for metric in &mut history {
         metric.instance_keys = conn.connector_keys();
         metric.pipe_ref = format!(
@@ -1360,8 +1604,11 @@ pub async fn read<C: InstanceConnector + ?Sized>(
         {
             metric.run_id = None;
         }
+        if aggregates.is_some() {
+            continue;
+        }
         response.summary.add(metric);
-        let bucket = (metric.ts - begin).num_milliseconds() / width;
+        let bucket = (metric.ts.timestamp_micros() - begin.timestamp_micros()) / width;
         series.entry(bucket).or_default().add(metric);
         pipes
             .entry(metric.pipe_key.clone())
@@ -1375,16 +1622,23 @@ pub async fn read<C: InstanceConnector + ?Sized>(
             .summary
             .add(metric);
     }
-    response.series = series
-        .into_iter()
-        .map(|(bucket, summary)| MetricBucket {
-            ts: begin + TimeDelta::milliseconds(bucket * width),
-            summary,
+    response.series = (0..buckets)
+        .map(|bucket| MetricBucket {
+            ts: begin + TimeDelta::microseconds(bucket as i64 * width),
+            summary: series.remove(&(bucket as i64)).unwrap_or_default(),
         })
         .collect();
     response.pipes = pipes.into_values().collect();
-    response.pipelines = pipelines.into_values().collect();
-    response.history = history;
+    response.pipelines = if query.summary_only {
+        Vec::new()
+    } else {
+        pipelines.into_values().collect()
+    };
+    response.history = if query.summary_only {
+        Vec::new()
+    } else {
+        history
+    };
     Ok(response)
 }
 

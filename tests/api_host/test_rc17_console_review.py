@@ -100,18 +100,18 @@ def read(*args,**kwargs):
     calls.append((args,kwargs))
     return data
 with patch.object(performance,'metrics',side_effect=read):
-    result = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,2,str(c),session)
+    result = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,2,str(c),50,session)
     assert result[3:6] == (3,2,False), result[3:]
     text = str(result[0])
-    assert '51–100 of 103 syncs' in text and 'reading_50' in text and 'reading_99' in text
+    assert '51–100 of 103 recent syncs' in text and 'reading_50' in text and 'reading_99' in text
     assert 'reading_49' not in text and 'reading_100' not in text
     # A page click reads fresh rights/metrics; there is no browser history Store to forge.
     assert len(calls) == 1 and calls[-1][0][1] == session
-    last = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,9999,str(c),session)
-    assert last[3:6] == (3,3,False) and '101–103 of 103 syncs' in str(last[0])
+    last = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,9999,str(c),50,session)
+    assert last[3:6] == (3,3,False) and '101–103 of 103 recent syncs' in str(last[0])
     with patch.object(callbacks.dash,'ctx',SimpleNamespace(triggered_id='performance-window')):
-        reset = callbacks.render_performance('/dash/performance',None,'24h',ref,None,0,0,3,str(c),session)
-    assert reset[4] == 1 and '1–50 of 103 syncs' in str(reset[0])
+        reset = callbacks.render_performance('/dash/performance',None,'24h',ref,None,0,0,3,str(c),50,session)
+    assert reset[4] == 1 and '1–50 of 103 recent syncs' in str(reset[0])
     # Exercise the real Dash protocol: filters and options are part of the same ten outputs.
     output, registered = next((key,value) for key,value in dash_app.callback_map.items()
                               if 'performance-body.children' in key)
@@ -121,6 +121,7 @@ with patch.object(performance,'metrics',side_effect=read):
         'performance-pipe.value':ref, 'performance-pipeline.value':None,
         'performance-refresh.n_clicks':0, 'performance-interval.n_intervals':0,
         'performance-history-page.active_page':2, 'performance-instance.data':str(c),
+        'performance-history-page-size.value':'50',
     }
     endpoint = next(str(rule) for rule in dash_app.server.url_map.iter_rules()
                     if str(rule).endswith('/_dash-update-component'))
@@ -137,17 +138,17 @@ with patch.object(performance,'metrics',side_effect=read):
     rendered = response.get_json()['response']
     assert rendered['performance-history-page'] == {'max_value':3,'active_page':2}
     assert rendered['performance-history-controls']['hidden'] is False
-    assert '51–100 of 103 syncs' in str(rendered['performance-body'])
+    assert '51–100 of 103 recent syncs' in str(rendered['performance-body'])
     assert rendered['performance-pipe']['value'] == ref
     assert rendered['performance-pipe']['options'] == [{'label':'Readings','value':ref}]
     with patch.object(callbacks.dash,'ctx',SimpleNamespace(triggered_id='performance-location')):
-        query_result = callbacks.render_performance('/dash/performance',query,'24h',None,None,0,0,3,str(c),session)
+        query_result = callbacks.render_performance('/dash/performance',query,'24h',None,None,0,0,3,str(c),50,session)
     assert query_result[6:] == (str(c),'7d',ref,None) and query_result[4] == 1
-assert performance.history_window({'history':history*20},9999)[1:] == (20,20,1000)
+assert performance.history_window({'history':history*20},9999,50)[1:] == (20,20,1000)
 assert performance.history_window(data,'not-a-page')[1] == 1
 # Permission revocation clears prior data, page controls, and dropdown metadata.
 with patch.object(performance,'metrics',side_effect=PermissionError('PRIVATE STATE')):
-    denied = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,2,str(c),session)
+    denied = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,2,str(c),50,session)
     assert denied[1:6] == ([{'label':'Selected Pipe','value':ref}],[],1,1,True)
     assert denied[6:] == (str(c),'7d',ref,None)
     assert 'not available' in str(denied[0])
@@ -156,7 +157,7 @@ with patch.object(performance,'metrics',side_effect=PermissionError('PRIVATE STA
     assert 'not available' in str(tile) and 'PRIVATE STATE' not in str(tile)
     assert digest != _digest(old)
 with patch.object(performance,'metrics',side_effect=RuntimeError('PRIVATE SQL PASSWORD')):
-    error = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,2,str(c),session)
+    error = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,2,str(c),50,session)
     assert error[1:6] == ([{'label':'Selected Pipe','value':ref}],[],1,1,True)
     assert 'PRIVATE SQL' not in str(error)
 '''))

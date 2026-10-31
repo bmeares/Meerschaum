@@ -606,6 +606,19 @@ pub trait InstanceConnector: Connector {
         Ok((docs, truncated))
     }
 
+    /// Aggregate authorized syncs in the database, bounding transferred groups instead of
+    /// raw events. `None` retains the bounded sample reader for unsupported backends.
+    async fn aggregate_sync_metrics(
+        &self,
+        query: &DataQuery,
+        begin_micros: i64,
+        bucket_width_micros: i64,
+        max_groups: usize,
+    ) -> ConnectorResult<Option<(Vec<crate::sync_metrics::MetricAggregate>, bool)>> {
+        let _ = (query, begin_micros, bucket_width_micros, max_groups);
+        Ok(None)
+    }
+
     /// `{{ Pipe(...) }}` without an attribute chain: the table a template for this pipe expands to
     /// on this instance (`sql_item_name` on SQL instances). `None` means `pipe.target`.
     fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {

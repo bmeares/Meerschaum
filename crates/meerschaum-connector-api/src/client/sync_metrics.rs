@@ -51,6 +51,7 @@ impl APIConnector {
             ("pipeline", query.pipeline.clone()),
             ("limit", query.limit.map(|value| value.to_string())),
             ("buckets", query.buckets.map(|value| value.to_string())),
+            ("summary_only", query.summary_only.then(|| "true".into())),
         ] {
             if let Some(value) = value {
                 parameters.push((name.into(), value.into()));

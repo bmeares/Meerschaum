@@ -35,7 +35,8 @@ Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC dateti
 
 ??? info "History, limits, and access"
     - History is retained for **30 days**. The default query covers the last 24 hours.
-    - Native queries aggregate at most **5,000** detailed sync records; the console requests **1,000**. The page says when its result is limited. Choose a shorter window for a closer look.
+    - SQL totals and charts cover the chosen window. Recent history is separate: **1,000** records in the console, up to **5,000** in the SDK. Check `summary_complete` and `history_truncated` for coverage.
+    - Backend or Pipeline run limits may produce sampled totals. The page labels these; filter by Pipe or choose a shorter window for more detail. Use `summary_only=True` for summary cards without history or run details.
     - Capture runs in the background and is best effort. Queue or database pressure can drop a measurement without failing the sync.
     - The console and HTTP API filter by your current Pipe, Pipeline, and team access before calculating results. An access change starts a new visible history segment.
     - Clients from before **5.0.0rc16** do not backfill detailed sync history.

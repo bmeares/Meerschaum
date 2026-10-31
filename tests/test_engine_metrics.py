@@ -79,6 +79,17 @@ def test_native_metrics_capture_replacements_on_each_instance_backend(flavor):
         assert summary['rows'] == 5, result
         assert summary['duration_seconds'] >= 0, result
         assert all(item['metric_key'] == pipe.metric_key for item in result['history'])
+        if flavor != 'valkey':
+            limited = mrsm.get_engine_metrics(instance=conn, pipe=pipe, limit=1, buckets=12)
+            assert limited['summary_complete'], limited
+            assert limited['summary']['syncs'] == 2, limited
+            assert limited['summary']['rows'] == 5, limited
+            assert limited['history_truncated'] and len(limited['history']) == 1, limited
+            assert len(limited['series']) == 12, limited
+            assert sum(point['syncs'] for point in limited['series']) == 2
+            compact = mrsm.get_engine_metrics(instance=conn, pipe=pipe, summary_only=True)
+            assert compact['summary']['syncs'] == 2 and compact['summary_complete'], compact
+            assert not compact['history'] and not compact['pipelines'], compact
         if flavor.startswith('timescaledb'):
             _check_timescale_metrics_partition_growth(conn, result['history'][0]['event_id'])
     finally:

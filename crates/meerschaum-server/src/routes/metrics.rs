@@ -95,6 +95,7 @@ async fn read(ctx: Ctx) -> ApiResult {
         pipeline: ctx.query.opt_str("pipeline"),
         limit: count(&ctx, "limit")?,
         buckets: count(&ctx, "buckets")?,
+        summary_only: ctx.query.bool("summary_only", false)?,
         ..Default::default()
     };
     query.validate().map_err(|_| {

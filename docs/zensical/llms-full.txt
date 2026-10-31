@@ -7755,7 +7755,8 @@ Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC dateti
 
 ??? info "History, limits, and access"
     - History is retained for **30 days**. The default query covers the last 24 hours.
-    - Native queries aggregate at most **5,000** detailed sync records; the console requests **1,000**. The page says when its result is limited. Choose a shorter window for a closer look.
+    - SQL totals and charts cover the chosen window. Recent history is separate: **1,000** records in the console, up to **5,000** in the SDK. Check `summary_complete` and `history_truncated` for coverage.
+    - Backend or Pipeline run limits may produce sampled totals. The page labels these; filter by Pipe or choose a shorter window for more detail. Use `summary_only=True` for summary cards without history or run details.
     - Capture runs in the background and is best effort. Queue or database pressure can drop a measurement without failing the sync.
     - The console and HTTP API filter by your current Pipe, Pipeline, and team access before calculating results. An access change starts a new visible history segment.
     - Clients from before **5.0.0rc16** do not backfill detailed sync history.
@@ -16153,7 +16154,9 @@ See [Pipelines in Compose](../reference/pipelines/compose.md).
 
 Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
 
-Performance refreshes keep charts visible. Unchanged chart bundles reuse the browser cache.
+Performance totals and charts cover the selected SQL history window; recent records are paged
+separately. Search and rank results, with cards on phones. Refreshes keep charts visible,
+and unchanged chart bundles reuse the browser cache.
 Leaving the Pipes table discards queued statistics refreshes.
 
 Pipelines have a searchable, sortable runbook with member details and recent runs loaded on demand. The canvas keeps View options in a compact popup and supports pinch zoom on phones.

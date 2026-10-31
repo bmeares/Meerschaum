@@ -63,6 +63,8 @@ with patch.object(mrsm,'get_engine_metrics',native,create=True):
     assert calls[-1]['visible_refs'] is None and calls[-1]['visible_pipelines'] is None
     performance.metrics(str(c),admin,'all')
     assert (calls[-1]['end'] - calls[-1]['begin']).total_seconds() == 30 * 86400
+    performance.metrics(str(c),admin,with_options=False)
+    assert calls[-1]['summary_only'] is True and calls[-1]['buckets'] == 1
     # Object visibility and permission changes take effect on the next refresh without a cache reset.
     public.parameters = {'access': {'owner':'somebody-else','visibility':'private'}}
     assert public.edit()[0]
@@ -100,15 +102,15 @@ assert 'No syncs in this sample' in empty and 'This view is limited' in empty
 assert 'longer window' not in empty
 tile = str(performance.build_overview_body(limited,'sql:apihosttest'))
 assert 'No syncs in this sample' in tile and 'limited' in tile and 'View performance' in tile
-assert performance.duration(None) == '—'
-assert performance.timestamp('invalid') == '—'
+assert performance.duration(None) == 'n/a'
+assert performance.timestamp('invalid') == 'n/a'
 layout = str(pages.route('/dash/performance','http://localhost/dash/performance?window=7d'))
 assert 'performance-window' in layout and "value='7d'" in layout and 'Loading performance' in layout
 with patch.object(performance,'metrics',side_effect=RuntimeError('PRIVATE SQL PASSWORD')):
-    result = callbacks.render_performance('/dash/performance',None,'24h',None,None,0,0,1,'sql:apihosttest',{})
+    result = callbacks.render_performance('/dash/performance',None,'24h',None,None,0,0,1,'sql:apihosttest',10,{})
     assert 'could not be loaded' in str(result) and 'PRIVATE SQL PASSWORD' not in str(result)
 with patch.object(performance,'metrics',side_effect=PermissionError('private object')):
-    result = callbacks.render_performance('/dash/performance',None,'24h',None,None,0,0,1,'sql:apihosttest',{})
+    result = callbacks.render_performance('/dash/performance',None,'24h',None,None,0,0,1,'sql:apihosttest',10,{})
     assert 'not available' in str(result) and 'private object' not in str(result)
 '''))
 
@@ -126,4 +128,29 @@ assert running['running']['performance-interval.disabled'] is True
 assert running['running']['performance-refresh.disabled'] is True
 assert running['runningOff']['performance-interval.disabled'] is False
 assert running['runningOff']['performance-refresh.disabled'] is False
+'''))
+
+
+def test_performance_labels_full_totals_separately_from_history_and_keeps_drilldown_scope(sandbox):
+    root, plugins = sandbox
+    check(run_python(root, plugins, '''
+from urllib.parse import urlparse,parse_qs
+from meerschaum.api.dash import performance
+summary={'syncs':1205,'failed':0,'rows':3615,'duration_seconds':301.25}
+data={'summary':summary,'summary_complete':True,'history_truncated':True,'truncated':True,
+      'history':[{} for _ in range(1000)],'_pipeline_filter':'daily',
+      'pipes':[{'pipe_ref':'sql:apihosttest|review|readings|None','summary':summary}]}
+body=str(performance.build_body(data,'sql:apihosttest','24h'))
+assert '1,205' in body and 'all recorded syncs' in body and 'latest 1,000' in body
+assert 'Sampled syncs' not in body and 'This view is limited' not in body
+sampled={**data,'summary_complete':False}
+assert 'Sampled syncs' in str(performance.build_body(sampled,'sql:apihosttest','24h'))
+assert 'Sampled syncs' in str(performance.build_overview_body(sampled,'sql:apihosttest'))
+groups=performance.build_groups(data,'sql:apihosttest','24h')
+choice=groups[0].children[0].data['rows'][0]
+query=parse_qs(urlparse(choice['href']).query)
+assert query['pipeline']==['daily'] and query['pipe']==['sql:apihosttest|review|readings|None']
+assert performance.number(9007199254740993)=='9,007,199,254,740,993'
+assert performance.number(float('nan'))=='n/a'
+assert performance.duration(float('inf'))=='n/a'
 '''))
