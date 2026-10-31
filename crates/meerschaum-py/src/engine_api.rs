@@ -225,6 +225,28 @@ fn sql_attributes(
         if value.is_null() {
             continue;
         }
+        if key == "options" {
+            use meerschaum_connector_sql::uri::ConnectionOptions;
+            out.options = Some(match value {
+                Json::Object(mapping) => ConnectionOptions::Pairs(
+                    mapping
+                        .iter()
+                        .map(|(key, value)| {
+                            (
+                                key.clone(),
+                                value
+                                    .as_str()
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| value.to_string()),
+                            )
+                        })
+                        .collect(),
+                ),
+                Json::String(text) => ConnectionOptions::Str(text.clone()),
+                _ => return Err(value_err("SQL options must be a string or mapping.")),
+            });
+            continue;
+        }
         let text = match value {
             Json::String(s) => s.clone(),
             Json::Number(n) => n.to_string(),
@@ -245,6 +267,8 @@ fn sql_attributes(
             "password" => out.password = Some(text),
             "database" => out.database = Some(text),
             "schema" => out.schema = Some(text),
+            "pool_size" => out.pool_size = text.trim().parse().ok(),
+            "max_overflow" => out.max_overflow = text.trim().parse().ok(),
             "label" => {}
             _ => out.extra.push((key.clone(), text)),
         }

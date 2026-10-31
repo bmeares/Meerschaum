@@ -16159,6 +16159,8 @@ separately. Search and rank results, with cards on phones. Refreshes keep charts
 and unchanged chart bundles reuse the browser cache.
 Leaving the Pipes table discards queued statistics refreshes.
 
+SQL connection settings are preserved for Python queries and Pipelines.
+
 Pipelines have a searchable, sortable runbook with member details and recent runs loaded on demand. The canvas keeps View options in a compact popup and supports pinch zoom on phones.
 
 Show related Pipes as dimmed context, review shared membership, and add them through an editable draft.

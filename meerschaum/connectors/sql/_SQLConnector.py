@@ -609,15 +609,10 @@ class SQLConnector(InstanceConnector):
                     "(`LD_LIBRARY_PATH` / `ldconfig`) to use `oracle` instances"
                 )
                 raise RuntimeError(self._rust_unavailable())
-            attributes = {
-                key: self.__dict__.get(key, None)
-                for key in (
-                    'flavor', 'uri', 'host', 'port', 'username', 'password', 'database',
-                    'protected',
-                )
-            }
+            attributes = {key: value for key, value in self.meta.items()
+                          if key not in ('type', 'label')}
             ### The core reads `protected` as text (`True` / `'true'` both mark it).
-            if attributes['protected'] is not None:
+            if attributes.get('protected') is not None:
                 attributes['protected'] = str(attributes['protected'])
             if self.flavor == 'duckdb':
                 from ._duckdb_transport import prepare_connector

@@ -50,6 +50,11 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<PgConnectOptions>
         opts = opts.database(db);
     }
     let mut params: Vec<(String, String)> = spec.option_pairs();
+    if let Some(crate::uri::ConnectionOptions::Str(raw)) = &spec.options
+        && raw.trim_start().starts_with('-')
+    {
+        params = vec![("options".into(), raw.clone())];
+    }
     params.extend(spec.params.iter().map(|(k, v)| (k.clone(), v.clone())));
     for (key, value) in params {
         match key.as_str() {
@@ -316,6 +321,19 @@ impl Backend for PgBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uri_libpq_settings_reach_connection_startup() {
+        let spec = ConnectionSpec::from_uri(
+            "postgresql://test:password@localhost/testdb?options=-c%20default_transaction_read_only%3Don%20-c%20statement_timeout%3D1500",
+            Some("options"),
+            None,
+        ).unwrap();
+        let options = connect_options(&spec).unwrap();
+        let startup = options.get_options().unwrap();
+        assert!(startup.contains("default_transaction_read_only=on"));
+        assert!(startup.contains("statement_timeout=1500"));
+    }
 
     #[test]
     fn parses_libpq_options() {

@@ -127,7 +127,9 @@ def connector_attributes(connector: Any) -> Optional[Dict[str, Any]]:
     """
     if getattr(connector, 'type', None) != 'sql':
         return None
-    attributes = {key: connector.__dict__.get(key, None) for key in _SQL_ATTRIBUTES}
+    from meerschaum.core.Pipe._sync import _connector_attributes
+    attributes = _connector_attributes(connector)
+    attributes.update({key: connector.__dict__.get(key, None) for key in _SQL_ATTRIBUTES})
     attributes['schema'] = getattr(connector, 'schema', None)
     database = str(attributes.get('database') or '')
     uri = str(attributes.get('uri') or '')

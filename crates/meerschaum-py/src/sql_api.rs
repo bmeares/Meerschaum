@@ -17,7 +17,7 @@ use meerschaum_connector::{PipesKeys, PipesKeysQuery, SyncOptions};
 use meerschaum_connector_sql::instance::InstanceSettings;
 use meerschaum_connector_sql::instance::data::DataQueryOptions;
 use meerschaum_connector_sql::pipe::ChunkInterval;
-use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
+use meerschaum_connector_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
 use meerschaum_connector_sql::{Flavor, SqlConnector as RsSqlConnector};
 use meerschaum_core::{Map, Value};
 use meerschaum_kernel::Frame;
@@ -207,6 +207,25 @@ fn attributes_from_py(label: &str, attrs: &Bound<'_, PyDict>) -> PyResult<Connec
             "password" => out.password = Some(text()?),
             "database" => out.database = Some(text()?),
             "schema" => out.schema = Some(text()?),
+            "options" => {
+                out.options = Some(if let Ok(mapping) = v.cast::<PyDict>() {
+                    ConnectionOptions::Pairs(
+                        mapping
+                            .iter()
+                            .map(|(key, value)| {
+                                Ok((
+                                    key.str()?.to_str()?.to_string(),
+                                    value.str()?.to_str()?.to_string(),
+                                ))
+                            })
+                            .collect::<PyResult<_>>()?,
+                    )
+                } else {
+                    ConnectionOptions::Str(text()?)
+                });
+            }
+            "pool_size" => out.pool_size = text()?.trim().parse().ok(),
+            "max_overflow" => out.max_overflow = text()?.trim().parse().ok(),
             "label" => {}
             _ => {
                 if v.is_instance_of::<pyo3::types::PyString>()
