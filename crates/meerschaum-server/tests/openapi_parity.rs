@@ -177,10 +177,18 @@ fn performance_routes_document_filters_scopes_and_admin_initialization() {
             "pipeline",
             "limit",
             "buckets",
+            "summary_only",
             "visible_refs",
             "visible_pipelines",
         ])
     );
+    let summary_only = get["parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|parameter| parameter["name"] == "summary_only")
+        .unwrap();
+    assert_eq!(summary_only["schema"]["type"], "boolean");
     assert_eq!(
         get["security"][0]["OAuth2PasswordBearer"],
         serde_json::json!(["pipes:read"])
