@@ -46,6 +46,8 @@ def follow_performance_location(search, path):
     running=[
         (Output('performance-interval', 'disabled'), True, False),
         (Output('performance-refresh', 'disabled'), True, False),
+        (Output('performance-refresh-status', 'className'),
+         'performance-refresh-status is-refreshing', 'performance-refresh-status'),
     ],
 )
 def render_performance(path, search, window, pipe, pipeline, refresh, interval, page, instance, session):

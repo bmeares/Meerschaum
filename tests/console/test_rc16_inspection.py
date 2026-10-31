@@ -341,6 +341,67 @@ def test_performance_plots_real_measurements_without_hidden_pipes(inspection_ser
         tab.page.locator('#performance-results .js-plotly-plot').wait_for()
         assert tab.page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
         tab.page.screenshot(path=str(artifacts()/f'performance-{width}.png'),full_page=True)
+        tab.page.reload(wait_until='domcontentloaded')
+        tab.page.locator('#performance-results .js-plotly-plot').wait_for()
+        bundle = tab.page.evaluate('''() => performance.getEntriesByType('resource')
+            .filter(item => new URL(item.name).pathname.endsWith('/plotly.min.js'))
+            .map(item => ({bytes:item.transferSize, decoded:item.decodedBodySize}))''')
+        assert len(bundle) == 1 and bundle[0]['bytes'] <= 512, bundle
+        assert tab.page.evaluate("typeof Plotly.version === 'string'")
+        assert not tab.errors,tab.errors
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize('width', [390, 1440])
+def test_performance_refresh_keeps_visuals_visible(inspection_server,browser,width):
+    context = browser.new_context(viewport={'width':width,'height':844})
+    try:
+        tab = Tab(context.new_page(),inspection_server.base_url)
+        tab.login('rc16-ops',INSPECTION_PASSWORD,path='/dash')
+        tab.goto('/dash/performance','#performance-page')
+        tab.page.locator('#performance-results .js-plotly-plot').wait_for(timeout=30000)
+        refresh = tab.page.locator('#performance-refresh')
+        tab.page.wait_for_function("!document.getElementById('performance-refresh').disabled")
+        for trigger in ('performance-refresh.n_clicks', 'performance-interval.n_intervals'):
+            refresh.scroll_into_view_if_needed()
+            tab.page.evaluate("window._performancePlots = [...document.querySelectorAll('#performance-body .js-plotly-plot')]")
+            before = [plot.bounding_box() for plot in tab.page.locator('#performance-body .js-plotly-plot').all()]
+            held = []
+            observed = []
+
+            def hold_refresh(route):
+                payload = route.request.post_data_json or {}
+                observed.append((payload.get('output'), payload.get('changedPropIds')))
+                if ('performance-body.children' in str(payload.get('output'))
+                    and trigger in payload.get('changedPropIds', [])):
+                    held.append(route)
+                else:
+                    route.continue_()
+
+            tab.page.route('**/*_dash-update-component*', hold_refresh)
+            try:
+                if trigger == 'performance-refresh.n_clicks':
+                    refresh.click()
+                else:
+                    tab.page.evaluate("window.dash_clientside.set_props('performance-interval', {n_intervals: 200})")
+                tab.page.wait_for_function("document.getElementById('performance-refresh').disabled")
+                tab.page.wait_for_timeout(150)
+                assert held, (trigger, observed)
+                plots = tab.page.locator('#performance-body .js-plotly-plot').all()
+                assert len(plots) == 3 and all(plot.is_visible() for plot in plots)
+                after = [plot.bounding_box() for plot in plots]
+                for original, current in zip(before, after):
+                    assert all(abs(original[key] - current[key]) <= 1 for key in ('x','y','width','height'))
+                assert tab.page.locator('#performance-refresh-status').is_visible()
+                tab.page.screenshot(path=str(artifacts()/f'performance-refresh-{width}-{trigger.split(".")[0]}.png'))
+            finally:
+                for route in held:
+                    route.continue_()
+                tab.page.unroute('**/*_dash-update-component*', hold_refresh)
+            tab.page.wait_for_function("!document.getElementById('performance-refresh').disabled")
+            tab.page.locator('#performance-refresh-status').wait_for(state='hidden')
+            assert tab.page.evaluate("window._performancePlots.every(plot => plot.isConnected)")
         assert not tab.errors,tab.errors
     finally:
         context.close()

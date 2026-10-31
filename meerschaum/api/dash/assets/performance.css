@@ -1,5 +1,8 @@
 .performance-page { max-width: 1600px; padding: 16px 24px 32px; margin: 0 auto; }
 .performance-page h1 { margin: 0; font-size: 1.75rem; }
+.performance-refresh-status { visibility: hidden; font-size: 0.8rem; color: #b6bdc5; }
+.performance-refresh-status.is-refreshing { visibility: visible; }
+.performance-loading { display: flex; align-items: center; gap: 10px; padding: 24px 0; color: #b6bdc5; }
 .performance-filters { display: grid; grid-template-columns: minmax(140px, 1fr) repeat(2, minmax(0, 2fr)); gap: 16px; margin: 16px 0 24px; }
 .performance-filters label { margin-bottom: 6px; font-size: 0.875rem; }
 .performance-filters > div { min-width: 0; }
