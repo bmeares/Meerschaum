@@ -290,8 +290,15 @@ def test_mobile_hamburger_stays_in_place_during_open_and_close(inspection_server
         context.close()
 
 
-def test_performance_plots_real_measurements_without_hidden_pipes(inspection_server,browser):
-    context = browser.new_context(viewport={'width':390,'height':844})
+@pytest.mark.parametrize('width', [390, 1440])
+def test_performance_plots_real_measurements_without_hidden_pipes(inspection_server,browser,width):
+    def luminance(color):
+        channels = [float(value) / 255 for value in color.removeprefix('rgb(').removesuffix(')').split(',')]
+        linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+                  for value in channels]
+        return sum(value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    context = browser.new_context(viewport={'width':width,'height':844})
     try:
         tab = Tab(context.new_page(),inspection_server.base_url)
         tab.login('rc16-ops',INSPECTION_PASSWORD,path='/dash')
@@ -303,13 +310,37 @@ def test_performance_plots_real_measurements_without_hidden_pipes(inspection_ser
             plot = tab.page.locator(f'#performance-{chart} .js-plotly-plot')
             bounds = plot.bounding_box()
             assert bounds and bounds['height'] >= 250 and bounds['width'] >= 150, bounds
+            plot.scroll_into_view_if_needed()
+            tooltip = plot.evaluate('''graph => {
+                const point = graph.data[0].y.findIndex(value => value > 0);
+                Plotly.Fx.hover(graph, {xval: graph._fullLayout.xaxis.d2l(graph.data[0].x[point])}, 'xy');
+                const layer = graph.querySelector('.hoverlayer');
+                const background = layer.querySelector('.legend .bg');
+                return {
+                    background: background && getComputedStyle(background).fill,
+                    text: [...layer.querySelectorAll('.legend text')].map(element => ({
+                        value: element.textContent, color: getComputedStyle(element).fill,
+                    })),
+                };
+            }''')
+            assert tooltip['background'] and tooltip['text'], tooltip
+
+            background = luminance(tooltip['background'])
+            assert background < 0.1, tooltip
+            for text in tooltip['text']:
+                assert (luminance(text['color']) + 0.05) / (background + 0.05) >= 4.5, tooltip
+            if chart == 'results':
+                assert any('Succeeded' in item['value'] for item in tooltip['text']), tooltip
+                assert any('Failed' in item['value'] for item in tooltip['text']), tooltip
+            plot.screenshot(path=str(artifacts()/f'performance-{chart}-hover-{width}.png'))
+            plot.evaluate('graph => Plotly.Fx.unhover(graph)')
         body = tab.page.inner_text('#performance-body')
         assert 'rc16_parent' in body and 'rc16_failure' in body
         assert 'HIDDEN_RC16_METRIC' not in tab.page.content()
         tab.page.select_option('#performance-window','7d')
         tab.page.locator('#performance-results .js-plotly-plot').wait_for()
         assert tab.page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
-        tab.page.screenshot(path=str(artifacts()/'performance-390.png'),full_page=True)
+        tab.page.screenshot(path=str(artifacts()/f'performance-{width}.png'),full_page=True)
         assert not tab.errors,tab.errors
     finally:
         context.close()

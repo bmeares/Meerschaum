@@ -155,6 +155,8 @@ def build_charts(data: Dict[str, Any], revision=None):
                   **({'range': [data['begin'], data['end']]} if data.get('begin') and data.get('end') else {})},
         'yaxis': {'rangemode': 'tozero', 'gridcolor': 'rgba(255,255,255,0.07)'},
         'legend': {'orientation': 'h', 'y': 1.15}, 'hovermode': 'x unified',
+        'hoverlabel': {'bgcolor': '#24282d', 'bordercolor': '#5a6169',
+                       'font': {'color': '#e5edf3'}},
         'uirevision': revision,
     }
     graphs = []

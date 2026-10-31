@@ -17,7 +17,7 @@ impl Plugin for Demo {
     const NAME: &'static str = "native_demo";
     const VERSION: &'static str = "1.0.0";
     fn manifest(&self) -> Value {
-        json!({"schema_version":meerschaum_plugin::MANIFEST_SCHEMA_VERSION,"meerschaum_version":"5.0.0-rc.20","python_version":"","fingerprint":null,
+        json!({"schema_version":meerschaum_plugin::MANIFEST_SCHEMA_VERSION,"meerschaum_version":"5.0.0-rc.21","python_version":"","fingerprint":null,
           "plugins":{"native_demo":{"name":"native_demo","version":"1.0.0","data_functions":["fetch","sync","register"],"actions":[{"name":"hello","doc":"Return a synthetic greeting."},{"name":"panic","doc":"Exercise panic containment."}],"arguments":[{"option_strings":["--native-demo"],"action":"store_true","help":"Enable demo."}],"pre_sync_hooks":["before"],"post_sync_hooks":["after"],"connectors":["native_demo"],"api_plugins":["routes"],"web_pages":[{"path":"/dash/native-demo","page_group":"Native demo","page_key":"native-demo","login_required":true,"function":"page","mode":"html"}]}},
           "connector_types":{"native_demo":{"type":"native_demo","plugin":"native_demo","class_name":"Demo","is_instance":true,"is_thread_safe":false,"methods":["fetch","register","sync_pipe","get_pipe_data"]}},"pre_sync_hooks":["before"],"post_sync_hooks":["after"]})
     }
