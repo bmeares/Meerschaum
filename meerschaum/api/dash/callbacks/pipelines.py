@@ -135,7 +135,8 @@ def build_pipeline_canvas(
     """
     expanded = expanded or {}
     roles = classify_nodes(graph, targets)
-    hidden = {ref for ref, role in roles.items() if role != 'explicit' and not expanded.get(role)}
+    hidden = {ref for ref, role in roles.items()
+              if role != 'explicit' and not expanded.get(role) and not expanded.get('family')}
     counts = {role: sum(1 for ref in hidden if roles[ref] == role) for role in ('upstream', 'downstream')}
     nodes = [node for node in graph['nodes'] if node['pipe_ref'] not in hidden]
     edges = [edge for edge in graph['edges'] if edge['parent'] not in hidden and edge['child'] not in hidden]
@@ -206,6 +207,8 @@ def build_pipeline_canvas(
                 continue
             instance = _engine.split_ref(ref)[0]
             role = roles.get(ref, 'explicit')
+            related = bool(node.get('context'))
+            shared = node.get('shared_with') or []
             ### A read-only card holds a link, so it is not itself a button.
             card_type = (lambda children, **kwargs: html.Div(children, tabIndex=0, **{
                 key: value for key, value in kwargs.items() if key not in ('id', 'n_clicks')})) if read_only else html.Button
@@ -217,6 +220,10 @@ def build_pipeline_canvas(
                 *([html.Small(instance, className='pipeline-instance-badge')]
                   if registry and instance != registry else []),
                 *([html.Small(role, className='pipeline-traversal-badge')] if role != 'explicit' else []),
+                *([html.Small('Not included', className='pipeline-context-badge')] if related else []),
+                *([html.Small('⚠ Shared', className='pipeline-shared-badge',
+                              title='Also in: ' + ', '.join(shared),
+                              **{'aria-label': 'Also in: ' + ', '.join(shared)})] if shared else []),
                 *([html.A('Open Pipe', href=_engine.pipe_href(ref), target='_blank', rel='noopener noreferrer',
                           className='pipeline-stage-open')] if read_only else
                   [html.Span('', className='pipeline-edge-handle pipeline-edit-only',
@@ -224,7 +231,8 @@ def build_pipeline_canvas(
             ], id={'type': 'pipeline-explore-stage' if read_only else 'pipeline-stage', 'index': key}, n_clicks=0,
                 className='pipeline-stage', title=node['label'],
                 style={**style, '--stage-color': _engine.STATUS_COLORS.get(node.get('status', ''), '#9aa5b1')},
-                **{'data-ref': ref, 'data-node': key, 'data-role': role, 'data-grouped': 'true' if name else 'false',
+                **{'data-ref': ref, 'data-node': key, 'data-role': role,
+                   'data-context': str(related).lower(), 'data-grouped': 'true' if name else 'false',
                    'aria-label': f"Inspect {node['label']}"}))
         connections.extend({'parent': json.dumps([name, e['parent']]),
                             'child': json.dumps([name, e['child']])} for e in subset['edges'])
@@ -247,7 +255,13 @@ def build_pipeline_canvas(
     return [
         html.Div([
             html.Div([
-                html.Span(f"{count_label(len(real), 'Pipe')} · {dependency_label(len(graph['edges']))}"),
+                html.Span(f"{count_label(sum(not node.get('context') for node in real), 'Pipe')}"
+                          + (f" + {sum(bool(node.get('context')) for node in real)} related"
+                             if any(node.get('context') for node in real) else '')
+                          + f" · {dependency_label(len(graph['edges']))}"),
+                *([html.Small(count_label(definition['defaults']['workers'], 'worker'),
+                              className='pipeline-workers-badge', title='Saved worker limit')]
+                  if ((definition or {}).get('defaults') or {}).get('workers') is not None else []),
                 html.Div([
                     dbc.Input(id='pipeline-canvas-search', placeholder='Find Pipe', type='search', size='sm'),
                     *([] if read_only else [html.Button('Add Pipe', id='pipeline-add-node', className='pipeline-edit-only')]),
@@ -255,6 +269,8 @@ def build_pipeline_canvas(
                     html.Details([
                         html.Summary('View options', **{'aria-controls': 'pipeline-view-options-panel'}),
                         html.Div([
+                            *([] if read_only else [dbc.Checkbox(id='pipeline-show-related',
+                                label='Show related pipes', value=bool(expanded.get('family')))]),
                             html.Div([
                                 html.Button('−', id='pipeline-zoom-out', title='Zoom out',
                                             **{'aria-label': 'Zoom out'}),
@@ -295,17 +311,25 @@ def build_pipeline_canvas(
 @dash_app.callback(
     Output('pipeline-canvas-prefs', 'data'),
     Input({'type': 'pipeline-expand', 'index': ALL}, 'n_clicks'),
+    Input('pipeline-show-related', 'value', allow_optional=True),
     State('pipeline-canvas-prefs', 'data'), State('pipeline-definition', 'data'),
     prevent_initial_call=True,
 )
-def toggle_traversal(clicks, prefs, definition):
+def toggle_traversal(clicks, related, prefs, definition):
     """Expanding (or collapsing) traversal Pipes is remembered per Pipeline in this browser."""
     trigger = dash.ctx.triggered_id
-    if not isinstance(trigger, dict) or not any(clicks or []) or not definition:
+    if not definition:
         raise PreventUpdate
-    role = trigger['index'].replace('-collapse', '')
     key = f"{definition.get('registry')}|{definition.get('name')}"
     prefs = dict(prefs or {})
+    if trigger == 'pipeline-show-related':
+        if bool((prefs.get(key) or {}).get('family')) == bool(related):
+            raise PreventUpdate
+        prefs[key] = {**(prefs.get(key) or {}), 'family': bool(related)}
+        return prefs
+    if not isinstance(trigger, dict) or not any(clicks or []):
+        raise PreventUpdate
+    role = trigger['index'].replace('-collapse', '')
     prefs[key] = {**(prefs.get(key) or {}), role: not trigger['index'].endswith('-collapse')}
     return prefs
 
@@ -317,9 +341,10 @@ def toggle_traversal(clicks, prefs, definition):
     Input('pipeline-inspector-close', 'n_clicks', allow_optional=True),
     State('session-store', 'data'),
     State('pipeline-edit-mode', 'data'),
+    State('pipeline-draft', 'data'),
     prevent_initial_call=True,
 )
-def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
+def inspect_stage(clicks, definition, close_clicks, session_data, edit=False, draft=None):
     """Read a selected stage without starting a sync."""
     if not _may_read(session_data):
         raise PreventUpdate
@@ -345,6 +370,7 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
     import uuid
     selection = {'ref': ref, 'token': uuid.uuid4().hex}
     dash.set_props('pipeline-selection', {'data': selection})
+    current = draft if draft and draft.get('definition_id') == (definition or {}).get('id', (definition or {}).get('name')) else definition
     return [
         html.Div([html.H4(html.Code(_engine.ref_label(ref))),
                   html.Button('×', id='pipeline-inspector-close', n_clicks=0,
@@ -354,6 +380,9 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False):
                href=_engine.pipe_href(ref), target='_blank', rel='noopener noreferrer',
                className='pipeline-open-pipe'),
         html.Div([
+            *([dbc.Button('Add to Pipeline', id='pipeline-add-related', size='sm',
+                          class_name='pipeline-edit-only')]
+              if current and ref not in current.get('targets', []) else []),
             dbc.Button('Sync this Pipe', id='pipeline-node-sync', size='sm',
                        style=(None if may_sync else {'display': 'none'})),
             dbc.Button('View output', id='pipeline-node-view-output', size='sm', color='secondary'),
@@ -431,9 +460,13 @@ def load_inspector_section(selection, section, resolve, retry, session):
             body = build_runs_table(_engine.get_runs(pipe.instance_connector, pipe=ref, limit=30),
                                     table_id='pipeline-stage-runs-table', registry=str(pipe.instance_connector))
         else:
+            from meerschaum.api.dash import pipes_table
             graph = _engine.plan_graph(pipe.instance_connector, [pipe], parents=1)
             planned = next((node for node in graph['nodes'] if node['pipe_ref'] == ref), {})
-            body = [html.P(['Latest data: ', str(pipe.get_sync_time())]),
+            sync_time = pipe.get_sync_time()
+            body = [html.P(['Latest data: ', pipes_table.sync_time_text(
+                        pipes_table._sync_time_fields(sync_time, pipe=pipe))],
+                        title=(str(sync_time) if sync_time is not None else '')),
                     html.P(_engine.action_label(planned.get('action', ''))),
                     html.P(planned.get('reason', '')),
                     build_data_range(planned['bounds'], planned.get('backtrack'))
@@ -503,8 +536,8 @@ def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, 
             raise PermissionError(reason)
         if scope in ('parents', 'children') and not (viewer.is_admin or viewer.no_auth):
             ### Its parents or children run too: each must be the viewer's to sync.
-            graph = _engine.plan_graph(pipe.instance_connector, [pipe],
-                                       parents=(scope == 'parents'), children=(scope == 'children'))
+            graph = _engine.dependency_graph(pipe.instance_connector, [pipe], viewer=viewer,
+                                            parents=(scope == 'parents'), children=(scope == 'children'))
             if graph.get('hidden'):
                 raise PermissionError(f"Some of its {scope} are pipes you cannot see.")
         args = ['sync', 'pipes', '-i', instance, '-c', connector, '-m', metric,
@@ -610,7 +643,6 @@ def build_gantt_children(detail: Optional[Dict[str, Any]]) -> List[Any]:
                 html.Code(_engine.ref_label(bar['pipe_ref'])), href=_engine.pipe_href(bar['pipe_ref']),
                 className='pipe-link', target='_blank', rel='noopener noreferrer',
             )),
-            html.Td(_engine.action_label(bar.get('action', ''))),
             html.Td('running' if bar.get('actual_start') and not bar.get('actual_end')
                     else bar.get('status', '').replace('_', ' ')),
             html.Td('Started' if bar.get('actual_start') else (
@@ -622,21 +654,27 @@ def build_gantt_children(detail: Optional[Dict[str, Any]]) -> List[Any]:
         for bar in detail.get('bars', [])
     ]
     return [
-        html.Div(dcc.Graph(
-            figure=_engine.gantt_figure(detail),
-            id='pipelines-gantt',
-            config={'displaylogo': False, 'displayModeBar': False, 'responsive': True, 'scrollZoom': False, 'doubleClick': False},
-            style={'minWidth': '1000px'},
-        ), className='pipeline-timeline-scroll', tabIndex=0, role='region', **{'aria-label':'Execution timeline'}),
-        html.Div(dbc.Table(
-            [html.Thead(html.Tr([
-                html.Th('Pipe'), html.Th('Action'), html.Th('Status'),
-                html.Th('Progress'), html.Th('Started at'), html.Th('Ended at'),
-            ]))] + [html.Tbody(rows)],
-            hover=True,
-            size='sm',
-            id='pipelines-nodes-table',
-        ), className='pipeline-table-scroll pipeline-stages-scroll', tabIndex=0, role='region', **{'aria-label':'Execution stages table'}),
+        html.Div([
+            html.Div([
+                html.Button('Timeline', **{'data-run-view': 'timeline', 'aria-selected': 'true'}, role='tab'),
+                html.Button('Table', **{'data-run-view': 'table', 'aria-selected': 'false'}, role='tab'),
+            ], className='pipeline-view-tabs', role='tablist', **{'aria-label': 'Execution view'}),
+            html.Div(dcc.Graph(
+                figure=_engine.gantt_figure(detail),
+                id='pipelines-gantt',
+                config={'displaylogo': False, 'displayModeBar': False, 'responsive': True, 'scrollZoom': False, 'doubleClick': False},
+                style={'minWidth': '1000px'},
+            ), className='pipeline-timeline-scroll', tabIndex=0, role='tabpanel', **{'aria-label':'Execution timeline'}),
+            html.Div(dbc.Table(
+                [html.Thead(html.Tr([
+                    html.Th('Pipe'), html.Th('Status'),
+                    html.Th('Progress'), html.Th('Started at'), html.Th('Ended at'),
+                ]))] + [html.Tbody(rows)],
+                hover=True,
+                size='sm',
+                id='pipelines-nodes-table',
+            ), className='pipeline-table-scroll pipeline-stages-scroll', tabIndex=0, role='tabpanel', **{'aria-label':'Execution stages table'}),
+        ], className='pipeline-run-detail', **{'data-run-view': 'timeline'}),
     ]
 
 
@@ -708,9 +746,25 @@ def render_pipeline_graph(pathname, definition, draft, refresh, prefs, search, s
         targets = list(selection.get('targets', []))
         from meerschaum.api.dash.pipeline_editing import make_pipe
         pipes = [make_pipe(ref, new_pipes.get(ref)) for ref in targets if ref not in new_pipes]
-        graph = (_engine.plan_graph(instance, pipes, parents=selection.get('parents'),
-                                    children=selection.get('children'))
+        graph = (_engine.dependency_graph(instance, pipes, parents=selection.get('parents'),
+                                          children=selection.get('children'))
                  if pipes else {'nodes': [], 'edges': [], 'warnings': []})
+        key = f"{definition.get('registry')}|{definition.get('name')}"
+        expanded = (prefs or {}).get(key) or {}
+        members = {node['pipe_ref'] for node in graph['nodes']}
+        if pipes and expanded.get('family'):
+            graph = _engine.dependency_graph(instance, pipes, parents=True, children=True)
+            for node in graph['nodes']:
+                node['context'] = node['pipe_ref'] not in members
+        from meerschaum.api.dash import access, pipes_access
+        shared = {}
+        for name, other in access.visible_pipelines(instance, viewer=pipes_access.viewer(session_data)).items():
+            if name == definition.get('name'):
+                continue
+            for ref in other.get('targets', []):
+                shared.setdefault(ref, []).append(name)
+        for node in graph['nodes']:
+            node['shared_with'] = sorted(shared.get(node['pipe_ref'], []))
         planned = {node['pipe_ref'] for node in graph['nodes']}
         graph['nodes'].extend({'pipe_ref': ref, 'label': _engine.ref_label(ref), 'action': 'root',
                                'reason': 'New Pipe', 'status': 'never_run'}
@@ -719,16 +773,18 @@ def render_pipeline_graph(pathname, definition, draft, refresh, prefs, search, s
             from meerschaum.api.dash.pipeline_editing import validate_edits
             edges = validate_edits(draft['pipe_edits'], [ref for ref in targets if ref not in new_pipes])
             visible = {node['pipe_ref'] for node in graph['nodes']}
-            graph = {**graph, 'edges': [{'parent': parent, 'child': child}
-                for parent, child in edges if parent in visible and child in visible]}
-        key = f"{definition.get('registry')}|{definition.get('name')}"
-        graph_children = build_pipeline_canvas(graph, targets, (prefs or {}).get(key) or {},
+            context_edges = [edge for edge in graph['edges']
+                             if expanded.get('family')
+                             and (edge['parent'] not in members or edge['child'] not in members)]
+            graph = {**graph, 'edges': [*context_edges, *[{'parent': parent, 'child': child}
+                for parent, child in edges if parent in visible and child in visible]]}
+        graph_children = build_pipeline_canvas(graph, targets, expanded,
                                                definition, registry=str(instance))
         dash.set_props('pipeline-visible-refs', {
             'data': [node['pipe_ref'] for node in graph['nodes']],
         })
     except Exception as e:
-        warn(f"Could not plan the pipeline graph: {e}", stack=False)
+        warn(f"Could not load the pipeline graph: {e}", stack=False)
         graph_children = [html.P(f"The dependency graph is unavailable: {e}")]
 
     return graph_children
@@ -1198,15 +1254,21 @@ def build_runs_overview(runs):
         end = _engine._parse_ts(record.get('finished')) or (datetime.now(timezone.utc) if start.tzinfo else datetime.now())
         bars.append((record['run_id'], start.isoformat(), max(1, (end-start).total_seconds()*1000), summary.get('status', '')))
     figure = {'data': [{'type': 'bar', 'orientation': 'h',
-        'y': [b[0] for b in bars], 'base': [b[1] for b in bars], 'x': [b[2] for b in bars],
+        'y': ['Runs'] * len(bars), 'base': [b[1] for b in bars], 'x': [b[2] for b in bars],
         'customdata': [b[0] for b in bars],
-        'marker': {'color': [_engine.STATUS_COLORS.get(b[3], '#3486bd') for b in bars]},
-        'hovertemplate': '%{y}<extra></extra>'}],
+        'marker': {'color': [_engine.STATUS_COLORS.get(
+            {'succeeded': 'caught_up', 'running': 'root', 'stopped': 'observe', 'cancelled': 'observe'}.get(b[3], b[3]),
+            '#3486bd') for b in bars]},
+        'text': [b[3].replace('_', ' ') for b in bars],
+        'textposition': 'none',
+        'hovertemplate': '%{customdata}<br>%{text}<br>Started %{base}<br>%{x:.0f} ms<extra></extra>'}],
         'layout': {'dragmode': False, 'xaxis': {'type': 'date', 'fixedrange': True},
                    'yaxis': {'fixedrange': True, 'autorange': 'reversed', 'automargin': True},
-                   'height': min(650, max(260, 80+len(bars)*35)),
+                   'height': 180, 'barmode': 'overlay', 'bargap': .4,
                    'paper_bgcolor': 'rgba(0,0,0,0)', 'plot_bgcolor': 'rgba(0,0,0,0)',
                    'font': {'color': '#d0d6dc'}, 'margin': {'l': 20, 'r': 20, 't': 20, 'b': 40}}}
+    figure['layout']['hoverlabel'] = {'bgcolor': '#17212b', 'bordercolor': '#607487',
+                                     'font': {'color': '#f1f5f9'}}
     return dcc.Graph(id='pipeline-runs-overview', figure=figure,
                      config={'displayModeBar': False, 'scrollZoom': False, 'doubleClick': False})
 

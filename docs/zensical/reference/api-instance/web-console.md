@@ -103,7 +103,7 @@ The **Pipes** page (`/dash/pipes`) is a table of the selected instance's [pipes]
 |---|---|
 | **Pipe** | `Pipe('connector', 'metric', 'location')`, with an instance badge when the page shows another instance than the global one. Click a row to open the pipe. |
 | **Rows** | The table's row count. On PostgreSQL, TimescaleDB, MySQL, MariaDB, SQL Server and Oracle large tables show the database's estimate (`~1.2M`, `pipe.get_rowcount(estimate=True)`); SQLite, DuckDB and tables under 100,000 rows are counted exactly. A pipe's Overview counts exactly on demand. |
-| **Sync time** | The newest datetime in the pipe's data (`pipe.get_sync_time()`), in UTC. |
+| **Sync time** | The newest datetime, in UTC. Integer timestamps use the Pipe's declared precision; hover for the raw value. |
 | **Status** | How the last sync went, whatever ran it (the CLI, a job, a Pipeline, the API or Python): **Synced 5 min ago**, **Failed** (or **Failed 3 times**; hover for the error) or **Never synced**. |
 | **Team** | The pipe's team (**Everyone** for a pipe without one), with **private** or **everyone** when its visibility is not its team's. Shown once you are in a team or see a team's pipe. A lock icon after the pipe's keys means it is [locked](#pipe-access-and-locks) (hover for what). |
 | **Tags** | The pipe's [tags](/reference/pipes/tags/). |
@@ -127,7 +127,7 @@ The tabs:
 - **Data**: the most recent rows, **Download CSV** (the latest chunk), and a query by **Params**, **Begin**, **End** and a row limit. In Edit mode, **Sync rows** syncs JSON documents into the pipe.
 - **Parameters**: the parameters as YAML or JSON (**Show resolved values** shows them with their `{{ Pipe(...) }}` and `MRSM{...}` references resolved); **Update** saves them in Edit mode.
 - **Definition**: the SQL of a `sql:` pipe as written, with its `{{ Pipe(...) }}` references (**Show resolved query** shows the SQL that runs), or the `fetch` parameters of another pipe; **Update** saves it in Edit mode.
-- **Lineage**: the pipe's parents and children and what the next sync does with each; in Edit mode, add and remove them. **Explore graph** opens its connected graph on the Pipelines page.
+- **Lineage**: parents and children from registered metadata. In Edit mode, add and remove them. **Explore graph** opens the connected graph.
 - **Runs**: the Syncing Engine's runs that included the pipe, newest first; a run of a saved Pipeline opens on its page.
 
 Each action is shown to the users who may run it on this pipe: Sync, Verify and Edit need `pipes:write`, Clear and Delete `pipes:delete`, Drop `pipes:drop` and Copy `pipes:register` (the Editor role has all but Clear, Drop and Delete), and the pipe's edit mode must let you change it. Under `--secure` (`api:permissions:actions:non_admin: false`) only administrators change anything. The console checks each action again when you click it, and the server when it runs. They show only for a pipe the page could read as registered: when the instance cannot be read (the database is down, the credentials are wrong) the page says **Could not read** with the error, and a pipe that is not registered (a deleted pipe, an old link) offers **Register**, which opens New pipe with its keys filled in. A pipe you may not see reads as not registered, and its page shows nothing of it.
@@ -171,7 +171,9 @@ Nothing is saved before you click one of them. Registering follows the API's rul
 
 The **Pipelines** page (`/dash/pipelines`) is a full-width, purple-accented runbook, distinct from the Pipes table. Search or sort its rows to compare **Name**, members, traversal, and run status. Open **Details** for member information or **Recent runs** to load history separately.
 
-Open a Pipeline for its **Canvas** and **Runs** views. The canvas supports a fixed-size **View options** popup and two-finger pinch zoom on phones. A Pipe's **Lineage** tab shows its parents and children. See [Visualization](/reference/pipelines/visualization/#in-the-web-console).
+Open a Pipeline for its **Canvas** and **Runs** views. **Show related pipes** adds context to the canvas;
+**Runs** offers one history timeline and a **Timeline / Table** switch for each run.
+See [Visualization](/reference/pipelines/visualization/#running-a-pipeline-in-the-console).
 
 A saved Pipeline has an access of its own, like a pipe: **New pipeline** asks for its **Team** and **Visibility** (your primary team and Team by default), and you own it. Its members you may not see are only counted (**1 hidden pipe**) in its list, Overview card, and canvas, and you may not run it, analyze its tags or clear its pipes until you may change every member. Runs, the canvas, lineage, plans and the Overview show only the pipes you may see; a run with none of them is not listed, and a stage of a pipe you may not see is shown as **Hidden pipe**.
 

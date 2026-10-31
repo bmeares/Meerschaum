@@ -637,6 +637,30 @@ def _instance_pipes(instance: Any, viewer: Any = None) -> List[mrsm.Pipe]:
     return access.visible_pipes(viewer, flatten_pipes_dict(pipes_dict))
 
 
+def dependency_graph(instance: Any, pipes: Optional[List[mrsm.Pipe]] = None,
+                     parents=None, children=None, viewer=None):
+    """Resolve visible relationships without watermarks, dirty history, or sync planning."""
+    selected = pipes if pipes is not None else _instance_pipes(instance, viewer=viewer)
+    if not selected:
+        return {'nodes': [], 'edges': [], 'warnings': [], 'hidden': 0}
+    request = _request(instance, targets=selected,
+                       parents=True if pipes is None and parents is None else parents,
+                       children=children)
+    request['graph'] = True
+    graph = _call('engine_graph', request)
+    anonymizer = Anonymizer(viewer, instance, refs=[row['pipe_ref'] for row in graph['nodes']])
+    visible = [row for row in graph['nodes'] if anonymizer.is_visible(row['pipe_ref'])]
+    refs = {row['pipe_ref'] for row in visible}
+    return {
+        'nodes': [{**row, 'label': ref_label(row['pipe_ref']), 'action': '',
+                   'reason': '', 'status': 'observe'} for row in visible],
+        'edges': [{**edge, 'lagging': False} for edge in graph['edges']
+                  if edge['parent'] in refs and edge['child'] in refs],
+        'warnings': [anonymizer.text(warning) for warning in graph['warnings']],
+        'hidden': len(graph['nodes']) - len(visible),
+    }
+
+
 def plan_graph(
     instance: Any = None,
     pipes: Optional[List[mrsm.Pipe]] = None,
@@ -1144,7 +1168,7 @@ def relations_of(pipe: mrsm.Pipe) -> Dict[str, List[Dict[str, Any]]]:
         return {'parents': [], 'children': []}
     ### Every neighbour: the caller decides what the viewer sees (`pipes._relation_rows`).
     from meerschaum.api.dash.access import SYSTEM
-    graph = plan_graph(pipe.instance_connector, [pipe], parents=1, children=1, viewer=SYSTEM)
+    graph = dependency_graph(pipe.instance_connector, [pipe], parents=1, children=1, viewer=SYSTEM)
     this_ref = '|'.join((
         str(pipe.instance_keys), str(pipe.connector_keys), str(pipe.metric_key),
         str(pipe.location_key),

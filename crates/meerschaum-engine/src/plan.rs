@@ -358,7 +358,7 @@ pub struct PlanOptions {
     pub completed: BTreeSet<PipeRef>,
     /// The resumed run's ID, for reasons.
     pub resumed_from: Option<String>,
-    /// Above this many chunks a range is listed as one chunk (the sync chunks it itself).
+    /// Maximum listed chunks per Pipe; larger ranges are chunked by the sync itself.
     pub max_chunks: usize,
     /// Widen the cap past each parent's watermark by one unit (one minute on a datetime axis,
     /// 1 on an integer axis), as Python's `get_chunk_bounds` widens its end, so a child also
@@ -744,10 +744,36 @@ fn chunks_for(
     max: usize,
     warnings: &mut Vec<String>,
 ) -> Vec<Span> {
+    let max = max.max(1);
+    if ranges.len() > max {
+        let begin = ranges
+            .iter()
+            .try_fold(i64::MAX, |low, iv| iv.begin.map(|begin| low.min(begin)));
+        let end = ranges
+            .iter()
+            .try_fold(i64::MIN, |high, iv| iv.end.map(|end| high.max(end)));
+        warnings.push(format!(
+            "{} dirty ranges exceed the plan limit ({max}); shown as one covering range",
+            ranges.len()
+        ));
+        return vec![to_span(axis, &Interval::new(begin, end))];
+    }
     let mut out = Vec::new();
-    for iv in ranges {
+    for (index, iv) in ranges.iter().enumerate() {
+        // Reserve one span for each remaining range before allocating chunk boundaries.
+        let remaining = max - out.len() - (ranges.len() - index - 1);
         match (iv.begin, iv.end) {
             (Some(b), Some(e)) => {
+                let width = axis.chunk.max(1) as i128;
+                let start = (b as i128).div_euclid(width) * width;
+                let count = (e as i128 - start + width - 1).div_euclid(width);
+                if e > b && count > remaining as i128 {
+                    warnings.push(format!(
+                        "{count} chunks exceed the remaining plan budget ({remaining}); shown as one range"
+                    ));
+                    out.push(to_span(axis, iv));
+                    continue;
+                }
                 let chunks = get_chunk_bounds(
                     Some(b),
                     Some(e),
@@ -759,13 +785,13 @@ fn chunks_for(
                     None,
                 );
                 match chunks {
-                    Ok(c) if c.len() <= max => out.extend(
+                    Ok(c) if c.len() <= remaining => out.extend(
                         c.into_iter()
                             .map(|(b, e)| to_span(axis, &Interval::new(b, e))),
                     ),
                     Ok(c) => {
                         warnings.push(format!(
-                            "{} chunks are more than the plan lists ({max}); shown as one range",
+                            "{} chunks exceed the remaining plan budget ({remaining}); shown as one range",
                             c.len()
                         ));
                         out.push(to_span(axis, iv));
@@ -1346,6 +1372,87 @@ mod tests {
     use crate::state::{MemoryState, MemoryStateData};
     use chrono::{TimeZone, Utc};
     use meerschaum_core::Value;
+
+    #[test]
+    fn chunk_budget_is_per_pipe() {
+        let axis = Axis::int("seq", None, 1, 0);
+        let ranges = [
+            Interval::new(Some(1), Some(4)),
+            Interval::new(Some(10), Some(13)),
+        ];
+        let mut warnings = Vec::new();
+        let chunks = chunks_for(&axis, &ranges, 4, &mut warnings);
+        assert!(
+            chunks.len() <= 4,
+            "allocated {} chunks for a budget of 4",
+            chunks.len()
+        );
+        for position in [1, 2, 3, 10, 11, 12] {
+            assert!(chunks.iter().any(|chunk| {
+                chunk
+                    .begin
+                    .as_ref()
+                    .and_then(|value| axis.pos(value))
+                    .is_none_or(|begin| begin <= position)
+                    && chunk
+                        .end
+                        .as_ref()
+                        .and_then(|value| axis.pos(value))
+                        .is_none_or(|end| position < end)
+            }));
+        }
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn chunk_budget_covers_many_disjoint_ranges() {
+        let axis = Axis::int("seq", None, 1, 0);
+        let ranges: Vec<_> = (0..20)
+            .map(|index| Interval::new(Some(index * 10), Some(index * 10 + 1)))
+            .collect();
+        let mut warnings = Vec::new();
+        let chunks = chunks_for(&axis, &ranges, 4, &mut warnings);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].begin, Some(Bound::Int(0)));
+        assert_eq!(chunks[0].end, Some(Bound::Int(191)));
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn chunk_budget_handles_extreme_integer_bounds_without_expanding() {
+        let axis = Axis::int("seq", None, 1, 0);
+        let mut warnings = Vec::new();
+        let chunks = chunks_for(
+            &axis,
+            &[Interval::new(Some(i64::MIN), Some(i64::MAX))],
+            16,
+            &mut warnings,
+        );
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].begin, Some(Bound::Int(i64::MIN)));
+        assert_eq!(chunks[0].end, Some(Bound::Int(i64::MAX)));
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn chunk_budget_preserves_small_aligned_boundaries() {
+        let axis = Axis::int("seq", None, 3, 0);
+        for (begin, end) in [(-8, 5), (0, 0), (0, 5), (4, 4), (2, 11)] {
+            let expected =
+                get_chunk_bounds(Some(begin), Some(end), true, 3, true, false, None, None)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(begin, end)| to_span(&axis, &Interval::new(begin, end)))
+                    .collect::<Vec<_>>();
+            let actual = chunks_for(
+                &axis,
+                &[Interval::new(Some(begin), Some(end))],
+                16,
+                &mut Vec::new(),
+            );
+            assert_eq!(actual, expected);
+        }
+    }
 
     fn rec(metric: &str, json: &str) -> PipeRecord {
         PipeRecord::new("sql:main", "sql:main", metric, None)

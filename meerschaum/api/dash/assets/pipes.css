@@ -53,8 +53,8 @@
 .pipes-table thead th { background: #252a30; white-space: nowrap; }
 .pipes-table-row { cursor: pointer; }
 .pipes-table-row:focus-within { outline: 2px solid #85caff; outline-offset: -2px; }
-.pipes-table-link { text-decoration: none; }
-.pipes-table-link:hover .mrsm-repr-metric, .pipes-table-link:focus .mrsm-repr-metric { text-decoration: underline; }
+#pipes-table .pipes-col-pipe a, #pipes-table .pipes-col-pipe a:hover,
+#pipes-table .pipes-col-pipe a:focus { text-decoration: none; }
 .pipes-col-pipe { min-width: 260px; }
 .pipes-col-rows { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 th.pipes-col-rows { text-align: right; }

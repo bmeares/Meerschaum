@@ -321,7 +321,7 @@ def render_explore(pathname, search, session):
         return [html.P('Choose a Pipe with Find Pipe on the Pipelines page.')], 'Pipe', '/dash/pipelines/new'
     try:
         instance = _engine.get_instance(_engine.split_ref(ref)[0], strict=True)
-        graph = _engine.focus_graph(_engine.plan_graph(instance, viewer=_viewer(session)), ref)
+        graph = _engine.focus_graph(_engine.dependency_graph(instance, viewer=_viewer(session)), ref)
         if ref not in {node['pipe_ref'] for node in graph['nodes']}:
             raise ValueError(f'{_engine.ref_label(ref)} is not registered.')
         refs = sorted(node['pipe_ref'] for node in graph['nodes'])

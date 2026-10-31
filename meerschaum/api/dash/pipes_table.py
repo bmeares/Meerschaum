@@ -481,7 +481,23 @@ def _to_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _sync_time_fields(value: Any) -> Dict[str, Any]:
+def _sync_time_fields(value: Any, pipe: Optional[mrsm.Pipe] = None) -> Dict[str, Any]:
+    raw = None
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and pipe is not None:
+        try:
+            parameters = pipe.get_parameters(apply_symlinks=False) or {}
+            if parameters.get('precision') and parameters.get('columns', {}).get('datetime'):
+                from meerschaum.utils.dtypes import (
+                    MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES,
+                )
+                declared = parameters['precision']
+                unit = declared if isinstance(declared, str) else declared.get('unit')
+                unit = unit or pipe.precision['unit']
+                unit = MRSM_PRECISION_UNITS_ALIASES.get(unit, unit)
+                timestamp = datetime.fromtimestamp(value / MRSM_PRECISION_UNITS_SCALARS[unit], timezone.utc)
+                raw, value = str(value), timestamp
+        except (AttributeError, KeyError, TypeError, ValueError, OverflowError, OSError):
+            pass
     if value is None:
         return {'sync_time': None, 'sync_time_sort': None}
     if isinstance(value, datetime):
@@ -491,7 +507,7 @@ def _sync_time_fields(value: Any) -> Dict[str, Any]:
             sort_key = value.replace(tzinfo=timezone.utc).timestamp() if value.tzinfo is None else value.timestamp()
         except (OverflowError, OSError, ValueError):
             sort_key = None
-        return {'sync_time': text, 'sync_time_sort': sort_key}
+        return {'sync_time': text, 'sync_time_sort': sort_key, **({'sync_time_raw': raw} if raw is not None else {})}
     if isinstance(value, (int, float)):
         return {'sync_time': str(value), 'sync_time_sort': float(value)}
     return {'sync_time': str(value), 'sync_time_sort': None}
@@ -519,7 +535,7 @@ def _pipe_stats(ref: str) -> Dict[str, Any]:
     except Exception as e:
         stats['error'] = str(e)
     try:
-        stats.update(_sync_time_fields(pipe.get_sync_time()))
+        stats.update(_sync_time_fields(pipe.get_sync_time(), pipe=pipe))
     except Exception as e:
         stats['error'] = stats['error'] or str(e)
     _cache_set(('stats', ref), stats)
@@ -1034,7 +1050,7 @@ def parse_timestamp(text: Optional[str]) -> Optional[datetime]:
 
 
 def sync_time_text(stats: Optional[Dict[str, Any]]) -> str:
-    """The Sync time cell: `2026-10-27 10:00` (UTC for time-zone-aware values) or the integer."""
+    """The Sync time cell, in UTC for timestamp axes and raw for other integer axes."""
     if not stats:
         return '…'
     value = stats.get('sync_time', None)
@@ -1240,7 +1256,7 @@ def render_rows_html(
             _tag('td', _esc(rows_text(entry)), class_name='pipes-col-rows',
                  title=str((entry or {}).get('error') or ''), data_label='Rows'),
             _tag('td', _esc(sync_time_text(entry)), class_name='pipes-col-sync-time',
-                 title=str((entry or {}).get('sync_time') or ''), data_label='Sync time'),
+                 title=str((entry or {}).get('sync_time_raw') or (entry or {}).get('sync_time') or ''), data_label='Sync time'),
             _tag('td', _tag('span', _esc(status_text), class_name=f'pipes-status pipes-status-{kind}'),
                  class_name='pipes-col-status', title=status_title, data_label='Status'),
             (_tag('td', team_html(row), class_name='pipes-col-team', data_label='Team')

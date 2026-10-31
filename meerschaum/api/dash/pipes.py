@@ -1278,10 +1278,9 @@ def build_relations_body(
 ) -> Any:
     """
     Return the Parents and Children tabs of a pipe card: the pipes it depends on and the pipes that
-    depend on it, with what the Syncing Engine would do with each (`meerschaum.api.dash.engine`).
+    depend on it, without planning a sync (`meerschaum.api.dash.engine`).
     Authenticated sessions may add and remove parents and children.
     """
-    from meerschaum.api.dash import engine as _engine
     from meerschaum.api.dash import access
     viewer = access.current_viewer()
     pipe_meta_str = json.dumps(pipe.meta, sort_keys=True)
@@ -1309,6 +1308,7 @@ def build_relations_body(
         )
 
     def _table(relation: str, rows: List[Dict[str, Any]], empty: str):
+        details = any(row.get('reason') for row in rows)
         hidden = int(rows_by_relation.get('hidden_' + relation, 0) or 0)
         hidden_note = (
             html.P(access.hidden_label(hidden), className='text-muted pipe-relations-hidden',
@@ -1323,7 +1323,7 @@ def build_relations_body(
         return html.Div([dbc.Table(
             [
                 html.Thead(html.Tr([
-                    html.Th('Pipe'), html.Th('Next sync'), html.Th('Details'), html.Th(''),
+                    html.Th('Pipe'), *([html.Th('Details')] if details else []), html.Th(''),
                 ])),
                 html.Tbody([
                     html.Tr([
@@ -1333,8 +1333,8 @@ def build_relations_body(
                             if new_tab
                             else dcc.Link(html.Code(row['label']), href=row['href'], className='pipe-link')
                         ),
-                        html.Td(_engine.action_indicator(row['action']) if row['action'] else ''),
-                        html.Td(html.Details([html.Summary('Show'), html.P(row['reason'])])),
+                        *([html.Td(html.Details([html.Summary('Show'), html.P(row['reason'])])
+                                   if row.get('reason') else '')] if details else []),
                         html.Td(_remove_button(relation, row), style={'text-align': 'right'}),
                     ])
                     for row in rows

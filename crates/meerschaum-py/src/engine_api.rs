@@ -440,6 +440,26 @@ fn to_json_string<T: serde::Serialize>(value: &T) -> PyResult<String> {
     serde_json::to_string(value).map_err(|e| runtime_err(e.to_string()))
 }
 
+/// `engine_graph(request) -> json`: resolve dependencies without reading run state or data.
+#[pyfunction]
+pub fn engine_graph(py: Python<'_>, request: &str) -> PyResult<String> {
+    let request = parse_request(request)?;
+    let session = session();
+    let built = build(py, &session, &request)?;
+    let mut opts = run_options(&request, &built.instance_keys)?;
+    opts.resume = None;
+    let (_, subgraph, _) = py
+        .detach(|| session.block_on(built.engine.resolve(&opts)))
+        .map_err(runtime_err)?;
+    to_json_string(&json!({
+        "nodes": subgraph.order.iter().map(|reference| json!({"pipe_ref": reference})).collect::<Vec<_>>(),
+        "edges": subgraph.display_edges().iter().map(|edge| json!({
+            "parent": edge.parent, "child": edge.child,
+        })).collect::<Vec<_>>(),
+        "warnings": subgraph.warnings,
+    }))
+}
+
 /// `engine_plan(request) -> json`: the plan only, no data movement.
 ///
 /// Result: `{"plan": <Plan>, "text": <plan table>, "critical_path": [...], "warnings": [...]}`.
