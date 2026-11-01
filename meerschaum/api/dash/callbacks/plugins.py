@@ -265,6 +265,9 @@ def run_plugin_action(action: str, name: str, session_data: Optional[Dict[str, A
     who = viewer(session_data)
     if not who['admin']:
         return alert_from_success_tuple((False, "Only administrators can manage plugins.")), no_update, no_update
+    ### Its versions change: the next update check asks the repository again.
+    from meerschaum.api.dash.plugins import forget_remote_versions
+    forget_remote_versions(name)
     origin = None
     if action == 'update':
         installed = {p['name']: p for p in get_installed_plugins(check_packages=False)}

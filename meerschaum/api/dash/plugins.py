@@ -342,12 +342,20 @@ REMOTE_VERSION_SECONDS: float = 15 * 60
 #: How long (seconds) the update check waits for the repositories in all.
 REMOTE_VERSION_TIMEOUT_SECONDS: float = 5.0
 
+#: At most this many repository requests run at once, process-wide.
+REMOTE_VERSION_WORKERS: int = 4
+
 _remote_versions: Dict[Tuple[str, str], Tuple[float, Optional[str]]] = {}
 _remote_versions_lock = threading.Lock()
+_remote_version_pool = None
+_remote_versions_in_flight: Dict[Tuple[str, str], Any] = {}
 
 
 def remote_plugin_version(name: str, origin: str) -> Optional[str]:
-    """The latest version of `name` in the repository `origin` (cached; `None` if unknown)."""
+    """
+    The latest version of `name` in the repository `origin` (cached; `None` if unknown). Runs on
+    the update check's pool (`_version_future`), never while a page renders.
+    """
     import time
     key = (str(origin), str(name))
     ### This server's repository is read fresh (a quick query); other repositories are cached.
@@ -373,6 +381,42 @@ def remote_plugin_version(name: str, origin: str) -> Optional[str]:
     return version or None
 
 
+def forget_remote_versions(name: str) -> None:
+    """Drop the cached repository versions of a plugin (after it is updated or uninstalled)."""
+    with _remote_versions_lock:
+        for key in [key for key in _remote_versions if key[1] == str(name)]:
+            _remote_versions.pop(key, None)
+
+
+def _version_future(name: str, origin: str) -> Any:
+    """
+    The pending request for `(origin, name)`: one at a time per plugin and repository, on one
+    pool of `REMOTE_VERSION_WORKERS` threads for the whole process, however often pages ask (a
+    repository that hangs holds at most those threads; the client's connect timeout still applies).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    global _remote_version_pool
+    key = (str(origin), str(name))
+    with _remote_versions_lock:
+        future = _remote_versions_in_flight.get(key, None)
+        if future is not None and not future.done():
+            return future
+        if _remote_version_pool is None:
+            _remote_version_pool = ThreadPoolExecutor(
+                max_workers=REMOTE_VERSION_WORKERS, thread_name_prefix='mrsm-plugin-versions',
+            )
+        future = _remote_version_pool.submit(remote_plugin_version, name, origin)
+        _remote_versions_in_flight[key] = future
+
+    def _done(finished, key=key):
+        with _remote_versions_lock:
+            if _remote_versions_in_flight.get(key, None) is finished:
+                _remote_versions_in_flight.pop(key, None)
+
+    future.add_done_callback(_done)
+    return future
+
+
 def is_newer_version(remote: Optional[str], installed: Optional[str]) -> bool:
     """Whether `remote` is a newer PEP 440 version than `installed` (`False` when unknown)."""
     if not remote or not installed:
@@ -387,23 +431,22 @@ def is_newer_version(remote: Optional[str], installed: Optional[str]) -> bool:
 def plugin_update_versions(names: List[str]) -> Dict[str, str]:
     """
     `{name: newer version}` for the installed plugins among `names` whose origin repository has a
-    newer version than the one installed. Repositories are asked at once, and one that does not
-    answer within `REMOTE_VERSION_TIMEOUT_SECONDS` offers no update this time.
+    newer version than the one installed (read fresh). Answers within
+    `REMOTE_VERSION_TIMEOUT_SECONDS`: a repository still busy offers no update this time, its
+    request stays the one in flight, and requests that have not started are cancelled.
     """
-    from concurrent.futures import ThreadPoolExecutor, wait
+    from concurrent.futures import wait
+    wanted = set(names or [])
     installed = {
         plugin['name']: plugin for plugin in get_installed_plugins(check_packages=False)
-        if plugin['name'] in set(names or []) and plugin.get('origin')
+        if plugin['name'] in wanted and plugin.get('origin')
     }
     if not installed:
         return {}
-    pool = ThreadPoolExecutor(max_workers=min(8, len(installed)))
-    futures = {
-        pool.submit(remote_plugin_version, name, plugin['origin']): name
-        for name, plugin in installed.items()
-    }
-    done, _ = wait(futures, timeout=REMOTE_VERSION_TIMEOUT_SECONDS)
-    pool.shutdown(wait=False)
+    futures = {_version_future(name, plugin['origin']): name for name, plugin in installed.items()}
+    done, pending = wait(futures, timeout=REMOTE_VERSION_TIMEOUT_SECONDS)
+    for future in pending:
+        future.cancel()
     updates = {}
     for future in done:
         name = futures[future]

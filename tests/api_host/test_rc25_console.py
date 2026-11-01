@@ -285,3 +285,79 @@ print('JSON:' + json.dumps(out))
     assert out['failed_read_known'][0] in (200, 204), out
     assert out['failed_read_unseen'] == [503, None], out
     assert out['deleted'] == [401, '/dash/login'], out
+
+
+def test_update_checks_stay_bounded_while_a_repository_hangs(sandbox):
+    """
+    A repository that never answers holds at most `REMOTE_VERSION_WORKERS` threads and one request
+    per plugin, however many pages check: every check answers by its deadline, nothing new starts
+    while the same request is pending, queued requests are cancelled, and released requests clean
+    up. Updating a plugin forgets its cached repository versions.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, '''
+import json, threading, time
+from unittest.mock import patch
+import meerschaum as mrsm
+from meerschaum.api.dash import plugins as pages
+release = threading.Event()
+started, lock = [], threading.Lock()
+
+class Hanging:
+    def get_plugin_version(self, plugin):
+        with lock:
+            started.append(plugin.name)
+        release.wait(30)
+        return '9.9.9'
+
+names = [f'rc25_hang_{i}' for i in range(10)]
+installed = [{'name': name, 'origin': 'api:hanging', 'version': '1.0.0'} for name in names]
+pages.REMOTE_VERSION_TIMEOUT_SECONDS = 0.3
+threads_before = threading.active_count()
+durations, results = [], []
+with patch.object(pages, 'get_installed_plugins', return_value=installed), \\
+     patch.object(mrsm, 'get_connector', return_value=Hanging()):
+    for _ in range(25):
+        began = time.monotonic()
+        results.append(pages.plugin_update_versions(names))
+        durations.append(time.monotonic() - began)
+    peak_threads = threading.active_count() - threads_before
+    started_while_blocked = len(started)
+    in_flight_while_blocked = len(pages._remote_versions_in_flight)
+    release.set()
+    deadline = time.monotonic() + 10
+    while pages._remote_versions_in_flight and time.monotonic() < deadline:
+        time.sleep(0.05)
+    in_flight_after = len(pages._remote_versions_in_flight)
+    ### Cached now: every plugin offers 9.9.9 without another request.
+    requests_before = len(started)
+    after = pages.plugin_update_versions(names)
+    after_requests = len(started) - requests_before
+    pages.forget_remote_versions('rc25_hang_0')
+    pages.plugin_update_versions(names)
+    forgotten_requests = len(started) - requests_before
+print('JSON:' + json.dumps({
+    'max_duration': max(durations), 'results': results[:2], 'peak_threads': peak_threads,
+    'started_while_blocked': started_while_blocked, 'distinct_started': len(set(started)),
+    'in_flight_while_blocked': in_flight_while_blocked, 'in_flight_after': in_flight_after,
+    'after': after, 'after_requests': after_requests, 'forgotten_requests': forgotten_requests,
+    'workers': pages.REMOTE_VERSION_WORKERS,
+}))
+'''))
+    workers = out['workers']
+    ### Each check answers by its deadline (0.3 s) and offers nothing while the repository hangs.
+    assert out['max_duration'] < 1.5, out
+    assert out['results'] == [{}, {}]
+    ### 25 checks of 10 plugins: only the pool's threads, which started one request each; queued
+    ### requests were cancelled, so only the running ones stay in flight.
+    assert 0 < out['peak_threads'] <= workers, out
+    assert out['started_while_blocked'] == workers, out
+    assert out['in_flight_while_blocked'] == workers, out
+    ### Released, the requests finish and clean up; the next check asks only for the plugins
+    ### whose request had been cancelled, and all ten offer the newer version.
+    assert out['in_flight_after'] == 0, out
+    assert out['after_requests'] == 10 - workers, out
+    assert sorted(out['after']) == sorted(f'rc25_hang_{i}' for i in range(10))
+    assert set(out['after'].values()) == {'9.9.9'}
+    ### Forgetting one plugin's versions (after an update) asks again for that plugin only.
+    assert out['forgotten_requests'] - out['after_requests'] == 1, out
