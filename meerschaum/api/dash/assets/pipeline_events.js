@@ -11,8 +11,10 @@
  *
  * Every stream ends with a terminal event: `run_finished`, or the server's `run_closed` for a run
  * that will not finish (`reason`: `interrupted`, `holder_gone`, or `idle`, which falls back to
- * polling). A follow is closed on either, and after MAX_ERRORS failed reconnects in a row, so the
- * browser never reconnects in a loop. Only open follows paint live statuses.
+ * polling). A follow is closed on either, when the server refuses a reconnect (an ended session),
+ * and after MAX_ERRORS failed reconnects in a row, so the browser never reconnects in a loop. A
+ * stream that was open for STABLE_MS before it dropped (a proxy's timeout) reconnects with a
+ * fresh count: a reconnect is not an error. Only open follows paint live statuses.
  */
 (function () {
     'use strict';
@@ -22,6 +24,7 @@
     var FALLBACK_POLL_MS = 5000;
     var RETRY_MS = 30000;
     var MAX_ERRORS = 5;
+    var STABLE_MS = 20000;
     var EVENT_NAMES = [
         'run_started', 'node_planned', 'node_started', 'chunk_started', 'chunk_finished',
         'node_finished', 'node_failed', 'node_skipped', 'node_rebuild_pending',
@@ -166,10 +169,13 @@
         follow.source = source;
         follows.set(runId, follow);
         source.onopen = function () {
+            follow.openedAt = Date.now();
             if (follow.state !== 'open') { follow.state = 'open'; publishStates(); }
         };
-        // `errors` counts failed (re)connects in a row; an event resets it.
+        // `errors` counts failed (re)connects in a row; an event, or a connection that stayed open
+        // for STABLE_MS, resets it.
         follow.errors = 0;
+        follow.openedAt = null;
         function fail() {
             source.close();
             follow.state = 'failed';
@@ -215,6 +221,8 @@
             // refused the stream; then the page falls back to polling. A stream that keeps
             // failing to resume is given up the same way.
             if (follow.finished) return;
+            if (follow.openedAt !== null && Date.now() - follow.openedAt >= STABLE_MS) follow.errors = 0;
+            follow.openedAt = null;
             follow.errors = (follow.errors || 0) + 1;
             if (source.readyState === 2 || follow.errors >= MAX_ERRORS) fail();
         };
