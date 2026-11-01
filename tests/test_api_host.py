@@ -320,15 +320,40 @@ def test_host_serves_plugin_routes(host):
     assert client.get('/hostdemo/stream').text == 'chunk 0\nchunk 1\nchunk 2\n'
 
 
-def test_jwts_from_the_server_validate_in_the_host(host):
+def _admin_credential(root: pathlib.Path, secret: bytes) -> str:
+    """The `mrsm_credential` claim the server puts in the `admin` user's JWTs."""
+    result = _python(root, """
+from meerschaum import get_connector
+from meerschaum.core import User
+instance = get_connector('sql:local')
+print('HASH:' + instance.get_user_password_hash(User('admin', instance=instance)))
+""")
+    assert result.returncode == 0, result.stderr[-4000:]
+    password_hash = [
+        line for line in result.stdout.splitlines() if line.startswith('HASH:')
+    ][-1][len('HASH:'):]
+    digest = hmac.new(
+        secret, b'mrsm-credential\x00' + password_hash.encode('utf-8'), hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest[:16]).rstrip(b'=').decode('ascii')
+
+
+def test_jwts_from_the_server_validate_in_the_host(host, root):
     client, secret = host
     claims = {
         'sub': 'admin', 'scopes': ['hostdemo:read'], 'type': 'user',
+        'mrsm_principal': 'user', 'mrsm_credential': _admin_credential(root, secret),
         'exp': int(time.time()) + 300,
     }
     token = mint_jwt(secret, claims)
     response = client.get('/hostdemo/scoped', headers={'Authorization': f'Bearer {token}'})
     assert response.status_code == 200, response.text
+
+    ### Issued before 5.0 bound JWTs to their principal and credential: refused.
+    for claim in ('mrsm_principal', 'mrsm_credential'):
+        legacy = mint_jwt(secret, {k: v for k, v in claims.items() if k != claim})
+        response = client.get('/hostdemo/scoped', headers={'Authorization': f'Bearer {legacy}'})
+        assert response.status_code == 401, (claim, response.text)
     assert response.json() == {'scopes': ['hostdemo:read']}
     response = client.get('/hostdemo/whoami', headers={'Authorization': f'Bearer {token}'})
     assert response.json() == {'username': 'admin'}
