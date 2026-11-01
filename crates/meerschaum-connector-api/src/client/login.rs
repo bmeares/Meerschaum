@@ -105,27 +105,53 @@ impl APIConnector {
 
     /// The `token` property: the API key, or a valid JWT (logging in when missing or expiring
     /// within a minute). `None` if login fails (warned once).
+    ///
+    /// Logins are single-flight: concurrent callers wait for one login (the gate is separate from
+    /// the token's lock, which `login()` takes) and use its JWT. After a failed implicit login,
+    /// none is tried again within `RELOGIN_INTERVAL`.
     pub async fn token(&self) -> Option<String> {
         if self.login_scheme() == "api_key" {
             return self.attr("api_key");
         }
+        if let Some(token) = self.current_token().await {
+            return Some(token);
+        }
+        let _gate = self.login_gate.lock().await;
+        // Another caller may have logged in while this one waited.
+        if let Some(token) = self.current_token().await {
+            return Some(token);
+        }
+        if self
+            .auth
+            .lock()
+            .await
+            .login_failed_at
+            .is_some_and(|at| at.elapsed() < super::RELOGIN_INTERVAL)
         {
-            let auth = self.auth.lock().await;
-            let expired = match auth.expires {
-                None => true,
-                Some(exp) => exp < Utc::now().naive_utc() + Duration::minutes(1),
-            };
-            if auth.token.is_some() && !expired {
-                return auth.token.clone();
-            }
+            return None;
         }
         let res = self.login().await;
         let mut auth = self.auth.lock().await;
+        auth.login_failed_at = (!res.success).then(std::time::Instant::now);
         if !res.success && !auth.emitted_warning {
             super::warnings::warn(&res.message);
             auth.emitted_warning = true;
         }
         auth.token.clone()
+    }
+
+    /// The stored JWT while it is valid for more than a minute.
+    async fn current_token(&self) -> Option<String> {
+        let auth = self.auth.lock().await;
+        let expired = match auth.expires {
+            None => true,
+            Some(exp) => exp < Utc::now().naive_utc() + Duration::minutes(1),
+        };
+        if auth.token.is_some() && !expired {
+            auth.token.clone()
+        } else {
+            None
+        }
     }
 
     /// The stored session token and its expiration, without logging in (v4's `_token` and

@@ -28,6 +28,11 @@ pub enum Method {
 }
 
 impl Method {
+    /// A method that is safe to send again (it changes nothing on the server).
+    pub fn is_safe(&self) -> bool {
+        matches!(self, Method::Get | Method::Head | Method::Options)
+    }
+
     /// The method name.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -275,13 +280,71 @@ impl APIConnector {
     }
 
     /// `make_request(method, r_url, headers, use_token, **kwargs)`.
+    ///
+    /// A logged-in JWT the server refuses (`401`: a changed password, a re-registered user, a
+    /// JWT minted before 5.0 bound JWTs to their user) is dropped for one fresh login, at most
+    /// once every [`super::RELOGIN_INTERVAL`]. Only a safe request (`GET`, `HEAD`, `OPTIONS`) is
+    /// sent again; any other returns its `401` and the next request uses the new login. API keys
+    /// are never retried, and the login itself sends no token, so it never recurses.
     pub async fn make_request(
         &self,
         method: Method,
         r_url: &str,
         opts: RequestOptions,
     ) -> ConnectorResult<ApiResponse> {
+        let replay = (opts.use_token && method.is_safe()).then(|| opts.clone());
+        let (response, sent) = self.send_request(method, r_url, opts).await?;
+        if response.status != 401 {
+            return Ok(response);
+        }
+        let Some(sent) = sent else {
+            return Ok(response);
+        };
+        if !self.drop_refused_token(&sent).await {
+            return Ok(response);
+        }
+        match replay {
+            Some(opts) => Ok(self.send_request(method, r_url, opts).await?.0),
+            None => Ok(response),
+        }
+    }
+
+    /// Drop a logged-in JWT the server refused, so the next token is a fresh login. `true` when
+    /// the request may be sent again: this call dropped the refused JWT (and no other was dropped
+    /// within [`super::RELOGIN_INTERVAL`]), or another request already replaced or dropped it.
+    async fn drop_refused_token(&self, sent: &str) -> bool {
+        if self.login_scheme() == "api_key" {
+            return false;
+        }
+        let mut auth = self.auth.lock().await;
+        match auth.token.as_deref() {
+            Some(stored) if stored == sent => {
+                if auth
+                    .relogged_at
+                    .is_some_and(|at| at.elapsed() < super::RELOGIN_INTERVAL)
+                {
+                    return false;
+                }
+                auth.token = None;
+                auth.expires = None;
+                auth.relogged_at = Some(std::time::Instant::now());
+                true
+            }
+            // Another request replaced it, or is logging in: the retry waits for that one
+            // login (`token()` is single-flight).
+            Some(_) | None => true,
+        }
+    }
+
+    /// Send one request; also the logged-in JWT it carried (never an API key).
+    async fn send_request(
+        &self,
+        method: Method,
+        r_url: &str,
+        opts: RequestOptions,
+    ) -> ConnectorResult<(ApiResponse, Option<String>)> {
         let url = self.request_url(r_url, &opts.query);
+        let mut sent = None;
         let mut req = self
             .http
             .request(method.to_reqwest(), &url)
@@ -292,9 +355,11 @@ impl APIConnector {
         if opts.use_token {
             // PARITY: an unavailable token is sent as `Bearer None` (`f'Bearer {self.token}'`).
             // Boxed: `token()` may log in, which posts through `make_request`.
-            let token = Box::pin(self.token())
-                .await
-                .unwrap_or_else(|| "None".into());
+            let token = Box::pin(self.token()).await;
+            if self.login_scheme() != "api_key" {
+                sent = token.clone();
+            }
+            let token = token.unwrap_or_else(|| "None".into());
             req = req.header("Authorization", format!("Bearer {token}"));
         }
         req = match opts.body {
@@ -342,11 +407,14 @@ impl APIConnector {
             .await
             .map_err(|e| ConnectorError::Backend(e.to_string()))?
             .to_vec();
-        Ok(ApiResponse {
-            status,
-            content_type,
-            bytes,
-        })
+        Ok((
+            ApiResponse {
+                status,
+                content_type,
+                bytes,
+            },
+            sent,
+        ))
     }
 
     /// `get(r_url, **kwargs)`.

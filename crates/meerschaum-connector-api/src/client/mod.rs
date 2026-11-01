@@ -61,7 +61,18 @@ pub(crate) struct AuthState {
     pub(crate) token: Option<String>,
     pub(crate) expires: Option<NaiveDateTime>,
     pub(crate) emitted_warning: bool,
+    /// When a JWT the server refused was last dropped for a fresh login (at most one per
+    /// [`RELOGIN_INTERVAL`]).
+    pub(crate) relogged_at: Option<std::time::Instant>,
+    /// When an implicit login (`token()`) last failed: none is tried again within
+    /// [`RELOGIN_INTERVAL`] (stored credentials that no longer work never cause a login per
+    /// request). An explicit `login()` always tries.
+    pub(crate) login_failed_at: Option<std::time::Instant>,
 }
+
+/// The least time between two fresh logins forced by refused JWTs: concurrent `401`s, or a
+/// server that refuses every new JWT too, never turn into a storm of logins.
+pub(crate) const RELOGIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct PipeCacheEntry {
@@ -84,6 +95,8 @@ pub struct APIConnector {
     /// `false` when the `verify` attribute is `false` (HTTP and websocket TLS accept any certificate).
     pub(crate) verify: bool,
     pub(crate) auth: Arc<tokio::sync::Mutex<AuthState>>,
+    /// One implicit login at a time (`token()`): the others wait, then use its JWT.
+    pub(crate) login_gate: Arc<tokio::sync::Mutex<()>>,
     pub(crate) pipe_cache: Arc<Mutex<HashMap<String, PipeCacheEntry>>>,
     pub(crate) job_metadata_cache: Arc<Mutex<HashMap<String, (Instant, Map)>>>,
     pub(crate) timeout: Duration,
@@ -191,6 +204,7 @@ impl APIConnector {
             http,
             verify,
             auth: Arc::new(tokio::sync::Mutex::new(AuthState::default())),
+            login_gate: Arc::new(tokio::sync::Mutex::new(())),
             pipe_cache: Arc::new(Mutex::new(HashMap::new())),
             job_metadata_cache: Arc::new(Mutex::new(HashMap::new())),
             timeout: Duration::from_secs(crate::routes::DEFAULT_TIMEOUT_SECONDS),
