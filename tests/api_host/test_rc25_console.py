@@ -197,8 +197,9 @@ print('JSON:' + json.dumps({
     assert out['slots'] == {'rc25_old': True, 'rc25_same': True}
     assert out['store'] == ['rc25_old', 'rc25_same']
     assert out['asked'] == [['rc25_old', 'api:elsewhere'], ['rc25_same', 'api:this_server']]
-    assert out['shown'] == [[False, True], ['Update rc25_old to 1.2.0', 'Update rc25_same']]
-    assert out['hidden_for_reader'] == [[True, True], ['Update rc25_old', 'Update rc25_same']]
+    checked = ['plugin-update-slot plugin-update-checked'] * 2
+    assert out['shown'] == [[False, True], checked, ['Update rc25_old to 1.2.0', 'Update rc25_same']]
+    assert out['hidden_for_reader'] == [[True, True], checked, ['Update rc25_old', 'Update rc25_same']]
     assert out['this_server'] == '2.0.0' and out['local_calls'] == 1
     assert out['newer'] == [True, False, False, True, False, False, False]
     assert out['back'] == ['Link', '← All plugins', 'plugin-back-link']
@@ -223,30 +224,40 @@ print('JSON:' + json.dumps({'text': text}))
     assert "children='TOML'" in text
 
 
-def test_a_failed_session_read_never_sends_the_console_to_sign_in(sandbox):
+def test_an_unreadable_session_store_answers_503_and_never_signs_out(sandbox):
     """
-    Console sessions live in the instance (`mrsm_sessions`), read again every few seconds by each
-    callback (the Terminal page's jobs interval ticks every 3 s). A failed read (a busy production
-    instance: pool or statement timeout, dropped connection) used to read as "no session": the
-    callback got `401` + `X-Mrsm-Login`, and `assets/session_guard.js` sent the whole page to
-    sign in and back. A read error now keeps the session last read in this process, or answers
-    `503` without the login header (the page stays); only a missing session signs out.
+    Console sessions live in the instance (`mrsm_sessions`), read again by callbacks once the
+    5 s cache expires (the Terminal page's jobs interval ticks every 3 s). The read used
+    `Pipe.get_doc`, which answers `None` for a failed read as for a missing session, so a busy
+    instance signed the console out: `401` + `X-Mrsm-Login`, and `assets/session_guard.js` sent
+    the whole page to sign in. Now an unreadable store is `503` without the login header and the
+    callback does not run (fail closed, nothing stale reused); a missing, deleted or expired
+    session is still `401`. The failure is real: the sessions pipe on an instance that refuses
+    connections (the driver's own error), not a mocked read.
     """
     root, plugins = sandbox
     out = _json(run_python(root, plugins, SIGN_IN + '''
-import json
+import json, time
+import meerschaum as mrsm
 from starlette.testclient import TestClient
 from meerschaum.api.host import build_app
 from meerschaum.api.dash import sessions
 app = build_app()
 client = TestClient(app)
 dependencies = client.get('/dash/_dash-dependencies').json()
-### Any console callback that needs a session: the guard answers before it runs. (Pipeline Edit
-### without a definition is a no-op `204`; the Terminal page's interval is guarded the same way.)
+from meerschaum.api.dash.callbacks import pipeline_management  # after the console is built
+### A console callback that needs a session; `_require_session` is the first thing it runs.
 toggle = next(d for d in dependencies if d['output'] == 'pipeline-edit-mode.data')
+ran = []
+real_require = pipeline_management._require_session
+def recording_require(session):
+    ran.append(1)
+    return real_require(session)
+pipeline_management._require_session = recording_require
 
 def fire(session):
     client.cookies.clear()
+    before = len(ran)
     response = client.post('/dash/_dash-update-component', json={
         'output': toggle['output'], 'outputs': {'id': 'pipeline-edit-mode', 'property': 'data'},
         'inputs': [{'id': 'pipeline-edit-toggle', 'property': 'n_clicks', 'value': 1},
@@ -255,36 +266,55 @@ def fire(session):
         'state': [{'id': 'pipeline-definition', 'property': 'data', 'value': None},
                   {'id': 'session-store', 'property': 'data', 'value': session}],
     })
-    return [response.status_code, response.headers.get('x-mrsm-login')]
+    return [response.status_code, response.headers.get('x-mrsm-login'), len(ran) > before]
 
-known = sign_in('rc25-session-admin', user_type='admin')
-unseen = sign_in('rc25-session-other', user_type='admin')
-type_ = type(sessions.get_instance_sessions_pipe())
-real_get_data = type_.get_data
-def failing_get_data(self, *args, **kwargs):
-    # What `get_data` does when the instance cannot be read (it raises; `silent=False`).
-    if getattr(self, 'target', None) == sessions.INSTANCE_SESSIONS_TARGET:
-        raise RuntimeError('pool timed out while waiting for an open connection')
-    return real_get_data(self, *args, **kwargs)
+valid = sign_in('rc25-session-admin', user_type='admin')
+expired = sign_in('rc25-session-expired', user_type='admin')
+gone = sign_in('rc25-session-gone', user_type='admin')
+out = {'healthy': fire(valid)}
+### A session whose row has expired, and one deleted: both really missing.
+pipe = sessions.get_instance_sessions_pipe()
+assert pipe.sync([{'session_id': expired['session-id'], 'data': '{"username":"rc25-session-expired"}',
+                   'expires': int(time.time()) - 10}], check_existing=False)[0]
+sessions._cache_drop(expired['session-id'])
+out['expired'] = fire(expired)
+sessions.delete_session(gone['session-id'])
+out['deleted'] = fire(gone)
 
-out = {'healthy': fire(known)}
-type_.get_data = failing_get_data
-### The 5 s per-process cache has expired; the session was read successfully moments ago.
-sessions._session_cache.pop(known['session-id'], None)
-out['failed_read_known'] = fire(known)
-### A session this process has no good read of: unknown, so `503` (not a sign-in).
-sessions._cache_drop(unseen['session-id'])
-out['failed_read_unseen'] = fire(unseen)
-type_.get_data = real_get_data
-### A session that is really gone still signs out.
-sessions.delete_session(known['session-id'])
-out['deleted'] = fire(known)
+### The store becomes unreadable: the same pipe on an instance that refuses connections.
+store = sessions._instance_pipe
+sessions._instance_pipe = mrsm.Pipe('mrsm', 'sessions', instance='sql:refused', temporary=True,
+                                    parameters=store.parameters)
+out['cached'] = fire(valid)  # within the 5 s cache: unchanged behavior
+sessions._session_cache.pop(valid['session-id'], None)  # the 5 s cache has expired
+out['unreadable'] = fire(valid)
+try:
+    sessions.get_session_data(valid['session-id'], use_cache=False)
+    out['fresh_read'] = 'returned'
+except sessions.SessionStoreUnavailable:
+    out['fresh_read'] = 'unavailable'
+out['update_session'] = 'returned'
+try:
+    sessions.update_session(valid['session-id'], {'x': 1})
+except sessions.SessionStoreUnavailable:
+    out['update_session'] = 'unavailable'
+out['old_read'] = repr(sessions._instance_pipe.get_doc(params={'session_id': valid['session-id']}))
+sessions._instance_pipe = store
+sessions._session_cache.pop(valid['session-id'], None)
+out['recovered'] = fire(valid)
 print('JSON:' + json.dumps(out))
-'''))
-    assert out['healthy'][0] in (200, 204), out
-    assert out['failed_read_known'][0] in (200, 204), out
-    assert out['failed_read_unseen'] == [503, None], out
-    assert out['deleted'] == [401, '/dash/login'], out
+''', extra_env={'MRSM_SQL_REFUSED': 'postgresql://u:p@127.0.0.1:1/db'}))
+    ### The callback runs with a session; a missing one is 401 and never runs.
+    assert out['healthy'] == [204, None, True], out
+    assert out['expired'] == [401, '/dash/login', False], out
+    assert out['deleted'] == [401, '/dash/login', False], out
+    assert out['cached'] == [204, None, True], out
+    ### Unreadable: 503, no login header, the callback does not run, nothing stale is reused.
+    assert out['unreadable'] == [503, None, False], out
+    assert out['fresh_read'] == 'unavailable' and out['update_session'] == 'unavailable', out
+    ### What the old read made of the same failure: no session.
+    assert out['old_read'] == 'None', out
+    assert out['recovered'] == [204, None, True], out
 
 
 def test_update_checks_stay_bounded_while_a_repository_hangs(sandbox):

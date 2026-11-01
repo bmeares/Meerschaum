@@ -60,13 +60,9 @@ _session_cache: Dict[str, Any] = {}
 _session_cache_lock = threading.Lock()
 
 ### A store that cannot be read (a busy instance: a pool or statement timeout, a dropped
-### connection) is not a missing session. Such a read raises `SessionStoreUnavailable`, and a session
-### this process read within `SESSION_STALE_SECONDS` is used meanwhile, so a blip never signs the
-### console out (which reloaded the whole page through `assets/session_guard.js`).
-SESSION_STALE_SECONDS: float = 300.0
-_last_good: Dict[str, Any] = {}
-
-
+### connection) is not a missing session: such a read raises `SessionStoreUnavailable` (the session
+### is unknown, never assumed), and the API host answers `503` instead of sending the visitor to
+### sign in. Only the `SESSION_CACHE_SECONDS` cache above is ever reused.
 class SessionStoreUnavailable(RuntimeError):
     """The session store could not be read: whether the session exists is unknown."""
 
@@ -96,27 +92,6 @@ def _cache_set(session_id: str, data: Any) -> None:
 def _cache_drop(session_id: Any) -> None:
     with _session_cache_lock:
         _session_cache.pop(str(session_id), None)
-        _last_good.pop(str(session_id), None)
-
-
-def _remember_good(session_id: str, data: Any) -> None:
-    now = time.monotonic()
-    with _session_cache_lock:
-        if len(_last_good) > 1024:
-            for key in [k for k, (at, _) in _last_good.items() if now - at > SESSION_STALE_SECONDS]:
-                _last_good.pop(key, None)
-        if data is None:
-            _last_good.pop(session_id, None)
-        else:
-            _last_good[session_id] = (now, data)
-
-
-def _recent_good(session_id: str) -> Any:
-    with _session_cache_lock:
-        entry = _last_good.get(session_id, None)
-    if entry is None or time.monotonic() - entry[0] > SESSION_STALE_SECONDS:
-        return None
-    return entry[1]
 
 
 def _use_instance_store() -> bool:
@@ -337,14 +312,9 @@ def get_session_data(
         cached = _cache_get(key)
         if cached is not None:
             return dict(cached) if isinstance(cached, dict) else cached
-    try:
-        data = _get_session_data(key)
-    except SessionStoreUnavailable:
-        recent = _recent_good(key)
-        if recent is None:
-            raise
-        return dict(recent) if isinstance(recent, dict) else recent
-    _remember_good(key, dict(data) if isinstance(data, dict) else data)
+    ### Raises `SessionStoreUnavailable` when the store cannot be read: callers never mistake it
+    ### for a missing session, and nothing older than the cache above is reused.
+    data = _get_session_data(key)
     if use_cache and data is not None:
         _cache_set(key, dict(data))
     return data

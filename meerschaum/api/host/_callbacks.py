@@ -241,8 +241,9 @@ def _login_required_response():
 
 def _store_unavailable_response():
     """
-    The `503` answering a callback whose session could not be read: no `X-Mrsm-Login`, so the
-    page stays (`assets/session_guard.js` signs in only on `401`); the next request tries again.
+    The `503` answering a callback whose session could not be read: the callback does not run
+    (fail closed), and there is no `X-Mrsm-Login`, so the page stays (`assets/session_guard.js`
+    signs in only on `401`); the next request tries again.
     """
     from flask import Response
     body = json.dumps({
