@@ -232,10 +232,13 @@ details[open] > .plugin-source-folder .mrsm-icon.plugin-source-folder-open { dis
 }
 .plugin-source-fullscreen .plugin-source-workspace { flex: 1; min-height: 0; }
 .plugin-source-fullscreen .plugin-source-tree { max-height: none; }
-.plugin-source-fullscreen .plugin-source-content { display: flex; flex-direction: column; min-height: 0; }
-.plugin-source-fullscreen .plugin-source-preview { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.plugin-source-fullscreen .plugin-source-code { flex: 1; min-height: 0; }
-.plugin-source-fullscreen .plugin-source-code pre { max-height: none; height: 100%; }
+/* The file's cell holds `dcc.Loading`'s wrappers around `.plugin-source-content`: every box from the
+   cell down to the code fills the remaining height. */
+.plugin-source-fullscreen .plugin-source-workspace div:has(.plugin-source-content),
+.plugin-source-fullscreen .plugin-source-content,
+.plugin-source-fullscreen .plugin-source-preview,
+.plugin-source-fullscreen .plugin-source-code { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.plugin-source-fullscreen .plugin-source-code pre { max-height: none; flex: 1 1 auto; min-height: 0; }
 body.plugin-source-noscroll { overflow: hidden; }
 .plugin-source-code > :last-child { margin-bottom: 0; }
 .source-token-keyword, .source-token-operator { color: #d7a8ff; }
