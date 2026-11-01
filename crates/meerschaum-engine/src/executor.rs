@@ -180,6 +180,10 @@ struct PipelinedView<'a, S> {
 }
 
 impl<S: StateSource> StateSource for PipelinedView<'_, S> {
+    async fn oldest_watermark(&self, node: &PipeRef) -> Result<Option<Bound>, StateError> {
+        self.inner.oldest_watermark(node).await
+    }
+
     async fn watermark(&self, node: &PipeRef) -> Result<Option<Bound>, StateError> {
         self.inner.watermark(node).await
     }

@@ -54,6 +54,14 @@ pub trait StateSource: Send + Sync {
         node: &PipeRef,
     ) -> impl Future<Output = Result<Option<Bound>, StateError>> + Send;
 
+    /// The oldest stored axis value, when available, for splitting full historical replays.
+    fn oldest_watermark(
+        &self,
+        _node: &PipeRef,
+    ) -> impl Future<Output = Result<Option<Bound>, StateError>> + Send {
+        async { Ok(None) }
+    }
+
     /// The stored definition hash (`mrsm:engine_state`), if any.
     fn definition_hash(
         &self,
@@ -432,6 +440,10 @@ impl<'a, S: StateSource> CachedState<'a, S> {
 }
 
 impl<S: StateSource> StateSource for CachedState<'_, S> {
+    async fn oldest_watermark(&self, node: &PipeRef) -> Result<Option<Bound>, StateError> {
+        self.inner.oldest_watermark(node).await
+    }
+
     async fn watermark(&self, node: &PipeRef) -> Result<Option<Bound>, StateError> {
         let cached = self
             .watermarks

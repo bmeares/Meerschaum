@@ -286,7 +286,15 @@ Pipe graph on sql:local: 3 pipes, 2 edges, 1 root, depth 3
 ● root   ◆ has children   ○ leaf   ★ selected
 ```
 
-In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. `plan pipes` shows that second plan as it would be if every parent that runs synced new rows after its watermark: the parent's ledger entry covers its whole chunk-grid cell, so a child usually backfills from the start of that cell (`[2026-10-04 00:00, …)` on the default 30-day grid), which is the `begin` its `fetch` receives. Only the start of the window is predicted: its end is the parents' current watermarks, and the executor caps it at their new ones. `--nopretty` prints the same plan as JSON. In Python, `pipeline.plan()` returns the static plan (each provisional row as the state is now, often `skip*`) and `pipeline.plan(expected=True)` the one `plan pipes` prints. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
+A `*` marks a provisional action, planned again after its parents finish.
+`plan pipes` predicts new tail data from the parents' current watermarks;
+actual changes determine the execution bounds. `--nopretty` prints JSON.
+In Python, `pipeline.plan()` shows the current state and
+`pipeline.plan(expected=True)` shows the CLI prediction.
+
+The graph marks selected targets with `★`, roots with `●`, and leaves with `○`.
+See [Visualization](/reference/pipelines/visualization/) for edge details.
+After a run, `show runs` lists it:
 
 ```text
 $ mrsm show runs --last 5
@@ -391,6 +399,10 @@ children:
 The engine waits for the lookup and propagates failures. A changed lookup
 rechecks the child's history; unchanged UPSERTs add no dirty ranges.
 Sources with only lookup inputs keep polling. Other dependencies use `role: data` by default.
+
+Full replays split stored history on the Pipe's chunk grid. The first and last
+windows stay open to include older and newer rows. Edge cursors advance only
+after every chunk succeeds.
 
 The same role works in `parents:`. For SQL pushdown, keep the primary data
 source first in that list, or declare lookup edges through `children:` as above.

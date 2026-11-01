@@ -907,6 +907,19 @@ impl InstanceState {
 }
 
 impl StateSource for InstanceState {
+    async fn oldest_watermark(&self, node: &PipeRef) -> Result<Option<Bound>, StateError> {
+        let instance = node.instance_keys().to_string();
+        let conn = self.conn(&instance)?;
+        let pipe = self.pipe_for(node);
+        if pipe.column("datetime").is_none() {
+            return Ok(None);
+        }
+        conn.get_sync_time(&pipe, None, false)
+            .await
+            .map(|time| time.as_ref().and_then(date_bound_to_bound))
+            .map_err(|error| unreachable(&instance, error))
+    }
+
     async fn watermark(&self, node: &PipeRef) -> Result<Option<Bound>, StateError> {
         let instance = node.instance_keys().to_string();
         let conn = self.conn(&instance)?;

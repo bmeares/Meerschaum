@@ -747,6 +747,7 @@ fn chunks_for(
     ranges: &[Interval],
     max: usize,
     warnings: &mut Vec<String>,
+    extent: Option<(i64, i64)>,
 ) -> Vec<Span> {
     let max = max.max(1);
     if ranges.len() > max {
@@ -766,11 +767,26 @@ fn chunks_for(
     for (index, iv) in ranges.iter().enumerate() {
         // Reserve one span for each remaining range before allocating chunk boundaries.
         let remaining = max - out.len() - (ranges.len() - index - 1);
-        match (iv.begin, iv.end) {
+        let bounded = iv.begin.is_some() && iv.end.is_some();
+        let begin = iv.begin.or(extent.map(|(oldest, _)| oldest));
+        let end = iv.end.or(extent.map(|(_, newest)| {
+            newest.saturating_add(if axis.kind == AxisKind::Datetime {
+                60_000_000
+            } else {
+                1
+            })
+        }));
+        match (begin, end) {
             (Some(b), Some(e)) => {
+                if !bounded && e <= b {
+                    out.push(to_span(axis, iv));
+                    continue;
+                }
                 let width = axis.chunk.max(1) as i128;
                 let start = (b as i128).div_euclid(width) * width;
-                let count = (e as i128 - start + width - 1).div_euclid(width);
+                let count = (e as i128 - start + width - 1).div_euclid(width)
+                    + i128::from(iv.begin.is_none())
+                    + i128::from(iv.end.is_none());
                 if e > b && count > remaining as i128 {
                     warnings.push(format!(
                         "{count} chunks exceed the remaining plan budget ({remaining}); shown as one range"
@@ -779,14 +795,14 @@ fn chunks_for(
                     continue;
                 }
                 let chunks = get_chunk_bounds(
-                    Some(b),
-                    Some(e),
-                    true,
+                    iv.begin,
+                    iv.end,
+                    bounded,
                     axis.chunk,
                     true,
                     axis.kind == AxisKind::Datetime,
-                    None,
-                    None,
+                    extent.map(|(oldest, _)| oldest),
+                    extent.map(|(_, newest)| newest),
                 );
                 match chunks {
                     Ok(c) if c.len() <= remaining => out.extend(
@@ -1171,7 +1187,7 @@ pub async fn plan_node<S: StateSource>(
             );
         }
         out.bounds = Some(to_bounds(axis, &iv));
-        out.chunks = chunks_for(axis, &[iv], options.max_chunks, &mut out.warnings);
+        out.chunks = chunks_for(axis, &[iv], options.max_chunks, &mut out.warnings, None);
         let from = if tail_begin.is_some() {
             "syncs from its last sync, minus the backtrack window,"
         } else {
@@ -1213,7 +1229,25 @@ pub async fn plan_node<S: StateSource>(
     let hull = Interval::new(ranges[0].begin, ranges[ranges.len() - 1].end);
     out.bounds = Some(to_bounds(axis, &hull));
     out.ranges = ranges.iter().map(|iv| to_span(axis, iv)).collect();
-    out.chunks = chunks_for(axis, &ranges, options.max_chunks, &mut out.warnings);
+    let extent = if ranges
+        .iter()
+        .any(|range| range.begin.is_none() || range.end.is_none())
+    {
+        match state.oldest_watermark(pipe_ref).await {
+            Ok(oldest) => oldest
+                .as_ref()
+                .and_then(|bound| axis.pos(bound))
+                .zip(own_pos),
+            Err(error) => {
+                out.warnings
+                    .push(format!("cannot split historical replay: {error}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    out.chunks = chunks_for(axis, &ranges, options.max_chunks, &mut out.warnings, extent);
     let tail = tail_begin
         .and_then(|t| axis.bound(t))
         .map_or("None".to_string(), |b| fmt_bound(&b));
@@ -1322,6 +1356,13 @@ impl<S> PredictedState<'_, S> {
 }
 
 impl<S: StateSource> StateSource for PredictedState<'_, S> {
+    async fn oldest_watermark(
+        &self,
+        node: &PipeRef,
+    ) -> Result<Option<Bound>, crate::state::StateError> {
+        self.inner.oldest_watermark(node).await
+    }
+
     async fn watermark(&self, node: &PipeRef) -> Result<Option<Bound>, crate::state::StateError> {
         self.inner.watermark(node).await
     }
@@ -1402,7 +1443,7 @@ mod tests {
             Interval::new(Some(10), Some(13)),
         ];
         let mut warnings = Vec::new();
-        let chunks = chunks_for(&axis, &ranges, 4, &mut warnings);
+        let chunks = chunks_for(&axis, &ranges, 4, &mut warnings, None);
         assert!(
             chunks.len() <= 4,
             "allocated {} chunks for a budget of 4",
@@ -1432,7 +1473,7 @@ mod tests {
             .map(|index| Interval::new(Some(index * 10), Some(index * 10 + 1)))
             .collect();
         let mut warnings = Vec::new();
-        let chunks = chunks_for(&axis, &ranges, 4, &mut warnings);
+        let chunks = chunks_for(&axis, &ranges, 4, &mut warnings, None);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].begin, Some(Bound::Int(0)));
         assert_eq!(chunks[0].end, Some(Bound::Int(191)));
@@ -1448,6 +1489,7 @@ mod tests {
             &[Interval::new(Some(i64::MIN), Some(i64::MAX))],
             16,
             &mut warnings,
+            None,
         );
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].begin, Some(Bound::Int(i64::MIN)));
@@ -1470,6 +1512,7 @@ mod tests {
                 &[Interval::new(Some(begin), Some(end))],
                 16,
                 &mut Vec::new(),
+                None,
             );
             assert_eq!(actual, expected);
         }

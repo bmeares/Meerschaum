@@ -20,6 +20,231 @@ impl InplaceObserver for Changes {
 }
 
 flavor_tests!(
+    all_null_upserts_do_not_invalidate_dependents,
+    |c: Ctx| async move {
+        if !meerschaum_connector_sql::queries::templates::has_update_query(&format!(
+            "{}-upsert",
+            c.flavor
+        )) {
+            return;
+        }
+        let mut source = c.pipe("test", "null_source", None,
+        r#"{"columns":{"id":"id"},"dtypes":{"id":"int","v":"int"},"upsert":true,"null_indices":true}"#);
+        ok(c.conn
+            .sync_mut(
+                &mut source,
+                PipeInput::Docs(vec![doc(vec![
+                    ("id", meerschaum_kernel::value::Value::Null),
+                    ("v", meerschaum_kernel::value::Value::Null),
+                ])]),
+                &SyncOptions::default(),
+            )
+            .await);
+        let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&source).unwrap());
+        let destination = c.pipe(
+            &c.conn.keys(),
+            "null_result",
+            None,
+            &serde_json::json!({
+                "columns":{"id":"id"},"dtypes":{"id":"int","v":"int"},
+                "upsert":true,"null_indices":true,"sql":format!("SELECT * FROM {table}")
+            })
+            .to_string(),
+        );
+        let changes = Changes::default();
+        for _ in 0..2 {
+            let result = c
+                .conn
+                .sync_pipe_inplace_observed(
+                    &destination,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                    &changes,
+                )
+                .await;
+            assert!(result.success, "{}", result.message);
+        }
+        assert_eq!(*changes.0.lock().unwrap(), vec![1, 0]);
+        assert_eq!(c.rowcount(&destination, Default::default()).await, Some(1));
+        for pipe in [&destination, &source] {
+            ok(c.conn.drop_pipe(pipe).await);
+        }
+    }
+);
+
+flavor_tests!(upserts_compare_stored_json_values, |c: Ctx| async move {
+    if !matches!(
+        c.flavor,
+        "postgresql" | "postgis" | "timescaledb" | "timescaledb-ha"
+    ) {
+        return;
+    }
+    for (stored_type, is_static) in ["TEXT", "JSON"]
+        .into_iter()
+        .flat_map(|kind| [false, true].map(move |fixed| (kind, fixed)))
+    {
+        let source_params = serde_json::json!({
+            "columns":{"datetime":"ts","id":"id"},
+            "dtypes":{"ts":"int","id":"int","v":"json"},
+            "upsert":true,"null_indices":false,
+        });
+        let rows =
+            |value| PipeInput::Docs(vec![doc(vec![("ts", i(10)), ("id", i(1)), ("v", value)])]);
+        let mut source = c.pipe(
+            "test",
+            &format!("json_source_{stored_type}_{is_static}"),
+            None,
+            &source_params.to_string(),
+        );
+        ok(c.conn
+            .sync_mut(
+                &mut source,
+                rows(j(r#"{"value":2}"#)),
+                &SyncOptions::default(),
+            )
+            .await);
+        let source_table = c.conn.pipe_table_name(&c.conn.sql_pipe(&source).unwrap());
+        let mut target_params = source_params;
+        target_params["static"] = serde_json::json!(is_static);
+        target_params["dtypes"]["v"] = serde_json::json!(if stored_type == "TEXT" {
+            "string"
+        } else {
+            "json"
+        });
+        target_params["sql"] = serde_json::json!(format!("SELECT * FROM {source_table}"));
+        let mut destination = c.pipe(
+            &c.conn.keys(),
+            &format!("json_target_{stored_type}_{is_static}"),
+            None,
+            &target_params.to_string(),
+        );
+        ok(c.conn
+            .sync_mut(
+                &mut destination,
+                rows(meerschaum_kernel::value::Value::Null),
+                &SyncOptions::default(),
+            )
+            .await);
+        let target = c
+            .conn
+            .pipe_table_name(&c.conn.sql_pipe(&destination).unwrap());
+        if stored_type == "JSON" {
+            assert!(
+                c.conn
+                    .exec(&format!(
+                        "ALTER TABLE {target} ALTER COLUMN v TYPE JSON USING v::json"
+                    ))
+                    .await
+                    .is_some()
+            );
+        }
+        let changes = Changes::default();
+        for value in [
+            j(r#"{"value":2}"#),
+            j(r#"{"value":2}"#),
+            j(r#"{"value":3}"#),
+            meerschaum_kernel::value::Value::Null,
+            meerschaum_kernel::value::Value::Null,
+        ] {
+            ok(c.conn
+                .sync_mut(&mut source, rows(value.clone()), &SyncOptions::default())
+                .await);
+            let result = c
+                .conn
+                .sync_pipe_inplace_observed(
+                    &destination,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                    &changes,
+                )
+                .await;
+            assert!(result.success, "{stored_type}: {}", result.message);
+            let data = c.docs(&destination).await;
+            let actual = &data[0]["v"];
+            match (&value, actual) {
+                (meerschaum_kernel::value::Value::Null, meerschaum_kernel::value::Value::Null) => {}
+                (
+                    meerschaum_kernel::value::Value::Json(expected),
+                    meerschaum_kernel::value::Value::Str(actual),
+                ) => assert_eq!(
+                    &serde_json::from_str::<serde_json::Value>(actual).unwrap(),
+                    expected
+                ),
+                _ => assert_eq!(actual, &value),
+            }
+        }
+        assert_eq!(*changes.0.lock().unwrap(), vec![1, 0, 1, 1, 0]);
+        for pipe in [&destination, &source] {
+            ok(c.conn.drop_pipe(pipe).await);
+        }
+    }
+});
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_upserts_compare_numeric_values_after_text_affinity() {
+    let c = ctx("sqlite", "affinity").await.unwrap();
+    let mut source = c.pipe("test", "affinity_source", None,
+        r#"{"columns":{"id":"id"},"dtypes":{"id":"int","v":"float"},"upsert":true,"null_indices":false}"#);
+    ok(c.conn
+        .sync_mut(
+            &mut source,
+            PipeInput::Docs(vec![doc(vec![("id", i(1)), ("v", fl(1.0))])]),
+            &SyncOptions::default(),
+        )
+        .await);
+    let source_table = c.conn.pipe_table_name(&c.conn.sql_pipe(&source).unwrap());
+    let mut destination = c.pipe(
+        &c.conn.keys(),
+        "affinity_result",
+        None,
+        &serde_json::json!({
+            "columns":{"id":"id"},"dtypes":{"id":"int","v":"string"},
+            "upsert":true,"null_indices":false,"sql":format!("SELECT * FROM {source_table}")
+        })
+        .to_string(),
+    );
+    ok(c.conn
+        .sync_mut(
+            &mut destination,
+            PipeInput::Docs(vec![doc(vec![("id", i(1)), ("v", s("1.00"))])]),
+            &SyncOptions::default(),
+        )
+        .await);
+    let changes = Changes::default();
+    for _ in 0..2 {
+        let result = c
+            .conn
+            .sync_pipe_inplace_observed(
+                &destination,
+                None,
+                Bound::None,
+                Bound::None,
+                true,
+                &changes,
+            )
+            .await;
+        assert!(result.success, "{}", result.message);
+    }
+    assert_eq!(*changes.0.lock().unwrap(), vec![1, 0]);
+    let target = c
+        .conn
+        .pipe_table_name(&c.conn.sql_pipe(&destination).unwrap());
+    assert_eq!(
+        c.conn.value(&format!("SELECT v FROM {target}")).await,
+        Some(meerschaum_connector_sql::driver::SqlValue::Text(
+            "1.0".into()
+        ))
+    );
+    for pipe in [&destination, &source] {
+        ok(c.conn.drop_pipe(pipe).await);
+    }
+}
+
+flavor_tests!(
     unchanged_upserts_do_not_invalidate_dependents,
     |c: Ctx| async move {
         // DuckDB has no native in-place UPSERT. Its ordinary diff path deliberately keeps

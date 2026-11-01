@@ -8,7 +8,7 @@ use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 
 use crate::dateadd::{DateArg, Number, dateadd_for_execution as dateadd_str};
 use crate::driver::{SqlTransaction, SqlValue};
-use crate::dtypes::get_db_type_from_pd_type;
+use crate::dtypes::{cast_dtype, get_db_type_from_pd_type};
 use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::sql_item_name;
 use crate::queries::metadef::{Bound, SQLITE_STORED_DATETIME_GLOB, sqlite_canonical_datetime};
@@ -713,7 +713,7 @@ impl SqlConnector {
             Ok(n) => n,
             Err(e) => fail!(e),
         };
-        let mut new_cols_types = if !is_static {
+        let mut new_cols_types = if !is_static || (upsert && observer.is_some()) {
             self.tx_table_cols_types(&mut tx, &temp_tables[new_root], isch)
                 .await
         } else {
@@ -1119,7 +1119,10 @@ impl SqlConnector {
                 fail!(e);
             }
         }
-        let backtrack_cols_types = if !(upsert || is_static) {
+        let target_cols_types = self.columns_types(&sp).await;
+        let backtrack_cols_types = if upsert {
+            target_cols_types.clone()
+        } else if !is_static {
             self.tx_table_cols_types(&mut tx, &temp_tables["backtrack"], isch)
                 .await
         } else {
@@ -1176,49 +1179,66 @@ impl SqlConnector {
                 "{}\n    AND\n    ",
                 on_cols
                     .keys()
-                    .map(|column| format!("{a_new}.{} = {a_bt}.{}", q(column), q(column)))
+                    .map(|column| {
+                        let value = upsert_comparable_value(
+                            &format!("{a_new}.{}", q(column)),
+                            &get_col_typ(column, &new_cols_types),
+                            &get_col_typ(column, &backtrack_cols_types),
+                            flavor,
+                        );
+                        format!("{value} = {a_bt}.{}", q(column))
+                    })
                     .collect::<Vec<_>>()
                     .join(" AND ")
             )
         } else {
             String::new()
         };
-        let select_delta_query = format!(
-            "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nLEFT OUTER JOIN {}{alias_as} {a_bt}\n    ON\n    {indexed_match}{}\nWHERE\n    {}",
-            if upsert {
-                &names["update"]
-            } else {
-                &names["new"]
-            },
-            if upsert {
-                &pipe_name
-            } else {
-                &names["backtrack"]
-            },
-            common_cols
-                .iter()
-                .map(|c| {
-                    let comparison = format!(
-                        "    COALESCE({a_new}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {}) ",
-                        q(c),
-                        get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
-                        q(c),
-                        get_null_replacement(&get_col_typ(c, &backtrack_cols_types), Some(flavor)),
+        let matching_columns = common_cols
+            .iter()
+            .map(|c| {
+                if upsert {
+                    let new = format!("{a_new}.{}", q(c));
+                    let old = format!("{a_bt}.{}", q(c));
+                    let target_type = get_col_typ(c, &backtrack_cols_types);
+                    let new_value = upsert_comparable_value(
+                        &new,
+                        &get_col_typ(c, &new_cols_types),
+                        &target_type,
+                        flavor,
                     );
-                    if upsert {
-                        format!("({comparison}) AND (({a_new}.{} IS NULL AND {a_bt}.{} IS NULL) OR ({a_new}.{} IS NOT NULL AND {a_bt}.{} IS NOT NULL))", q(c), q(c), q(c), q(c))
-                    } else {
-                        comparison
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n    AND\n    "),
-            common_cols
+                    let old_value =
+                        upsert_comparable_value(&old, &target_type, &target_type, flavor);
+                    return format!(
+                        "({new_value} = {old_value} OR ({new} IS NULL AND {old} IS NULL))"
+                    );
+                }
+                format!(
+                    "    COALESCE({a_new}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {}) ",
+                    q(c),
+                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
+                    q(c),
+                    get_null_replacement(&get_col_typ(c, &backtrack_cols_types), Some(flavor)),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n    AND\n    ");
+        let select_delta_query = if upsert {
+            format!(
+                "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nWHERE NOT EXISTS (\n    SELECT 1 FROM {pipe_name}{alias_as} {a_bt}\n    WHERE {indexed_match}{matching_columns}\n)",
+                names["update"],
+            )
+        } else {
+            let unmatched = common_cols
                 .iter()
                 .map(|c| format!("{a_bt}.{} IS NULL", q(c)))
                 .collect::<Vec<_>>()
-                .join("\n    AND\n    "),
-        );
+                .join("\n    AND\n    ");
+            format!(
+                "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nLEFT OUTER JOIN {}{alias_as} {a_bt}\n    ON\n    {matching_columns}\nWHERE\n    {unmatched}",
+                names["new"], names["backtrack"],
+            )
+        };
         if !upsert {
             let create_delta_query = match ctas(&select_delta_query, &temp_tables["delta"]) {
                 Ok(q) => q,
@@ -1338,7 +1358,6 @@ impl SqlConnector {
             }
         }
 
-        let target_cols_types = self.columns_types(&sp).await;
         let schema = self.get_pipe_schema(&sp);
         let db_version = if matches!(flavor, Flavor::Sqlite | Flavor::Geopackage) {
             self.db_version().await
@@ -1430,6 +1449,50 @@ impl SqlConnector {
         };
         clean_up(true).await;
         SuccessTuple::ok(msg)
+    }
+}
+
+/// Compare the value after its destination assignment cast; PostgreSQL JSON needs JSONB equality.
+fn upsert_comparable_value(
+    expression: &str,
+    source_type: &str,
+    target_type: &str,
+    flavor: Flavor,
+) -> String {
+    let json_equality = flavor.driver_family() == DriverFamily::Postgres
+        && target_type.eq_ignore_ascii_case("json");
+    if source_type.eq_ignore_ascii_case(target_type) && !json_equality {
+        return expression.to_string();
+    }
+    let text_affinity = ["CHAR", "CLOB", "TEXT"]
+        .iter()
+        .any(|name| target_type.to_uppercase().contains(name));
+    if matches!(flavor, Flavor::Sqlite | Flavor::Geopackage) {
+        return if text_affinity {
+            format!(
+                "CASE WHEN typeof({expression}) IN ('integer', 'real') THEN CAST({expression} AS TEXT) ELSE {expression} END"
+            )
+        } else {
+            expression.to_string()
+        };
+    }
+    if matches!(flavor, Flavor::Mysql | Flavor::Mariadb) {
+        // MySQL's legacy CAST mappings can round floats or truncate long text.
+        return if text_affinity {
+            format!("CAST({expression} AS CHAR)")
+        } else {
+            expression.to_string()
+        };
+    }
+    let target = if json_equality {
+        "JSONB"
+    } else {
+        cast_dtype(Some(flavor), &target_type.to_uppercase()).unwrap_or(target_type)
+    };
+    if source_type.eq_ignore_ascii_case(target) {
+        expression.to_string()
+    } else {
+        format!("CAST({expression} AS {})", target.replace('_', " "))
     }
 }
 
