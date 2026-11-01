@@ -44,6 +44,7 @@ def _env(home: pathlib.Path) -> dict:
         'MRSM_SQL_DST': f"sqlite:///{home / 'dst.db'}",
         'MRSM_CONFIG': json.dumps({'shell': {'updates': {'check': False}}}),
         'MRSM_NO_UPDATE_CHECK': '1',
+        'MRSM_NO_AUTO_INSTALL': '1',
         'NO_COLOR': '1',
         'COLUMNS': '160',
     })

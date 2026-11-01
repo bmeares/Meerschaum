@@ -301,6 +301,16 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::get_pipe_rowcount_estimate(self, pipe, query, None).await
     }
 
+    async fn pipe_has_rows_checked(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+    ) -> ConnectorResult<bool> {
+        self.require_schema().await?;
+        let pipe = &self.prepare_pipe(pipe).await;
+        SqlConnector::pipe_has_rows_checked(self, pipe, params).await
+    }
+
     async fn get_pipe_schema_plan(
         &self,
         pipe: &Pipe,

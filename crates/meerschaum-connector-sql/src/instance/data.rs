@@ -1190,6 +1190,39 @@ impl SqlConnector {
         Ok(self.value_checked(&sql).await?.and_then(|v| v.as_i64()))
     }
 
+    /// [`InstanceConnector::pipe_has_rows_checked`]: a target the checked table probe finds
+    /// missing has no rows; for an existing target, one row matching `params` is read (`LIMIT 1`
+    /// in the flavor's syntax, no `ORDER BY`, never a full count). Database errors are errors.
+    ///
+    /// [`InstanceConnector::pipe_has_rows_checked`]: meerschaum_connector::InstanceConnector::pipe_has_rows_checked
+    pub async fn pipe_has_rows_checked(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+    ) -> ConnectorResult<bool> {
+        let sp = self.sql_pipe(pipe)?;
+        let state = self.pipe_state_checked(&sp).await?;
+        if !state.exists {
+            return Ok(false);
+        }
+        let query = DataQuery {
+            params: params.cloned(),
+            limit: Some(1),
+            ..Default::default()
+        };
+        let options = DataQueryOptions {
+            no_order: true,
+            ..Default::default()
+        };
+        match self
+            .get_pipe_data_with_state(&sp, &state, &query, &options)
+            .await?
+        {
+            Some(df) => Ok(df.height() > 0),
+            None => Err(be(format!("Whether {pipe} has rows cannot be determined."))),
+        }
+    }
+
     /// The `COUNT(*)` query of `get_pipe_rowcount` (`None` when the table does not exist).
     pub fn get_pipe_rowcount_query(
         &self,

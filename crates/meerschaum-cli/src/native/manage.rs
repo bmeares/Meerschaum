@@ -899,10 +899,10 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             }
         }
         if data_only {
-            // PARITY: v4's message for the "data only" answer (`actions/copy.py`).
+            // v4's message for its interactive "data only" answer (`actions/copy.py`).
             info(
                 rt,
-                &format!("Keeping existing attributes of {new_pipe} — will copy data only."),
+                &format!("Keeping existing attributes of {new_pipe}: will copy data only."),
             );
         } else if exists {
             if overwrite == "skip" {
@@ -1079,9 +1079,9 @@ impl CopyData {
 ///
 /// The window starts at the destination pipe's sync time (within `--params`) minus the pipe's
 /// backtrack window, or at `--begin` when that is later, and ends at `--end`. A destination
-/// without a sync time is copied from `--begin` (or from the start) only when it has no rows;
-/// one with rows but no readable datetime axis is an error, so a failed watermark is never
-/// read as "copy everything".
+/// without a sync time is copied from `--begin` (or from the start) only when its connector
+/// proves it has no rows (`pipe_has_rows_checked`); one with rows, or one whose rows cannot be
+/// counted, is an error, so a failed watermark or count is never read as "copy everything".
 async fn incremental_window(
     dest: &dyn InstanceConnector,
     dest_pipe: &Pipe,
@@ -1101,22 +1101,22 @@ async fn incremental_window(
             defaults,
         )),
         None => {
-            let count = DataQuery {
-                params: explicit.params.clone(),
-                ..Default::default()
-            };
-            let rows = dest
-                .get_pipe_rowcount(dest_pipe, &count)
+            // Only a target proven missing or empty is filled; an unknown count never is.
+            let has_rows = dest
+                .pipe_has_rows_checked(dest_pipe, explicit.params.as_ref())
                 .await
-                .map_err(|e| format!("Failed to count the rows of {dest_pipe}: {e}"))?
-                .unwrap_or(0);
-            if rows > 0 {
+                .map_err(|e| {
+                    format!(
+                        "{dest_pipe} has no sync time, and whether it has rows cannot be \
+                         determined ({e}), so an incremental copy would not know where to \
+                         start.\nUse `--sync-data filter` with explicit bounds for this pipe."
+                    )
+                })?;
+            if has_rows {
                 return Err(format!(
-                    "{dest_pipe} has {} row{} but no sync time (no datetime column, or one \
-                     without readable values), so an incremental copy cannot tell which rows \
-                     are new.\nUse `--sync-data all` or `--sync-data filter` for this pipe.",
-                    thousands(rows),
-                    plural(rows as usize),
+                    "{dest_pipe} has rows but no sync time (no datetime column, or one without \
+                     readable values), so an incremental copy cannot tell which rows are \
+                     new.\nUse `--sync-data all` or `--sync-data filter` for this pipe."
                 ));
             }
             None
@@ -1336,7 +1336,7 @@ pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 mod copy_tests {
     use super::{
         CopyData, DataQuery, DateBound, PipeDefaults, axis_pipe, backtrack_from, backtrack_minutes,
-        bound_before, copy_summary, incremental_query,
+        bound_before, copy_summary, incremental_query, incremental_window,
     };
     use chrono::{TimeZone, Utc};
     use meerschaum_core::{Pipe, Value};
@@ -1449,6 +1449,140 @@ mod copy_tests {
         );
         // Integer watermark, datetime `--begin`: refused, never guessed.
         assert!(incremental_query(&p, Some(DateBound::Int(5)), &q(Some(at(1)), None)).is_err());
+    }
+
+    /// A destination without a sync time whose row count is whatever the test says.
+    struct Destination {
+        rows: Result<Option<i64>, String>,
+    }
+
+    #[async_trait::async_trait]
+    impl meerschaum_connector::Connector for Destination {
+        fn connector_type(&self) -> &str {
+            "fake"
+        }
+
+        fn label(&self) -> &str {
+            "destination"
+        }
+
+        async fn test_connection(&self) -> meerschaum_connector::ConnectorResult<bool> {
+            Ok(true)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl meerschaum_connector::InstanceConnector for Destination {
+        async fn register_pipe(&self, _: &Pipe) -> meerschaum_core::SuccessTuple {
+            meerschaum_core::SuccessTuple::success()
+        }
+
+        async fn get_pipe_attributes(
+            &self,
+            _: &Pipe,
+        ) -> meerschaum_connector::ConnectorResult<meerschaum_core::Map> {
+            Ok(meerschaum_core::Map::new())
+        }
+
+        async fn get_pipe_id(
+            &self,
+            _: &Pipe,
+        ) -> meerschaum_connector::ConnectorResult<Option<meerschaum_connector::PipeId>> {
+            Ok(None)
+        }
+
+        async fn fetch_pipes_keys(
+            &self,
+            _: &meerschaum_connector::PipesKeysQuery,
+        ) -> meerschaum_connector::ConnectorResult<meerschaum_connector::PipesKeys> {
+            Ok(meerschaum_connector::PipesKeys::List(Vec::new()))
+        }
+
+        async fn pipe_exists(&self, _: &Pipe) -> meerschaum_connector::ConnectorResult<bool> {
+            Ok(true)
+        }
+
+        async fn drop_pipe(&self, _: &Pipe) -> meerschaum_core::SuccessTuple {
+            meerschaum_core::SuccessTuple::success()
+        }
+
+        async fn sync_pipe(
+            &self,
+            _: &Pipe,
+            _: meerschaum_kernel::Frame,
+            _: &meerschaum_connector::SyncOptions,
+        ) -> meerschaum_core::SuccessTuple {
+            panic!("an incremental window never writes")
+        }
+
+        async fn get_pipe_data(
+            &self,
+            _: &Pipe,
+            _: &DataQuery,
+        ) -> meerschaum_connector::ConnectorResult<Option<meerschaum_kernel::Frame>> {
+            panic!("an incremental window never reads rows")
+        }
+
+        async fn get_sync_time(
+            &self,
+            _: &Pipe,
+            _: Option<&meerschaum_core::Map>,
+            _: bool,
+        ) -> meerschaum_connector::ConnectorResult<Option<DateBound>> {
+            Ok(None)
+        }
+
+        async fn get_pipe_rowcount(
+            &self,
+            _: &Pipe,
+            _: &DataQuery,
+        ) -> meerschaum_connector::ConnectorResult<Option<i64>> {
+            self.rows
+                .clone()
+                .map_err(meerschaum_connector::ConnectorError::Backend)
+        }
+
+        async fn get_pipe_columns_types(
+            &self,
+            _: &Pipe,
+        ) -> meerschaum_connector::ConnectorResult<indexmap::IndexMap<String, String>> {
+            Ok(indexmap::IndexMap::new())
+        }
+    }
+
+    fn window(rows: Result<Option<i64>, String>) -> Result<(Option<DataQuery>, String), String> {
+        let p = pipe(r#"{"columns": {"datetime": "ts"}}"#);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(incremental_window(
+            &Destination { rows },
+            &p,
+            &DataQuery::default(),
+            1440,
+            &PipeDefaults::default(),
+        ))
+    }
+
+    #[test]
+    fn only_a_destination_proven_empty_is_filled() {
+        // A count that cannot be determined is not an empty destination: refused with no
+        // query, so the source is never read.
+        let unknown = window(Ok(None)).unwrap_err();
+        assert!(unknown.contains("cannot be determined"), "{unknown}");
+        let failed = window(Err("connection reset".into())).unwrap_err();
+        assert!(failed.contains("connection reset"), "{failed}");
+        let negative = window(Ok(Some(-1))).unwrap_err();
+        assert!(negative.contains("Invalid row count"), "{negative}");
+        let rows = window(Ok(Some(3))).unwrap_err();
+        assert!(rows.contains("has rows but no sync time"), "{rows}");
+        // Counted and empty: the first fill.
+        let (query, note) = window(Ok(Some(0))).unwrap();
+        assert!(query.unwrap().begin.is_none());
+        assert!(
+            note.ends_with("has no rows yet: copying all rows."),
+            "{note}"
+        );
     }
 
     #[test]

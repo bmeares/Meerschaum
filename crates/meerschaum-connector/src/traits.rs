@@ -797,6 +797,31 @@ pub trait InstanceConnector: Connector {
         self.get_pipe_rowcount(pipe, query).await
     }
 
+    /// Whether the pipe's target has any rows matching `params`, for decisions that would
+    /// otherwise widen a read (an incremental copy into a destination without a sync time).
+    /// `Ok(false)` only for a target proven missing or proven empty: a count the connector
+    /// cannot establish is an error, never "empty". The default trusts only an exact,
+    /// non-negative [`Self::get_pipe_rowcount`] (`None`, "cannot be determined", is an error).
+    async fn pipe_has_rows_checked(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+    ) -> ConnectorResult<bool> {
+        let query = DataQuery {
+            params: params.cloned(),
+            ..Default::default()
+        };
+        match self.get_pipe_rowcount(pipe, &query).await? {
+            Some(rows) if rows >= 0 => Ok(rows > 0),
+            Some(rows) => Err(ConnectorError::Invalid(format!(
+                "Invalid row count for {pipe}: {rows}."
+            ))),
+            None => Err(ConnectorError::Invalid(format!(
+                "The number of rows of {pipe} cannot be determined."
+            ))),
+        }
+    }
+
     /// Return the data types for the columns in the target table for data type enforcement.
     async fn get_pipe_columns_types(
         &self,

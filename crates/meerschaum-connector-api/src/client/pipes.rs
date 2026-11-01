@@ -1253,6 +1253,51 @@ impl APIConnector {
         })
     }
 
+    /// `InstanceConnector::pipe_has_rows_checked` over `GET /pipes/{keys}/rowcount`: only a
+    /// successful, non-negative integer answer counts as a measurement. Unlike [`Self::get_pipe_rowcount`]
+    /// (0 on a refused or malformed answer, as in v4), any other answer is an error.
+    pub async fn pipe_has_rows_checked(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+    ) -> ConnectorResult<bool> {
+        let r_url = Self::pipe_r_url(pipe) + "/rowcount";
+        let opts = RequestOptions {
+            query: vec![
+                ("remote".into(), QueryValue::bool(false)),
+                self.instance_query(pipe, "instance"),
+            ],
+            body: match params {
+                Some(p) => Body::Json(py_json(&Value::Map(p.clone()))),
+                None => Body::None,
+            },
+            ..Default::default()
+        };
+        let response = self.get(&r_url, opts).await?;
+        if !response.ok() {
+            return Err(server_failed(pipe, "the rowcount", &response).unwrap_or(
+                ConnectorError::Http {
+                    status: response.status,
+                    body: response.text(),
+                },
+            ));
+        }
+        // A non-negative integer only (`2.5`, `-1`, `"many"`, `null` and `detail` bodies are not
+        // counts).
+        let rows = match response.json() {
+            Ok(serde_json::Value::Number(n)) => n.as_i64(),
+            Ok(serde_json::Value::String(s)) => s.trim().parse::<i64>().ok(),
+            _ => None,
+        }
+        .filter(|rows| *rows >= 0);
+        rows.map(|rows| rows > 0).ok_or_else(|| {
+            ConnectorError::Invalid(format!(
+                "The API server did not count the rows of {pipe}: {}",
+                response.text()
+            ))
+        })
+    }
+
     /// `get_pipe_rowcount(pipe, estimate=True)`: `GET /pipes/{keys}/rowcount?estimate=true`
     /// (the server's catalog estimate, contract C1). Bounds, `params` and `remote` make the
     /// count exact; a server that refuses the parameter (a `4xx`) is asked for the exact count.

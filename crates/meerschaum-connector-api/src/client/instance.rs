@@ -234,6 +234,14 @@ impl InstanceConnector for APIConnector {
         ))
     }
 
+    async fn pipe_has_rows_checked(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+    ) -> ConnectorResult<bool> {
+        APIConnector::pipe_has_rows_checked(self, pipe, params).await
+    }
+
     async fn get_pipe_columns_types(
         &self,
         pipe: &Pipe,
