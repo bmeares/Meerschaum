@@ -1124,6 +1124,19 @@ pub trait InstanceConnector: Connector {
         pipe_ops::default_register_user(self, user).await
     }
 
+    /// Register `user` as the first user of an instance that has none, atomically: of any
+    /// number of concurrent first registrations, in this process or another, at most one
+    /// succeeds. `Ok(true)`: registered; `Ok(false)`: the instance already has a user and nothing
+    /// was written. The default is unsupported (`NotImplemented`): a first-run registration then
+    /// promotes nobody, and the administrator is created explicitly.
+    async fn register_first_user(&self, user: &mut User) -> ConnectorResult<bool> {
+        let _ = user;
+        Err(ConnectorError::NotImplemented(format!(
+            "Instance connectors of type '{}' cannot register their first user atomically.",
+            self.connector_type()
+        )))
+    }
+
     /// Return a user's ID from the username.
     ///
     /// The username is matched exactly ([`pipe_ops::user_id_of_username`]): a `params` filter

@@ -495,6 +495,46 @@ async fn register_user(ctx: Ctx, body: Body) -> ApiResult {
         without_reserved(attributes)
     };
     user.instance_keys = Some(conn.connector_keys());
+    if first_run {
+        // The first account becomes an administrator only through the instance's atomic
+        // first-user registration: the in-process lock above does not cover other server
+        // processes or the CLI.
+        match conn.register_first_user(&mut user).await {
+            Ok(true) => {
+                state.access_cache().forget_identities();
+                return Ok(tuple(
+                    true,
+                    format!("Successfully registered user '{}'.", user.username),
+                ));
+            }
+            // Another registration was first: this one is an ordinary registration.
+            Ok(false) => {}
+            Err(meerschaum_connector::ConnectorError::NotImplemented(_)) => {
+                if !state.config.registration_users {
+                    return Ok(tuple(
+                        false,
+                        "This instance cannot register its first administrator safely from \
+                         here. Create the administrator with `mrsm register users` and the \
+                         admin type.",
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(crate::error::ApiError::unavailable(
+                    "Could not register the first user; try again.",
+                )
+                .with_internal(e.to_string()));
+            }
+        }
+        if !state.config.registration_users {
+            return Ok(tuple(
+                false,
+                "The administrator for this server has not allowed user registration.",
+            ));
+        }
+        user.user_type = None;
+        user.attributes = without_reserved(user.attributes.take());
+    }
     let res = conn.register_user(&mut user).await;
     if res.success {
         state.access_cache().forget_identities();

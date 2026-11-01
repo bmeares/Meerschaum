@@ -747,6 +747,31 @@ impl InstanceConnector for MemoryInstance {
         SuccessTuple::ok(format!("Successfully registered user '{}'.", user.username))
     }
 
+    /// Atomic under the instance's one lock: only while it has no users.
+    async fn register_first_user(&self, user: &mut User) -> ConnectorResult<bool> {
+        let hash = match &user.password_hash {
+            Some(h) => h.clone(),
+            None => meerschaum_core::users::hash_password(&user.password, None, Some(TEST_ROUNDS))
+                .expect("hash"),
+        };
+        let mut d = self.lock();
+        if !d.users.is_empty() {
+            return Ok(false);
+        }
+        let id = d.next_user_id;
+        d.next_user_id += 1;
+        d.users.push(UserRow {
+            id,
+            username: user.username.clone(),
+            password_hash: hash,
+            email: user.email.clone(),
+            user_type: user.user_type.clone(),
+            attributes: user.attributes.clone().unwrap_or_default(),
+        });
+        user.user_id = Some(Value::Int(id));
+        Ok(true)
+    }
+
     async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
         self.identity_read_error()?;
         Ok(self.user_row(&user.username).map(|u| Value::Int(u.id)))

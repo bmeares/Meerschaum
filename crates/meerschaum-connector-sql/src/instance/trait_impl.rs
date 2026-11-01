@@ -500,6 +500,11 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::register_user(self, user).await
     }
 
+    async fn register_first_user(&self, user: &mut User) -> ConnectorResult<bool> {
+        self.require_schema().await?;
+        SqlConnector::register_first_user(self, user).await
+    }
+
     async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
         self.require_schema().await?;
         SqlConnector::get_user_id(self, user).await
