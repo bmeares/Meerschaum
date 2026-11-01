@@ -12,9 +12,12 @@
   const LIGHT = { background: '#ffffff', foreground: '#1f2328', cursor: '#1f2328', selectionBackground: '#b6d4f5' };
   const FONT = '"DejaVu Sans Mono", "Liberation Mono", monospace';
   // A lost connection is retried after 1 s, then twice as long each time up to 30 s, and given up
-  // after this many failures in a row (a little over four minutes).
+  // after this many failures in a row (a little over four minutes). A connection counts as working
+  // again (a fresh budget) only once its shell stayed attached for RECONNECT_STABLE_MS, so a
+  // server that attaches and drops at once is given up too.
   const RECONNECT_MAX_MS = 30000;
   const RECONNECT_ATTEMPTS = 12;
+  const RECONNECT_STABLE_MS = 20000;
   const sessions = new Set();
 
   const LIGHT_PAGE = new URLSearchParams(location.search).get('theme') === 'light';
@@ -45,7 +48,7 @@
     term.unicode.activeVersion = '11';
     term.open(el);
 
-    const session = { term, fit, el, root, mode, socket: null, mods: { ctrl: false, shift: false }, disposed: false, timer: null, fitting: false, reconnects: 0, failures: 0, ended: false };
+    const session = { term, fit, el, root, mode, socket: null, mods: { ctrl: false, shift: false }, disposed: false, timer: null, fitting: false, reconnects: 0, failures: 0, attachedAt: 0, ended: false };
     sessions.add(session);
 
     const send = (frame, userInput = true) => {
@@ -126,7 +129,7 @@
           // A shell is attached: only now does a reconnect replace the old screen (a refused
           // one keeps it and adds the server's reason).
           if (session.reconnects) term.reset();
-          session.failures = 0;
+          session.attachedAt = Date.now();
           scheduleState();
         }
         else if (message[0] === 'shell_state') {
@@ -149,6 +152,8 @@
         // An unclean close (the server or the network went away) reconnects, backing off; the
         // shell ending or the server refusing the session (clean closes, `disconnect`) does not.
         if (session.ended || event.wasClean || event.code === 1005) return;
+        if (session.attachedAt && Date.now() - session.attachedAt >= RECONNECT_STABLE_MS) session.failures = 0;
+        session.attachedAt = 0;
         session.failures += 1;
         if (session.failures > RECONNECT_ATTEMPTS) {
           term.write('\r\n[Disconnected. Reload to reconnect.]\r\n');
