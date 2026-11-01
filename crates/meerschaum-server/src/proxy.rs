@@ -6,9 +6,16 @@
 //!
 //! The Dash web console (D21) is the host's: [`HostProxy::console`] says whether the host mounted
 //! it (`GET /_mrsm/host/status`), and `/dash/*` goes to the host only then.
+//!
+//! A forwarded request body is limited by `api:limits:proxy_bytes` without being buffered: a
+//! declared `Content-Length` over the limit is answered `413` before the host is asked, and a body
+//! without one is counted as it streams to the host (`413` when it runs past the limit). The
+//! wait for the host's response headers is limited by `api:host:response_seconds` (`504`); once
+//! the headers arrived, bodies, streams and upgraded connections are never timed or limited.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::Request;
@@ -130,6 +137,10 @@ pub struct HostProxy {
     console: Arc<std::sync::Mutex<ConsoleStatus>>,
     /// Whether the unavailable console was already reported in the log.
     warned: Arc<AtomicBool>,
+    /// `api:limits:proxy_bytes`: the largest forwarded request body (`None`: no limit).
+    body_limit: Option<usize>,
+    /// `api:host:response_seconds`: the longest wait for the host's response headers.
+    response_timeout: Option<Duration>,
 }
 
 impl std::fmt::Debug for HostProxy {
@@ -168,6 +179,75 @@ fn bad_gateway(detail: &str) -> Response {
     resp
 }
 
+fn gateway_timeout() -> Response {
+    ApiError::new(504, "The API host did not answer in time.").into_response()
+}
+
+fn proxied_body_too_large(limit: usize) -> Response {
+    ApiError::new(
+        413,
+        format!(
+            "The request body is larger than the API host accepts through this server \
+             ({limit} bytes, `api:limits:proxy_bytes`)."
+        ),
+    )
+    .into_response()
+}
+
+/// Apply `limit` to a request about to be forwarded: a declared `Content-Length` over it is
+/// refused at once (nothing is read); a body without a declared length is counted as it streams,
+/// and fails past the limit, setting the returned flag (so the proxy answers `413`, not `502`).
+/// Nothing is buffered either way.
+fn limit_forwarded_body(
+    req: Request,
+    limit: Option<usize>,
+) -> Result<(Request, Arc<AtomicBool>), Response> {
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let Some(limit) = limit else {
+        return Ok((req, exceeded));
+    };
+    let declared = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    if let Some(length) = declared {
+        if length > limit as u64 {
+            return Err(proxied_body_too_large(limit));
+        }
+        // The server's HTTP layer ends a body at its declared length.
+        return Ok((req, exceeded));
+    }
+    {
+        use axum::body::HttpBody as _;
+        let hint = req.body().size_hint();
+        if hint.lower() > limit as u64 {
+            return Err(proxied_body_too_large(limit));
+        }
+        // An empty body stays as it is (a stream would make the host see a chunked `GET`).
+        if hint.exact() == Some(0) {
+            return Ok((req, exceeded));
+        }
+    }
+    let flag = exceeded.clone();
+    let mut seen: usize = 0;
+    let req = req.map(move |body| {
+        use futures_util::StreamExt as _;
+        Body::from_stream(body.into_data_stream().map(move |chunk| {
+            let chunk = chunk?;
+            seen = seen.saturating_add(chunk.len());
+            if seen > limit {
+                flag.store(true, Ordering::SeqCst);
+                return Err(axum::Error::new(std::io::Error::other(
+                    "the request body exceeds `api:limits:proxy_bytes`",
+                )));
+            }
+            Ok(chunk)
+        }))
+    });
+    Ok((req, exceeded))
+}
+
 impl HostProxy {
     /// A proxy to a host already listening on `socket`.
     pub fn new(socket: impl Into<PathBuf>) -> HostProxy {
@@ -176,6 +256,10 @@ impl HostProxy {
             supervisor: None,
             console: Arc::default(),
             warned: Arc::default(),
+            body_limit: Some(crate::config::DEFAULT_PROXY_BYTES),
+            response_timeout: Some(Duration::from_secs(
+                crate::config::DEFAULT_HOST_RESPONSE_SECONDS,
+            )),
         }
     }
 
@@ -184,9 +268,21 @@ impl HostProxy {
         HostProxy {
             socket: supervisor.socket().to_path_buf(),
             supervisor: Some(supervisor),
-            console: Arc::default(),
-            warned: Arc::default(),
+            ..HostProxy::new(PathBuf::new())
         }
+    }
+
+    /// This proxy with `api:limits:proxy_bytes` (`body_limit`) and `api:host:response_seconds`
+    /// (`response_timeout`); `None` is no limit. The server's state applies its configuration
+    /// with this ([`crate::state::AppStateBuilder::build`]).
+    pub fn with_limits(
+        mut self,
+        body_limit: Option<usize>,
+        response_timeout: Option<Duration>,
+    ) -> HostProxy {
+        self.body_limit = body_limit;
+        self.response_timeout = response_timeout;
+        self
     }
 
     /// Whether requests may be forwarded: always for an unsupervised proxy, and while the
@@ -319,8 +415,19 @@ impl HostProxy {
             .await
     }
 
-    /// Forward a request to the host and return its response.
-    pub async fn forward(&self, mut req: Request) -> Response {
+    /// Forward a request to the host and return its response: `413` for a body over
+    /// `api:limits:proxy_bytes`, `504` when the host does not start answering within
+    /// `api:host:response_seconds`, `502` when it cannot be reached.
+    pub async fn forward(&self, req: Request) -> Response {
+        let (mut req, exceeded) = match limit_forwarded_body(req, self.body_limit) {
+            Ok(limited) => limited,
+            Err(response) => return response,
+        };
+        let too_large = || {
+            exceeded
+                .load(Ordering::SeqCst)
+                .then(|| proxied_body_too_large(self.body_limit.unwrap_or_default()))
+        };
         if let Some(sup) = &self.supervisor
             && let Err(e) = sup.ensure_started().await
         {
@@ -375,13 +482,36 @@ impl HostProxy {
             parts.headers.insert(header::HOST, v);
         }
         let upstream_req = hyper::Request::from_parts(parts, body);
-        let mut resp = match sender.send_request(upstream_req).await {
+        // Only the wait for the response headers is timed: a host that accepted the request and
+        // never answers (hung) is a `504`, while a long download or stream that started is not.
+        let sending = sender.send_request(upstream_req);
+        let answered = match self.response_timeout {
+            Some(timeout) => match tokio::time::timeout(timeout, sending).await {
+                Ok(answered) => answered,
+                Err(_) => {
+                    if let Some(response) = too_large() {
+                        return response;
+                    }
+                    tracing::warn!("The API host did not answer within {timeout:?}.");
+                    return gateway_timeout();
+                }
+            },
+            None => sending.await,
+        };
+        let mut resp = match answered {
             Ok(r) => r,
             Err(e) => {
+                // A body that ran past the limit fails the request: that is the client's `413`.
+                if let Some(response) = too_large() {
+                    return response;
+                }
                 tracing::warn!("The API host failed to answer: {e}");
                 return bad_gateway("The API host failed to answer.");
             }
         };
+        if let Some(response) = too_large() {
+            return response;
+        }
 
         if resp.status() == StatusCode::SWITCHING_PROTOCOLS {
             let Some(client_upgrade) = client_upgrade else {

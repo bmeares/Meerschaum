@@ -177,6 +177,15 @@ impl AppStateBuilder {
             Some(s) => s,
             None => auth::generate_secret_key(&self.config.secret_key_path)?,
         };
+        // The proxy forwards with this server's `api:limits:proxy_bytes` and
+        // `api:host:response_seconds`.
+        let host = self.host.map(|host| {
+            Arc::new(
+                host.as_ref()
+                    .clone()
+                    .with_limits(self.config.limits.proxy, self.config.host_response_timeout),
+            )
+        });
         let rate_limiter = RateLimiter::new(&self.config);
         Ok(AppState(Arc::new(Inner {
             config: Arc::new(self.config),
@@ -189,7 +198,7 @@ impl AppStateBuilder {
             engine_streams: Default::default(),
             log_stream: std::sync::atomic::AtomicBool::new(false),
             resolver: self.resolver,
-            host: self.host,
+            host,
             rate_limiter,
             execution_maintenance: tokio::sync::Mutex::new(()),
             pipes: tokio::sync::Mutex::new(HashMap::new()),

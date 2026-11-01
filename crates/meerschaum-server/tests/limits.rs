@@ -1,5 +1,7 @@
-//! Request size limits (`api:limits`): a body over its route's allowance gets `413` before it is
-//! read (a declared length) or as soon as it streams past it (chunked).
+//! Request size limits (`api:limits`) and the API host's response timeout
+//! (`api:host:response_seconds`): a body over its route's allowance gets `413` before it is read
+//! (a declared length) or as soon as it streams past it (chunked), whether the server or the API
+//! host would have read it; a host that does not start answering gets `504`.
 //!
 //! These tests use only configuration keys, so they also run against a server without the limits
 //! (where they fail).
@@ -14,7 +16,9 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::routing::{get, post};
 use common::{SECRET, login, req, send};
+use futures_util::StreamExt;
 use meerschaum_server::proxy::HostProxy;
 use meerschaum_server::{AppState, ServerConfig, ServerFlags};
 use serde_json::{Value as Json, json};
@@ -226,4 +230,106 @@ fn unusable_limits_stop_the_server() {
             .to_string();
         assert!(error.contains(key), "{api}: {error}");
     }
+}
+
+/// A fake API host on `socket`: `/plugin/size` answers how many body bytes it read,
+/// `/plugin/slow` answers its headers at once and streams its body slowly, `/plugin/hang` never
+/// answers.
+async fn serve_host(socket: &Path) -> tokio::task::JoinHandle<()> {
+    let _ = std::fs::remove_file(socket);
+    let listener = tokio::net::UnixListener::bind(socket).unwrap();
+    let app = Router::new()
+        .route(
+            "/plugin/size",
+            post(|body: Body| async move {
+                let mut stream = body.into_data_stream();
+                let mut read = 0usize;
+                while let Some(Ok(chunk)) = stream.next().await {
+                    read += chunk.len();
+                }
+                format!("read {read}")
+            }),
+        )
+        .route(
+            "/plugin/slow",
+            get(|| async {
+                Body::from_stream(futures_util::stream::iter(0..3).then(|i| async move {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    Ok::<_, std::io::Error>(Bytes::from(format!("part{i};")))
+                }))
+            }),
+        )
+        .route(
+            "/plugin/hang",
+            get(|| async {
+                std::future::pending::<()>().await;
+                "never"
+            }),
+        );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    })
+}
+
+#[tokio::test]
+async fn forwarded_bodies_are_counted_against_proxy_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("host.sock");
+    let _host = serve_host(&socket).await;
+    let app = app_for(common::config(dir.path()), Some(HostProxy::new(&socket)));
+    let mib = 1024 * 1024;
+    // A console callback or plugin upload of ordinary size passes, declared or chunked.
+    let request = Request::post("/plugin/size")
+        .header("content-type", "application/json")
+        .body(Body::from(vec![b'a'; 256 * 1024]))
+        .unwrap();
+    let r = send(&app, request).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.text(), format!("read {}", 256 * 1024));
+    let request = Request::post("/plugin/size")
+        .body(chunked(4, 64 * 1024))
+        .unwrap();
+    let r = send(&app, request).await;
+    assert_eq!(r.text(), format!("read {}", 256 * 1024));
+    // Over the default 16 MiB, streamed: counted as it goes to the host, and the client gets
+    // `413`, not `502`.
+    let request = Request::post("/plugin/size")
+        .body(chunked(17, mib))
+        .unwrap();
+    let r = tokio::time::timeout(Duration::from_secs(30), send(&app, request))
+        .await
+        .expect("no answer");
+    assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE, "{}", r.text());
+    assert!(r.text().contains("proxy_bytes"), "{}", r.text());
+    // Declared over the limit: refused before the host is asked (the body never comes).
+    let request = Request::post("/plugin/size")
+        .header("content-length", (17 * mib).to_string())
+        .body(never())
+        .unwrap();
+    let r = tokio::time::timeout(Duration::from_secs(10), send(&app, request))
+        .await
+        .expect("the proxy waited for a body it should have refused");
+    assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE, "{}", r.text());
+}
+
+#[tokio::test]
+async fn a_host_that_does_not_answer_is_a_gateway_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("host.sock");
+    let _host = serve_host(&socket).await;
+    let app = app_for(
+        config_with_api(dir.path(), json!({"host": {"response_seconds": 0.3}})),
+        Some(HostProxy::new(&socket)),
+    );
+    let r = tokio::time::timeout(
+        Duration::from_secs(10),
+        send(&app, req("GET", "/plugin/hang", None, None)),
+    )
+    .await
+    .expect("the proxy waited for a host that never answers");
+    assert_eq!(r.status, StatusCode::GATEWAY_TIMEOUT, "{}", r.text());
+    // Only the wait for the headers is timed: a body that streams for longer is delivered.
+    let r = send(&app, req("GET", "/plugin/slow", None, None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.text(), "part0;part1;part2;");
 }
