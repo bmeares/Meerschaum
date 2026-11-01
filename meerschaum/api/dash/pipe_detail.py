@@ -718,7 +718,7 @@ def data_tab(
     meta_str = json.dumps(pipe.meta)
     download = dbc.Button(
         'Download CSV', id={'type': 'pipe-download-csv-button', 'index': meta_str},
-        size='sm', color='secondary', n_clicks=0,
+        size='sm', color='secondary',
     ) if allowed else None
     sections = [_section('Recent rows', build_recent_data_body(pipe), actions=download)]
     if allowed:

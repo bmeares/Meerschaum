@@ -883,15 +883,18 @@ dash_app.clientside_callback(
 )
 def download_pipe_csv(n_clicks, session_store_data):
     """
-    Download the most recent chunk as a CSV file.
+    Download the most recent chunk as a CSV file, only for a click on Download CSV.
+
+    Dash also runs this callback when a layout chunk (the pipe page's Data tab) adds a button
+    while the `dcc.Download` stays outside that chunk, whatever `prevent_initial_call` says. The
+    triggering value then is the new button's `n_clicks` (`None` or `0`), never a click.
     """
-    if not n_clicks:
+    ctx = dash.callback_context.triggered
+    clicks = ctx[0]['value'] if ctx else None
+    if isinstance(clicks, bool) or not isinstance(clicks, int) or clicks < 1:
         raise PreventUpdate
     from meerschaum.api.dash import pipes_access
     if not pipes_access.can_read(session_store_data):
-        raise PreventUpdate
-    ctx = dash.callback_context.triggered
-    if ctx[0]['value'] is None:
         raise PreventUpdate
     pipe = pipe_from_ctx(ctx, 'n_clicks')
     if pipe is None:
