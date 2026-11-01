@@ -123,3 +123,29 @@ api:
 - An entry the server cannot use (a count below 1, a window that is not a positive number, a key it does not know inside an entry, a name that matches no route group) is reported at startup, naming the entry, and the rest of the config still applies.
 
 The client is the connection's address, or behind a trusted proxy (`api:server:forwarded_allow_ips`, `api:server:proxy_headers`) the first untrusted `X-Forwarded-For` address.
+
+## Request size limits
+
+Request bodies are limited before the server reads them: a declared `Content-Length` over the limit is refused at once, and a chunked body is refused when it streams past it. Either way the client gets `413` and nothing larger than the limit is buffered. Meerschaum 4 had no limits.
+
+```yaml
+api:
+  limits:
+    ### `/login`, `/users/register` and `/tokens/*` (64 KiB).
+    auth_bytes: 65536
+    ### Every other JSON or form body, `/execute` and MCP (16 MiB).
+    body_bytes: 16777216
+    ### Pipe data sync, `POST /pipes/{connector}/{metric}/{location}/data` (1 GiB).
+    data_bytes: 1073741824
+    ### Requests forwarded to the API host: plugin routes and console callbacks (16 MiB).
+    proxy_bytes: 16777216
+  host:
+    ### How long a forwarded request waits for the API host to start answering.
+    response_seconds: 300
+```
+
+- Each value is a whole number of bytes. `null` turns that one limit off. A value that is not a byte count (text, a negative number, zero, one too large) stops `start api` with an error naming the key, so a typo never removes a limit.
+- Forwarded requests are counted as they stream to the API host, never buffered.
+- Responses, downloads, event streams and websockets are never limited. The engine routes (64 MiB) and plugin archive uploads (128 MiB) keep their own limits.
+- A forwarded request whose API host does not start answering within `api:host:response_seconds` gets `504`; once the answer starts, it is never timed (`null` waits forever).
+- The server asks the API host every 30 seconds whether it answers. After three checks in a row without an answer (10 seconds each), the host process is stopped (SIGTERM, then SIGKILL after a grace period) and started again, with a restart delay that doubles up to a minute.
