@@ -21,6 +21,18 @@ on:
         description: 'Publish the images to DockerHub.'
         type: boolean
         default: false
+      candidate_run_id:
+        description: 'Successful release.yaml run supplying the sealed SDK artifacts.'
+        type: string
+        default: ''
+      image_run_id:
+        description: 'Successful Docker candidate run to promote without rebuilding.'
+        type: string
+        default: ''
+      rebuild_on_missing:
+        description: 'Explicitly rebuild missing candidate images from the same sealed SDK and rerun all gates.'
+        type: boolean
+        default: false
       v4_only:
         description: 'Build only the default-target images per dep group (no slim).'
         type: boolean
@@ -38,6 +50,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Shared daemon, image tags and persistent builders: never overlap two release builds.
 concurrency:
@@ -71,6 +84,9 @@ jobs:
       PYTHON_BIN: python3
       BUILDX_BUILDER: meerschaum-release-${{ matrix.arch }}
       DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
+      GH_TOKEN: ${{ github.token }}
+      SDK_RUN: ${{ inputs.candidate_run_id }}
+      IMAGE_RUN: ${{ inputs.image_run_id }}
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -89,11 +105,48 @@ jobs:
         run: |
           docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
           echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
+          echo "SDK_ARTIFACT_DIR=$RUNNER_TEMP/mrsm-sdk-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.arch }}" >> "$GITHUB_ENV"
+          echo "IMAGE_RECEIPT_DIR=$RUNNER_TEMP/mrsm-image-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.arch }}" >> "$GITHUB_ENV"
 
       # setup-python's downloaded interpreters do not support every self-hosted Linux distro.
       # The orchestration scripts use only the standard library; the image builds its own Python.
       - name: Check host Python
         run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
+
+      - name: Verify publication inputs
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          V4_ONLY: ${{ inputs.v4_only }}
+          SIZE_GATE: ${{ inputs.size_gate }}
+        run: |
+          if [ "$PUBLISH" = true ]; then
+            [ -n "$SDK_RUN" ] && [ -n "$IMAGE_RUN" ] && [ "$V4_ONLY" != true ] && [ "$SIZE_GATE" = enforce ] || {
+              echo 'Publication requires a sealed SDK run, a tested image run and all enforced gates.' >&2; exit 1;
+            }
+          fi
+
+      - name: Download and verify the complete sealed SDK
+        if: inputs.candidate_run_id != ''
+        run: python3 scripts/ci/docker_candidate.py sdk --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --output "$SDK_ARTIFACT_DIR"
+
+      - name: Select build or immutable image promotion
+        id: plan
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          REBUILD: ${{ inputs.rebuild_on_missing }}
+        run: |
+          build=true
+          if [ "$PUBLISH" = true ]; then
+            python3 scripts/ci/docker_candidate.py fetch --sdk-run-id "$SDK_RUN" --image-run-id "$IMAGE_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --output "$IMAGE_RECEIPT_DIR"
+            status=0
+            python3 scripts/ci/docker_candidate.py check --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --record "$IMAGE_RECEIPT_DIR/docker-candidate.json" || status=$?
+            if [ "$status" = 0 ]; then
+              build=false
+            elif [ "$status" != 2 ] || [ "$REBUILD" != true ]; then
+              exit "$status"
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
 
       - name: Set up ARM64 emulation
         if: matrix.arch == 'arm64'
@@ -121,10 +174,14 @@ jobs:
       # Load and test the requested architecture, including under QEMU for arm64.
       - name: Build Docker images
         id: build
-        run: ./scripts/docker/buildx.sh --platform ${{ matrix.platform }} ${{ inputs.v4_only && '--v4-only' || '' }}
+        if: steps.plan.outputs.build == 'true'
+        run: |
+          args=()
+          if [ -n "$SDK_RUN" ]; then args+=(--sdk-artifacts "$SDK_ARTIFACT_DIR"); fi
+          ./scripts/docker/buildx.sh --platform "$DOCKER_DEFAULT_PLATFORM" ${{ inputs.v4_only && '--v4-only' || '' }} "${args[@]}"
 
       - name: Size gate
-        if: ${{ !inputs.v4_only && inputs.size_gate != 'skip' }}
+        if: ${{ steps.plan.outputs.build == 'true' && !inputs.v4_only && inputs.size_gate != 'skip' }}
         env:
           # `inputs` is empty on events other than workflow_dispatch: default to enforcing.
           SIZE_GATE_MODE: ${{ inputs.size_gate || 'enforce' }}
@@ -143,7 +200,7 @@ jobs:
       # filesystem, with installs disabled (scripts/docker/smoke_facade.py exits nonzero otherwise).
       # The slim rootfs ships `python3` (also as `python`) and `bash`.
       - name: Facade smoke (slim)
-        if: ${{ !inputs.v4_only }}
+        if: ${{ steps.plan.outputs.build == 'true' && !inputs.v4_only }}
         env:
           SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
         run: |
@@ -167,6 +224,20 @@ jobs:
           runpy.run_path("/smoke_facade.py", run_name="__main__")
           '
 
+      - name: Record the exact tested images
+        if: ${{ steps.plan.outputs.build == 'true' && inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' }}
+        run: |
+          mkdir -p "$IMAGE_RECEIPT_DIR"
+          python3 scripts/ci/docker_candidate.py record --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --output "$IMAGE_RECEIPT_DIR/docker-candidate.json"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.plan.outputs.build == 'true' && inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' }}
+        with:
+          name: docker-candidate-${{ matrix.arch }}
+          path: ${{ env.IMAGE_RECEIPT_DIR }}/docker-candidate.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Login to DockerHub
         if: inputs.publish
         uses: docker/login-action@v3
@@ -174,13 +245,10 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Reuses the builder's layer cache from the build step above. Only the architecture's own
-      # `<version>-<tag>-<arch>` tags are pushed here; the `publish` job joins them.
-      - name: Publish this architecture's images
+      - name: Publish this architecture's tested images without rebuilding
         if: inputs.publish
         run: |
-          ./scripts/docker/buildx.sh --push --arch-tags --platform ${{ matrix.platform }} \
-            ${{ inputs.v4_only && '--v4-only' || '' }}
+          python3 scripts/ci/docker_candidate.py promote --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --record "$IMAGE_RECEIPT_DIR/docker-candidate.json"
 
   # Joins the architectures' images into the published tags. Runs only for a publish, and only when
   # every architecture built, passed its gates and pushed.

@@ -8,11 +8,13 @@ failed checks and a candidate built from a different actual commit/tree.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import importlib.util
 import json
 import os
 from pathlib import Path
 import runpy
+import re
 import sys
 import tomllib
 
@@ -68,6 +70,7 @@ def create(directory: Path, output: Path, checks: dict, *, repo: Path = REPO) ->
         raise artifacts.ArtifactError(f'A release candidate requires every full gate to succeed: {checks}')
     record = {
         'schema': 1,
+        'created_at': datetime.now(timezone.utc).isoformat(),
         'source': artifacts.checkout(repo),
         'checks': checks,
         'run_id': os.environ.get('GITHUB_RUN_ID', ''),
@@ -89,15 +92,54 @@ def verify(directory: Path, manifest: Path, *, repo: Path = REPO) -> dict:
     return record
 
 
+def equivalent(manifest: Path, *, repo: Path = REPO) -> dict:
+    """Reuse full checks only for the identical tree, including a PR merge tree.
+
+    The caller must fetch this manifest from a successful trusted Actions run.
+    Shipping artifact verification still requires the exact commit and payload.
+    """
+    record = json.loads(manifest.read_text())
+    actual = artifacts.checkout(repo)
+    source = record.get('source', {})
+    if (record.get('schema') != 1 or source.get('tree') != actual['tree']
+            or not re.fullmatch('[0-9a-f]{40}', source.get('commit', ''))):
+        raise artifacts.ArtifactError('Candidate does not match the actual tested tree.')
+    if set(record.get('checks', {})) != CHECKS or any(v != 'success' for v in record['checks'].values()):
+        raise artifacts.ArtifactError('Candidate has incomplete or failed full checks.')
+    created = datetime.fromisoformat(record['created_at'])
+    if created.tzinfo is None:
+        raise artifacts.ArtifactError('Candidate timestamp must include its timezone.')
+    age = (datetime.now(timezone.utc) - created).total_seconds()
+    if not 0 <= age <= 90 * 86400:
+        raise artifacts.ArtifactError('Candidate has expired or has a future timestamp.')
+    required, optional = expected_catalog(repo)
+    files = record.get('files', {})
+    if not files or any(not re.fullmatch('[0-9a-f]{64}', digest) for digest in files.values()):
+        raise artifacts.ArtifactError('Candidate has no complete artifact checksums.')
+    names = set()
+    for name in files:
+        path = Path(name)
+        if path.is_absolute() or '..' in path.parts or '\\' in name:
+            raise artifacts.ArtifactError('Unsafe candidate payload path.')
+        names.add(path.parts[0])
+    if required.keys() - names or names - (required.keys() | optional.keys()):
+        raise artifacts.ArtifactError('Candidate artifact catalog is incomplete.')
+    return record
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('create', 'verify'))
-    parser.add_argument('--artifacts', type=Path, required=True)
+    parser.add_argument('command', choices=('create', 'verify', 'equivalent'))
+    parser.add_argument('--artifacts', type=Path)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--checks-json', default='{}')
     args = parser.parse_args()
     try:
-        if args.command == 'create':
+        if args.command == 'equivalent':
+            equivalent(args.manifest)
+        elif args.artifacts is None:
+            raise artifacts.ArtifactError('--artifacts is required for shipping verification.')
+        elif args.command == 'create':
             create(args.artifacts, args.manifest, json.loads(args.checks_json))
         else:
             verify(args.artifacts, args.manifest)

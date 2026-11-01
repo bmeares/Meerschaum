@@ -26,6 +26,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Branch pushes and pull requests of the same branch share a group: a newer one supersedes the
 # running one (a release push and its pull request are the same commit). A dispatch (the release
@@ -57,16 +58,29 @@ jobs:
       package: ${{ steps.changes.outputs.package }}
       duckdb: ${{ steps.changes.outputs.duckdb }}
       full: ${{ steps.changes.outputs.full }}
+      reused: ${{ steps.reuse.outputs.reused }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}' }
+      - id: reuse
+        name: Reuse full checks only for the identical PR merge tree
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/ci/candidates.py --head-sha "$PR_HEAD" --github-output "$GITHUB_OUTPUT"
       - id: changes
         name: Which jobs does this change need?
         env:
           BEFORE: ${{ github.event.before }}
           BASE: ${{ github.event.pull_request.base.sha }}
           FORCE_FULL: ${{ inputs.full }}
+          REUSED: ${{ steps.reuse.outputs.reused }}
         run: |
+          if [ "$REUSED" = true ]; then
+            printf '%s\n' rust=false rust_test=false parity=false frontcrate=false package=false duckdb=false full=false >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           event="$GITHUB_EVENT_NAME"
           if [ "$FORCE_FULL" = true ]; then event=workflow_call; fi
           python3 scripts/ci/changes.py --event "$event" --ref "$GITHUB_REF" --before "$BEFORE" --after "$GITHUB_SHA" --base "$BASE"

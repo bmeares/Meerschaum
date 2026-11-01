@@ -8,6 +8,7 @@ import shutil
 from types import SimpleNamespace
 import tarfile
 import zipfile
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -207,3 +208,36 @@ def test_raw_candidates_are_not_accepted_as_validated_release_artifacts(candidat
     (candidate.directory / 'wheel-candidate-wheels-ubuntu-latest').mkdir()
     with pytest.raises(gate.artifacts.ArtifactError, match='Unexpected release artifacts'):
         seal(candidate)
+
+
+def test_full_checks_can_be_reused_for_an_identical_merge_tree(candidate):
+    record = seal(candidate)
+    git(candidate.repo, 'commit', '--allow-empty', '-qm', 'Synthetic merge with identical tree')
+    assert gate.equivalent(candidate.manifest, repo=candidate.repo) == record
+    with pytest.raises(gate.artifacts.ArtifactError, match='different commit/tree'):
+        verify(candidate)
+
+
+def test_reuse_refuses_a_different_merge_tree(candidate):
+    seal(candidate)
+    (candidate.repo / 'changed').write_text('base branch changes')
+    git(candidate.repo, 'add', 'changed')
+    git(candidate.repo, 'commit', '-qm', 'Different merge tree')
+    with pytest.raises(gate.artifacts.ArtifactError, match='tested tree'):
+        gate.equivalent(candidate.manifest, repo=candidate.repo)
+
+
+@pytest.mark.parametrize('damage', ['expired', 'failed', 'missing_platform', 'bad_digest'])
+def test_reuse_requires_current_complete_successful_checks(candidate, damage):
+    record = seal(candidate)
+    if damage == 'expired':
+        record['created_at'] = (datetime.now(timezone.utc) - timedelta(days=91)).isoformat()
+    elif damage == 'failed':
+        record['checks']['python'] = 'failure'
+    elif damage == 'missing_platform':
+        record['files'] = {k: v for k, v in record['files'].items() if not k.startswith('sdist/')}
+    else:
+        record['files'][next(iter(record['files']))] = 'corrupt'
+    candidate.manifest.write_text(json.dumps(record))
+    with pytest.raises(gate.artifacts.ArtifactError):
+        gate.equivalent(candidate.manifest, repo=candidate.repo)

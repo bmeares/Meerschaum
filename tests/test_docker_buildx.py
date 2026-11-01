@@ -141,3 +141,14 @@ def test_a_v4_version_is_never_pushed(tmp_path):
 def test_the_final_release_platforms_are_amd64_and_arm64():
     text = (REPO / 'scripts' / 'config.sh').read_text()
     assert 'export platforms="linux/amd64,linux/arm64"' in text
+
+
+def test_a_sealed_sdk_context_replaces_source_compilation(tmp_path):
+    sdk = tmp_path / 'sdk'
+    (sdk / 'wheels').mkdir(parents=True)
+    (sdk / 'mrsm').write_bytes(b'verified-program')
+    result, commands = _buildx(tmp_path, '5.0.0rc25', '--sdk-artifacts', str(sdk))
+    assert result.returncode == 0, result.stderr
+    assert len(commands) == 5
+    assert all(f'--build-context sdk={sdk}' in c and '--build-arg sdk_source=artifacts' in c for c in commands)
+    assert all('--label org.opencontainers.image.revision=' in c for c in commands)

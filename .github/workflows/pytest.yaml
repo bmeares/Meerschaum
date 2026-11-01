@@ -60,9 +60,17 @@ jobs:
       wheel_artifact: ${{ steps.plan.outputs.wheel_artifact }}
       binary_artifact: ${{ steps.plan.outputs.binary_artifact }}
       binary_profile: ${{ steps.plan.outputs.binary_profile }}
+      reused: ${{ steps.reuse.outputs.reused }}
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}'}
+      - id: reuse
+        name: Reuse full checks only for the identical PR merge tree
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/ci/candidates.py --head-sha "$PR_HEAD" --github-output "$GITHUB_OUTPUT"
       - id: plan
         name: Select test lanes from the tested revision
         env:
@@ -72,7 +80,12 @@ jobs:
           FULL: ${{ inputs.full }}
           SHARDS: ${{ inputs.shards }}
           ARTIFACTS_RUN: ${{ inputs.artifacts_run_id }}
+          REUSED: ${{ steps.reuse.outputs.reused }}
         run: |
+          if [ "$REUSED" = true ]; then
+            printf '%s\n' pytest=false full=false 'matrix={"include":[]}' wheel_artifact= binary_artifact= binary_profile= >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$PROFILE" = release ] && [ -z "$ARTIFACTS_RUN" ]; then
             echo 'Release tests require verified artifacts: dispatch release.yaml, or supply artifacts_run_id.' >&2
             exit 1

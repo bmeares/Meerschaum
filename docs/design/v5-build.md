@@ -57,6 +57,12 @@ Tests install the complete wheel into their venv. Source-reading tests also rece
 native payload, including bundled libraries, while tracked Python files must match the wheel.
 Dependency-free installed-wheel smokes remain separate from backend/extras tests.
 
+PRs may reuse a successful full release candidate when its Git tree exactly
+matches the checked-out merge tree. The proof requires the same repository, a
+successful release workflow, every mandatory gate and an unexpired artifact catalog.
+A changed base, expired payload or unavailable proof runs the ordinary checks.
+Shipping artifacts still require the exact commit, profile and every payload digest.
+
 ### Isolated backend lanes
 
 Each lane owns a scratch root, Compose project, volumes, loopback-mapped database ports and API
@@ -97,6 +103,13 @@ A future `v5*` tag must match the source version and point to an exact commit wi
 unexpired sealed candidate. Tag validation downloads those same bytes; it does not rebuild or
 publish. Registry uploads, GitHub releases and Docker publication remain separately authorized
 release steps.
+
+Docker candidates take `candidate_run_id=SDK_RUN_ID` and consume that run's verified
+manylinux wheel and standalone CLI, avoiding another SDK compilation. Source builds
+remain available for local development. Publish with the same SDK run plus
+`image_run_id=DOCKER_RUN_ID`: the job pushes the image IDs that passed the candidate's
+smokes and size gates, then verifies registry config digests. Publication does not
+rebuild. Missing images stop it unless an explicit rebuild reruns every image gate.
 
 ### Build caches
 
@@ -265,8 +278,9 @@ There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. One distribution 
 | `--target rust` | Native runtime | Native binary, OS libraries, no Python or compiler. |
 | `--target rust-full` | Native development | Native binary + Cargo/rustc and C/C++ tools, no Python. |
 
-The Fedora 44 `rust-builder` stage builds the wheel with maturin and the repository's Rust
-toolchain. BuildKit cache mounts share the Rust artifacts between builds. The `py-slim` and
+Local source builds use Fedora 44's `rust-builder` stage and the repository's Rust
+toolchain. Release builds select the verified SDK context instead. BuildKit cache mounts
+retain source-build artifacts. The `py-slim` and
 `py-full` stages install into a prefix before copying into the runtime installroots.
 Slim trims development headers; full retains them for building dependencies. Full still explicitly includes PyYAML while public Python config I/O
 requires it; that is an outstanding D20 dependency, not part of the declared extras.

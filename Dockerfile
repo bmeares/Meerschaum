@@ -5,6 +5,8 @@
 ###   full/default: native binary, Python SDK + all extras, Cargo/rustc and build tools.
 ### BuildKit is required. `api` remains an alias of full; it is not a separate build.
 
+ARG sdk_source=source
+
 FROM fedora:44 AS rust-toolchain
 
 ENV RUSTUP_HOME=/usr/local/rustup \
@@ -62,13 +64,22 @@ RUN --mount=type=cache,id=mrsm-v5-cargo-registry,target=/usr/local/cargo/registr
   && ls -l /out/wheels
 
 
+FROM native-builder AS native-source
+FROM rust-builder AS wheel-source
+FROM scratch AS native-artifacts
+COPY --from=sdk /mrsm /out/mrsm
+FROM scratch AS wheel-artifacts
+COPY --from=sdk /wheels /out/wheels
+FROM native-${sdk_source} AS native-selected
+FROM wheel-${sdk_source} AS wheel-selected
+
 ### ---------------------------------------------------------------------------------------------
 ### py-slim: the wheel with no extras, installed into /install.
 FROM fedora:44 AS py-slim
 
 RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip binutils findutils \
   && dnf clean all
-RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
+RUN --mount=type=bind,from=wheel-selected,source=/out/wheels,target=/wheels \
     --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
     python3 -m pip install --no-index --find-links /wheels --no-cache-dir --no-compile \
       --root-user-action=ignore --prefix=/install meerschaum \
@@ -90,7 +101,7 @@ ARG dep_group=full
 
 RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip binutils findutils \
   && dnf clean all
-RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
+RUN --mount=type=bind,from=wheel-selected,source=/out/wheels,target=/wheels \
     --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
     case "$dep_group" in \
       minimal) extras=""; set -- ;; \
@@ -256,7 +267,7 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/bashrc /rootfs/home/$mrsm_user/.bashrc
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/tmux.conf /rootfs/home/$mrsm_user/.tmux.conf
 COPY --from=py-full /install/ /rootfs/usr/local/
-COPY --from=native-builder /out/mrsm /rootfs/usr/local/bin/mrsm
+COPY --from=native-selected /out/mrsm /rootfs/usr/local/bin/mrsm
 COPY --from=rust-toolchain /usr/local/rustup/ /rootfs/usr/local/rustup/
 COPY --from=rust-toolchain /usr/local/cargo/bin/ /rootfs/usr/local/cargo/bin/
 RUN install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user/.cargo"
@@ -334,7 +345,7 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
   && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
   && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir"
-COPY --from=native-builder /out/mrsm /rootfs/usr/local/bin/mrsm
+COPY --from=native-selected /out/mrsm /rootfs/usr/local/bin/mrsm
 COPY --from=duckdb-driver /out/ /rootfs/
 
 FROM rust-rootfs AS rust-full-rootfs

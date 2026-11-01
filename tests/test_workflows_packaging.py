@@ -155,10 +155,12 @@ def test_docker_images_build_on_self_hosted_runners(docker_build):
     assert job['env']['DOCKER_DEFAULT_PLATFORM'] == '${{ matrix.platform }}'
     assert 'memory=' in setup['with']['driver-opts']
     build = _step(job, 'Build Docker images')
-    assert '--platform ${{ matrix.platform }}' in build['run']
-    push = next(s for s in job['steps'] if 'arch-tags' in str(s.get('run', '')))
+    assert '--platform "$DOCKER_DEFAULT_PLATFORM"' in build['run']
+    push = _step(job, "Publish this architecture's tested images")
     assert push['if'] == 'inputs.publish'
-    assert '--push --arch-tags --platform ${{ matrix.platform }}' in push['run']
+    assert 'docker_candidate.py promote' in push['run']
+    assert 'buildx.sh' not in push['run']
+    assert _step(job, 'Download and verify the complete sealed SDK')['if'] == "inputs.candidate_run_id != ''"
 
     publish = docker_build['jobs']['publish']
     assert set(publish['needs']) == {'metadata', 'buildx'}

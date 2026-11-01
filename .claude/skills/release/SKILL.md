@@ -286,60 +286,39 @@ pass `--prerelease` (and not `--latest`). Do not `git push origin --tags` (it wo
 
 ## 5.7 Docker **[needs explicit user authorization, separate from 5.4 to 5.6]**
 
-Docker images are built and pushed **from the maintainer's build host** (this repository's checkout at the
-release commit) or from `docker-build.yaml`; the docs host is not used for image builds (the native Rust
-build needs far more memory than it has). Prerequisites: `docker login -u "$DOCKER_USERNAME"` on the build
-host with a Docker Hub personal access token (Read & Write; run it in a real terminal: `docker login` refuses a non-TTY,
-or use `--password-stdin` from a file only the user can read), and, for the workflow route, the same token in
-the `DOCKER_PASSWORD` repository secret (`gh secret set DOCKER_PASSWORD`; the `DOCKER_USERNAME` secret matches `.env`).
-Agents never read, print or copy the token; check the login with `docker info | grep Username`.
-
-**Build host route (release candidates: `linux/amd64` only).** Build and load, gate, then push exactly the
-images that passed, by their version-qualified tags:
+Use the same clean release commit for both dispatches. The SDK candidate must have
+passed every full gate before Docker consumes its sealed wheel and CLI. Local
+`buildx.sh` builds still default to source for development.
 
 ```bash
-git rev-parse HEAD                                   # must be the release commit ($SHA), clean tracked tree
-./scripts/docker/buildx.sh                           # --load for the host's platform (linux/amd64), smoke-tested
-./scripts/docker/size_gate.sh --slim-image bmeares/meerschaum:<ver>-slim --full-image bmeares/meerschaum:<ver>-full \
-  --rust-image bmeares/meerschaum:<ver>-rust --rust-full-image bmeares/meerschaum:<ver>-rust-full   # D25 budgets: 250 / 2500 / 250 / 1600 MB
-# the façade smoke inside the slim image (as below), must exit 0 with install_requests []
-for t in full minimal slim rust rust-full; do docker push bmeares/meerschaum:<ver>-$t; done
-docker buildx imagetools inspect bmeares/meerschaum:latest   # unchanged by an rc
+# No registry credentials are used by the candidate build.
+gh workflow run docker-build.yaml --ref v5 -f candidate_run_id=SDK_RUN_ID -f size_gate=enforce
+# After the Docker candidate passes, and publication is authorized:
+gh workflow run docker-build.yaml --ref v5 -f publish=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID -f size_gate=enforce
 ```
 
-The build only creates its own images; it never touches other containers on the host (the build host may run
-production services: never `docker system prune` or remove images you did not create). Multi-architecture
-images for final releases (adding `linux/arm64`) come from the self-hosted workflow route below.
+The first run loads and tests every selected architecture, enforces the existing
+size limits, runs the offline facade smoke, and records immutable image IDs in
+`docker-candidate-<arch>`. The second run verifies the same SDK and image receipt,
+pushes those exact IDs without rebuilding, checks their registry config digests,
+and merges the selected architectures. Repository Docker Hub secrets are used
+only for publication. SDK binaries are copied unchanged from the release artifacts.
 
-**Workflow route (self-hosted).** Dispatch `docker-build.yaml` with `publish: true` to use
-repository Docker Hub secrets. The workflow derives its matrix from the Cargo version: AMD64 only
-for a prerelease; AMD64 and ARM64 for a final release. All image builds run on the existing
-self-hosted Linux x86_64 runners; ARM64 uses QEMU and may take much longer on its first build.
+Candidate receipts and their complete SDK payloads must remain unexpired. Local
+candidate image tags keep the tested IDs on the shared daemon. Missing images stop
+publication. Only an explicit `rebuild_on_missing=true` allows a rebuild from the
+same sealed SDK; every image gate and smoke runs again before publication.
 
-The workflow serializes Docker release jobs and runs, keeps separate named BuildKit caches for each
-architecture, and limits each builder to 16 CPUs / 64 GiB RAM. Builder state persists across runs;
-its cache GC is capped at 100 GB with 30 GB minimum free space. Docker configuration is private to
-the job, so publishing does not change the user's login or selected builder. Do not prune the shared
-Docker daemon or interfere with unrelated containers, images or builders.
+Prereleases select Linux amd64 and version-qualified tags only. Finals also build
+arm64 under QEMU and update floating tags after every architecture passes. Capture
+`latest` before a prerelease and verify it remains unchanged afterward. Do not prune
+the shared daemon or touch unrelated containers, images or builders.
 
-Each job loads and smoke-tests its images, enforces size limits, and runs the offline facade smoke
-before pushing its architecture-qualified tags. The publish job merges only the selected release
-platforms and verifies every variant's manifest. These checks are mandatory; a failed facade smoke
-blocks publication. Prereleases publish only version-qualified tags and never move `latest`,
-`full`, `slim`, `minimal` or `api`.
-
-```bash
-# Capture the current latest digest before dispatch; verify it is unchanged for a prerelease.
-docker buildx imagetools inspect bmeares/meerschaum:latest
-gh workflow run docker-build.yaml --ref v5 -f publish=true -f size_gate=enforce
-# Wait for every job to succeed on the exact release SHA, then inspect the full/minimal/slim/rust/rust-full tags.
-docker buildx imagetools inspect bmeares/meerschaum:<ver>-full
-docker buildx imagetools inspect bmeares/meerschaum:latest
-```
-
-The `-amd64` / `-arm64` tags of selected architectures stay in the registry. `tests/test_docker_buildx.py`
-and `tests/test_workflows_packaging.py` verify prerelease/final selection, matching smoke jobs and
-manifest command plans.
+The workflow retains per-architecture BuildKit caches, a bounded CPU/memory budget
+and private Docker configuration. `tests/test_ci_docker_candidate.py` exercises
+promotion, missing-image refusal, source/platform/checksum mismatches and registry
+digest verification. `tests/test_docker_buildx.py` and workflow tests retain the
+prerelease/final platform and smoke contracts.
 
 ## 5.8 Docs
 

@@ -20,6 +20,7 @@
 #                 `minimal`, `api` for a release) with `docker buildx imagetools create`. Run it after
 #                 every `--push --arch-tags` job succeeded. The `-<arch>` tags stay in the registry as
 #                 the architectures' own images.
+#   --sdk-artifacts DIR  use the normalized, verified wheel/CLI context instead of compiling the SDK.
 #
 # Pre-release versions (dev, rc, aN, bN) default to amd64 and only get version-qualified tags,
 # never `latest`/`full`/`slim`. Final releases include both amd64 and arm64.
@@ -41,12 +42,16 @@ v4_only=""
 platform=""
 arch_tags=""
 merge=""
+sdk_artifacts=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --push)      push="--push" ;;
     --v4-only)   v4_only=1 ;;
     --arch-tags) arch_tags=1 ;;
     --merge)     merge=1 ;;
+    --sdk-artifacts)
+      [ $# -ge 2 ] || { echo 'buildx.sh: --sdk-artifacts needs a directory' >&2; exit 2; }
+      sdk_artifacts="$2"; shift ;;
     --platform)
       [ $# -ge 2 ] || { echo "buildx.sh: --platform needs a value" >&2; exit 2; }
       platform="$2"; shift ;;
@@ -170,9 +175,18 @@ build() {
   local target="$1" dep_group="$2"; shift 2
   local target_args=() tag_args=() t
   [ -n "$target" ] && target_args=(--target "$target")
+  local sdk_args=()
+  if [ -n "$sdk_artifacts" ]; then
+    [ -f "$sdk_artifacts/mrsm" ] && [ -d "$sdk_artifacts/wheels" ] || {
+      echo 'buildx.sh: normalized SDK artifacts are missing' >&2; exit 2;
+    }
+    sdk_args=(--build-context "sdk=$sdk_artifacts" --build-arg sdk_source=artifacts)
+  fi
   for t in "$@"; do tag_args+=(-t "$t"); done
   echo "Building tags (target ${target:-default}): $*"
   run docker buildx build --progress plain "$push" \
+    --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+    ${sdk_args[@]+"${sdk_args[@]}"} \
     ${target_args[@]+"${target_args[@]}"} \
     --build-arg dep_group="$dep_group" \
     --build-arg mrsm_uid="$mrsm_uid" \
