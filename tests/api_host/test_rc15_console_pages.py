@@ -496,6 +496,7 @@ print('JSON:' + json.dumps(out, default=str))
     assert 'only admin' in out['delete_last']
     assert 'Type the username' in out['delete_untyped']
     assert out['promoted'] == [False, 'admin']
+    assert out['promoted_session'].pop('credential')
     assert out['promoted_session'] == {'username': 'c-user'}
     assert out['demote_now_allowed'] is False
     assert out['reset'] is False

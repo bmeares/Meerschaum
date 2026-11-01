@@ -74,6 +74,11 @@ out['fragment'] = client.get('/_pages/latepages/fragment').text
 out['framed'] = client.get('/_pages/latepages/fragment?frame=1').text
 out['page_only_fragment'] = client.get('/_pages/pageonly/fragment').text
 out['locked_anonymous'] = client.get('/_pages/latepages/locked').status_code
+### A session names a registered user (it is bound to the user's credential).
+from meerschaum.api import get_api_connector as _get_instance
+from meerschaum.core import User as _User
+_instance = _get_instance()
+assert _instance.register_user(_User('example', 'example-password-1', instance=_instance))[0]
 sessions.set_session('00000000-0000-4000-8000-0000000d1a01', {'username': 'example'})
 client.cookies.set('mrsm-session-id', '00000000-0000-4000-8000-0000000d1a01')
 out['locked_authenticated'] = client.get('/_pages/latepages/locked').status_code

@@ -269,7 +269,9 @@ def set_session(session_id: str, session_data: Dict[str, Any]) -> bool:
     username = session_data.get('username', None) if isinstance(session_data, dict) else None
     if username is not None and 'credential' not in session_data:
         from meerschaum.api._oauth2 import user_credential
-        session_data = {**session_data, 'credential': user_credential(str(username))}
+        credential = user_credential(str(username))
+        if credential:
+            session_data = {**session_data, 'credential': credential}
     _cache_drop(session_id)
     conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():

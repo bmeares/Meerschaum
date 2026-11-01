@@ -292,6 +292,13 @@ def counting(session_id):
     return real(session_id)
 sessions._get_session_data = counting
 
+### Sessions name registered users (each is bound to its user's credential).
+from meerschaum.api import get_api_connector
+from meerschaum.core import User
+_conn = get_api_connector()
+for _name in ('ann', 'bob'):
+    assert _conn.register_user(User(_name, 'console-password-1', instance=_conn))[0]
+
 sessions.set_session('00000000-0000-4000-8000-0000000cac01', {'username': 'ann'})
 out = {}
 out['first'] = sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac01')
@@ -320,6 +327,7 @@ print('JSON:' + json.dumps(out))
 '''))
     assert (out['first'], out['second'], out['third']) == ('ann', 'ann', True)
     assert out['store_reads'] == 1
+    assert out['updated'].pop('credential')
     assert out['updated'] == {'username': 'ann', 'admin': True}
     assert out['after_delete'] is None and out['active_after_delete'] is False
     assert out['unknown_reads'] == 2

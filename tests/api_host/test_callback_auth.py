@@ -160,6 +160,11 @@ out['calls_anonymous'] = list(plugin.CALLS)
 out['bogus_cookie'] = fire('cba-private-out', click('cba-private-btn'), cookies={'mrsm-session-id': 'nope'})
 
 CBA_SESSION = '00000000-0000-4000-8000-0000000cba01'
+### A session names a registered user (it is bound to the user's credential).
+from meerschaum.api import get_api_connector as _get_instance
+from meerschaum.core import User as _User
+_instance = _get_instance()
+assert _instance.register_user(_User('alice', 'alice-password-9', instance=_instance))[0]
 sessions.set_session(CBA_SESSION, {'username': 'alice'})
 out['cookie'] = fire('cba-private-out', click('cba-private-btn'), cookies={'mrsm-session-id': CBA_SESSION})
 ### The console's store alone (no cookie) is a session too, and is copied into the cookie.

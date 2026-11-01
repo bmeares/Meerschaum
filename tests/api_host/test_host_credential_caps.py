@@ -178,7 +178,8 @@ name = 'caps-console'
 assert instance.register_user(User(name, 'first-password', instance=instance))[0]
 bound, legacy = str(uuid.uuid4()), str(uuid.uuid4())
 set_session(bound, {'username': name, 'credential': user_credential(name)})
-set_session(legacy, {'username': name})
+### Written before 5.0 bound sessions: no credential.
+set_session(legacy, {'username': name, 'credential': None})
 out = {'bound': get_username_from_session(bound), 'legacy': get_username_from_session(legacy)}
 assert instance.delete_user(User(name, instance=instance))[0]
 assert instance.register_user(User(name, 'second-password', instance=instance))[0]

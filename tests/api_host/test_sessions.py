@@ -30,8 +30,14 @@ def test_python_session_is_readable_as_rust_reads_it(sandbox):
     root, plugins = sandbox
     result = run_python(root, plugins, PRELUDE + """
 assert api._host_mode
+from meerschaum.core import User
+from meerschaum.api import get_api_connector
+from meerschaum.api._oauth2 import user_credential
+conn = get_api_connector()
+assert conn.register_user(User('alice', 'alice-password-1', instance=conn))[0]
 s.set_session('00000000-0000-4000-8000-00000000a001', {'username': 'alice', 'admin': False, 'note': 'x y'})
 print(json.dumps({
+    'credential': user_credential('alice'),
     'username': s.get_username_from_session('00000000-0000-4000-8000-00000000a001'),
     'active': s.is_session_active('00000000-0000-4000-8000-00000000a001'),
     'other': s.is_session_active('00000000-0000-4000-8000-00000000a0ff'),
@@ -53,8 +59,12 @@ print(json.dumps({
         conn.close()
     assert len(rows) == 1
     session_id, data, expires = rows[0]
-    ### Compact JSON (no spaces after separators), as the Rust store writes it.
-    assert data == '{"username":"alice","admin":false,"note":"x y"}'
+    ### Compact JSON (no spaces after separators), as the Rust store writes it, bound to the
+    ### user's current credential.
+    assert data == (
+        '{"username":"alice","admin":false,"note":"x y","credential":"'
+        + out['credential'] + '"}'
+    )
     assert json.loads(data)['username'] == 'alice'
     ### Expiry is Unix seconds `now + 30 days`.
     assert abs(int(expires) - (time.time() + 43200 * 60)) < 300
@@ -87,11 +97,18 @@ def test_rust_written_session_is_readable_in_python(sandbox):
     result = run_python(root, plugins, PRELUDE + """
 from meerschaum.core import User
 from meerschaum.api import get_api_connector
+from meerschaum.api._oauth2 import user_credential
 conn = get_api_connector()
 conn.register_user(User('bob', 'bob-password-1', type='admin', instance=conn))
 conn.register_user(User('rust-claims', 'claims-password-1', instance=conn))
 s.set_session('00000000-0000-4000-8000-00000000a005', {'username': 'rust-claims', 'admin': True})
+### Written as the Rust store writes it, bound to bob's credential; one without it names nobody.
+s._instance_set(
+    '00000000-0000-4000-8000-00000000a006',
+    json.dumps({'username': 'bob', 'admin': True, 'credential': user_credential('bob')}),
+)
 print(json.dumps({
+    'bob_bound': s.get_username_from_session('00000000-0000-4000-8000-00000000a006'),
     'bob': s.get_username_from_session('00000000-0000-4000-8000-00000000a003'),
     'bob_admin': s.session_is_admin('00000000-0000-4000-8000-00000000a003'),
     'expired': s.get_username_from_session('00000000-0000-4000-8000-00000000a004'),
@@ -103,9 +120,10 @@ print(json.dumps({
     out = json.loads(result.stdout.strip().splitlines()[-1])
     ### Whether a session is an administrator's is read from its user (their type now), never
     ### from a flag the session's data carries.
+    ### A session without its user's credential (written before 5.0 bound sessions) names nobody.
     assert out == {
-        'bob': 'bob', 'bob_admin': True, 'expired': None, 'expired_active': False,
-        'claims_admin': False,
+        'bob_bound': 'bob', 'bob': None, 'bob_admin': False, 'expired': None,
+        'expired_active': False, 'claims_admin': False,
     }
 
 
@@ -175,6 +193,7 @@ from meerschaum.core import User
 from meerschaum.api import get_api_connector
 conn = get_api_connector()
 conn.register_user(User('wild-admin', 'wild-password-1', type='admin', instance=conn))
+conn.register_user(User('wild-user', 'wild-password-2', instance=conn))
 ADMIN = '00000000-0000-4000-8000-00000000b001'
 USER = '00000000-0000-4000-8000-00000000b002'
 assert s.set_session(ADMIN, {'username': 'wild-admin'}) is True
@@ -234,6 +253,10 @@ def test_in_memory_sessions_need_uuid_ids_too(sandbox):
     root, plugins = sandbox
     result = run_python(root, plugins, PRELUDE + """
 ID = '00000000-0000-4000-8000-00000000c001'
+from meerschaum.core import User
+from meerschaum.api import get_api_connector
+conn = get_api_connector()
+conn.register_user(User('mem-user', 'mem-password-1', instance=conn))
 print(json.dumps({
     'host_mode': bool(getattr(api, '_host_mode', False)),
     'custom': s.set_session('custom-id', {'username': 'x'}),

@@ -65,8 +65,14 @@ def test_depends_manager_resolves_the_user_of_a_bearer_jwt(sandbox):
         instance = get_api_connector()
         assert instance.register_user(User('bob', 'probe-password', instance=instance))[0]
 
+        from meerschaum.api._oauth2 import user_credential
+
         def token(secret=SECRET, **claims):
-            payload = {'sub': 'bob', 'scopes': ['*'], 'exp': int(time.time()) + 60, **claims}
+            ### As the server issues a user JWT: its principal kind and the user's credential.
+            payload = {
+                'sub': 'bob', 'scopes': ['*'], 'exp': int(time.time()) + 60,
+                'mrsm_principal': 'user', 'mrsm_credential': user_credential('bob'), **claims,
+            }
             return jwt.encode(payload, secret, algorithm='HS256')
 
         def get(path, tok=None):
@@ -87,6 +93,9 @@ def test_depends_manager_resolves_the_user_of_a_bearer_jwt(sandbox):
             'optional_user_none': get('/lm/optional-user'),
             'optional_user_invalid': get('/lm/optional-user', 'not-a-jwt'),
             'user_disallowed': get('/lm/token-only', token()),
+            'no_kind': get('/lm/me', token(mrsm_principal=None)),
+            'no_credential': get('/lm/me', token(mrsm_credential=None)),
+            'token_kind': get('/lm/me', token(mrsm_principal='token')),
         }
         print('JSON:' + json.dumps(out))
     """)
@@ -103,6 +112,11 @@ def test_depends_manager_resolves_the_user_of_a_bearer_jwt(sandbox):
     assert out['optional_user_none'] == [200, {'username': None}]
     assert out['optional_user_invalid'] == [200, {'username': None}]
     assert out['user_disallowed'][0] == 401
+    ### A JWT that names no principal kind, carries no credential, or names a token for a
+    ### username is refused.
+    assert out['no_kind'][0] == 401
+    assert out['no_credential'][0] == 401
+    assert out['token_kind'][0] == 401
 
 
 def test_manager_creates_tokens_the_host_accepts(sandbox):

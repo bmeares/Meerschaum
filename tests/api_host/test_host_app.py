@@ -114,6 +114,11 @@ out['teapot'] = [r.status_code, r.text]
 out['locked_anon'] = client.get('/_pages/synth/locked').status_code
 from meerschaum.api.dash import sessions
 SYNTH_SESSION = '00000000-0000-4000-8000-00000005e551'
+### A session names a registered user (it is bound to the user's credential).
+from meerschaum.api import get_api_connector as _get_instance
+from meerschaum.core import User as _User
+_instance = _get_instance()
+assert _instance.register_user(_User('zed', 'zed-password-1', instance=_instance))[0]
 sessions.set_session(SYNTH_SESSION, {'username': 'zed'})
 r = client.get('/_pages/synth/locked', cookies={'mrsm-session-id': SYNTH_SESSION})
 out['locked_authed'] = [r.status_code, r.text]

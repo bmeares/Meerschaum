@@ -199,12 +199,28 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
-def _bearer(secret: bytes, sub: str) -> str:
+def _bearer(secret: bytes, sub: str, instance_db: pathlib.Path) -> str:
+    """
+    A user JWT as the server issues one: it names its principal kind and carries the user's
+    credential (`HMAC(secret, "mrsm-credential\\0" + password hash)`, first 16 bytes).
+    """
     def _b64(data: bytes) -> str:
         return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
+    import sqlite3
+    with sqlite3.connect(instance_db) as connection:
+        (password_hash,) = connection.execute(
+            "SELECT password_hash FROM mrsm_users WHERE username = ?", (sub,)
+        ).fetchone()
+    digest = hmac.new(
+        secret, b'mrsm-credential\x00' + password_hash.encode('utf-8'), hashlib.sha256,
+    ).digest()
+    claims = {
+        'sub': sub, 'scopes': ['*'], 'exp': int(time.time()) + 300,
+        'mrsm_principal': 'user', 'mrsm_credential': _b64(digest[:16]),
+    }
     signing_input = (
         _b64(json.dumps({'alg': 'HS256', 'typ': 'JWT'}).encode()) + '.'
-        + _b64(json.dumps({'sub': sub, 'scopes': ['*'], 'exp': int(time.time()) + 300}).encode())
+        + _b64(json.dumps(claims).encode())
     )
     signature = hmac.new(secret, signing_input.encode(), hashlib.sha256).digest()
     return f'{signing_input}.{_b64(signature)}'
@@ -244,7 +260,7 @@ def _probe_routes(port: int, tmp_path: pathlib.Path) -> dict:
     return {
         'ping': _get(port, '/freshhost/ping'),
         'no_token': _get(port, '/freshhost/me')[0],
-        'token': _get(port, '/freshhost/me', _bearer(secret, 'bob')),
+        'token': _get(port, '/freshhost/me', _bearer(secret, 'bob', tmp_path / 'instance.db')),
         'websocket': _websocket_upgrade_status(port, '/freshhost/ws'),
     }
 
