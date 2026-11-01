@@ -3,9 +3,9 @@
 
 use indexmap::IndexMap;
 use meerschaum_connector::pipe_ops::{self, Doc};
-use meerschaum_connector::traits::{ConnectorResult, DataQuery, PluginRecord};
+use meerschaum_connector::traits::{ConnectorError, ConnectorResult, DataQuery, PluginRecord};
 use meerschaum_core::pyfmt::{JsonStyle, json_dumps};
-use meerschaum_core::users::User;
+use meerschaum_core::users::{User, valid_username};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::value::Value as KValue;
 
@@ -198,6 +198,76 @@ impl ValkeyConnector {
         self.remove_unclaimed_user_rows(&user.username, &user_id)
             .await;
         SuccessTuple::success()
+    }
+
+    /// [`InstanceConnector::register_first_user`]: [`Self::valkey_register_user`] whose claim
+    /// also checks, in the same atomic step, that no user is registered
+    /// ([`ValkeyBackend::claim_first_user`]). `Ok(false)`: a user exists (this one is then an
+    /// ordinary registration, or the username is taken), and nothing of this attempt is kept.
+    ///
+    /// [`InstanceConnector::register_first_user`]: meerschaum_connector::InstanceConnector::register_first_user
+    /// [`ValkeyBackend::claim_first_user`]: crate::backend::ValkeyBackend::claim_first_user
+    pub async fn valkey_register_first_user(&self, user: &mut User) -> ConnectorResult<bool> {
+        let refused = |e: String| ConnectorError::Backend(e);
+        let valid = valid_username(&user.username);
+        if !valid.success {
+            return Err(refused(valid.message));
+        }
+        user.user_id = Some(Value::Str((self.id_factory)()));
+        let password_hash = Self::password_hash_off_runtime(user).await;
+        let keys_vals = Self::get_user_keys_vals(user, password_hash, false).map_err(refused)?;
+        let claim_key = get_user_key(&user.username, "user_id", true).map_err(refused)?;
+        let user_id = user_id_str(user);
+        if self.get(&claim_key).await?.is_some() {
+            return Ok(false);
+        }
+        let users_pipe = self.valkey_users_pipe();
+        let doc: Doc = [
+            ("user_id".to_string(), KValue::Str(user_id.clone())),
+            ("username".to_string(), KValue::Str(user.username.clone())),
+        ]
+        .into_iter()
+        .collect();
+        let res = pipe_ops::sync_docs(self, &users_pipe, vec![doc], false).await;
+        if !res.success {
+            self.remove_user_row(&user_id).await;
+            return Err(refused(res.message));
+        }
+        let ops: Vec<WriteOp> = keys_vals
+            .iter()
+            .filter(|(key, _)| **key != claim_key)
+            .filter_map(|(key, val)| {
+                val.as_ref().map(|v| WriteOp::Set {
+                    key: key.clone(),
+                    value: v.clone(),
+                })
+            })
+            .collect();
+        let users = quote_table(USERS_TABLE);
+        match self
+            .backend
+            .claim_first_user(&users, &claim_key, &user_id, &ops)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                self.remove_user_row(&user_id).await;
+                return Ok(false);
+            }
+            Err(e) => match self.get(&claim_key).await {
+                // A reply lost after the script ran still registered the user.
+                Ok(Some(v)) if v == user_id => {}
+                Ok(_) => {
+                    self.remove_user_row(&user_id).await;
+                    return Err(be(e));
+                }
+                // Unknown: keep the row (unlisted without its claim) rather than orphan a claim.
+                Err(_) => return Err(be(e)),
+            },
+        }
+        self.remove_unclaimed_user_rows(&user.username, &user_id)
+            .await;
+        Ok(true)
     }
 
     /// Remove the `mrsm_users` row of `user_id` (its index member and its document key), even

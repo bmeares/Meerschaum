@@ -139,6 +139,49 @@ impl MemoryBackend {
         f(&mut guard)
     }
 
+    /// [`ValkeyBackend::claim_and_write`] on the locked map.
+    fn claim_locked(
+        m: &mut HashMap<String, (Entry, Option<Instant>)>,
+        claim_key: &str,
+        claim_value: &str,
+        ops: &[WriteOp],
+    ) -> BackendResult<bool> {
+        if m.contains_key(claim_key) {
+            return Ok(false);
+        }
+        for op in ops {
+            if let (Some(need), Some((entry, _))) = (op.required_type(), m.get(op.key()))
+                && entry.type_name() != need
+            {
+                return wrongtype();
+            }
+        }
+        m.insert(
+            claim_key.to_string(),
+            (Entry::Str(claim_value.to_string()), None),
+        );
+        for op in ops {
+            match op {
+                WriteOp::Set { key, value } => {
+                    m.insert(key.clone(), (Entry::Str(value.clone()), None));
+                }
+                WriteOp::ZAdd { key, member, score } => {
+                    let z = Self::zset_mut(m, key, true)?.expect("created");
+                    z.retain(|(mem, _)| mem != member);
+                    z.push((member.clone(), *score));
+                    z.sort_by(zcmp);
+                }
+                WriteOp::SAdd { key, member } => {
+                    let set = Self::set_mut(m, key, true)?.expect("created");
+                    if !set.iter().any(|x| x == member) {
+                        set.push(member.clone());
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
     fn zset_mut<'a>(
         map: &'a mut HashMap<String, (Entry, Option<Instant>)>,
         key: &str,
@@ -337,41 +380,45 @@ impl ValkeyBackend for MemoryBackend {
         for op in ops {
             self.fault(op.command(), op.key())?;
         }
+        self.with(|m| Self::claim_locked(m, claim_key, claim_value, ops))
+    }
+
+    async fn claim_first_user(
+        &self,
+        users: &str,
+        claim_key: &str,
+        claim_value: &str,
+        ops: &[WriteOp],
+    ) -> BackendResult<bool> {
+        self.fault("EVAL", users)?;
+        self.fault("SET", claim_key)?;
+        for op in ops {
+            self.fault(op.command(), op.key())?;
+        }
         self.with(|m| {
-            if m.contains_key(claim_key) {
-                return Ok(false);
-            }
-            for op in ops {
-                if let (Some(need), Some((entry, _))) = (op.required_type(), m.get(op.key()))
-                    && entry.type_name() != need
+            let get = |key: String| match m.get(&key) {
+                Some((Entry::Str(s), _)) => Some(s.clone()),
+                _ => None,
+            };
+            let members = match m.get(users) {
+                None => Vec::new(),
+                Some((Entry::Set(members), _)) => members.clone(),
+                Some(_) => return wrongtype(),
+            };
+            for member in members {
+                let ix = serde_json::from_str::<serde_json::Value>(&member)
+                    .ok()
+                    .and_then(|row| row.get("ix")?.as_str().map(str::to_string));
+                let Some(id) = ix.as_deref().and_then(|ix| ix.strip_prefix("user_id-_")) else {
+                    return Ok(false);
+                };
+                if let Some(name) = get(format!("mrsm_user:user_id:{id}:username"))
+                    && get(format!("mrsm_user:username:{name}:user_id")).as_deref() == Some(id)
                 {
-                    return wrongtype();
+                    return Ok(false);
                 }
             }
-            m.insert(
-                claim_key.to_string(),
-                (Entry::Str(claim_value.to_string()), None),
-            );
-            for op in ops {
-                match op {
-                    WriteOp::Set { key, value } => {
-                        m.insert(key.clone(), (Entry::Str(value.clone()), None));
-                    }
-                    WriteOp::ZAdd { key, member, score } => {
-                        let z = Self::zset_mut(m, key, true)?.expect("created");
-                        z.retain(|(mem, _)| mem != member);
-                        z.push((member.clone(), *score));
-                        z.sort_by(zcmp);
-                    }
-                    WriteOp::SAdd { key, member } => {
-                        let set = Self::set_mut(m, key, true)?.expect("created");
-                        if !set.iter().any(|x| x == member) {
-                            set.push(member.clone());
-                        }
-                    }
-                }
-            }
-            Ok(true)
+            Self::claim_locked(m, claim_key, claim_value, ops)
         })
     }
 

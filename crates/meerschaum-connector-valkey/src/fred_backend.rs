@@ -72,6 +72,67 @@ end
 return 1
 "#;
 
+/// [`ValkeyBackend::claim_first_user`]: [`CLAIM_AND_WRITE`] after the users set (`KEYS[1]`)
+/// shows no registered user; the claim and the writes follow at `KEYS[2]`. Reads the user keys it
+/// checks by name (standalone Valkey, as the claim's own multi-key writes need).
+const CLAIM_FIRST_USER: &str = r#"
+for _, member in ipairs(redis.call('SMEMBERS', KEYS[1])) do
+  local read, row = pcall(cjson.decode, member)
+  if not read or type(row) ~= 'table' or type(row.ix) ~= 'string' then return 0 end
+  local id = string.match(row.ix, '^user_id%-_(.+)$')
+  if not id then return 0 end
+  local name = redis.call('GET', 'mrsm_user:user_id:' .. id .. ':username')
+  if name and redis.call('GET', 'mrsm_user:username:' .. name .. ':user_id') == id then
+    return 0
+  end
+end
+if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+local want = {zadd = 'zset', sadd = 'set'}
+for j = 1, #KEYS - 2 do
+  local need = want[ARGV[3 * j - 1]]
+  if need then
+    local t = redis.call('TYPE', KEYS[j + 2]).ok
+    if t ~= 'none' and t ~= need then
+      return redis.error_reply('WRONGTYPE Operation against a key holding the wrong kind of value')
+    end
+  end
+end
+redis.call('SET', KEYS[2], ARGV[1])
+for j = 1, #KEYS - 2 do
+  local kind, a, b = ARGV[3 * j - 1], ARGV[3 * j], ARGV[3 * j + 1]
+  if kind == 'set' then
+    redis.call('SET', KEYS[j + 2], a)
+  elseif kind == 'zadd' then
+    redis.call('ZADD', KEYS[j + 2], a, b)
+  else
+    redis.call('SADD', KEYS[j + 2], a)
+  end
+end
+return 1
+"#;
+
+/// The keys and arguments of `ops` for [`CLAIM_AND_WRITE`].
+fn claim_args(ops: &[WriteOp], keys: &mut Vec<String>, argv: &mut Vec<String>) {
+    for op in ops {
+        keys.push(op.key().to_string());
+        match op {
+            WriteOp::Set { value, .. } => {
+                argv.extend(["set".into(), value.clone(), String::new()]);
+            }
+            WriteOp::ZAdd { member, score, .. } => {
+                argv.extend([
+                    "zadd".into(),
+                    ScoreBound::Value(*score).to_arg(),
+                    member.clone(),
+                ]);
+            }
+            WriteOp::SAdd { member, .. } => {
+                argv.extend(["sadd".into(), member.clone(), String::new()]);
+            }
+        }
+    }
+}
+
 /// A Valkey connection through `fred`.
 pub struct FredBackend {
     client: Client,
@@ -275,25 +336,25 @@ return 1
     ) -> BackendResult<bool> {
         let mut keys = vec![claim_key.to_string()];
         let mut argv = vec![claim_value.to_string()];
-        for op in ops {
-            keys.push(op.key().to_string());
-            match op {
-                WriteOp::Set { value, .. } => {
-                    argv.extend(["set".into(), value.clone(), String::new()]);
-                }
-                WriteOp::ZAdd { member, score, .. } => {
-                    argv.extend([
-                        "zadd".into(),
-                        ScoreBound::Value(*score).to_arg(),
-                        member.clone(),
-                    ]);
-                }
-                WriteOp::SAdd { member, .. } => {
-                    argv.extend(["sadd".into(), member.clone(), String::new()]);
-                }
-            }
-        }
+        claim_args(ops, &mut keys, &mut argv);
         let mut args = vec![CLAIM_AND_WRITE.to_string(), keys.len().to_string()];
+        args.extend(keys);
+        args.extend(argv);
+        let v = self.call("EVAL", args).await?;
+        Ok(to_i64(&v) == 1)
+    }
+
+    async fn claim_first_user(
+        &self,
+        users: &str,
+        claim_key: &str,
+        claim_value: &str,
+        ops: &[WriteOp],
+    ) -> BackendResult<bool> {
+        let mut keys = vec![users.to_string(), claim_key.to_string()];
+        let mut argv = vec![claim_value.to_string()];
+        claim_args(ops, &mut keys, &mut argv);
+        let mut args = vec![CLAIM_FIRST_USER.to_string(), keys.len().to_string()];
         args.extend(keys);
         args.extend(argv);
         let v = self.call("EVAL", args).await?;

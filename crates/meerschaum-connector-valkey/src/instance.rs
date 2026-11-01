@@ -273,6 +273,10 @@ impl InstanceConnector for ValkeyConnector {
         self.valkey_register_user(user).await
     }
 
+    async fn register_first_user(&self, user: &mut User) -> ConnectorResult<bool> {
+        self.valkey_register_first_user(user).await
+    }
+
     async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
         Ok(self.valkey_get_user_id(user).await?.map(Value::Str))
     }

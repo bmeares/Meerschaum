@@ -178,6 +178,19 @@ pub trait ValkeyBackend: Send + Sync {
         claim_value: &str,
         ops: &[WriteOp],
     ) -> BackendResult<bool>;
+    /// [`claim_and_write`](Self::claim_and_write) only when no user is registered: no member
+    /// `{"ix": "user_id-_{id}"}` of the `users` set has a `mrsm_user:user_id:{id}:username`
+    /// whose `mrsm_user:username:{username}:user_id` is `{id}` (a row without its claim is a
+    /// registration that never finished or a deleted user's stale member). A member that is not
+    /// such a row counts as a user. One atomic step: of concurrent first registrations at most
+    /// one returns `true`.
+    async fn claim_first_user(
+        &self,
+        users: &str,
+        claim_key: &str,
+        claim_value: &str,
+        ops: &[WriteOp],
+    ) -> BackendResult<bool>;
     /// `DEL key [key ...]`: the number of keys removed.
     async fn del(&self, keys: &[String]) -> BackendResult<i64>;
     /// `EXISTS key`.
