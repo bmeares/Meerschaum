@@ -254,6 +254,12 @@ def test_source_tree_highlights_rust_and_keeps_markdown_literal(inspection_serve
         assert exit_button.get_attribute('aria-pressed') == 'true'
         assert exit_button.locator('.mrsm-icon:visible').count() == 1
         assert tab.page.locator('.plugin-source-tree').is_visible()
+        if width < 768:
+            ### A phone: the tree takes its content's height (at most 30vh); the file gets the rest.
+            tree = tab.page.locator('.plugin-source-tree').bounding_box()
+            code = tab.page.locator('.plugin-source-code').bounding_box()
+            assert tree['height'] <= 0.3 * tab.page.viewport_size['height'] + 1, tree
+            assert code['height'] > tree['height'], (tree, code)
         tab.page.screenshot(path=str(artifacts()/f'source-fullscreen-{width}.png'))
         tab.page.keyboard.press('Escape')
         assert 'plugin-source-fullscreen' not in browser_section.get_attribute('class')
