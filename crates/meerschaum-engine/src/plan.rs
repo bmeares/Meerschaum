@@ -1230,14 +1230,12 @@ pub async fn plan_node<S: StateSource>(
 ///
 /// The static [`plan`] shows a provisional node as the state is *now*, but the executor re-plans
 /// it with [`plan_node`] once its parents finish, against the ledger entries their syncs wrote.
-/// Those entries cover whole epoch-aligned grid cells (§5.4), so a child usually runs a
-/// `backfill` from the start of its parent's current chunk (e.g. `[2026-10-04 00:00, …)` on the
-/// default 30-day grid) where the static plan showed `skip` or the tail window
-/// `[own watermark − backtrack, …)`.
+/// Those entries preserve the changed rows' extents within each grid cell. A new tail does
+/// not imply a historical backfill simply because its grid cell starts before the tail.
 ///
 /// This re-plans every provisional node in order, as the executor would, assuming that each
 /// node that runs before it writes new rows from its watermark on: one ledger entry from the
-/// grid cell holding its watermark, open-ended (the full range for a `rebuild`, a node without a
+/// watermark, open-ended (the full range for a `rebuild`, a node without a
 /// watermark or without a datetime axis). The parents' watermarks stay as they are now, so an
 /// expected window ends at the parents' current watermarks; the executor caps it at their new
 /// ones. Expected nodes keep `provisional` (what the parents really write decides).
@@ -1306,11 +1304,7 @@ impl<S> PredictedState<'_, S> {
     fn write(&self, node: &PlannedNode, axis: &Axis) {
         let from = match (node.action, axis.kind) {
             (Action::Rebuild, _) | (_, AxisKind::None) => None,
-            _ => node
-                .watermark
-                .as_ref()
-                .and_then(|w| axis.pos(w))
-                .and_then(|pos| axis.bound(crate::axis::grid_floor(pos, axis.chunk))),
+            _ => node.watermark,
         };
         self.writes
             .lock()

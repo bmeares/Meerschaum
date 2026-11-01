@@ -570,15 +570,15 @@ fn gantt_of_rows_without_a_plan_has_no_planned_bars() {
 }
 
 /// `plan pipes` shows a provisional node with the window the executor re-plans it with once
-/// its parents have synced (a backfill from the start of the parent's grid cell), not the
-/// static tail window: the planned and executed windows agree.
+/// its parents have synced. A changed row inside the tail remains incremental even when its
+/// ledger grid cell begins before the tail: the planned and executed windows agree.
 #[test]
 fn plan_pipes_shows_the_window_the_executor_passes() {
     let env = chain();
     env.ok(&["sync", "pipes", "-m", "clean", "--parents", "--yes"]);
 
     // A late reading before `raw`'s watermark (2024-01-02 00:00): `raw` syncs it, writes a
-    // ledger entry for its 30-day grid cell, and `clean` backfills that cell up to the cap.
+    // precise ledger extent, and `clean` picks it up within its one-day backtrack window.
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let attrs = ConnectorAttributes {
         flavor: Some(Flavor::Sqlite),
@@ -614,14 +614,15 @@ fn plan_pipes_shows_the_window_the_executor_passes() {
         .unwrap_or_else(|| panic!("{out}"))
         .clone();
     assert_eq!(planned["provisional"], true, "{planned}");
-    assert_eq!(planned["action"], "backfill", "{planned}");
-    // The static plan shows the tail window (own watermark − 1 day); the executor starts on
-    // the grid: 2024-01-01 is day 19723 since the epoch, so its 30-day cell starts 13 days
-    // earlier.
+    assert_eq!(planned["action"], "incremental", "{planned}");
+    // Both views use the tail window (own watermark minus one day), not the grid boundary.
     let begin = planned["bounds"]["begin"].to_string();
-    assert!(begin.contains("2023-12-19"), "{planned}");
+    assert!(begin.contains("2024-01-01"), "{planned}");
     let table = env.ok(&["plan", "pipes", "-m", "clean", "--parents"]);
-    assert!(table.contains("backfill*  2023-12-19 00:00 → "), "{table}");
+    assert!(
+        table.contains("incremental*  2024-01-01 00:00 → "),
+        "{table}"
+    );
 
     env.ok(&["sync", "pipes", "-m", "clean", "--parents", "--yes"]);
     let runs = env.ok(&["show", "runs", "--nopretty"]);

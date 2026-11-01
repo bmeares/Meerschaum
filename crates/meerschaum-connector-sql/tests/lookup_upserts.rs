@@ -22,6 +22,18 @@ impl InplaceObserver for Changes {
 flavor_tests!(
     unchanged_upserts_do_not_invalidate_dependents,
     |c: Ctx| async move {
+        // DuckDB has no native in-place UPSERT. Its ordinary diff path deliberately keeps
+        // v4's sentinel normalization; it cannot satisfy this UPSERT-specific contract.
+        if !meerschaum_connector_sql::queries::templates::has_update_query(&format!(
+            "{}-upsert",
+            c.flavor
+        )) {
+            eprintln!(
+                "Skipping {}: native in-place UPSERT is unsupported.",
+                c.flavor
+            );
+            return;
+        }
         let params = serde_json::json!({"columns":{"datetime":"ts","id":"id"},
         "dtypes":{"ts":"int","id":"int","v":"int"},"upsert":true,"null_indices":false});
         let mut source = c.pipe("test", "lookup_source", None, &params.to_string());
@@ -39,6 +51,11 @@ flavor_tests!(
             None,
             &destination_params.to_string(),
         );
+        let target = c
+            .conn
+            .pipe_table_name(&c.conn.sql_pipe(&destination).unwrap());
+        let value_column =
+            meerschaum_connector_sql::ident::sql_item_name("v", c.conn.flavor(), None);
         let changes = Changes::default();
         for (index, value) in [
             i(2),
@@ -67,6 +84,15 @@ flavor_tests!(
                 )
                 .await;
             assert!(result.success, "{}", result.message);
+            assert_eq!(
+                c.conn
+                    .value(&format!("SELECT {value_column} FROM {target}"))
+                    .await,
+                c.conn
+                    .value(&format!("SELECT {value_column} FROM {source_table}"))
+                    .await,
+                "the native UPSERT must preserve the actual value at step {index}"
+            );
             if index > 0
                 && matches!(
                     c.flavor,
@@ -86,9 +112,6 @@ flavor_tests!(
             c.flavor,
             "postgresql" | "postgis" | "timescaledb" | "timescaledb-ha"
         ) {
-            let target = c
-                .conn
-                .pipe_table_name(&c.conn.sql_pipe(&destination).unwrap());
             let log = c.conn.take_query_log();
             let query = log
                 .iter()
