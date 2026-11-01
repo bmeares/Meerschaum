@@ -2,13 +2,13 @@
 //! `meerschaum_core::users` (passlib's `pbkdf2-sha256` modular-crypt format), so v4 user rows
 //! validate unchanged.
 
-use meerschaum_connector::ConnectorResult;
+use meerschaum_connector::{ConnectorResult, InstanceConnector};
 use meerschaum_core::users::{User, valid_username};
 use meerschaum_core::{Map, SuccessTuple, Value};
 
 use crate::driver::params::{placeholder, placeholders};
 use crate::driver::{SqlParam, SqlValue};
-use crate::flavor::Flavor;
+use crate::flavor::{DriverFamily, Flavor};
 
 use super::{SqlConnector, be, frame_docs, kv_str};
 
@@ -60,10 +60,26 @@ impl SqlConnector {
         };
         let attributes = user.attributes.clone().unwrap_or_default();
         let table = self.instance_table_name("mrsm_users");
-        let query = format!(
-            "INSERT INTO {table} (username, password_hash, email, user_type, attributes) VALUES ({})",
-            placeholders(self.flavor, 1, 5)
-        );
+        let query = if self.flavor.driver_family() == DriverFamily::Sqlite {
+            // SQLite hands a new row the highest deleted rowid again. A new user's ID is above
+            // every user's and every token owner's, in the same statement, so a key that a
+            // deleted user left behind never becomes the new user's.
+            let token_owners = match self.token_owner_ids_query().await {
+                Ok(query) => query,
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            };
+            format!(
+                "INSERT INTO {table} (user_id, username, password_hash, email, user_type, attributes)\n\
+                 SELECT COALESCE(MAX(id), 0) + 1, {} FROM (\n    \
+                 SELECT MAX(user_id) AS id FROM {table}{token_owners}\n) AS ids",
+                placeholders(self.flavor, 1, 5)
+            )
+        } else {
+            format!(
+                "INSERT INTO {table} (username, password_hash, email, user_type, attributes) VALUES ({})",
+                placeholders(self.flavor, 1, 5)
+            )
+        };
         let params = vec![
             SqlParam::Text(user.username.clone()),
             SqlParam::Text(password_hash),
@@ -237,7 +253,21 @@ impl SqlConnector {
             .map(|v| Value::Str(v.to_string())))
     }
 
-    /// `delete_user(user)`: delete the user and the plugins they own.
+    /// `UNION ALL SELECT MAX(...)` over the tokens table's `user_id`, or nothing while the
+    /// table does not exist (a failed probe is an error).
+    async fn token_owner_ids_query(&self) -> ConnectorResult<String> {
+        let tokens = self.sql_pipe(&InstanceConnector::get_tokens_pipe(self))?;
+        let state = self.pipe_state_checked(&tokens).await?;
+        if !state.exists {
+            return Ok(String::new());
+        }
+        Ok(format!(
+            "\n    UNION ALL SELECT MAX(CAST(user_id AS INTEGER)) FROM {}",
+            self.pipe_table_name(&tokens)
+        ))
+    }
+
+    /// `delete_user(user)`: delete the user, their tokens and the plugins they own.
     pub async fn delete_user(&self, user: &User) -> SuccessTuple {
         let user_id = match self.resolve_user_id(user).await {
             Ok(Some(id)) => id,
@@ -249,6 +279,11 @@ impl SqlConnector {
             }
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
+        // The user's tokens go first: none may outlive the user (SQLite reuses user IDs).
+        let tokens = meerschaum_connector::pipe_ops::delete_tokens_of_user(self, &user_id).await;
+        if !tokens.success {
+            return tokens;
+        }
         let users = self.instance_table_name("mrsm_users");
         let plugins = self.instance_table_name("mrsm_plugins");
         let f = self.flavor;

@@ -1173,6 +1173,11 @@ pub trait InstanceConnector: Connector {
                 user.username
             ));
         }
+        // The user's tokens go first: none may outlive the user.
+        let tokens = pipe_ops::delete_tokens_of_user(self, &user_id).await;
+        if !tokens.success {
+            return tokens;
+        }
         let pipe = self.get_users_pipe();
         let mut params = Map::new();
         params.insert("user_id".into(), user_id);

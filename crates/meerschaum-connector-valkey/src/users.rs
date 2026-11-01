@@ -369,6 +369,15 @@ impl ValkeyConnector {
             Ok(user_id) => user_id,
             Err(e) => return SuccessTuple::fail(format!("Failed to delete user:\n{e}")),
         };
+        // The user's tokens go first: none may outlive the user.
+        let tokens = meerschaum_connector::pipe_ops::delete_tokens_of_user(
+            self,
+            &Value::Str(user_id.clone()),
+        )
+        .await;
+        if !tokens.success {
+            return tokens;
+        }
         let users_pipe = self.valkey_users_pipe();
         let keys_vals = match Self::get_user_keys_vals(user, user.password_hash.clone(), false) {
             Ok(kv) => kv,

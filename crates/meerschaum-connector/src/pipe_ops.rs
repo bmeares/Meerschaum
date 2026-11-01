@@ -1353,6 +1353,50 @@ pub async fn default_edit_token<C: InstanceConnector + ?Sized>(
     SuccessTuple::success()
 }
 
+/// Delete every token owned by the user with `user_id` (an exact match). A deleted user's
+/// tokens must not outlive them. `delete_user` calls it before deleting the user and fails when
+/// it fails, so a user is never deleted with tokens left behind.
+pub async fn delete_tokens_of_user<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user_id: &Value,
+) -> SuccessTuple {
+    let id_text = meerschaum_core::pyfmt::py_str(user_id);
+    if user_id.is_null() || !literal_param_safe(&id_text) {
+        return SuccessTuple::fail(format!(
+            "Cannot delete the tokens of user ID {id_text}: it cannot be matched exactly."
+        ));
+    }
+    let pipe = conn.get_tokens_pipe();
+    match conn.pipe_exists(&pipe).await {
+        Ok(false) => return SuccessTuple::success(),
+        Ok(true) => {}
+        Err(e) => {
+            return SuccessTuple::fail(format!(
+                "Failed to delete the tokens of user ID {id_text}:\n{e}"
+            ));
+        }
+    }
+    let mut params = Map::new();
+    params.insert("user_id".into(), user_id.clone());
+    let cleared = conn
+        .clear_pipe(
+            &pipe,
+            &DataQuery {
+                params: Some(params),
+                ..Default::default()
+            },
+        )
+        .await;
+    if cleared.success {
+        SuccessTuple::success()
+    } else {
+        SuccessTuple::fail(format!(
+            "Failed to delete the tokens of user ID {id_text}:\n{}",
+            cleared.message
+        ))
+    }
+}
+
 /// `InstanceConnector.delete_token()`.
 pub async fn default_delete_token<C: InstanceConnector + ?Sized>(
     conn: &C,
