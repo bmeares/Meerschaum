@@ -10,7 +10,8 @@ mod common;
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -43,29 +44,50 @@ const GHOST_SESSION: &str = "44444444-4444-4444-8444-444444444444";
 const EDITOR_SESSION: &str = "55555555-5555-4555-8555-555555555555";
 const UNKNOWN_SESSION: &str = "88888888-8888-4888-8888-888888888888";
 
-struct Sessions(HashMap<String, String>);
+/// The console's session store: a test may end a session (a logout, or an administrator ending
+/// the user's sessions) or make the store fail while a terminal is open.
+struct Sessions {
+    map: Mutex<HashMap<String, String>>,
+    failing: AtomicBool,
+}
+
+impl Sessions {
+    fn end(&self, session_id: &str) {
+        self.map.lock().unwrap().remove(session_id);
+    }
+
+    fn fail(&self, failing: bool) {
+        self.failing.store(failing, Ordering::SeqCst);
+    }
+}
 
 #[async_trait]
 impl SessionLookup for Sessions {
     async fn username(&self, session_id: &str) -> Result<Option<String>, String> {
-        Ok(self.0.get(session_id).cloned())
+        if self.failing.load(Ordering::SeqCst) {
+            return Err("the session store is down".into());
+        }
+        Ok(self.map.lock().unwrap().get(session_id).cloned())
     }
 }
 
-fn sessions() -> Arc<dyn SessionLookup> {
-    Arc::new(Sessions(
-        [
-            (ADMIN_SESSION, "admin"),
-            (ADMIN_TAB_TWO, "admin"),
-            (OTHER_ADMIN_SESSION, "root2"),
-            (USER_SESSION, "bob"),
-            (GHOST_SESSION, "nobody"),
-            (EDITOR_SESSION, "ed"),
-        ]
-        .into_iter()
-        .map(|(id, user)| (id.to_string(), user.to_string()))
-        .collect(),
-    ))
+fn sessions() -> Arc<Sessions> {
+    Arc::new(Sessions {
+        map: Mutex::new(
+            [
+                (ADMIN_SESSION, "admin"),
+                (ADMIN_TAB_TWO, "admin"),
+                (OTHER_ADMIN_SESSION, "root2"),
+                (USER_SESSION, "bob"),
+                (GHOST_SESSION, "nobody"),
+                (EDITOR_SESSION, "ed"),
+            ]
+            .into_iter()
+            .map(|(id, user)| (id.to_string(), user.to_string()))
+            .collect(),
+        ),
+        failing: AtomicBool::new(false),
+    })
 }
 
 /// The default server configuration (`default_config()`, as `start api` reads it), with the
@@ -110,6 +132,11 @@ fn state(root: &Path) -> AppState {
 }
 
 fn state_from(cfg: ServerConfig) -> AppState {
+    state_and_instance(cfg).0
+}
+
+/// [`state_from`] and its instance, whose users a test may change.
+fn state_and_instance(cfg: ServerConfig) -> (AppState, Arc<MemoryInstance>) {
     let instance = Arc::new(MemoryInstance::new("fixture"));
     instance.seed_user("admin", "pass", Some("admin"));
     instance.seed_user("root2", "pass", Some("admin"));
@@ -121,16 +148,27 @@ fn state_from(cfg: ServerConfig) -> AppState {
     let operator: Vec<&str> = operator.iter().map(String::as_str).collect();
     instance.seed_user_scopes("bob", &operator);
     instance.seed_user("ed", "pass", None);
-    AppState::builder(cfg, instance)
+    let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
         .build()
-        .expect("state")
+        .expect("state");
+    (state, instance)
 }
 
 fn config(state: &AppState, shell: ShellCommand, tmux: Option<TmuxSettings>) -> WebtermConfig {
+    config_with(state, sessions(), shell, tmux)
+}
+
+/// [`config`] over a session store the test keeps.
+fn config_with(
+    state: &AppState,
+    sessions: Arc<Sessions>,
+    shell: ShellCommand,
+    tmux: Option<TmuxSettings>,
+) -> WebtermConfig {
     WebtermConfig::new(
         state,
-        sessions(),
+        sessions,
         Arc::new(|id| format!("<html><body data-session=\"{id}\">terminal page</body></html>")),
         shell,
     )
@@ -335,13 +373,42 @@ async fn access(app: &Router, addr: std::net::SocketAddr, session: &str) -> (Sta
     .status;
     let mut socket = connect(addr, session).await;
     let shell = match next_message(&mut socket).await {
+        Some(message) if message == json!(["setup", {}]) => true,
+        // A refusal says why before it closes.
         Some(message) => {
-            assert_eq!(message, json!(["setup", {}]));
-            true
+            assert_eq!(message[0], "stdout", "{message}");
+            false
         }
         None => false,
     };
     (page, shell)
+}
+
+/// How a terminal's socket ended: the `stdout` text before the end, whether
+/// `["disconnect", 1]` came, and the close frame's code. Panics when it is still open after
+/// `within`.
+async fn ending(socket: &mut Socket, within: Duration) -> (String, bool, Option<u16>) {
+    let mut out = String::new();
+    let mut disconnected = false;
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        match tokio::time::timeout_at(deadline, socket.next()).await {
+            Err(_) => panic!("the terminal stayed open; got {:?}", plain(&out)),
+            Ok(Some(Ok(Message::Text(text)))) => {
+                let message: Value = serde_json::from_str(text.as_str()).unwrap();
+                if message[0] == "stdout" {
+                    out.push_str(message[1].as_str().unwrap());
+                } else if message == json!(["disconnect", 1]) {
+                    disconnected = true;
+                }
+            }
+            Ok(Some(Ok(Message::Close(frame)))) => {
+                return (out, disconnected, frame.map(|f| u16::from(f.code)));
+            }
+            Ok(None) | Ok(Some(Err(_))) => return (out, disconnected, None),
+            Ok(Some(Ok(_))) => {}
+        }
+    }
 }
 
 #[tokio::test]
@@ -414,17 +481,35 @@ async fn a_websocket_without_a_session_is_accepted_and_closed() {
     let state = state(root.path());
     let addr = serve(webterm::routes(state.clone(), config(&state, sh(), None))).await;
 
-    // PARITY: v4 accepts the socket, then closes it; no PTY starts.
+    // PARITY: v4 accepts the socket, then closes it; no PTY starts. v4's terminal stayed blank;
+    // v5 says why first.
     let mut socket = connect(addr, "no-such-session").await;
-    match socket.next().await {
-        Some(Ok(Message::Close(frame))) => {
-            assert_eq!(u16::from(frame.expect("close frame").code), 1000);
-        }
-        other => panic!("expected a close frame, got {other:?}"),
-    }
+    let (out, disconnected, code) = ending(&mut socket, Duration::from_secs(10)).await;
+    assert!(out.contains("Log in again"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1000));
     // So does a session id the store does not know.
     let mut socket = connect(addr, UNKNOWN_SESSION).await;
-    assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+    let (out, disconnected, code) = ending(&mut socket, Duration::from_secs(10)).await;
+    assert!(out.contains("Log in again"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1000));
+    // A user without the terminal, and a session store that fails.
+    let mut socket = connect(addr, EDITOR_SESSION).await;
+    let (out, _, code) = ending(&mut socket, Duration::from_secs(10)).await;
+    assert!(out.contains("permission"), "{out:?}");
+    assert_eq!(code, Some(1000));
+    let sessions = sessions();
+    sessions.fail(true);
+    let addr = serve(webterm::routes(
+        state.clone(),
+        config_with(&state, sessions, sh(), None),
+    ))
+    .await;
+    let mut socket = connect(addr, ADMIN_SESSION).await;
+    let (out, _, code) = ending(&mut socket, Duration::from_secs(10)).await;
+    assert!(out.contains("Try again later"), "{out:?}");
+    assert_eq!(code, Some(1000));
 }
 
 #[tokio::test]
@@ -643,6 +728,244 @@ async fn closing_the_socket_ends_the_shell() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     panic!("the shell {pid} or its readiness outlived its socket");
+}
+
+/// How often the revocation tests' terminals authorize their sessions again.
+const RECHECK: Duration = Duration::from_millis(300);
+
+/// The process id of the shell behind a terminal (`echo $$`).
+async fn shell_pid(socket: &mut Socket) -> i32 {
+    send_json(socket, json!(["stdin", "echo shellpid:$$:end\n"])).await;
+    let out = read_until(socket, |out| has_line_matching(out, "shellpid:", ":end")).await;
+    plain(&out)
+        .split(['\r', '\n'])
+        .find(|l| l.starts_with("shellpid:") && l.ends_with(":end"))
+        .and_then(|l| l.split(':').nth(1))
+        .and_then(|n| n.parse().ok())
+        .expect("the shell's pid")
+}
+
+fn alive(pid: i32) -> bool {
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Wait for a shell to end (`/proc` is Linux-only; elsewhere this checks nothing).
+async fn assert_shell_ends(pid: i32) {
+    if !Path::new("/proc/self").exists() {
+        return;
+    }
+    for _ in 0..100 {
+        if !alive(pid) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the shell {pid} outlived its revoked terminal");
+}
+
+/// A closed terminal takes no more input: a send fails, or nothing echoes it.
+async fn assert_no_echo(socket: &mut Socket) {
+    if socket
+        .send(Message::Text(
+            json!(["stdin", "echo after-revocation\n"])
+                .to_string()
+                .into(),
+        ))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let echoed = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Text(text))) if text.as_str().contains("after-revocation") => {
+                    return true;
+                }
+                Some(Ok(_)) => continue,
+                _ => return false,
+            }
+        }
+    })
+    .await;
+    assert!(
+        !matches!(echoed, Ok(true)),
+        "a revoked terminal echoed input"
+    );
+}
+
+/// An open terminal is authorized again every `reauthorize_every`: signing out (or an
+/// administrator ending the user's sessions) closes it with a reason and ends its shell. Another
+/// user's terminal keeps running.
+#[tokio::test]
+async fn an_open_terminal_closes_when_its_session_ends() {
+    let root = tempfile::tempdir().unwrap();
+    let state = state(root.path());
+    let sessions = sessions();
+    let cfg = config_with(&state, sessions.clone(), sh(), None).with_reauthorize_every(RECHECK);
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let mut socket = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut socket).await;
+    let pid = shell_pid(&mut socket).await;
+    let mut other = connect(addr, OTHER_ADMIN_SESSION).await;
+    expect_setup(&mut other).await;
+    let other_pid = shell_pid(&mut other).await;
+
+    // Several checks pass while the session is valid.
+    tokio::time::sleep(RECHECK * 3).await;
+    send_json(&mut socket, json!(["stdin", "echo still-mine\n"])).await;
+    read_until(&mut socket, |out| has_line(out, "still-mine")).await;
+
+    sessions.end(ADMIN_SESSION);
+    let (out, disconnected, code) = ending(&mut socket, RECHECK * 10).await;
+    assert!(out.contains("Your session has ended"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1008));
+    assert_shell_ends(pid).await;
+    assert_no_echo(&mut socket).await;
+
+    // The other user's terminal is untouched.
+    if Path::new("/proc/self").exists() {
+        assert!(alive(other_pid));
+    }
+    send_json(&mut other, json!(["stdin", "echo other-alive\n"])).await;
+    read_until(&mut other, |out| has_line(out, "other-alive")).await;
+}
+
+/// A session store that fails while a terminal is open closes it (fail closed).
+#[tokio::test]
+async fn an_open_terminal_closes_when_the_session_store_fails() {
+    let root = tempfile::tempdir().unwrap();
+    let state = state(root.path());
+    let sessions = sessions();
+    let cfg = config_with(&state, sessions.clone(), sh(), None).with_reauthorize_every(RECHECK);
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let mut socket = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut socket).await;
+    let pid = shell_pid(&mut socket).await;
+    sessions.fail(true);
+    let (out, disconnected, code) = ending(&mut socket, RECHECK * 10).await;
+    assert!(out.contains("verify"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1008));
+    assert_shell_ends(pid).await;
+    assert_no_echo(&mut socket).await;
+}
+
+/// A user who loses the permission to use the terminal, or is deleted, loses an open terminal.
+#[tokio::test]
+async fn an_open_terminal_closes_when_its_user_loses_access() {
+    use meerschaum_connector::InstanceConnector;
+    let root = tempfile::tempdir().unwrap();
+    let (state, instance) =
+        state_and_instance(server_config(root.path(), ServerFlags::default(), None));
+    let cfg = config_with(&state, sessions(), sh(), None).with_reauthorize_every(RECHECK);
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    // `bob` is an operator (`webterm:use`); `root2` an administrator.
+    let mut operator = connect(addr, USER_SESSION).await;
+    expect_setup(&mut operator).await;
+    let operator_pid = shell_pid(&mut operator).await;
+    let mut admin = connect(addr, OTHER_ADMIN_SESSION).await;
+    expect_setup(&mut admin).await;
+    let admin_pid = shell_pid(&mut admin).await;
+
+    instance.seed_user_scopes("bob", &[]);
+    let (out, disconnected, code) = ending(&mut operator, Duration::from_secs(5)).await;
+    assert!(out.contains("permission"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1008));
+    assert_shell_ends(operator_pid).await;
+
+    let deleted = instance
+        .delete_user(&meerschaum_core::users::User::new("root2", None))
+        .await;
+    assert!(deleted.success, "{deleted:?}");
+    let (out, disconnected, code) = ending(&mut admin, Duration::from_secs(5)).await;
+    assert!(out.contains("Your session has ended"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1008));
+    assert_shell_ends(admin_pid).await;
+}
+
+/// On the tmux path a revoked terminal ends its own tmux client, as a closed tab does: the
+/// user's tmux session stays (only an authorized connection reattaches to it), and another
+/// user's attached terminal keeps running.
+#[tokio::test]
+async fn a_revoked_tmux_terminal_ends_only_its_own_client() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP a_revoked_tmux_terminal_ends_only_its_own_client: no tmux");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let tmux_dir = short_tmp();
+    let _server = PrivateTmux(tmux_dir.path().to_path_buf());
+    let state = state(root.path());
+    let sessions = sessions();
+    let tmux = TmuxSettings {
+        binary: "tmux".into(),
+        socket: Some(tmux_socket(tmux_dir.path())),
+        session_suffix: "_r".into(),
+        env_dir: root.path().join("webterm"),
+        config_file: Some("/dev/null".into()),
+    };
+    let cfg =
+        config_with(&state, sessions.clone(), sh(), Some(tmux)).with_reauthorize_every(RECHECK);
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let tmux_cmd = |args: &[&str]| {
+        std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(tmux_socket(tmux_dir.path()))
+            .args(args)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap()
+    };
+    let clients = |session: &str| {
+        let target = format!("={session}");
+        String::from_utf8_lossy(
+            &tmux_cmd(&["list-clients", "-t", &target, "-F", "#{client_pid}"]).stdout,
+        )
+        .lines()
+        .count()
+    };
+    let mut mine = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut mine).await;
+    send_json(&mut mine, json!(["stdin", "echo mine-ready\n"])).await;
+    read_until(&mut mine, |out| has_line(out, "mine-ready")).await;
+    let mut theirs = connect(addr, OTHER_ADMIN_SESSION).await;
+    expect_setup(&mut theirs).await;
+    send_json(&mut theirs, json!(["stdin", "echo theirs-ready\n"])).await;
+    read_until(&mut theirs, |out| has_line(out, "theirs-ready")).await;
+    assert_eq!((clients("admin_r"), clients("root2_r")), (1, 1));
+
+    sessions.end(ADMIN_SESSION);
+    let (out, disconnected, code) = ending(&mut mine, RECHECK * 10).await;
+    assert!(out.contains("Your session has ended"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1008));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while clients("admin_r") > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the revoked terminal's tmux client outlived it"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        tmux_cmd(&["has-session", "-t", "=admin_r"])
+            .status
+            .success()
+    );
+
+    assert_eq!(clients("root2_r"), 1);
+    send_json(&mut theirs, json!(["stdin", "echo theirs-alive\n"])).await;
+    read_until(&mut theirs, |out| has_line(out, "theirs-alive")).await;
 }
 
 #[tokio::test]

@@ -8,10 +8,13 @@
 //! - **Authentication** is the console session store. The session id is the path segment
 //!   (`is_session_authenticated(session_id)`); the user name behind it names the terminal.
 //!   An unknown session gets v4's `401` "Unauthorized / Please log in" page (and a websocket
-//!   that is accepted and closed straight away). The terminal needs the permission
+//!   that is accepted, told why and closed straight away). The terminal needs the permission
 //!   `webterm:use` (rc15's access model, [`crate::access`]): administrators, the role
 //!   `operator`, and users given it. Under `start api --secure`
-//!   (`api:permissions:actions:non_admin: false`) only administrators get a shell.
+//!   (`api:permissions:actions:non_admin: false`) only administrators get a shell. An open
+//!   terminal is authorized again every [`REAUTHORIZE_EVERY`]: when the session ends (a logout,
+//!   an administrator ending the user's sessions), the user is deleted or loses `webterm:use`,
+//!   or the check fails, it says why and closes, and its PTY process ends.
 //! - **tmux.** With `api:webterm:tmux:enabled` (default) and a `tmux` binary, the shell runs in
 //!   `tmux new-session -A -s <user><session_suffix>`, so a reconnect (or a second tab) attaches
 //!   to the same session. Closing the socket kills the PTY and with it the tmux client, never the
@@ -72,6 +75,20 @@ const MAX_NEW_WINDOWS: usize = 8;
 
 /// The websocket close code for "going away / try again later" when [`MAX_TERMINALS`] is reached.
 const CLOSE_TRY_AGAIN: u16 = 1013;
+
+/// How often an open terminal authorizes its session again (the session, its user and the
+/// user's permission to use the terminal): [`WebtermConfig::reauthorize_every`]'s default.
+pub const REAUTHORIZE_EVERY: Duration = Duration::from_secs(10);
+
+/// How long one of those checks may take; a store that does not answer closes the terminal.
+const REAUTHORIZE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The websocket close code ("policy violation") of a terminal whose access ended while it was
+/// open.
+const CLOSE_REVOKED: u16 = 1008;
+
+/// What a terminal refused for [`MAX_TERMINALS`] shows.
+const TOO_MANY_TERMINALS: &str = "Too many terminals are open on this server. Try again later.";
 
 /// Variables that make a process part of the job (or the service) the server itself runs in,
 /// besides the `static.toml` names [`job_context_vars`] adds. A terminal's shell is never that job:
@@ -213,6 +230,8 @@ pub struct WebtermConfig {
     pub shell: ShellCommand,
     /// `Some` runs the shell inside a tmux session.
     pub tmux: Option<TmuxSettings>,
+    /// How often an open terminal authorizes its session again ([`REAUTHORIZE_EVERY`]).
+    pub reauthorize_every: Duration,
 }
 
 impl WebtermConfig {
@@ -251,7 +270,14 @@ impl WebtermConfig {
             page,
             shell,
             tmux,
+            reauthorize_every: REAUTHORIZE_EVERY,
         }
+    }
+
+    /// Replace how often an open terminal authorizes its session again (tests shorten it).
+    pub fn with_reauthorize_every(mut self, every: Duration) -> WebtermConfig {
+        self.reauthorize_every = every;
+        self
     }
 
     /// Replace the tmux settings (`None` forces the plain path).
@@ -538,7 +564,39 @@ enum Access {
     Unavailable,
 }
 
-async fn authorize(inner: &Inner, session_id: &str) -> Access {
+impl Access {
+    /// What a refused websocket shows before it closes (v4 closed it without a word, leaving a
+    /// blank terminal).
+    fn refusal(&self) -> Option<&'static str> {
+        match self {
+            Access::Granted(_) => None,
+            Access::Denied => {
+                Some("Not logged in, or the session has ended. Log in again to use the terminal.")
+            }
+            Access::Forbidden => Some("You do not have permission to use the terminal."),
+            Access::Unavailable => Some("Could not check your session. Try again later."),
+        }
+    }
+
+    /// Why an open terminal of `term_name` closes after authorizing its session again; `None`
+    /// keeps it open.
+    fn revocation(&self, term_name: &str) -> Option<&'static str> {
+        match self {
+            Access::Granted(name) if name == term_name => None,
+            Access::Granted(_) | Access::Denied => {
+                Some("Your session has ended. Log in again to use the terminal.")
+            }
+            Access::Forbidden => Some("Your permission to use the terminal was removed."),
+            Access::Unavailable => {
+                Some("Could not verify your session, so the terminal was closed.")
+            }
+        }
+    }
+}
+
+/// Who `session_id` may open a terminal as. `fresh` reads the user's identity now instead of
+/// from the access cache (a websocket, and every check of an open one).
+async fn authorize(inner: &Inner, session_id: &str, fresh: bool) -> Access {
     // PARITY: `is_session_authenticated` is true for everyone under `--no-auth`; the terminal is
     // named after the session then (`username or session_id`).
     if inner.state.config.no_auth {
@@ -565,13 +623,14 @@ async fn authorize(inner: &Inner, session_id: &str) -> Access {
             return Access::Unavailable;
         }
     }
-    let access = match crate::access::access_of(
-        &inner.state,
-        crate::auth::Principal::User(user),
-        &crate::auth::Scopes::List(vec!["*".into()]),
-    )
-    .await
-    {
+    let principal = crate::auth::Principal::User(user);
+    let granted = crate::auth::Scopes::List(vec!["*".into()]);
+    let access = if fresh {
+        crate::access::access_of_fresh(&inner.state, principal, &granted).await
+    } else {
+        crate::access::access_of(&inner.state, principal, &granted).await
+    };
+    let access = match access {
         Ok(access) => access,
         Err(e) if e.status.as_u16() == 503 => return Access::Unavailable,
         Err(_) => return Access::Denied,
@@ -621,7 +680,7 @@ const FORBIDDEN_PAGE: &str = r#"<html>
 "#;
 
 async fn page(State(inner): State<Inner>, UrlPath(session_id): UrlPath<String>) -> Response {
-    let mut response = match authorize(&inner, &session_id).await {
+    let mut response = match authorize(&inner, &session_id, false).await {
         Access::Granted(_) => Html((inner.config.page)(&session_id)).into_response(),
         Access::Denied => (StatusCode::UNAUTHORIZED, Html(UNAUTHORIZED_PAGE)).into_response(),
         Access::Forbidden => (StatusCode::FORBIDDEN, Html(FORBIDDEN_PAGE)).into_response(),
@@ -677,11 +736,13 @@ async fn socket(
     }
     ws.max_message_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| async move {
-            // PARITY: v4 accepts the websocket, then closes it when the session is not authorized.
-            match authorize(&inner, &session_id).await {
-                Access::Granted(name) => run(inner.config, name, socket).await,
-                Access::Denied | Access::Forbidden | Access::Unavailable => {
-                    close(socket, 1000).await
+            // PARITY: v4 accepts the websocket, then closes it when the session is not authorized
+            // (v5 says why first).
+            match authorize(&inner, &session_id, true).await {
+                Access::Granted(name) => run(inner, session_id, name, socket).await,
+                refused => {
+                    let reason = refused.refusal().unwrap_or_default();
+                    refuse(socket, reason, 1000).await
                 }
             }
         })
@@ -696,16 +757,30 @@ async fn close(mut socket: WebSocket, code: u16) {
         .await;
 }
 
+/// The terminal's line for `reason` (the `[CLOSED]` that follows is the browser's).
+fn reason_message(reason: &str) -> Message {
+    text(json!(["stdout", format!("\r\n[{reason}]\r\n")]))
+}
+
+/// Tell the browser why, end the terminal (`["disconnect", 1]`, so it does not reconnect) and
+/// close the socket with `code`.
+async fn refuse(mut socket: WebSocket, reason: &str, code: u16) {
+    let _ = socket.send(reason_message(reason)).await;
+    let _ = socket.send(text(json!(["disconnect", 1]))).await;
+    close(socket, code).await;
+}
+
 fn text(parts: Value) -> Message {
     Message::Text(parts.to_string().into())
 }
 
-/// Bridge one websocket to one PTY until either side ends.
-async fn run(config: WebtermConfig, term_name: String, mut socket: WebSocket) {
+/// Bridge one websocket to one PTY until either side ends, or the session's access does.
+async fn run(inner: Inner, session_id: String, term_name: String, mut socket: WebSocket) {
+    let config = inner.config.clone();
     let guard = match TerminalGuard::acquire() {
         Some(guard) => guard,
         None => {
-            close(socket, CLOSE_TRY_AGAIN).await;
+            refuse(socket, TOO_MANY_TERMINALS, CLOSE_TRY_AGAIN).await;
             return;
         }
     };
@@ -745,7 +820,13 @@ async fn run(config: WebtermConfig, term_name: String, mut socket: WebSocket) {
     let mut decoder = Utf8Stream::default();
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     ping.tick().await;
+    // The session, its user and the permission are checked again while the terminal is open: a
+    // logout, a deleted user or a removed permission must not leave a shell running.
+    let every = config.reauthorize_every.max(Duration::from_millis(10));
+    let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
+    recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut closed_by_client = false;
+    let mut close_frame: Option<(u16, &'static str)> = None;
     let mut new_windows = 0usize;
     loop {
         tokio::select! {
@@ -827,13 +908,30 @@ async fn run(config: WebtermConfig, term_name: String, mut socket: WebSocket) {
                     break;
                 }
             }
+            _ = recheck.tick() => {
+                // Fail closed: an error or a store that does not answer ends the terminal too.
+                let access = tokio::time::timeout(
+                    REAUTHORIZE_TIMEOUT,
+                    authorize(&inner, &session_id, true),
+                )
+                .await
+                .unwrap_or(Access::Unavailable);
+                if let Some(reason) = access.revocation(&term_name) {
+                    tracing::info!("Closing the terminal of '{term_name}': {reason}");
+                    let _ = tx.send(reason_message(reason)).await;
+                    let _ = tx.send(text(json!(["disconnect", 1]))).await;
+                    close_frame = Some((CLOSE_REVOKED, reason));
+                    break;
+                }
+            }
         }
     }
     if !closed_by_client {
+        let (code, reason) = close_frame.unwrap_or((1000, ""));
         let _ = tx
             .send(Message::Close(Some(CloseFrame {
-                code: 1000,
-                reason: "".into(),
+                code,
+                reason: reason.into(),
             })))
             .await;
     }
