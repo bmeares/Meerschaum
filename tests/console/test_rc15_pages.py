@@ -458,9 +458,9 @@ def test_plugins_installed_tab_uninstall_and_install(pages_server, context):
     ### Installed from this repository, it offers Update only once the repository has a newer version.
     page.click('#plugins-tabs .nav-link:text-is("Installed")')
     update = page.get_by_role('button', name='Update w7_pyfig', exact=True)
-    page.wait_for_selector('#plugins-update-check', state='attached', timeout=60000)
-    page.wait_for_load_state('networkidle')
-    assert update.count() == 0 or not update.is_visible()
+    ### The update check has answered (a `dcc.Store` has no element to wait for).
+    page.wait_for_selector('#installed-plugins-table .plugin-update-checked', state='attached', timeout=60000)
+    assert not update.is_visible()
     _publish_version(server, 'w7_pyfig', '0.0.2')
     page.reload()
     update.wait_for(state='visible', timeout=60000)

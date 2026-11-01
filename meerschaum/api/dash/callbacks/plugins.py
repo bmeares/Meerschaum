@@ -204,6 +204,7 @@ dash_app.clientside_callback(
 
 @dash_app.callback(
     Output({'type': 'plugin-update-slot', 'index': ALL}, 'hidden'),
+    Output({'type': 'plugin-update-slot', 'index': ALL}, 'className'),
     Output({'type': 'plugin-action', 'action': 'update', 'index': ALL}, 'title'),
     Input('plugins-update-check', 'data'),
     State({'type': 'plugin-update-slot', 'index': ALL}, 'id'),
@@ -225,7 +226,9 @@ def show_plugin_updates(names, slots, buttons, session_data):
          if button.get('index') in updates else f"Update {button.get('index')}")
         for button in buttons
     ]
-    return hidden, titles
+    ### `plugin-update-checked`: the check has answered (what browser tests wait for).
+    checked = ['plugin-update-slot plugin-update-checked' for _ in slots]
+    return hidden, checked, titles
 
 
 def _run_alert(message: str, job_name: Optional[str], success: bool = True, running: bool = False):

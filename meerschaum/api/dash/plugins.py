@@ -322,6 +322,7 @@ def plugin_action_buttons(plugin: Dict[str, Any], size: str = 'sm') -> List[Any]
         actions.append(html.Span(
             _button('arrow-up', 'update', f"Update {name}", 'btn-secondary'),
             id={'type': 'plugin-update-slot', 'index': name},
+            className='plugin-update-slot',
             hidden=True,
         ))
     actions.append(_button('trash', 'uninstall', f"Uninstall {name}", 'btn-outline-danger'))
