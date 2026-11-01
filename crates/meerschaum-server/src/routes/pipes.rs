@@ -291,7 +291,7 @@ where
 /// SQL guard ([`crate::sql_guard`]); a connector reserved for other teams is refused.
 async fn register_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let ik = ctx.instance_keys();
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     // Genuine legacy credentials are expanded during access resolution. Rechecking a raw
     // `pipes:write` alias here would restore registration that a modern role removed.
     let access = access::require(&ctx.state, &ctx.headers, &["pipes:register"]).await?;
@@ -334,7 +334,7 @@ async fn register_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiRe
 /// administrators); a SQL definition passes the SQL guard.
 async fn edit_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let ik = ctx.instance_keys();
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let access = authorize(&ctx, PIPES_WRITE).await?;
     let parameters = match body {
         None => return Err(ApiError::missing(&["body"])),
@@ -717,7 +717,7 @@ async fn create_metadata(ctx: Ctx) -> ApiResult {
 // ------------------------------------------------------------------------------------------------
 
 async fn get_sync_time(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let access = authorize(&ctx, PIPES_READ).await?;
     let params = optional_dict_body(body)?;
     let newest = ctx.query.bool("newest", true)?;
@@ -814,7 +814,7 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
         ),
         None => None,
     };
-    let body = body_bytes(body).await?;
+    let body = body_bytes(body, ctx.state.config.limits.data).await?;
     let (payload, no_rows) = match parse_sync_body(&body)? {
         Some(payload) => (payload, false),
         None if replace => (SyncPayload::Json(Json::Array(Vec::new())), true),
@@ -1198,7 +1198,7 @@ async fn get_pipe_csv(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 /// estimate (exact where there is none or counting is cheap) and `params` as a JSON query string
 /// for clients that cannot send a body with a `GET` (the body wins when both are given).
 async fn get_pipe_rowcount(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let access = authorize(&ctx, PIPES_READ).await?;
     let params = match optional_dict_body(body)? {
         Some(params) => Some(params),

@@ -179,9 +179,11 @@ pub fn check_may_lock(
     ))
 }
 
-async fn json_body(body: Body) -> Result<Json, ApiError> {
-    Ok(super::pipes::parse_json_body(&body_bytes(body).await?)?
-        .unwrap_or(Json::Object(JsonMap::new())))
+async fn json_body(body: Body, limit: Option<usize>) -> Result<Json, ApiError> {
+    Ok(
+        super::pipes::parse_json_body(&body_bytes(body, limit).await?)?
+            .unwrap_or(Json::Object(JsonMap::new())),
+    )
 }
 
 async fn get_access(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
@@ -193,7 +195,7 @@ async fn get_access(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 
 async fn patch_access(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
-    let body = json_body(body).await?;
+    let body = json_body(body, ctx.state.config.limits.body).await?;
     let (conn, pipe) = registered_visible(&ctx, &caller, &ck, &mk, &lk).await?;
     let new = changed_access(&caller, pipe.raw_parameters(), &body)?;
     // A connector reserved for some teams keeps its pipes with them.
@@ -225,7 +227,7 @@ async fn lock_or_unlock(
     lock: bool,
 ) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
-    let body = json_body(body).await?;
+    let body = json_body(body, ctx.state.config.limits.body).await?;
     let requested = requested_locks(&body)?;
     let (conn, pipe) = registered_visible(&ctx, &caller, &keys.0, &keys.1, &keys.2).await?;
     check_may_lock(&caller, &pipe, pipe.raw_parameters(), lock)?;

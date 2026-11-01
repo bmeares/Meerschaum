@@ -50,7 +50,7 @@ fn nonempty(s: &Option<String>) -> bool {
 
 async fn login(ctx: Ctx, body: Body) -> ApiResult {
     let state = &ctx.state;
-    let body = body_bytes(body).await?;
+    let body = body_bytes(body, ctx.state.config.limits.auth).await?;
     let form = read_form(&ctx.headers, body).await;
     let mut data = LoginForm {
         grant_type: form_get(&form, "grant_type").map(String::from),

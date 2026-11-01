@@ -178,7 +178,7 @@ async fn get_job(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 }
 
 async fn create_job(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let access = access::require(&ctx.state, &ctx.headers, &["jobs:execute", "jobs:write"]).await?;
     let Some(metadata) = body else {
         return Err(ApiError::missing(&["body"]));

@@ -153,8 +153,9 @@ async fn get_permissions(ctx: Ctx, Path(username): Path<String>) -> ApiResult {
 async fn patch_permissions(ctx: Ctx, Path(username): Path<String>, body: Body) -> ApiResult {
     use meerschaum_core::access as rules;
     let caller = crate::access::require(&ctx.state, &ctx.headers, &["users:write"]).await?;
-    let body = super::pipes::parse_json_body(&body_bytes(body).await?)?
-        .unwrap_or(Json::Object(Default::default()));
+    let body =
+        super::pipes::parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?
+            .unwrap_or(Json::Object(Default::default()));
     let Some(request) = body.as_object() else {
         return Err(ApiError::new(
             400,
@@ -422,7 +423,11 @@ fn keep_reserved(stored: &Map, mut given: Map) -> Result<Map, &'static str> {
 ///   new user gets the default role and is in Everyone; it cannot set its own type or rights.
 async fn register_user(ctx: Ctx, body: Body) -> ApiResult {
     let state = &ctx.state;
-    let form = read_form(&ctx.headers, body_bytes(body).await?).await;
+    let form = read_form(
+        &ctx.headers,
+        body_bytes(body, ctx.state.config.limits.auth).await?,
+    )
+    .await;
     let conn = state.instance();
     let _first_user = state.first_user.lock().await;
     let first_run = conn
@@ -544,7 +549,11 @@ async fn register_user(ctx: Ctx, body: Body) -> ApiResult {
 
 async fn edit_user(ctx: Ctx, body: Body) -> ApiResult {
     let state = &ctx.state;
-    let form = read_form(&ctx.headers, body_bytes(body).await?).await;
+    let form = read_form(
+        &ctx.headers,
+        body_bytes(body, ctx.state.config.limits.body).await?,
+    )
+    .await;
     let principal = scoped_auth(state, &ctx.headers, &["users:write"]).await?;
     let _user_change = state.first_user.lock().await;
     let Ok(attributes) = parse_attributes(form_get(&form, "attributes")) else {

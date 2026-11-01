@@ -127,8 +127,8 @@ fn failed(context: &str, error: impl std::fmt::Display) -> ApiError {
     ApiError::exception(context, error)
 }
 
-async fn parameters(body: Body, name: &str) -> Result<Map, ApiError> {
-    let body = super::pipes::parse_json_body(&body_bytes(body).await?)?
+async fn parameters(body: Body, name: &str, limit: Option<usize>) -> Result<Map, ApiError> {
+    let body = super::pipes::parse_json_body(&body_bytes(body, limit).await?)?
         .ok_or_else(|| ApiError::missing(&["body"]))?;
     let Json::Object(_) = body else {
         return Err(ApiError::new(
@@ -741,8 +741,9 @@ pub fn bounds_of(body: &Json) -> Result<PlanOptions, ApiError> {
     })
 }
 
-async fn optional_body(body: Body) -> Result<Json, ApiError> {
-    let body = super::pipes::parse_json_body(&body_bytes(body).await?)?.unwrap_or(Json::Null);
+async fn optional_body(body: Body, limit: Option<usize>) -> Result<Json, ApiError> {
+    let body =
+        super::pipes::parse_json_body(&body_bytes(body, limit).await?)?.unwrap_or(Json::Null);
     match body {
         Json::Null | Json::Object(_) => Ok(body),
         _ => Err(ApiError::new(
@@ -755,7 +756,7 @@ async fn optional_body(body: Body) -> Result<Json, ApiError> {
 /// `POST /pipelines/{name}/plan`: what a run would do, read-only.
 async fn plan(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
-    let body = optional_body(body).await?;
+    let body = optional_body(body, ctx.state.config.limits.body).await?;
     let options = bounds_of(&body)?;
     let conn = connector(&ctx)?;
     visible_registration(&ctx.state, &caller, &conn, &name).await?;
@@ -1083,7 +1084,7 @@ async fn sync(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let caller =
         access::require(&ctx.state, &ctx.headers, &["pipes:write", "jobs:execute"]).await?;
     let principal = caller.auth.clone();
-    let body = optional_body(body).await?;
+    let body = optional_body(body, ctx.state.config.limits.body).await?;
     let options = bounds_of(&body)?;
     let run_id = match body.get("run_id") {
         None | Some(Json::Null) => None,
@@ -1139,7 +1140,7 @@ async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let conn = connector(&ctx)?;
     access::guard::check_connector_teams(&ctx.state, &caller, &conn.connector_keys())?;
     let mut pipe = metadata(&ctx, &conn, &name)?;
-    let mut requested = parameters(body, &name).await?;
+    let mut requested = parameters(body, &name, ctx.state.config.limits.body).await?;
     let registry = conn.connector_keys();
     canonicalize_client_members(&ctx, &registry, &mut requested);
     if let Some(Value::Map(definition)) = requested.get_mut("pipeline") {
@@ -1195,7 +1196,7 @@ async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         ));
     }
     let patch = ctx.query.bool("patch", false)?;
-    let mut requested = parameters(body, &name).await?;
+    let mut requested = parameters(body, &name, ctx.state.config.limits.body).await?;
     canonicalize_client_members(&ctx, &conn.connector_keys(), &mut requested);
     let requested = if patch {
         meerschaum_core::value::apply_patch_maps(&old, &requested)
@@ -1285,7 +1286,10 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     if !ctx.state.config.registration_pipes {
         return Err(ApiError::new(403, "Pipe registration is disabled."));
     }
-    let request: RenameBody = serde_json::from_slice(&body_bytes(body).await?).map_err(|_| {
+    let request: RenameBody = serde_json::from_slice(
+        &body_bytes(body, ctx.state.config.limits.body).await?,
+    )
+    .map_err(|_| {
         ApiError::new(
             400,
             "Expected a destination name and optional source identity/revision.",
@@ -1559,7 +1563,7 @@ async fn attributes(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 async fn lease(ctx: Ctx, body: Body, release: bool) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
     let request: meerschaum_connector_api::models::LeaseRequest =
-        serde_json::from_slice(&body_bytes(body).await?)
+        serde_json::from_slice(&body_bytes(body, ctx.state.config.limits.body).await?)
             .map_err(|e| ApiError::new(400, format!("Invalid lease request: {e}")))?;
     let parts: Vec<_> = request.pipe_ref.splitn(4, '|').collect();
     if parts.len() != 4
@@ -1666,7 +1670,7 @@ async fn get_access(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 
 async fn patch_access(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
-    let body = optional_body(body).await?;
+    let body = optional_body(body, ctx.state.config.limits.body).await?;
     let body = if body.is_null() { json!({}) } else { body };
     let (conn, pipe, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
     let new = super::pipe_access::changed_access(&caller, &parameters, &body)?;
@@ -1684,7 +1688,7 @@ async fn patch_access(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResu
 
 async fn lock_or_unlock(ctx: Ctx, name: String, body: Body, lock: bool) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
-    let body = optional_body(body).await?;
+    let body = optional_body(body, ctx.state.config.limits.body).await?;
     let requested = super::pipe_access::requested_locks(&body)?;
     let (conn, pipe, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
     super::pipe_access::check_may_lock(&caller, &pipe, &parameters, lock)?;

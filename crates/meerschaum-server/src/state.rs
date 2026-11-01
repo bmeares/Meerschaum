@@ -163,7 +163,16 @@ impl AppStateBuilder {
     }
 
     /// Build the state, reading (or creating) the secret key file unless a secret was given.
+    /// A configuration with errors ([`ServerConfig::errors`], such as an `api:limits` value that
+    /// is not a byte count) is refused: the server never starts without the protection it
+    /// names.
     pub fn build(self) -> std::io::Result<AppState> {
+        if !self.config.errors.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid configuration: {}", self.config.errors.join(" ")),
+            ));
+        }
         let secret = match self.secret {
             Some(s) => s,
             None => auth::generate_secret_key(&self.config.secret_key_path)?,

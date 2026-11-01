@@ -57,8 +57,8 @@ fn failed(context: &str, e: impl std::fmt::Display) -> ApiError {
     ApiError::exception(context, e)
 }
 
-async fn json_body(body: Body) -> Result<Json, ApiError> {
-    let body = super::pipes::parse_json_body(&body_bytes(body).await?)?
+async fn json_body(body: Body, limit: Option<usize>) -> Result<Json, ApiError> {
+    let body = super::pipes::parse_json_body(&body_bytes(body, limit).await?)?
         .unwrap_or(Json::Object(JsonMap::new()));
     if !body.is_object() {
         return Err(ApiError::new(
@@ -183,7 +183,7 @@ async fn detail(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 
 async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["users:write"]).await?;
-    let body = json_body(body).await?;
+    let body = json_body(body, ctx.state.config.limits.body).await?;
     require_admin(&caller, "create teams")?;
     let valid = rules::valid_team_name(&name);
     if !valid.success {
@@ -219,7 +219,7 @@ async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
 
 async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["users:write"]).await?;
-    let body = json_body(body).await?;
+    let body = json_body(body, ctx.state.config.limits.body).await?;
     let mut team = team_or_404(&ctx.state, &name).await?;
     let admin = caller.no_auth || rules::can_administer_teams(&caller.principal);
     if !admin && !rules::can_manage_team(&caller.principal, &team.name) {
@@ -309,7 +309,7 @@ async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
 
 async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["users:write"]).await?;
-    let body = json_body(body).await?;
+    let body = json_body(body, ctx.state.config.limits.body).await?;
     require_admin(&caller, "rename teams")?;
     let Some(new_name) = body
         .get("name")

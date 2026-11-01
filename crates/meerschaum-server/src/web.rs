@@ -4,7 +4,7 @@
 use crate::AppState;
 use crate::host::ConsoleStatus;
 use axum::{
-    body::{Body, to_bytes},
+    body::Body,
     extract::{Request, State},
     http::{Method, StatusCode},
     middleware::Next,
@@ -57,9 +57,10 @@ pub async fn protect_sessions(
         && parts.get(5).is_some_and(|p| p == "register" || p == "edit")
     {
         let (head, body) = req.into_parts();
-        let bytes = match to_bytes(body, usize::MAX).await {
+        // Read here, before the route's own limit applies: bounded by the same allowance.
+        let bytes = match crate::routes::body_bytes(body, state.config.limits.body).await {
             Ok(b) => b,
-            Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+            Err(error) => return error.into_response(),
         };
         if let Ok(parameters) = serde_json::from_slice::<serde_json::Value>(&bytes)
             && ["target", "target_name", "target_table"]

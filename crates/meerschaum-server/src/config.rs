@@ -51,6 +51,195 @@ pub struct RateLimit {
     pub per: Duration,
 }
 
+/// The default `api:limits:auth_bytes`: `/login`, `/users/register` and `/tokens/*` (64 KiB).
+pub const DEFAULT_AUTH_BYTES: usize = 64 * 1024;
+/// The default `api:limits:body_bytes`: every other JSON or form body, `/execute` and MCP
+/// (16 MiB).
+pub const DEFAULT_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// The default `api:limits:data_bytes`: pipe data sync (`POST /pipes/{...}/data`, 1 GiB).
+pub const DEFAULT_DATA_BYTES: usize = 1024 * 1024 * 1024;
+/// The default `api:limits:proxy_bytes`: a request forwarded to the Python API host, Dash
+/// callbacks included (16 MiB).
+pub const DEFAULT_PROXY_BYTES: usize = 16 * 1024 * 1024;
+/// The default `api:host:response_seconds`: how long the proxy waits for the API host to start
+/// answering a request.
+pub const DEFAULT_HOST_RESPONSE_SECONDS: u64 = 300;
+/// The longest `api:host:response_seconds` (larger values are refused as overflowing).
+const MAX_HOST_RESPONSE_SECONDS: f64 = 1e9;
+
+/// `api:limits` (new in v5; v4 had none): the largest request body each kind of route accepts,
+/// enforced before the body is buffered (a declared `Content-Length` over the limit is refused at
+/// once, a chunked body when it streams past it), with `413`. `None` is no limit: the key was set
+/// to `null` on purpose. Response bodies, downloads and streams are never limited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BodyLimits {
+    /// `auth_bytes`: `/login`, `/users/register` and `/tokens/*`.
+    pub auth: Option<usize>,
+    /// `body_bytes`: every other route's JSON or form body, `/execute` and MCP.
+    pub body: Option<usize>,
+    /// `data_bytes`: the authenticated pipe data sync route (`POST /pipes/{...}/data`). The
+    /// engine routes and plugin uploads keep their own fixed limits.
+    pub data: Option<usize>,
+    /// `proxy_bytes`: a request forwarded to the Python API host (plugin routes, Dash callbacks),
+    /// counted as it streams and never buffered.
+    pub proxy: Option<usize>,
+}
+
+impl Default for BodyLimits {
+    fn default() -> Self {
+        BodyLimits {
+            auth: Some(DEFAULT_AUTH_BYTES),
+            body: Some(DEFAULT_BODY_BYTES),
+            data: Some(DEFAULT_DATA_BYTES),
+            proxy: Some(DEFAULT_PROXY_BYTES),
+        }
+    }
+}
+
+/// The keys of `api:limits`.
+const LIMIT_KEYS: &[&str] = &["auth_bytes", "body_bytes", "data_bytes", "proxy_bytes"];
+
+/// The largest float taken as a whole number of bytes (2^53, the last exactly representable).
+const MAX_EXACT_FLOAT: f64 = 9_007_199_254_740_992.0;
+
+/// One `api:limits` value: a whole number of bytes of at least 1 (an integer, a whole float such
+/// as `1e9`, or digits in a string), or `null` for no limit. Anything else is an error, and the
+/// server refuses to start: a typo never turns a limit off.
+fn limit_bytes(
+    key: &str,
+    value: Option<&Value>,
+    default: usize,
+    errors: &mut Vec<String>,
+) -> Option<usize> {
+    let value = match value {
+        None => return Some(default),
+        Some(Value::Null) => return None,
+        Some(value) => value,
+    };
+    let number = match value {
+        Value::Int(n) => u64::try_from(*n).ok(),
+        Value::Float(f)
+            if f.is_finite() && f.fract() == 0.0 && *f >= 0.0 && *f <= MAX_EXACT_FLOAT =>
+        {
+            Some(*f as u64)
+        }
+        Value::Str(text)
+            if !text.trim().is_empty() && text.trim().bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            text.trim().parse::<u64>().ok()
+        }
+        _ => None,
+    };
+    match number
+        .filter(|n| *n >= 1)
+        .and_then(|n| usize::try_from(n).ok())
+    {
+        Some(bytes) => Some(bytes),
+        None => {
+            errors.push(format!(
+                "`api:limits:{key}` must be a whole number of bytes of at least 1, or null for no \
+                 limit; got {} ({}).",
+                value.py_str(),
+                value.type_name()
+            ));
+            Some(default)
+        }
+    }
+}
+
+/// `api:limits` ([`BodyLimits`]): defaults for missing keys; errors for unusable values.
+pub fn parse_body_limits(
+    limits: Option<&Value>,
+    notices: &mut Vec<String>,
+    errors: &mut Vec<String>,
+) -> BodyLimits {
+    let defaults = BodyLimits::default();
+    let map = match limits {
+        None | Some(Value::Null) => return defaults,
+        Some(Value::Map(map)) => map,
+        Some(other) => {
+            errors.push(format!(
+                "`api:limits` must be a mapping of {} to byte counts; got {}.",
+                LIMIT_KEYS.join(", "),
+                other.type_name()
+            ));
+            return defaults;
+        }
+    };
+    let unknown: Vec<&str> = map
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !LIMIT_KEYS.contains(key))
+        .collect();
+    if !unknown.is_empty() {
+        notices.push(format!(
+            "Unknown key(s) in `api:limits`: {} (known: {}).",
+            unknown.join(", "),
+            LIMIT_KEYS.join(", ")
+        ));
+    }
+    BodyLimits {
+        auth: limit_bytes(
+            "auth_bytes",
+            map.get("auth_bytes"),
+            DEFAULT_AUTH_BYTES,
+            errors,
+        ),
+        body: limit_bytes(
+            "body_bytes",
+            map.get("body_bytes"),
+            DEFAULT_BODY_BYTES,
+            errors,
+        ),
+        data: limit_bytes(
+            "data_bytes",
+            map.get("data_bytes"),
+            DEFAULT_DATA_BYTES,
+            errors,
+        ),
+        proxy: limit_bytes(
+            "proxy_bytes",
+            map.get("proxy_bytes"),
+            DEFAULT_PROXY_BYTES,
+            errors,
+        ),
+    }
+}
+
+/// `api:host:response_seconds`: how long the proxy waits for the API host's response headers
+/// (default [`DEFAULT_HOST_RESPONSE_SECONDS`]; `null`: no limit). A value that is not a positive
+/// number of seconds is an error.
+pub fn parse_host_response_timeout(
+    value: Option<&Value>,
+    errors: &mut Vec<String>,
+) -> Option<Duration> {
+    let default = Duration::from_secs(DEFAULT_HOST_RESPONSE_SECONDS);
+    let value = match value {
+        None => return Some(default),
+        Some(Value::Null) => return None,
+        Some(value) => value,
+    };
+    let seconds = match value {
+        Value::Int(n) => Some(*n as f64),
+        Value::Float(f) => Some(*f),
+        Value::Str(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|s| s.is_finite() && *s > 0.0 && *s <= MAX_HOST_RESPONSE_SECONDS);
+    match seconds {
+        Some(seconds) => Some(Duration::from_secs_f64(seconds)),
+        None => {
+            errors.push(format!(
+                "`api:host:response_seconds` must be a positive number of seconds, or null for no \
+                 limit; got {} ({}).",
+                value.py_str(),
+                value.type_name()
+            ));
+            Some(default)
+        }
+    }
+}
+
 /// The name of the public preset (`api:permissions:preset: public`, `start api --public`).
 pub const PUBLIC_PRESET: &str = "public";
 
@@ -207,6 +396,15 @@ pub struct ServerConfig {
     /// Where the loopback-only plain listener of an HTTPS server listens, once
     /// [`crate::tls::prepare`] bound it: the Python API host calls the server back there.
     pub internal_addr: Option<std::net::SocketAddr>,
+    /// `api:limits`: the largest request body of each kind of route ([`BodyLimits`]).
+    pub limits: BodyLimits,
+    /// `api:host:response_seconds`: how long a request forwarded to the API host may wait for
+    /// its response headers (`504` after). `None`: no limit. Bodies, streams and websockets are
+    /// never timed once the headers arrived.
+    pub host_response_timeout: Option<Duration>,
+    /// Configuration that cannot be used (an `api:limits` or `api:host` value that is not a
+    /// number): the server refuses to start with these ([`crate::state::AppStateBuilder::build`]).
+    pub errors: Vec<String>,
 }
 
 fn get<'a>(map: &'a Map, keys: &[&str]) -> Option<&'a Value> {
@@ -447,6 +645,21 @@ impl ServerConfig {
     /// Resolve the configuration from a config map (`{'api': ..., 'meerschaum': ..., ...}`).
     pub fn from_map(cfg: &Map, flags: &ServerFlags) -> ServerConfig {
         let mut notices = Vec::new();
+        let mut errors = Vec::new();
+        let limits = parse_body_limits(get(cfg, &["api", "limits"]), &mut notices, &mut errors);
+        let host_response_timeout = match get(cfg, &["api", "host"]) {
+            None | Some(Value::Null) => Some(Duration::from_secs(DEFAULT_HOST_RESPONSE_SECONDS)),
+            Some(Value::Map(host)) => {
+                parse_host_response_timeout(host.get("response_seconds"), &mut errors)
+            }
+            Some(other) => {
+                errors.push(format!(
+                    "`api:host` must be a mapping (`response_seconds`); got {}.",
+                    other.type_name()
+                ));
+                Some(Duration::from_secs(DEFAULT_HOST_RESPONSE_SECONDS))
+            }
+        };
         // `api:server:*` wins; `api:uvicorn:*` is honored with a deprecation notice when it
         // differs from the v4 default.
         let server_or_uvicorn = |key: &str, notices: &mut Vec<String>| -> Option<Value> {
@@ -699,6 +912,9 @@ impl ServerConfig {
             webterm_resources_path: PathBuf::from("internal/webterm"),
             tls,
             internal_addr: None,
+            limits,
+            host_response_timeout,
+            errors,
         }
     }
 
@@ -1172,5 +1388,106 @@ mod tests {
             sc.webterm_tmux_config.as_deref(),
             Some(std::path::Path::new("/etc/mrsm-tmux.conf"))
         );
+    }
+
+    fn limits_of(
+        api: serde_json::Value,
+    ) -> (BodyLimits, Option<Duration>, Vec<String>, Vec<String>) {
+        let map = serde_json::from_value::<Value>(serde_json::json!({ "api": api }))
+            .unwrap()
+            .to_map();
+        let sc = ServerConfig::from_map(&map, &ServerFlags::default());
+        (sc.limits, sc.host_response_timeout, sc.notices, sc.errors)
+    }
+
+    #[test]
+    fn body_limits_default_and_take_byte_counts() {
+        let (limits, response, _, errors) = limits_of(serde_json::json!({}));
+        assert_eq!(limits, BodyLimits::default());
+        assert_eq!(limits.auth, Some(64 * 1024));
+        assert_eq!(limits.body, Some(16 * 1024 * 1024));
+        assert_eq!(limits.data, Some(1024 * 1024 * 1024));
+        assert_eq!(limits.proxy, Some(16 * 1024 * 1024));
+        assert_eq!(response, Some(Duration::from_secs(300)));
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let (limits, response, notices, errors) = limits_of(serde_json::json!({
+            "limits": {"auth_bytes": null, "body_bytes": 1e6, "data_bytes": "2048", "typo_bytes": 1},
+            "host": {"response_seconds": 2.5},
+        }));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(limits.auth, None, "null is no limit");
+        assert_eq!(limits.body, Some(1_000_000));
+        assert_eq!(limits.data, Some(2048));
+        assert_eq!(limits.proxy, Some(DEFAULT_PROXY_BYTES));
+        assert_eq!(response, Some(Duration::from_millis(2500)));
+        assert!(
+            notices.iter().any(|n| n.contains("typo_bytes")),
+            "{notices:?}"
+        );
+
+        let (_, response, _, errors) =
+            limits_of(serde_json::json!({"host": {"response_seconds": null}}));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(response, None);
+    }
+
+    #[test]
+    fn unusable_body_limits_are_errors_never_no_limit() {
+        for (api, key) in [
+            (
+                serde_json::json!({"limits": {"auth_bytes": -1}}),
+                "auth_bytes",
+            ),
+            (
+                serde_json::json!({"limits": {"body_bytes": "16MiB"}}),
+                "body_bytes",
+            ),
+            (
+                serde_json::json!({"limits": {"data_bytes": 0}}),
+                "data_bytes",
+            ),
+            (
+                serde_json::json!({"limits": {"proxy_bytes": 1e300}}),
+                "proxy_bytes",
+            ),
+            (
+                serde_json::json!({"limits": {"proxy_bytes": 1.5}}),
+                "proxy_bytes",
+            ),
+            (
+                serde_json::json!({"limits": {"auth_bytes": true}}),
+                "auth_bytes",
+            ),
+            (
+                serde_json::json!({"limits": {"body_bytes": "99999999999999999999999"}}),
+                "body_bytes",
+            ),
+            (serde_json::json!({"limits": "large"}), "api:limits"),
+            (
+                serde_json::json!({"host": {"response_seconds": -5}}),
+                "response_seconds",
+            ),
+            (
+                serde_json::json!({"host": {"response_seconds": 0}}),
+                "response_seconds",
+            ),
+            (
+                serde_json::json!({"host": {"response_seconds": "soon"}}),
+                "response_seconds",
+            ),
+            (serde_json::json!({"host": "fast"}), "api:host"),
+        ] {
+            let (limits, _, _, errors) = limits_of(api.clone());
+            assert!(errors.iter().any(|e| e.contains(key)), "{api}: {errors:?}");
+            // The value in effect is never "no limit".
+            assert!(
+                limits.auth.is_some()
+                    && limits.body.is_some()
+                    && limits.data.is_some()
+                    && limits.proxy.is_some(),
+                "{api}"
+            );
+        }
     }
 }

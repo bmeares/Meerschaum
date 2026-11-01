@@ -102,7 +102,8 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
             return Err(ApiError::new(403, allowed.message));
         }
     }
-    let body = parse_json_body(&body_bytes(body).await?)?.unwrap_or(Json::Null);
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?
+        .unwrap_or(Json::Null);
     let items = body
         .get("sysargs")
         .and_then(Json::as_array)
@@ -293,7 +294,7 @@ pub fn start_cleanup(state: &AppState) {
 /// they select; any other action also needs `actions:execute` and `jobs:write` (rc15,
 /// [`crate::execute_access`]).
 async fn execute(ctx: Ctx, body: Body) -> ApiResult {
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let caller = crate::access::require(&ctx.state, &ctx.headers, &["jobs:execute"]).await?;
     let principal = caller.auth.clone();
     let object = match body {

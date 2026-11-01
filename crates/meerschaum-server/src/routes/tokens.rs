@@ -141,7 +141,7 @@ fn scopes_of(v: Option<&Json>) -> Result<Vec<String>, ApiError> {
 }
 
 async fn register_token(ctx: Ctx, body: Body) -> ApiResult {
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.auth).await?)?;
     let principal = manager_unless_no_auth(&ctx.state, &ctx.headers).await?;
     let Some(Json::Object(model)) = body else {
         return Err(match body {
@@ -359,7 +359,7 @@ async fn owned_token(
 }
 
 async fn edit_token(ctx: Ctx, Path(token_id): Path<String>, body: Body) -> ApiResult {
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.auth).await?)?;
     let principal = manager_unless_no_auth(&ctx.state, &ctx.headers).await?;
     let Some(Json::Object(model)) = body else {
         return Err(ApiError::missing(&["body"]));

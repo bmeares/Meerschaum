@@ -33,7 +33,7 @@ async fn get_actions(ctx: Ctx) -> ApiResult {
 /// pipes it may change ([`crate::execute_access`]), its keywords read as the command line they
 /// stand for ([`crate::execute_access::sysargs_of_keywords`]).
 async fn do_action_legacy(ctx: Ctx, Path(action): Path<String>, body: Body) -> ApiResult {
-    let body = parse_json_body(&body_bytes(body).await?)?;
+    let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let caller = crate::access::require(&ctx.state, &ctx.headers, &["actions:execute"]).await?;
     let principal = caller.auth.clone();
     let mut keywords = match body {

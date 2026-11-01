@@ -3,6 +3,10 @@
 //!
 //! `/login` is served unless explicitly disabled. Unmatched requests fall through to the extension-host proxy
 //! (§7.3) when one is configured, else `404 {"detail": "Not Found"}`.
+//!
+//! Every route's request body is bounded by its `api:limits` allowance before anything reads it
+//! ([`BodyClass`], [`limit_body`]); requests forwarded to the API host have their own
+//! (`proxy_bytes`, [`crate::proxy`]).
 
 use axum::Router;
 use axum::body::Body;
@@ -12,6 +16,7 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
+use crate::config::BodyLimits;
 use crate::error::ApiError;
 use crate::query::Query;
 use crate::state::AppState;
@@ -289,6 +294,15 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         app = crate::mcp::http::routes(app, mcp);
     }
     app = docs::routes(app, &cfg);
+    // Each route's request body is bounded by its own allowance (`api:limits`, chosen per route,
+    // so a smaller default never caps a larger allowance such as pipe data) before anything
+    // reads it. A route layer: requests no route matches are the API host proxy's to limit.
+    if app.has_routes() {
+        app = app.route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            limit_body,
+        ));
+    }
     // The host mounts `/static` too (`meerschaum.api`, and the Dash console's own files): when a
     // host runs, its mount answers it (the server never shadows it); else the server serves the
     // directory itself, as v4 did.
@@ -315,11 +329,134 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
     .with_state(state)
 }
 
-/// Read a request body to bytes (Starlette's `await request.body()`).
-pub async fn body_bytes(body: Body) -> Result<bytes::Bytes, ApiError> {
-    axum::body::to_bytes(body, usize::MAX)
-        .await
-        .map_err(|e| ApiError::exception("Failed to read the request body", e))
+/// The pipe data sync route (`POST`), the one route with `api:limits:data_bytes`.
+pub const PIPE_DATA_ROUTE: &str = "/pipes/{connector_keys}/{metric_key}/{location_key}/data";
+
+/// Which allowance a route's request body has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyClass {
+    /// `api:limits:auth_bytes`: `/login`, `/users/register`, `/tokens/*`.
+    Auth,
+    /// `api:limits:body_bytes`: every other route (JSON and form bodies, `/execute`, MCP).
+    Body,
+    /// `api:limits:data_bytes`: pipe data sync ([`PIPE_DATA_ROUTE`]).
+    Data,
+    /// A fixed limit of the route's own: the engine routes ([`engine::ENGINE_BODY_LIMIT`]) and
+    /// plugin uploads ([`plugins::ARCHIVE_MAX_BYTES`]).
+    Fixed(usize),
+}
+
+impl BodyClass {
+    /// The allowance of a `method` request to the route registered as `route` (its pattern).
+    pub fn of(method: &Method, route: &str) -> BodyClass {
+        if route == meerschaum_connector_api::routes::LOGIN
+            || route == "/users/register"
+            || route == "/tokens"
+            || route.starts_with("/tokens/")
+        {
+            BodyClass::Auth
+        } else if route == PIPE_DATA_ROUTE && *method == Method::POST {
+            BodyClass::Data
+        } else if route.starts_with("/engine/") {
+            BodyClass::Fixed(engine::ENGINE_BODY_LIMIT)
+        } else if route == "/plugins/{name}" && *method == Method::POST {
+            BodyClass::Fixed(plugins::ARCHIVE_MAX_BYTES)
+        } else {
+            BodyClass::Body
+        }
+    }
+
+    /// The limit of this allowance (`None`: no limit, `null` in the config).
+    pub fn limit(self, limits: &BodyLimits) -> Option<usize> {
+        match self {
+            BodyClass::Auth => limits.auth,
+            BodyClass::Body => limits.body,
+            BodyClass::Data => limits.data,
+            BodyClass::Fixed(limit) => Some(limit),
+        }
+    }
+}
+
+/// `413` for a body over `limit` bytes.
+pub fn body_too_large(limit: usize) -> ApiError {
+    ApiError::new(
+        413,
+        format!(
+            "The request body is larger than this route accepts ({limit} bytes, `api:limits`)."
+        ),
+    )
+}
+
+/// Whether `error` (or an error it wraps) is a body read stopped by a length limit.
+pub fn exceeded_length_limit(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if error.is::<http_body_util::LengthLimitError>() {
+            return true;
+        }
+        current = error.source();
+    }
+    false
+}
+
+/// The length a request says its body has: `Content-Length`, or what the body itself knows.
+fn declared_length(req: &Request) -> u64 {
+    use axum::body::HttpBody as _;
+    let header = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    header.max(req.body().size_hint().lower())
+}
+
+/// Apply `limit` to a request before anything reads its body: a declared length over it is
+/// refused at once (`413`, nothing is read), and the body is capped at `limit`, so a chunked body
+/// fails when it streams past it ([`body_bytes`] answers `413`). Nothing is buffered here.
+pub fn limit_request(req: Request, limit: Option<usize>) -> Result<Request, ApiError> {
+    let Some(limit) = limit else {
+        return Ok(req);
+    };
+    if declared_length(&req) > limit as u64 {
+        return Err(body_too_large(limit));
+    }
+    Ok(req.map(|body| Body::new(http_body_util::Limited::new(body, limit))))
+}
+
+/// The route layer of [`BodyClass`]: each matched route's request body is limited by its own
+/// allowance (`api:limits`) before its handler (and its authentication) runs.
+pub async fn limit_body(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let class = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map_or(BodyClass::Body, |route| {
+            BodyClass::of(req.method(), route.as_str())
+        });
+    match limit_request(req, class.limit(&state.config.limits)) {
+        Ok(req) => next.run(req).await,
+        Err(error) => error.into_response(),
+    }
+}
+
+/// Read a request body to bytes (Starlette's `await request.body()`), at most `limit` bytes (the
+/// route's `api:limits` allowance; `None` only when the operator set it to `null`): `413` past it,
+/// whether the body declared its length or streams.
+pub async fn body_bytes(body: Body, limit: Option<usize>) -> Result<bytes::Bytes, ApiError> {
+    if let Some(limit) = limit {
+        use axum::body::HttpBody as _;
+        if body.size_hint().lower() > limit as u64 {
+            return Err(body_too_large(limit));
+        }
+    }
+    let max = limit.unwrap_or(usize::MAX);
+    axum::body::to_bytes(body, max).await.map_err(|e| {
+        if exceeded_length_limit(&e) {
+            body_too_large(max)
+        } else {
+            ApiError::exception("Failed to read the request body", e)
+        }
+    })
 }
 
 /// Parse an `application/x-www-form-urlencoded` body into ordered pairs.

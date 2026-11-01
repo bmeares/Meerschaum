@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -53,11 +53,16 @@ async fn post_mcp(
     State(state): State<AppState>,
     Extension(server): Extension<Arc<McpServer>>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let caller = match caller(&state, &headers).await {
         Ok(c) => c,
         Err(r) => return *r,
+    };
+    // Read after authentication, within `api:limits:body_bytes`.
+    let body = match crate::routes::body_bytes(body, state.config.limits.body).await {
+        Ok(body) => body,
+        Err(error) => return error.into_response(),
     };
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return json(

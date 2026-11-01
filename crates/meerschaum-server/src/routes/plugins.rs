@@ -58,7 +58,17 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
     if let Ok(mut mp) = Multipart::from_request(req, &state).await {
         while let Ok(Some(field)) = mp.next_field().await {
             if field.name() == Some("archive") {
-                archive = field.bytes().await.ok();
+                archive = match field.bytes().await {
+                    Ok(bytes) => Some(bytes),
+                    // An archive over the limit is a `413`, not a missing archive.
+                    Err(e)
+                        if e.status() == StatusCode::PAYLOAD_TOO_LARGE
+                            || super::exceeded_length_limit(&e) =>
+                    {
+                        return Err(super::body_too_large(ARCHIVE_MAX_BYTES));
+                    }
+                    Err(_) => None,
+                };
             }
         }
     }
