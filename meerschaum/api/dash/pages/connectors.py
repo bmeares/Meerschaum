@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Browse visible connectors; administrators inspect masked settings and test connections
+Browse visible connectors; administrators see masked settings and test connections
 in a modal. Build each request from the current viewer's permissions.
 """
 
@@ -143,15 +143,18 @@ def connector_modal():
     return dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle(id='connector-info-title')),
         dbc.ModalBody(id='connector-info-body'),
-        dbc.ModalFooter(id='connector-info-footer',children=[
-            dbc.Button('Close',id='connector-info-close',color='secondary',n_clicks=0),
-        ]),
+        ### Test connection (administrators); hidden when the connector has no actions.
+        dbc.ModalFooter(id='connector-info-footer',children=[],style={'display':'none'}),
     ],id='connector-info-modal',is_open=False,size='lg',scrollable=True,
        class_name='connector-info-modal')
 
 
 def connector_info(row, details, testable):
-    """Only receive a freshly authorized, secret-masked listing row."""
+    """
+    The modal's body and footer for a freshly authorized, secret-masked listing row: with
+    `details`, the connection settings are shown at once. The header's X and a click outside close
+    the modal; the footer only holds Test connection.
+    """
     keys = row['keys']
     entries = []
     for field,label in (('flavor','Flavor'),('host','Host'),('port','Port'),
@@ -160,18 +163,15 @@ def connector_info(row, details, testable):
         if details and value not in (None,''):
             entries += [html.Dt(label),html.Dd(str(value))]
     body = [html.Dl(entries,className='connector-info-summary'),
-            html.Div(_cell('source',row),className='connector-info-source'),
-            html.Div(id={'type':'connector-inspect-content','index':keys})]
-    footer = []
+            html.Div(_cell('source',row),className='connector-info-source')]
     if details:
-        footer.append(dbc.Button('Inspect',id={'type':'connector-inspect-button','index':keys},
-                                 n_clicks=0,color='secondary'))
+        body.append(connector_inspection(row))
+    footer = []
     if testable and row.get('testable'):
         footer += [html.Div(id={'type':'connector-test-result','index':keys},role='status',
                             className='connectors-test-result'),
                    dbc.Button('Test connection',id={'type':'connector-test-button','index':keys},
                               n_clicks=0,color='primary',class_name='connectors-test-button')]
-    footer.append(dbc.Button('Close',id='connector-info-close',color='secondary',n_clicks=0))
     return body,footer
 
 

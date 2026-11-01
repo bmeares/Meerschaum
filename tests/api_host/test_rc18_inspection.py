@@ -31,29 +31,24 @@ other = sign_in('modal-other', role='viewer', teams={'Sales':'member'})
 trigger = SimpleNamespace(triggered_id={'type':'connector-info-button','index':'sql:modal_ops'})
 with patch.object(callbacks.dash, 'ctx', trigger), \\
      patch.object(connector_listing, 'test_connector', side_effect=AssertionError('Inspection connected.')):
-    shown = callbacks.connector_info_click([1], 0, admin)
+    shown = callbacks.connector_info_click([1], admin)
     assert shown[0] and 'db.invalid' in str(shown[2]) and '5432' in str(shown[2])
-    assert 'Test connection' in str(shown[3]) and 'Inspect' in str(shown[3])
+    # The settings are shown at once; no Inspect or Close button (the X and the backdrop close).
+    assert 'Supported keys' in str(shown[2]) and 'weather' in str(shown[2])
+    assert 'Test connection' in str(shown[3]) and shown[4] == {}
+    assert 'Inspect' not in str(shown[2:4]) and 'Close' not in str(shown[2:4])
     assert 'modal-private-password' not in str(shown)
     for session in (ops, other, {'session-id':'forged','admin':True}, {}):
-        result = callbacks.connector_info_click([1], 0, session)
+        result = callbacks.connector_info_click([1], session)
         assert 'db.invalid' not in str(result) and 'Test connection' not in str(result)
-        assert 'Inspect' not in str(result[3])
-    with patch.object(callbacks.dash, 'ctx', SimpleNamespace(triggered_id={
-            'type':'connector-inspect-button','index':'sql:modal_ops'})):
-        inspected = callbacks.inspect_connector_click(1, admin)
-        assert 'Supported keys' in str(inspected) and 'weather' in str(inspected)
-        assert 'modal-private-password' not in str(inspected)
-        for session in (ops, other, {}):
-            assert 'not available' in str(callbacks.inspect_connector_click(1, session))
+        assert 'Supported keys' not in str(result) and result[4] == {'display':'none'}
     # An open administrator page cannot retain settings after demotion.
     assert get_api_connector().edit_user(User('modal-admin', type='user', instance=get_api_connector()))[0]
-    result = callbacks.connector_info_click([2], 0, admin)
-    assert 'db.invalid' not in str(result) and 'Inspect' not in str(result[3])
-    assert 'not available' in str(callbacks.inspect_connector_click(1, admin))
+    result = callbacks.connector_info_click([2], admin)
+    assert 'db.invalid' not in str(result) and 'Supported keys' not in str(result)
     with patch.object(access, '_secure', return_value=True):
         for session in (ops, admin):
-            result = callbacks.connector_info_click([3], 0, session)
+            result = callbacks.connector_info_click([3], session)
             assert result[1] == 'Connector' and 'not available' in str(result[2])
 plugin_row = {'keys':'custom:local','type':'custom','source':'Plugin','plugin':'modal_source',
               'source_detail':None,'attributes':{},'fields':{}}

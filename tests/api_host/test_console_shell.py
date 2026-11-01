@@ -188,19 +188,23 @@ page = route(client, dash_app, '/dash/connectors')
 rows = {row['keys']: row for row in cl.list_connectors()}
 assert find(page, 'connector-info-modal') is not None
 assert not [n for n in walk(page) if n.get('props', {}).get('className') == 'connectors-attributes']
-callback = next(key for key in dash_app.callback_map if 'connector-inspect-content' in key)
+### The settings arrive with the modal (the connector button's click), never with the page.
+callback = next(key for key in dash_app.callback_map if 'connector-info-modal.is_open' in key)
+outputs = [{'id':'connector-info-modal','property':'is_open'},{'id':'connector-info-title','property':'children'},
+           {'id':'connector-info-body','property':'children'},{'id':'connector-info-footer','property':'children'},
+           {'id':'connector-info-footer','property':'style'}]
 inspections = []
 for keys in ('sql:revpatch','sql:atsecret','valkey:revcache','sql:jsonsecret','hookish:main'):
-    button = json.dumps({'type':'connector-inspect-button','index':keys},sort_keys=True,separators=(',',':'))
+    button = {'type':'connector-info-button','index':keys}
     response = client.post('/dash/_dash-update-component',json={
         'output':callback,
-        'outputs':{'id':{'type':'connector-inspect-content','index':keys},'property':'children'},
-        'inputs':[{'id':button,'property':'n_clicks','value':1}],
+        'outputs':outputs,
+        'inputs':[[{'id':button,'property':'n_clicks','value':1}]],
         'state':[{'id':'session-store','property':'data','value':{'session-id':'00000000-0000-4000-8000-0000005e1101'}}],
-        'changedPropIds':[button+'.n_clicks'],
+        'changedPropIds':[json.dumps(button,sort_keys=True,separators=(',',':'))+'.n_clicks'],
     })
     assert response.status_code == 200, response.text[-2000:]
-    inspections.append(next(iter(response.json()['response'].values()))['children'])
+    inspections.append(response.json()['response']['connector-info-body']['children'])
 text = json.dumps([page,*inspections], ensure_ascii=False)
 pre = [n['props'].get('children') for n in walk(inspections) if n.get('props', {}).get('className') == 'connectors-attributes']
 print('JSON:' + json.dumps({

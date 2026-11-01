@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Connector filtering, freshly authorized inspection, and connection tests.
+Connector filtering, the freshly authorized connector modal, and connection tests.
 """
 
 from __future__ import annotations
@@ -39,46 +39,25 @@ def _connector_row(keys, session, details=False):
     Output('connector-info-title','children'),
     Output('connector-info-body','children'),
     Output('connector-info-footer','children'),
+    Output('connector-info-footer','style'),
     Input({'type':'connector-info-button','index':ALL},'n_clicks'),
-    Input('connector-info-close','n_clicks'),
     State('session-store','data'),
     prevent_initial_call=True,
 )
-def connector_info_click(clicks, close, session):
+def connector_info_click(clicks, session):
+    """Open a connector's modal, built from the viewer's rights at the moment of the click."""
     import dash_bootstrap_components as dbc
     from meerschaum.api.dash.pages.connectors import connector_info
     trigger = dash.ctx.triggered_id
-    if trigger=='connector-info-close':
-        if not close:
-            raise PreventUpdate
-        return False,dash.no_update,dash.no_update,dash.no_update
     if not isinstance(trigger,dict) or trigger.get('type')!='connector-info-button' or not any(clicks or []):
         raise PreventUpdate
     try:
         row,who = _connector_row(trigger.get('index'),session)
         body,footer = connector_info(row,who['admin'],who['admin'])
-        return True,html.Code(row['keys']),body,footer
+        return True,html.Code(row['keys']),body,footer,({} if footer else {'display':'none'})
     except Exception:
-        return True,'Connector',dbc.Alert('This connector is not available.',color='secondary'),[
-            dbc.Button('Close',id='connector-info-close',color='secondary',n_clicks=0)]
-
-
-@dash_app.callback(
-    Output({'type':'connector-inspect-content','index':MATCH},'children'),
-    Input({'type':'connector-inspect-button','index':MATCH},'n_clicks'),
-    State('session-store','data'),
-    prevent_initial_call=True,
-)
-def inspect_connector_click(clicks, session):
-    if not clicks:
-        raise PreventUpdate
-    from meerschaum.api.dash.pages.connectors import connector_inspection
-    trigger = dash.ctx.triggered_id
-    try:
-        row,_ = _connector_row(trigger.get('index') if isinstance(trigger,dict) else None,session,details=True)
-    except Exception:
-        return html.P('Connection settings are not available to your account.')
-    return connector_inspection(row)
+        return (True,'Connector',dbc.Alert('This connector is not available.',color='secondary'),
+                [],{'display':'none'})
 
 
 dash_app.clientside_callback(

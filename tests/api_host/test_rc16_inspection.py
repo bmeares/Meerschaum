@@ -94,9 +94,12 @@ shown = str(connectors.build_table([row], False, details=True))
 assert 'connector-info-button' in shown and 'Inspect' not in shown
 assert 'Supported keys' not in shown
 body, footer = connectors.connector_info(row, details=True, testable=True)
-shown += str(body) + str(footer) + str(connectors.connector_inspection(row))
-assert 'Inspect' in shown and 'Test connection' in shown
-assert 'Supported keys' in shown and 'weather' in shown
+### RC25: the settings are expanded in the modal's body; only Test connection is a button.
+assert 'Supported keys' in str(body) and 'weather' in str(body)
+assert 'Test connection' in str(footer) and 'Inspect' not in str(body) + str(footer)
+summary, _ = connectors.connector_info(row, details=False, testable=False)
+assert 'Supported keys' not in str(summary) and 'weather' not in str(summary)
+shown += str(body) + str(footer)
 for secret in ('secret-main-321','nested-token-654','query-secret-987'):
     assert secret not in shown and secret not in json.dumps(rows), secret
 public = str(connectors.build_table([row], False, details=False))

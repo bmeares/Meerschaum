@@ -155,16 +155,24 @@ def test_connector_and_plugin_inspection_obey_roles(inspection_server,browser,wi
                 own = rows.locator('tr[data-keys="sql:rc16_ops"]')
                 assert rows.locator('button:text-is("Inspect")').count() == 0
                 assert tab.page.locator('#connectors-table thead th').all_text_contents() == ['Connector','Source']
-                own.get_by_role('button',name='sql:rc16_ops',exact=True).click()
+                key_button = own.get_by_role('button',name='sql:rc16_ops',exact=True)
+                ### RC25: connector links carry no underline, at rest or on hover.
+                assert key_button.evaluate('e => getComputedStyle(e).textDecorationLine') == 'none'
+                key_button.hover()
+                assert key_button.evaluate('e => getComputedStyle(e).textDecorationLine') == 'none'
+                key_button.click()
                 modal = tab.page.locator('.connector-info-modal.show')
                 modal.wait_for()
                 text = modal.inner_text()
                 assert 'weather' in text and 'db.invalid' in text and '5432' in text
                 assert modal.get_by_role('button',name='Test connection',exact=True).is_visible()
-                modal.get_by_role('button',name='Inspect',exact=True).click()
+                ### RC25: settings expanded at once; the X is the only Close (no Inspect / Close).
                 modal.get_by_text('Supported keys',exact=True).wait_for()
                 text = modal.inner_text()
                 assert 'Supported keys' in text and 'Required keys' in text
+                assert modal.get_by_role('button',name='Inspect',exact=True).count() == 0
+                assert modal.get_by_role('button',name='Close',exact=True).count() == 1
+                assert modal.locator('.modal-header .btn-close').count() == 1
                 bounds = modal.locator('.modal-dialog').bounding_box()
                 assert bounds['x'] >= 0 and bounds['x']+bounds['width'] <= width+1, bounds
                 assert modal.evaluate('element => element.scrollWidth <= element.clientWidth + 1')
@@ -175,7 +183,8 @@ def test_connector_and_plugin_inspection_obey_roles(inspection_server,browser,wi
                 modal.wait_for()
                 modal.get_by_role('button',name='Test connection',exact=True).click()
                 modal.get_by_text('Connected in',exact=False).wait_for(timeout=30000)
-                modal.get_by_role('button',name='Close',exact=True).last.click()
+                ### A click outside the dialog (the backdrop) closes it.
+                tab.page.mouse.click(2, 2)
                 modal.wait_for(state='hidden')
             else:
                 expected, hidden = ('ops','sales') if role == 'ops' else ('sales','ops')

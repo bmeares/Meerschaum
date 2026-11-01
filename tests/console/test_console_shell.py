@@ -138,8 +138,9 @@ def test_connectors_page_masks_secrets_and_tests_connections(server, context):
     modal = page.locator('.connector-info-modal.show')
     modal.wait_for()
     assert '127.0.0.1' in modal.inner_text() and 'postgresql' in modal.inner_text()
-    modal.get_by_role('button',name='Inspect',exact=True).click()
+    ### The settings are shown at once (RC25: no Inspect button).
     modal.locator('.connectors-attributes').wait_for()
+    assert modal.get_by_role('button',name='Inspect',exact=True).count() == 0
     assert 'w7user:' in modal.inner_text()
     ### The mask reads as dots, not as `•` escapes.
     assert 'postgresql://w7user:••••••@127.0.0.1:1/w7' in modal.inner_text()
@@ -246,7 +247,6 @@ def test_overview_and_connectors_fit_a_phone(server, browser):
             'button',name='sql:w7secret',exact=True).click()
         modal = page.locator('.connector-info-modal.show')
         modal.wait_for()
-        modal.get_by_role('button',name='Inspect',exact=True).click()
         modal.locator('.connectors-attributes').wait_for()
         small = page.evaluate(SMALL_TARGETS, '.connector-info-modal.show')
         assert small == [], small
