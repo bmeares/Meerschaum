@@ -303,13 +303,13 @@ def test_cli_plan_is_pipeline_plan_expected(chain):
     pipeline = mrsm.Pipeline(daily, parents=True)
     first = pipeline.sync(yes=True)
     assert first.success, _why(first)
-    ### A late reading before `raw`'s watermark: `raw` will write a ledger entry for its grid cell.
+    ### A late reading inside the backtrack window keeps its precise ledger extent.
     _insert(_conn(), [('2024-01-01 01:30:00', 'c', 4)])
 
     static = pipeline.plan()
     expected = pipeline.plan(expected=True)
     assert static.node(clean).action == 'skip'
-    assert expected.node(clean).action == 'backfill'
+    assert expected.node(clean).action == 'incremental'
     assert expected.node(clean).raw['provisional'] is True
 
     conn = _conn()

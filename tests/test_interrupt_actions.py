@@ -90,16 +90,15 @@ def _no_crash(text: str) -> None:
 
 def test_ctrl_c_interrupts_a_worker_backed_action(home):
     binary, env, root = home
-    started = time.time()
-    out, status = _pty([str(binary), 'w18sleep'], env, root, b'W18SLEEP-STARTED', after=30)
-    text = out.decode('utf-8', 'replace')
-    assert status is not None, text[-1500:]
-    assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 130, (status, text[-1500:])
-    assert 'Interrupted.' in text, text[-1500:]
-    assert time.time() - started < 60
-    ### The Python side of the interrupt is the plugin's own: the output holds no mrsm traceback
-    ### beyond what the worker prints for the plugin's `KeyboardInterrupt`.
-    assert 'panicked' not in text, text[-1500:]
+    for _ in range(3):
+        started = time.time()
+        out, status = _pty([str(binary), 'w18sleep'], env, root, b'W18SLEEP-STARTED', after=30)
+        text = out.decode('utf-8', 'replace')
+        assert status is not None, text[-1500:]
+        assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 130, (status, text[-1500:])
+        assert 'Interrupted.' in text, text[-1500:]
+        assert time.time() - started < 60
+        assert 'panicked' not in text, text[-1500:]
 
 
 def test_a_second_ctrl_c_drops_a_plugin_which_ignores_the_first(home):

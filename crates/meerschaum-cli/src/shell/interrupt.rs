@@ -8,7 +8,7 @@
 //! | Regime (decided per signal) | First Ctrl-C | Second Ctrl-C |
 //! |---|---|---|
 //! | idle at the shell prompt | ignored (the editor reads the key) | |
-//! | idle, not in a shell | the default action (the process dies) | |
+//! | idle, not in a shell | `Interrupted.` and exit 130 | |
 //! | an action runs | cooperative cancellation: [`Session::block_on`](crate::native::session::Session::block_on) drops its future and unwinds with [`Interrupted`]; [`check`] does the same between awaits; the dispatcher ([`guarded`]) turns the unwind into `Interrupted.` | `mrsm <action>`: exit 130 at once; in a shell, only when the action is still running two seconds later |
 //! | the action handles the stop flag itself (laps, `--loop`, `sync --loop`, followed logs: [`mark_cooperative`]) | sets the stop flag, nothing is dropped | exit 130 (`mrsm <action>`) or forced cancellation as above (shell) |
 //! | a foreground program runs (`sh`, `python`: [`ChildScope`]) | nothing: the terminal already delivered it to the program's own process group | within two seconds: SIGKILL the program (not an interactive REPL) |
@@ -25,8 +25,8 @@
 
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use meerschaum_core::SuccessTuple;
@@ -65,8 +65,8 @@ static CHILD_KILLABLE: AtomicBool = AtomicBool::new(false);
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 /// A second Ctrl-C forces the running action to unwind although it handles the signal itself.
 static FORCED: AtomicBool = AtomicBool::new(false);
-/// A Ctrl-C reached the action (in any regime that is not the cooperative one).
-static SEEN: AtomicBool = AtomicBool::new(false);
+/// A Ctrl-C was delivered or observed by the watcher.
+static SEEN: LazyLock<Arc<AtomicBool>> = LazyLock::new(|| Arc::new(AtomicBool::new(false)));
 /// An unwind was turned into `Interrupted.`.
 static UNWOUND: AtomicBool = AtomicBool::new(false);
 /// Ctrl-Cs counted in the current window.
@@ -243,6 +243,10 @@ pub fn install(_session: Option<&crate::native::Session>) {
         return;
     }
     START.call_once(|| {
+        // A worker may return before the watcher runs; latch delivery in the signal handler.
+        let Ok(_seen) = register_sigint_flag() else {
+            return;
+        };
         let Ok(mut signals) = SignalsInfo::<WithOrigin>::new([SIGINT, SIGTERM]) else {
             return;
         };
@@ -260,6 +264,11 @@ pub fn install(_session: Option<&crate::native::Session>) {
             }
         });
     });
+}
+
+#[cfg(unix)]
+fn register_sigint_flag() -> std::io::Result<signal_hook::SigId> {
+    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&SEEN))
 }
 
 /// Start the Ctrl-C task on the session's runtime (once per process).
@@ -352,14 +361,13 @@ fn on_sigint(from_terminal: bool) {
         return;
     }
     if DEPTH.load(Ordering::SeqCst) == 0 {
-        // Between actions: a shell's editor reads Ctrl-C as a key (the terminal is raw), so a
-        // signal here is a stray one; anywhere else the process ends as it always did.
+        // A worker may have returned before this signal was processed. A standalone CLI
+        // still reports an interruption; a shell leaves the key to its editor.
         if in_shell() {
             crate::format::progress::clear_for_signal();
             return;
         }
-        end_like_default_sigint();
-        return;
+        exit_now();
     }
     if COOPERATIVE.load(Ordering::SeqCst) {
         jobs::stop_requested_flag().store(true, Ordering::SeqCst);
@@ -746,6 +754,39 @@ mod tests {
             "a REPL that ended normally is not an interruption"
         );
         reset();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_worker_returning_before_the_watcher_still_exits_130() {
+        const CHILD: &str = "MRSM_TEST_LATE_SIGINT_WATCHER";
+        const TEST: &str =
+            "shell::interrupt::tests::a_worker_returning_before_the_watcher_still_exits_130";
+        if std::env::var_os(CHILD).is_some() {
+            let _serial = test_serial::take();
+            reset();
+            register_sigint_flag().unwrap();
+            let running = Running::begin(true);
+            let child = ChildScope::enter(None, true);
+            signal_hook::low_level::raise(signal_hook::consts::SIGINT).unwrap();
+            drop(child);
+            drop(running);
+            let result = SuccessTuple::fail("worker returned");
+            assert!(take_interrupted(&result));
+            assert!(!take_interrupted(&result));
+            // Process the signal only after the worker result and action scope are gone.
+            on_sigint(true);
+            panic!("a late standalone Ctrl-C must exit 130");
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture"])
+            .env(CHILD, "1")
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(EXIT_CODE), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains(MESSAGE));
     }
 
     #[test]
