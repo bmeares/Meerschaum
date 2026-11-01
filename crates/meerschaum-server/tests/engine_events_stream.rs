@@ -808,7 +808,7 @@ impl ShortLivedSessions {
 impl BrowserAuth for ShortLivedSessions {
     async fn authorize(
         &self,
-        _state: &AppState,
+        state: &AppState,
         headers: &HeaderMap,
     ) -> Option<Result<(HeaderMap, String), StatusCode>> {
         let cookie = headers.get("cookie")?.to_str().ok()?;
@@ -817,10 +817,19 @@ impl BrowserAuth for ShortLivedSessions {
         }
         self.minted
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // As the console's bridge mints it: a user bearer bound to the user's credential.
+        let credential = meerschaum_server::auth::user_credential(
+            state,
+            &meerschaum_core::users::User::new("admin", None),
+        )
+        .await
+        .unwrap();
         let claims: Map = serde_json::from_value(json!({
             "sub": "admin",
             "scopes": ["*"],
             "exp": chrono::Utc::now().timestamp() + Self::LIFETIME,
+            (meerschaum_server::auth::PRINCIPAL_CLAIM): "user",
+            (meerschaum_server::auth::CREDENTIAL_CLAIM): credential,
         }))
         .unwrap();
         let mut h = HeaderMap::new();

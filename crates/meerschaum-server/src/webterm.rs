@@ -1073,15 +1073,13 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
     // Then let the socket's writer deliver what was queued (the reason, the close frame), for a
     // bounded time.
     drop(control);
-    if !writer_done {
-        if closed_by_client {
-            writer.abort();
-        } else if tokio::time::timeout(CLOSE_TIMEOUT, &mut writer)
-            .await
-            .is_err()
-        {
-            writer.abort();
-        }
+    if !writer_done
+        && (closed_by_client
+            || tokio::time::timeout(CLOSE_TIMEOUT, &mut writer)
+                .await
+                .is_err())
+    {
+        writer.abort();
     }
 }
 
