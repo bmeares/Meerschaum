@@ -3,7 +3,7 @@
 //! and update sets in temporary tables within one transaction (SQLAlchemy `Session`).
 
 use indexmap::IndexMap;
-use meerschaum_core::dtypes::{are_dtypes_equal, get_pd_type_from_db_type};
+use meerschaum_core::dtypes::{are_dtypes_equal, get_pd_type_from_db_type, is_dtype_numeric};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 
 use crate::dateadd::{DateArg, Number, dateadd_for_execution as dateadd_str};
@@ -809,13 +809,34 @@ impl SqlConnector {
             .get_table_cols_types(&target, pipe_schema.as_deref())
             .await;
         let state = self.pipe_state(&sp).await;
+        // PostgreSQL can store integer, floating and decimal SQL expressions in an existing
+        // unbounded NUMERIC column. A CASE expression may promote NUMERIC to DOUBLE PRECISION;
+        // that does not require rewriting the destination as TEXT (and Timescale cannot do
+        // that while chunks are compressed). Keep the actual staged types for comparisons.
+        let migration_cols = new_cols
+            .iter()
+            .map(|(col, dtype)| {
+                let compatible = table_cols_types.get(col).filter(|stored| {
+                    flavor.driver_family() == DriverFamily::Postgres
+                        && matches!(
+                            stored.trim().to_ascii_uppercase().as_str(),
+                            "NUMERIC" | "DECIMAL"
+                        )
+                        && is_dtype_numeric(dtype)
+                });
+                let dtype = compatible
+                    .map(|stored| get_pd_type_from_db_type(stored, true))
+                    .unwrap_or_else(|| dtype.clone());
+                (col.clone(), dtype)
+            })
+            .collect();
         let input = super::sync::AlterColumnsInput {
             numeric_cols: new_cols
                 .iter()
                 .filter(|(_, t)| t.starts_with("numeric"))
                 .map(|(c, _)| c.clone())
                 .collect(),
-            df_cols_types: new_cols.clone(),
+            df_cols_types: migration_cols,
             db_cols_types: table_cols_types,
             pipe_dtypes: state.dtypes.clone(),
             explicit_dtypes: state.explicit_dtypes.clone(),

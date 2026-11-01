@@ -20,6 +20,118 @@ impl InplaceObserver for Changes {
 }
 
 flavor_tests!(
+    numeric_storage_survives_floating_sql_upserts,
+    |c: Ctx| async move {
+        if !matches!(
+            c.flavor,
+            "postgresql" | "postgis" | "timescaledb" | "timescaledb-ha"
+        ) {
+            return;
+        }
+        let params = serde_json::json!({
+            "columns":{"id":"id"},"dtypes":{"id":"int","v":"float"},
+            "upsert":true,"null_indices":false,
+        });
+        let rows = |value| PipeInput::Docs(vec![doc(vec![("id", i(1)), ("v", fl(value))])]);
+        let mut source = c.pipe("test", "numeric_source", None, &params.to_string());
+        ok(c.conn
+            .sync_mut(&mut source, rows(1.25), &SyncOptions::default())
+            .await);
+        let source_table = c.conn.pipe_table_name(&c.conn.sql_pipe(&source).unwrap());
+        let mut target_params = params;
+        target_params["sql"] = serde_json::json!(format!("SELECT * FROM {source_table}"));
+        let mut destination = c.pipe(
+            &c.conn.keys(),
+            "numeric_target",
+            None,
+            &target_params.to_string(),
+        );
+        ok(c.conn
+            .sync_mut(&mut destination, rows(1.25), &SyncOptions::default())
+            .await);
+        let sp = c.conn.sql_pipe(&destination).unwrap();
+        let target = c.conn.pipe_table_name(&sp);
+        assert!(
+            c.conn
+                .exec(&format!(
+                    "ALTER TABLE {target} ALTER COLUMN v TYPE NUMERIC USING v::numeric"
+                ))
+                .await
+                .is_some()
+        );
+        let changes = Changes::default();
+        let mut stored_types = Vec::new();
+        for value in [1.25, 2.5, 2.5] {
+            ok(c.conn
+                .sync_mut(&mut source, rows(value), &SyncOptions::default())
+                .await);
+            ok(c.conn
+                .sync_pipe_inplace_observed(
+                    &destination,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                    &changes,
+                )
+                .await);
+            let types = c
+                .conn
+                .get_table_cols_types(&sp.target, Some("public"))
+                .await;
+            stored_types.push(types["v"].to_uppercase());
+            assert_eq!(
+                c.conn
+                    .value(&format!("SELECT v::double precision FROM {target}"))
+                    .await,
+                Some(meerschaum_connector_sql::driver::SqlValue::Float(value))
+            );
+        }
+        // A real change to textual data must still evolve a dynamic schema.
+        assert!(
+            c.conn
+                .exec(&format!(
+                    "ALTER TABLE {source_table} ALTER COLUMN v TYPE TEXT USING v::text"
+                ))
+                .await
+                .is_some()
+        );
+        assert!(
+            c.conn
+                .exec(&format!("UPDATE {source_table} SET v = 'textual value'"))
+                .await
+                .is_some()
+        );
+        ok(c.conn
+            .sync_pipe_inplace_observed(
+                &destination,
+                None,
+                Bound::None,
+                Bound::None,
+                true,
+                &changes,
+            )
+            .await);
+        let textual = c.conn.value(&format!("SELECT v FROM {target}")).await;
+        for pipe in [&destination, &source] {
+            ok(c.conn.drop_pipe(pipe).await);
+        }
+        assert_eq!(
+            stored_types,
+            vec!["NUMERIC"; 3],
+            "Compatible numeric input must not rewrite the destination schema."
+        );
+        assert_eq!(*changes.0.lock().unwrap(), vec![0, 1, 0, 1]);
+        assert_eq!(
+            textual,
+            Some(meerschaum_connector_sql::driver::SqlValue::Text(
+                "textual value".into()
+            ))
+        );
+    }
+);
+
+flavor_tests!(
     all_null_upserts_do_not_invalidate_dependents,
     |c: Ctx| async move {
         if !meerschaum_connector_sql::queries::templates::has_update_query(&format!(
