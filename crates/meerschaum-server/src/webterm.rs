@@ -14,7 +14,9 @@
 //!   (`api:permissions:actions:non_admin: false`) only administrators get a shell. An open
 //!   terminal is authorized again every [`REAUTHORIZE_EVERY`]: when the session ends (a logout,
 //!   an administrator ending the user's sessions), the user is deleted or loses `webterm:use`,
-//!   or the check fails, it says why and closes, and its PTY process ends.
+//!   or the check fails, it says why and closes, and its PTY process ends. That holds while the
+//!   browser has stopped reading too: one task writes to the socket, each write bounded, and the
+//!   bridge never waits on it.
 //! - **tmux.** With `api:webterm:tmux:enabled` (default) and a `tmux` binary, the shell runs in
 //!   `tmux new-session -A -s <user><session_suffix>`, so a reconnect (or a second tab) attaches
 //!   to the same session. Closing the socket kills the PTY and with it the tmux client, never the
@@ -94,6 +96,25 @@ const CLOSE_REVOKED: u16 = 1008;
 
 /// What a terminal refused for [`MAX_TERMINALS`] shows.
 const TOO_MANY_TERMINALS: &str = "Too many terminals are open on this server. Try again later.";
+
+/// How long one write to a terminal's browser may take. A browser that stops reading for longer
+/// is treated as gone; the bridge itself never waits on a write.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a closing terminal lets its last messages (the reason, the close frame) reach the
+/// browser, after its PTY process has already been ended.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Messages from the bridge waiting for the socket's writer (`setup`, pings, `shell_state`
+/// answers, the closing reason). The PTY's output has its own queue ([`spawn_pty`]).
+const CONTROL_QUEUE: usize = 16;
+
+/// The longest a terminal's tmux command may run (counting or opening windows, reading the
+/// pane's process, scrubbing the environment); it is killed after that.
+const TMUX_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How often the thread that reaps a PTY's process checks whether it has exited.
+const EXIT_POLL: Duration = Duration::from_millis(200);
 
 /// Variables that make a process part of the job (or the service) the server itself runs in,
 /// besides the `static.toml` names [`job_context_vars`] adds. A terminal's shell is never that job:
@@ -451,7 +472,7 @@ fn scrub_tmux_server_env(tmux: &TmuxSettings, session: Option<&str>) {
         scopes.push(vec!["-t", target.as_str()]);
     }
     for scope in scopes {
-        let Ok(listing) = tmux_command().arg("show-environment").args(&scope).output() else {
+        let Some(listing) = tmux_output(tmux_command().arg("show-environment").args(&scope)) else {
             return;
         };
         if !listing.status.success() {
@@ -476,7 +497,33 @@ fn scrub_tmux_server_env(tmux: &TmuxSettings, session: Option<&str>) {
                 .args(&scope)
                 .args(["-u", name.as_str()]);
         }
-        let _ = command.stdout(std::process::Stdio::null()).status();
+        let _ = tmux_output(&mut command);
+    }
+}
+
+/// Run a tmux command within [`TMUX_TIMEOUT`] (killed when it takes longer): its output, or
+/// `None` when it could not start or did not finish in time. Every tmux command a terminal runs
+/// while it is open goes through here, so a hung tmux server never holds a terminal's tasks.
+fn tmux_output(command: &mut std::process::Command) -> Option<std::process::Output> {
+    let mut child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + TMUX_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
     }
 }
 
@@ -753,13 +800,22 @@ async fn socket(
         })
 }
 
-async fn close(mut socket: WebSocket, code: u16) {
-    let _ = socket
-        .send(Message::Close(Some(CloseFrame {
-            code,
-            reason: "".into(),
-        })))
-        .await;
+fn close_message(code: u16, reason: &str) -> Message {
+    Message::Close(Some(CloseFrame {
+        code,
+        reason: reason.into(),
+    }))
+}
+
+/// Send one message, giving up after [`WRITE_TIMEOUT`]; `false` when it was not sent.
+async fn send_within<S>(sink: &mut S, message: Message) -> bool
+where
+    S: futures_util::Sink<Message> + Unpin,
+{
+    matches!(
+        tokio::time::timeout(WRITE_TIMEOUT, sink.send(message)).await,
+        Ok(Ok(()))
+    )
 }
 
 /// The terminal's line for `reason` (the `[CLOSED]` that follows is the browser's).
@@ -768,11 +824,82 @@ fn reason_message(reason: &str) -> Message {
 }
 
 /// Tell the browser why, end the terminal (`["disconnect", 1]`, so it does not reconnect) and
-/// close the socket with `code`.
+/// close the socket with `code`, each write bounded.
 async fn refuse(mut socket: WebSocket, reason: &str, code: u16) {
-    let _ = socket.send(reason_message(reason)).await;
-    let _ = socket.send(text(json!(["disconnect", 1]))).await;
-    close(socket, code).await;
+    if send_within(&mut socket, reason_message(reason)).await
+        && send_within(&mut socket, text(json!(["disconnect", 1]))).await
+    {
+        let _ = send_within(&mut socket, close_message(code, "")).await;
+    }
+}
+
+/// Queue messages for the socket's writer without waiting: a full queue (a browser that stopped
+/// reading) drops them.
+fn queue(control: &mpsc::Sender<Message>, messages: impl IntoIterator<Item = Message>) {
+    for message in messages {
+        let _ = control.try_send(message);
+    }
+}
+
+/// How a terminal's socket writer ended.
+enum WriterEnd {
+    /// The PTY closed (the shell exited): its last output, `["disconnect", 1]` and a close frame
+    /// were sent.
+    ShellExited,
+    /// It sent the bridge's close frame, or the bridge let go of it.
+    Closed,
+    /// A write failed or did not finish within [`WRITE_TIMEOUT`] (the browser is gone or stopped
+    /// reading).
+    PeerGone,
+}
+
+/// The only task that writes to a terminal's socket: the bridge's messages (`control`, first)
+/// and the PTY's output, each write bounded by [`WRITE_TIMEOUT`]. A browser that stops reading
+/// stalls only this task; the bridge keeps reading input and checking the session.
+async fn write_terminal(
+    mut tx: futures_util::stream::SplitSink<WebSocket, Message>,
+    mut output: mpsc::Receiver<Vec<u8>>,
+    mut control: mpsc::Receiver<Message>,
+) -> WriterEnd {
+    let mut decoder = Utf8Stream::default();
+    loop {
+        tokio::select! {
+            biased;
+            message = control.recv() => {
+                let Some(message) = message else {
+                    return WriterEnd::Closed;
+                };
+                let close = matches!(message, Message::Close(_));
+                if !send_within(&mut tx, message).await {
+                    return WriterEnd::PeerGone;
+                }
+                if close {
+                    return WriterEnd::Closed;
+                }
+            }
+            chunk = output.recv() => match chunk {
+                Some(bytes) => {
+                    let out = decoder.push(&bytes);
+                    if !out.is_empty()
+                        && !send_within(&mut tx, text(json!(["stdout", out]))).await
+                    {
+                        return WriterEnd::PeerGone;
+                    }
+                }
+                None => {
+                    // Each write waits only while the previous one went through.
+                    let rest = decoder.finish();
+                    if (rest.is_empty()
+                        || send_within(&mut tx, text(json!(["stdout", rest]))).await)
+                        && send_within(&mut tx, text(json!(["disconnect", 1]))).await
+                    {
+                        let _ = send_within(&mut tx, close_message(1000, "")).await;
+                    }
+                    return WriterEnd::ShellExited;
+                }
+            },
+        }
+    }
 }
 
 fn text(parts: Value) -> Message {
@@ -798,14 +925,15 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
         Ok(Ok(started)) => started,
         Ok(Err(error)) => {
             tracing::warn!("Failed to start a terminal for '{term_name}': {error}");
-            let _ = socket
-                .send(text(json!([
-                    "stdout",
-                    format!("Failed to start the shell: {error}\r\n")
-                ])))
-                .await;
-            let _ = socket.send(text(json!(["disconnect", 1]))).await;
-            close(socket, 1011).await;
+            let reason = text(json!([
+                "stdout",
+                format!("Failed to start the shell: {error}\r\n")
+            ]));
+            if send_within(&mut socket, reason).await
+                && send_within(&mut socket, text(json!(["disconnect", 1]))).await
+            {
+                let _ = send_within(&mut socket, close_message(1011, "")).await;
+            }
             return;
         }
         Err(_) => return,
@@ -815,14 +943,16 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
         process_id,
         master,
         input,
-        mut output,
+        output,
         killer,
     } = pty;
-    let (mut tx, mut rx) = socket.split();
-    if tx.send(text(json!(["setup", {}]))).await.is_err() {
-        return;
-    }
-    let mut decoder = Utf8Stream::default();
+    let (tx, mut rx) = socket.split();
+    // Every write goes through one task with bounded writes, so nothing here ever waits on a
+    // browser that stopped reading: input, the session's checks and the teardown stay live.
+    let (control, control_rx) = mpsc::channel::<Message>(CONTROL_QUEUE);
+    queue(&control, [text(json!(["setup", {}]))]);
+    let mut writer = tokio::spawn(write_terminal(tx, output, control_rx));
+    let mut writer_done = false;
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     ping.tick().await;
     // The session, its user and the permission are checked again while the terminal is open: a
@@ -831,27 +961,18 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
     let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
     recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut closed_by_client = false;
-    let mut close_frame: Option<(u16, &'static str)> = None;
     let mut new_windows = 0usize;
     loop {
         tokio::select! {
-            chunk = output.recv() => match chunk {
-                Some(bytes) => {
-                    let out = decoder.push(&bytes);
-                    if !out.is_empty() && tx.send(text(json!(["stdout", out]))).await.is_err() {
-                        closed_by_client = true;
-                        break;
-                    }
+            ended = &mut writer, if !writer_done => {
+                // The shell exited (its last output and close frame are sent), or the browser is
+                // gone or stopped reading.
+                writer_done = true;
+                if matches!(ended, Ok(WriterEnd::PeerGone)) {
+                    tracing::debug!("A browser stopped reading the terminal of '{term_name}'.");
                 }
-                None => {
-                    let rest = decoder.finish();
-                    if !rest.is_empty() {
-                        let _ = tx.send(text(json!(["stdout", rest]))).await;
-                    }
-                    let _ = tx.send(text(json!(["disconnect", 1]))).await;
-                    break;
-                }
-            },
+                break;
+            }
             message = rx.next() => match message {
                 Some(Ok(Message::Text(raw))) => {
                     match parse_client_message(raw.as_str()) {
@@ -862,10 +983,11 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                                 input.try_send(data.into_bytes())
                             {
                                 tracing::warn!("A terminal's input queue is full; closing it.");
-                                let _ = tx
-                                    .send(text(json!(["stdout", "\r\n[input queue full]\r\n"])))
-                                    .await;
-                                let _ = tx.send(text(json!(["disconnect", 1]))).await;
+                                queue(&control, [
+                                    text(json!(["stdout", "\r\n[input queue full]\r\n"])),
+                                    text(json!(["disconnect", 1])),
+                                    close_message(1000, ""),
+                                ]);
                                 break;
                             }
                         }
@@ -875,7 +997,8 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                         Some(ClientMessage::NewWindow) => {
                             // Each window is a process: bounded per connection and per user
                             // session (`MAX_SESSION_WINDOWS`, across reconnects), and refused
-                            // while the server is at its terminal limit.
+                            // while the server is at its terminal limit. tmux runs off the
+                            // bridge (and bounded): it never delays input or a revocation.
                             if new_windows < MAX_NEW_WINDOWS
                                 && active_terminals() < MAX_TERMINALS
                                 && let (Some(settings), Some(session)) =
@@ -884,20 +1007,28 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                                 new_windows += 1;
                                 let (settings, shell, session) =
                                     (settings.clone(), config.shell.clone(), session.clone());
-                                let _ = tokio::task::spawn_blocking(move || {
+                                tokio::task::spawn_blocking(move || {
                                     tmux_new_window(&settings, &shell, &session)
-                                })
-                                .await;
+                                });
                             }
                         }
                         Some(ClientMessage::ShellState(request)) => {
-                            let (config, session) = (config.clone(), tmux_session.clone());
-                            let snapshot = tokio::task::spawn_blocking(move || {
-                                shell_state(&config, session.as_deref(), process_id)
-                            }).await.ok().flatten();
-                            if tx.send(text(json!(["shell_state", request, snapshot]))).await.is_err() {
-                                break;
-                            }
+                            // Off the bridge and bounded; the answer is queued when it is ready.
+                            let (config, session, control) =
+                                (config.clone(), tmux_session.clone(), control.clone());
+                            tokio::spawn(async move {
+                                let snapshot = tokio::time::timeout(
+                                    TMUX_TIMEOUT,
+                                    tokio::task::spawn_blocking(move || {
+                                        shell_state(&config, session.as_deref(), process_id)
+                                    }),
+                                )
+                                .await
+                                .ok()
+                                .and_then(Result::ok)
+                                .flatten();
+                                queue(&control, [text(json!(["shell_state", request, snapshot]))]);
+                            });
                         }
                         None => {}
                     }
@@ -909,10 +1040,9 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                 Some(Ok(_)) => {}
             },
             _ = ping.tick() => {
-                if tx.send(Message::Ping(Vec::new().into())).await.is_err() {
-                    closed_by_client = true;
-                    break;
-                }
+                // A browser that is gone or stopped reading is found by the writer's bounded
+                // writes.
+                queue(&control, [Message::Ping(Vec::new().into())]);
             }
             _ = recheck.tick() => {
                 // Fail closed: an error or a store that does not answer ends the terminal too.
@@ -924,28 +1054,35 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                 .unwrap_or(Access::Unavailable);
                 if let Some(reason) = access.revocation(&term_name) {
                     tracing::info!("Closing the terminal of '{term_name}': {reason}");
-                    let _ = tx.send(reason_message(reason)).await;
-                    let _ = tx.send(text(json!(["disconnect", 1]))).await;
-                    close_frame = Some((CLOSE_REVOKED, reason));
+                    queue(&control, [
+                        reason_message(reason),
+                        text(json!(["disconnect", 1])),
+                        close_message(CLOSE_REVOKED, reason),
+                    ]);
                     break;
                 }
             }
         }
     }
-    if !closed_by_client {
-        let (code, reason) = close_frame.unwrap_or((1000, ""));
-        let _ = tx
-            .send(Message::Close(Some(CloseFrame {
-                code,
-                reason: reason.into(),
-            })))
-            .await;
-    }
-    // End the process on the PTY (the tmux client, never the tmux session) first, then close the
-    // input queue: the writer thread drops its writer only after the process has exited, so the
-    // EOF it sends reaches no one (see `spawn_pty`).
+    // End the process on the PTY (the tmux client, never the tmux session) first, whether or not
+    // the browser ever reads the reason, then close the input queue: the writer thread drops its
+    // writer only after the process has exited, so the EOF it sends reaches no one (see
+    // `spawn_pty`).
     drop(killer);
     drop(input);
+    // Then let the socket's writer deliver what was queued (the reason, the close frame), for a
+    // bounded time.
+    drop(control);
+    if !writer_done {
+        if closed_by_client {
+            writer.abort();
+        } else if tokio::time::timeout(CLOSE_TIMEOUT, &mut writer)
+            .await
+            .is_err()
+        {
+            writer.abort();
+        }
+    }
 }
 
 /// What a browser may send.
@@ -1061,11 +1198,12 @@ struct Pty {
     killer: KillOnDrop,
 }
 
-struct KillOnDrop(Box<dyn ChildKiller + Send + Sync>);
+/// Ends the PTY's process when dropped: the thread that reaps the process signals it.
+struct KillOnDrop(std::sync::mpsc::Sender<()>);
 
 impl Drop for KillOnDrop {
     fn drop(&mut self) {
-        let _ = self.0.kill();
+        let _ = self.0.send(());
     }
 }
 
@@ -1082,19 +1220,37 @@ fn spawn_pty(builder: CommandBuilder, state_dir: Option<PathBuf>) -> std::io::Re
     let readiness = state_dir.and_then(|dir| process_id.map(|pid| dir.join(format!("{pid}.json"))));
     // The child holds the slave end now; ours must close for EOF to reach the reader.
     drop(pair.slave);
-    let killer = KillOnDrop(child.clone_killer());
-    let mut reader = pair.master.try_clone_reader().map_err(pty_error)?;
-    let mut writer = pair.master.take_writer().map_err(pty_error)?;
-    // Reap the child whenever it ends, and tell the writer thread (see below).
+    let (kill_tx, kill_rx) = std::sync::mpsc::channel::<()>();
+    let killer = KillOnDrop(kill_tx);
+    // Reap the child whenever it ends, and tell the writer thread (see below). When the bridge
+    // lets go of it (`KillOnDrop`), end it here, on the only thread that reaps it, so a signal
+    // never reaches a reused PID: SIGHUP, then SIGKILL after a short grace (portable-pty's
+    // `Child::kill`), so a process that ignores SIGHUP ends too.
     let (exited_tx, exited_rx) = std::sync::mpsc::channel::<()>();
     std::thread::spawn(move || {
-        let _ = child.wait();
+        loop {
+            match kill_rx.recv_timeout(EXIT_POLL) {
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if !matches!(child.try_wait(), Ok(None)) {
+                        break;
+                    }
+                }
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = ChildKiller::kill(&mut *child);
+                    let _ = child.wait();
+                    break;
+                }
+            }
+        }
         // A disconnected plain terminal kills its shell before its own guard can clean up.
         if let Some(path) = readiness {
             let _ = std::fs::remove_file(path);
         }
         let _ = exited_tx.send(());
     });
+    // (An error from here on drops `killer`, which ends the child.)
+    let mut reader = pair.master.try_clone_reader().map_err(pty_error)?;
+    let mut writer = pair.master.take_writer().map_err(pty_error)?;
     let (out_tx, output) = mpsc::channel::<Vec<u8>>(64);
     std::thread::spawn(move || {
         let mut buffer = [0u8; 8192];
@@ -1144,13 +1300,15 @@ fn shell_state(
         if let Some(socket) = &tmux.socket {
             command.arg("-S").arg(socket);
         }
-        let output = command
-            .args(["display-message", "-p", "-t", session, "#{pane_pid}"])
-            .envs(config.shell.env.iter().map(|(k, v)| (k, v)))
-            .env_remove("TMUX")
-            .env_remove("TMUX_PANE")
-            .output()
-            .ok()?;
+        // `=`: exactly this terminal's session, never another whose name starts with it.
+        let target = format!("={session}:");
+        let output = tmux_output(
+            command
+                .args(["display-message", "-p", "-t", &target, "#{pane_pid}"])
+                .envs(config.shell.env.iter().map(|(k, v)| (k, v)))
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE"),
+        )?;
         if !output.status.success() {
             return None;
         }
@@ -1353,21 +1511,19 @@ fn tmux_window_count(tmux: &TmuxSettings, shell: &ShellCommand, session: &str) -
     if let Some(socket) = &tmux.socket {
         command.arg("-S").arg(socket);
     }
-    let output = command
-        .args([
-            "list-windows",
-            "-t",
-            &format!("={session}"),
-            "-F",
-            "#{window_id}",
-        ])
-        .envs(shell.env.iter().map(|(k, v)| (k, v)))
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
+    let output = tmux_output(
+        command
+            .args([
+                "list-windows",
+                "-t",
+                &format!("={session}"),
+                "-F",
+                "#{window_id}",
+            ])
+            .envs(shell.env.iter().map(|(k, v)| (k, v)))
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE"),
+    )?;
     output.status.success().then(|| {
         String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -1408,7 +1564,7 @@ fn tmux_new_window(
     for var in job_context_vars() {
         command.env_remove(var);
     }
-    command.status().map(|status| status.success())
+    Ok(tmux_output(&mut command).is_some_and(|output| output.status.success()))
 }
 
 #[cfg(test)]

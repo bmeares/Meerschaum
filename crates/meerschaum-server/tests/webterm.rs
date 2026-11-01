@@ -852,6 +852,53 @@ async fn an_open_terminal_closes_when_the_session_store_fails() {
     assert_no_echo(&mut socket).await;
 }
 
+/// A client that leaves the kernel as little room as it can for unread data (a tiny receive
+/// buffer), so a noisy shell fills the connection as soon as the client stops reading.
+async fn connect_with_a_small_window(addr: std::net::SocketAddr, session: &str) -> Socket {
+    let tcp = tokio::net::TcpSocket::new_v4().unwrap();
+    tcp.set_recv_buffer_size(4096).unwrap();
+    let stream = tcp.connect(addr).await.unwrap();
+    let (socket, _) = tokio_tungstenite::client_async(
+        format!("ws://{addr}/websocket/{session}"),
+        MaybeTlsStream::Plain(stream),
+    )
+    .await
+    .expect("handshake");
+    socket
+}
+
+/// A browser that stops reading while its shell floods the terminal fills the connection. The
+/// session is still checked, and a revocation ends the shell although the browser never reads
+/// the reason (before, the bridge waited on that write and never checked the session again).
+#[tokio::test]
+async fn a_revoked_terminal_ends_its_shell_while_the_browser_is_not_reading() {
+    let root = tempfile::tempdir().unwrap();
+    let state = state(root.path());
+    let sessions = sessions();
+    let cfg = config_with(&state, sessions.clone(), sh(), None).with_reauthorize_every(RECHECK);
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let mut socket = connect_with_a_small_window(addr, ADMIN_SESSION).await;
+    expect_setup(&mut socket).await;
+    let pid = shell_pid(&mut socket).await;
+    // The shell itself prints a long line forever; from here on the client reads nothing.
+    send_json(
+        &mut socket,
+        json!([
+            "stdin",
+            "x=$(printf '%01000d' 0); while :; do echo \"$x\"; done\n"
+        ]),
+    )
+    .await;
+    // Long enough for the connection to fill; the session's checks pass meanwhile.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    if Path::new("/proc/self").exists() {
+        assert!(alive(pid), "the noisy shell ended by itself");
+    }
+    sessions.end(ADMIN_SESSION);
+    assert_shell_ends(pid).await;
+    drop(socket);
+}
+
 /// A user who loses the permission to use the terminal, or is deleted, loses an open terminal.
 #[tokio::test]
 async fn an_open_terminal_closes_when_its_user_loses_access() {
