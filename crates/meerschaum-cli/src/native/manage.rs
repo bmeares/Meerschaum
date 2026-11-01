@@ -4,10 +4,12 @@
 //! (`actions/tag.py`), `index pipes` (`actions/index.py`) and `copy pipes` (`actions/copy.py`,
 //! the `copy pipes <instance>` path).
 
-use meerschaum_connector::DataQuery;
+use meerschaum_connector::{DataQuery, DateBound, InstanceConnector};
 use meerschaum_core::access::Locks;
+use meerschaum_core::pipe::{ChunkInterval, DEFAULT_BACKTRACK_MINUTES, PipeDefaults};
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{Pipe, SuccessTuple};
+use meerschaum_kernel::value::DateTimeValue;
 use meerschaum_plugin::NativePlugins;
 
 use crate::builtin::ActionResult;
@@ -812,6 +814,34 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let overwrite = if force { "overwrite" } else { "skip" };
     let batch_sync = sync_data.clone().unwrap_or_else(|| "nothing".into());
+    let Some(mode) = CopyData::parse(&batch_sync) else {
+        return Ok(SuccessTuple::fail(format!(
+            "Unknown `--sync-data {batch_sync}` (expected nothing, backtrack, incremental, all or filter)."
+        )));
+    };
+    // The filters `all` and `backtrack` would ignore: refused, never a silent copy of everything.
+    let bounded = ["begin", "end"]
+        .iter()
+        .any(|key| string(args, key).is_some())
+        || super::params(args).is_some_and(|p| !p.is_empty());
+    if bounded && matches!(mode, CopyData::All | CopyData::Backtrack) {
+        return Ok(SuccessTuple::fail(format!(
+            "`--sync-data {batch_sync}` ignores --begin, --end and --params.\n\
+             To bound the copy, use `--sync-data filter` (exactly those rows) or \
+             `--sync-data incremental` (the new rows within them)."
+        )));
+    }
+    let explicit = DataQuery {
+        begin: bound(args, "begin"),
+        end: bound(args, "end"),
+        params: super::params(args),
+        ..Default::default()
+    };
+    let default_backtrack_minutes = rt
+        .config()
+        .get(&["pipes", "parameters", "fetch", "backtrack_minutes"])
+        .and_then(|v| v.as_i64())
+        .unwrap_or(DEFAULT_BACKTRACK_MINUTES);
     let defaults = super::pipes::defaults(rt);
     // Each pipe's outcome, for the summary: copied, skipped (already on the destination) or
     // failed (with the reason). Any failure fails the action.
@@ -841,6 +871,9 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             .flatten()
             .is_some();
         let mut dest_locks = Locks::new();
+        // An incremental copy into an existing pipe without `--force` copies data only (v4's
+        // interactive "data only" answer): the destination keeps all of its attributes.
+        let data_only = exists && !force && mode == CopyData::Incremental;
         if exists {
             let mut existing = SelectedPipe {
                 pipe: new_pipe.clone(),
@@ -851,17 +884,27 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             // from the stored ones alone to read the destination's access and locks.
             existing.pipe.set_parameters(Map::new());
             hydrate(rt, &dest, &mut existing);
-            let stored = existing.pipe.raw_parameters();
-            dest_locks = Locks::from_parameters(stored);
-            let mut params = new_pipe.raw_parameters().clone();
-            for key in ["access", "locks"] {
-                if let Some(value) = stored.get(key) {
-                    params.insert(key.to_string(), value.clone());
+            if data_only {
+                new_pipe = existing.pipe;
+            } else {
+                let stored = existing.pipe.raw_parameters();
+                dest_locks = Locks::from_parameters(stored);
+                let mut params = new_pipe.raw_parameters().clone();
+                for key in ["access", "locks"] {
+                    if let Some(value) = stored.get(key) {
+                        params.insert(key.to_string(), value.clone());
+                    }
                 }
+                new_pipe.set_parameters(params);
             }
-            new_pipe.set_parameters(params);
         }
-        if exists {
+        if data_only {
+            // PARITY: v4's message for the "data only" answer (`actions/copy.py`).
+            info(
+                rt,
+                &format!("Keeping existing attributes of {new_pipe} — will copy data only."),
+            );
+        } else if exists {
             if overwrite == "skip" {
                 info(
                     rt,
@@ -905,46 +948,75 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         let src_exists = session
             .block_on(src_inst.conn().pipe_exists(&sp.pipe))
             .unwrap_or(false);
-        if src_exists && batch_sync != "nothing" {
-            info(rt, &format!("Fetching data from {}...", sp.pipe));
-            let query = DataQuery {
-                begin: bound(args, "begin"),
-                end: bound(args, "end"),
-                params: super::params(args),
-                ..Default::default()
-            };
-            let df = match batch_sync.as_str() {
-                "backtrack" => session.block_on(src_inst.conn().get_backtrack_data(
-                    &sp.pipe,
-                    meerschaum_connector_sql::pipe::DEFAULT_BACKTRACK_MINUTES,
-                    &DataQuery::default(),
-                )),
-                "filter" => session.block_on(src_inst.conn().get_pipe_data(&sp.pipe, &query)),
-                _ => session.block_on(
-                    src_inst
-                        .conn()
-                        .get_pipe_data(&sp.pipe, &DataQuery::default()),
-                ),
-            };
-            info(rt, &format!("Syncing into {new_pipe}..."));
-            let res = match df {
-                Ok(Some(df)) => {
-                    let mut dest_sp = SelectedPipe {
-                        pipe: new_pipe.clone(),
-                        id: None,
-                        hydrated: true,
-                    };
-                    let sargs = super::sync::SyncArgs {
-                        check_existing: true,
-                        chunksize: Some(-1),
-                        ..Default::default()
-                    };
-                    super::sync::sync_frame_public(&session, &dest, &mut dest_sp, df, &sargs)
+        if src_exists && mode != CopyData::Nothing {
+            // The rows to read: `None` when nothing is new (incremental), an error when the
+            // window cannot be told (never a fall-back to the whole history).
+            let query = match mode {
+                CopyData::Incremental => {
+                    let window = session.block_on(incremental_window(
+                        dest.conn().as_ref(),
+                        &new_pipe,
+                        &explicit,
+                        default_backtrack_minutes,
+                        &defaults,
+                    ));
+                    match window {
+                        Ok((query, note)) => {
+                            info(rt, &note);
+                            query
+                        }
+                        Err(reason) => {
+                            warn(rt, &format!("Not copying data into {new_pipe}:\n{reason}"));
+                            failed.push((sp.pipe.to_string(), format!("data: {reason}")));
+                            continue;
+                        }
+                    }
                 }
-                Ok(None) => SuccessTuple::fail(format!(
-                    "You passed `None` instead of data into `sync()` for {new_pipe}.\nOmit the DataFrame to infer fetching."
-                )),
-                Err(e) => SuccessTuple::fail(e.to_string()),
+                CopyData::Filter => Some(explicit.clone()),
+                _ => Some(DataQuery::default()),
+            };
+            let res = match query {
+                None => SuccessTuple::ok(format!("No new rows to copy into {new_pipe}.")),
+                Some(query) => {
+                    info(rt, &format!("Fetching data from {}...", sp.pipe));
+                    let df = if mode == CopyData::Backtrack {
+                        let minutes =
+                            backtrack_minutes(&sp.pipe, default_backtrack_minutes, &defaults);
+                        session.block_on(src_inst.conn().get_backtrack_data(
+                            &sp.pipe,
+                            minutes,
+                            &DataQuery::default(),
+                        ))
+                    } else {
+                        session.block_on(src_inst.conn().get_pipe_data(&sp.pipe, &query))
+                    };
+                    info(rt, &format!("Syncing into {new_pipe}..."));
+                    match df {
+                        Ok(Some(df)) => {
+                            let mut dest_sp = SelectedPipe {
+                                pipe: new_pipe.clone(),
+                                id: None,
+                                hydrated: true,
+                            };
+                            let sargs = super::sync::SyncArgs {
+                                check_existing: true,
+                                chunksize: Some(-1),
+                                ..Default::default()
+                            };
+                            super::sync::sync_frame_public(
+                                &session,
+                                &dest,
+                                &mut dest_sp,
+                                df,
+                                &sargs,
+                            )
+                        }
+                        Ok(None) => SuccessTuple::fail(format!(
+                            "You passed `None` instead of data into `sync()` for {new_pipe}.\nOmit the DataFrame to infer fetching."
+                        )),
+                        Err(e) => SuccessTuple::fail(e.to_string()),
+                    }
+                }
             };
             print_tuple(rt, &res, TupleArgs::default());
             if !res.success {
@@ -958,7 +1030,7 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
         // The source's locks, added to the destination's own (a copy never unlocks), with the
         // destination's `lock_pipe` (an `api:` destination asks its server).
-        if dest_locks.with(&source_locks).kinds() != dest_locks.kinds() {
+        if !data_only && dest_locks.with(&source_locks).kinds() != dest_locks.kinds() {
             let res = session.block_on(dest.conn().lock_pipe(&new_pipe, &source_locks));
             if !res.success {
                 warn(
@@ -972,6 +1044,214 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         copied.push(sp.pipe.to_string());
     }
     Ok(copy_summary(&dest.keys(), &copied, &skipped, &failed))
+}
+
+/// What `copy pipes --sync-data` copies from each source pipe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyData {
+    /// No data (the default).
+    Nothing,
+    /// The source pipe's backtrack window before its own sync time.
+    Backtrack,
+    /// The rows from each destination pipe's sync time minus its backtrack window.
+    Incremental,
+    /// All of the source pipe's rows.
+    All,
+    /// The rows within `--begin`, `--end` and `--params`.
+    Filter,
+}
+
+impl CopyData {
+    fn parse(choice: &str) -> Option<CopyData> {
+        Some(match choice {
+            "nothing" => CopyData::Nothing,
+            "backtrack" => CopyData::Backtrack,
+            "incremental" => CopyData::Incremental,
+            "all" => CopyData::All,
+            "filter" => CopyData::Filter,
+            _ => return None,
+        })
+    }
+}
+
+/// The source rows an incremental copy reads for `dest_pipe`, and a line saying where they
+/// start (`None`: `--end` is not after the window's start, so nothing is new).
+///
+/// The window starts at the destination pipe's sync time (within `--params`) minus the pipe's
+/// backtrack window, or at `--begin` when that is later, and ends at `--end`. A destination
+/// without a sync time is copied from `--begin` (or from the start) only when it has no rows;
+/// one with rows but no readable datetime axis is an error, so a failed watermark is never
+/// read as "copy everything".
+async fn incremental_window(
+    dest: &dyn InstanceConnector,
+    dest_pipe: &Pipe,
+    explicit: &DataQuery,
+    default_backtrack_minutes: i64,
+    defaults: &PipeDefaults,
+) -> Result<(Option<DataQuery>, String), String> {
+    let sync_time = dest
+        .get_sync_time(dest_pipe, explicit.params.as_ref(), true)
+        .await
+        .map_err(|e| format!("Failed to read the sync time of {dest_pipe}: {e}"))?;
+    let watermark = match sync_time {
+        Some(sync_time) => Some(backtrack_from(
+            dest_pipe,
+            sync_time,
+            default_backtrack_minutes,
+            defaults,
+        )),
+        None => {
+            let count = DataQuery {
+                params: explicit.params.clone(),
+                ..Default::default()
+            };
+            let rows = dest
+                .get_pipe_rowcount(dest_pipe, &count)
+                .await
+                .map_err(|e| format!("Failed to count the rows of {dest_pipe}: {e}"))?
+                .unwrap_or(0);
+            if rows > 0 {
+                return Err(format!(
+                    "{dest_pipe} has {} row{} but no sync time (no datetime column, or one \
+                     without readable values), so an incremental copy cannot tell which rows \
+                     are new.\nUse `--sync-data all` or `--sync-data filter` for this pipe.",
+                    thousands(rows),
+                    plural(rows as usize),
+                ));
+            }
+            None
+        }
+    };
+    incremental_query(dest_pipe, watermark, explicit)
+}
+
+/// The query of an incremental copy from the destination's watermark (its sync time minus its
+/// backtrack window, `None` for a destination without rows) and the explicit filters.
+/// `--begin` only raises the watermark and `--end` caps it; `None` when the window is empty,
+/// so the source is not read at all.
+fn incremental_query(
+    dest_pipe: &Pipe,
+    watermark: Option<DateBound>,
+    explicit: &DataQuery,
+) -> Result<(Option<DataQuery>, String), String> {
+    let (begin, from_watermark) = match (watermark.clone(), explicit.begin.clone()) {
+        (Some(watermark), Some(begin)) => {
+            if bound_before(&watermark, &begin, dest_pipe)? {
+                (Some(begin), false)
+            } else {
+                (Some(watermark), true)
+            }
+        }
+        (Some(watermark), None) => (Some(watermark), true),
+        (None, begin) => (begin, false),
+    };
+    let rows = match (&begin, &explicit.end) {
+        (Some(begin), Some(end)) => format!("rows from {} until {}", begin.py_str(), end.py_str()),
+        (Some(begin), None) => format!("rows from {} on", begin.py_str()),
+        (None, Some(end)) => format!("rows until {}", end.py_str()),
+        (None, None) => "all rows".to_string(),
+    };
+    let note = if watermark.is_none() {
+        let matching = if explicit.params.is_some() {
+            " matching rows"
+        } else {
+            " rows"
+        };
+        format!("{dest_pipe} has no{matching} yet: copying {rows}.")
+    } else if from_watermark {
+        format!("Copying {rows} into {dest_pipe} (its sync time minus its backtrack window).")
+    } else {
+        format!("Copying {rows} into {dest_pipe} (--begin is after its sync time).")
+    };
+    if let (Some(begin), Some(end)) = (&begin, &explicit.end)
+        && !bound_before(begin, end, dest_pipe)?
+    {
+        return Ok((None, note));
+    }
+    let query = DataQuery {
+        begin,
+        end: explicit.end.clone(),
+        params: explicit.params.clone(),
+        ..Default::default()
+    };
+    Ok((Some(query), note))
+}
+
+/// `pipe.get_sync_time(apply_backtrack_interval=True)` from a sync time already read: the
+/// pipe's `fetch.backtrack_minutes` (else the configured default) as a duration, or in axis
+/// units on an integer axis (scaled by `precision`). Integer values decide the axis when the
+/// dtypes do not say (v4 infers the dtype from the table).
+fn backtrack_from(
+    pipe: &Pipe,
+    sync_time: DateBound,
+    default_backtrack_minutes: i64,
+    defaults: &PipeDefaults,
+) -> DateBound {
+    let interval = match axis_pipe(pipe, &sync_time).get_backtrack_interval(
+        true,
+        default_backtrack_minutes,
+        defaults,
+    ) {
+        Ok(interval) => interval,
+        Err(_) => return sync_time,
+    };
+    match (&sync_time, &interval) {
+        (DateBound::Datetime(dt), ChunkInterval::Delta(delta)) => {
+            match dt.utc.checked_sub_signed(*delta) {
+                Some(utc) => DateBound::Datetime(DateTimeValue {
+                    utc,
+                    tz: dt.tz.clone(),
+                }),
+                None => sync_time,
+            }
+        }
+        (DateBound::Int(i), ChunkInterval::Int(width)) => DateBound::Int(i.saturating_sub(*width)),
+        // PARITY: v4 cannot subtract a duration from an integer (or the reverse) and keeps the
+        // sync time itself.
+        _ => sync_time,
+    }
+}
+
+/// `pipe` with an integer dtype for its datetime column when `sync_time` is an integer and no
+/// dtype is configured for it (`Pipe::dtypes` would otherwise default it to `datetime`).
+fn axis_pipe(pipe: &Pipe, sync_time: &DateBound) -> Pipe {
+    let mut axis = pipe.clone();
+    if let (DateBound::Int(_), Some(dt_col)) = (sync_time, pipe.column("datetime"))
+        && pipe
+            .param("dtypes")
+            .and_then(|dtypes| dtypes.get(&dt_col))
+            .is_none_or(|dtype| !dtype.truthy())
+    {
+        let mut dtypes = Map::new();
+        dtypes.insert(dt_col, Value::Str("int".into()));
+        let mut patch = Map::new();
+        patch.insert("dtypes".into(), Value::Map(dtypes));
+        axis.update_parameters(patch);
+    }
+    axis
+}
+
+/// The `backtrack_minutes` a source pipe's `get_backtrack_data` takes: its own
+/// `fetch.backtrack_minutes` (else the configured default), in axis units on an integer axis.
+fn backtrack_minutes(pipe: &Pipe, default_backtrack_minutes: i64, defaults: &PipeDefaults) -> i64 {
+    match pipe.get_backtrack_interval(true, default_backtrack_minutes, defaults) {
+        Ok(ChunkInterval::Int(width)) => width,
+        Ok(ChunkInterval::Delta(delta)) => delta.num_minutes(),
+        Err(_) => default_backtrack_minutes,
+    }
+}
+
+/// `a < b` for two bounds on the same axis; an error for a datetime and an integer.
+fn bound_before(a: &DateBound, b: &DateBound, pipe: &Pipe) -> Result<bool, String> {
+    match (a, b) {
+        (DateBound::Datetime(x), DateBound::Datetime(y)) => Ok(x.utc < y.utc),
+        (DateBound::Int(x), DateBound::Int(y)) => Ok(x < y),
+        _ => Err(format!(
+            "--begin / --end ({} and {}) do not match the datetime axis of {pipe}.",
+            a.py_str(),
+            b.py_str()
+        )),
+    }
 }
 
 /// The result of `copy pipes`: a failure when any pipe failed (or none was selected), with one
@@ -1054,7 +1334,134 @@ pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
 #[cfg(test)]
 mod copy_tests {
-    use super::copy_summary;
+    use super::{
+        CopyData, DataQuery, DateBound, PipeDefaults, axis_pipe, backtrack_from, backtrack_minutes,
+        bound_before, copy_summary, incremental_query,
+    };
+    use chrono::{TimeZone, Utc};
+    use meerschaum_core::{Pipe, Value};
+
+    fn pipe(params: &str) -> Pipe {
+        Pipe::builder("sql:src", "temp")
+            .parameters(Value::from_json_str(params).unwrap().to_map())
+            .build()
+            .unwrap()
+    }
+
+    fn at(hour: u32) -> DateBound {
+        DateBound::utc(Utc.with_ymd_and_hms(2024, 1, 2, hour, 0, 0).unwrap())
+    }
+
+    #[test]
+    fn the_modes_are_v4_choices() {
+        assert_eq!(CopyData::parse("incremental"), Some(CopyData::Incremental));
+        assert_eq!(CopyData::parse("all"), Some(CopyData::All));
+        assert_eq!(CopyData::parse("everything"), None);
+    }
+
+    #[test]
+    fn the_watermark_is_the_sync_time_minus_the_pipes_backtrack() {
+        let d = PipeDefaults::default();
+        let dt = pipe(r#"{"columns": {"datetime": "ts"}}"#);
+        assert_eq!(
+            backtrack_from(&dt, at(12), 1440, &d).py_str(),
+            "2024-01-01 12:00:00+00:00"
+        );
+        let own = pipe(r#"{"columns": {"datetime": "ts"}, "fetch": {"backtrack_minutes": 120}}"#);
+        assert_eq!(
+            backtrack_from(&own, at(12), 1440, &d).py_str(),
+            "2024-01-02 10:00:00+00:00"
+        );
+        // An integer axis in milliseconds: one minute is 60,000 units.
+        let ms = pipe(
+            r#"{"columns": {"datetime": "t"}, "dtypes": {"t": "int"}, "precision": "ms",
+                "fetch": {"backtrack_minutes": 1}}"#,
+        );
+        let big = 1_700_000_000_123_456_789_i64;
+        assert!(matches!(
+            backtrack_from(&ms, DateBound::Int(big), 1440, &d),
+            DateBound::Int(v) if v == big - 60_000
+        ));
+        // Integer values without a dtype: the axis is an integer one, in raw minutes.
+        assert!(matches!(
+            backtrack_from(&dt, DateBound::Int(10_000), 1440, &d),
+            DateBound::Int(8_560)
+        ));
+        assert!(axis_pipe(&dt, &DateBound::Int(1)).is_int_axis());
+        assert!(!axis_pipe(&dt, &at(1)).is_int_axis());
+        // PARITY: a datetime sync time on a pipe whose dtype says int keeps the sync time.
+        let int_dtype = pipe(r#"{"columns": {"datetime": "ts"}, "dtypes": {"ts": "int"}}"#);
+        assert_eq!(
+            backtrack_from(&int_dtype, at(12), 1440, &d).py_str(),
+            at(12).py_str()
+        );
+    }
+
+    #[test]
+    fn backtrack_reads_the_source_pipes_own_window() {
+        let d = PipeDefaults::default();
+        let own = pipe(r#"{"columns": {"datetime": "ts"}, "fetch": {"backtrack_minutes": 120}}"#);
+        assert_eq!(backtrack_minutes(&own, 1440, &d), 120);
+        assert_eq!(
+            backtrack_minutes(&pipe(r#"{"columns": {"datetime": "ts"}}"#), 1440, &d),
+            1440
+        );
+        let ms = pipe(
+            r#"{"columns": {"datetime": "t"}, "dtypes": {"t": "int"}, "precision": "ms",
+                "fetch": {"backtrack_minutes": 2}}"#,
+        );
+        assert_eq!(backtrack_minutes(&ms, 1440, &d), 120_000);
+    }
+
+    #[test]
+    fn begin_only_raises_the_watermark_and_an_empty_window_reads_nothing() {
+        let p = pipe(r#"{"columns": {"datetime": "ts"}}"#);
+        let q = |begin: Option<DateBound>, end: Option<DateBound>| DataQuery {
+            begin,
+            end,
+            ..Default::default()
+        };
+        let begin_of = |(query, _): (Option<DataQuery>, String)| query.unwrap().begin.unwrap();
+        let (query, note) = incremental_query(&p, Some(at(10)), &q(Some(at(12)), None)).unwrap();
+        assert_eq!(query.unwrap().begin.unwrap().py_str(), at(12).py_str());
+        assert!(note.contains("--begin"), "{note}");
+        let raised = incremental_query(&p, Some(at(12)), &q(Some(at(10)), None)).unwrap();
+        assert_eq!(begin_of(raised).py_str(), at(12).py_str());
+        // `--end` at or before the window's start: no query, so the source is never read.
+        assert!(
+            incremental_query(&p, Some(at(12)), &q(None, Some(at(12))))
+                .unwrap()
+                .0
+                .is_none()
+        );
+        assert!(
+            incremental_query(&p, None, &q(Some(at(5)), Some(at(4))))
+                .unwrap()
+                .0
+                .is_none()
+        );
+        // No rows yet: everything (or from `--begin`).
+        let (all, note) = incremental_query(&p, None, &q(None, None)).unwrap();
+        assert!(all.unwrap().begin.is_none());
+        assert!(
+            note.ends_with("has no rows yet: copying all rows."),
+            "{note}"
+        );
+        // Integer watermark, datetime `--begin`: refused, never guessed.
+        assert!(incremental_query(&p, Some(DateBound::Int(5)), &q(Some(at(1)), None)).is_err());
+    }
+
+    #[test]
+    fn bounds_compare_only_on_the_same_axis() {
+        let p = pipe(r#"{"columns": {"datetime": "ts"}}"#);
+        assert_eq!(bound_before(&at(1), &at(2), &p), Ok(true));
+        assert_eq!(bound_before(&at(2), &at(2), &p), Ok(false));
+        assert_eq!(
+            bound_before(&DateBound::Int(1), &DateBound::Int(2), &p),
+            Ok(true)
+        );
+        assert!(bound_before(&at(1), &DateBound::Int(2), &p).is_err());
+    }
 
     #[test]
     fn any_failed_pipe_fails_the_copy() {
