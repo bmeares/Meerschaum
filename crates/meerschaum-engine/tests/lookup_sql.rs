@@ -4,14 +4,161 @@ mod common;
 
 use common::*;
 use meerschaum_connector::InstanceConnector;
-use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::{SqlConnector, driver::SqlValue};
+use meerschaum_core::success::Bound;
 use meerschaum_engine::graph::EdgeRole;
 use meerschaum_engine::{
-    Action, Depth, EdgeCursor, InstanceState, RunOptions, Selection, StateSource, StateWriter,
-    StaticRegistry,
+    Action, ChunkSource, Depth, EdgeCursor, EventKind, InstanceState, RunOptions, Selection,
+    StateSource, StateWriter, StaticRegistry,
 };
 use serde_json::json;
 use std::sync::Arc;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bounded_lookup_replays_changed_windows_and_keeps_polling_without_a_time_cap() {
+    bounded_lookup_scenario(env("bounded_lookup_sql").await, "").await;
+}
+
+async fn bounded_lookup_scenario(env: Env, prefix: &str) {
+    let event_source = format!("{prefix}event_source");
+    let state_source = format!("{prefix}state_source");
+    env.exec(&format!(
+        "CREATE TABLE {event_source} (ts INTEGER, id INTEGER)"
+    ))
+    .await;
+    env.exec(&format!(
+        "INSERT INTO {event_source} VALUES (10,1),(100,2),(200,3)"
+    ))
+    .await;
+    env.exec(&format!(
+        "CREATE TABLE {state_source} (ts INTEGER, id INTEGER, multiplier INTEGER)"
+    ))
+    .await;
+    env.exec(&format!(
+        "INSERT INTO {state_source} VALUES (5,1,1),(95,2,2),(195,3,3)"
+    ))
+    .await;
+    let columns = json!({"datetime":"ts","id":"id"});
+    env.register("events", &json!({"columns":columns,"dtypes":{"ts":"int","id":"int"},"sql":format!("SELECT * FROM {event_source}")})).await;
+    env.register("catalog", &json!({"columns":columns,"dtypes":{"ts":"int","id":"int","multiplier":"int"},"sql":format!("SELECT * FROM {state_source}"),"fetch":{"backtrack_minutes":1000},"upsert":true,"null_indices":false})).await;
+    let result_pipe = env.register("result", &json!({
+        "columns":columns,"dtypes":{"ts":"int","id":"int","v":"int"},
+        "sql":"SELECT e.ts, e.id, (SELECT c.multiplier FROM {{ Pipe('sql:eng','catalog') }} c WHERE c.ts <= e.ts AND c.ts > e.ts - 10 ORDER BY c.ts DESC LIMIT 1) AS v FROM {{ Pipe('sql:eng','events') }} e",
+        "parents":["Pipe('sql:eng','events')",{"connector":"sql:eng","metric":"catalog","role":"lookup","lookback":10}],
+        "verify":{"chunk_minutes":10},"fetch":{"backtrack_minutes":30},"upsert":true,"null_indices":false,
+    })).await;
+    let engine = env.engine();
+    let seeded = engine
+        .run(RunOptions {
+            selection: Some(Selection::refs([env.pipe_ref("events")])),
+            ..Default::default()
+        })
+        .await;
+    assert!(seeded.success, "{}", seeded.message);
+    let options = || RunOptions {
+        selection: Some(
+            Selection::refs([env.pipe_ref("catalog"), env.pipe_ref("result")]).with_graph(true),
+        ),
+        workers: Some(2),
+        ..Default::default()
+    };
+    let first = engine.run(options()).await;
+    assert!(first.success, "{}", first.message);
+    assert_eq!(
+        env.rowcount("result").await,
+        3,
+        "An old lookup watermark must not cap current events."
+    );
+    let target = env
+        .conn
+        .pipe_table_name(&env.conn.sql_pipe(&result_pipe).unwrap());
+    env.exec(&format!(
+        "UPDATE {state_source} SET multiplier = 7 WHERE ts = 95"
+    ))
+    .await;
+    let mut events = engine.subscribe();
+    let revised = engine.run(options()).await;
+    assert!(revised.success, "{}", revised.message);
+    assert_eq!(
+        revised
+            .record
+            .as_ref()
+            .unwrap()
+            .node(&env.pipe_ref("result"))
+            .unwrap()
+            .action,
+        Action::Backfill
+    );
+    let mut windows = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if event.pipe_ref.as_ref() != Some(&env.pipe_ref("result")) {
+            continue;
+        }
+        if let EventKind::ChunkStarted {
+            source: ChunkSource::Window,
+            begin,
+            end,
+            ..
+        } = event.kind
+        {
+            windows.push((begin, end));
+        }
+    }
+    assert_eq!(
+        windows,
+        vec![
+            (Some(Bound::Int(90)), Some(Bound::Int(100))),
+            (Some(Bound::Int(100)), Some(Bound::Int(110)))
+        ]
+    );
+    for (ts, value) in [(10, 1), (100, 7), (200, 3)] {
+        assert_eq!(
+            env.conn
+                .value(&format!(
+                    "SELECT CAST(v AS BIGINT) FROM {target} WHERE ts={ts}"
+                ))
+                .await,
+            Some(SqlValue::Int(value))
+        );
+    }
+    env.exec(&format!(
+        "UPDATE {state_source} SET multiplier = 4 WHERE ts = 195"
+    ))
+    .await;
+    let recent = engine.run(options()).await;
+    assert!(recent.success, "{}", recent.message);
+    assert_eq!(
+        recent
+            .record
+            .as_ref()
+            .unwrap()
+            .node(&env.pipe_ref("result"))
+            .unwrap()
+            .action,
+        Action::Incremental
+    );
+    assert_eq!(
+        env.conn
+            .value(&format!(
+                "SELECT CAST(v AS BIGINT) FROM {target} WHERE ts=200"
+            ))
+            .await,
+        Some(SqlValue::Int(4))
+    );
+    let quiet = engine.run(options()).await;
+    assert!(quiet.success, "{}", quiet.message);
+    assert_eq!(
+        quiet
+            .record
+            .as_ref()
+            .unwrap()
+            .node(&env.pipe_ref("result"))
+            .unwrap()
+            .action,
+        Action::Root
+    );
+    assert_eq!(env.rowcount("result").await, 3);
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lookup_changes_recompute_history_but_identical_upserts_stay_quiet() {
@@ -266,6 +413,20 @@ async fn postgres_lookup_changes_and_noop_upserts() {
     };
     let conn = env.conn.clone();
     lookup_scenario(env, &format!("\"{schema}\".")).await;
+    assert!(
+        conn.exec(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .await
+            .is_some()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_bounded_lookup_changes() {
+    let Some((env, schema)) = postgres_env().await else {
+        return;
+    };
+    let conn = env.conn.clone();
+    bounded_lookup_scenario(env, &format!("\"{schema}\".")).await;
     assert!(
         conn.exec(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
             .await

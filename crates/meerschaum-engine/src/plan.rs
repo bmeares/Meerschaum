@@ -1021,7 +1021,15 @@ pub async fn plan_node<S: StateSource>(
             }
         };
         if eval.lookup && (matches!(eval.signal, Signal::Dirty { .. }) || eval.advanced()) {
-            eval.dirty = vec![Interval::full()];
+            // A declared lookup window can bound known changes without imposing a watermark
+            // cap. Cold cursors and advances without dirty extents still require full coverage.
+            let known_window = (e.options.lookback.is_some() || e.options.lookahead.is_some())
+                && !eval.no_cursor
+                && matches!(eval.signal, Signal::Dirty { .. })
+                && !eval.dirty.is_empty();
+            if !known_window {
+                eval.dirty = vec![Interval::full()];
+            }
         }
         out.consumes.push(crate::plan::Consumption {
             parent_ref: e.parent.clone(),

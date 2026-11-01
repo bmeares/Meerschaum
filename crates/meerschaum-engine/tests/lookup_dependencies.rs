@@ -82,6 +82,100 @@ fn cursor(parent: &str, role: EdgeRole) -> EdgeCursor {
     }
 }
 
+fn bounded_records() -> Vec<PipeRecord> {
+    vec![
+        record("events", r#"{"columns":{"datetime":"ts"}}"#),
+        record("catalog", r#"{"columns":{"datetime":"ts"}}"#),
+        record(
+            "result",
+            r#"{"columns":{"datetime":"ts"},"verify":{"chunk_days":1},"fetch":{"backtrack_minutes":60},"parents":["Pipe('sql:main','events')",{"connector":"sql:main","metric":"catalog","role":"lookup","lookback_days":1,"lookahead_minutes":30}]}"#,
+        ),
+    ]
+}
+
+fn bounded_state() -> MemoryStateData {
+    let mut state = state();
+    state
+        .watermarks
+        .insert(reference("catalog"), Some(at(19, 0)));
+    let mut lookup_cursor = cursor("catalog", EdgeRole::Lookup);
+    lookup_cursor.parent_watermark_at_cursor = Some(at(19, 0));
+    state.cursors.insert(
+        "sql:main".into(),
+        vec![cursor("events", EdgeRole::Data), lookup_cursor],
+    );
+    state
+}
+
+fn change_lookup(state: &mut MemoryStateData, begin: Bound, end: Bound) {
+    state.ledger.insert(
+        "sql:main".into(),
+        vec![meerschaum_engine::ledger::LedgerEntry {
+            pipe_ref: reference("catalog"),
+            seq: 1,
+            begin: Some(begin),
+            end: Some(end),
+            created: Utc::now(),
+        }],
+    );
+}
+
+#[tokio::test]
+async fn bounded_lookup_changes_near_the_tail_stay_incremental() {
+    let mut state = bounded_state();
+    state
+        .watermarks
+        .insert(reference("catalog"), Some(at(20, 11)));
+    change_lookup(&mut state, at(20, 11), at(20, 12));
+    let plan = planned_records(state, bounded_records()).await;
+    let child = plan.node(&reference("result")).unwrap();
+    assert_eq!(child.action, Action::Incremental, "{child:?}");
+    assert_eq!(
+        child.bounds.unwrap().end,
+        Some(at(20, 12)),
+        "The lookup must not cap the data stream at 11:00."
+    );
+}
+
+#[tokio::test]
+async fn bounded_lookup_historical_changes_replay_only_the_dependency_window() {
+    let mut state = bounded_state();
+    change_lookup(&mut state, at(10, 12), at(10, 13));
+    let plan = planned_records(state, bounded_records()).await;
+    let child = plan.node(&reference("result")).unwrap();
+    assert_eq!(child.action, Action::Backfill);
+    assert_eq!(child.ranges[0].begin, Some(at(10, 0)));
+    assert_eq!(child.ranges.last().unwrap().end, Some(at(12, 0)));
+    assert!(
+        child
+            .chunks
+            .iter()
+            .all(|chunk| chunk.begin.is_some() && chunk.end.is_some())
+    );
+}
+
+#[tokio::test]
+async fn a_bounded_lookup_without_a_cursor_still_checks_full_history() {
+    let mut state = state();
+    change_lookup(&mut state, at(10, 12), at(10, 13));
+    let plan = planned_records(state, bounded_records()).await;
+    let child = plan.node(&reference("result")).unwrap();
+    assert_eq!(child.action, Action::Backfill);
+    assert!(child.ranges[0].begin.is_none());
+}
+
+#[tokio::test]
+async fn a_bounded_lookup_with_unknown_changed_ranges_checks_full_history() {
+    let mut state = bounded_state();
+    state
+        .watermarks
+        .insert(reference("catalog"), Some(at(20, 11)));
+    let plan = planned_records(state, bounded_records()).await;
+    let child = plan.node(&reference("result")).unwrap();
+    assert_eq!(child.action, Action::Backfill);
+    assert!(child.ranges[0].begin.is_none());
+}
+
 #[tokio::test]
 async fn old_lookup_timestamp_does_not_stop_recent_event_data() {
     let plan = planned(state(), true).await;

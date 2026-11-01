@@ -400,6 +400,20 @@ The engine waits for the lookup and propagates failures. A changed lookup
 rechecks the child's history; unchanged UPSERTs add no dirty ranges.
 Sources with only lookup inputs keep polling. Other dependencies use `role: data` by default.
 
+For a lookup with a bounded query window, declare its lookback and lookahead.
+Known changes then recheck that window without capping progress:
+
+```yaml
+children:
+  - connector: sql:main
+    metric: availability
+    role: lookup
+    lookback_days: 1
+    lookahead_minutes: 30
+```
+
+The first sync and changes without known ranges still check full history.
+
 Full replays split stored history on the Pipe's chunk grid. The first and last
 windows stay open to include older and newer rows. Edge cursors advance only
 after every chunk succeeds.

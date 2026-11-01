@@ -318,7 +318,9 @@ fn map_changes(
     if intervals.is_empty() {
         return Vec::new();
     }
-    if options.role == EdgeRole::Lookup
+    if (options.role == EdgeRole::Lookup
+        && options.lookback.is_none()
+        && options.lookahead.is_none())
         || parent.kind == AxisKind::None
         || child.kind == AxisKind::None
     {
