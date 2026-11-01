@@ -289,3 +289,125 @@ async fn sqlite_duplicate_usernames_fail_closed() {
         refused.message
     );
 }
+
+/// SQLite: a user registered before ID reservations existed has no reservation; deleting them
+/// reserves their ID first, so the next user never takes it and a key written late for the
+/// deleted user names nobody.
+#[tokio::test]
+async fn sqlite_a_legacy_users_id_stays_reserved_after_deletion() {
+    let Some(c) = ctx("sqlite", "legacy_ids").await else {
+        return;
+    };
+    let mut first = User::new(&unique("first"), Some("test1234"));
+    ok(c.conn.register_user(&mut first).await);
+    let first_id = c
+        .conn
+        .get_user_id(&first)
+        .await
+        .unwrap()
+        .unwrap()
+        .as_i64()
+        .unwrap();
+    // Written before reservations: above every reserved ID, with none of its own.
+    let users = c.conn.instance_table_name("mrsm_users");
+    let (legacy_id, legacy_name) = (first_id + 1, unique("legacy"));
+    assert!(
+        c.conn
+            .exec(&format!(
+                "INSERT INTO {users} (user_id, username, password_hash) \
+                 VALUES ({legacy_id}, '{legacy_name}', 'x')"
+            ))
+            .await
+            .is_some()
+    );
+    ok(c.conn.delete_user(&User::new(&legacy_name, None)).await);
+
+    let mut next = User::new(&unique("next"), Some("test1234"));
+    ok(c.conn.register_user(&mut next).await);
+    let next_id = c
+        .conn
+        .get_user_id(&next)
+        .await
+        .unwrap()
+        .unwrap()
+        .as_i64()
+        .unwrap();
+    assert!(
+        next_id > legacy_id,
+        "the new user took the deleted legacy user's ID {legacy_id}"
+    );
+
+    use meerschaum_connector::pipe_ops;
+    let late_id = uuid::Uuid::new_v4();
+    let doc: pipe_ops::Doc = [
+        ("id".to_string(), KValue::Uuid(late_id)),
+        (
+            "user_id".to_string(),
+            pipe_ops::user_id_value(&meerschaum_core::Value::Int(legacy_id)),
+        ),
+        ("creation".to_string(), pipe_ops::utc_value(Utc::now())),
+        ("label".to_string(), KValue::Str(unique("late"))),
+        ("is_valid".to_string(), KValue::Bool(true)),
+        ("secret_hash".to_string(), KValue::Str("x".into())),
+    ]
+    .into_iter()
+    .collect();
+    let tokens = InstanceConnector::get_tokens_pipe(&c.conn);
+    ok(pipe_ops::sync_docs(&c.conn, &tokens, vec![doc], false).await);
+    let late_owner = InstanceConnector::get_token_model(&c.conn, &late_id)
+        .await
+        .unwrap()
+        .expect("the late key was written")
+        .user_id
+        .unwrap();
+    assert!(
+        InstanceConnector::get_username(&c.conn, &late_owner)
+            .await
+            .unwrap()
+            .is_none(),
+        "the late key names a user"
+    );
+}
+
+/// SQLite: when the deleted user's ID cannot be reserved, nothing is deleted.
+#[tokio::test]
+async fn sqlite_a_deletion_that_cannot_reserve_the_id_deletes_nothing() {
+    let Some(c) = ctx("sqlite", "unreserved").await else {
+        return;
+    };
+    let mut kept = User::new(&unique("kept"), Some("test1234"));
+    ok(c.conn.register_user(&mut kept).await);
+    let key = token_for(&c, &kept).await;
+    let reserved = c.conn.instance_table_name("mrsm_user_ids");
+    assert!(
+        c.conn
+            .exec(&format!(
+                "CREATE TRIGGER refuse_reservations BEFORE INSERT ON {reserved} \
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END"
+            ))
+            .await
+            .is_some()
+    );
+    // The registration already reserved this user's ID: `INSERT OR IGNORE` never fires the
+    // trigger then. Free it, so the deletion has to reserve it again.
+    let kept_id = c.conn.get_user_id(&kept).await.unwrap().unwrap();
+    assert!(
+        c.conn
+            .exec(&format!(
+                "DELETE FROM {reserved} WHERE user_id = {}",
+                kept_id.as_i64().unwrap()
+            ))
+            .await
+            .is_some()
+    );
+    let refused = c.conn.delete_user(&kept).await;
+    assert!(!refused.success, "{}", refused.message);
+    assert!(c.conn.get_user_id(&kept).await.unwrap().is_some());
+    assert!(
+        InstanceConnector::get_token_model(&c.conn, &key.id.unwrap())
+            .await
+            .unwrap()
+            .is_some(),
+        "a refused deletion deleted the user's keys"
+    );
+}

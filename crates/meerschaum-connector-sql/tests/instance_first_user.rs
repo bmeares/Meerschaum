@@ -2,14 +2,18 @@
 //! connectors (separate pools, as separate processes have), at most one succeeds; a failed one
 //! leaves the lock free; a lock row that cannot be seeded is an error, never a lock.
 //!
-//! The races run on SQLite files (always available); the server flavors run the "already has a
-//! user" case when their URIs are set.
+//! The races run on SQLite files (always available) and, when their URIs are set, on a database
+//! of their own on PostgreSQL (defaulting to REPEATABLE READ, where locking the claim row without
+//! changing it promoted a second administrator), MySQL and MariaDB; every flavor runs the
+//! "already has a user" case.
 
 mod common;
 use common::*;
 use meerschaum_connector::InstanceConnector;
 use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::uri::ConnectionSpec;
 use meerschaum_core::users::User;
+use std::time::{Duration, Instant};
 
 fn unique(tag: &str) -> String {
     format!(
@@ -119,3 +123,225 @@ flavor_tests!(
         ok(c.conn.delete_user(&existing).await);
     }
 );
+
+/// A database of its own on a server flavor, so a race starts with no users without touching
+/// other tests' users. PostgreSQL's defaults to REPEATABLE READ.
+struct Dedicated {
+    flavor: &'static str,
+    admin: SqlConnector,
+    spec: ConnectionSpec,
+    database: String,
+}
+
+impl Dedicated {
+    async fn create(flavor: &'static str) -> Option<Self> {
+        let env = FLAVOR_ENVS
+            .iter()
+            .find(|(f, _)| *f == flavor)
+            .map(|(_, e)| *e)
+            .expect("flavor");
+        let Ok(uri) = std::env::var(env) else {
+            eprintln!("Skipping {flavor}: set {env}.");
+            return None;
+        };
+        let mut spec = ConnectionSpec::from_uri(&uri, Some(&format!("rs_first_{flavor}")), None)
+            .expect("valid URI");
+        let admin = SqlConnector::connect(&format!("rs_first_admin_{flavor}"), spec.clone())
+            .await
+            .expect("connects");
+        let database = unique("first_db");
+        admin
+            .driver()
+            .exec(&format!("CREATE DATABASE {database}"))
+            .await
+            .unwrap_or_else(|e| {
+                panic!("The race needs a database of its own (CREATE DATABASE {database}): {e}")
+            });
+        if flavor == "postgresql" {
+            admin
+                .driver()
+                .exec(&format!(
+                    "ALTER DATABASE {database} SET default_transaction_isolation TO 'repeatable read'"
+                ))
+                .await
+                .expect("isolation");
+        }
+        spec.database = Some(database.clone());
+        Some(Self {
+            flavor,
+            admin,
+            spec,
+            database,
+        })
+    }
+
+    async fn connect(&self, label: &str) -> SqlConnector {
+        SqlConnector::connect(label, self.spec.clone())
+            .await
+            .expect("connects")
+    }
+
+    /// Wait until `n` sessions of this database wait on a lock in a statement starting with
+    /// `statement` (`'INSERT INTO%mrsm_users'`, say).
+    async fn wait_for_lock_waits(&self, statement: &str, n: i64) {
+        let query = if self.flavor == "postgresql" {
+            format!(
+                "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE datname = '{}' \
+                 AND wait_event_type = 'Lock' AND query ILIKE '{statement}%'",
+                self.database
+            )
+        } else {
+            format!(
+                "SELECT COUNT(*) AS n FROM information_schema.innodb_trx t \
+                 JOIN information_schema.processlist p ON p.id = t.trx_mysql_thread_id \
+                 WHERE p.db = '{}' AND t.trx_state = 'LOCK WAIT' AND t.trx_query LIKE '{statement}%'",
+                self.database
+            )
+        };
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let waiting = self
+                .admin
+                .driver()
+                .value(&query)
+                .await
+                .expect("lock waits")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            if waiting >= n {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no session waits in {statement} ({waiting} of {n})"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn drop_database(self, connectors: Vec<SqlConnector>) {
+        for conn in &connectors {
+            conn.driver().close().await;
+        }
+        let drop = if self.flavor == "postgresql" {
+            format!("DROP DATABASE {} WITH (FORCE)", self.database)
+        } else {
+            format!("DROP DATABASE {}", self.database)
+        };
+        self.admin
+            .driver()
+            .exec(&drop)
+            .await
+            .expect("drop database");
+        self.admin.driver().close().await;
+    }
+}
+
+/// The deterministic race: the first registration holds the claim (its insert waits on a
+/// third session's table lock), the second demonstrably waits on the claim row, then the first
+/// commits. The second is an ordinary registration, never a second administrator.
+async fn a_waiting_first_registration_is_not_promoted(flavor: &'static str) {
+    let Some(d) = Dedicated::create(flavor).await else {
+        return;
+    };
+    let winner = d.connect("rs_first_w").await;
+    let loser = d.connect("rs_first_l").await;
+    let blocker = d.connect("rs_first_c").await;
+    // The instance tables and the username key first: their DDL would wait on the blocker.
+    let mut warm = User::new(&unique("warm"), Some("test1234"));
+    ok(blocker.register_user(&mut warm).await);
+    ok(blocker.delete_user(&warm).await);
+    assert!(
+        InstanceConnector::get_users(&blocker)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let users = blocker.instance_table_name("mrsm_users");
+    let mut tx = blocker.driver().begin().await.unwrap();
+    let hold = if flavor == "postgresql" {
+        format!("LOCK TABLE {users} IN SHARE MODE")
+    } else {
+        // REPEATABLE READ: locks the empty table's supremum gap, so inserts wait.
+        format!("SELECT user_id FROM {users} FOR UPDATE")
+    };
+    tx.exec(&hold).await.unwrap();
+
+    let (first, second) = (unique("first"), unique("second"));
+    let winning = tokio::spawn({
+        let name = first.clone();
+        async move {
+            let outcome = InstanceConnector::register_first_user(&winner, &mut admin(&name)).await;
+            (winner, outcome)
+        }
+    });
+    d.wait_for_lock_waits("INSERT INTO%mrsm_users", 1).await;
+    let losing = tokio::spawn({
+        let name = second.clone();
+        async move {
+            let outcome = InstanceConnector::register_first_user(&loser, &mut admin(&name)).await;
+            (loser, outcome)
+        }
+    });
+    d.wait_for_lock_waits("UPDATE%mrsm_bootstrap", 1).await;
+    tx.rollback().await.unwrap();
+
+    let (winner, won) = winning.await.unwrap();
+    let (loser, lost) = losing.await.unwrap();
+    assert!(matches!(won, Ok(true)), "{won:?}");
+    assert!(matches!(lost, Ok(false)), "{lost:?}");
+    assert_eq!(
+        InstanceConnector::get_users(&blocker).await.unwrap(),
+        vec![first.clone()]
+    );
+    let user_type = blocker
+        .get_user_type(&User::new(&first, None))
+        .await
+        .unwrap();
+    assert_eq!(user_type.as_deref(), Some("admin"));
+    d.drop_database(vec![winner, loser, blocker]).await;
+}
+
+/// Eight first registrations at once from two independent connectors: one administrator, and
+/// every other one is refused cleanly (none fails, none is promoted).
+async fn first_registrations_at_once(flavor: &'static str) {
+    let Some(d) = Dedicated::create(flavor).await else {
+        return;
+    };
+    let a = d.connect("rs_first_a").await;
+    let b = d.connect("rs_first_b").await;
+    let names: Vec<String> = (0..8).map(|i| unique(&format!("first{i}"))).collect();
+    let outcomes = futures_util::future::join_all(names.iter().enumerate().map(|(i, name)| {
+        let conn = if i % 2 == 0 { &a } else { &b };
+        async move { InstanceConnector::register_first_user(conn, &mut admin(name)).await }
+    }))
+    .await;
+    let won = outcomes.iter().filter(|o| matches!(o, Ok(true))).count();
+    let lost = outcomes.iter().filter(|o| matches!(o, Ok(false))).count();
+    assert_eq!(won, 1, "{outcomes:?}");
+    assert_eq!(won + lost, 8, "no registration may fail: {outcomes:?}");
+    let users = InstanceConnector::get_users(&a).await.unwrap();
+    assert_eq!(users.len(), 1, "{users:?}");
+    d.drop_database(vec![a, b]).await;
+}
+
+macro_rules! server_races {
+    ($($flavor:literal => $waiting:ident, $at_once:ident;)*) => {$(
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $waiting() {
+            a_waiting_first_registration_is_not_promoted($flavor).await;
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $at_once() {
+            first_registrations_at_once($flavor).await;
+        }
+    )*};
+}
+
+server_races! {
+    "postgresql" => postgresql_waiting_registration, postgresql_registrations_at_once;
+    "mysql" => mysql_waiting_registration, mysql_registrations_at_once;
+    "mariadb" => mariadb_waiting_registration, mariadb_registrations_at_once;
+}

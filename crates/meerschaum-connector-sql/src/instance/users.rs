@@ -2,7 +2,7 @@
 //! `meerschaum_core::users` (passlib's `pbkdf2-sha256` modular-crypt format), so v4 user rows
 //! validate unchanged.
 
-use meerschaum_connector::{ConnectorResult, InstanceConnector};
+use meerschaum_connector::{ConnectorError, ConnectorResult, InstanceConnector};
 use meerschaum_core::users::{User, valid_username};
 use meerschaum_core::{Map, SuccessTuple, Value};
 
@@ -14,12 +14,27 @@ use meerschaum_kernel::value::Value as KValue;
 
 use super::{SqlConnector, be, frame_docs, kv_str};
 
+/// Fresh transactions [`SqlConnector::register_first_user`] tries before returning a failure.
+const FIRST_USER_ATTEMPTS: usize = 3;
+
+/// How a first-user transaction failed: before its commit (rolled back, safe to try again) or
+/// at or after it (never tried again; a missing lock row or a wrong row count counts here too).
+enum FirstUserError {
+    BeforeCommit(ConnectorError),
+    Commit(ConnectorError),
+}
+
 /// A user ID cell as an integer (drivers return integer columns as integers, Oracle's `NUMBER`
 /// as a decimal or float, some as text).
 fn user_id_of(v: &KValue) -> Option<i64> {
     match v {
         KValue::Int(i) => Some(*i),
-        KValue::Float(f) if f.fract() == 0.0 => Some(*f as i64),
+        // Only integers a float holds exactly (|f| <= 2^53): never a rounded identity.
+        KValue::Float(f)
+            if f.is_finite() && f.fract() == 0.0 && f.abs() <= 9_007_199_254_740_992.0 =>
+        {
+            Some(*f as i64)
+        }
         KValue::Decimal(d) => d.to_string().parse().ok(),
         KValue::Str(s) => s.trim().parse().ok(),
         _ => None,
@@ -297,13 +312,13 @@ impl SqlConnector {
             .map(|v| Value::Str(v.to_string())))
     }
 
-    /// [`InstanceConnector::register_first_user`]: one transaction on one connection locks the
-    /// `mrsm_bootstrap` row (`SELECT ... FOR UPDATE`, MSSQL's `UPDLOCK, HOLDLOCK`, SQLite's
-    /// `BEGIN IMMEDIATE`, an `UPDATE` on DuckDB), then counts the users in a later statement and
-    /// inserts `user` only when there are none. A concurrent first registration waits on the lock
-    /// and then sees the winner (or, on DuckDB, fails its commit). Any error rolls the whole
-    /// transaction back and is returned (never a promotion from a stale count). The lock row is
-    /// seeded idempotently, and a missing row is an error, never a lock.
+    /// [`InstanceConnector::register_first_user`]: one transaction on one connection (SQLite:
+    /// `BEGIN IMMEDIATE`) changes the `mrsm_bootstrap` row with an `UPDATE`, then counts the users
+    /// in a later statement and inserts `user` only when there are none. A concurrent first
+    /// registration waits on the row, then sees the winner (READ COMMITTED) or fails with a
+    /// serialization error (snapshot isolation). Any error rolls the whole transaction back and is
+    /// returned (fail closed: never a promotion from a stale count). The lock row is seeded
+    /// idempotently, and a missing row is an error, never a lock.
     ///
     /// [`InstanceConnector::register_first_user`]: meerschaum_connector::InstanceConnector::register_first_user
     pub async fn register_first_user(&self, user: &mut User) -> ConnectorResult<bool> {
@@ -354,85 +369,146 @@ impl SqlConnector {
             self.json_param(&attributes),
         ]);
 
-        let mut tx = self.driver.begin_write().await.map_err(be)?;
-        // Every early return drops `tx`, which rolls it back.
-        let lock_statement = match self.flavor {
-            Flavor::Mssql => {
-                format!("SELECT claim FROM {lock} WITH (UPDLOCK, HOLDLOCK) WHERE claim = 1")
-            }
-            Flavor::Duckdb => format!("UPDATE {lock} SET claim = 1 WHERE claim = 1"),
-            _ if self.flavor.driver_family() == DriverFamily::Sqlite => {
-                format!("SELECT claim FROM {lock} WHERE claim = 1")
-            }
-            _ => format!("SELECT claim FROM {lock} WHERE claim = 1 FOR UPDATE"),
-        };
-        self.log(&lock_statement);
-        if self.flavor == Flavor::Duckdb {
-            tx.exec(&lock_statement).await.map_err(be)?;
-            let held = tx
-                .read_frame(&format!("SELECT claim FROM {lock} WHERE claim = 1"))
+        // A failure before the commit (a serialization failure under snapshot isolation, a
+        // deadlock victim) rolled everything back: a fresh transaction sees the winner. A failed
+        // commit is never retried (its outcome is unknown).
+        let mut attempt = 1;
+        loop {
+            match self
+                .first_user_attempt(&lock, &users, &insert, &params)
                 .await
-                .map_err(be)?;
-            if held.height() != 1 {
-                return Err(be(format!("The bootstrap lock row of {self} is missing.")));
+            {
+                Err(FirstUserError::BeforeCommit(e)) if attempt < FIRST_USER_ATTEMPTS => {
+                    self.log(&format!("First-user attempt {attempt} rolled back: {e}"));
+                    tokio::time::sleep(std::time::Duration::from_millis(25 * attempt as u64)).await;
+                    attempt += 1;
+                }
+                Err(FirstUserError::BeforeCommit(e) | FirstUserError::Commit(e)) => return Err(e),
+                Ok(first) => return Ok(first),
             }
-        } else {
-            let held = tx.read_frame(&lock_statement).await.map_err(be)?;
-            if held.height() != 1 {
-                return Err(be(format!("The bootstrap lock row of {self} is missing.")));
-            }
+        }
+    }
+
+    /// One transaction of [`Self::register_first_user`]. Every early return drops `tx`, which
+    /// rolls it back. The lock is an `UPDATE` that changes the row (MySQL counts changed rows
+    /// only): it waits for a concurrent bootstrap and, under snapshot isolation (PostgreSQL
+    /// REPEATABLE READ, Oracle SERIALIZABLE, DuckDB), fails instead of reading a stale "no users".
+    /// Exactly one row must change, so a missing row is an error, never a lock.
+    async fn first_user_attempt(
+        &self,
+        lock: &str,
+        users: &str,
+        insert: &str,
+        params: &[SqlParam],
+    ) -> Result<bool, FirstUserError> {
+        let before = |e: String| FirstUserError::BeforeCommit(be(e));
+        let mut tx = self
+            .driver
+            .begin_write()
+            .await
+            .map_err(|e| before(e.to_string()))?;
+        let lock_statement =
+            format!("UPDATE {lock} SET generation = 1 - generation WHERE claim = 1");
+        self.log(&lock_statement);
+        let locked = tx
+            .exec(&lock_statement)
+            .await
+            .map_err(|e| before(e.to_string()))?;
+        if locked != 1 {
+            return Err(FirstUserError::Commit(be(format!(
+                "The bootstrap lock row of {self} is missing."
+            ))));
         }
         let count = format!("SELECT COUNT(*) AS users FROM {users}");
         self.log(&count);
-        let counted = tx.read_frame(&count).await.map_err(be)?;
+        let counted = tx
+            .read_frame(&count)
+            .await
+            .map_err(|e| before(e.to_string()))?;
         let users_now = frame_docs(&counted)
             .first()
             .and_then(|doc| doc.get("users"))
             .and_then(user_id_of)
-            .ok_or_else(|| be(format!("Could not count the users of {self}.")))?;
+            .ok_or_else(|| before(format!("Could not count the users of {self}.")))?;
         if users_now > 0 {
-            tx.rollback().await.map_err(be)?;
+            tx.rollback().await.map_err(|e| before(e.to_string()))?;
             return Ok(false);
         }
-        self.log(&insert);
-        let inserted = tx.raw_execute(&insert, &params).await.map_err(be)?;
+        self.log(insert);
+        let inserted = tx
+            .raw_execute(insert, params)
+            .await
+            .map_err(|e| before(e.to_string()))?;
         if inserted != 1 {
-            return Err(be(format!(
+            return Err(FirstUserError::Commit(be(format!(
                 "Registering the first user of {self} wrote {inserted} rows."
-            )));
+            ))));
         }
-        tx.commit().await.map_err(be)?;
+        tx.commit()
+            .await
+            .map_err(|e| FirstUserError::Commit(be(e)))?;
         Ok(true)
     }
 
     /// Create `mrsm_bootstrap` with its one row (`claim = 1`) if missing, and check the row is
-    /// there. Concurrent seeders may both try: a refused duplicate is fine, a missing row is not.
+    /// there. A present row is only read (an `INSERT` of a duplicate key would wait on a
+    /// bootstrap holding the row). Concurrent seeders may both insert: a refused duplicate is
+    /// fine, a missing row is not.
     async fn seed_bootstrap_lock(&self) -> ConnectorResult<String> {
         let lock = self.instance_table_name("mrsm_bootstrap");
         let schema = self.instance_schema().map(str::to_string);
-        if !self
+        let check = format!("SELECT COUNT(*) AS n FROM {lock} WHERE claim = 1");
+        let claims = async || -> ConnectorResult<Option<i64>> {
+            let df = self.read(&check).await.map_err(be)?;
+            Ok(frame_docs(&df)
+                .first()
+                .and_then(|d| d.get("n"))
+                .and_then(user_id_of))
+        };
+        if self
             .table_exists_checked("mrsm_bootstrap", schema.as_deref())
             .await?
         {
-            let create = format!("CREATE TABLE {lock} (claim INTEGER NOT NULL PRIMARY KEY)");
+            if claims().await? == Some(1) {
+                return Ok(lock);
+            }
+        } else {
+            let create = format!(
+                "CREATE TABLE {lock} (claim INTEGER NOT NULL PRIMARY KEY, generation INTEGER NOT NULL)"
+            );
             self.log(&create);
             let _ = self.driver.exec(&create).await;
         }
-        let seed = format!("INSERT INTO {lock} (claim) VALUES (1)");
+        let seed = format!("INSERT INTO {lock} (claim, generation) VALUES (1, 0)");
         self.log(&seed);
         let _ = self.driver.exec(&seed).await;
-        let check = format!("SELECT COUNT(*) AS n FROM {lock} WHERE claim = 1");
-        let df = self.read(&check).await.map_err(be)?;
-        match frame_docs(&df)
-            .first()
-            .and_then(|d| d.get("n"))
-            .and_then(user_id_of)
-        {
+        match claims().await? {
             Some(1) => Ok(lock),
             _ => Err(be(format!(
                 "Could not seed the bootstrap lock row of {self}."
             ))),
         }
+    }
+
+    /// `mrsm_user_ids` (SQLite family), created when missing.
+    async fn user_ids_table(&self) -> ConnectorResult<String> {
+        let ids = self.instance_table_name("mrsm_user_ids");
+        let create = format!("CREATE TABLE IF NOT EXISTS {ids} (user_id INTEGER PRIMARY KEY)");
+        self.log(&create);
+        self.driver.exec(&create).await.map_err(be)?;
+        Ok(ids)
+    }
+
+    /// Keep a user's ID reserved (SQLite family): `delete_user` calls it before deleting.
+    async fn retain_user_id(&self, user_id: &Value) -> ConnectorResult<()> {
+        let id = user_id
+            .as_i64()
+            .ok_or_else(|| be(format!("Invalid user ID: {}", user_id.py_str())))?;
+        let ids = self.user_ids_table().await?;
+        let keep = format!("INSERT OR IGNORE INTO {ids} (user_id) VALUES ({id})");
+        self.log(&keep);
+        self.driver.exec(&keep).await.map_err(be)?;
+        Ok(())
     }
 
     /// Reserve a new user ID on a SQLite-family instance. One write statement appends it to
@@ -442,10 +518,7 @@ impl SqlConnector {
     /// fails wastes the ID. SQLite serializes writers, so concurrent reservations differ; the
     /// largest ID is an error, never an overflow.
     async fn reserve_user_id(&self) -> ConnectorResult<i64> {
-        let ids = self.instance_table_name("mrsm_user_ids");
-        let create = format!("CREATE TABLE IF NOT EXISTS {ids} (user_id INTEGER PRIMARY KEY)");
-        self.log(&create);
-        self.driver.exec(&create).await.map_err(be)?;
+        let ids = self.user_ids_table().await?;
         let users = self.instance_table_name("mrsm_users");
         let token_owners = self.token_owner_ids_query().await?;
         let query = format!(
@@ -494,6 +567,13 @@ impl SqlConnector {
             }
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
+        // SQLite: the ID is kept reserved before anything is deleted (a user registered before
+        // reservations existed has none), so a key written late for it never names a new user.
+        if self.flavor.driver_family() == DriverFamily::Sqlite
+            && let Err(e) = self.retain_user_id(&user_id).await
+        {
+            return SuccessTuple::fail(format!("Failed to delete user '{}': {e}", user.username));
+        }
         // The user's tokens go first: none may outlive the user (SQLite reuses user IDs).
         let tokens = meerschaum_connector::pipe_ops::delete_tokens_of_user(self, &user_id).await;
         if !tokens.success {
@@ -564,5 +644,34 @@ impl SqlConnector {
             .iter()
             .filter_map(|d| kv_str(d.get("username")))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_ids_are_exact_integers() {
+        assert_eq!(user_id_of(&KValue::Int(7)), Some(7));
+        assert_eq!(user_id_of(&KValue::Float(7.0)), Some(7));
+        assert_eq!(user_id_of(&KValue::Float(-0.0)), Some(0));
+        assert_eq!(
+            user_id_of(&KValue::Float(9_007_199_254_740_992.0)),
+            Some(9_007_199_254_740_992)
+        );
+        // Floats that are no exact identity: never saturated or rounded into one.
+        for f in [
+            7.5,
+            1e19,
+            -1e19,
+            9_007_199_254_740_994.0,
+            f64::NAN,
+            f64::INFINITY,
+        ] {
+            assert_eq!(user_id_of(&KValue::Float(f)), None, "{f}");
+        }
+        assert_eq!(user_id_of(&KValue::Str(" 12 ".into())), Some(12));
+        assert_eq!(user_id_of(&KValue::Str("12.5".into())), None);
     }
 }
