@@ -962,8 +962,26 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
     recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut closed_by_client = false;
     let mut new_windows = 0usize;
+    // At most one `shell_state` query runs per connection (each may run tmux). Requests that
+    // arrive meanwhile are coalesced: the latest waits for the next query, an older one is
+    // answered at once without a snapshot (the browser's probe treats that as "unknown").
+    let mut shell_job: Option<tokio::task::JoinHandle<Option<Value>>> = None;
+    let mut shell_request: Option<String> = None;
+    let mut shell_waiting: Option<String> = None;
     loop {
         tokio::select! {
+            snapshot = joined(&mut shell_job), if shell_job.is_some() => {
+                shell_job = None;
+                let snapshot = snapshot.ok().flatten();
+                if let Some(request) = shell_request.take() {
+                    queue(&control, [text(json!(["shell_state", request, snapshot]))]);
+                }
+                if let Some(request) = shell_waiting.take() {
+                    let session = tmux_session.as_deref();
+                    shell_job = Some(spawn_shell_state(&config, session, process_id));
+                    shell_request = Some(request);
+                }
+            }
             ended = &mut writer, if !writer_done => {
                 // The shell exited (its last output and close frame are sent), or the browser is
                 // gone or stopped reading.
@@ -1013,22 +1031,13 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                             }
                         }
                         Some(ClientMessage::ShellState(request)) => {
-                            // Off the bridge and bounded; the answer is queued when it is ready.
-                            let (config, session, control) =
-                                (config.clone(), tmux_session.clone(), control.clone());
-                            tokio::spawn(async move {
-                                let snapshot = tokio::time::timeout(
-                                    TMUX_TIMEOUT,
-                                    tokio::task::spawn_blocking(move || {
-                                        shell_state(&config, session.as_deref(), process_id)
-                                    }),
-                                )
-                                .await
-                                .ok()
-                                .and_then(Result::ok)
-                                .flatten();
-                                queue(&control, [text(json!(["shell_state", request, snapshot]))]);
-                            });
+                            if shell_job.is_none() {
+                                let session = tmux_session.as_deref();
+                                shell_job = Some(spawn_shell_state(&config, session, process_id));
+                                shell_request = Some(request);
+                            } else if let Some(dropped) = shell_waiting.replace(request) {
+                                queue(&control, [text(json!(["shell_state", dropped, null]))]);
+                            }
                         }
                         None => {}
                     }
@@ -1070,6 +1079,11 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
     // `spawn_pty`).
     drop(killer);
     drop(input);
+    // A `shell_state` query still running is this connection's: stop it (its tmux command is
+    // bounded by `TMUX_TIMEOUT` either way).
+    if let Some(job) = shell_job.take() {
+        job.abort();
+    }
     // Then let the socket's writer deliver what was queued (the reason, the close frame), for a
     // bounded time.
     drop(control);
@@ -1081,6 +1095,26 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
     {
         writer.abort();
     }
+}
+
+/// The result of an in-flight job; never ready without one.
+async fn joined<T>(
+    job: &mut Option<tokio::task::JoinHandle<T>>,
+) -> Result<T, tokio::task::JoinError> {
+    match job {
+        Some(handle) => handle.await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Read the shell's readiness off the bridge (it may run tmux, bounded by `TMUX_TIMEOUT`).
+fn spawn_shell_state(
+    config: &WebtermConfig,
+    session: Option<&str>,
+    process_id: Option<u32>,
+) -> tokio::task::JoinHandle<Option<Value>> {
+    let (config, session) = (config.clone(), session.map(str::to_string));
+    tokio::task::spawn_blocking(move || shell_state(&config, session.as_deref(), process_id))
 }
 
 /// What a browser may send.

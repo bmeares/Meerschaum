@@ -899,6 +899,123 @@ async fn a_revoked_terminal_ends_its_shell_while_the_browser_is_not_reading() {
     drop(socket);
 }
 
+/// A fake `tmux` for [`shell_state_queries_run_one_at_a_time`]: `new-session` runs the wrapped
+/// shell itself (no tmux server at all), and `display-message` (the readiness query) takes a
+/// second and records how many queries run at once. Anything else succeeds silently.
+const FAKE_TMUX: &str = r#"#!/bin/sh
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -S|-f) shift 2 ;;
+        -u) shift ;;
+        *) break ;;
+    esac
+done
+command="$1"
+shift
+case "$command" in
+    new-session)
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -A) shift ;;
+                -s) shift 2 ;;
+                *) break ;;
+            esac
+        done
+        exec "$@"
+        ;;
+    display-message)
+        mkdir -p "$FAKE_TMUX_DIR/running"
+        : > "$FAKE_TMUX_DIR/running/$$"
+        ls "$FAKE_TMUX_DIR/running" | wc -l >> "$FAKE_TMUX_DIR/concurrency"
+        sleep 1
+        rm -f "$FAKE_TMUX_DIR/running/$$"
+        echo 1
+        ;;
+esac
+exit 0
+"#;
+
+/// A burst of `["shell_state", id]` requests runs one readiness query at a time per connection:
+/// the latest request waits for the running one, every other is answered at once without a
+/// snapshot. The terminal still closes promptly on revocation while a query runs.
+#[tokio::test]
+async fn shell_state_queries_run_one_at_a_time() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let fake = tempfile::tempdir().unwrap();
+    let binary = fake.path().join("tmux");
+    std::fs::write(&binary, FAKE_TMUX).unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let state = state(root.path());
+    let sessions = sessions();
+    let mut shell = sh();
+    shell
+        .env
+        .push(("FAKE_TMUX_DIR".into(), fake.path().display().to_string()));
+    let tmux = TmuxSettings {
+        binary: binary.display().to_string(),
+        socket: Some(fake.path().join("never.sock")),
+        session_suffix: "_s".into(),
+        env_dir: root.path().join("webterm"),
+        config_file: Some("/dev/null".into()),
+    };
+    let cfg =
+        config_with(&state, sessions.clone(), shell, Some(tmux)).with_reauthorize_every(RECHECK);
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let mut socket = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut socket).await;
+    send_json(&mut socket, json!(["stdin", "echo fake-ready\n"])).await;
+    read_until(&mut socket, |out| has_line(out, "fake-ready")).await;
+
+    let burst: Vec<String> = (0..20).map(|i| format!("q{i}")).collect();
+    for id in &burst {
+        send_json(&mut socket, json!(["shell_state", id])).await;
+    }
+    let mut answered = HashMap::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while answered.len() < burst.len() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "unanswered requests; got {answered:?}"
+        );
+        match try_next_message(&mut socket)
+            .await
+            .expect("the terminal went quiet")
+        {
+            Some(message) if message[0] == "shell_state" => {
+                answered.insert(message[1].as_str().unwrap().to_string(), message[2].clone());
+            }
+            Some(_) => {}
+            None => panic!("the terminal closed; got {answered:?}"),
+        }
+    }
+    assert!(burst.iter().all(|id| answered.contains_key(id)));
+    let counts: Vec<usize> = std::fs::read_to_string(fake.path().join("concurrency"))
+        .unwrap()
+        .lines()
+        .map(|line| line.trim().parse().unwrap())
+        .collect();
+    assert!(
+        counts.iter().all(|&running| running == 1),
+        "readiness queries ran at once: {counts:?}"
+    );
+    // The first request and the latest one ran (a loaded host may split the burst once more).
+    assert!(
+        (2..=3).contains(&counts.len()),
+        "queries run for a burst of {}: {counts:?}",
+        burst.len()
+    );
+
+    // The session ends while a query runs: the terminal still closes at its next check.
+    send_json(&mut socket, json!(["shell_state", "last"])).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    sessions.end(ADMIN_SESSION);
+    let (out, disconnected, code) = ending(&mut socket, RECHECK * 10).await;
+    assert!(out.contains("Your session has ended"), "{out:?}");
+    assert!(disconnected);
+    assert_eq!(code, Some(1008));
+}
+
 /// A user who loses the permission to use the terminal, or is deleted, loses an open terminal.
 #[tokio::test]
 async fn an_open_terminal_closes_when_its_user_loses_access() {
