@@ -234,7 +234,7 @@ def test_source_tree_highlights_rust_and_keeps_markdown_literal(inspection_serve
         tab.page.locator('.plugin-source-code .source-token-keyword').first.wait_for()
         assert 'Explore synthetic source files.' in tab.page.inner_text('.plugin-detail-description')
         assert 'Package' in tab.page.inner_text('.plugin-detail-properties')
-        tab.page.locator('.plugin-source-tree summary:text-is("helpers")').click()
+        tab.page.locator('.plugin-source-tree summary:has(.plugin-source-folder-name:text-is("helpers"))').click()
         tab.page.get_by_role('button',name='helpers/sample.rs',exact=True).click()
         tab.page.wait_for_function("document.querySelector('.plugin-source-toolbar code')?.textContent === 'helpers/sample.rs'")
         tab.page.locator('.plugin-source-code .source-token-keyword').first.wait_for()
@@ -242,6 +242,21 @@ def test_source_tree_highlights_rust_and_keeps_markdown_literal(inspection_serve
         assert 'reading' in tab.page.inner_text('.plugin-source-code')
         assert tab.page.locator('.plugin-source-file.active').count() == 1
         tab.page.screenshot(path=str(artifacts()/f'source-tree-{width}.png'))
+        ### RC25: numbered lines; one icon per button; fullscreen keeps the tree, Escape leaves it.
+        assert tab.page.locator('.plugin-source-code .source-line').count() == 3
+        browser_section = tab.page.locator('.plugin-source-browser')
+        fullscreen = tab.page.get_by_role('button', name='Fullscreen', exact=True)
+        assert fullscreen.locator('.mrsm-icon:visible').count() == 1
+        assert tab.page.locator('.plugin-source-copy .mrsm-icon:visible').count() == 1
+        fullscreen.click()
+        assert 'plugin-source-fullscreen' in browser_section.get_attribute('class')
+        exit_button = tab.page.get_by_role('button', name='Exit fullscreen', exact=True)
+        assert exit_button.get_attribute('aria-pressed') == 'true'
+        assert exit_button.locator('.mrsm-icon:visible').count() == 1
+        assert tab.page.locator('.plugin-source-tree').is_visible()
+        tab.page.screenshot(path=str(artifacts()/f'source-fullscreen-{width}.png'))
+        tab.page.keyboard.press('Escape')
+        assert 'plugin-source-fullscreen' not in browser_section.get_attribute('class')
         tab.page.get_by_role('button',name='helpers/literal.md',exact=True).click()
         tab.page.wait_for_function("document.querySelector('.plugin-source-toolbar code')?.textContent === 'helpers/literal.md'")
         assert '<script>window.sourceExecuted = true</script>' in tab.page.inner_text('.plugin-source-code')
