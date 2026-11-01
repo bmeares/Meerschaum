@@ -108,7 +108,7 @@ const JOB_CONTEXT_VARS: &[&str] = &[
 
 /// Every variable a terminal's shell must not inherit from the server ([`scrub_job_context`]):
 /// the job's name, its `systemd` paths and its Compose stamps (by their `static.toml` names), and
-/// [`JOB_CONTEXT_VARS`].
+/// `JOB_CONTEXT_VARS`.
 pub fn job_context_vars() -> Vec<String> {
     let environment = &meerschaum_core::static_config::static_config().environment;
     let mut vars: Vec<String> = [

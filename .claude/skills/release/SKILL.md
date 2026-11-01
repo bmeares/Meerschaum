@@ -106,6 +106,7 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
 
    ```bash
    python3 scripts/check_packaging.py          # versions, console scripts, extras, lockstep pins, crates.io metadata
+   scripts/rust/ci.sh doc                     # public Rust docs must pass before freezing the candidate
    scripts/rust/ci.sh package                   # cargo package --workspace --no-verify + size/content checks
    scripts/parity/check_fixture_hygiene.sh      # on any touched public file or fixture directory
    ```
