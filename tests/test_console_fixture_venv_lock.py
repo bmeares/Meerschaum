@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
@@ -38,6 +39,13 @@ WORKER = textwrap.dedent('''
 
     conftest._provides_server_packages = lambda python: False
     conftest._build_server_venv = fake_build
+    # Start together: report ready after the imports, then wait for the test's go.
+    (log.parent / f'ready-{os.getpid()}').write_text('')
+    go = log.parent / 'go'
+    deadline = time.monotonic() + 60
+    while not go.exists():
+        assert time.monotonic() < deadline, 'No go from the test.'
+        time.sleep(0.01)
     print(json.dumps(conftest.server_python()))
 ''')
 
@@ -61,14 +69,27 @@ def test_concurrent_workers_build_the_server_interpreter_once():
         })
         (tmp / 'root').mkdir()
         (tmp / 'plugins').mkdir()
-        workers = [
-            subprocess.Popen(
-                [sys.executable, '-c', WORKER, str(log)],
-                env=env, cwd=str(REPO), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            )
-            for _ in range(3)
-        ]
-        results = [worker.communicate(timeout=120) for worker in workers]
+        workers = []
+        try:
+            for _ in range(3):
+                workers.append(subprocess.Popen(
+                    [sys.executable, '-c', WORKER, str(log)],
+                    env=env, cwd=str(REPO), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                ))
+            ### The race starts once every worker has imported the fixture module.
+            deadline = time.monotonic() + 90
+            while len(list(tmp.glob('ready-*'))) < len(workers):
+                assert all(worker.poll() is None for worker in workers), 'A worker exited early.'
+                assert time.monotonic() < deadline, 'The workers did not start.'
+                time.sleep(0.05)
+            (tmp / 'go').write_text('')
+            results = [worker.communicate(timeout=120) for worker in workers]
+        finally:
+            ### Never leave a worker behind, whatever failed.
+            for worker in workers:
+                if worker.poll() is None:
+                    worker.kill()
+                    worker.communicate()
         for worker, (stdout, stderr) in zip(workers, results):
             assert worker.returncode == 0, stderr[-3000:]
         pythons = {json.loads(stdout.strip().splitlines()[-1]) for stdout, _ in results}
