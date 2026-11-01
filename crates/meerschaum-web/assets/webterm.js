@@ -11,6 +11,10 @@
   const DARK = { background: '#000000', foreground: '#e6e6e6', cursor: '#e6e6e6', selectionBackground: '#3b4a5a' };
   const LIGHT = { background: '#ffffff', foreground: '#1f2328', cursor: '#1f2328', selectionBackground: '#b6d4f5' };
   const FONT = '"DejaVu Sans Mono", "Liberation Mono", monospace';
+  // A lost connection is retried after 1 s, then twice as long each time up to 30 s, and given up
+  // after this many failures in a row (a little over four minutes).
+  const RECONNECT_MAX_MS = 30000;
+  const RECONNECT_ATTEMPTS = 12;
   const sessions = new Set();
 
   const LIGHT_PAGE = new URLSearchParams(location.search).get('theme') === 'light';
@@ -41,7 +45,7 @@
     term.unicode.activeVersion = '11';
     term.open(el);
 
-    const session = { term, fit, el, root, mode, socket: null, mods: { ctrl: false, shift: false }, disposed: false, timer: null, fitting: false, reconnects: 0 };
+    const session = { term, fit, el, root, mode, socket: null, mods: { ctrl: false, shift: false }, disposed: false, timer: null, fitting: false, reconnects: 0, failures: 0, ended: false };
     sessions.add(session);
 
     const send = (frame, userInput = true) => {
@@ -111,7 +115,6 @@
       session.socket = socket;
       socket.onopen = () => {
         session.idle = false;
-        if (session.reconnects) term.reset();
         try { fit.fit(); } catch (_) { /* hidden */ }
         sendSize();
       };
@@ -119,25 +122,41 @@
         let message;
         try { message = JSON.parse(event.data); } catch (_) { return; }
         if (message[0] === 'stdout') { term.write(message[1]); scheduleState(); }
-        else if (message[0] === 'setup') scheduleState();
+        else if (message[0] === 'setup') {
+          // A shell is attached: only now does a reconnect replace the old screen (a refused
+          // one keeps it and adds the server's reason).
+          if (session.reconnects) term.reset();
+          session.failures = 0;
+          scheduleState();
+        }
         else if (message[0] === 'shell_state') {
           const probe = session.probes.get(message[1]);
           session.probes.delete(message[1]);
           if (probe) probe(message[2]);
         }
-        else if (message[0] === 'disconnect') term.write('\r\n\r\n[CLOSED]\r\n');
+        else if (message[0] === 'disconnect') {
+          // The server ended this terminal (the shell exited, or the session was refused or
+          // revoked): never reconnect it.
+          session.ended = true;
+          term.write('\r\n\r\n[CLOSED]\r\n');
+        }
       };
       socket.onclose = (event) => {
         if (session.disposed || session.socket !== socket) return;
         session.idle = false;
         for (const probe of session.probes.values()) probe(null);
         session.probes.clear();
-        // An unclean close (the server went away) reconnects; the shell ending or the
-        // server refusing the session (clean closes) does not.
-        if (!event.wasClean && event.code !== 1005) {
-          session.reconnects += 1;
-          session.timer = setTimeout(connect, 1000);
+        // An unclean close (the server or the network went away) reconnects, backing off; the
+        // shell ending or the server refusing the session (clean closes, `disconnect`) does not.
+        if (session.ended || event.wasClean || event.code === 1005) return;
+        session.failures += 1;
+        if (session.failures > RECONNECT_ATTEMPTS) {
+          term.write('\r\n[Disconnected. Reload to reconnect.]\r\n');
+          return;
         }
+        session.reconnects += 1;
+        const delay = Math.min(RECONNECT_MAX_MS, 1000 * 2 ** (session.failures - 1));
+        session.timer = setTimeout(connect, delay);
       };
     };
     session.connect = connect;
