@@ -86,7 +86,7 @@ def test_performance_complete_window_and_responsive_breakdowns(populated_perform
         page.wait_for_function("document.querySelector('#performance-pipes tbody')?.textContent.includes('rc23_perf_')")
         assert search.input_value() == 'rc23_perf_'
         assert first == section.locator('tbody tr').first.inner_text()
-        output = pathlib.Path.home() / '.cache/mrsm-5.0.0rc23/screenshots'
+        output = pathlib.Path.home() / '.cache/mrsm-5.0.0rc24/screenshots'
         output.mkdir(parents=True, exist_ok=True)
         section.screenshot(path=str(output / f'performance-pipes-{width}.png'))
         # Recent history stays a distinct view, with adjustable page size and mobile cards.
@@ -104,7 +104,7 @@ def test_performance_complete_window_and_responsive_breakdowns(populated_perform
         page.screenshot(path=str(output / f'performance-history-{width}.png'), full_page=True)
     finally:
         if context.pages:
-            output = pathlib.Path.home() / '.cache/mrsm-5.0.0rc23/screenshots'
+            output = pathlib.Path.home() / '.cache/mrsm-5.0.0rc24/screenshots'
             output.mkdir(parents=True, exist_ok=True)
             context.pages[0].screenshot(path=str(output / f'performance-last-state-{width}.png'), full_page=True)
         context.close()

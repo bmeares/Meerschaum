@@ -26,7 +26,7 @@ use crate::axis::{Axis, AxisKind};
 use crate::events::{ChunkSource, Emitter, EventKind};
 use crate::executor::{NodeEvents, SyncExecutor, SyncRequest};
 use crate::graph::Graph;
-use crate::ledger::ledger_intervals;
+use crate::ledger::ledger_extents;
 use crate::node::PipeRef;
 use crate::plan::{Action, Begin, Span};
 use crate::registry::ConnectorRegistry;
@@ -233,7 +233,7 @@ impl<'a, S: StateWriter> LedgerWriter<'a, S> {
 impl<S: StateWriter> DeltaObserver for LedgerWriter<'_, S> {
     async fn before_commit(&self, _pipe: &Pipe, delta: &Frame) -> Result<(), String> {
         let intervals = if delta.height() > 0 {
-            ledger_intervals(frame_positions(delta, &self.axis), &self.axis)
+            ledger_extents(frame_positions(delta, &self.axis), &self.axis)
         } else {
             Vec::new()
         };

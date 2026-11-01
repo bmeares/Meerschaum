@@ -94,7 +94,7 @@ impl InstanceEngine {
             Ok(p) => p,
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
-        if metric == "engine_nodes" {
+        if matches!(metric, "engine_nodes" | "engine_cursors") {
             // Add newly declared progress and registration columns to older state tables.
             pipe.parameters_mut()
                 .insert("static".into(), Value::Bool(false));
@@ -372,6 +372,12 @@ impl EngineBackend for InstanceEngine {
                     (
                         "parent_watermark_at_cursor",
                         bound_to_store(&c.parent_watermark_at_cursor),
+                    ),
+                    (
+                        "role",
+                        c.role
+                            .as_ref()
+                            .map_or(KValue::Null, |role| KValue::Str(role.clone())),
                     ),
                 ]
                 .into_iter()

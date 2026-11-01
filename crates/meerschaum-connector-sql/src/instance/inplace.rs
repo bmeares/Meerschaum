@@ -1169,10 +1169,18 @@ impl SqlConnector {
                 .collect::<Vec<_>>()
                 .join(",\n    ")
         );
-        let select_delta_query = format!(
+        let mut select_delta_query = format!(
             "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nLEFT OUTER JOIN {}{alias_as} {a_bt}\n    ON\n    {}\nWHERE\n    {}",
-            names["new"],
-            names["backtrack"],
+            if upsert {
+                &names["update"]
+            } else {
+                &names["new"]
+            },
+            if upsert {
+                &pipe_name
+            } else {
+                &names["backtrack"]
+            },
             common_cols
                 .iter()
                 .map(|c| format!(
@@ -1190,6 +1198,14 @@ impl SqlConnector {
                 .collect::<Vec<_>>()
                 .join("\n    AND\n    "),
         );
+        if upsert && !sp.null_indices() {
+            let null_keys = on_cols
+                .keys()
+                .map(|column| format!("{a_new}.{} IS NULL", q(column)))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            select_delta_query.push_str(&format!("\n    OR ({null_keys})"));
+        }
         if !upsert {
             let create_delta_query = match ctas(&select_delta_query, &temp_tables["delta"]) {
                 Ok(q) => q,
@@ -1347,7 +1363,11 @@ impl SqlConnector {
         let apply_update_queries = get_update_queries(&args);
 
         observe!(if upsert {
-            format!("SELECT {observed_col} FROM {}", names["update"])
+            // Keep physical upsert counts, but notify dependants only of logical row changes.
+            format!(
+                "SELECT {observed_col} FROM ({select_delta_query}){alias_as} {}",
+                q("_mrsm_changed")
+            )
         } else {
             format!(
                 "SELECT {observed_col} FROM {} UNION ALL SELECT {observed_col} FROM {}",

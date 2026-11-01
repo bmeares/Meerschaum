@@ -37,6 +37,7 @@ use meerschaum_kernel::enforce::{PipeDtypesContext, PipeInput, pipe_enforce_dtyp
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
 
 use crate::events::EventRow;
+use crate::graph::EdgeRole;
 use crate::ledger::{EdgeCursor, LedgerEntry};
 use crate::node::PipeRef;
 use crate::plan::Action;
@@ -508,8 +509,8 @@ impl InstanceState {
         let mut pipe = engine_pipe_on(conn.as_ref(), instance, kind)
             .await
             .map_err(|e| unreachable(instance, e))?;
-        if kind == EnginePipe::Nodes {
-            // Allow the declared progress columns to be added to older internal tables.
+        if matches!(kind, EnginePipe::Nodes | EnginePipe::Cursors) {
+            // Allow declared progress and dependency columns on older internal tables.
             pipe.parameters_mut()
                 .insert("static".into(), Value::Bool(false));
         }
@@ -948,13 +949,20 @@ impl StateSource for InstanceState {
                 None,
             )
             .await?;
-        Ok(docs.iter().find_map(|d| {
-            Some(EdgeCursor {
-                parent_ref: parent.clone(),
-                child_ref: child.clone(),
-                seq: doc_int(d, "seq")?,
-                parent_watermark_at_cursor: doc_bound(d, "parent_watermark_at_cursor"),
-            })
+        let Some(d) = docs.iter().find(|d| doc_int(d, "seq").is_some()) else {
+            return Ok(None);
+        };
+        let role = match doc_str(d, "role") {
+            None => EdgeRole::Data,
+            Some(value) => EdgeRole::parse(&value)
+                .ok_or_else(|| StateError::Other(format!("unknown dependency role '{value}'")))?,
+        };
+        Ok(Some(EdgeCursor {
+            parent_ref: parent.clone(),
+            child_ref: child.clone(),
+            seq: doc_int(d, "seq").expect("a cursor sequence was selected"),
+            parent_watermark_at_cursor: doc_bound(d, "parent_watermark_at_cursor"),
+            role,
         }))
     }
 
@@ -1003,6 +1011,7 @@ fn cursor_doc(cursor: &EdgeCursor) -> Doc {
         ("parent_ref", kv_str(cursor.parent_ref.as_str())),
         ("child_ref", kv_str(cursor.child_ref.as_str())),
         ("seq", KValue::Int(cursor.seq)),
+        ("role", kv_str(cursor.role.as_str())),
         (
             "parent_watermark_at_cursor",
             kv_json(cursor.parent_watermark_at_cursor.as_ref()),

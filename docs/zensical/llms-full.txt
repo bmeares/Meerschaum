@@ -3404,7 +3404,7 @@ backfill  1 unconsumed ledger entry from sql:local/clean (seq 3); dirty ranges s
 
 ### Windows your plugin receives
 
-Ledger ranges are recorded on the epoch-aligned chunk grid (`verify.chunk_minutes`), and a child backfills them on its own chunk grid. So under `--parents`, `--children` or a `Pipeline`, a plugin's `fetch(pipe, begin, end)` can receive a window that starts at a chunk edge, earlier than v4's `sync time − backtrack`. A bare `pipe.sync()` and a flat `sync pipes` keep v4's window. If your plugin **clears its window and recomputes** it (for example `pipe.clear(begin=begin, end=end)` followed by a rebuild from its parents), it must be able to rebuild the whole window it is given, not only the most recent part.
+The ledger keeps changed extents within each occupied chunk. New tail rows stay incremental; historical changes widen to the child's chunk grid (`verify.chunk_minutes`). Under `--parents`, `--children` or a `Pipeline`, `fetch(pipe, begin, end)` may therefore start earlier than the usual backtrack window. A plugin that clears and recomputes its window must rebuild the whole requested window.
 
 Dropping, deleting or fully clearing a pipe (`pipe.drop()`, `pipe.delete()`, `pipe.clear()` without bounds, and the matching actions) forgets its engine state: its ledger entries, the edge cursors it is part of and its definition hash. A pipe recreated under the same keys is planned like a new one. Run history is kept. Cursors and ledger entries the pipe left on the instances of its cross-instance children are forgotten too (the pipe's own instance remembers where it wrote them); an instance that is not configured on this host or cannot be reached keeps them, and a warning names it.
 
@@ -3430,6 +3430,24 @@ parents:
 ```
 
 Keys are `lookback_{seconds,minutes,hours,days,weeks}` and `lookahead_*`, or a bare number (raw units on an integer axis, minutes on a datetime axis).
+
+### Lookup inputs
+
+A lookup table affects results without limiting how far event data can advance.
+Declare `role: lookup` on its dependency:
+
+```yaml
+# Parameters of the catalog Pipe:
+children:
+  - {connector: sql:main, metric: daily, role: lookup}
+```
+
+The engine waits for the lookup and propagates failures. A changed lookup
+rechecks the child's history; unchanged UPSERTs add no dirty ranges.
+Sources with only lookup inputs keep polling. Other dependencies use `role: data` by default.
+
+The same role works in `parents:`. For SQL pushdown, keep the primary data
+source first in that list, or declare lookup edges through `children:` as above.
 
 </details>
 
@@ -16136,6 +16154,9 @@ The data engine, database connectors, CLI, HTTP API, jobs, and Compose now run i
 ### Pipelines that know the dependencies
 
 Save a group of Pipes, preview its plan, then run parents before children. The engine records run history, retries failures, and tracks late data for backfills.
+
+Lookup dependencies preserve ordering without capping event progress at an old lookup timestamp.
+New tail rows stay incremental; unchanged UPSERTs leave dependents quiet.
 
 ```bash
 mrsm register pipelines daily -i sql:local -c sql:local -m daily --parents

@@ -519,6 +519,7 @@ mod tests {
                 child_ref: c.clone(),
                 seq: 2,
                 parent_watermark_at_cursor: None,
+                role: Default::default(),
             },
         )
         .await

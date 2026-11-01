@@ -473,6 +473,7 @@ enum TaskOutput {
         attempt: u32,
         result: SyncResult,
         started: chrono::DateTime<Utc>,
+        finished: chrono::DateTime<Utc>,
         elapsed: Duration,
         /// The attempt never synced: another holder kept the pipe's lease (another process is
         /// syncing it, and records that sync itself).
@@ -805,6 +806,7 @@ where
                     child_ref: c.child_ref.clone(),
                     seq: c.seq,
                     parent_watermark_at_cursor: c.parent_watermark,
+                    role: c.role,
                 });
         }
         for (instance, cursors) in by_instance {
@@ -848,6 +850,7 @@ where
                         child_ref: c.child_ref.clone(),
                         seq: c.seq,
                         parent_watermark_at_cursor: c.parent_watermark,
+                        role: c.role,
                     });
             }
             for (instance, cursors) in by_instance {
@@ -1076,6 +1079,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 attempt,
                 result,
                 started,
+                finished: Utc::now(),
                 elapsed: t0.elapsed(),
                 contended,
             };
@@ -1145,6 +1149,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 attempt,
                 result,
                 started,
+                finished: Utc::now(),
                 elapsed: t0.elapsed(),
                 contended: false,
             }
@@ -1569,6 +1574,7 @@ where
                 attempt,
                 result,
                 started,
+                finished,
                 elapsed,
                 contended,
                 ..
@@ -1597,7 +1603,7 @@ where
                 if let Some(row) = d.rows.get_mut(&r) {
                     row.attempts = attempt;
                     row.started.get_or_insert(started);
-                    row.finished = Some(Utc::now());
+                    row.finished = Some(finished);
                     row.message = Some(result.message.clone());
                 }
                 if result.success {

@@ -76,6 +76,7 @@ fn cursor(parent: &PipeRef, child: &PipeRef) -> EdgeCursor {
         child_ref: child.clone(),
         seq: 1,
         parent_watermark_at_cursor: None,
+        role: Default::default(),
     }
 }
 

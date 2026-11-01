@@ -155,7 +155,7 @@ async fn per_shape_routes_persist_across_servers() {
             "/engine/cursors",
             Some(&admin),
             body(json!([{"parent_ref": "p", "child_ref": "c", "seq": 1,
-                         "parent_watermark_at_cursor": "2024-01-01T00:00:00+00:00"}])),
+                         "parent_watermark_at_cursor": "2024-01-01T00:00:00+00:00", "role":"lookup"}])),
         ),
     )
     .await;
@@ -227,6 +227,17 @@ async fn per_shape_routes_persist_across_servers() {
     // A new server on the same instance (a restart) reads everything back.
     let app = app_again(dir.path(), &db).await;
     let admin = login(&app, "admin", "pass", None).await;
+    let r = send(
+        &app,
+        req(
+            "POST",
+            "/engine/pipes/engine_cursors/read",
+            Some(&admin),
+            body(json!({"params":{"child_ref":"c"}})),
+        ),
+    )
+    .await;
+    assert_eq!(r.json()["rows"][0]["role"], "lookup");
     let r = send(
         &app,
         req(

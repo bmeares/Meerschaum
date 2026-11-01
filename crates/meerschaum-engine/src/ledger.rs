@@ -14,9 +14,10 @@ use meerschaum_core::success::Bound;
 use meerschaum_core::{Map, Value};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
-use crate::axis::{Axis, AxisKind, Interval, Rounding, convert, occupied_cells, union};
-use crate::graph::EdgeOptions;
+use crate::axis::{Axis, AxisKind, Interval, Rounding, convert, grid_floor, occupied_cells, union};
+use crate::graph::{EdgeOptions, EdgeRole};
 use crate::node::PipeRef;
 
 /// One row of the `mrsm:engine_ledger` pipe: datetime `created`, ids `pipe_ref` and `seq`,
@@ -48,6 +49,9 @@ pub struct EdgeCursor {
     pub seq: i64,
     /// The parent's watermark when the cursor last moved.
     pub parent_watermark_at_cursor: Option<Bound>,
+    /// The dependency role consumed by this cursor; older cursors are data dependencies.
+    #[serde(default, skip_serializing_if = "EdgeRole::is_data")]
+    pub role: EdgeRole,
 }
 
 /// Canonical JSON of a value: object keys sorted (by code point), no whitespace. Two parameter
@@ -213,6 +217,28 @@ pub fn ledger_intervals(positions: impl IntoIterator<Item = i64>, axis: &Axis) -
     }
 }
 
+/// Preserve exact changed extents while bounding ledger size to one entry per occupied chunk.
+pub(crate) fn ledger_extents(
+    positions: impl IntoIterator<Item = i64>,
+    axis: &Axis,
+) -> Vec<Interval> {
+    if axis.kind == AxisKind::None {
+        return vec![Interval::full()];
+    }
+    let mut extents = BTreeMap::<i64, (i64, i64)>::new();
+    for position in positions {
+        let extent = extents
+            .entry(grid_floor(position, axis.chunk))
+            .or_insert((position, position));
+        extent.0 = extent.0.min(position);
+        extent.1 = extent.1.max(position);
+    }
+    extents
+        .into_values()
+        .map(|(begin, end)| Interval::new(Some(begin), end.checked_add(1)))
+        .collect()
+}
+
 /// Map a position from a parent's axis onto a child's axis. `axis_unit` is the edge's
 /// override of the parent's integer unit.
 pub fn map_position(
@@ -248,6 +274,9 @@ pub fn map_watermark(
     child: &Axis,
     options: &EdgeOptions,
 ) -> Option<i64> {
+    if options.role == EdgeRole::Lookup {
+        return None;
+    }
     let pos = parent.pos(watermark)?;
     map_position(pos, parent, child, options.axis_unit, Rounding::Floor)
 }
@@ -266,10 +295,33 @@ pub fn map_to_child(
     child: &Axis,
     options: &EdgeOptions,
 ) -> Vec<Interval> {
+    map_changes(intervals, parent, child, options, true)
+}
+
+/// Map changed extents before deciding whether the change is a new tail or historical data.
+pub(crate) fn mapped_changes(
+    intervals: &[Interval],
+    parent: &Axis,
+    child: &Axis,
+    options: &EdgeOptions,
+) -> Vec<Interval> {
+    map_changes(intervals, parent, child, options, false)
+}
+
+fn map_changes(
+    intervals: &[Interval],
+    parent: &Axis,
+    child: &Axis,
+    options: &EdgeOptions,
+    widen: bool,
+) -> Vec<Interval> {
     if intervals.is_empty() {
         return Vec::new();
     }
-    if parent.kind == AxisKind::None || child.kind == AxisKind::None {
+    if options.role == EdgeRole::Lookup
+        || parent.kind == AxisKind::None
+        || child.kind == AxisKind::None
+    {
         return vec![Interval::full()];
     }
     let lookback = options.lookback.map_or(0, |x| x.to_units(child));
@@ -281,9 +333,12 @@ pub fn map_to_child(
         let end = iv
             .end
             .and_then(|e| map_position(e, parent, child, options.axis_unit, Rounding::Ceil));
-        Interval::new(begin, end)
-            .extend(lookahead, lookback)
-            .widen_to_grid(child.chunk)
+        let interval = Interval::new(begin, end).extend(lookahead, lookback);
+        if widen {
+            interval.widen_to_grid(child.chunk)
+        } else {
+            interval
+        }
     }))
 }
 
@@ -313,6 +368,22 @@ mod tests {
     use super::*;
     use crate::graph::Extent;
     use chrono::{TimeDelta, TimeZone};
+
+    #[test]
+    fn changed_extents_do_not_round_new_tail_rows_back_to_a_chunk_start() {
+        let axis = Axis::int("seq", None, 100, 0);
+        assert_eq!(
+            ledger_extents([108, 105, 107, 205], &axis),
+            vec![
+                Interval::new(Some(105), Some(109)),
+                Interval::new(Some(205), Some(206)),
+            ]
+        );
+        assert_eq!(
+            ledger_extents([i64::MAX], &axis),
+            vec![Interval::new(Some(i64::MAX), None)]
+        );
+    }
 
     fn dt(d: u32, h: u32) -> Bound {
         Bound::Datetime(Utc.with_ymd_and_hms(2026, 10, d, h, 0, 0).unwrap())

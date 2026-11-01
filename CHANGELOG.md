@@ -12,6 +12,9 @@ The data engine, database connectors, CLI, HTTP API, jobs, and Compose now run i
 
 Save a group of Pipes, preview its plan, then run parents before children. The engine records run history, retries failures, and tracks late data for backfills.
 
+Lookup dependencies preserve ordering without capping event progress at an old lookup timestamp.
+New tail rows stay incremental; unchanged UPSERTs leave dependents quiet.
+
 ```bash
 mrsm register pipelines daily -i sql:local -c sql:local -m daily --parents
 mrsm plan pipelines daily -i sql:local

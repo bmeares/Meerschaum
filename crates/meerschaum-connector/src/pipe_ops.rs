@@ -513,7 +513,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
         "engine_cursors" => {
             r#"{"columns": {"parent_ref": "parent_ref", "child_ref": "child_ref"},
                     "dtypes": {"parent_ref": "string", "child_ref": "string", "seq": "int",
-                               "parent_watermark_at_cursor": "json"},
+                               "parent_watermark_at_cursor": "json", "role": "string"},
                     "upsert": true}"#
         }
         "engine_runs" => {

@@ -28,8 +28,8 @@ use meerschaum_core::success::Bound;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::axis::{Axis, AxisKind, Interval, get_chunk_bounds, union};
-use crate::graph::{Edge, Graph};
-use crate::ledger::{definition_changed, dirty_intervals, map_to_child, map_watermark};
+use crate::graph::{Edge, EdgeRole, Graph};
+use crate::ledger::{definition_changed, dirty_intervals, map_watermark, mapped_changes};
 use crate::node::PipeRef;
 use crate::selection::Subgraph;
 use crate::state::StateSource;
@@ -172,6 +172,9 @@ pub struct Consumption {
     pub seq: i64,
     /// The parent watermark observed while planning.
     pub parent_watermark: Option<Bound>,
+    /// The dependency role this successful sync consumes.
+    #[serde(default, skip_serializing_if = "EdgeRole::is_data")]
+    pub role: EdgeRole,
 }
 
 /// One node's plan.
@@ -639,6 +642,7 @@ enum Signal {
 
 struct EdgeEval {
     label: String,
+    lookup: bool,
     signal: Signal,
     /// Dirty intervals on the child's axis.
     dirty: Vec<Interval>,
@@ -909,7 +913,8 @@ pub async fn plan_node<S: StateSource>(
                     unreachable("what this pipe last read", err),
                 );
             }
-        };
+        }
+        .filter(|cursor| cursor.role == e.options.role);
         let mapped_wm = pwm
             .as_ref()
             .and_then(|w| map_watermark(w, &parent.axis, axis, &e.options));
@@ -922,6 +927,7 @@ pub async fn plan_node<S: StateSource>(
         }
         let mut eval = EdgeEval {
             label: label(e),
+            lookup: e.options.role == EdgeRole::Lookup,
             signal: Signal::Quiet,
             dirty: Vec::new(),
             parent_watermark: pwm,
@@ -942,7 +948,9 @@ pub async fn plan_node<S: StateSource>(
                         return out.set(Action::UpstreamFailed, unreachable("the changes", err));
                     }
                 };
-                let advanced = if parent.axis.kind == AxisKind::None || axis.kind == AxisKind::None
+                let advanced = if eval.lookup
+                    || parent.axis.kind == AxisKind::None
+                    || axis.kind == AxisKind::None
                 {
                     true
                 } else {
@@ -958,7 +966,7 @@ pub async fn plan_node<S: StateSource>(
                         count: entries.len(),
                     };
                     let dirty = dirty_intervals(&entries, &parent.axis);
-                    eval.dirty = map_to_child(&dirty, &parent.axis, axis, &e.options);
+                    eval.dirty = mapped_changes(&dirty, &parent.axis, axis, &e.options);
                     last.seq
                 } else {
                     eval.signal = Signal::NoHistory { advanced };
@@ -986,7 +994,7 @@ pub async fn plan_node<S: StateSource>(
                         count: entries.len(),
                     };
                     let dirty = dirty_intervals(&entries, &parent.axis);
-                    eval.dirty = map_to_child(&dirty, &parent.axis, axis, &e.options);
+                    eval.dirty = mapped_changes(&dirty, &parent.axis, axis, &e.options);
                     last.seq.max(c.seq)
                 } else {
                     if eval.watermark_advanced {
@@ -996,12 +1004,16 @@ pub async fn plan_node<S: StateSource>(
                 }
             }
         };
+        if eval.lookup && (matches!(eval.signal, Signal::Dirty { .. }) || eval.advanced()) {
+            eval.dirty = vec![Interval::full()];
+        }
         out.consumes.push(crate::plan::Consumption {
             parent_ref: e.parent.clone(),
             child_ref: pipe_ref.clone(),
             state_instance: e.state_instance.clone(),
             seq,
             parent_watermark: eval.parent_watermark,
+            role: e.options.role,
         });
         evals.push(eval);
     }
@@ -1056,19 +1068,31 @@ pub async fn plan_node<S: StateSource>(
         );
     }
 
-    if in_edges.is_empty() {
+    let independent_source = !in_edges.is_empty()
+        && in_edges
+            .iter()
+            .all(|edge| edge.options.role == EdgeRole::Lookup)
+        && evals
+            .iter()
+            .all(|eval| !matches!(eval.signal, Signal::Dirty { .. }) && !eval.advanced());
+    if in_edges.is_empty() || independent_source {
         out.bounds = Some(user_v4);
         let what = if options.begin.is_some() || options.end.is_some() {
             "syncs the requested range"
         } else {
             "syncs from its last sync, minus the backtrack window"
         };
-        return out.set(Action::Root, format!("no parents in this run: {what}"));
+        let inputs = if independent_source {
+            "only lookup inputs in this run"
+        } else {
+            "no parents in this run"
+        };
+        return out.set(Action::Root, format!("{inputs}: {what}"));
     }
 
     let any_entries = evals
         .iter()
-        .any(|e| matches!(e.signal, Signal::Dirty { .. }));
+        .any(|e| matches!(e.signal, Signal::Dirty { .. }) || (e.lookup && e.advanced()));
     let any_advanced = evals.iter().any(EdgeEval::advanced);
     let describe = |evals: &[EdgeEval], pick: &dyn Fn(&EdgeEval) -> bool| -> String {
         evals
@@ -1163,7 +1187,10 @@ pub async fn plan_node<S: StateSource>(
         );
     }
 
-    let mut ranges = dirty.clone();
+    let mut ranges: Vec<Interval> = dirty
+        .iter()
+        .map(|iv| iv.widen_to_grid(axis.chunk))
+        .collect();
     if any_advanced {
         ranges.push(Interval::new(tail_begin, None));
     }

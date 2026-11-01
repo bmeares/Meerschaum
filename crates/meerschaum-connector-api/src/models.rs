@@ -399,6 +399,9 @@ pub struct EdgeCursor {
     /// The parent's watermark when the cursor advanced.
     #[serde(default)]
     pub parent_watermark_at_cursor: Value,
+    /// Dependency role; omitted by older servers and for ordinary data dependencies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// A pipe's persisted engine state (`GET`/`PUT /engine/state`): primary key `pipe_ref`.

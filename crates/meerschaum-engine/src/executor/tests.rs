@@ -6,7 +6,7 @@ use meerschaum_core::success::Bound;
 use meerschaum_core::{Map, Value};
 
 use super::*;
-use crate::events::VecSink;
+use crate::events::{Event, VecSink};
 use crate::graph::{Graph, GraphOptions};
 use crate::plan::{Action, PlanOptions, plan};
 use crate::runs::NodeStatus;
@@ -184,9 +184,66 @@ fn rollup_state() -> MemoryStateData {
             child_ref: r("rollup"),
             seq: 5,
             parent_watermark_at_cursor: Some(dt(12, 9)),
+            role: Default::default(),
         }],
     );
     s
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_result_reporting_does_not_inflate_recorded_concurrency() {
+    struct SlowReporting(std::sync::atomic::AtomicBool);
+    impl EventSink for SlowReporting {
+        fn emit(&self, event: Event) {
+            if matches!(event.kind, EventKind::NodeFinished { .. })
+                && !self.0.swap(true, Ordering::SeqCst)
+            {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+    let h = Harness::new(
+        (0..8).map(|i| rec(&format!("root_{i}"), "{}")).collect(),
+        MemoryStateData::default(),
+    );
+    let sub = Pipeline::new(Selection::refs((0..8).map(|i| r(&format!("root_{i}")))))
+        .resolve(&h.graph)
+        .unwrap();
+    let options = ExecutorOptions {
+        workers: 2,
+        ..Default::default()
+    };
+    let planned = plan(&h.graph, &sub, &*h.state, &options.plan).await;
+    let record = execute(
+        ExecuteContext {
+            graph: &h.graph,
+            subgraph: &sub,
+            state: &*h.state,
+            executor: h.fake.clone(),
+            leases: h.leases.clone(),
+            sink: Arc::new(SlowReporting(std::sync::atomic::AtomicBool::new(false))),
+            durations: &h.durations,
+        },
+        planned,
+        &options,
+    )
+    .await;
+    assert!(record.run.success.unwrap());
+    assert_eq!(h.fake.peak_concurrency(), 2);
+    let mut spans = Vec::new();
+    for row in record.nodes {
+        spans.push((row.started.unwrap(), 1));
+        spans.push((row.finished.unwrap(), -1));
+    }
+    spans.sort();
+    let mut running = 0;
+    for (_, change) in spans {
+        running += change;
+        assert!(
+            running <= 2,
+            "the timeline must count actual attempts, not delayed result processing"
+        );
+    }
 }
 
 #[tokio::test(start_paused = true)]

@@ -76,6 +76,41 @@ impl Extent {
     }
 }
 
+/// How a parent contributes to its child's processing window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeRole {
+    /// A data stream whose progress bounds its child.
+    #[default]
+    Data,
+    /// A lookup input whose changes invalidate the child without bounding its progress.
+    Lookup,
+}
+
+impl EdgeRole {
+    /// The spelling accepted in dependency declarations and persisted cursors.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Data => "data",
+            Self::Lookup => "lookup",
+        }
+    }
+
+    /// Whether this is the backwards-compatible data dependency.
+    pub fn is_data(&self) -> bool {
+        *self == Self::Data
+    }
+
+    /// Parse an explicit dependency role.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "data" => Some(Self::Data),
+            "lookup" => Some(Self::Lookup),
+            _ => None,
+        }
+    }
+}
+
 /// Per-edge overrides of the range mapping (§5.4), declared next to the reference. They
 /// describe the child's query: `lookback` is how far back from `t` the child's row at `t` reads
 /// the parent (a trailing window), `lookahead` how far forward ([`crate::ledger::map_to_child`]).
@@ -88,6 +123,9 @@ impl Extent {
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeOptions {
+    /// Lookup dependencies preserve ordering but do not cap the child's datetime window.
+    #[serde(default, skip_serializing_if = "EdgeRole::is_data")]
+    pub role: EdgeRole,
     /// The child reads the parent this far back: mapped ranges' ends move up by this much.
     pub lookback: Option<Extent>,
     /// The child reads the parent this far ahead: mapped ranges' begins move down by this much.
@@ -107,11 +145,20 @@ impl EdgeOptions {
     ///
     /// Recognized keys: `lookback` / `lookahead` (a number), `lookback_<unit>` /
     /// `lookahead_<unit>` with `<unit>` in `seconds`, `minutes`, `hours`, `days`, `weeks`, and
-    /// `axis` (a dict with `unit`, or a unit string).
+    /// `axis` (a dict with `unit`, or a unit string), and `role` (`data` or `lookup`).
     pub fn split(map: &Map) -> Result<(Map, EdgeOptions), String> {
         let mut kwargs = Map::new();
         let mut opts = EdgeOptions::default();
         for (key, value) in map {
+            if key == "role" {
+                opts.role = value.as_str().and_then(EdgeRole::parse).ok_or_else(|| {
+                    format!(
+                        "invalid dependency role {}: expected data or lookup",
+                        py_repr(value)
+                    )
+                })?;
+                continue;
+            }
             let target = match key.strip_prefix("lookback") {
                 Some(suffix) => Some((&mut opts.lookback, suffix)),
                 None => key

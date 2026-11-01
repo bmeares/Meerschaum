@@ -74,7 +74,7 @@ pub use executor::{
     ChunkProgress, ExecuteContext, ExecutorOptions, LeaseSource, Limits, Priority, RetryPolicy,
     SyncExecutor, SyncRequest, drain_lease_releases, execute,
 };
-pub use graph::{Edge, EdgeOptions, Graph, GraphError, GraphOptions, GraphWarning, Node};
+pub use graph::{Edge, EdgeOptions, EdgeRole, Graph, GraphError, GraphOptions, GraphWarning, Node};
 pub use instance_state::InstanceState;
 pub use leases::{FileLeases, InstanceLeases};
 pub use ledger::{EdgeCursor, LedgerEntry, definition_hash};

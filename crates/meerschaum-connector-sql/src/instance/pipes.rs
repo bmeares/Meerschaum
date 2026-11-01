@@ -168,7 +168,11 @@ impl SqlConnector {
         if pipe.temporary {
             return Ok(None);
         }
-        if !self.ensure_instance_tables(true).await {
+        if !self.tables_ready()
+            && !self
+                .table_exists("mrsm_pipes", self.instance_schema())
+                .await
+        {
             return Ok(None);
         }
         let table = self.instance_table_name("mrsm_pipes");
@@ -201,7 +205,12 @@ impl SqlConnector {
     /// it, two round trips; the id comes back with the row.) A temporary pipe, and a database
     /// without the instance tables, have no row.
     pub async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
-        if pipe.temporary || !self.ensure_instance_tables(true).await {
+        if pipe.temporary
+            || (!self.tables_ready()
+                && !self
+                    .table_exists("mrsm_pipes", self.instance_schema())
+                    .await)
+        {
             return Ok(Map::new());
         }
         let table = self.instance_table_name("mrsm_pipes");
