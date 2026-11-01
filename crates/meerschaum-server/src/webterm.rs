@@ -23,7 +23,8 @@
 //!   loaded) or the file `api:webterm:tmux:config` names. A server this process started is
 //!   stopped with the API ([`stop_owned_servers`]).
 //! - **The shell** is `<this binary> -i <instance>` (the `mrsm` shell on the server's instance)
-//!   started with the server's environment minus `COLUMNS`/`LINES` (and `TMUX`).
+//!   started with the server's connection/config environment. Job execution context and
+//!   `COLUMNS`/`LINES`/`TMUX` are removed so the shell stays interactive on a job-hosted API.
 //!   On the tmux path the environment travels in a `0600` file in the webterm resources
 //!   directory that the first shell sources (a pre-existing tmux server would otherwise hand
 //!   the shell its own, older, environment, and argv would expose secrets to `ps`).

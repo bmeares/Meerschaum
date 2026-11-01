@@ -1,7 +1,8 @@
 //! The web terminal (§7.1): page authentication, the websocket handshake, the terminado wire
 //! protocol against a real PTY, resize, `--no-webterm`, concurrent terminals, and tmux reattach.
 //!
-//! Every terminal runs `sh` (never the user's shell or a real root). The plain path always runs;
+//! Terminals run `sh` or `mrsm` in scratch roots (never the user's shell or a real root).
+//! The plain path always runs;
 //! the tmux test skips itself when no `tmux` is installed, and says so on stderr.
 #![cfg(unix)]
 
@@ -1269,16 +1270,37 @@ async fn a_tmux_sessions_own_job_context_is_unset() {
     drop(socket);
 }
 
-/// End to end through the terminal's route: the real `mrsm` shell (`MRSM_TEST_BIN`) in a server
+/// End to end through the terminal's route: the real `mrsm` shell in a server
 /// whose environment is a `systemd` job's stays interactive, and the job's log, result and FIFO
 /// are untouched. Before RC25 the shell wrapped itself as the job and the page showed `[CLOSED]`.
-/// Skipped without `MRSM_TEST_BIN`.
+/// Workspace tests build `mrsm-cli` beside this test's `deps` directory. `MRSM_TEST_BIN` may
+/// override it; only local single-crate runs without either binary may skip this regression.
 #[tokio::test]
 async fn the_mrsm_shell_stays_interactive_on_a_jobs_server() {
-    let Some(binary) = std::env::var_os("MRSM_TEST_BIN").filter(|b| Path::new(b).is_file()) else {
-        eprintln!("SKIP the_mrsm_shell_stays_interactive_on_a_jobs_server: no MRSM_TEST_BIN");
+    let explicit = std::env::var_os("MRSM_TEST_BIN");
+    let binary = explicit
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_exe()
+                .expect("integration test executable")
+                .parent()
+                .and_then(Path::parent)
+                .expect("integration test profile directory")
+                .join("mrsm-cli")
+        });
+    if !binary.is_file() {
+        assert!(
+            explicit.is_none() && std::env::var_os("CI").is_none(),
+            "the real CLI regression requires a built mrsm-cli or valid MRSM_TEST_BIN: {}",
+            binary.display()
+        );
+        eprintln!(
+            "SKIP the_mrsm_shell_stays_interactive_on_a_jobs_server: run workspace tests or set MRSM_TEST_BIN"
+        );
         return;
-    };
+    }
+    eprintln!("webterm CLI regression uses {}", binary.display());
     let root = tempfile::tempdir().unwrap();
     let job = tempfile::tempdir().unwrap();
     let fifo = job.path().join("rc25-api.stdin");
