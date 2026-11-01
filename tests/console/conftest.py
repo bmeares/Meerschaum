@@ -453,23 +453,27 @@ def nodash_server():
 @pytest.fixture(scope='session')
 def webterm_server():
     """A server with the web terminal on; its terminal process must not outlive the server."""
-    port = free_port()
-    instance = Server(
-        'webterm',
-        config={'api': {'webterm': {'port': port, 'tmux': {'enabled': False}}}},
-        native=False,
-        webterm=True,
-    )
-    instance.watch_ports = [port]
-    instance.webterm_port = port
-    try:
-        instance.start()
-    except Exception:
+    ### The legacy terminal port must stay unused. Keep it bound without listening so another
+    ### parallel fixture cannot claim it before the browser checks the shared API listener.
+    with socket.socket() as reservation:
+        reservation.bind(('127.0.0.1', 0))
+        port = reservation.getsockname()[1]
+        instance = Server(
+            'webterm',
+            config={'api': {'webterm': {'port': port, 'tmux': {'enabled': False}}}},
+            native=False,
+            webterm=True,
+        )
+        instance.watch_ports = [port]
+        instance.webterm_port = port
+        try:
+            instance.start()
+        except Exception:
+            instance.stop()
+            raise
+        yield instance
         instance.stop()
-        raise
-    yield instance
-    instance.stop()
-    assert instance.leaked_ports == [], "the terminal process outlived the server"
+        assert instance.leaked_ports == [], "the terminal process outlived the server"
 
 
 @pytest.fixture(scope='session')
