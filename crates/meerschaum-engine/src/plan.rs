@@ -23,6 +23,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
+use meerschaum_core::Value;
 use meerschaum_core::access::LockOp;
 use meerschaum_core::success::Bound;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -828,6 +829,35 @@ fn chunks_for(
     out
 }
 
+async fn historical_chunks<S: StateSource>(
+    axis: &Axis,
+    pipe_ref: &PipeRef,
+    ranges: &[Interval],
+    own_pos: Option<i64>,
+    max: usize,
+    state: &S,
+    warnings: &mut Vec<String>,
+) -> Vec<Span> {
+    let extent = if ranges
+        .iter()
+        .any(|range| range.begin.is_none() || range.end.is_none())
+    {
+        match state.oldest_watermark(pipe_ref).await {
+            Ok(oldest) => oldest
+                .as_ref()
+                .and_then(|bound| axis.pos(bound))
+                .zip(own_pos),
+            Err(error) => {
+                warnings.push(format!("cannot split historical replay: {error}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    chunks_for(axis, ranges, max, warnings, extent)
+}
+
 /// Plan one node given its parents' states. Used by [`plan`] and by the executor to re-plan a
 /// provisional node once its parents finished.
 pub async fn plan_node<S: StateSource>(
@@ -1054,12 +1084,40 @@ pub async fn plan_node<S: StateSource>(
             Interval::new(None, cap)
         };
         let what = "its definition changed (SQL, fetch, dtypes or columns)";
-        // A rebuild clears the table and syncs it again: a `drop` or `clear` lock refuses it
-        // (`--yes` never bypasses a lock).
+        let preserve = match node.pipe.parameters().get("rebuild_mode") {
+            None | Some(Value::Null) => false,
+            Some(Value::Str(mode)) if mode == "clear" => false,
+            Some(Value::Str(mode)) if mode == "upsert" => {
+                if !node
+                    .pipe
+                    .parameters()
+                    .get("upsert")
+                    .is_some_and(Value::truthy)
+                {
+                    return out.set(
+                        Action::RebuildPending,
+                        "rebuild_mode 'upsert' requires upsert: true",
+                    );
+                }
+                true
+            }
+            _ => {
+                return out.set(
+                    Action::RebuildPending,
+                    "rebuild_mode must be 'clear' or 'upsert'",
+                );
+            }
+        };
+        // Default rebuilds clear the table; preserving rebuilds only sync. Each respects
+        // its operation locks (`--yes` never bypasses a lock).
         if let Some(reason) = locked_reason(
             &node.pipe,
             &locks,
-            LockOp::Rebuild,
+            if preserve {
+                LockOp::Sync
+            } else {
+                LockOp::Rebuild
+            },
             &format!("{what}, but "),
         ) {
             out.consumes.clear();
@@ -1067,13 +1125,30 @@ pub async fn plan_node<S: StateSource>(
         }
         if options.yes || options.auto_rebuild {
             out.bounds = Some(to_bounds(axis, &cap_iv));
+            if preserve {
+                out.ranges = vec![to_span(axis, &cap_iv)];
+                out.chunks = historical_chunks(
+                    axis,
+                    pipe_ref,
+                    &[cap_iv],
+                    own_pos,
+                    options.max_chunks,
+                    state,
+                    &mut out.warnings,
+                )
+                .await;
+                return out.set(
+                    Action::Backfill,
+                    format!("{what}: replays the full range using UPSERTs, retaining stored rows"),
+                );
+            }
             out.clear = true;
             return out.set(
                 Action::Rebuild,
                 format!("{what}: clears its table and syncs everything again"),
             );
         }
-        if options.interactive {
+        if options.interactive && !preserve {
             out.bounds = Some(to_bounds(axis, &cap_iv));
             out.clear = true;
             out.requires_confirmation = true;
@@ -1237,25 +1312,16 @@ pub async fn plan_node<S: StateSource>(
     let hull = Interval::new(ranges[0].begin, ranges[ranges.len() - 1].end);
     out.bounds = Some(to_bounds(axis, &hull));
     out.ranges = ranges.iter().map(|iv| to_span(axis, iv)).collect();
-    let extent = if ranges
-        .iter()
-        .any(|range| range.begin.is_none() || range.end.is_none())
-    {
-        match state.oldest_watermark(pipe_ref).await {
-            Ok(oldest) => oldest
-                .as_ref()
-                .and_then(|bound| axis.pos(bound))
-                .zip(own_pos),
-            Err(error) => {
-                out.warnings
-                    .push(format!("cannot split historical replay: {error}"));
-                None
-            }
-        }
-    } else {
-        None
-    };
-    out.chunks = chunks_for(axis, &ranges, options.max_chunks, &mut out.warnings, extent);
+    out.chunks = historical_chunks(
+        axis,
+        pipe_ref,
+        &ranges,
+        own_pos,
+        options.max_chunks,
+        state,
+        &mut out.warnings,
+    )
+    .await;
     let tail = tail_begin
         .and_then(|t| axis.bound(t))
         .map_or("None".to_string(), |b| fmt_bound(&b));

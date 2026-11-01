@@ -436,11 +436,30 @@ mrsm sync pipes -i sql:local --resume 01M4VCTF759XD89GSA6046KPHM
 
 ### Rebuilds
 
-When you change a pipe's `sql`, `fetch` config, `dtypes` or `columns` (a renamed or new `datetime`, `id` or `primary` column), an engine run notices (the definition is hashed from the *unresolved* text, so reordering YAML keys never triggers it). Because a definition change can drop rows or columns that `filter_existing` would never remove, a `rebuild` clears the pipe and syncs it in full.
+When you change a pipe's `sql`, `fetch` config, `dtypes` or `columns` (a renamed or new `datetime`, `id` or `primary` column), an engine run notices (the definition is hashed from the *unresolved* text, so reordering YAML keys never triggers it). By default, a `rebuild` clears the pipe and syncs it in full.
 
 - **Interactively**, the plan asks you to confirm (or pass `--yes`). Declining leaves the pipe `rebuild_pending`.
 - **In a job, with `--loop`, or over the API** a rebuild without `--yes` never blocks: the node is marked `rebuild_pending`, its descendants run against the stale data, and a warning repeats on every run until someone confirms.
 - Set `system.engine.auto_rebuild: true` to rebuild without asking.
+
+??? example "Retain history during an UPSERT rebuild"
+
+    Use `rebuild_mode: upsert` when existing rows should remain, such as an equivalent
+    SQL rewrite. Approval still applies. The full range replays in chunks; rows no
+    longer emitted by the query remain stored.
+
+    ```yaml
+    parameters:
+      upsert: true
+      rebuild_mode: upsert
+    ```
+
+    ```bash
+    mrsm sync pipelines daily -i sql:local --yes
+    ```
+
+    A failed replay keeps the previous definition hash. Retry the approved rebuild
+    to complete the replay.
 
 The first engine run on a pipe has no stored hash, so it records a baseline rather than treating it as a change: upgrading from 4.x never rebuilds a pipe. A hash stored by an earlier 5.0 pre-release is compared the way that release computed it, so upgrading never rebuilds a pipe whose definition did not change; the next successful sync stores the new hash.
 

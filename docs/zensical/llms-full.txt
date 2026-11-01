@@ -3340,7 +3340,15 @@ Pipe graph on sql:local: 3 pipes, 2 edges, 1 root, depth 3
 ● root   ◆ has children   ○ leaf   ★ selected
 ```
 
-In the plan, a `*` after the action marks a provisional row: a child cannot know what its parent will change, so the executor plans it again when the parent finishes. `plan pipes` shows that second plan as it would be if every parent that runs synced new rows after its watermark: the parent's ledger entry covers its whole chunk-grid cell, so a child usually backfills from the start of that cell (`[2026-10-04 00:00, …)` on the default 30-day grid), which is the `begin` its `fetch` receives. Only the start of the window is predicted: its end is the parents' current watermarks, and the executor caps it at their new ones. `--nopretty` prints the same plan as JSON. In Python, `pipeline.plan()` returns the static plan (each provisional row as the state is now, often `skip*`) and `pipeline.plan(expected=True)` the one `plan pipes` prints. In the graph, `★` marks the targets you selected (the others were pulled in by `--parents`), `●` a root and `○` a leaf; see [Visualization](/reference/pipelines/visualization/) for back-references, collapsed fan-outs and edge details. After a run, `show runs` lists it:
+A `*` marks a provisional action, planned again after its parents finish.
+`plan pipes` predicts new tail data from the parents' current watermarks;
+actual changes determine the execution bounds. `--nopretty` prints JSON.
+In Python, `pipeline.plan()` shows the current state and
+`pipeline.plan(expected=True)` shows the CLI prediction.
+
+The graph marks selected targets with `★`, roots with `●`, and leaves with `○`.
+See [Visualization](/reference/pipelines/visualization/) for edge details.
+After a run, `show runs` lists it:
 
 ```text
 $ mrsm show runs --last 5
@@ -3446,6 +3454,24 @@ The engine waits for the lookup and propagates failures. A changed lookup
 rechecks the child's history; unchanged UPSERTs add no dirty ranges.
 Sources with only lookup inputs keep polling. Other dependencies use `role: data` by default.
 
+For a lookup with a bounded query window, declare its lookback and lookahead.
+Known changes then recheck that window without capping progress:
+
+```yaml
+children:
+  - connector: sql:main
+    metric: availability
+    role: lookup
+    lookback_days: 1
+    lookahead_minutes: 30
+```
+
+The first sync and changes without known ranges still check full history.
+
+Full replays split stored history on the Pipe's chunk grid. The first and last
+windows stay open to include older and newer rows. Edge cursors advance only
+after every chunk succeeds.
+
 The same role works in `parents:`. For SQL pushdown, keep the primary data
 source first in that list, or declare lookup edges through `children:` as above.
 
@@ -3464,11 +3490,30 @@ mrsm sync pipes -i sql:local --resume 01M4VCTF759XD89GSA6046KPHM
 
 ### Rebuilds
 
-When you change a pipe's `sql`, `fetch` config, `dtypes` or `columns` (a renamed or new `datetime`, `id` or `primary` column), an engine run notices (the definition is hashed from the *unresolved* text, so reordering YAML keys never triggers it). Because a definition change can drop rows or columns that `filter_existing` would never remove, a `rebuild` clears the pipe and syncs it in full.
+When you change a pipe's `sql`, `fetch` config, `dtypes` or `columns` (a renamed or new `datetime`, `id` or `primary` column), an engine run notices (the definition is hashed from the *unresolved* text, so reordering YAML keys never triggers it). By default, a `rebuild` clears the pipe and syncs it in full.
 
 - **Interactively**, the plan asks you to confirm (or pass `--yes`). Declining leaves the pipe `rebuild_pending`.
 - **In a job, with `--loop`, or over the API** a rebuild without `--yes` never blocks: the node is marked `rebuild_pending`, its descendants run against the stale data, and a warning repeats on every run until someone confirms.
 - Set `system.engine.auto_rebuild: true` to rebuild without asking.
+
+??? example "Retain history during an UPSERT rebuild"
+
+    Use `rebuild_mode: upsert` when existing rows should remain, such as an equivalent
+    SQL rewrite. Approval still applies. The full range replays in chunks; rows no
+    longer emitted by the query remain stored.
+
+    ```yaml
+    parameters:
+      upsert: true
+      rebuild_mode: upsert
+    ```
+
+    ```bash
+    mrsm sync pipelines daily -i sql:local --yes
+    ```
+
+    A failed replay keeps the previous definition hash. Retry the approved rebuild
+    to complete the replay.
 
 The first engine run on a pipe has no stored hash, so it records a baseline rather than treating it as a change: upgrading from 4.x never rebuilds a pipe. A hash stored by an earlier 5.0 pre-release is compared the way that release computed it, so upgrading never rebuilds a pipe whose definition did not change; the next successful sync stores the new hash.
 
@@ -16157,6 +16202,7 @@ Save a group of Pipes, preview its plan, then run parents before children. The e
 
 Lookup dependencies preserve ordering without capping event progress at an old lookup timestamp.
 New tail rows stay incremental; unchanged UPSERTs leave dependents quiet.
+Approved UPSERT rebuilds replay history in chunks while retaining stored rows.
 
 ```bash
 mrsm register pipelines daily -i sql:local -c sql:local -m daily --parents
