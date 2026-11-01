@@ -170,3 +170,29 @@ print('JSON:' + json.dumps(out))
     status, body = out['callback_anonymous']
     assert status == 401 and body['success'] is False and body['login'] == '/dash/login'
     assert out['callback'][0] == 200 and 'session-id' in out['callback'][1]
+
+
+def test_the_health_check_answers_only_an_internal_token(sandbox):
+    """`GET /_mrsm/host/health` (the supervisor's liveness check) needs the internal token."""
+    root, plugins = sandbox
+    result = run_python(root, plugins, """
+import json
+from starlette.testclient import TestClient
+from meerschaum.api.host import build_app, HEALTH_PATH, TOKEN_HEADER
+from meerschaum.api.host._auth import mint_internal_token
+client = TestClient(build_app())
+out = {
+    'path': HEALTH_PATH,
+    'anonymous': client.get(HEALTH_PATH).status_code,
+    'forged': client.get(HEALTH_PATH, headers={TOKEN_HEADER: 'not-a-token'}).status_code,
+}
+r = client.get(HEALTH_PATH, headers={TOKEN_HEADER: mint_internal_token()})
+out['internal'] = [r.status_code, r.json()]
+print('JSON:' + json.dumps(out))
+""")
+    assert result.returncode == 0, result.stderr[-4000:]
+    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
+    out = json.loads(line[len('JSON:'):])
+    assert out['path'] == '/_mrsm/host/health'
+    assert out['anonymous'] == 403 and out['forged'] == 403
+    assert out['internal'] == [200, {'ok': True}]

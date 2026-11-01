@@ -415,6 +415,7 @@ fn opts() -> SupervisorOptions {
         ready_timeout: Duration::from_secs(5),
         backoff_initial: Duration::from_millis(20),
         backoff_max: Duration::from_millis(100),
+        ..SupervisorOptions::default()
     }
 }
 

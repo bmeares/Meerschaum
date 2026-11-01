@@ -12,6 +12,16 @@
 //! changes, the host is restarted (so newly installed plugins load), started on demand if a
 //! plugin now needs it, or stopped if none does, and the MCP federation's registry is
 //! refetched.
+//!
+//! **A hung host.** A host process that is alive but stops answering (a plugin that blocks its
+//! event loop) is found by a health check: every [`SupervisorOptions::health_interval`] the
+//! supervisor asks `GET /_mrsm/host/health` (an internal token minted for each check) and waits at
+//! most [`SupervisorOptions::health_timeout`]. Any answer counts as alive; after
+//! [`SupervisorOptions::health_failures`] failures in a row the process is terminated (SIGTERM,
+//! a grace period, SIGKILL), awaited, and only then replaced. Requests forwarded meanwhile end
+//! with `504` after `api:host:response_seconds` ([`crate::proxy`]). Restarts back off, doubling up
+//! to [`SupervisorOptions::backoff_max`], and the delay starts over only after a process stayed
+//! ready for [`SupervisorOptions::stable_after`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -314,6 +324,9 @@ pub const STATUS_PATH: &str = "/_mrsm/host/status";
 /// before the host binds it, so a local process could take it in between; only the real host can
 /// answer, and the proxy forwards nothing (cookies, bearer tokens, the proxy token) before it did.
 pub const PROOF_PATH: &str = "/_mrsm/host/proof";
+/// The host's health check (internal token required): the supervisor asks it to find a host that
+/// is alive but no longer answers.
+pub const HEALTH_PATH: &str = "/_mrsm/host/health";
 /// The header carrying the per-start token on the TCP transport.
 pub const PROXY_TOKEN_HEADER: &str = "x-mrsm-host-proxy-token";
 /// The environment variable that gives the host its per-start token (TCP transport).
@@ -561,7 +574,30 @@ impl PythonHostLauncher {
 }
 
 /// How long a terminating host may take to exit before it is killed.
-const TERMINATE_GRACE: Duration = Duration::from_secs(10);
+pub const TERMINATE_GRACE: Duration = Duration::from_secs(10);
+
+/// End a child process the caller owns and wait for it: SIGTERM first (the host runs its shutdown
+/// events), up to `grace` for it to exit, then SIGKILL. The signal goes to that child alone (never
+/// a process group), and only while it is not yet reaped, so it cannot reach a reused PID. Where
+/// there are no signals the child is killed at once.
+pub async fn terminate_child(
+    child: &mut tokio::process::Child,
+    grace: Duration,
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if let Some(pid) = child.id()
+        && let Ok(raw) = i32::try_from(pid)
+        && let Some(pid) = rustix::process::Pid::from_raw(raw)
+    {
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+        if tokio::time::timeout(grace, child.wait()).await.is_ok() {
+            return Ok(());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = grace;
+    child.kill().await
+}
 
 struct ChildProcess(tokio::process::Child);
 
@@ -573,23 +609,7 @@ impl HostProcess for ChildProcess {
     async fn kill(&mut self) -> std::io::Result<()> {
         // SIGTERM first so the host runs its shutdown events (it stops the terminal process and
         // its tmux session); SIGKILL only when it does not exit within the grace period.
-        #[cfg(unix)]
-        if let Some(pid) = self.0.id() {
-            let _ = tokio::process::Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
-            if tokio::time::timeout(TERMINATE_GRACE, self.0.wait())
-                .await
-                .is_ok()
-            {
-                return Ok(());
-            }
-        }
-        self.0.kill().await
+        terminate_child(&mut self.0, TERMINATE_GRACE).await
     }
 }
 
@@ -636,12 +656,22 @@ impl HostLauncher for PythonHostLauncher {
 /// Supervision options.
 #[derive(Debug, Clone, Copy)]
 pub struct SupervisorOptions {
-    /// How long to wait for the socket to accept connections after a start.
+    /// How long to wait for the socket to accept connections after a start. A process that does
+    /// not get there is terminated and replaced.
     pub ready_timeout: Duration,
     /// The first restart delay (doubled after each consecutive crash).
     pub backoff_initial: Duration,
     /// The longest restart delay.
     pub backoff_max: Duration,
+    /// How often a running host is asked whether it answers (`GET /_mrsm/host/health`).
+    pub health_interval: Duration,
+    /// How long one health check may take.
+    pub health_timeout: Duration,
+    /// How many failed health checks in a row mark a live host as hung (it is then replaced).
+    pub health_failures: u32,
+    /// How long a host must stay ready before the restart delay starts over at
+    /// `backoff_initial`.
+    pub stable_after: Duration,
 }
 
 impl Default for SupervisorOptions {
@@ -649,8 +679,76 @@ impl Default for SupervisorOptions {
         SupervisorOptions {
             ready_timeout: Duration::from_secs(60),
             backoff_initial: Duration::from_millis(500),
-            backoff_max: Duration::from_secs(30),
+            backoff_max: Duration::from_secs(60),
+            health_interval: Duration::from_secs(30),
+            health_timeout: Duration::from_secs(10),
+            health_failures: 3,
+            stable_after: Duration::from_secs(60),
         }
+    }
+}
+
+/// How long the manifest watcher lets the MCP federation refetch the host's registry after a
+/// change (in the background: a later change is never held up by it).
+const REGISTRY_REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Why the supervisor stopped watching a host process.
+enum WatchEvent {
+    /// The process exited.
+    Exited(std::io::Result<Option<i32>>),
+    /// The server is stopping.
+    Stop,
+    /// The plugin manifest changed.
+    Restart,
+    /// The process did not start answering within `ready_timeout`.
+    Unready,
+    /// The process is alive but failed `health_failures` health checks in a row.
+    Hung,
+}
+
+/// End a host process and wait for it: its replacement never starts before it is gone.
+async fn terminate(proc: &mut dyn HostProcess) {
+    let _ = proc.kill().await;
+    let _ = proc.wait().await;
+}
+
+/// Ask the host at `endpoint` whether it answers (`GET /_mrsm/host/health` with an internal token
+/// minted now from `secret`, so an expired credential is never mistaken for a hung host). Any
+/// answer within `timeout` is alive, whatever its status; no connection, or no answer in time,
+/// is a failure.
+pub async fn probe_health(endpoint: &HostEndpoint, secret: &[u8], timeout: Duration) -> bool {
+    let token = crate::mcp::federation::internal_token(secret, None);
+    matches!(
+        tokio::time::timeout(timeout, health_request(endpoint, token)).await,
+        Ok(Ok(()))
+    )
+}
+
+/// `GET /_mrsm/host/health` on `endpoint` with the internal `token`: `Ok` once response headers
+/// arrive, whatever the status.
+async fn health_request(endpoint: &HostEndpoint, token: String) -> std::io::Result<()> {
+    let stream = crate::proxy::connect_endpoint(endpoint).await?;
+    let (mut sender, connection) = hyper::client::conn::http1::handshake::<_, axum::body::Body>(
+        hyper_util::rt::TokioIo::new(stream),
+    )
+    .await
+    .map_err(std::io::Error::other)?;
+    let mut request = hyper::Request::builder()
+        .method(hyper::Method::GET)
+        .uri(HEALTH_PATH)
+        .header(hyper::header::HOST, "localhost")
+        .header(crate::mcp::federation::TOKEN_HEADER, token);
+    if let Some(proxy_token) = endpoint.token() {
+        request = request.header(PROXY_TOKEN_HEADER, proxy_token);
+    }
+    let request = request
+        .body(axum::body::Body::empty())
+        .map_err(std::io::Error::other)?;
+    let send = sender.send_request(request);
+    tokio::pin!(connection);
+    tokio::select! {
+        answered = send => answered.map(|_| ()).map_err(std::io::Error::other),
+        _ = &mut connection => Err(std::io::Error::other("the API host closed the connection")),
     }
 }
 
@@ -681,6 +779,8 @@ pub struct HostSupervisor {
     ever_ready: AtomicBool,
     /// Remembered guard refusals (see [`Refusals`]).
     refusals: std::sync::Mutex<Refusals>,
+    /// The server's secret, which signs the health checks' internal tokens (no checks without).
+    internal_secret: std::sync::Mutex<Option<Vec<u8>>>,
 }
 
 /// A host that refused to start (its guard found a `meerschaum` package this program cannot work
@@ -840,7 +940,59 @@ impl HostSupervisor {
             terminated: tokio::sync::watch::channel(false).0,
             ever_ready: AtomicBool::new(false),
             refusals: std::sync::Mutex::new(Refusals::NONE),
+            internal_secret: std::sync::Mutex::new(None),
         })
+    }
+
+    /// The secret that signs the health checks' internal tokens (the server's state sets it,
+    /// [`crate::state::AppStateBuilder::build`]). Without it the host is not health-checked.
+    pub fn set_internal_secret(&self, secret: &[u8]) {
+        *self
+            .internal_secret
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(secret.to_vec());
+    }
+
+    fn internal_secret(&self) -> Option<Vec<u8>> {
+        self.internal_secret
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Whether a stop was requested ([`HostSupervisor::shutdown`]).
+    fn stopping(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst)
+    }
+
+    /// Wait until a stop is requested: at once when it already was. The flag is read after the
+    /// wait is registered, so a stop that comes while the supervisor is busy elsewhere (a launch,
+    /// a readiness wait, a health check, a backoff) is never lost.
+    async fn stop_requested(&self) {
+        let notified = self.stop.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.stopping() {
+            return;
+        }
+        notified.await;
+    }
+
+    /// Wait `delay` (a restart backoff); `false` when a stop was requested first.
+    async fn pause(&self, delay: Duration) -> bool {
+        tokio::select! {
+            () = tokio::time::sleep(delay) => true,
+            () = self.stop_requested() => false,
+        }
+    }
+
+    /// One health check of the current process; healthy when the server's secret is unknown
+    /// (nothing to sign the check with).
+    async fn healthy(&self) -> bool {
+        match self.internal_secret() {
+            Some(secret) => probe_health(&self.endpoint(), &secret, self.opts.health_timeout).await,
+            None => true,
+        }
     }
 
     /// Whether the host process has been started (and not stopped since).
@@ -1026,28 +1178,79 @@ impl HostSupervisor {
         }
     }
 
-    async fn supervise(self: Arc<Self>, mut proc: Box<dyn HostProcess>) {
-        enum Event {
-            Exited(std::io::Result<Option<i32>>),
-            Stop,
-            Restart,
+    /// Watch one host process until something ends its watch: it exits, the server stops, the
+    /// manifest changes, it does not get ready in time, or it stops answering its health checks.
+    /// The second value is when it got ready.
+    async fn watch(
+        &self,
+        proc: &mut dyn HostProcess,
+    ) -> (WatchEvent, Option<tokio::time::Instant>) {
+        let ready = tokio::select! {
+            status = proc.wait() => return (WatchEvent::Exited(status), None),
+            () = self.stop_requested() => return (WatchEvent::Stop, None),
+            () = self.restart.notified() => return (WatchEvent::Restart, None),
+            ready = endpoint_ready(self, self.opts.ready_timeout) => ready,
+        };
+        if ready.is_err() {
+            return (WatchEvent::Unready, None);
         }
+        self.ever_ready.store(true, Ordering::SeqCst);
+        let ready_at = tokio::time::Instant::now();
+        let interval = self.opts.health_interval.max(Duration::from_millis(1));
+        let mut checks = tokio::time::interval_at(ready_at + interval, interval);
+        checks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut failures = 0u32;
+        loop {
+            // A check in flight never delays an exit, a stop or a manifest change.
+            let check = async {
+                checks.tick().await;
+                self.healthy().await
+            };
+            let event = tokio::select! {
+                status = proc.wait() => WatchEvent::Exited(status),
+                () = self.stop_requested() => WatchEvent::Stop,
+                () = self.restart.notified() => WatchEvent::Restart,
+                healthy = check => {
+                    if healthy {
+                        failures = 0;
+                        continue;
+                    }
+                    failures += 1;
+                    if failures < self.opts.health_failures.max(1) {
+                        tracing::warn!(
+                            "The API host did not answer a health check ({failures} in a row)."
+                        );
+                        continue;
+                    }
+                    WatchEvent::Hung
+                }
+            };
+            return (event, Some(ready_at));
+        }
+    }
+
+    async fn supervise(self: Arc<Self>, mut proc: Box<dyn HostProcess>) {
         let mut backoff = self.opts.backoff_initial;
         loop {
-            let event = tokio::select! {
-                status = proc.wait() => Event::Exited(status),
-                _ = self.stop.notified() => Event::Stop,
-                _ = self.restart.notified() => Event::Restart,
-            };
-            if matches!(event, Event::Stop) || self.stopping.load(Ordering::SeqCst) {
-                let _ = proc.kill().await;
+            let (event, ready_at) = self.watch(proc.as_mut()).await;
+            // A process that stayed ready long enough was working: the delay starts over.
+            if ready_at.is_some_and(|at| at.elapsed() >= self.opts.stable_after) {
+                backoff = self.opts.backoff_initial;
+            }
+            let hung = matches!(event, WatchEvent::Hung);
+            if self.stopping() && !matches!(event, WatchEvent::Exited(_)) {
+                terminate(proc.as_mut()).await;
                 self.terminated.send_replace(true);
                 return;
             }
             match event {
-                Event::Restart => {
-                    let _ = proc.kill().await;
-                    let _ = proc.wait().await;
+                WatchEvent::Stop => {
+                    terminate(proc.as_mut()).await;
+                    self.terminated.send_replace(true);
+                    return;
+                }
+                WatchEvent::Restart => {
+                    terminate(proc.as_mut()).await;
                     if !self.is_needed() {
                         tracing::info!("No installed plugin needs the API host; stopped it.");
                         *self.started.lock().await = false;
@@ -1058,7 +1261,7 @@ impl HostSupervisor {
                     tracing::info!("The plugin manifest changed; restarting the API host.");
                     backoff = self.opts.backoff_initial;
                 }
-                Event::Exited(Ok(Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE)))
+                WatchEvent::Exited(Ok(Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE)))
                     if !self.ever_ready.load(Ordering::SeqCst) =>
                 {
                     // The host's guard said why on stderr (a `meerschaum` this program cannot
@@ -1074,20 +1277,47 @@ impl HostSupervisor {
                     self.terminated.send_replace(true);
                     return;
                 }
-                Event::Exited(status) => {
+                WatchEvent::Exited(status) => {
+                    if self.stopping() {
+                        self.terminated.send_replace(true);
+                        return;
+                    }
                     tracing::warn!("The API host exited ({status:?}); restarting in {backoff:?}.");
-                    tokio::select! {
-                        _ = tokio::time::sleep(backoff) => {}
-                        _ = self.stop.notified() => {
-                            self.terminated.send_replace(true);
-                            return;
-                        }
+                    if !self.pause(backoff).await {
+                        self.terminated.send_replace(true);
+                        return;
                     }
                     backoff = (backoff * 2).min(self.opts.backoff_max);
                 }
-                Event::Stop => return,
+                WatchEvent::Unready | WatchEvent::Hung => {
+                    let why = if hung {
+                        format!(
+                            "stopped answering ({} health checks in a row failed)",
+                            self.opts.health_failures.max(1)
+                        )
+                    } else {
+                        format!(
+                            "did not start answering within {:?}",
+                            self.opts.ready_timeout
+                        )
+                    };
+                    tracing::warn!(
+                        "The API host {why}; terminating it and restarting in {backoff:?}."
+                    );
+                    terminate(proc.as_mut()).await;
+                    if !self.pause(backoff).await {
+                        self.terminated.send_replace(true);
+                        return;
+                    }
+                    backoff = (backoff * 2).min(self.opts.backoff_max);
+                }
             }
+            // The replacement: the old process is gone (it exited, or was terminated and awaited).
             loop {
+                if self.stopping() {
+                    self.terminated.send_replace(true);
+                    return;
+                }
                 match self.launch_once().await {
                     Ok(p) => {
                         proc = p;
@@ -1095,20 +1325,13 @@ impl HostSupervisor {
                     }
                     Err(e) => {
                         tracing::warn!("Failed to restart the API host: {e}");
-                        tokio::select! {
-                            _ = tokio::time::sleep(backoff) => {}
-                            _ = self.stop.notified() => {
-                                self.terminated.send_replace(true);
-                                return;
-                            }
+                        if !self.pause(backoff).await {
+                            self.terminated.send_replace(true);
+                            return;
                         }
                         backoff = (backoff * 2).min(self.opts.backoff_max);
                     }
                 }
-            }
-            if endpoint_ready(&self, self.opts.ready_timeout).await.is_ok() {
-                self.ever_ready.store(true, Ordering::SeqCst);
-                backoff = self.opts.backoff_initial;
             }
         }
     }
@@ -1141,6 +1364,9 @@ pub fn spawn_manifest_watcher(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut last: Option<HostManifest> = None;
+        // The registry refetch of the last change runs on its own (bounded): a later change is
+        // applied at once, and replaces it.
+        let mut refreshing: Option<tokio::task::JoinHandle<()>> = None;
         loop {
             match source.load().await {
                 Ok(manifest) => {
@@ -1148,21 +1374,33 @@ pub fn spawn_manifest_watcher(
                         let running = supervisor.is_running().await;
                         let before = supervisor.starts();
                         let changed = supervisor.set_manifest(&manifest).await;
-                        if changed && running && manifest.needs_host() {
-                            // Wait for the new process so the registry is not read from the old.
-                            let deadline =
-                                tokio::time::Instant::now() + supervisor.opts.ready_timeout;
-                            while supervisor.starts() == before
-                                && tokio::time::Instant::now() < deadline
-                            {
-                                tokio::time::sleep(Duration::from_millis(20)).await;
+                        if let Some(federation) = federation.clone().filter(|_| changed) {
+                            if let Some(previous) = refreshing.take() {
+                                previous.abort();
                             }
-                        }
-                        if let Some(f) = federation.as_ref().filter(|_| changed) {
-                            f.invalidate().await;
-                            if manifest.needs_host() {
-                                let _ = f.refresh().await;
-                            }
+                            let (supervisor, needs_host) =
+                                (supervisor.clone(), manifest.needs_host());
+                            refreshing = Some(tokio::spawn(async move {
+                                if running && needs_host {
+                                    // Wait for the new process so the registry is not read from
+                                    // the old.
+                                    let deadline =
+                                        tokio::time::Instant::now() + supervisor.opts.ready_timeout;
+                                    while supervisor.starts() == before
+                                        && tokio::time::Instant::now() < deadline
+                                    {
+                                        tokio::time::sleep(Duration::from_millis(20)).await;
+                                    }
+                                }
+                                federation.invalidate().await;
+                                if needs_host {
+                                    let _ = tokio::time::timeout(
+                                        REGISTRY_REFRESH_TIMEOUT,
+                                        federation.refresh(),
+                                    )
+                                    .await;
+                                }
+                            }));
                         }
                         last = Some(manifest);
                     }

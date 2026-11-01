@@ -215,6 +215,7 @@ async fn python_host_end_to_end() {
             ready_timeout: Duration::from_secs(120),
             backoff_initial: Duration::from_millis(200),
             backoff_max: Duration::from_secs(2),
+            ..SupervisorOptions::default()
         },
     );
     let proxy = Arc::new(HostProxy::supervised(supervisor.clone()));

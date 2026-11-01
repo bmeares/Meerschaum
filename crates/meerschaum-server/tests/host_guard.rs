@@ -85,6 +85,7 @@ async fn a_refused_host_is_neither_restarted_nor_waited_for() {
             ready_timeout: Duration::from_secs(60),
             backoff_initial: Duration::from_millis(50),
             backoff_max: Duration::from_millis(100),
+            ..SupervisorOptions::default()
         },
     );
     let started = Instant::now();
@@ -115,6 +116,7 @@ fn supervisor_for(dir: &Path, code: i32, ready_timeout: Duration) -> Arc<HostSup
             ready_timeout,
             backoff_initial: Duration::from_millis(50),
             backoff_max: Duration::from_millis(200),
+            ..SupervisorOptions::default()
         },
     )
 }

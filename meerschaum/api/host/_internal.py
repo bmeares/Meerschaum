@@ -11,9 +11,12 @@ The host's internal routes, called only by the Rust server (§7.2 federation):
 - `GET /_mrsm/host/status`: `{"console": {"mounted", "reason", "dash_version"}, "version"}`, what the
   Rust server reads to decide whether `/dash/*` is proxied here or shows the pointer page;
 - `POST /_mrsm/host/mcp`: a JSON-RPC message, dispatched by `meerschaum.mcp` with the caller's
-  scopes from the internal token.
+  scopes from the internal token;
+- `GET /_mrsm/host/health`: `{"ok": true}` from the event loop itself, no instance or plugin
+  involved. The Rust server's supervisor asks it to find a host that is alive but no longer
+  answers (a plugin blocking the loop) and replaces such a host.
 
-Both require `X-Mrsm-Host-Token` (see `_auth.decode_internal_token`). The Rust server never
+All require `X-Mrsm-Host-Token` (see `_auth.decode_internal_token`). The Rust server never
 proxies `/_mrsm/` from clients.
 """
 
@@ -124,7 +127,13 @@ def register(app) -> None:
     import fastapi
     from fastapi.concurrency import run_in_threadpool
     from starlette.responses import JSONResponse, Response
-    from meerschaum.api.host import REGISTRY_PATH, MCP_PATH, STATUS_PATH, TOKEN_HEADER
+    from meerschaum.api.host import (
+        REGISTRY_PATH,
+        MCP_PATH,
+        STATUS_PATH,
+        HEALTH_PATH,
+        TOKEN_HEADER,
+    )
     from meerschaum.api.host._auth import decode_internal_token, load_user_or_token_from_manager
 
     def _forbidden():
@@ -135,6 +144,14 @@ def register(app) -> None:
         if decode_internal_token(internal_token_from(request)) is None:
             return _forbidden()
         return JSONResponse(content=registry_document(app))
+
+    @app.get(HEALTH_PATH, include_in_schema=False)
+    async def _host_health(request: fastapi.Request):
+        ### Answered on the event loop with nothing else involved: a host whose loop is blocked
+        ### does not answer, and that is what the supervisor looks for.
+        if decode_internal_token(internal_token_from(request)) is None:
+            return _forbidden()
+        return JSONResponse(content={'ok': True})
 
     @app.get(STATUS_PATH, include_in_schema=False)
     async def _host_status(request: fastapi.Request):

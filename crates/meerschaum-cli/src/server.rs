@@ -31,7 +31,13 @@ impl HostProcess for HostChild {
     }
 
     async fn kill(&mut self) -> std::io::Result<()> {
-        self.0.kill().await
+        // SIGTERM, a grace period, then SIGKILL, and the child awaited (a hung host is replaced
+        // only once it is gone).
+        meerschaum_server::host::terminate_child(
+            &mut self.0,
+            meerschaum_server::host::TERMINATE_GRACE,
+        )
+        .await
     }
 }
 

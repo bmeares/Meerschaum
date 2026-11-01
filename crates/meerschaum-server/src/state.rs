@@ -178,8 +178,12 @@ impl AppStateBuilder {
             None => auth::generate_secret_key(&self.config.secret_key_path)?,
         };
         // The proxy forwards with this server's `api:limits:proxy_bytes` and
-        // `api:host:response_seconds`.
+        // `api:host:response_seconds`; its supervisor probes the host's health with internal
+        // tokens signed by this server's secret.
         let host = self.host.map(|host| {
+            if let Some(supervisor) = host.supervisor() {
+                supervisor.set_internal_secret(&secret);
+            }
             Arc::new(
                 host.as_ref()
                     .clone()
