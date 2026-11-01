@@ -72,6 +72,71 @@ const MAX_NEW_WINDOWS: usize = 8;
 /// The websocket close code for "going away / try again later" when [`MAX_TERMINALS`] is reached.
 const CLOSE_TRY_AGAIN: u16 = 1013;
 
+/// Variables that make a process part of the job (or the service) the server itself runs in,
+/// besides the `static.toml` names [`job_context_vars`] adds. A terminal's shell is never that job:
+/// `mrsm` started with `MRSM_SYSTEMD_LOG_PATH` becomes the `systemd` job's wrapper
+/// (`meerschaum_jobs::systemd_job`): it takes the job's FIFO as stdin, writes the job's result
+/// ("an interactive shell cannot start in a job") and exits, and the terminal shows `[CLOSED]`.
+/// A job started from the shell would also carry the server's Compose stamps. Connector, config
+/// and authentication variables are kept.
+const JOB_CONTEXT_VARS: &[&str] = &[
+    // The `systemd` executor's marker for the job's wrapped child.
+    "MRSM_SYSTEMD_JOB_CHILD",
+    // The local executor's supervisor, its result file, laps and startup gate.
+    "MRSM_JOB_RESULT_PATH",
+    "MRSM_JOB_SUPERVISOR",
+    "MRSM_JOB_PROGRAM",
+    "MRSM_JOB_LAPS_PATH",
+    "MRSM_JOB_LAPS_PARENT",
+    "MRSM_JOB_STARTUP_RELEASE",
+    "MRSM_JOB_START_KIND",
+    // What the service manager sets for the unit's own process.
+    "INVOCATION_ID",
+    "JOURNAL_STREAM",
+    "NOTIFY_SOCKET",
+    "LISTEN_FDS",
+    "LISTEN_PID",
+    "LISTEN_FDNAMES",
+    "WATCHDOG_USEC",
+    "WATCHDOG_PID",
+    "MANAGERPID",
+    "SYSTEMD_EXEC_PID",
+    "MEMORY_PRESSURE_WATCH",
+    "MEMORY_PRESSURE_WRITE",
+];
+
+/// Every variable a terminal's shell must not inherit from the server ([`scrub_job_context`]):
+/// the job's name, its `systemd` paths and its Compose stamps (by their `static.toml` names), and
+/// [`JOB_CONTEXT_VARS`].
+pub fn job_context_vars() -> Vec<String> {
+    let environment = &meerschaum_core::static_config::static_config().environment;
+    let mut vars: Vec<String> = [
+        &environment.daemon_id,
+        &environment.systemd_log_path,
+        &environment.systemd_result_path,
+        &environment.systemd_stdin_path,
+        &environment.systemd_delete_job,
+        &environment.compose_project,
+        &environment.compose_root,
+    ]
+    .into_iter()
+    .cloned()
+    .chain(JOB_CONTEXT_VARS.iter().map(|var| var.to_string()))
+    .filter(|var| valid_env_name(var))
+    .collect();
+    vars.sort();
+    vars.dedup();
+    vars
+}
+
+/// Remove the server's job context ([`job_context_vars`]) from a terminal's command, after any
+/// explicit overrides: the shell runs as a terminal, never as the job the server runs in.
+pub fn scrub_job_context(builder: &mut CommandBuilder) {
+    for var in job_context_vars() {
+        builder.env_remove(var);
+    }
+}
+
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 /// The console's session store, as far as the terminal needs it.
@@ -322,6 +387,64 @@ fn claim_tmux_server(tmux: &TmuxSettings) {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(socket.clone());
+    }
+}
+
+/// Unset the server's job context ([`job_context_vars`]) on the terminal's own tmux server (`-S`,
+/// never the default server): in its global environment and in the user's `session` (exact name),
+/// either of which a server started by an earlier release, from a job's environment or with an
+/// `update-environment` setting may hold. Windows opened afterwards, with the terminal's
+/// `["new_window"]` or with tmux's own keys, start without it. Nothing happens when no server
+/// answers or the session does not exist yet.
+fn scrub_tmux_server_env(tmux: &TmuxSettings, session: Option<&str>) {
+    let Some(socket) = &tmux.socket else {
+        return;
+    };
+    let tmux_command = || {
+        let mut command = std::process::Command::new(&tmux.binary);
+        command
+            .arg("-S")
+            .arg(socket)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        command
+    };
+    let context = job_context_vars();
+    // `=name`: exactly this session, never one whose name merely starts with it.
+    let target = session.map(|name| format!("={name}"));
+    let mut scopes: Vec<Vec<&str>> = vec![vec!["-g"]];
+    if let Some(target) = &target {
+        scopes.push(vec!["-t", target.as_str()]);
+    }
+    for scope in scopes {
+        let Ok(listing) = tmux_command().arg("show-environment").args(&scope).output() else {
+            return;
+        };
+        if !listing.status.success() {
+            continue;
+        }
+        let present: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .filter_map(|line| line.split_once('=').map(|(name, _)| name.to_string()))
+            .filter(|name| context.contains(name))
+            .collect();
+        if present.is_empty() {
+            continue;
+        }
+        // One tmux invocation: `set-environment <scope> -u A ; set-environment <scope> -u B ...`.
+        let mut command = tmux_command();
+        for (i, name) in present.iter().enumerate() {
+            if i > 0 {
+                command.arg(";");
+            }
+            command
+                .arg("set-environment")
+                .args(&scope)
+                .args(["-u", name.as_str()]);
+        }
+        let _ = command.stdout(std::process::Stdio::null()).status();
     }
 }
 
@@ -976,6 +1099,7 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
             let name = tmux_session_name(term_name, &tmux.session_suffix);
             let wrapped = tmux_shell_argv(tmux, &config.shell)?;
             claim_tmux_server(tmux);
+            scrub_tmux_server_env(tmux, Some(&name));
             builder = CommandBuilder::new(&tmux.binary);
             if let Some(socket) = &tmux.socket {
                 builder.arg("-S");
@@ -1002,6 +1126,9 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
     // enclosing user's tmux server. Strip these after applying the overrides too.
     builder.env_remove("TMUX");
     builder.env_remove("TMUX_PANE");
+    // Nor run the shell as the job the server runs in (the tmux client's environment also becomes
+    // a new tmux server's global environment).
+    scrub_job_context(&mut builder);
     builder.env("TERM", "xterm-256color");
     builder.env("COLORTERM", "truecolor");
     // PARITY: v4's shell command pops `COLUMNS` and `LINES` so the PTY's size wins.
@@ -1053,9 +1180,10 @@ fn write_env_file(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result<
     for (key, value) in &shell.env {
         vars.insert(key.clone(), value.clone());
     }
+    let context = job_context_vars();
     let mut body = String::new();
     for (key, value) in &vars {
-        if ENV_SKIP.contains(&key.as_str()) || !valid_env_name(key) {
+        if ENV_SKIP.contains(&key.as_str()) || !valid_env_name(key) || context.contains(key) {
             continue;
         }
         body.push_str(&format!("{key}={}\n", sh_quote(value)));
@@ -1096,14 +1224,17 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.write_all(bytes)
 }
 
-/// The argv tmux runs in a window: `sh` sources the environment file, then replaces itself with
-/// the shell.
+/// The argv tmux runs in a window: `sh` sources the environment file, unsets the server's job
+/// context (a tmux server started before, or from a job's environment, may hold it in its global
+/// environment), then replaces itself with the shell.
 fn tmux_shell_argv(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result<Vec<String>> {
     let env_file = write_env_file(tmux, shell)?;
+    // The names are `valid_env_name`s: safe to write into the script as they are.
+    let unset = job_context_vars().join(" ");
     let mut argv = vec![
         "sh".to_string(),
         "-c".into(),
-        "set -a; . \"$0\"; set +a; exec \"$@\"".into(),
+        format!("set -a; . \"$0\"; set +a; unset {unset}; exec \"$@\""),
         env_file.display().to_string(),
         shell.program.clone(),
     ];
@@ -1117,6 +1248,7 @@ fn tmux_new_window(
     session: &str,
 ) -> std::io::Result<()> {
     let argv = tmux_shell_argv(tmux, shell)?;
+    scrub_tmux_server_env(tmux, Some(session));
     let mut command = std::process::Command::new(&tmux.binary);
     if let Some(socket) = &tmux.socket {
         command.arg("-S").arg(socket);
@@ -1130,12 +1262,99 @@ fn tmux_new_window(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    for var in job_context_vars() {
+        command.env_remove(var);
+    }
     command.status().map(|_| ())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminals_never_carry_the_servers_job_context() {
+        let vars = job_context_vars();
+        for name in [
+            "MRSM_SYSTEMD_LOG_PATH",
+            "MRSM_SYSTEMD_RESULT_PATH",
+            "MRSM_SYSTEMD_STDIN_PATH",
+            "MRSM_SYSTEMD_DELETE_JOB",
+            "MRSM_SYSTEMD_JOB_CHILD",
+            "MRSM_DAEMON_ID",
+            "MRSM__COMPOSE_PROJECT",
+            "MRSM__COMPOSE_ROOT",
+            "MRSM_JOB_RESULT_PATH",
+            "MRSM_JOB_SUPERVISOR",
+            "INVOCATION_ID",
+            "JOURNAL_STREAM",
+        ] {
+            assert!(vars.iter().any(|var| var == name), "{name} must be removed");
+        }
+        // The shell's own configuration stays.
+        for name in [
+            "MRSM_ROOT_DIR",
+            "MRSM_PLUGINS_DIR",
+            "MRSM_CONFIG",
+            "MRSM_PATCH",
+            "MRSM_SQL_MAIN",
+            "MRSM_PYTHON",
+            "PATH",
+            "HOME",
+        ] {
+            assert!(!vars.iter().any(|var| var == name), "{name} must be kept");
+        }
+        assert!(vars.iter().all(|var| valid_env_name(var)));
+
+        let mut builder = CommandBuilder::new("sh");
+        builder.env("MRSM_SYSTEMD_LOG_PATH", "/job/log");
+        builder.env("MRSM_DAEMON_ID", "api");
+        builder.env("MRSM_SQL_MAIN", "sqlite:///main.db");
+        scrub_job_context(&mut builder);
+        assert!(builder.get_env("MRSM_SYSTEMD_LOG_PATH").is_none());
+        assert!(builder.get_env("MRSM_DAEMON_ID").is_none());
+        assert!(builder.get_env("MRSM_SQL_MAIN").is_some());
+    }
+
+    #[test]
+    fn the_tmux_window_unsets_the_job_context_and_its_env_file_omits_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: None,
+            session_suffix: String::new(),
+            env_dir: dir.path().join("env"),
+            config_file: None,
+        };
+        let mut shell = ShellCommand::new("mrsm");
+        // Explicit overrides are scrubbed too; ordinary ones are written.
+        shell.env.push(("MRSM_DAEMON_ID".into(), "api".into()));
+        shell
+            .env
+            .push(("MRSM_SYSTEMD_LOG_PATH".into(), "/job/log".into()));
+        shell.env.push(("MRSM_RC25_KEEP".into(), "yes".into()));
+        let argv = tmux_shell_argv(&tmux, &shell).unwrap();
+        assert!(argv[2].contains("unset "), "{}", argv[2]);
+        for var in job_context_vars() {
+            assert!(
+                argv[2]
+                    .split(' ')
+                    .any(|word| word.trim_end_matches(';') == var),
+                "{var}"
+            );
+        }
+        assert!(argv[2].ends_with("exec \"$@\""), "{}", argv[2]);
+        let body = std::fs::read_to_string(&argv[3]).unwrap();
+        assert!(body.contains("MRSM_RC25_KEEP='yes'"), "{body}");
+        for var in job_context_vars() {
+            assert!(
+                !body
+                    .lines()
+                    .any(|line| line.starts_with(&format!("{var}="))),
+                "{var}"
+            );
+        }
+    }
 
     #[test]
     fn utf8_stream_joins_split_characters() {
