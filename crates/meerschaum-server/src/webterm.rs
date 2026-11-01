@@ -34,7 +34,8 @@
 //! - **Wire protocol** is terminado's: the client sends JSON arrays `["stdin", text]` and
 //!   `["set_size", rows, cols, height, width]`; the server sends `["setup", {}]`,
 //!   `["stdout", text]` and `["disconnect", 1]`. `["new_window"]` is a v5 addition (tmux only):
-//!   it opens a new tmux window running the shell, which v4 did by typing into the terminal.
+//!   it opens a new tmux window running the shell, which v4 did by typing into the terminal (at
+//!   most [`MAX_SESSION_WINDOWS`] in a user's session, however often the tab reconnects).
 //!
 //! The crate does not know the console's session store (`meerschaum-web` depends on this crate),
 //! so [`WebtermConfig`] carries a [`SessionLookup`] and the page renderer; `meerschaum-web`
@@ -72,6 +73,10 @@ const INPUT_QUEUE: usize = 64;
 
 /// `["new_window"]` requests one connection may make (each is a process on the tmux path).
 const MAX_NEW_WINDOWS: usize = 8;
+
+/// The most windows a user's tmux session may have for `["new_window"]` to open another: windows
+/// outlive the connection that opened them, so a reconnect must not start a fresh allowance.
+pub const MAX_SESSION_WINDOWS: usize = 16;
 
 /// The websocket close code for "going away / try again later" when [`MAX_TERMINALS`] is reached.
 const CLOSE_TRY_AGAIN: u16 = 1013;
@@ -868,7 +873,8 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                             let _ = master.resize(size);
                         }
                         Some(ClientMessage::NewWindow) => {
-                            // Each window is a process: bounded per connection, and refused
+                            // Each window is a process: bounded per connection and per user
+                            // session (`MAX_SESSION_WINDOWS`, across reconnects), and refused
                             // while the server is at its terminal limit.
                             if new_windows < MAX_NEW_WINDOWS
                                 && active_terminals() < MAX_TERMINALS
@@ -1341,19 +1347,57 @@ fn tmux_shell_argv(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result
     Ok(argv)
 }
 
+/// How many windows the tmux `session` (exact name) has; `None` when tmux cannot say.
+fn tmux_window_count(tmux: &TmuxSettings, shell: &ShellCommand, session: &str) -> Option<usize> {
+    let mut command = std::process::Command::new(&tmux.binary);
+    if let Some(socket) = &tmux.socket {
+        command.arg("-S").arg(socket);
+    }
+    let output = command
+        .args([
+            "list-windows",
+            "-t",
+            &format!("={session}"),
+            "-F",
+            "#{window_id}",
+        ])
+        .envs(shell.env.iter().map(|(k, v)| (k, v)))
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then(|| {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+    })
+}
+
+/// Open a window running the shell in the user's tmux `session` (exact name), unless it already
+/// has [`MAX_SESSION_WINDOWS`] (or its windows cannot be counted): `Ok(false)` then.
 fn tmux_new_window(
     tmux: &TmuxSettings,
     shell: &ShellCommand,
     session: &str,
-) -> std::io::Result<()> {
+) -> std::io::Result<bool> {
+    // One at a time, so two tabs of a session cannot both pass the count.
+    static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _opening = OPENING.lock().unwrap_or_else(|e| e.into_inner());
+    if tmux_window_count(tmux, shell, session).is_none_or(|n| n >= MAX_SESSION_WINDOWS) {
+        return Ok(false);
+    }
     let argv = tmux_shell_argv(tmux, shell)?;
     scrub_tmux_server_env(tmux, Some(session));
     let mut command = std::process::Command::new(&tmux.binary);
     if let Some(socket) = &tmux.socket {
         command.arg("-S").arg(socket);
     }
+    // `=`: exactly this session, never another whose name starts with it.
     command
-        .args(["new-window", "-t", &format!("{session}:")])
+        .args(["new-window", "-t", &format!("={session}:")])
         .args(&argv)
         .envs(shell.env.iter().map(|(k, v)| (k, v)))
         .env_remove("TMUX")
@@ -1364,7 +1408,7 @@ fn tmux_new_window(
     for var in job_context_vars() {
         command.env_remove(var);
     }
-    command.status().map(|_| ())
+    command.status().map(|status| status.success())
 }
 
 #[cfg(test)]

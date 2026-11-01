@@ -1232,6 +1232,74 @@ async fn tmux_sessions_survive_reconnects_and_carry_the_environment() {
     drop(second);
 }
 
+/// Windows outlive the connection that opened them: a reconnect does not start a fresh allowance,
+/// so the user's tmux session stays within `MAX_SESSION_WINDOWS` however often the tab reconnects.
+#[tokio::test]
+async fn tmux_windows_are_bounded_across_reconnects() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP tmux_windows_are_bounded_across_reconnects: no tmux");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let tmux_dir = short_tmp();
+    let _server = PrivateTmux(tmux_dir.path().to_path_buf());
+    let state = state(root.path());
+    let tmux = TmuxSettings {
+        binary: "tmux".into(),
+        socket: Some(tmux_socket(tmux_dir.path())),
+        session_suffix: "_w".into(),
+        env_dir: root.path().join("webterm"),
+        config_file: Some("/dev/null".into()),
+    };
+    let addr = serve(webterm::routes(
+        state.clone(),
+        config(&state, sh(), Some(tmux)),
+    ))
+    .await;
+    let count = || {
+        let out = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(tmux_socket(tmux_dir.path()))
+            .args(["list-windows", "-t", "=admin_w", "-F", "#{window_id}"])
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().count()
+    };
+    let mut expected = 1;
+    for (i, session) in [ADMIN_SESSION, ADMIN_TAB_TWO, ADMIN_SESSION]
+        .into_iter()
+        .enumerate()
+    {
+        let mut socket = connect(addr, session).await;
+        expect_setup(&mut socket).await;
+        let token = format!("ready{i}");
+        send_json(&mut socket, json!(["stdin", format!("echo {token}\n")])).await;
+        read_until(&mut socket, |out| has_line(out, &token)).await;
+        // More than one connection's allowance (8).
+        for _ in 0..12 {
+            send_json(&mut socket, json!(["new_window"])).await;
+        }
+        expected = (expected + 8).min(webterm::MAX_SESSION_WINDOWS);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while count() < expected && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        // Anything past the bound would arrive by now.
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(count(), expected, "after connection {i}");
+        socket.close(None).await.unwrap();
+        drop(socket);
+    }
+    assert_eq!(count(), webterm::MAX_SESSION_WINDOWS);
+}
+
 /// Q15: with tmux enabled, the terminal's sessions live on a tmux server of their own (a socket
 /// under the root, never the user's default server), started with Meerschaum's configuration
 /// (no status bar), named as before; the server this process started stops with the API.
