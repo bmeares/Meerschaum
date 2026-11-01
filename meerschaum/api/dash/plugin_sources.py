@@ -245,9 +245,36 @@ def read_source(kind: str, name: str, selected: str, session: Any) -> str:
         raise ValueError('This file is not UTF-8 text.') from None
 
 
+#: The source viewer's language per suffix (Pygments lexer names).
+SOURCE_MODES = {
+    '.py': 'python', '.rs': 'rust', '.toml': 'toml', '.json': 'json', '.yaml': 'yaml',
+    '.yml': 'yaml', '.sql': 'sql', '.md': 'markdown', '.txt': 'text',
+}
+
+#: Token classes (`source-token-<name>`), most specific first.
+TOKEN_STYLES = (
+    ('Comment', 'comment'), ('Keyword', 'keyword'), ('Name.Function', 'function'),
+    ('Name.Class', 'class'), ('Name.Builtin', 'builtin'), ('Name.Decorator', 'decorator'),
+    ('Literal.String', 'string'), ('Literal.Number', 'number'), ('Operator', 'operator'),
+)
+
+#: At most this many highlighted runs per file (a 256 KiB file of real code has far fewer); a
+#: hostile, highly fragmented file is highlighted up to here and plain after.
+MAX_TOKEN_RUNS = 60000
+
+#: Icons of a file in the tree, by suffix (`assets/nav.css`); other files show their suffix.
+LANGUAGE_ICONS = {'.py': ('python', 'Python'), '.rs': ('rust', 'Rust')}
+
+
+def source_mode(path: str) -> str:
+    """The language a file is highlighted as."""
+    return SOURCE_MODES.get(pathlib.PurePosixPath(path).suffix.lower(), 'text')
+
+
 def build_source_browser(kind: str, name: str, session: Any):
     from dash import html, dcc
     import dash_bootstrap_components as dbc
+    from meerschaum.api.dash.components import build_icon
     if not may_read_source(kind, session):
         return None
     try:
@@ -256,8 +283,16 @@ def build_source_browser(kind: str, name: str, session: Any):
         return dbc.Alert('Source preview is unavailable for this plugin.', color='secondary')
     if not files:
         return html.P('No source files are available to preview.', className='text-muted')
+    ### Fullscreen keeps the tree and the file (`assets/plugin_source.js`; Escape leaves it).
+    fullscreen = html.Button(
+        [build_icon('fullscreen', 'plugin-source-icon-enter'),
+         build_icon('fullscreen-exit', 'plugin-source-icon-exit')],
+        type='button', className='btn btn-sm btn-outline-secondary plugin-source-fullscreen-button',
+        title='Fullscreen', **{'aria-label': 'Fullscreen', 'aria-pressed': 'false',
+                               'data-source-action': 'fullscreen'},
+    )
     return html.Section([
-        html.H4('Source'),
+        html.Div([html.H4('Source'), fullscreen], className='plugin-source-header'),
         dcc.Input(id='plugin-source-file',type='hidden',value=files[0]),
         dcc.Store(id='plugin-source-context', data={'kind': kind, 'name': name}),
         html.Div([
@@ -268,8 +303,19 @@ def build_source_browser(kind: str, name: str, session: Any):
     ], className='plugin-source-browser')
 
 
+def _file_icon(name: str):
+    from dash import html
+    from meerschaum.api.dash.components import build_icon
+    suffix = pathlib.PurePosixPath(name).suffix.lower()
+    if suffix in LANGUAGE_ICONS:
+        icon, language = LANGUAGE_ICONS[suffix]
+        return html.Span(build_icon(icon), className='plugin-source-file-kind', title=language)
+    return html.Span(suffix.lstrip('.').upper() or 'FILE', className='plugin-source-file-kind')
+
+
 def source_tree(files, selected):
     from dash import html
+    from meerschaum.api.dash.components import build_icon
     tree = {'folders':{},'files':[]}
     for relative in files:
         node = tree
@@ -281,14 +327,18 @@ def source_tree(files, selected):
         items = []
         for name,child in sorted(node['folders'].items()):
             path = prefix+name+'/'
+            ### The folder icon opens with its `details` (`console_pages.css`).
             items.append(html.Li(html.Details([
-                html.Summary(name,className='plugin-source-folder'),
+                html.Summary([
+                    build_icon('folder', 'plugin-source-folder-closed'),
+                    build_icon('folder-open', 'plugin-source-folder-open'),
+                    html.Span(name, className='plugin-source-folder-name'),
+                ], className='plugin-source-folder'),
                 branch(child,path),
             ],open=selected.startswith(path))))
         for name,path in sorted(node['files']):
-            suffix = pathlib.PurePosixPath(name).suffix.lstrip('.').upper()
             items.append(html.Li(html.Button([
-                html.Span(suffix or 'FILE',className='plugin-source-file-kind'),
+                _file_icon(name),
                 html.Span(name,className='plugin-source-file-name'),
             ],id={'type':'plugin-source-select','path':path},n_clicks=0,type='button',
                 className='plugin-source-file'+(' active' if path==selected else ''),
@@ -297,36 +347,65 @@ def source_tree(files, selected):
     return html.Nav(branch(tree),className='plugin-source-tree',**{'aria-label':'Plugin files'})
 
 
-def source_preview(path, source):
-    """Render highlighted tokens as escaped text, without interpreting plugin HTML."""
-    from dash import html, dcc
+def _utf16_length(value: str) -> int:
+    """A string's length in the browser (UTF-16 code units), which the runs count in."""
+    return len(value.encode('utf-16-le')) // 2
+
+
+def source_tokens(path: str, source: str) -> dict:
+    """
+    The highlighted source as data: the text, and runs of `[length, style]` (UTF-16 lengths;
+    `style` indexes `styles`, `-1` is plain) that `assets/plugin_source.js` renders as escaped
+    text with line numbers. Every file is highlighted in full, up to `MAX_TOKEN_RUNS` runs.
+    """
     from pygments.lexers import get_lexer_by_name
-    from pygments.token import Token
-    mode = {'.py':'python','.rs':'rust','.toml':'toml','.json':'json','.yaml':'yaml',
-            '.yml':'yaml','.sql':'sql','.md':'markdown','.txt':'text'}.get(
-                pathlib.PurePosixPath(path).suffix.lower(),'text')
-    lexer = get_lexer_by_name(mode)
-    styles = ((Token.Comment,'comment'),(Token.Keyword,'keyword'),
-              (Token.Name.Function,'function'),(Token.Name.Class,'class'),
-              (Token.Name.Builtin,'builtin'),(Token.Name.Decorator,'decorator'),
-              (Token.Literal.String,'string'),(Token.Literal.Number,'number'),
-              (Token.Operator,'operator'))
-    runs = []
-    for _, token, value in lexer.get_tokens_unprocessed(source):
-        style = next((name for category,name in styles if token in category),None)
-        if runs and runs[-1][0]==style:
-            runs[-1][1] += value
+    from pygments.token import Token, string_to_tokentype
+    mode = source_mode(path)
+    categories = [(string_to_tokentype(name), index) for index, (name, _) in enumerate(TOKEN_STYLES)]
+    runs: List[List[int]] = []
+    plain = 0
+    for _, token, value in get_lexer_by_name(mode).get_tokens_unprocessed(source):
+        if not value:
+            continue
+        if len(runs) >= MAX_TOKEN_RUNS:
+            plain += _utf16_length(value)
+            continue
+        style = next((index for category, index in categories if token in category), -1)
+        length = _utf16_length(value)
+        if runs and runs[-1][1] == style:
+            runs[-1][0] += length
         else:
-            runs.append([style,value])
-        # Keep a hostile or highly fragmented source from creating an oversized DOM.
-        if len(runs)>5000:
-            runs = [(None,source)]
-            break
-    tokens = [html.Span(value,className='source-token-'+style) if style else value
-              for style,value in runs]
+            runs.append([length, style])
+    if plain:
+        runs.append([plain, -1])
+    return {
+        'path': path,
+        'mode': mode,
+        'source': source,
+        'styles': [name for _, name in TOKEN_STYLES],
+        'runs': runs,
+    }
+
+
+def source_preview(path, source):
+    """
+    One file: its toolbar and its code, which the browser fills from `plugin-source-data`
+    (`assets/plugin_source.js`), always as text, never as the plugin's HTML.
+    """
+    from dash import html, dcc
+    from meerschaum.api.dash.components import build_icon
+    data = source_tokens(path, source)
     lines = len(source.splitlines())
+    copy = html.Button(
+        [build_icon('copy', 'plugin-source-icon-copy'), build_icon('check', 'plugin-source-icon-copied')],
+        type='button', className='btn btn-sm btn-outline-secondary plugin-source-copy',
+        title='Copy source', **{'aria-label': 'Copy source', 'data-source-action': 'copy'},
+    )
     return html.Div([
-        html.Div([html.Code(path),html.Span(f'{lines:,} lines',className='text-muted'),
-                  dcc.Clipboard(content=source,title='Copy source')],className='plugin-source-toolbar'),
-        html.Div(html.Pre(html.Code(tokens,className='language-'+mode)),className='plugin-source-code'),
+        html.Div([html.Code(path),html.Span(f'{lines:,} lines',className='text-muted'),copy],
+                 className='plugin-source-toolbar'),
+        html.Div(html.Pre(html.Code(id='plugin-source-code', className='language-'+data['mode'])),
+                 className='plugin-source-code'),
+        dcc.Store(id='plugin-source-data', data=data),
+        html.Div(id='plugin-source-rendered', hidden=True),
     ],className='plugin-source-preview')

@@ -103,7 +103,8 @@ def build_icon(name: str, class_name: str = '') -> Any:
     """
     An icon drawn in the text's color (a CSS mask over an inline SVG, see `assets/nav.css`), so it
     renders with any font: `refresh`, `fullscreen`, `fullscreen-exit`, `user`, `plus`, `terminal`,
-    `check`, `x`. It is hidden from screen readers: label its button with `title`.
+    `check`, `x`, `lock`, `trash`, `arrow-up`, `copy`, `folder`, `folder-open`, `python`, `rust`.
+    It is hidden from screen readers: label its button with `title` and `aria-label`.
     """
     return html.Span(
         className=f'mrsm-icon mrsm-icon-{name}' + (f' {class_name}' if class_name else ''),

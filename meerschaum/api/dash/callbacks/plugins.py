@@ -18,7 +18,7 @@ from meerschaum.core import Plugin
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate
-from dash.dependencies import Input, Output, State, ALL, MATCH
+from dash.dependencies import Input, Output, State, ALL, MATCH, ClientsideFunction
 from dash import no_update
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
@@ -173,6 +173,14 @@ def show_plugin_source(selected, context, session):
         return 'This file cannot be previewed. Choose another source file.'
 
 
+### The file's text, highlighting and line numbers, drawn as text (`assets/plugin_source.js`).
+dash_app.clientside_callback(
+    ClientsideFunction(namespace='mrsmPluginSource', function_name='render'),
+    Output('plugin-source-rendered', 'children'),
+    Input('plugin-source-data', 'data'),
+)
+
+
 dash_app.clientside_callback(
     """
     function(clicks, ids) {
@@ -192,6 +200,32 @@ dash_app.clientside_callback(
     State({'type':'plugin-source-select','path':ALL},'id'),
     prevent_initial_call=True,
 )
+
+
+@dash_app.callback(
+    Output({'type': 'plugin-update-slot', 'index': ALL}, 'hidden'),
+    Output({'type': 'plugin-action', 'action': 'update', 'index': ALL}, 'title'),
+    Input('plugins-update-check', 'data'),
+    State({'type': 'plugin-update-slot', 'index': ALL}, 'id'),
+    State({'type': 'plugin-action', 'action': 'update', 'index': ALL}, 'id'),
+    State('session-store', 'data'),
+)
+def show_plugin_updates(names, slots, buttons, session_data):
+    """
+    After the installed plugins show, reveal Update only for the plugins whose repository has a
+    newer version (administrators; `plugins.plugin_update_versions`).
+    """
+    if not slots:
+        raise PreventUpdate
+    from meerschaum.api.dash.plugins import plugin_update_versions
+    updates = plugin_update_versions(names or []) if viewer(session_data)['admin'] else {}
+    hidden = [slot.get('index') not in updates for slot in slots]
+    titles = [
+        (f"Update {button.get('index')} to {updates[button.get('index')]}"
+         if button.get('index') in updates else f"Update {button.get('index')}")
+        for button in buttons
+    ]
+    return hidden, titles
 
 
 def _run_alert(message: str, job_name: Optional[str], success: bool = True, running: bool = False):

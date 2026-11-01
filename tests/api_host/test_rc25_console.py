@@ -115,3 +115,109 @@ print('JSON:' + json.dumps({
     assert 'mrsm-pipe-repr' in history and 'mrsm-repr-connector' in history
     assert "'plugin:noaa'" in history and '/dash/pipes/plugin%3Anoaa/weather?instance=sql%3Amain' in history
     assert '__hidden__' not in history
+
+
+def test_installed_plugins_offer_icon_actions_and_update_only_when_newer(sandbox):
+    """
+    Uninstall and Update are icon buttons named for their plugin; Update starts hidden and the
+    update check reveals it only when the plugin's repository has a newer version (this server's
+    repository included), for administrators. The detail page links back to All plugins.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, SIGN_IN + '''
+import json, pathlib
+from unittest.mock import patch
+from meerschaum.config import paths
+from meerschaum.api import get_api_connector
+from meerschaum.api.dash import build_dash_app, plugins as pages
+build_dash_app()
+from meerschaum.api.dash.callbacks import plugins as callbacks
+from meerschaum.plugins._origins import write_plugin_origin
+admin = sign_in('rc25-plugins-admin', user_type='admin')
+reader = sign_in('rc25-plugins-reader', role='viewer')
+plugin_root = pathlib.Path(paths.PLUGINS_DIR_PATHS[0])
+for name, origin in (('rc25_old', 'api:elsewhere'), ('rc25_same', 'api:this_server'), ('rc25_local', None)):
+    (plugin_root / name).mkdir(parents=True)
+    (plugin_root / name / '__init__.py').write_text("__version__ = '1.0.0'\\n")
+    if origin:
+        assert write_plugin_origin(name, origin, plugin_root)
+installed = {plugin['name']: plugin for plugin in pages.get_installed_plugins(check_packages=False)}
+for plugin in installed.values():
+    plugin['version'] = '1.0.0'
+table = pages.build_installed_plugins_table(list(installed.values()), admin=True)
+
+def walk(node):
+    yield node
+    children = getattr(node, 'children', None)
+    for child in (children if isinstance(children, list) else [children]):
+        if child is not None and not isinstance(child, str):
+            yield from walk(child)
+
+nodes = list(walk(table))
+buttons = [node.to_plotly_json()['props'] for node in nodes
+           if isinstance(getattr(node, 'id', None), dict) and node.id.get('type') == 'plugin-action']
+slots = {node.id['index']: node.hidden for node in nodes
+         if isinstance(getattr(node, 'id', None), dict) and node.id.get('type') == 'plugin-update-slot'}
+store = next(node.data for node in nodes if getattr(node, 'id', None) == 'plugins-update-check')
+asked = []
+def remote(name, origin):
+    asked.append((name, origin))
+    return {'rc25_old': '1.2.0', 'rc25_same': '1.0.0'}.get(name)
+with patch.object(pages, 'get_installed_plugins', return_value=list(installed.values())), \\
+     patch.object(pages, 'remote_plugin_version', side_effect=remote):
+    slot_ids = [{'type': 'plugin-update-slot', 'index': name} for name in sorted(slots)]
+    button_ids = [{'type': 'plugin-action', 'action': 'update', 'index': name} for name in sorted(slots)]
+    shown = callbacks.show_plugin_updates(store, slot_ids, button_ids, admin)
+    hidden_for_reader = callbacks.show_plugin_updates(store, slot_ids, button_ids, reader)
+### This server's repository is the API's own instance (no `api:this_server` connector here).
+with patch.object(type(get_api_connector()), 'get_plugin_version', return_value='2.0.0', create=True) as local:
+    this_server = pages.remote_plugin_version('rc25_same', 'api:this_server')
+detail = pages.build_installed_plugin_detail('rc25_old', admin)
+back = next(node for node in walk(detail) if getattr(node, 'href', None) == '/dash/plugins')
+print('JSON:' + json.dumps({
+    'buttons': [(b['id']['action'], b['id']['index'], b.get('aria-label'), b.get('title'),
+                 'Update' in str(b.get('children')) or 'Uninstall' in str(b.get('children'))) for b in buttons],
+    'slots': slots, 'store': sorted(store), 'asked': sorted(asked),
+    'shown': shown, 'hidden_for_reader': hidden_for_reader,
+    'this_server': this_server, 'local_calls': local.call_count,
+    'newer': [pages.is_newer_version(a, b) for a, b in (('1.2.0', '1.0.0'), ('1.0.0', '1.0.0'),
+              ('0.9', '1.0.0'), ('1.0.0rc2', '1.0.0rc1'), (None, '1.0.0'), ('1.0.0', None), ('x', '1.0'))],
+    'back': [type(back).__name__, back.children, back.className],
+    'detail_text': str(detail),
+}))
+'''))
+    assert sorted(out['buttons']) == [
+        ['uninstall', 'rc25_local', 'Uninstall rc25_local', 'Uninstall rc25_local', False],
+        ['uninstall', 'rc25_old', 'Uninstall rc25_old', 'Uninstall rc25_old', False],
+        ['uninstall', 'rc25_same', 'Uninstall rc25_same', 'Uninstall rc25_same', False],
+        ['update', 'rc25_old', 'Update rc25_old', 'Update rc25_old', False],
+        ['update', 'rc25_same', 'Update rc25_same', 'Update rc25_same', False],
+    ]
+    ### Update starts hidden; a plugin without an origin has none.
+    assert out['slots'] == {'rc25_old': True, 'rc25_same': True}
+    assert out['store'] == ['rc25_old', 'rc25_same']
+    assert out['asked'] == [['rc25_old', 'api:elsewhere'], ['rc25_same', 'api:this_server']]
+    assert out['shown'] == [[False, True], ['Update rc25_old to 1.2.0', 'Update rc25_same']]
+    assert out['hidden_for_reader'] == [[True, True], ['Update rc25_old', 'Update rc25_same']]
+    assert out['this_server'] == '2.0.0' and out['local_calls'] == 1
+    assert out['newer'] == [True, False, False, True, False, False, False]
+    assert out['back'] == ['Link', '← All plugins', 'plugin-back-link']
+    assert 'Installed plugins' not in out['detail_text']
+
+
+def test_plugin_source_tree_uses_folder_and_language_icons(sandbox):
+    """Folders show a folder icon that opens with them; Python and Rust files show their language."""
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, '''
+import json
+from meerschaum.api.dash import plugin_sources as source
+tree = source.source_tree(['__init__.py', 'callbacks/console.py', 'src/lib.rs', 'plugin.toml'], '__init__.py')
+text = str(tree)
+print('JSON:' + json.dumps({'text': text}))
+'''))
+    text = out['text']
+    assert 'mrsm-icon-folder' in text and 'mrsm-icon-folder-open' in text
+    assert "mrsm-icon-python" in text and "mrsm-icon-rust" in text
+    assert "title='Python'" in text and "title='Rust'" in text
+    ### Other files keep their suffix.
+    assert "children='TOML'" in text

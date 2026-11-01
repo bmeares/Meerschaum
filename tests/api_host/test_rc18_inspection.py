@@ -85,19 +85,44 @@ for expected in ('Read synthetic weather data.', '1.2.3', 'Python', 'Package',
 assert str(package) not in detail
 preview = callbacks.show_plugin_source('helpers/readings.py',
     {'kind':'installed','name':'tree_source'}, admin)
-assert 'source-token-keyword' in str(preview) and 'return 42' in str(preview)
+
+def data_of(preview):
+    return next(node.data for node in [preview, *preview.children] if getattr(node, 'id', None) == 'plugin-source-data')
+
+def utf16(text):
+    return len(text.encode('utf-16-le')) // 2
+
+def styled(data, name):
+    # The text of each run with style `name` (the browser slices by UTF-16 lengths).
+    units = data['source'].encode('utf-16-le')
+    out, offset = [], 0
+    for length, style in data['runs']:
+        if style >= 0 and data['styles'][style] == name:
+            out.append(units[offset*2:(offset+length)*2].decode('utf-16-le'))
+        offset += length
+    return out
+
+data = data_of(preview)
+assert 'return 42' in data['source'] and 'return' in styled(data, 'keyword')
 text = 'fn main() { }\\n```\\n<script>window.sourceExecuted = true</script>\\n````'
 preview = source.source_preview('src/plugin.rs', text)
-code = preview.children[1].children.children
-assert code.className == 'language-rust'
-assert ''.join(value.children if hasattr(value,'children') else value for value in code.children) == text
-assert all(isinstance(value,str) or value.to_plotly_json()['type']=='Span' for value in code.children)
+data = data_of(preview)
+assert data['mode'] == 'rust' and 'language-rust' in str(preview)
+assert data['source'] == text and sum(length for length, _ in data['runs']) == utf16(text)
+### The page never carries the source as components (only as the Store's text).
+assert '<script>' not in str(preview.children[:2])
 assert 'language-toml' in str(source.source_preview('plugin.toml', '[plugin]\\nname="demo"'))
-for path, text in (('notes.txt','literal <script>\\r\\nα\\tβ'), ('unknown.config','RAW = 1\\n'),
+for path, text in (('notes.txt','literal <script>\\r\\nα\\tβ 🐍'), ('unknown.config','RAW = 1\\n'),
                    ('large.rs','fn value() { let x = 1; }\\n'*1500)):
-    code = source.source_preview(path,text).children[1].children.children
-    assert ''.join(value.children if hasattr(value,'children') else value for value in code.children) == text
-    assert len(code.children) <= 5000
+    data = data_of(source.source_preview(path,text))
+    assert data['source'] == text and sum(length for length, _ in data['runs']) == utf16(text)
+### RC25: a large file stays highlighted (it used to fall back to plain text past 5000 runs).
+large = data_of(source.source_preview('large.rs', 'fn value() { let x = 1; }\\n'*1500))
+assert len(large['runs']) > 5000 and styled(large, 'keyword').count('fn') == 1500
+### A hostile, fragmented file is highlighted up to the bound, then plain.
+hostile = data_of(source.source_preview('hostile.py', '1+' * 100000))
+assert len(hostile['runs']) <= source.MAX_TOKEN_RUNS + 1 and hostile['runs'][-1][1] == -1
+assert sum(length for length, _ in hostile['runs']) == 200000
 tree = str(source.source_tree(['src/plugin.rs','src/nested/helper.rs','plugin.toml'],'src/plugin.rs'))
 assert 'plugin-source-select' in tree and 'src/nested/helper.rs' in tree
 assert 'open=True' in tree and 'open=False' in tree

@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import json
 import pathlib
+import threading
+
+import meerschaum as mrsm
 
 from meerschaum.utils.typing import List, Tuple, SuccessTuple, Optional, WebState, Dict, Any
 from meerschaum.utils.packages import import_dcc, import_html
@@ -281,29 +284,136 @@ def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = F
             ),
         ]
         if admin:
-            actions = []
-            if plugin.get('origin'):
-                actions.append(dbc.Button(
-                    'Update', size='sm', color='secondary',
-                    id={'type': 'plugin-action', 'action': 'update', 'index': name},
-                    title=f"Install the latest version from {plugin['origin']}",
-                ))
-            actions.append(dbc.Button(
-                'Uninstall', size='sm', color='danger', outline=True,
-                id={'type': 'plugin-action', 'action': 'uninstall', 'index': name},
-            ))
-            cells.append(html.Td(html.Div(actions, className='plugin-row-actions')))
+            cells.append(html.Td(html.Div(plugin_action_buttons(plugin), className='plugin-row-actions')))
         rows.append(html.Tr(cells, id={'type': 'installed-plugin-row', 'index': name}))
     return html.Div(
-        dbc.Table(
-            [html.Thead(html.Tr(header)), html.Tbody(rows)],
-            hover=True,
-            size='sm',
-            class_name='console-table plugins-table',
-            id='installed-plugins-table',
-        ),
+        [
+            dbc.Table(
+                [html.Thead(html.Tr(header)), html.Tbody(rows)],
+                hover=True,
+                size='sm',
+                class_name='console-table plugins-table',
+                id='installed-plugins-table',
+            ),
+        ] + ([update_check_store(plugins)] if admin else []),
         className='console-table-scroll',
     )
+
+
+def plugin_action_buttons(plugin: Dict[str, Any], size: str = 'sm') -> List[Any]:
+    """
+    An installed plugin's Update (an up arrow, shown only once `plugin_update_versions()` finds a
+    newer version in the repository it came from) and Uninstall (a trash can) icon buttons.
+    """
+    from meerschaum.api.dash.components import build_icon
+    name = plugin['name']
+    size_class = f' btn-{size}' if size in ('sm', 'lg') else ''
+
+    def _button(icon: str, action: str, label: str, style: str):
+        return html.Button(
+            build_icon(icon), type='button', title=label,
+            id={'type': 'plugin-action', 'action': action, 'index': name},
+            className=f'btn {style}{size_class} plugin-icon-button',
+            **{'aria-label': label},
+        )
+
+    actions = []
+    if plugin.get('origin'):
+        actions.append(html.Span(
+            _button('arrow-up', 'update', f"Update {name}", 'btn-secondary'),
+            id={'type': 'plugin-update-slot', 'index': name},
+            hidden=True,
+        ))
+    actions.append(_button('trash', 'uninstall', f"Uninstall {name}", 'btn-outline-danger'))
+    return actions
+
+
+def update_check_store(plugins: List[Dict[str, Any]]) -> Any:
+    """The installed plugins with an origin, which the update check reads after the page shows."""
+    return dcc.Store(
+        id='plugins-update-check',
+        data=[plugin['name'] for plugin in plugins if plugin.get('origin')],
+    )
+
+
+#: How long (seconds) a repository's answer for a plugin's latest version is reused.
+REMOTE_VERSION_SECONDS: float = 15 * 60
+
+#: How long (seconds) the update check waits for the repositories in all.
+REMOTE_VERSION_TIMEOUT_SECONDS: float = 5.0
+
+_remote_versions: Dict[Tuple[str, str], Tuple[float, Optional[str]]] = {}
+_remote_versions_lock = threading.Lock()
+
+
+def remote_plugin_version(name: str, origin: str) -> Optional[str]:
+    """The latest version of `name` in the repository `origin` (cached; `None` if unknown)."""
+    import time
+    key = (str(origin), str(name))
+    ### This server's repository is read fresh (a quick query); other repositories are cached.
+    local = str(origin) == THIS_SERVER_REPOSITORY
+    with _remote_versions_lock:
+        cached = None if local else _remote_versions.get(key, None)
+    if cached is not None and time.monotonic() - cached[0] < REMOTE_VERSION_SECONDS:
+        return cached[1]
+    try:
+        ### `api:this_server` exists only in an install job's environment: this server's own
+        ### repository is its instance (what the Repository tab lists).
+        repository = (
+            get_api_connector() if str(origin) == THIS_SERVER_REPOSITORY
+            else mrsm.get_connector(str(origin))
+        )
+        version = repository.get_plugin_version(Plugin(name, repo_connector=repository))
+        version = str(version).strip() if version else None
+    except Exception:
+        version = None
+    if not local:
+        with _remote_versions_lock:
+            _remote_versions[key] = (time.monotonic(), version or None)
+    return version or None
+
+
+def is_newer_version(remote: Optional[str], installed: Optional[str]) -> bool:
+    """Whether `remote` is a newer PEP 440 version than `installed` (`False` when unknown)."""
+    if not remote or not installed:
+        return False
+    from meerschaum.utils.packages import _version_satisfies
+    try:
+        return bool(_version_satisfies(str(remote), '>' + str(installed)))
+    except Exception:
+        return False
+
+
+def plugin_update_versions(names: List[str]) -> Dict[str, str]:
+    """
+    `{name: newer version}` for the installed plugins among `names` whose origin repository has a
+    newer version than the one installed. Repositories are asked at once, and one that does not
+    answer within `REMOTE_VERSION_TIMEOUT_SECONDS` offers no update this time.
+    """
+    from concurrent.futures import ThreadPoolExecutor, wait
+    installed = {
+        plugin['name']: plugin for plugin in get_installed_plugins(check_packages=False)
+        if plugin['name'] in set(names or []) and plugin.get('origin')
+    }
+    if not installed:
+        return {}
+    pool = ThreadPoolExecutor(max_workers=min(8, len(installed)))
+    futures = {
+        pool.submit(remote_plugin_version, name, plugin['origin']): name
+        for name, plugin in installed.items()
+    }
+    done, _ = wait(futures, timeout=REMOTE_VERSION_TIMEOUT_SECONDS)
+    pool.shutdown(wait=False)
+    updates = {}
+    for future in done:
+        name = futures[future]
+        try:
+            remote = future.result()
+        except Exception:
+            continue
+        if is_newer_version(remote, installed[name].get('version')):
+            updates[name] = remote
+    return updates
 
 
 def build_installed_plugins_tab(admin: bool = False) -> Any:
@@ -744,7 +854,7 @@ def _source_browser(kind: str, name: str, session: Any):
 def build_installed_plugin_detail(name: str, session: Any) -> Any:
     """Read-only installed plugin metadata and source, restricted to session administrators."""
     from meerschaum.api.dash.plugin_sources import may_read_source
-    back = dbc.Button('← Installed plugins', href='/dash/plugins', color='link')
+    back = dcc.Link('← All plugins', href='/dash/plugins', className='plugin-back-link')
     if not may_read_source('installed', session):
         return html.Div([back, html.H5('Installed source is available to administrators.')],
                         className='console-empty')
@@ -754,12 +864,9 @@ def build_installed_plugin_detail(name: str, session: Any) -> Any:
         return html.Div([back, html.H5('This plugin is not installed.')], className='console-empty')
     from meerschaum.api.dash.connector_listing import mask_text
     description = installed.get('description') or _installed_description(name,session)
-    actions = []
+    actions = plugin_action_buttons(installed, size='md')
     if installed.get('origin'):
-        actions.append(dbc.Button('Update',color='secondary',
-            id={'type':'plugin-action','action':'update','index':name}))
-    actions.append(dbc.Button('Uninstall',color='danger',outline=True,
-        id={'type':'plugin-action','action':'uninstall','index':name}))
+        actions.append(update_check_store([installed]))
     info = [('Runtime',installed['kind']),
             ('Layout','Single file' if installed['layout']=='file' else 'Package'),
             ('Version',installed['version'] or 'Not declared'),

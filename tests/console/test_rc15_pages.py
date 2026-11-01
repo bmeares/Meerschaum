@@ -12,6 +12,7 @@ Opt-in (`MRSM_TEST_CONSOLE=1`); see `tests/console/conftest.py`. All data is syn
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import time
 
@@ -380,6 +381,27 @@ def _publish(server, plugin: str) -> None:
     assert published.returncode == 0, published.stdout[-2000:] + published.stderr[-2000:]
 
 
+def _publish_version(server, plugin: str, version: str) -> None:
+    """
+    Publish `version` of a plugin to the server's repository from a copy outside its plugins
+    directory, so the installed plugin keeps its older version (RC25: Update shows only then).
+    """
+    import re
+    source = server.root / 'publish' / version
+    shutil.rmtree(source, ignore_errors=True)
+    shutil.copytree(server.plugins / plugin, source / plugin, ignore=shutil.ignore_patterns('__pycache__'))
+    init = source / plugin / '__init__.py'
+    init.write_text(re.sub(r"__version__ = '[^']*'", f"__version__ = '{version}'", init.read_text()))
+    port = server.base_url.rsplit(':', 1)[1]
+    published = subprocess.run(
+        [str(mrsm_binary()), 'register', 'plugin', plugin, '-r', 'api:w7self', '--yes', '--noask', '--nopretty'],
+        env={**server.env, 'MRSM_PLUGINS_DIR': str(source),
+             'MRSM_API_W7SELF': f"http://{USERNAME}:{PASSWORD}@127.0.0.1:{port}"},
+        cwd=str(server.root), capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
+    )
+    assert published.returncode == 0, published.stdout[-2000:] + published.stderr[-2000:]
+
+
 def _plugin_run_result(page, *prefixes: str) -> str:
     """Wait until the plugin action's alert starts with one of `prefixes`, and return its text."""
     page.wait_for_function(
@@ -404,7 +426,8 @@ def test_plugins_installed_tab_uninstall_and_install(pages_server, context):
     assert 'Python' in row.inner_text() and 'API routes' in row.inner_text()
 
     ### Uninstall asks first, runs as a job, and the table follows.
-    page.locator('#installed-plugins-table tbody tr:has-text("w7_dashapp") button:text-is("Uninstall")').click()
+    ### RC25: Uninstall and Update are icon buttons named for their plugin.
+    page.get_by_role('button', name='Uninstall w7_dashapp', exact=True).click()
     page.wait_for_selector('.modal.show #plugins-uninstall-confirm', timeout=15000)
     page.click('#plugins-uninstall-confirm')
     page.wait_for_function(
@@ -432,11 +455,16 @@ def test_plugins_installed_tab_uninstall_and_install(pages_server, context):
         timeout=30000,
     )
     page.keyboard.press('Escape')
-    ### Installed from this repository, it can be updated from it.
+    ### Installed from this repository, it offers Update only once the repository has a newer version.
     page.click('#plugins-tabs .nav-link:text-is("Installed")')
-    page.wait_for_selector(
-        '#installed-plugins-table tbody tr:has-text("w7_pyfig") button:text-is("Update")', timeout=60000,
-    )
+    update = page.get_by_role('button', name='Update w7_pyfig', exact=True)
+    page.wait_for_selector('#plugins-update-check', state='attached', timeout=60000)
+    page.wait_for_load_state('networkidle')
+    assert update.count() == 0 or not update.is_visible()
+    _publish_version(server, 'w7_pyfig', '0.0.2')
+    page.reload()
+    update.wait_for(state='visible', timeout=60000)
+    assert update.get_attribute('title') == 'Update w7_pyfig to 0.0.2'
     assert _errors(tab) == [], _errors(tab)
 
 
@@ -469,10 +497,11 @@ def test_plugins_install_and_update_from_a_private_server(private_server, contex
     page.click('#w7_pyfig_card button.plugin-card-install')
     result = _plugin_run_result(page, 'Reinstalled plugin', 'Failed to reinstall plugin')
     assert result.startswith("Reinstalled plugin 'w7_pyfig'."), result
+    _publish_version(server, 'w7_pyfig', '0.0.2')
     page.click('#plugins-tabs .nav-link:text-is("Installed")')
-    update = '#installed-plugins-table tbody tr:has-text("w7_pyfig") button:text-is("Update")'
-    page.wait_for_selector(update, timeout=60000)
-    page.click(update)
+    update = page.get_by_role('button', name='Update w7_pyfig', exact=True)
+    update.wait_for(state='visible', timeout=60000)
+    update.click()
     result = _plugin_run_result(page, 'Updated plugin', 'Failed to update plugin')
     assert result.startswith("Updated plugin 'w7_pyfig'."), result
     assert _errors(tab) == [], _errors(tab)
