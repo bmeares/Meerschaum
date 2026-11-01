@@ -772,7 +772,8 @@ dash_app.clientside_callback(
         const ctx = dash_clientside.callback_context;
         if (!ctx.triggered || !ctx.triggered.length) { return dash_clientside.no_update; }
         const t = ctx.triggered[0];
-        if (t.value == null) { return dash_clientside.no_update; }
+        // Mounting the key row (a new layout chunk) also runs this with `n_clicks` 0: not a tap.
+        if (!t.value) { return dash_clientside.no_update; }
         const key = JSON.parse(t.prop_id.split('.n_clicks')[0]).index;
         const iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return dash_clientside.no_update; }
