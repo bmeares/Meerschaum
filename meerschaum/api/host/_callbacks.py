@@ -143,14 +143,27 @@ def _store_session_id(body: Any) -> Optional[str]:
     return None
 
 
-def _session_active(session_id: Optional[str]) -> bool:
-    from meerschaum.api.dash.sessions import is_session_active, valid_session_id
+def _session_state(session_id: Optional[str]) -> Optional[bool]:
+    """
+    Whether a session is active: `True`, `False` (no such session), or `None` when the session
+    store cannot be read right now (`SessionStoreUnavailable`): unknown, which must not send the
+    visitor to sign in.
+    """
+    from meerschaum.api.dash.sessions import (
+        is_session_active, valid_session_id, SessionStoreUnavailable,
+    )
     if valid_session_id(session_id) is None:
         return False
     try:
         return bool(is_session_active(session_id))
+    except SessionStoreUnavailable:
+        return None
     except Exception:
         return False
+
+
+def _session_active(session_id: Optional[str]) -> bool:
+    return _session_state(session_id) is True
 
 
 def _prop_key(component_id: Any, prop: Any) -> str:
@@ -226,6 +239,22 @@ def _login_required_response():
     return response
 
 
+def _store_unavailable_response():
+    """
+    The `503` answering a callback whose session could not be read: no `X-Mrsm-Login`, so the
+    page stays (`assets/session_guard.js` signs in only on `401`); the next request tries again.
+    """
+    from flask import Response
+    body = json.dumps({
+        'success': False,
+        'message': "The console's sessions cannot be read right now. Try again shortly.",
+    })
+    response = Response(body, status=503, mimetype='application/json')
+    response.headers['Retry-After'] = '2'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 def _api_route_handler(dash_app: Any, path: str) -> Any:
     """
     Return the function behind a Dash callback API route (`@callback(api_endpoint=...)`) at
@@ -280,12 +309,13 @@ def install_callback_guard(dash_app: Any) -> bool:
             output = body.get('output', None) if isinstance(body, dict) else None
             cookie_session = get_session_id_from_request(request)
             store_session = _store_session_id(body)
-            cookie_active = _session_active(cookie_session)
-            store_active = (
-                store_session is not None
-                and store_session != cookie_session
-                and _session_active(store_session)
+            cookie_state = _session_state(cookie_session)
+            store_state = (
+                _session_state(store_session)
+                if store_session is not None and store_session != cookie_session
+                else False
             )
+            cookie_active, store_active = cookie_state is True, store_state is True
             ### The cookie can be gone (expired before the session, or cleared) while the
             ### console's store still names a live session: copy it back into the cookie.
             if store_active and not cookie_active:
@@ -297,17 +327,21 @@ def install_callback_guard(dash_app: Any) -> bool:
             ### the visitor. Anything the visitor does, and every plugin callback, needs a session.
             if _untriggered(body) and _is_console_callback(dash_app, output):
                 return _no_update_response()
+            ### A session that could not be read is not a missing one: never sign out for it.
+            if cookie_state is None or store_state is None:
+                return _store_unavailable_response()
             return _login_required_response()
 
         if request.method == 'POST':
             handler = _api_route_handler(dash_app, path)
             if handler is not None:
                 from meerschaum.plugins import _is_public_callback
-                if _is_public_callback(handler) or _session_active(
-                    get_session_id_from_request(request)
-                ):
+                if _is_public_callback(handler):
                     return None
-                return _login_required_response()
+                state = _session_state(get_session_id_from_request(request))
+                if state is True:
+                    return None
+                return _store_unavailable_response() if state is None else _login_required_response()
 
         mcp_route = _mcp_route(dash_app)
         if mcp_route is not None and path.rstrip('/') == mcp_route.rstrip('/'):

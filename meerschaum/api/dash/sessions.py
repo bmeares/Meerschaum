@@ -59,6 +59,17 @@ SESSION_CACHE_SECONDS: float = 5.0
 _session_cache: Dict[str, Any] = {}
 _session_cache_lock = threading.Lock()
 
+### A store that cannot be read (a busy instance: a pool or statement timeout, a dropped
+### connection) is not a missing session. Such a read raises `SessionStoreUnavailable`, and a session
+### this process read within `SESSION_STALE_SECONDS` is used meanwhile, so a blip never signs the
+### console out (which reloaded the whole page through `assets/session_guard.js`).
+SESSION_STALE_SECONDS: float = 300.0
+_last_good: Dict[str, Any] = {}
+
+
+class SessionStoreUnavailable(RuntimeError):
+    """The session store could not be read: whether the session exists is unknown."""
+
 
 def _cache_get(session_id: str):
     with _session_cache_lock:
@@ -85,6 +96,27 @@ def _cache_set(session_id: str, data: Any) -> None:
 def _cache_drop(session_id: Any) -> None:
     with _session_cache_lock:
         _session_cache.pop(str(session_id), None)
+        _last_good.pop(str(session_id), None)
+
+
+def _remember_good(session_id: str, data: Any) -> None:
+    now = time.monotonic()
+    with _session_cache_lock:
+        if len(_last_good) > 1024:
+            for key in [k for k, (at, _) in _last_good.items() if now - at > SESSION_STALE_SECONDS]:
+                _last_good.pop(key, None)
+        if data is None:
+            _last_good.pop(session_id, None)
+        else:
+            _last_good[session_id] = (now, data)
+
+
+def _recent_good(session_id: str) -> Any:
+    with _session_cache_lock:
+        entry = _last_good.get(session_id, None)
+    if entry is None or time.monotonic() - entry[0] > SESSION_STALE_SECONDS:
+        return None
+    return entry[1]
 
 
 def _use_instance_store() -> bool:
@@ -123,11 +155,15 @@ def _instance_get(session_id: str) -> Union[Dict[str, Any], None]:
     if session_id is None:
         return None
     pipe = get_instance_sessions_pipe()
-    if not pipe.exists():
+    ### `get_data` raises when the instance cannot be read (`get_doc` would answer `None`, the same
+    ### as no session) and returns `None` while the table does not exist yet.
+    try:
+        docs = pipe.get_data(params={'session_id': session_id}, limit=1, as_docs=True, debug=debug)
+    except Exception as e:
+        raise SessionStoreUnavailable(f"Could not read the console's sessions: {e}") from e
+    if not docs:
         return None
-    doc = pipe.get_doc(params={'session_id': session_id})
-    if not doc:
-        return None
+    doc = docs[0]
     try:
         expires = int(doc.get('expires', 0) or 0)
     except (TypeError, ValueError):
@@ -301,7 +337,14 @@ def get_session_data(
         cached = _cache_get(key)
         if cached is not None:
             return dict(cached) if isinstance(cached, dict) else cached
-    data = _get_session_data(key)
+    try:
+        data = _get_session_data(key)
+    except SessionStoreUnavailable:
+        recent = _recent_good(key)
+        if recent is None:
+            raise
+        return dict(recent) if isinstance(recent, dict) else recent
+    _remember_good(key, dict(data) if isinstance(data, dict) else data)
     if use_cache and data is not None:
         _cache_set(key, dict(data))
     return data
@@ -323,7 +366,10 @@ def _get_session_data(session_id: Optional[str]) -> Union[Dict[str, Any], None]:
         return _active_sessions.get(session_id, None)
 
     session_key = get_session_key(session_id)
-    session_data_str = conn.get(session_key)
+    try:
+        session_data_str = conn.get(session_key)
+    except Exception as e:
+        raise SessionStoreUnavailable(f"Could not read the console's sessions: {e}") from e
     if not session_data_str:
         return None
 

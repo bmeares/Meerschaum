@@ -221,3 +221,67 @@ print('JSON:' + json.dumps({'text': text}))
     assert "title='Python'" in text and "title='Rust'" in text
     ### Other files keep their suffix.
     assert "children='TOML'" in text
+
+
+def test_a_failed_session_read_never_sends_the_console_to_sign_in(sandbox):
+    """
+    Console sessions live in the instance (`mrsm_sessions`), read again every few seconds by each
+    callback (the Terminal page's jobs interval ticks every 3 s). A failed read (a busy production
+    instance: pool or statement timeout, dropped connection) used to read as "no session": the
+    callback got `401` + `X-Mrsm-Login`, and `assets/session_guard.js` sent the whole page to
+    sign in and back. A read error now keeps the session last read in this process, or answers
+    `503` without the login header (the page stays); only a missing session signs out.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, SIGN_IN + '''
+import json
+from starlette.testclient import TestClient
+from meerschaum.api.host import build_app
+from meerschaum.api.dash import sessions
+app = build_app()
+client = TestClient(app)
+dependencies = client.get('/dash/_dash-dependencies').json()
+### Any console callback that needs a session: the guard answers before it runs. (Pipeline Edit
+### without a definition is a no-op `204`; the Terminal page's interval is guarded the same way.)
+toggle = next(d for d in dependencies if d['output'] == 'pipeline-edit-mode.data')
+
+def fire(session):
+    client.cookies.clear()
+    response = client.post('/dash/_dash-update-component', json={
+        'output': toggle['output'], 'outputs': {'id': 'pipeline-edit-mode', 'property': 'data'},
+        'inputs': [{'id': 'pipeline-edit-toggle', 'property': 'n_clicks', 'value': 1},
+                   {'id': 'pipeline-draft-discard', 'property': 'n_clicks', 'value': None}],
+        'changedPropIds': ['pipeline-edit-toggle.n_clicks'],
+        'state': [{'id': 'pipeline-definition', 'property': 'data', 'value': None},
+                  {'id': 'session-store', 'property': 'data', 'value': session}],
+    })
+    return [response.status_code, response.headers.get('x-mrsm-login')]
+
+known = sign_in('rc25-session-admin', user_type='admin')
+unseen = sign_in('rc25-session-other', user_type='admin')
+type_ = type(sessions.get_instance_sessions_pipe())
+real_get_data = type_.get_data
+def failing_get_data(self, *args, **kwargs):
+    # What `get_data` does when the instance cannot be read (it raises; `silent=False`).
+    if getattr(self, 'target', None) == sessions.INSTANCE_SESSIONS_TARGET:
+        raise RuntimeError('pool timed out while waiting for an open connection')
+    return real_get_data(self, *args, **kwargs)
+
+out = {'healthy': fire(known)}
+type_.get_data = failing_get_data
+### The 5 s per-process cache has expired; the session was read successfully moments ago.
+sessions._session_cache.pop(known['session-id'], None)
+out['failed_read_known'] = fire(known)
+### A session this process has no good read of: unknown, so `503` (not a sign-in).
+sessions._cache_drop(unseen['session-id'])
+out['failed_read_unseen'] = fire(unseen)
+type_.get_data = real_get_data
+### A session that is really gone still signs out.
+sessions.delete_session(known['session-id'])
+out['deleted'] = fire(known)
+print('JSON:' + json.dumps(out))
+'''))
+    assert out['healthy'][0] in (200, 204), out
+    assert out['failed_read_known'][0] in (200, 204), out
+    assert out['failed_read_unseen'] == [503, None], out
+    assert out['deleted'] == [401, '/dash/login'], out
