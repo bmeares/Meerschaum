@@ -86,11 +86,18 @@ Everything below is deliberate, and each item links to the section with the deta
 | `/dash` | The dashboard (key filters, command builder, web terminal) | The Overview. The dashboard is the Terminal page at `/dash/terminal`, and `/dash?action=...` links open it. [Web pages](#web-pages-and-dash-plugins) |
 | Console callbacks | Answered any request | Need a console session, except the login and registration forms and the callbacks a plugin marks public. [Web pages](#web-pages-and-dash-plugins) |
 | A user's scopes that cannot be read | A failed read granted every scope | The login or request is refused (`503`); Valkey's user reads raise `ConnectionError`. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
-| JWTs and console sessions after a password change, or after a username is deleted and registered again | Kept working until they expired (JWTs 12 hours, sessions 30 days), and a new user with the old name inherited them | They end at once: each carries a fingerprint of its user's current password, and every JWT says whether it names a user or an API token (a username that looks like a token's ID stays a user). JWTs and sessions issued by 4.1 or earlier 5.0 candidates carry neither, so each client signs in once more after the upgrade; the `api:` connector logs in again by itself (safe requests are retried once, others fail once). [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
-| A deleted user's API keys | Kept working on plugin routes, and on SQLite a new user could take the deleted user's ID and its keys | Deleted with the user; a SQLite instance never gives a new user an ID that a remaining key names. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
-| Plugin routes (`ScopedAuth`, `CurrentScopes`) | A JWT's scopes were trusted until it expired; an API key held its stored scopes whatever its owner's role | Capped by the owner's current permissions, as on the server's own routes (a demoted administrator's JWT keeps only the new role's); a JWT minted from an API key keeps no more than the key holds now. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| Sign-ins (JWTs, console sessions) | Outlived a password change, and a re-registered username inherited them | Bound to the current account and password; sign in again once after upgrading ([note](#signing-in-after-the-upgrade)). [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| A deleted user's API keys | Kept working on plugin routes | Removed with the user; every credential needs a current owner. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| Plugin routes (`ScopedAuth`, `CurrentScopes`) | Trusted a JWT's scopes, or an API key's stored scopes | The owner's and the token's current permissions, as on the server's own routes. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
 | `start api --keyfile/--certfile` | HTTPS through Uvicorn | Native HTTPS with rustls when a key and certificate are supplied; plain HTTP otherwise. [Deployment](#deployment) |
 | Web terminal and tmux | Sessions on your default tmux server | A tmux server of its own under the Meerschaum root, with its own configuration. [Deployment](#deployment) |
+
+</details>
+
+<details markdown="1" id="signing-in-after-the-upgrade">
+<summary>Signing in after the upgrade</summary>
+
+JWTs and console sessions issued by 4.1 or by an earlier 5.0 release candidate are refused, so each person signs in once more. Long-lived API keys (`mrsm-key:...`) keep working while their owner exists. An `api:` connector that logs in with a username and password logs in again by itself: it retries a refused read once, while the first write after the upgrade can return `401` once. Changing a password, or deleting a user, ends their sign-ins within the server's identity cache (a few seconds) and open terminals within their check interval.
 
 </details>
 
