@@ -1029,6 +1029,19 @@ impl SqlConnector {
             return SuccessTuple::ok(format!("Inserted {new_count}, updated 0 rows."));
         }
 
+        let target_cols_types = self.columns_types(&sp).await;
+        let prune_upsert_history = upsert
+            && observer.is_some()
+            && !sp.null_indices()
+            && flavor.driver_family() == DriverFamily::Postgres
+            && dt_col.as_ref().is_some_and(|column| {
+                new_cols_types.contains_key(column)
+                    && target_cols_types.get(column).is_some_and(|typ| {
+                        let typ = typ.to_ascii_uppercase();
+                        typ.starts_with("TIMESTAMP")
+                            || matches!(typ.as_str(), "DATE" | "SMALLINT" | "INTEGER" | "BIGINT")
+                    })
+            });
         let mut begin_bound = match &begin {
             Bound::DateTime(d) => Some(meerschaum_connector::DateBound::Datetime(
                 super::values::kernel_datetime(d),
@@ -1043,8 +1056,18 @@ impl SqlConnector {
             Bound::Int(i) => Some(meerschaum_connector::DateBound::Int(*i)),
             _ => None,
         };
-        if let (Some(dt_name), false) = (&dt_col_name, upsert) {
+        if let (Some(dt_name), true) = (&dt_col_name, !upsert || prune_upsert_history) {
             let da = |agg: &str| {
+                if prune_upsert_history {
+                    let column = dt_col.as_deref().expect("a bounded datetime column");
+                    let value = upsert_comparable_value(
+                        dt_name,
+                        &get_col_typ(column, &new_cols_types),
+                        &get_col_typ(column, &target_cols_types),
+                        flavor,
+                    );
+                    return Ok(format!("{agg}({value})"));
+                }
                 dateadd_str(
                     Some(flavor),
                     Some("day"),
@@ -1111,7 +1134,11 @@ impl SqlConnector {
         let backtrack_query = DataQuery {
             begin: begin_bound,
             end: end_bound,
-            params: params.cloned(),
+            params: if prune_upsert_history {
+                None
+            } else {
+                params.cloned()
+            },
             ..Default::default()
         };
         let backtrack_def = match self
@@ -1140,7 +1167,6 @@ impl SqlConnector {
                 fail!(e);
             }
         }
-        let target_cols_types = self.columns_types(&sp).await;
         let backtrack_cols_types = if upsert {
             target_cols_types.clone()
         } else if !is_static {
@@ -1245,8 +1271,15 @@ impl SqlConnector {
             .collect::<Vec<_>>()
             .join("\n    AND\n    ");
         let select_delta_query = if upsert {
+            // Constant time bounds exclude compressed history before the anti-join.
+            // Nullable conflict keys retain the unrestricted comparison.
+            let comparison_target = if prune_upsert_history {
+                format!("({backtrack_def})")
+            } else {
+                pipe_name.clone()
+            };
             format!(
-                "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nWHERE NOT EXISTS (\n    SELECT 1 FROM {pipe_name}{alias_as} {a_bt}\n    WHERE {indexed_match}{matching_columns}\n)",
+                "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nWHERE NOT EXISTS (\n    SELECT 1 FROM {comparison_target}{alias_as} {a_bt}\n    WHERE {indexed_match}{matching_columns}\n)",
                 names["update"],
             )
         } else {

@@ -11,6 +11,191 @@ use std::sync::Mutex;
 #[derive(Default)]
 struct Changes(Mutex<Vec<usize>>);
 
+flavor_tests!(
+    integer_axis_observation_uses_destination_assignment_bounds,
+    |c: Ctx| async move {
+        if !matches!(
+            c.flavor,
+            "postgresql" | "postgis" | "timescaledb" | "timescaledb-ha"
+        ) {
+            return;
+        }
+        let mut source = c.pipe(
+            "test",
+            "cast_source",
+            None,
+            r#"{
+            "columns":{"id":"id"},"dtypes":{"id":"int","ts":"float","v":"int"},
+            "upsert":true,"null_indices":false
+        }"#,
+        );
+        let rows = |time, value| {
+            PipeInput::Docs(vec![doc(vec![
+                ("id", i(1)),
+                ("ts", fl(time)),
+                ("v", i(value)),
+            ])])
+        };
+        ok(c.conn
+            .sync_mut(&mut source, rows(1.6, 10), &SyncOptions::default())
+            .await);
+        let source_table = c.conn.pipe_table_name(&c.conn.sql_pipe(&source).unwrap());
+        let params = serde_json::json!({
+            "columns":{"datetime":"ts","id":"id"},
+            "dtypes":{"ts":"int","id":"int","v":"int"},
+            "static":true,"upsert":true,"null_indices":false,
+            "sql":format!("SELECT * FROM {source_table}"),
+        });
+        let mut target = c.pipe(&c.conn.keys(), "cast_target", None, &params.to_string());
+        ok(c.conn
+            .sync_mut(
+                &mut target,
+                PipeInput::Docs(vec![doc(vec![("id", i(1)), ("ts", i(2)), ("v", i(10))])]),
+                &SyncOptions::default(),
+            )
+            .await);
+        let changes = Changes::default();
+        for (time, value) in [(1.6, 10), (1.6, 12), (2.6, 12), (2.6, 12)] {
+            ok(c.conn
+                .sync_mut(&mut source, rows(time, value), &SyncOptions::default())
+                .await);
+            ok(c.conn
+                .sync_pipe_inplace_observed(&target, None, Bound::None, Bound::None, true, &changes)
+                .await);
+        }
+        let data = c.docs(&target).await;
+        for pipe in [&target, &source] {
+            ok(c.conn.drop_pipe(pipe).await);
+        }
+        assert_eq!(*changes.0.lock().unwrap(), vec![0, 1, 1, 0]);
+        assert_eq!(data.len(), 2);
+        assert!(data.iter().all(|row| row["v"] == i(12)));
+    }
+);
+
+flavor_tests!(
+    unchanged_upserts_prune_compressed_history,
+    |c: Ctx| async move {
+        if !matches!(
+            c.flavor,
+            "postgresql" | "postgis" | "timescaledb" | "timescaledb-ha"
+        ) || c
+            .conn
+            .value("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')")
+            .await
+            != Some(meerschaum_connector_sql::driver::SqlValue::Bool(true))
+        {
+            return;
+        }
+        let params = serde_json::json!({
+            "columns":{"datetime":"ts","id":"id"},
+            "dtypes":{"ts":"datetime64[ms, UTC]","id":"int","v":"int"},
+            "upsert":true,"null_indices":false,
+        });
+        let mut source = c.pipe("test", "recent_source", None, &params.to_string());
+        ok(c.conn
+            .sync_mut(
+                &mut source,
+                PipeInput::Docs(vec![doc(vec![
+                    ("ts", udt(2026, 1, 1, 0, 0)),
+                    ("id", i(1)),
+                    ("v", i(2)),
+                ])]),
+                &SyncOptions::default(),
+            )
+            .await);
+        let source_table = c.conn.pipe_table_name(&c.conn.sql_pipe(&source).unwrap());
+        assert!(c.conn.exec(&format!(
+            "INSERT INTO {source_table} (ts, id, v) SELECT TIMESTAMPTZ '2026-01-01' + n * INTERVAL '1 minute', 1, 2 FROM generate_series(1, 151) n"
+        )).await.is_some());
+        let mut target_params = params;
+        target_params["sql"] = serde_json::json!(format!("SELECT * FROM {source_table}"));
+        let target = c.pipe(
+            &c.conn.keys(),
+            "recent_target",
+            None,
+            &target_params.to_string(),
+        );
+        ok(c.conn
+            .sync_pipe_inplace(&target, None, Bound::None, Bound::None, true)
+            .await);
+        let target_table = c.conn.pipe_table_name(&c.conn.sql_pipe(&target).unwrap());
+        for sql in [
+            format!(
+                "SELECT create_hypertable('{target_table}'::regclass, 'ts', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE, migrate_data => TRUE)"
+            ),
+            format!(
+                "ALTER TABLE {target_table} SET (timescaledb.compress, timescaledb.compress_segmentby = 'id', timescaledb.compress_orderby = 'ts')"
+            ),
+            format!(
+                "INSERT INTO {target_table} (ts, id, v) SELECT make_timestamptz(y, 1, 1, 0, 0, 0, 'UTC') + n * INTERVAL '1 second', n % 10, n FROM generate_series(2022, 2024) y CROSS JOIN generate_series(1, 3000) n"
+            ),
+            format!(
+                "SELECT compress_chunk(chunk) FROM show_chunks('{target_table}'::regclass, older_than => TIMESTAMPTZ '2025-01-01') chunk"
+            ),
+            format!("ANALYZE {target_table}"),
+            format!("ANALYZE {source_table}"),
+        ] {
+            assert!(c.conn.exec(&sql).await.is_some(), "{sql}");
+        }
+        let target_name = c.conn.sql_pipe(&target).unwrap().target;
+        assert!(matches!(c.conn.value(&format!(
+            "SELECT count(*) FROM timescaledb_information.chunks WHERE hypertable_schema = 'public' AND hypertable_name = '{target_name}' AND is_compressed"
+        )).await, Some(meerschaum_connector_sql::driver::SqlValue::Int(n)) if n >= 3));
+        let changes = Changes::default();
+        c.conn.enable_query_log();
+        let result = c
+            .conn
+            .sync_pipe_inplace_observed(&target, None, Bound::None, Bound::None, true, &changes)
+            .await;
+        let log = c.conn.take_query_log();
+        let query = log
+            .iter()
+            .find(|q| q.contains("_mrsm_changed") && q.contains(&target_table))
+            .expect("in-place observer query");
+        let stage = query
+            .split("\nFROM ")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap();
+        let staged = meerschaum_connector_sql::ident::sql_item_name(
+            &format!("{}_staged", c.prefix),
+            c.conn.flavor(),
+            Some("public"),
+        );
+        // In-place staging tables have not been ANALYZEd when the observer reads them.
+        assert!(
+            c.conn
+                .exec(&format!(
+                    "CREATE TABLE {staged} AS SELECT * FROM {source_table}"
+                ))
+                .await
+                .is_some()
+        );
+        let explain = format!("EXPLAIN {}", query.replace(stage, &staged));
+        let plan = c.conn.read(&explain).await.map(|frame| {
+            meerschaum_connector::pipe_ops::frame_to_docs(&frame)
+                .into_iter()
+                .flat_map(|doc| doc.into_values().map(|v| v.py_str()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        assert!(c.conn.exec(&format!("DROP TABLE {staged}")).await.is_some());
+        for pipe in [&target, &source] {
+            ok(c.conn.drop_pipe(pipe).await);
+        }
+        ok(result);
+        assert_eq!(*changes.0.lock().unwrap(), vec![0]);
+        let plan = plan.expect("observer plan");
+        assert!(
+            !plan.contains("DecompressChunk") && !plan.contains("ColumnarScan"),
+            "A recent unchanged batch must exclude older compressed history: {plan}"
+        );
+    }
+);
+
 #[meerschaum_connector::async_trait]
 impl InplaceObserver for Changes {
     async fn before_merge(&self, delta: &Frame) -> Result<(), String> {
