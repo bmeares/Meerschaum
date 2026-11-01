@@ -33,7 +33,7 @@ const TEMP_TABLE_ROOTS: [&str; 6] = ["backtrack", "new", "delta", "joined", "uns
 /// types, no frame round trip).
 #[meerschaum_connector::async_trait]
 pub trait InplaceObserver: Send + Sync {
-    /// `delta` has one row per row about to be inserted, updated or upserted, with only the
+    /// `delta` has one row per logical insertion or change (excluding unchanged UPSERTs), with only the
     /// pipe's datetime column (no columns when the pipe has none). `Err` aborts the sync with
     /// nothing merged.
     async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String>;
@@ -652,6 +652,7 @@ impl SqlConnector {
             ($query:expr, $window:expr) => {{
                 if let Some(o) = observer {
                     let query: String = $query;
+                    self.log(&query);
                     let window: Option<(
                         Option<&meerschaum_connector::DateBound>,
                         Option<&meerschaum_connector::DateBound>,
@@ -1169,8 +1170,21 @@ impl SqlConnector {
                 .collect::<Vec<_>>()
                 .join(",\n    ")
         );
-        let mut select_delta_query = format!(
-            "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nLEFT OUTER JOIN {}{alias_as} {a_bt}\n    ON\n    {}\nWHERE\n    {}",
+        let indexed_match = if upsert && !sp.null_indices() {
+            // Ordinary conflict keys keep the no-op check eligible for an index lookup.
+            format!(
+                "{}\n    AND\n    ",
+                on_cols
+                    .keys()
+                    .map(|column| format!("{a_new}.{} = {a_bt}.{}", q(column), q(column)))
+                    .collect::<Vec<_>>()
+                    .join(" AND ")
+            )
+        } else {
+            String::new()
+        };
+        let select_delta_query = format!(
+            "SELECT{null_replace_new_cols_str}\nFROM {}{alias_as} {a_new}\nLEFT OUTER JOIN {}{alias_as} {a_bt}\n    ON\n    {indexed_match}{}\nWHERE\n    {}",
             if upsert {
                 &names["update"]
             } else {
@@ -1183,13 +1197,20 @@ impl SqlConnector {
             },
             common_cols
                 .iter()
-                .map(|c| format!(
-                    "    COALESCE({a_new}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {}) ",
-                    q(c),
-                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
-                    q(c),
-                    get_null_replacement(&get_col_typ(c, &backtrack_cols_types), Some(flavor)),
-                ))
+                .map(|c| {
+                    let comparison = format!(
+                        "    COALESCE({a_new}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {}) ",
+                        q(c),
+                        get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
+                        q(c),
+                        get_null_replacement(&get_col_typ(c, &backtrack_cols_types), Some(flavor)),
+                    );
+                    if upsert {
+                        format!("({comparison}) AND (({a_new}.{} IS NULL AND {a_bt}.{} IS NULL) OR ({a_new}.{} IS NOT NULL AND {a_bt}.{} IS NOT NULL))", q(c), q(c), q(c), q(c))
+                    } else {
+                        comparison
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n    AND\n    "),
             common_cols
@@ -1198,14 +1219,6 @@ impl SqlConnector {
                 .collect::<Vec<_>>()
                 .join("\n    AND\n    "),
         );
-        if upsert && !sp.null_indices() {
-            let null_keys = on_cols
-                .keys()
-                .map(|column| format!("{a_new}.{} IS NULL", q(column)))
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            select_delta_query.push_str(&format!("\n    OR ({null_keys})"));
-        }
         if !upsert {
             let create_delta_query = match ctas(&select_delta_query, &temp_tables["delta"]) {
                 Ok(q) => q,

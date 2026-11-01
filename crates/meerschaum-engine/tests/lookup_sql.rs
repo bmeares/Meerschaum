@@ -39,7 +39,7 @@ async fn lookup_scenario(env: Env, prefix: &str) {
         &json!({
             "sql":format!("SELECT * FROM {prefix}event_source"), "columns":columns,
             "dtypes":{"ts":"datetime","id":"int","v":"int"},
-            "fetch":{"backtrack_minutes":60}, "upsert":true,
+            "fetch":{"backtrack_minutes":60}, "upsert":true, "null_indices":false,
         }),
     )
     .await;
@@ -47,7 +47,7 @@ async fn lookup_scenario(env: Env, prefix: &str) {
         "catalog",
         &json!({
             "sql":format!("SELECT * FROM {prefix}catalog_source"), "columns":columns,
-            "dtypes":{"ts":"datetime","id":"int","multiplier":"int"}, "upsert":true,
+            "dtypes":{"ts":"datetime","id":"int","multiplier":"int"}, "upsert":true, "null_indices":false,
         }),
     )
     .await;
@@ -153,11 +153,9 @@ async fn lookup_scenario(env: Env, prefix: &str) {
         .unwrap();
     assert_eq!(result.action, Action::Incremental, "{result:?}");
     assert_eq!(env.rowcount("result").await, 4);
+    let log = env.conn.take_query_log();
     assert!(
-        env.conn
-            .take_query_log()
-            .iter()
-            .any(|sql| sql.contains("_mrsm_pushdown")),
+        log.iter().any(|sql| sql.contains("_mrsm_pushdown")),
         "the incremental test must exercise source predicate pushdown"
     );
 }
@@ -262,7 +260,7 @@ async fn postgres_env() -> Option<(Env, String)> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_inplace_lookup_changes_and_noop_upserts() {
+async fn postgres_lookup_changes_and_noop_upserts() {
     let Some((env, schema)) = postgres_env().await else {
         return;
     };
