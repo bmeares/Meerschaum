@@ -152,22 +152,62 @@ def server_python() -> str:
     ready = env_dir / '.ready'
     if not ready.exists():
         base.mkdir(parents=True, exist_ok=True)
-        venv.EnvBuilder(with_pip=True, clear=True).create(env_dir)
-        command = [
-            str(python), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
-        ]
-        for path in files:
-            command += ['-r', str(path)]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=1200)
-        if result.returncode != 0:
-            pytest.fail(
-                f"The console suite builds its server interpreter ({env_dir}) from "
-                f"requirements/{{{','.join(SERVER_REQUIREMENTS)}}}.txt and needs a package index; "
-                f"pip failed:\n{result.stderr[-2000:]}"
-            )
-        ready.write_text('\n'.join(str(p.name) for p in files), encoding='utf-8')
+        ### pytest-xdist workers (and concurrent runs) share the directory: one builds it, the
+        ### others wait on the lock and then find it complete (`.ready`, written last).
+        with _exclusive(base / (env_dir.name + '.lock')):
+            if not ready.exists():
+                _build_server_venv(env_dir, python, ready, files)
     _server_python['python'] = str(python)
     return str(python)
+
+
+def _exclusive(path: pathlib.Path):
+    """An exclusive lock on `path` across processes (released when the block ends)."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def _lock():
+        with open(path, 'a+b') as handle:
+            if os.name == 'nt':
+                import msvcrt
+                while True:
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError:
+                        time.sleep(0.5)
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    return _lock()
+
+
+def _build_server_venv(env_dir: pathlib.Path, python: pathlib.Path, ready: pathlib.Path, files) -> None:
+    """Create the server interpreter's virtual environment (called under `_exclusive`)."""
+    venv.EnvBuilder(with_pip=True, clear=True).create(env_dir)
+    command = [
+        str(python), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
+    ]
+    for path in files:
+        command += ['-r', str(path)]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=1200)
+    if result.returncode != 0:
+        pytest.fail(
+            f"The console suite builds its server interpreter ({env_dir}) from "
+            f"requirements/{{{','.join(SERVER_REQUIREMENTS)}}}.txt and needs a package index; "
+            f"pip failed:\n{result.stderr[-2000:]}"
+        )
+    ready.write_text('\n'.join(str(p.name) for p in files), encoding='utf-8')
 
 
 def base_env(root: pathlib.Path, plugins: pathlib.Path, config: dict | None = None) -> dict:
