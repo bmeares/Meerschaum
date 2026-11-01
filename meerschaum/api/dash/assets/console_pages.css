@@ -270,6 +270,9 @@ body.plugin-source-noscroll { overflow: hidden; }
 @media (max-width: 767.98px) {
     .plugin-source-workspace { grid-template-columns: minmax(0, 1fr); }
     .plugin-source-tree { max-height: 200px; border-right: 0; border-bottom: 1px solid #47515c; }
+    /* Fullscreen on a phone: the tree takes its content's height (at most 30vh, then scrolls); the file gets the rest. */
+    .plugin-source-fullscreen .plugin-source-workspace { grid-template-rows: auto minmax(0, 1fr); }
+    .plugin-source-fullscreen .plugin-source-tree { max-height: 30vh; }
     .plugin-source-file, .plugin-source-folder { min-height: 44px; }
     .plugin-icon-button, .plugin-source-fullscreen-button, .plugin-source-copy { min-width: 44px; min-height: 44px; }
     .plugin-back-link { display: inline-flex; align-items: center; min-height: 44px; }
