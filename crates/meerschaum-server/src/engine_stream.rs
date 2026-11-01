@@ -35,9 +35,11 @@
 //!
 //! Authorization is that of `GET /engine/runs` (`pipes:read`), by bearer token or, for the
 //! console's `EventSource`, by the console session cookie when `meerschaum-web` installs a
-//! [`BrowserAuth`]. Open streams are bounded like the job-log streams
-//! (`api:permissions:log_streams`, a separate count). A run the store cannot be read for is an
-//! error (`500`, or `501` without a store), never "not found".
+//! [`BrowserAuth`]. It is checked again every few seconds while the stream is open; a console
+//! stream is authorized again from its session each time (its bearer is short-lived), so it
+//! lasts as long as the session and the user's access do. Open streams are bounded like the
+//! job-log streams (`api:permissions:log_streams`, a separate count). A run the store cannot be
+//! read for is an error (`500`, or `501` without a store), never "not found".
 
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
@@ -100,7 +102,8 @@ const SCOPES: &[&str] = &["pipes:read"];
 pub trait BrowserAuth: Send + Sync {
     /// `None` when the request has no console session; otherwise the headers to authorize it
     /// with (a short-lived bearer for the session's user) and the session ID, or the status to
-    /// answer (`401`, `503`).
+    /// answer (`401`, `503`). An open stream calls it again (with the request's cookies) at each
+    /// access check, so it must check the session and its user every time.
     async fn authorize(
         &self,
         state: &AppState,
@@ -411,7 +414,11 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         Some(auth) if !ctx.headers.contains_key(header::AUTHORIZATION) => {
             match auth.authorize(&state, &ctx.headers).await {
                 Some(Ok((headers, id))) => {
-                    session = Some((auth, id));
+                    session = Some(ConsoleSession {
+                        auth,
+                        id,
+                        cookies: cookies_of(&ctx.headers),
+                    });
                     headers
                 }
                 Some(Err(status)) => return Ok(status.into_response()),
@@ -506,7 +513,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         _ => (
             slot_key(
                 principal.as_ref(),
-                session.as_ref().map(|(_, id)| id.as_str()),
+                session.as_ref().map(|session| session.id.as_str()),
             ),
             state.config.log_streams_per_user,
         ),
@@ -569,6 +576,24 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     Ok(response)
 }
 
+/// The console session a stream was opened with.
+struct ConsoleSession {
+    auth: Arc<dyn BrowserAuth>,
+    /// The session ID.
+    id: String,
+    /// The request's `Cookie` headers (what [`BrowserAuth::authorize`] reads), nothing else.
+    cookies: HeaderMap,
+}
+
+/// Only the `Cookie` headers of a request.
+fn cookies_of(headers: &HeaderMap) -> HeaderMap {
+    let mut cookies = HeaderMap::new();
+    for value in headers.get_all(header::COOKIE) {
+        cookies.append(header::COOKIE, value.clone());
+    }
+    cookies
+}
+
 /// One stream's state.
 struct Tail {
     state: AppState,
@@ -604,7 +629,7 @@ struct Tail {
     gap_through: Option<i64>,
     /// The synthetic `run_closed` to send before ending.
     terminal: Option<EngineRunEvent>,
-    session: Option<(Arc<dyn BrowserAuth>, String)>,
+    session: Option<ConsoleSession>,
     next_session_check: Instant,
     done: bool,
     /// For a caller who is not an administrator: anonymizes the events of hidden pipes.
@@ -723,6 +748,15 @@ impl Tail {
 
     /// A long-lived stream must stop when its credential or saved Pipeline access changes.
     async fn refresh_access(&mut self) -> Option<()> {
+        // A console stream's bearer lives a minute: mint the next one from the session, which
+        // checks the session and its user again (an ended session or a refused user ends the
+        // stream, never an older bearer).
+        if let Some(session) = &self.session {
+            match session.auth.authorize(&self.state, &session.cookies).await {
+                Some(Ok((headers, id))) if id == session.id => self.auth_headers = headers,
+                _ => return None,
+            }
+        }
         let caller = crate::access::require_fresh(&self.state, &self.auth_headers, SCOPES)
             .await
             .ok()?;
@@ -747,10 +781,10 @@ impl Tail {
     async fn tick(&mut self) -> Option<()> {
         self.read_persisted().await;
         let now = Instant::now();
-        if let Some((auth, id)) = &self.session
+        if let Some(session) = &self.session
             && now >= self.next_session_check
         {
-            if !auth.session_active(&self.state, id).await {
+            if !session.auth.session_active(&self.state, &session.id).await {
                 return None;
             }
             self.next_session_check = now + SESSION_CHECK;

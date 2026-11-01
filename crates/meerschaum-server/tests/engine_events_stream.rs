@@ -774,6 +774,160 @@ async fn the_console_session_authorizes_an_event_source() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+/// A console session store whose bearers live [`ShortLivedSessions::LIFETIME`] seconds, as the
+/// console's own (`meerschaum-web`'s `api_headers`, 60 s) but short enough for a test. The
+/// cookie `mrsm-session-id=good` is the admin's session until [`ShortLivedSessions::end`].
+struct ShortLivedSessions {
+    active: std::sync::atomic::AtomicBool,
+    minted: std::sync::atomic::AtomicUsize,
+}
+
+impl ShortLivedSessions {
+    /// Whole seconds, checked against the wall clock (`jwt_decode` reads `Utc::now()`).
+    const LIFETIME: i64 = 2;
+
+    fn new() -> Self {
+        ShortLivedSessions {
+            active: true.into(),
+            minted: 0.into(),
+        }
+    }
+
+    /// Sign the session out (or end it from the console's Users page).
+    fn end(&self) {
+        self.active
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl BrowserAuth for ShortLivedSessions {
+    async fn authorize(
+        &self,
+        _state: &AppState,
+        headers: &HeaderMap,
+    ) -> Option<Result<(HeaderMap, String), StatusCode>> {
+        let cookie = headers.get("cookie")?.to_str().ok()?;
+        if cookie != "mrsm-session-id=good" || !self.is_active() {
+            return Some(Err(StatusCode::UNAUTHORIZED));
+        }
+        self.minted
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let claims: Map = serde_json::from_value(json!({
+            "sub": "admin",
+            "scopes": ["*"],
+            "exp": chrono::Utc::now().timestamp() + Self::LIFETIME,
+        }))
+        .unwrap();
+        let mut h = HeaderMap::new();
+        h.insert(
+            "authorization",
+            format!(
+                "Bearer {}",
+                meerschaum_server::auth::jwt_encode(&claims, SECRET)
+            )
+            .parse()
+            .unwrap(),
+        );
+        Some(Ok((h, "good".into())))
+    }
+
+    async fn session_active(&self, _state: &AppState, _session_id: &str) -> bool {
+        self.is_active()
+    }
+}
+
+/// A Pipeline run the console follows by its session cookie outlives the short-lived bearer the
+/// session is authorized with (rc25 ended it at the first access check after the bearer's 60
+/// seconds, and the page gave up on the stream), and still ends when the session does.
+#[tokio::test(start_paused = true)]
+async fn a_console_stream_outlives_its_bearer_and_ends_with_its_session() {
+    use meerschaum_server::backends::{EngineBackend, MemoryEngine};
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    let engine = Arc::new(MemoryEngine::default());
+    assert!(
+        engine
+            .record_runs(
+                serde_json::from_value(json!([
+                    {"run_id": "console-running", "started": chrono::Utc::now(), "status": "running"}
+                ]))
+                .unwrap()
+            )
+            .await
+            .success
+    );
+    assert!(
+        engine
+            .record_events(
+                serde_json::from_value(json!([
+                    {"run_id": "console-running", "created": chrono::Utc::now(),
+                     "event": "run_started", "payload": {}}
+                ]))
+                .unwrap()
+            )
+            .await
+            .success
+    );
+    let state = AppState::builder(common::config(dir.path()), instance)
+        .secret(SECRET.to_vec())
+        .engine(engine)
+        .build()
+        .unwrap();
+    let sessions = Arc::new(ShortLivedSessions::new());
+    assert!(state.engine_streams.set_browser_auth(sessions.clone()));
+    let app = meerschaum_server::app(state.clone());
+    let (status, _, body) = open(
+        &app,
+        "/engine/runs/console-running/events/stream",
+        &[("cookie", "mrsm-session-id=good")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let mut stream = body.into_data_stream();
+    let first = stream.next().await.unwrap().unwrap();
+    assert!(String::from_utf8_lossy(&first).contains("run_started"));
+
+    // The bearer minted when the stream opened expires (on the wall clock, which paused tokio
+    // time does not move).
+    std::thread::sleep(Duration::from_millis(
+        (ShortLivedSessions::LIFETIME as u64 + 1) * 1000 + 100,
+    ));
+    let minted = sessions.minted.load(std::sync::atomic::Ordering::SeqCst);
+    // Several access checks later (every 5 s), the stream is still open.
+    for _ in 0..4 {
+        tokio::time::advance(Duration::from_secs(6)).await;
+        match tokio::time::timeout(Duration::from_secs(1), stream.next()).await {
+            Err(_) | Ok(Some(Ok(_))) => {}
+            Ok(None) => panic!("the console stream ended while its session is valid"),
+            Ok(Some(Err(e))) => panic!("body error: {e}"),
+        }
+    }
+    assert!(
+        sessions.minted.load(std::sync::atomic::Ordering::SeqCst) > minted,
+        "the stream's access checks re-authorize the session"
+    );
+    assert_eq!(state.engine_streams.open_streams(), 1);
+
+    // Signing out ends it at the next check.
+    sessions.end();
+    tokio::time::advance(Duration::from_secs(6)).await;
+    let ended = tokio::time::timeout(Duration::from_secs(12), async {
+        while let Some(chunk) = stream.next().await {
+            chunk.expect("body");
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "the stream outlived its session");
+    drop(stream);
+    assert_eq!(state.engine_streams.open_streams(), 0);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_api_client_follows_a_run() {
     let dir = tempfile::tempdir().unwrap();
