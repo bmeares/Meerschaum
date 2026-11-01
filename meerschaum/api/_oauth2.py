@@ -129,11 +129,14 @@ def get_granted_scopes(
     user_or_token: Union[User, Token, None],
 ) -> List[str]:
     """
-    Return the scopes granted to an authenticated principal.
+    Return the scopes an authenticated principal holds: what its credential grants, capped by
+    its owner's current permissions, by the Rust server's rule
+    (`meerschaum.core.access.credential_permissions`).
 
-    Long-lived API tokens are always resolved against the database so that a
-    revoked or edited token takes effect immediately; JWTs are trusted to carry
-    their own scopes.
+    API keys are resolved against the instance on every request, so a revoked or edited token
+    takes effect immediately. A JWT carries its own scopes; one minted from an API token keeps
+    no more than the token holds now. A token whose owner no longer exists is refused (401), and
+    a store that cannot be read refuses the request (503), never a wider grant.
 
     Parameters
     ----------
@@ -145,7 +148,7 @@ def get_granted_scopes(
 
     Returns
     -------
-    A list of scope strings. `['*']` grants everything.
+    A list of scope strings. `'*'` holds everything.
     """
     if no_auth:
         return ['*']
@@ -160,18 +163,16 @@ def get_granted_scopes(
     authorization = request.headers.get(
         'authorization', request.headers.get('Authorization', None)
     )
-
-    ### For long-lived API tokens, always hit the database.
-    if authorization and 'mrsm-key:' in authorization:
-        return user_or_token.get_scopes(refresh=True, debug=debug)
-
-    ### For JWTs, trust the scopes in the token.
     if not authorization:
         # This should be caught by `load_user_or_token` but we can be safe.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated.",
         )
+
+    if 'mrsm-key:' in authorization:
+        granted = _read_or_unavailable(lambda: user_or_token.get_scopes(refresh=True, debug=debug))
+        return _owner_capped(user_or_token, granted)
 
     scheme, _, token_str = authorization.partition(' ')
     if not token_str or scheme.lower() != 'bearer':
@@ -189,7 +190,78 @@ def get_granted_scopes(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return payload.get('scopes', [])
+    claimed = _claimed_scopes(payload.get('scopes', []))
+    if isinstance(user_or_token, Token):
+        current = _read_or_unavailable(lambda: user_or_token.get_scopes(refresh=True, debug=debug))
+        from meerschaum.core import access
+        claimed = access.narrow_to_token_scopes(claimed, current or [])
+    return _owner_capped(user_or_token, claimed)
+
+
+def _claimed_scopes(claim) -> List[str]:
+    """
+    A JWT's `scopes` claim as a list: a string claim (an instance quirk) holds the permissions
+    it contains, as on the Rust server.
+    """
+    if isinstance(claim, str):
+        from meerschaum.core import access
+        held = [scope for scope in access.ALL_PERMISSIONS if scope in claim]
+        if '*' in claim:
+            held.append('*')
+        return held
+    if isinstance(claim, (list, tuple)):
+        return [str(scope) for scope in claim]
+    return []
+
+
+def _read_or_unavailable(read):
+    """
+    Run an instance read; a failure refuses the request (503), never a guess. The reason is
+    logged on the server only (a driver's error can name its connection or query).
+    """
+    try:
+        return read()
+    except HTTPException:
+        raise
+    except Exception as e:
+        from meerschaum.utils.warnings import warn
+        warn(f"Refused a request: the caller's permissions could not be read: {e}", stack=False)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The caller's permissions cannot be read right now.",
+        )
+
+
+def _owner_capped(user_or_token: Union[User, Token], granted: List[str]) -> List[str]:
+    """
+    Cap a credential's scopes by its owner's current permissions (the Rust server's
+    `access_of`): a user's own, or a token owner's. An unowned token keeps its own scopes.
+    """
+    from meerschaum.core import access
+    from meerschaum.api import get_api_connector
+    conn = get_api_connector()
+    if isinstance(user_or_token, Token):
+        user_id = getattr(user_or_token, '_user_id', None)
+        if user_id is None:
+            return list(granted or [])
+        username = _read_or_unavailable(lambda: conn.get_username(user_id))
+        if not username:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or revoked token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        user = User(str(username), instance=conn)
+    else:
+        user = user_or_token
+    user_type = _read_or_unavailable(lambda: conn.get_user_type(user))
+    attributes = _read_or_unavailable(lambda: conn.get_user_attributes(user))
+    return access.credential_permissions(
+        user_type,
+        attributes if isinstance(attributes, dict) else None,
+        list(granted or []),
+        access.default_role(),
+    )
 
 
 async def CurrentScopes(request: Request) -> List[str]:
@@ -295,3 +367,98 @@ manager = LoginManager(
     token_url=endpoints['login'],
     scopes=STATIC_CONFIG['tokens']['scopes'],
 )
+
+#: The claim that binds a user's JWT (and a console session's `credential`) to the user's
+#: current password: a deleted and re-registered username, or a changed password, ends every
+#: credential issued before. The Rust server's `meerschaum_server::auth::CREDENTIAL_CLAIM`.
+CREDENTIAL_CLAIM: str = 'mrsm_credential'
+
+
+def credential_fingerprint(password_hash: str) -> str:
+    """
+    Return the credential fingerprint of a password hash: `HMAC-SHA256(secret,
+    "mrsm-credential\\0" + hash)`, its first 16 bytes in unpadded base64url (the Rust server's
+    `credential_fingerprint`).
+    """
+    import hmac
+    import hashlib
+    digest = hmac.new(
+        SECRET,
+        b'mrsm-credential\x00' + str(password_hash).encode('utf-8'),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest[:16]).rstrip(b'=').decode('ascii')
+
+
+def user_credential(username: str) -> Optional[str]:
+    """
+    Return the current credential fingerprint of `username` (`None`: no such user or no stored
+    password). Raises when the instance cannot be read.
+    """
+    from meerschaum.api import get_api_connector
+    conn = get_api_connector()
+    password_hash = conn.get_user_password_hash(User(str(username), instance=conn))
+    return credential_fingerprint(password_hash) if password_hash else None
+
+
+def credential_matches(username: str, credential: Optional[str]) -> bool:
+    """
+    Return whether `credential` is `username`'s current one. A missing credential (issued before
+    5.0 bound credentials to their user) never matches. Raises when the instance cannot be read.
+    """
+    import hmac
+    if not credential or not isinstance(credential, str):
+        return False
+    current = user_credential(username)
+    return current is not None and hmac.compare_digest(current, credential)
+
+
+#: The claim naming the kind of principal a JWT's `sub` is, set by its issuer: `user` (a
+#: username, whatever it looks like) or `token` (an API token's ID). A JWT without it is refused,
+#: so a username that looks like a token's ID never selects that token. The Rust server's
+#: `meerschaum_server::auth::PRINCIPAL_CLAIM`.
+PRINCIPAL_CLAIM: str = 'mrsm_principal'
+PRINCIPAL_KINDS = ('user', 'token')
+
+
+def _issuer_claims(data: Dict) -> Dict:
+    """
+    `manager.claims_for`: the principal kind of a JWT naming a `sub` (`user` unless the caller
+    says `token`, as v4's `create_access_token(data={'sub': username})` made user tokens), and a
+    user's current credential.
+    """
+    sub = data.get('sub', None)
+    if not sub:
+        return {}
+    kind = data.get(PRINCIPAL_CLAIM, None) or 'user'
+    if kind not in PRINCIPAL_KINDS:
+        raise ValueError(f"Invalid principal kind '{kind}' (expected 'user' or 'token').")
+    claims = {PRINCIPAL_CLAIM: kind}
+    if kind == 'user' and CREDENTIAL_CLAIM not in data:
+        credential = user_credential(str(sub))
+        if credential:
+            claims[CREDENTIAL_CLAIM] = credential
+    return claims
+
+
+def principal_matches(payload: Dict, principal) -> bool:
+    """
+    Whether `principal` is what a JWT's payload names: the kind its issuer set, the same subject,
+    and for a user their current credential. Raises when the instance cannot be read.
+    """
+    kind = payload.get(PRINCIPAL_CLAIM, None)
+    sub = str(payload.get('sub', None))
+    if kind == 'user':
+        return (
+            isinstance(principal, User)
+            and principal.username == sub
+            and credential_matches(principal.username, payload.get(CREDENTIAL_CLAIM, None))
+        )
+    if kind == 'token':
+        return isinstance(principal, Token) and str(getattr(principal, 'id', None)) == sub
+    return False
+
+
+manager.claims_for = _issuer_claims
+manager.payload_check = principal_matches
+manager.principal_claim = PRINCIPAL_CLAIM

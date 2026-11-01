@@ -264,6 +264,12 @@ def set_session(session_id: str, session_data: Dict[str, Any]) -> bool:
         if debug:
             dprint("Not setting a session: its ID is not a UUID.")
         return False
+    ### A new session for a user is bound to the user's current credential (a user that does not
+    ### exist gets none, so the session names nobody). `update_session` keeps the bound one.
+    username = session_data.get('username', None) if isinstance(session_data, dict) else None
+    if username is not None and 'credential' not in session_data:
+        from meerschaum.api._oauth2 import user_credential
+        session_data = {**session_data, 'credential': user_credential(str(username))}
     _cache_drop(session_id)
     conn = None if _use_instance_store() else get_cache_connector()
     if conn is None and _use_instance_store():
@@ -357,7 +363,48 @@ def get_username_from_session(session_id: Optional[str]) -> Union[str, None]:
     if session_data is None:
         return None
 
-    return session_data.get('username', None)
+    username = session_data.get('username', None)
+    if username is None:
+        return None
+    ### A session is its user's only while it carries their current credential (one made before
+    ### the username was deleted and registered again, before a password change, or before 5.0
+    ### bound sessions to their user, is signed out).
+    if not _credential_current(str(username), session_data.get('credential', None)):
+        return None
+    return username
+
+
+#: How long a checked `(username, credential)` stays checked (the Rust server's identity cache).
+CREDENTIAL_CHECK_SECONDS: float = 5.0
+_credential_checks: Dict[Any, float] = {}
+
+
+def _credential_current(username: str, credential: Any) -> bool:
+    """
+    Whether `credential` is `username`'s current one (`meerschaum.api._oauth2.credential_matches`),
+    remembered for `CREDENTIAL_CHECK_SECONDS`. A read that fails raises `SessionStoreUnavailable`.
+    """
+    if not credential or not isinstance(credential, str):
+        return False
+    key = (username, credential)
+    now = time.monotonic()
+    checked_at = _credential_checks.get(key, None)
+    if checked_at is not None and now - checked_at < CREDENTIAL_CHECK_SECONDS:
+        return True
+    from meerschaum.api._oauth2 import credential_matches
+    try:
+        matches = credential_matches(username, credential)
+    except Exception as e:
+        from meerschaum.utils.warnings import warn
+        warn(f"Could not read the console user's credential: {e}", stack=False)
+        raise SessionStoreUnavailable("Could not read the console user's credential.") from e
+    if not matches:
+        _credential_checks.pop(key, None)
+        return False
+    if len(_credential_checks) > 4096:
+        _credential_checks.clear()
+    _credential_checks[key] = now
+    return True
 
 
 def get_user_from_session(session_id: Optional[str]) -> Union[User, None]:

@@ -46,8 +46,11 @@ fn jwts_match_pyjwt_and_jose_byte_for_byte() {
     }
 }
 
+/// A user JWT that v4 (PyJWT) issued carries no credential binding (`CREDENTIAL_CLAIM`): it is
+/// refused, so its holder signs in once more (the same secret and signature format still verify,
+/// `jwts_match_pyjwt_and_jose_byte_for_byte`).
 #[tokio::test]
-async fn tokens_issued_by_python_authenticate() {
+async fn user_jwts_issued_by_v4_need_a_fresh_sign_in() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = common::config(dir.path());
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
@@ -61,8 +64,7 @@ async fn tokens_issued_by_python_authenticate() {
     let app = meerschaum_server::app(state);
     let auth = format!("Bearer {}", v["pyjwt"].as_str().unwrap());
     let r = send(&app, req("GET", "/users/me", Some(&auth), None)).await;
-    assert_eq!(r.status, StatusCode::OK);
-    assert_eq!(r.json()["username"], "fixture_admin");
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text());
 }
 
 #[tokio::test]
@@ -184,6 +186,68 @@ async fn scopes_and_api_keys() {
         "json.dumps style: {}",
         r.text()
     );
+}
+
+#[tokio::test]
+async fn narrowing_a_tokens_scopes_reaches_its_existing_jwts() {
+    let (app, _dir) = default_app();
+    let admin = login(&app, "admin", "pass", None).await;
+    let r = send(
+        &app,
+        req(
+            "POST",
+            "/tokens/register",
+            Some(&admin),
+            Some((
+                "application/json",
+                br#"{"label": "narrowed", "scopes": ["pipes:read", "pipes:register"]}"#.to_vec(),
+            )),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let j = r.json();
+    let id = j["id"].as_str().unwrap().to_string();
+    let basic = format!(
+        "Basic mrsm-key:{}",
+        base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            format!("{id}:{}", j["secret"].as_str().unwrap())
+        )
+    );
+    let r = send(&app, req("POST", "/login", Some(&basic), None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let jwt = format!("Bearer {}", r.json()["access_token"].as_str().unwrap());
+    let register = || req("POST", "/pipes/narrow/b/c/register", Some(&jwt), None);
+    let r = send(&app, register()).await;
+    assert_ne!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+
+    // The token now holds only `pipes:read`: the JWT minted before keeps no more.
+    let edited = json!({
+        "creation": "2024-01-01T00:00:00+00:00",
+        "expiration": null,
+        "label": "narrowed",
+        "scopes": ["pipes:read"],
+    });
+    let r = send(
+        &app,
+        req(
+            "POST",
+            &format!("/tokens/{id}/edit"),
+            Some(&admin),
+            Some(("application/json", edited.to_string().into_bytes())),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let r = send(
+        &app,
+        req("POST", "/pipes/narrow/b/d/register", Some(&jwt), None),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    let r = send(&app, req("GET", "/pipes/keys", Some(&jwt), None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
 }
 
 #[tokio::test]

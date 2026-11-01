@@ -1360,12 +1360,17 @@ impl PluginHost {
             // A host call may follow a long-running plugin operation: reload credential
             // validity and scope narrowing as well as its owner's current access.
             use meerschaum_server::auth::{Principal, Scopes};
-            let subject = match principal {
-                Principal::User(user) => user.username.clone(),
-                Principal::Token(token) => token.id.map(|id| id.to_string()).unwrap_or_default(),
+            // Reloaded as the kind it already is, never re-classified by the look of its name.
+            let reloaded = match principal {
+                Principal::User(user) => {
+                    meerschaum_server::auth::load_user(&api.state, &user.username).await
+                }
+                Principal::Token(token) => {
+                    let id = token.id.map(|id| id.to_string()).unwrap_or_default();
+                    meerschaum_server::auth::load_token(&api.state, &id).await
+                }
             };
-            let principal = meerschaum_server::auth::load_from_subject(&api.state, &subject)
-                .await
+            let principal = reloaded
                 .map_err(|e| host_error(e.detail_text()))?
                 .ok_or_else(|| host_error("Invalid or revoked credentials."))?;
             let mut access = meerschaum_server::access::access_of_fresh(
@@ -3326,7 +3331,7 @@ mod host_access_tests {
         let registered = state.instance().register_token(&mut token).await;
         assert!(registered.success, "{registered}");
         let credential =
-            meerschaum_server::auth::load_from_subject(&state, &token.id.unwrap().to_string())
+            meerschaum_server::auth::load_token(&state, &token.id.unwrap().to_string())
                 .await
                 .unwrap();
         let token_host = api(

@@ -123,10 +123,10 @@ impl std::fmt::Debug for Federation {
 pub fn internal_token(secret: &[u8], caller: Option<&Caller>) -> String {
     // `sub` must be a string when present (PyJWT and the server's decoder both reject others),
     // so it is omitted for the server itself and for unauthenticated callers.
-    let sub = match caller.and_then(|c| c.principal.as_ref()) {
-        Some(Principal::User(u)) => Some(u.username.clone()),
-        Some(Principal::Token(t)) => t.id.map(|id| id.to_string()),
-        None => None,
+    let (sub, kind) = match caller.and_then(|c| c.principal.as_ref()) {
+        Some(Principal::User(u)) => (Some(u.username.clone()), "user"),
+        Some(Principal::Token(t)) => (t.id.map(|id| id.to_string()), "token"),
+        None => (None, "user"),
     };
     let scopes = caller
         .map(|c| {
@@ -142,6 +142,8 @@ pub fn internal_token(secret: &[u8], caller: Option<&Caller>) -> String {
     let mut claims = Map::new();
     if let Some(sub) = sub {
         claims.insert("sub".into(), s(sub));
+        // The host loads the identity by this kind, never by the look of `sub`.
+        claims.insert(crate::auth::PRINCIPAL_CLAIM.into(), s(kind));
     }
     claims.extend(map_of([
         ("scopes", scopes),

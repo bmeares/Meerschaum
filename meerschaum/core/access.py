@@ -85,6 +85,8 @@ __all__ = (
     'attributes_with_role',
     'attributes_with_permissions',
     'token_permissions',
+    'credential_permissions',
+    'narrow_to_token_scopes',
     'get_pipe_access',
     'parse_access',
     'get_locks',
@@ -356,6 +358,33 @@ def token_permissions(token_scopes: Iterable[str], user_permissions: Iterable[st
     effective permissions.
     """
     return list(_core().access_token_permissions(list(token_scopes), list(user_permissions)))
+
+
+def credential_permissions(
+    user_type: Optional[str],
+    attributes: Optional[Dict[str, Any]],
+    granted: Iterable[str],
+    default_role: Optional[str] = None,
+) -> List[str]:
+    """
+    Return what a credential granting `granted` may do for its owner (a user of type
+    `user_type` with `attributes`): the owner's current permissions (`*` for an administrator)
+    intersected with the credential's scopes. This is the Rust server's rule, so the API host
+    and the server decide the same way.
+    """
+    return list(_core().access_credential_permissions(
+        user_type,
+        attributes or {},
+        default_role,
+        list(granted),
+    ))
+
+
+def narrow_to_token_scopes(claimed: Iterable[str], token_scopes: Iterable[str]) -> List[str]:
+    """
+    Return a token JWT's scopes narrowed to its backing token's current scopes.
+    """
+    return list(_core().access_narrow_to_token_scopes(list(claimed), list(token_scopes)))
 
 
 def get_pipe_access(pipe_or_parameters: Any) -> Dict[str, Any]:

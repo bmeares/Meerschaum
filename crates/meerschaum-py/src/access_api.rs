@@ -352,6 +352,39 @@ pub fn access_token_permissions(
     Ok(names(&access::token_permissions(&scopes, &user)))
 }
 
+/// `_core.access_credential_permissions(user_type, attributes, default_role, granted)`: what a
+/// credential granting `granted` may do for its owner (`access::credential_permissions` over
+/// `access::credential_owner_permissions`), the rule the Rust server applies.
+#[pyfunction]
+#[pyo3(signature = (user_type, attributes, default_role, granted))]
+pub fn access_credential_permissions(
+    user_type: Option<&str>,
+    attributes: Option<&Bound<'_, PyAny>>,
+    default_role: Option<&str>,
+    granted: &Bound<'_, PyAny>,
+) -> PyResult<Vec<String>> {
+    let attributes = map_of(attributes)?;
+    let owner = access::credential_owner_permissions(
+        user_type,
+        attributes.as_ref(),
+        role_of(default_role)?,
+    );
+    let granted = strings(Some(granted))?;
+    Ok(names(&access::credential_permissions(&owner, &granted)))
+}
+
+/// `_core.access_narrow_to_token_scopes(claimed, token_scopes)`: a token JWT's scopes narrowed
+/// to its token's current scopes.
+#[pyfunction]
+pub fn access_narrow_to_token_scopes(
+    claimed: &Bound<'_, PyAny>,
+    token_scopes: &Bound<'_, PyAny>,
+) -> PyResult<Vec<String>> {
+    let claimed = strings(Some(claimed))?;
+    let token = strings(Some(token_scopes))?;
+    Ok(access::narrow_to_token_scopes(&claimed, &token))
+}
+
 /// `_core.access_pipe_access(parameters)`: the access in a pipe's parameters (normalized).
 #[pyfunction]
 pub fn access_pipe_access<'py>(
@@ -995,6 +1028,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_attributes_with_role, m)?)?;
     m.add_function(wrap_pyfunction!(access_attributes_with_permissions, m)?)?;
     m.add_function(wrap_pyfunction!(access_token_permissions, m)?)?;
+    m.add_function(wrap_pyfunction!(access_credential_permissions, m)?)?;
+    m.add_function(wrap_pyfunction!(access_narrow_to_token_scopes, m)?)?;
     m.add_function(wrap_pyfunction!(access_pipe_access, m)?)?;
     m.add_function(wrap_pyfunction!(access_parse_access, m)?)?;
     m.add_function(wrap_pyfunction!(access_visibilities, m)?)?;

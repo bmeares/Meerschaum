@@ -289,7 +289,7 @@ async fn the_standalone_terminal_page_loads_its_own_assets() {
     let sessions = web.sessions.clone();
     let app = meerschaum_web::app(state.clone(), web).unwrap();
     sessions
-        .set(&id.to_string(), json!({"username": "admin"}), 100)
+        .set(&id.to_string(), console_session(&state, "admin").await, 100)
         .await
         .unwrap();
     let r = send(
@@ -448,7 +448,19 @@ impl JobsBackend for ScriptedJobs {
     }
 }
 
-fn stream_app(cfg: meerschaum_server::ServerConfig) -> (Router, WebConfig, Arc<ScriptedJobs>) {
+/// A console session of `username` as the console writes it: bound to the user's current
+/// credential (`credential`), which every server-side reader checks.
+async fn console_session(state: &AppState, username: &str) -> Json {
+    let user = meerschaum_core::users::User::new(username, None);
+    let credential = meerschaum_server::auth::user_credential(state, &user)
+        .await
+        .unwrap();
+    json!({"username": username, "credential": credential})
+}
+
+fn stream_app(
+    cfg: meerschaum_server::ServerConfig,
+) -> (Router, WebConfig, Arc<ScriptedJobs>, AppState) {
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     instance.seed_user("admin", "pass", Some("admin"));
     instance.seed_user("bob", "pw", None);
@@ -460,8 +472,8 @@ fn stream_app(cfg: meerschaum_server::ServerConfig) -> (Router, WebConfig, Arc<S
         .build()
         .unwrap();
     let web = WebConfig::for_state(&state);
-    let app = meerschaum_web::app(state, web.clone()).unwrap();
-    (app, web, jobs)
+    let app = meerschaum_web::app(state.clone(), web.clone()).unwrap();
+    (app, web, jobs, state)
 }
 
 fn script() -> Vec<LogEvent> {
@@ -477,7 +489,7 @@ fn script() -> Vec<LogEvent> {
 #[tokio::test]
 async fn the_job_log_stream_serves_sse_to_a_bearer() {
     let root = tempfile::tempdir().unwrap();
-    let (app, _web, jobs) = stream_app(config(root.path()));
+    let (app, _web, jobs, _state) = stream_app(config(root.path()));
     jobs.add("execute-abc12345", script());
     let admin = common::login(&app, "admin", "pass", None).await;
 
@@ -536,11 +548,11 @@ async fn the_job_log_stream_serves_sse_to_a_bearer() {
 #[tokio::test]
 async fn the_job_log_stream_accepts_the_console_session_cookie() {
     let root = tempfile::tempdir().unwrap();
-    let (app, web, jobs) = stream_app(config(root.path()));
+    let (app, web, jobs, state) = stream_app(config(root.path()));
     jobs.add("execute-cookie", script());
     let id = uuid::Uuid::new_v4().to_string();
     web.sessions
-        .set(&id, json!({"username": "admin"}), 100)
+        .set(&id, console_session(&state, "admin").await, 100)
         .await
         .unwrap();
     let cookie = format!("mrsm-session-id={id}");
@@ -601,7 +613,7 @@ async fn the_job_log_stream_follows_the_log_permissions() {
     for console_key in [true, false] {
         let mut cfg = config(root.path());
         cfg.actions_non_admin = console_key;
-        let (app, web, jobs) = stream_app(cfg);
+        let (app, web, jobs, state) = stream_app(cfg);
         jobs.add("execute-rule", script());
         let label = format!("console key {console_key}");
 
@@ -624,7 +636,7 @@ async fn the_job_log_stream_follows_the_log_permissions() {
         // The same for a console session.
         let id = uuid::Uuid::new_v4().to_string();
         web.sessions
-            .set(&id, json!({"username": "bob"}), 100)
+            .set(&id, console_session(&state, "bob").await, 100)
             .await
             .unwrap();
         let r = send(&app, session_stream(&id)).await;
@@ -635,7 +647,7 @@ async fn the_job_log_stream_follows_the_log_permissions() {
 #[tokio::test]
 async fn the_job_log_stream_is_the_creators_and_the_administrators() {
     let root = tempfile::tempdir().unwrap();
-    let (app, _web, jobs) = stream_app(config(root.path()));
+    let (app, _web, jobs, _state) = stream_app(config(root.path()));
     jobs.add("execute-rule", script());
     jobs.add("plain-job", script());
     let (admin, bob, eve) = (
@@ -731,7 +743,7 @@ async fn log_streams_are_bounded_in_total_and_per_user() {
     cfg.system_actions_non_admin = true;
     cfg.log_streams_max = 3;
     cfg.log_streams_per_user = 2;
-    let (app, _web, jobs) = stream_app(cfg);
+    let (app, _web, jobs, _state) = stream_app(cfg);
     jobs.add("execute-held", vec![]);
     let admin = common::login(&app, "admin", "pass", None).await;
     let bob = common::login(&app, "bob", "pw", None).await;
@@ -768,7 +780,7 @@ async fn log_streams_are_rate_limited_like_the_jobs_group() {
             per: std::time::Duration::from_secs(3600),
         },
     );
-    let (app, _web, jobs) = stream_app(cfg);
+    let (app, _web, jobs, _state) = stream_app(cfg);
     jobs.add("execute-limited", script());
     let admin = common::login(&app, "admin", "pass", None).await;
     let stream = || common::req("GET", "/logs/execute-limited/stream", Some(&admin), None);
@@ -783,11 +795,11 @@ async fn a_silent_stream_ends_when_its_session_does() {
     use futures_util::StreamExt;
     use tower::ServiceExt;
     let root = tempfile::tempdir().unwrap();
-    let (app, web, jobs) = stream_app(config(root.path()));
+    let (app, web, jobs, state) = stream_app(config(root.path()));
     jobs.add("execute-held-session", vec![]);
     let id = uuid::Uuid::new_v4().to_string();
     web.sessions
-        .set(&id, json!({"username": "admin"}), 3600)
+        .set(&id, console_session(&state, "admin").await, 3600)
         .await
         .unwrap();
     let response = app
@@ -821,7 +833,7 @@ async fn the_job_log_stream_follows_the_jobs_route_group() {
     let root = tempfile::tempdir().unwrap();
     let mut cfg = config(root.path());
     cfg.routes_allowlist = vec!["pipes".into()];
-    let (app, _web, jobs) = stream_app(cfg);
+    let (app, _web, jobs, _state) = stream_app(cfg);
     jobs.add("execute-x", script());
     let r = send(
         &app,

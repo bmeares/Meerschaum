@@ -875,3 +875,42 @@ fn serde_names() {
     let back: Principal = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
     assert_eq!(back, p);
 }
+
+#[test]
+fn credentials_are_capped_by_their_owners_current_permissions() {
+    let viewer =
+        credential_owner_permissions(None, Some(&map(r#"{"role": "viewer"}"#)), Role::Editor);
+    assert!(!viewer.contains(ALL_SCOPE));
+    // A demoted administrator's `*` credential holds only the new role's permissions.
+    assert_eq!(credential_permissions(&viewer, &["*"]), viewer);
+    assert!(!credential_permissions(&viewer, &["*"]).contains("pipes:write"));
+    // A key listing more than its owner holds keeps only what the owner holds.
+    assert_eq!(
+        credential_permissions(&viewer, &["pipes:read", "pipes:write"]),
+        set(&["pipes:read"])
+    );
+    // An administrator lends every listed scope, a plugin's own included.
+    let admin = credential_owner_permissions(Some("admin"), None, Role::Editor);
+    assert!(admin.contains(ALL_SCOPE));
+    assert!(credential_permissions(&admin, &["myplugin:read"]).contains("myplugin:read"));
+    assert!(credential_permissions(&admin, &["*"]).contains(ALL_SCOPE));
+    // Legacy spellings grant the current scope.
+    let operator =
+        credential_owner_permissions(None, Some(&map(r#"{"role": "operator"}"#)), Role::Editor);
+    assert!(credential_permissions(&operator, &["josb:stop"]).contains("jobs:stop"));
+}
+
+#[test]
+fn a_token_jwt_keeps_no_more_than_its_token_holds_now() {
+    let narrowed = narrow_to_token_scopes(&["pipes:read", "pipes:write"], &["pipes:read"]);
+    assert_eq!(narrowed, vec!["pipes:read".to_string()]);
+    assert_eq!(
+        narrow_to_token_scopes(&["*"], &["pipes:read"]),
+        vec!["pipes:read".to_string()]
+    );
+    assert_eq!(
+        narrow_to_token_scopes(&["pipes:read"], &["*"]),
+        vec!["pipes:read".to_string()]
+    );
+    assert!(narrow_to_token_scopes(&["pipes:write"], &Vec::<String>::new()).is_empty());
+}

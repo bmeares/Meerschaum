@@ -112,6 +112,8 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
     let conn = state.instance();
     let no_auth = state.config.no_auth;
     let py_str = |s: &Option<String>| s.clone().unwrap_or_else(|| "None".into());
+    // A user's JWT carries their credential fingerprint (`CREDENTIAL_CLAIM`).
+    let mut credential: Option<String> = None;
     let (allowed_scopes, user_type, sub): (Vec<String>, Option<String>, String) = if grant_type
         == "password"
     {
@@ -144,6 +146,7 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
             &crate::auth::Principal::User(User::new(&username, None)),
         )
         .await?;
+        credential = crate::auth::user_credential(state, &User::new(&username, None)).await?;
         (scopes, typ, username)
     } else if grant_type == "client_credentials" {
         let client_id = py_str(&data.client_id);
@@ -226,6 +229,21 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
         "exp".into(),
         Value::Int((now + Duration::minutes(expires_minutes)).timestamp()),
     );
+    // The kind of principal `sub` is, as this login decided it (never guessed from `sub`).
+    claims.insert(
+        crate::auth::PRINCIPAL_CLAIM.into(),
+        Value::Str(
+            if grant_type == "password" {
+                "user"
+            } else {
+                "token"
+            }
+            .into(),
+        ),
+    );
+    if let Some(credential) = credential {
+        claims.insert(crate::auth::CREDENTIAL_CLAIM.into(), Value::Str(credential));
+    }
     let access_token = jwt_encode(&claims, state.secret());
     Ok(ok_json(&json!({
         "access_token": access_token,

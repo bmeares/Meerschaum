@@ -153,8 +153,11 @@ def test_token_jwts_follow_backing_token_revocation_and_expiry(sandbox):
         assert instance.register_user(user)[0]
         token = Token(label='token-probe', user=user, instance=instance, scopes=['pipes:read'])
         assert token.register()[0]
+        ### The issuer states the principal kind: a token JWT says `token`.
         access = manager.create_access_token(
-            data={'sub': str(token.id)}, expires=timedelta(minutes=5), scopes=['pipes:read'],
+            data={'sub': str(token.id), 'mrsm_principal': 'token'},
+            expires=timedelta(minutes=5),
+            scopes=['pipes:read'],
         )
         client = TestClient(app)
 

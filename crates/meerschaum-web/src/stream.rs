@@ -99,9 +99,11 @@ fn slot_key(principal: Option<&auth::Principal>, session_id: Option<&str>) -> St
 /// Whether a console session that was following has ended (`None`: a bearer, nothing to check).
 async fn session_ended(state: &WebState, id: Option<&str>) -> bool {
     match id {
-        Some(id) if !state.server.config.no_auth => {
-            !matches!(state.config.sessions.get(id).await, Ok(Some(_)))
-        }
+        Some(id) if !state.server.config.no_auth => match state.config.sessions.get(id).await {
+            // Still its user's: the session carries the user's current credential.
+            Ok(Some(data)) => !matches!(bound_username(&state.server, &data).await, Ok(Some(_))),
+            _ => true,
+        },
         _ => false,
     }
 }

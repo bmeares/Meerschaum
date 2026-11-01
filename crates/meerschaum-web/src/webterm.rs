@@ -46,8 +46,9 @@ fn segment(id: &str) -> String {
     percent_encoding::utf8_percent_encode(id, UNRESERVED).to_string()
 }
 
-/// The console session store as the terminal's authentication.
-struct Lookup(Arc<dyn sessions::SessionStore>);
+/// The console session store as the terminal's authentication: the session's user while the
+/// session carries the user's current credential ([`bound_username`]).
+struct Lookup(Arc<dyn sessions::SessionStore>, AppState);
 
 #[async_trait::async_trait]
 impl SessionLookup for Lookup {
@@ -56,11 +57,12 @@ impl SessionLookup for Lookup {
         if uuid::Uuid::parse_str(session_id).is_err() {
             return Ok(None);
         }
-        Ok(self
-            .0
-            .get(session_id)
-            .await?
-            .and_then(|data| data["username"].as_str().map(str::to_string)))
+        let Some(data) = self.0.get(session_id).await? else {
+            return Ok(None);
+        };
+        bound_username(&self.1, &data)
+            .await
+            .map_err(|e| e.detail_text())
     }
 }
 
@@ -72,7 +74,7 @@ pub(crate) fn config(server: &AppState, config: &WebConfig) -> Option<WebtermCon
     }
     let mut webterm = WebtermConfig::new(
         server,
-        Arc::new(Lookup(config.sessions.clone())),
+        Arc::new(Lookup(config.sessions.clone(), server.clone())),
         Arc::new(standalone_page),
         settings.shell.clone(),
     );

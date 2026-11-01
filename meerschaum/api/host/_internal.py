@@ -157,12 +157,16 @@ def register(app) -> None:
 
         scopes = claims.get('scopes') or []
         sub = claims.get('sub')
+        ### The kind of the identity the Rust server named (`mrsm_principal`).
+        kind = claims.get('mrsm_principal')
 
         def _dispatch():
             user = None
             if sub:
                 try:
-                    user = load_user_or_token_from_manager(str(sub))
+                    user = load_user_or_token_from_manager(
+                        str(sub), kind=kind if kind in ('user', 'token') else None,
+                    )
                 except Exception:
                     user = None
             token = set_mcp_context({'api': True, 'user': user})

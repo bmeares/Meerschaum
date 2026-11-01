@@ -248,15 +248,13 @@ pub fn default_role(state: &AppState) -> Role {
     Role::parse(&state.config.default_role).unwrap_or(rules::DEFAULT_ROLE)
 }
 
-/// Scopes whose old spelling a credential may still hold: `(legacy, current)`. v4's job route
-/// asked for the misspelled `josb:stop`; a token that holds it holds `jobs:stop`.
-pub const LEGACY_SPELLINGS: &[(&str, &str)] = &[("josb:stop", "jobs:stop")];
+pub use rules::LEGACY_SPELLINGS;
 
 /// The scopes a credential grants, as a list: a JWT's `scopes` string claim (an instance quirk)
 /// holds the permissions it contains; a legacy spelling ([`LEGACY_SPELLINGS`]) also grants the
 /// current one.
-fn granted_list(granted: &Scopes) -> Vec<String> {
-    let mut out = match granted {
+pub(crate) fn granted_list(granted: &Scopes) -> Vec<String> {
+    let out = match granted {
         Scopes::List(l) => l.clone(),
         Scopes::Str(s) => {
             let mut out: Vec<String> = rules::ALL_PERMISSIONS
@@ -270,12 +268,7 @@ fn granted_list(granted: &Scopes) -> Vec<String> {
             out
         }
     };
-    for (legacy, current) in LEGACY_SPELLINGS {
-        if out.iter().any(|s| s == legacy) && !out.iter().any(|s| s == current) {
-            out.push(current.to_string());
-        }
-    }
-    out
+    rules::credential_scopes(&out)
 }
 
 /// `effective ∩ granted`: what a credential may do for its owner ([`rules::token_permissions`]:
@@ -283,14 +276,7 @@ fn granted_list(granted: &Scopes) -> Vec<String> {
 /// whole: a `*` credential holds its owner's permissions (a plugin's own scopes included), and
 /// an owner with `*` among their permissions lends a credential every scope it lists.
 pub fn intersect(effective: &rules::Permissions, granted: &Scopes) -> rules::Permissions {
-    let list = granted_list(granted);
-    if list.iter().any(|s| s.trim() == rules::ALL_SCOPE) {
-        return effective.clone();
-    }
-    if effective.contains(rules::ALL_SCOPE) {
-        return rules::scopes_to_permissions(&list);
-    }
-    rules::token_permissions(&list, effective)
+    rules::credential_permissions(effective, &granted_list(granted))
 }
 
 /// A user's effective permissions ([`rules::user_permissions`]), with `*` added for an
@@ -301,14 +287,7 @@ pub fn user_permissions(
     attributes: Option<&Map>,
     default_role: Role,
 ) -> rules::Permissions {
-    let mut out = rules::user_permissions(user_type, attributes, default_role);
-    if rules::is_admin_type(user_type)
-        || rules::explicit_scopes(attributes)
-            .is_some_and(|scopes| scopes.iter().any(|s| s.trim() == rules::ALL_SCOPE))
-    {
-        out.insert(rules::ALL_SCOPE.to_string());
-    }
-    out
+    rules::credential_owner_permissions(user_type, attributes, default_role)
 }
 
 /// The teams of `username` on `conn` with their roles (Everyone included).

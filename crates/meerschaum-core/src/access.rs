@@ -566,6 +566,78 @@ pub fn token_permissions<S: AsRef<str>>(token_scopes: &[S], user: &Permissions) 
         .collect()
 }
 
+/// Scopes whose old spelling a credential may still hold: `(legacy, current)`. v4's job route
+/// asked for the misspelled `josb:stop`; a token that holds it holds `jobs:stop`.
+pub const LEGACY_SPELLINGS: &[(&str, &str)] = &[("josb:stop", "jobs:stop")];
+
+/// A credential's scope list with the current spelling added for each legacy one it holds
+/// ([`LEGACY_SPELLINGS`]).
+pub fn credential_scopes<S: AsRef<str>>(granted: &[S]) -> Vec<String> {
+    let mut out: Vec<String> = granted.iter().map(|s| s.as_ref().to_string()).collect();
+    for (legacy, current) in LEGACY_SPELLINGS {
+        if out.iter().any(|s| s == legacy) && !out.iter().any(|s| s == current) {
+            out.push(current.to_string());
+        }
+    }
+    out
+}
+
+/// The permissions a user lends to their credentials: [`user_permissions`], with `*` added for
+/// an administrator and when their own permissions list it, so they pass plugins' own scopes too
+/// (as in v4) and their credentials keep every scope they list.
+pub fn credential_owner_permissions(
+    user_type: Option<&str>,
+    attributes: Option<&Map>,
+    default_role: Role,
+) -> Permissions {
+    let mut out = user_permissions(user_type, attributes, default_role);
+    if is_admin_type(user_type)
+        || explicit_scopes(attributes)
+            .is_some_and(|scopes| scopes.iter().any(|s| s.trim() == ALL_SCOPE))
+    {
+        out.insert(ALL_SCOPE.to_string());
+    }
+    out
+}
+
+/// What a credential that grants `granted` may do for an owner holding `owner`
+/// ([`credential_owner_permissions`]): their intersection ([`token_permissions`], so lists
+/// written before 5.0 keep what they allowed). `*` on either side keeps the other side whole: a
+/// `*` credential holds its owner's permissions (a plugin's own scopes included), and an owner
+/// with `*` lends a credential every scope it lists. The one rule for the Rust server and the
+/// Python API host.
+pub fn credential_permissions<S: AsRef<str>>(owner: &Permissions, granted: &[S]) -> Permissions {
+    let list = credential_scopes(granted);
+    if list.iter().any(|s| s.trim() == ALL_SCOPE) {
+        return owner.clone();
+    }
+    if owner.contains(ALL_SCOPE) {
+        return scopes_to_permissions(&list);
+    }
+    token_permissions(&list, owner)
+}
+
+/// A credential's scopes narrowed to its backing token's current scopes (a JWT minted from an API
+/// token keeps no more than the token holds now). `*` on either side keeps the other side.
+pub fn narrow_to_token_scopes<S: AsRef<str>, T: AsRef<str>>(
+    claimed: &[S],
+    token: &[T],
+) -> Vec<String> {
+    let claimed = credential_scopes(claimed);
+    let token = credential_scopes(token);
+    if token.iter().any(|s| s.trim() == ALL_SCOPE) {
+        return claimed;
+    }
+    if claimed.iter().any(|s| s.trim() == ALL_SCOPE) {
+        return token;
+    }
+    let token = scopes_to_permissions(&token);
+    scopes_to_permissions(&claimed)
+        .into_iter()
+        .filter(|s| token.contains(s))
+        .collect()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Teams
 // ---------------------------------------------------------------------------------------------

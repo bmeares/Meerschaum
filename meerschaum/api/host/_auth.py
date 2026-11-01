@@ -20,9 +20,11 @@ from meerschaum.utils.typing import Any, Dict, Optional, Union
 _installed = {'loader': False}
 
 
-def load_user_or_token_from_manager(username_or_token_id: str):
+def load_user_or_token_from_manager(username_or_token_id: str, kind: Optional[str] = None):
     """
-    Resolve the JWT's current principal, rejecting deleted users and invalid tokens.
+    Resolve the JWT's current principal, rejecting deleted users and invalid tokens. `kind`
+    (`user` or `token`, the JWT's `mrsm_principal`) says which: a username that looks like a
+    token's ID is a user. Without it (the host's internal callers), a UUID is read as a token.
     """
     from meerschaum.core import User
     from meerschaum.api import get_api_connector
@@ -30,7 +32,9 @@ def load_user_or_token_from_manager(username_or_token_id: str):
 
     api_conn = get_api_connector()
 
-    if is_uuid(username_or_token_id):
+    if kind == 'token' and not is_uuid(username_or_token_id):
+        return None
+    if kind == 'token' or (kind is None and is_uuid(username_or_token_id)):
         token = api_conn.get_token(username_or_token_id)
         if token is None or not token.is_valid:
             return None
@@ -82,7 +86,12 @@ def principal_from_authorization(authorization: Optional[str]) -> Any:
     if not subject:
         return None
     try:
-        return load_user_or_token_from_manager(str(subject))
+        from meerschaum.api._oauth2 import PRINCIPAL_CLAIM, principal_matches
+        kind = claims.get(PRINCIPAL_CLAIM, None)
+        if kind not in ('user', 'token'):
+            return None
+        principal = load_user_or_token_from_manager(str(subject), kind=kind)
+        return principal if principal is not None and principal_matches(claims, principal) else None
     except Exception:
         return None
 

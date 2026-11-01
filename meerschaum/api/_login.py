@@ -77,6 +77,12 @@ class LoginManager(OAuth2PasswordBearer):
 
         self._user_callback: Optional[Callable] = None
         self._user_callback_is_async: bool = False
+        ### `claims_for(data) -> dict`: claims `create_access_token()` adds to `data`.
+        ### `payload_check(payload, user) -> bool`: whether a loaded user may use this payload.
+        ### `principal_claim`: the claim naming the principal's kind, passed to the loader.
+        self.principal_claim: Optional[str] = None
+        self.claims_for: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+        self.payload_check: Optional[Callable[[Dict[str, Any], Any], bool]] = None
         self._not_authenticated_exception = not_authenticated_exception
         self._out_of_scope_exception = out_of_scope_exception
 
@@ -99,7 +105,16 @@ class LoginManager(OAuth2PasswordBearer):
         Positional and keyword arguments are passed on to the callback after the identifier.
         """
         def decorator(callback: Callable):
-            def _bound(identifier):
+            ### A loader that takes `kind` gets the principal kind the token names
+            ### (`principal_claim`), so it never guesses it from the identifier.
+            try:
+                takes_kind = 'kind' in inspect.signature(callback).parameters
+            except (TypeError, ValueError):
+                takes_kind = False
+
+            def _bound(identifier, kind=None):
+                if takes_kind:
+                    return callback(identifier, *args, kind=kind, **kwargs)
                 return callback(identifier, *args, **kwargs)
             self._user_callback = _bound
             self._user_callback_is_async = inspect.iscoroutinefunction(callback)
@@ -129,19 +144,22 @@ class LoginManager(OAuth2PasswordBearer):
         """Return whether a token carries every required scope."""
         return self._has_scopes(self._get_payload(token), required_scopes)
 
-    async def _load_user(self, identifier: Any):
+    async def _load_user(self, identifier: Any, kind: Optional[str] = None):
         if self._user_callback is None:
             raise Exception("Missing user_loader callback")
         if self._user_callback_is_async:
-            return await self._user_callback(identifier)
-        return await run_sync(self._user_callback, identifier)
+            return await self._user_callback(identifier, kind)
+        return await run_sync(self._user_callback, identifier, kind)
 
     async def _get_current_user(self, payload: Dict[str, Any]):
         user_identifier = payload.get("sub")
         if user_identifier is None:
             raise self.not_authenticated_exception
-        user = await self._load_user(user_identifier)
+        kind = payload.get(self.principal_claim) if self.principal_claim else None
+        user = await self._load_user(user_identifier, kind)
         if user is None:
+            raise self.not_authenticated_exception
+        if self.payload_check is not None and not await run_sync(self.payload_check, payload, user):
             raise self.not_authenticated_exception
         return user
 
@@ -158,6 +176,8 @@ class LoginManager(OAuth2PasswordBearer):
     ) -> str:
         """Encode `data` (plus `exp` and `scopes`) with the manager's secret."""
         to_encode = data.copy()
+        if self.claims_for is not None:
+            to_encode.update(self.claims_for(to_encode) or {})
         to_encode.update({"exp": datetime.now(timezone.utc) + (expires or self.default_expiry)})
         if scopes is not None:
             to_encode.update({"scopes": list(set(scopes))})

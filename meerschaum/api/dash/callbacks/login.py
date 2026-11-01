@@ -131,6 +131,8 @@ def login_button_click(
             'session-id': session_id,
             'mrsm-location.href': location_href,
         }
+        ### `set_session` binds the session to the user's current credential: deleting and
+        ### re-registering the username, or changing the password, ends it.
         set_session(session_id, {'username': username})
         ### Mirror the session ID into an `HttpOnly` cookie (scoped to `/`)
         ### so plain HTTP routes outside the `/dash` WSGI mount can read it.

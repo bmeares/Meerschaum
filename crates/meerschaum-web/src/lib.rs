@@ -158,6 +158,26 @@ pub(crate) async fn session(state: &WebState, headers: &HeaderMap) -> Result<Jso
     }
 }
 
+/// The user a console session names while it carries the user's current credential
+/// (`auth::load_from_bound_subject`); `None` for a session of nobody, of a deleted user, or one
+/// made before a password change or a re-registration. Under `--no-auth`, the session's name.
+pub(crate) async fn bound_username(
+    server: &AppState,
+    data: &Json,
+) -> Result<Option<String>, meerschaum_server::error::ApiError> {
+    let Some(username) = data["username"].as_str().filter(|u| !u.is_empty()) else {
+        return Ok(None);
+    };
+    if server.config.no_auth {
+        return Ok(Some(username.to_string()));
+    }
+    Ok(
+        auth::load_from_bound_subject(server, username, Some("user"), data["credential"].as_str())
+            .await?
+            .and_then(|principal| principal.as_user().map(|_| username.to_string())),
+    )
+}
+
 /// Request headers carrying a short-lived bearer token for the user of a console session, so
 /// that the API's own authorization (user existence, scopes, admin) applies to what the session
 /// does.
@@ -168,7 +188,17 @@ pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderM
     }
     let username = data["username"].as_str().unwrap_or("");
     let login = || StatusCode::UNAUTHORIZED;
-    let principal = match auth::load_from_subject(&state.server, username).await {
+    // The session must carry its user's current credential (a re-registered username or a
+    // changed password ends it); the bearer minted for it carries the same.
+    let credential = data["credential"].as_str();
+    let principal = match auth::load_from_bound_subject(
+        &state.server,
+        username,
+        Some("user"),
+        credential,
+    )
+    .await
+    {
         Ok(Some(principal)) => principal,
         Ok(None) => return Err(login()),
         // A failed read refuses (fail closed).
@@ -203,10 +233,19 @@ pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderM
             scopes = vec!["*".into()];
         }
     }
-    let claims: Map = serde_json::from_value(
-        json!({"sub": username, "scopes": scopes, "exp": chrono::Utc::now().timestamp() + 60}),
-    )
+    let mut claims: Map = serde_json::from_value(json!({
+        "sub": username,
+        "scopes": scopes,
+        "exp": chrono::Utc::now().timestamp() + 60,
+        (auth::PRINCIPAL_CLAIM): "user",
+    }))
     .expect("claims");
+    if let Some(credential) = credential.filter(|_| principal.as_user().is_some()) {
+        claims.insert(
+            auth::CREDENTIAL_CLAIM.into(),
+            meerschaum_core::Value::Str(credential.to_string()),
+        );
+    }
     headers.insert(
         header::AUTHORIZATION,
         format!(

@@ -274,23 +274,37 @@ async fn get_token(
 /// that still exists on the instance (`Ok(None)` otherwise). Deleted users cannot retain access
 /// through an old JWT. A read that fails is an error (`503`).
 pub async fn load_from_subject(state: &AppState, sub: &str) -> Result<Option<Principal>, ApiError> {
-    let conn = state.instance();
     if is_uuid(sub) {
-        let Ok(id) = Uuid::parse_str(sub.trim()) else {
-            return Ok(None);
-        };
-        // A JWT is an access credential for its backing token, not a way to outlive the
-        // token's revocation or expiry. API keys enforce these checks on every request too.
-        return Ok(get_token(&conn, &id)
-            .await?
-            .filter(|token| {
-                token.is_valid
-                    && token
-                        .expiration
-                        .is_none_or(|expiration| expiration > Utc::now())
-            })
-            .map(Principal::Token));
+        return load_token(state, sub).await;
     }
+    load_user(state, sub).await
+}
+
+/// A current, valid and unexpired token from its ID (`Ok(None)` otherwise). A read that fails
+/// is an error (`503`).
+pub async fn load_token(state: &AppState, id: &str) -> Result<Option<Principal>, ApiError> {
+    let conn = state.instance();
+    let Ok(id) = Uuid::parse_str(id.trim()) else {
+        return Ok(None);
+    };
+    // A JWT is an access credential for its backing token, not a way to outlive the token's
+    // revocation or expiry. API keys enforce these checks on every request too.
+    Ok(get_token(&conn, &id)
+        .await?
+        .filter(|token| {
+            token.is_valid
+                && token
+                    .expiration
+                    .is_none_or(|expiration| expiration > Utc::now())
+        })
+        .map(Principal::Token))
+}
+
+/// A user that still exists, by their exact username (one that looks like a token's ID too).
+/// A read that fails is an error (`503`).
+pub async fn load_user(state: &AppState, username: &str) -> Result<Option<Principal>, ApiError> {
+    let conn = state.instance();
+    let sub = username;
     let mut user = User::new(sub, None);
     user.instance_keys = Some(conn.connector_keys());
     // An indefinitely cached ID would let a deleted user keep the scopes in an existing JWT.
@@ -304,6 +318,76 @@ pub async fn load_from_subject(state: &AppState, sub: &str) -> Result<Option<Pri
     };
     user.user_id = Some(id);
     Ok(Some(Principal::User(user)))
+}
+
+/// The claim that binds a user's JWT (and a console session's `credential`) to the user's
+/// current password: a deleted and re-registered username, or a changed password, ends every
+/// credential issued before. Token JWTs (a UUID `sub`) are bound by their token instead.
+pub const CREDENTIAL_CLAIM: &str = "mrsm_credential";
+
+/// The credential fingerprint of a password hash: `HMAC-SHA256(secret, "mrsm-credential\0" +
+/// hash)`, its first 16 bytes in unpadded base64url (22 characters). The Python API host
+/// computes the same (`meerschaum.api._oauth2.credential_fingerprint`).
+pub fn credential_fingerprint(secret: &[u8], password_hash: &str) -> String {
+    let mut input = b"mrsm-credential\0".to_vec();
+    input.extend_from_slice(password_hash.as_bytes());
+    let digest = sign(&input, secret);
+    URL_SAFE_NO_PAD.encode(&digest[..16])
+}
+
+/// The current credential fingerprint of `user` (`None` without a stored password). A read that
+/// fails is an error (`503`).
+pub async fn user_credential(state: &AppState, user: &User) -> Result<Option<String>, ApiError> {
+    let hash = state
+        .instance()
+        .get_user_password_hash(user)
+        .await
+        .map_err(credentials_unavailable)?;
+    Ok(hash
+        .filter(|hash| !hash.is_empty())
+        .map(|hash| credential_fingerprint(state.secret(), &hash)))
+}
+
+/// The claim naming the kind of principal a JWT's `sub` is, set by its issuer: `user` (a
+/// username, whatever it looks like) or `token` (an API token's ID). A JWT without it names no
+/// principal, so a username that looks like a token's ID never selects that token.
+pub const PRINCIPAL_CLAIM: &str = "mrsm_principal";
+
+/// The principal a credential a client presents names (a JWT, a console session), by the kind
+/// its issuer set ([`PRINCIPAL_CLAIM`]), never guessed from `sub`: a `user` by exact username,
+/// who must also present `credential` equal to their current one ([`user_credential`]); a
+/// `token` by ID. No kind, another kind, or a missing or different credential (one issued
+/// before the user was deleted and re-registered, before a password change, or before 5.0 bound
+/// credentials to their user) is no principal (`401`).
+pub async fn load_from_bound_subject(
+    state: &AppState,
+    sub: &str,
+    kind: Option<&str>,
+    credential: Option<&str>,
+) -> Result<Option<Principal>, ApiError> {
+    match kind {
+        Some("token") => load_token(state, sub).await,
+        Some("user") => {
+            let Some(credential) = credential else {
+                return Ok(None);
+            };
+            let principal = load_user(state, sub).await?;
+            let Some(Principal::User(user)) = &principal else {
+                return Ok(None);
+            };
+            Ok(match user_credential(state, user).await? {
+                Some(current) if constant_time_eq(current.as_bytes(), credential.as_bytes()) => {
+                    principal
+                }
+                _ => None,
+            })
+        }
+        _ => Ok(None),
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// `manager(request)` (`fastapi_login.LoginManager` with `OAuth2PasswordBearer`): a `Bearer`
@@ -320,7 +404,9 @@ pub async fn manager(state: &AppState, headers: &HeaderMap) -> Result<Principal,
     let Some(sub) = payload.get("sub").and_then(Json::as_str) else {
         return Err(ApiError::invalid_credentials());
     };
-    load_from_subject(state, sub)
+    let kind = payload.get(PRINCIPAL_CLAIM).and_then(Json::as_str);
+    let credential = payload.get(CREDENTIAL_CLAIM).and_then(Json::as_str);
+    load_from_bound_subject(state, sub, kind, credential)
         .await?
         .ok_or_else(ApiError::invalid_credentials)
 }
@@ -479,7 +565,17 @@ pub async fn granted_scopes(
     }
     let payload = jwt_decode(token, state.secret(), Utc::now())
         .map_err(|_| ApiError::unauthorized("Invalid access token.", Some("Bearer")))?;
-    Ok(Scopes::from_claim(payload.get("scopes")))
+    let claimed = Scopes::from_claim(payload.get("scopes"));
+    // A JWT minted from an API token keeps no more than the token holds now: narrowing the
+    // token's scopes reaches the JWTs already issued for it (as invalidation and expiry do).
+    if let Principal::Token(_) = principal {
+        let stored = stored_scopes(state, principal).await?;
+        let claimed = crate::access::granted_list(&claimed);
+        return Ok(Scopes::List(crate::access::rules::narrow_to_token_scopes(
+            &claimed, &stored,
+        )));
+    }
+    Ok(claimed)
 }
 
 /// The scopes a principal may hand to a token it registers or edits: `None` when it may grant
@@ -697,6 +793,15 @@ pub async fn is_user_allowed_to_execute_with(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credential_fingerprints_match_the_python_host() {
+        // `tests/api_host/test_host_credential_caps.py` pins the same vector.
+        assert_eq!(
+            super::credential_fingerprint(b"0123456789abcdef", "$pbkdf2-sha256$1$c2FsdA$aGFzaA"),
+            "yTngG9oGz5X69a6RX22jLw"
+        );
+    }
+
     use super::*;
 
     #[test]
