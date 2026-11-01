@@ -29,7 +29,6 @@
 .performance-group-table td:not(:first-child), .performance-group-table th:not(:first-child) { text-align: right; }
 .performance-row-name { min-width: 13rem; }
 .performance-running { display: block; color: #b6bdc5; }
-.performance-pipe-source { display: block; color: #b6bdc5; font-size: 0.8rem; font-weight: 400; }
 .performance-no-matches { padding: 20px 0; }
 .performance-section h2 { margin-left: 0; }
 .performance-table td:first-child { max-width: 32rem; overflow-wrap: anywhere; }

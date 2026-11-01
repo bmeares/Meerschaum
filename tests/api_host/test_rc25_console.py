@@ -78,3 +78,40 @@ print('JSON:' + json.dumps({
     assert clicked['status'] == 200, clicked
     assert clicked['filename'].startswith('rc25_csv ') and clicked['filename'].endswith('.csv')
     assert 'ts,v' in clicked['content']
+
+
+def test_performance_names_pipes_as_python_writes_them(sandbox):
+    """
+    Performance names a Pipe `Pipe('plugin:noaa', 'weather')` with the Pipes page's colors, in the
+    breakdown (rows the browser renders, searches and sorts) and in Recent syncs; a Pipe the viewer
+    may not see keeps its placeholder.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, '''
+import json
+from meerschaum.api.dash import performance
+ref = 'sql:main|plugin:noaa|weather|None'
+located = "sql:main|sql:x|temp|o'hare"
+data = {
+    'pipes': [{'pipe_ref': ref, 'summary': {'syncs': 1}}, {'pipe_ref': located, 'summary': {}}],
+    'history': [{'pipe_ref': ref, 'started': '2026-11-01T00:00:00Z', 'success': True},
+                {'pipe_ref': '__hidden__:1', 'started': '2026-11-01T00:00:00Z', 'success': True}],
+}
+groups = performance.build_groups(data, 'sql:main', '24h')
+rows = groups[0].children[0].data['rows']
+history = performance.build_history(data).to_plotly_json()
+print('JSON:' + json.dumps({
+    'labels': [row['label'] for row in rows],
+    'repr': rows[0]['repr'],
+    'history': json.dumps(history, default=lambda o: o.to_plotly_json()),
+}))
+'''))
+    assert out['labels'] == ["Pipe('plugin:noaa', 'weather')", "Pipe('sql:x', 'temp', \"o'hare\")"]
+    assert out['repr'] == [
+        ['Pipe(', 'type'], ["'plugin:noaa'", 'connector'], [', ', 'punctuation'],
+        ["'weather'", 'metric'], [')', 'type'],
+    ]
+    history = out['history']
+    assert 'mrsm-pipe-repr' in history and 'mrsm-repr-connector' in history
+    assert "'plugin:noaa'" in history and '/dash/pipes/plugin%3Anoaa/weather?instance=sql%3Amain' in history
+    assert '__hidden__' not in history

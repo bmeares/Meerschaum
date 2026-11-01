@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, parse_qs, urlparse, quote
 import math
 
-from meerschaum.utils.typing import Any, Dict, Optional
+from meerschaum.utils.typing import Any, Dict, List, Optional
 
 WINDOWS = (('1h', 'Last hour'), ('24h', 'Last 24 hours'), ('7d', 'Last 7 days'),
            ('30d', 'Last 30 days'), ('all', 'All retained history'))
@@ -130,13 +130,51 @@ def timestamp(value: Any) -> str:
         return 'n/a'
 
 
-def pipe_label(reference):
-    """Readable metric/location plus source keys, without a Python constructor."""
-    parts = str(reference or '').split('|')
-    if len(parts) < 3:
-        return str(reference or 'Unknown Pipe'), ''
-    connector, metric, location = parts[-3:]
-    return metric + (':' + location if location not in ('', 'None') else ''), connector
+def pipe_keys(reference) -> Optional[tuple]:
+    """`(connector_keys, metric_key, location_key)` of a `pipe_ref`, or `None` (hidden or no Pipe)."""
+    from meerschaum.api.dash.engine import is_hidden_ref, split_ref
+    reference = str(reference or '')
+    if is_hidden_ref(reference) or reference.count('|') < 3:
+        return None
+    return split_ref(reference)[1:]
+
+
+def pipe_label(reference) -> str:
+    """
+    A Pipe as Python writes it, `Pipe('plugin:noaa', 'weather')` (the page is one instance's, so
+    no `instance=`): the text the breakdown searches and sorts.
+    """
+    keys = pipe_keys(reference)
+    if keys is None:
+        from meerschaum.api.dash.engine import ref_label
+        return ref_label(str(reference)) if reference else 'Unknown Pipe'
+    return 'Pipe(' + ', '.join(repr(str(key)) for key in keys if key is not None) + ')'
+
+
+def pipe_repr_parts(reference) -> Optional[List[List[str]]]:
+    """
+    `pipe_label()` as `[text, kind]` pieces for `assets/performance.js`, which colors them with the
+    Pipes page's `mrsm-repr-*` classes (`pipes_table.pipe_title`).
+    """
+    keys = pipe_keys(reference)
+    if keys is None:
+        return None
+    connector, metric, location = keys
+    parts = [['Pipe(', 'type'], [repr(str(connector)), 'connector'],
+             [', ', 'punctuation'], [repr(str(metric)), 'metric']]
+    if location is not None:
+        parts += [[', ', 'punctuation'], [repr(str(location)), 'location']]
+    return parts + [[')', 'type']]
+
+
+def pipe_title(reference) -> Any:
+    """`pipe_label()` colored like the Pipes page (`pipes_table.pipe_title`)."""
+    from dash import html
+    keys = pipe_keys(reference)
+    if keys is None:
+        return html.Span(pipe_label(reference))
+    from meerschaum.api.dash.pipes_table import pipe_title as colored
+    return colored(*keys)
 
 
 def _stat(label, value, detail=None):
@@ -233,13 +271,14 @@ def build_groups(data: Dict[str, Any], instance: str, window: str):
             value = group.get('pipe_ref') if field == 'pipes' else group.get('name')
             if not isinstance(value, str) or not value:
                 continue
-            label, subtitle = pipe_label(value) if field == 'pipes' else (value, '')
+            label = pipe_label(value) if field == 'pipes' else value
             summary = group.get('summary') or {}
             filters = {key: chosen for key, chosen in (
                 ('pipe', data.get('_pipe_filter')), ('pipeline', data.get('_pipeline_filter'))
             ) if chosen}
             link = '/dash/performance?' + urlencode({'instance': instance, 'window': window, **filters, filter_key: value})
-            rows.append({'label': label, 'subtitle': subtitle, 'key': value, 'href': link,
+            rows.append({'label': label, 'key': value, 'href': link,
+                         'repr': pipe_repr_parts(value) if field == 'pipes' else None,
                          'running': group.get('running', 0),
                          'sort': summary,
                          'cells': [number(summary.get('syncs', 0)), number(summary.get('failed', 0)),
@@ -301,15 +340,14 @@ def build_history(data: Dict[str, Any], page=1, page_size=HISTORY_PAGE_SIZE):
     headers = ['Started', 'Pipe', 'Result', 'Duration', 'Rows affected']
     for item in history:
         reference = item.get('pipe_ref') or ''
-        label, subtitle = pipe_label(reference)
-        parts = reference.split('|')
-        href = ('/dash/pipes/' + '/'.join(quote(key, safe='') for key in parts[-3:])
-                + '?' + urlencode({'instance': parts[0]})) if len(parts) == 4 else None
-        name = dcc.Link(label, href=href, className='console-name-link') if href else html.Span(label)
+        keys = pipe_keys(reference)
+        href = ('/dash/pipes/' + '/'.join(quote(str(key), safe='') for key in keys if key is not None)
+                + '?' + urlencode({'instance': reference.split('|', 1)[0]})) if keys else None
+        title = pipe_title(reference)
+        name = dcc.Link(title, href=href, className='console-name-link') if href else title
         rows.append(html.Tr([
             html.Td(timestamp(item.get('started') or item.get('ts')), **{'data-label': 'Started'}),
-            html.Td([name, html.Small(subtitle, className='performance-pipe-source')],
-                    className='performance-row-name', **{'data-label': 'Pipe'}),
+            html.Td(name, className='performance-row-name', **{'data-label': 'Pipe'}),
             html.Td('Succeeded' if item.get('success') else 'Failed',
                     className='text-success' if item.get('success') else 'text-danger', **{'data-label': 'Result'}),
             html.Td(duration(item.get('duration_seconds')), **{'data-label': 'Duration'}),

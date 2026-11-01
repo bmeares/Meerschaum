@@ -11,7 +11,7 @@
             });
             const query = String(search || '').trim().toLocaleLowerCase();
             const rows = (data.rows || []).filter(row =>
-                (row.label + ' ' + (row.subtitle || '')).toLocaleLowerCase().includes(query));
+                String(row.label).toLocaleLowerCase().includes(query));
             rows.sort((a, b) => {
                 if (sort === 'name') return a.label.localeCompare(b.label, undefined, {numeric: true});
                 const value = row => {
@@ -34,10 +34,12 @@
             const start = (page - 1) * size;
             const visible = rows.slice(start, start + size);
             const body = visible.map(row => {
-                const name = [component('Link', {children: row.label, href: row.href,
+                // A Pipe reads `Pipe('ck', 'mk', 'lk')`, colored like the Pipes page.
+                const label = row.repr ? component('Span', {className: 'mrsm-pipe-repr',
+                    children: row.repr.map(part => component('Span', {children: part[0],
+                        className: 'mrsm-repr-' + part[1]}))}) : row.label;
+                const name = [component('Link', {children: label, href: row.href,
                     className: 'console-name-link'}, 'dash_core_components')];
-                if (row.subtitle) name.push(component('Small', {children: row.subtitle,
-                    className: 'performance-pipe-source'}));
                 if (row.running) name.push(component('Small', {children: row.running + ' running',
                     className: 'performance-running'}));
                 return component('Tr', {key: row.key, children: [
