@@ -10,7 +10,21 @@ use crate::driver::params::{placeholder, placeholders};
 use crate::driver::{SqlParam, SqlValue};
 use crate::flavor::{DriverFamily, Flavor};
 
+use meerschaum_kernel::value::Value as KValue;
+
 use super::{SqlConnector, be, frame_docs, kv_str};
+
+/// A user ID cell as an integer (drivers return integer columns as integers, Oracle's `NUMBER`
+/// as a decimal or float, some as text).
+fn user_id_of(v: &KValue) -> Option<i64> {
+    match v {
+        KValue::Int(i) => Some(*i),
+        KValue::Float(f) if f.fract() == 0.0 => Some(*f as i64),
+        KValue::Decimal(d) => d.to_string().parse().ok(),
+        KValue::Str(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
 
 /// A user ID value as a bound parameter.
 fn id_param(v: &Value) -> SqlParam {
@@ -54,39 +68,54 @@ impl SqlConnector {
             Err(e) => return SuccessTuple::fail(e.to_string()),
         }
         let _ = self.ensure_instance_tables(true).await;
+        // Without the unique key on usernames (rows from before it, held twice), a new
+        // registration could add another ambiguous account: refuse until they are repaired.
+        self.ensure_unique_key(&super::unique_keys::USERS_KEY).await;
+        match self.unique_key_status(&super::unique_keys::USERS_KEY).await {
+            Ok(super::unique_keys::KeyStatus::Present | super::unique_keys::KeyStatus::NoTable) => {
+            }
+            Ok(super::unique_keys::KeyStatus::Missing { .. }) => {
+                return SuccessTuple::fail(format!(
+                    "Registering users on {self} is refused while a username is held by more than \
+                     one user. Run `mrsm doctor` for the duplicates and remove the extra rows."
+                ));
+            }
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        }
         let password_hash = match user.get_password_hash() {
             Ok(h) => h,
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
         let attributes = user.attributes.clone().unwrap_or_default();
         let table = self.instance_table_name("mrsm_users");
-        let query = if self.flavor.driver_family() == DriverFamily::Sqlite {
-            // SQLite hands a new row the highest deleted rowid again. A new user's ID is above
-            // every user's and every token owner's, in the same statement, so a key that a
-            // deleted user left behind never becomes the new user's.
-            let token_owners = match self.token_owner_ids_query().await {
-                Ok(query) => query,
+        // SQLite hands a new row the highest deleted rowid again: a SQLite-family user's ID is
+        // reserved first, never to be handed out twice (`reserve_user_id`).
+        let reserved = if self.flavor.driver_family() == DriverFamily::Sqlite {
+            match self.reserve_user_id().await {
+                Ok(id) => Some(id),
                 Err(e) => return SuccessTuple::fail(e.to_string()),
-            };
-            format!(
-                "INSERT INTO {table} (user_id, username, password_hash, email, user_type, attributes)\n\
-                 SELECT COALESCE(MAX(id), 0) + 1, {} FROM (\n    \
-                 SELECT MAX(user_id) AS id FROM {table}{token_owners}\n) AS ids",
-                placeholders(self.flavor, 1, 5)
-            )
+            }
         } else {
-            format!(
+            None
+        };
+        let query = match reserved {
+            Some(_) => format!(
+                "INSERT INTO {table} (user_id, username, password_hash, email, user_type, attributes) VALUES ({})",
+                placeholders(self.flavor, 1, 6)
+            ),
+            None => format!(
                 "INSERT INTO {table} (username, password_hash, email, user_type, attributes) VALUES ({})",
                 placeholders(self.flavor, 1, 5)
-            )
+            ),
         };
-        let params = vec![
+        let mut params: Vec<SqlParam> = reserved.map(SqlParam::Int).into_iter().collect();
+        params.extend([
             SqlParam::Text(user.username.clone()),
             SqlParam::Text(password_hash),
             SqlParam::opt_text(user.email.as_deref()),
             SqlParam::opt_text(user.user_type.as_deref()),
             self.json_param(&attributes),
-        ];
+        ]);
         match self.exec_params(&query, &params).await {
             Some(_) => {
                 SuccessTuple::ok(format!("Successfully registered user '{}'.", user.username))
@@ -181,10 +210,25 @@ impl SqlConnector {
             "SELECT {table}.user_id \nFROM {table} \nWHERE {table}.username = {}",
             placeholder(self.flavor, 1)
         );
-        let v = self
-            .value_params(&query, &[SqlParam::Text(user.username.clone())])
-            .await?;
-        Ok(v.and_then(|v| v.as_i64()).map(Value::Int))
+        let df = self
+            .read_params(&query, &[SqlParam::Text(user.username.clone())])
+            .await
+            .map_err(be)?;
+        let docs = frame_docs(&df);
+        // A username held by more than one row (an instance from before the unique key) names
+        // none of them: no credential may pick one.
+        if docs.len() > 1 {
+            return Err(be(format!(
+                "The username '{}' is held by {} users, so it names none of them. Run `mrsm doctor` \
+                 for the duplicates and remove the extra rows.",
+                user.username,
+                docs.len()
+            )));
+        }
+        Ok(docs
+            .first()
+            .and_then(|doc| doc.get("user_id").and_then(user_id_of))
+            .map(Value::Int))
     }
 
     async fn resolve_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
@@ -253,6 +297,39 @@ impl SqlConnector {
             .map(|v| Value::Str(v.to_string())))
     }
 
+    /// Reserve a new user ID on a SQLite-family instance. One write statement appends it to
+    /// `mrsm_user_ids`, whose rows are never deleted, above every ID reserved before and every
+    /// user's and token owner's ID (rows registered before the table existed), so an ID is never
+    /// handed out twice, even after its user and their keys are deleted. A user insert that then
+    /// fails wastes the ID. SQLite serializes writers, so concurrent reservations differ; the
+    /// largest ID is an error, never an overflow.
+    async fn reserve_user_id(&self) -> ConnectorResult<i64> {
+        let ids = self.instance_table_name("mrsm_user_ids");
+        let create = format!("CREATE TABLE IF NOT EXISTS {ids} (user_id INTEGER PRIMARY KEY)");
+        self.log(&create);
+        self.driver.exec(&create).await.map_err(be)?;
+        let users = self.instance_table_name("mrsm_users");
+        let token_owners = self.token_owner_ids_query().await?;
+        let query = format!(
+            "INSERT INTO {ids} (user_id)\n\
+             SELECT highest + 1 FROM (\n    \
+             SELECT COALESCE(MAX(id), 0) AS highest FROM (\n        \
+             SELECT MAX(user_id) AS id FROM {ids}\n        \
+             UNION ALL SELECT MAX(user_id) FROM {users}{token_owners}\n    \
+             ) AS ids\n\
+             ) AS reserved\n\
+             WHERE highest < {}\n\
+             RETURNING user_id",
+            i64::MAX
+        );
+        match self.value_checked(&query).await?.and_then(|v| v.as_i64()) {
+            Some(id) => Ok(id),
+            None => Err(be(format!(
+                "No user ID is left on {self}: the largest has been reserved."
+            ))),
+        }
+    }
+
     /// `UNION ALL SELECT MAX(...)` over the tokens table's `user_id`, or nothing while the
     /// table does not exist (a failed probe is an error).
     async fn token_owner_ids_query(&self) -> ConnectorResult<String> {
@@ -262,7 +339,7 @@ impl SqlConnector {
             return Ok(String::new());
         }
         Ok(format!(
-            "\n    UNION ALL SELECT MAX(CAST(user_id AS INTEGER)) FROM {}",
+            "\n        UNION ALL SELECT MAX(CAST(user_id AS INTEGER)) FROM {}",
             self.pipe_table_name(&tokens)
         ))
     }

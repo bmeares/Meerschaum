@@ -9,6 +9,7 @@ use chrono::Utc;
 use common::*;
 use meerschaum_connector::InstanceConnector;
 use meerschaum_core::users::{Expiration, Token, User};
+use meerschaum_kernel::value::Value as KValue;
 
 fn unique(tag: &str) -> String {
     format!(
@@ -100,3 +101,191 @@ flavor_tests!(
         ok(c.conn.delete_user(&bob).await);
     }
 );
+
+// The token-registration race, step by step: a registration reads its owner's ID, the owner is
+// deleted with their keys, a new user registers, and only then is the key written. The new user
+// never takes the deleted owner's ID, so the late key names nobody.
+flavor_tests!(
+    test_a_key_written_after_its_owner_is_deleted_names_nobody,
+    |c: Ctx| async move {
+        let mut owner = User::new(&unique("owner"), Some("test1234"));
+        ok(c.conn.register_user(&mut owner).await);
+        let owner_id = c.conn.get_user_id(&owner).await.unwrap().unwrap();
+        ok(c.conn.delete_user(&owner).await);
+        let mut newcomer = User::new(&unique("newcomer"), Some("test1234"));
+        ok(c.conn.register_user(&mut newcomer).await);
+        let newcomer_id = c.conn.get_user_id(&newcomer).await.unwrap().unwrap();
+        assert_ne!(newcomer_id.as_i64(), owner_id.as_i64());
+        // The late write of `register_token` (it read the owner's ID before the deletion and
+        // writes its row now, with that ID).
+        use meerschaum_connector::pipe_ops;
+        let late_id = uuid::Uuid::new_v4();
+        let doc: pipe_ops::Doc = [
+            ("id".to_string(), KValue::Uuid(late_id)),
+            ("user_id".to_string(), pipe_ops::user_id_value(&owner_id)),
+            ("creation".to_string(), pipe_ops::utc_value(Utc::now())),
+            ("label".to_string(), KValue::Str(unique("late"))),
+            ("is_valid".to_string(), KValue::Bool(true)),
+            ("secret_hash".to_string(), KValue::Str("x".into())),
+        ]
+        .into_iter()
+        .collect();
+        let tokens = InstanceConnector::get_tokens_pipe(&c.conn);
+        ok(pipe_ops::sync_docs(&c.conn, &tokens, vec![doc], false).await);
+        let late_owner = InstanceConnector::get_token_model(&c.conn, &late_id)
+            .await
+            .unwrap()
+            .expect("the late key was written")
+            .user_id
+            .unwrap();
+        assert!(
+            InstanceConnector::get_username(&c.conn, &late_owner)
+                .await
+                .unwrap()
+                .is_none(),
+            "the late key names a user"
+        );
+        ok(c.conn.delete_user(&newcomer).await);
+    }
+);
+
+/// SQLite: reserved IDs are never handed out twice, concurrent registrations get distinct IDs,
+/// a registration that fails after reserving wastes its ID, and the largest ID is an error.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_user_ids_are_reserved_once() {
+    let Some(c) = ctx("sqlite", "reserved_ids").await else {
+        return;
+    };
+    let mut first = User::new(&unique("first"), Some("test1234"));
+    ok(c.conn.register_user(&mut first).await);
+    let mut last = User::new(&unique("last"), Some("test1234"));
+    ok(c.conn.register_user(&mut last).await);
+    let last_id = c
+        .conn
+        .get_user_id(&last)
+        .await
+        .unwrap()
+        .unwrap()
+        .as_i64()
+        .unwrap();
+    ok(c.conn.delete_user(&last).await);
+
+    // Concurrent registrations, two of them for the same username.
+    let twin = unique("twin");
+    let mut names: Vec<String> = (0..6).map(|i| unique(&format!("racer{i}"))).collect();
+    names.push(twin.clone());
+    names.push(twin.clone());
+    let conn = &c.conn;
+    let outcomes = futures_util::future::join_all(names.into_iter().map(|name| async move {
+        let mut user = User::new(&name, Some("test1234"));
+        (name.clone(), conn.register_user(&mut user).await.success)
+    }))
+    .await;
+    let registered: Vec<String> = outcomes
+        .into_iter()
+        .filter(|(_, success)| *success)
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(
+        registered.iter().filter(|n| **n == twin).count(),
+        1,
+        "one twin"
+    );
+    assert_eq!(registered.len(), 7);
+    let mut ids = Vec::new();
+    for name in &registered {
+        let id = c
+            .conn
+            .get_user_id(&User::new(name, None))
+            .await
+            .unwrap()
+            .unwrap()
+            .as_i64()
+            .unwrap();
+        assert!(id > last_id, "{name} took a deleted user's ID");
+        ids.push(id);
+    }
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 7, "distinct IDs");
+    let highest = *ids.last().unwrap();
+    // A reservation whose user insert failed (as the losing twin's may) is spent: the next
+    // user is above it, and nothing below it is handed out again.
+    let reserved = c.conn.instance_table_name("mrsm_user_ids");
+    assert!(
+        c.conn
+            .exec(&format!(
+                "INSERT INTO {reserved} (user_id) VALUES ({})",
+                highest + 5
+            ))
+            .await
+            .is_some()
+    );
+    let mut after = User::new(&unique("after"), Some("test1234"));
+    ok(c.conn.register_user(&mut after).await);
+    let after_id = c
+        .conn
+        .get_user_id(&after)
+        .await
+        .unwrap()
+        .unwrap()
+        .as_i64()
+        .unwrap();
+    assert_eq!(after_id, highest + 6, "a spent reservation was handed out");
+
+    // No ID left: refused, never an overflow.
+    assert!(
+        c.conn
+            .exec(&format!(
+                "INSERT INTO {reserved} (user_id) VALUES ({})",
+                i64::MAX
+            ))
+            .await
+            .is_some()
+    );
+    let mut overflow = User::new(&unique("overflow"), Some("test1234"));
+    let refused = c.conn.register_user(&mut overflow).await;
+    assert!(!refused.success);
+    assert!(
+        refused.message.contains("No user ID is left"),
+        "{}",
+        refused.message
+    );
+}
+
+/// SQLite: a username held twice (rows from before the unique key) names nobody, and no new
+/// user is registered until the duplicates are repaired.
+#[tokio::test]
+async fn sqlite_duplicate_usernames_fail_closed() {
+    let Some(c) = ctx("sqlite", "dupe_names").await else {
+        return;
+    };
+    let mut dupe = User::new(&unique("dupe"), Some("test1234"));
+    ok(c.conn.register_user(&mut dupe).await);
+    let users = c.conn.instance_table_name("mrsm_users");
+    assert!(
+        c.conn
+            .exec("DROP INDEX IF EXISTS uq_mrsm_users_username")
+            .await
+            .is_some()
+    );
+    assert!(
+        c.conn
+            .exec(&format!(
+                "INSERT INTO {users} (user_id, username, password_hash) VALUES (9000, '{}', 'x')",
+                dupe.username
+            ))
+            .await
+            .is_some()
+    );
+    let looked_up = c.conn.get_user_id(&User::new(&dupe.username, None)).await;
+    assert!(looked_up.is_err(), "{looked_up:?}");
+    let mut next = User::new(&unique("next"), Some("test1234"));
+    let refused = c.conn.register_user(&mut next).await;
+    assert!(!refused.success);
+    assert!(
+        refused.message.contains("mrsm doctor"),
+        "{}",
+        refused.message
+    );
+}
