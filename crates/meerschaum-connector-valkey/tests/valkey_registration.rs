@@ -1,7 +1,10 @@
 //! Registration is all-or-nothing: a failure at any write of `register_pipe` /
 //! `valkey_register_user` leaves no claim and no row, and a retry registers exactly once.
 //! Faults are injected through the in-memory backend's hook; the `_live` tests repeat what a
-//! real server can reproduce (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`).
+//! real server can reproduce (set `MRSM_VALKEY_TEST_URL` and `MRSM_TEST_ISOLATED=1` for an owned fixture).
+
+#[path = "support/live.rs"]
+mod live;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,8 +27,7 @@ fn unique(prefix: &str) -> String {
 }
 
 async fn live_backend() -> Option<Arc<dyn ValkeyBackend>> {
-    let url = std::env::var("MRSM_VALKEY_TEST_URL")
-        .unwrap_or_else(|_| "redis://localhost:6399/12".to_string());
+    let url = live::url()?;
     match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),

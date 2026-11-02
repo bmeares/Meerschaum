@@ -899,6 +899,7 @@ impl APIConnector {
             ("begin", bound_query(&query.begin)),
             ("end", bound_query(&query.end)),
             ("params", params_json.into()),
+            ("order", QueryValue::opt(query.order.clone())),
             (
                 "instance",
                 QueryValue::opt(self.get_pipe_instance_keys(pipe)),

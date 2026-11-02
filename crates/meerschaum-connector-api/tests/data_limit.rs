@@ -36,6 +36,7 @@ async fn an_explicit_limit_is_sent_and_a_refused_one_is_an_error() {
     server.push_response(json(413, refused));
     let limited = DataQuery {
         limit: Some(5),
+        order: Some("desc".into()),
         ..Default::default()
     };
     let answer = conn.get_pipe_data(&pipe, &limited).await;
@@ -55,7 +56,9 @@ async fn an_explicit_limit_is_sent_and_a_refused_one_is_an_error() {
     let targets: Vec<&str> = requests.iter().map(|r| r.target.as_str()).collect();
     assert_eq!(targets.len(), 2, "{targets:?}");
     assert!(
-        targets[0].contains("/data?") && targets[0].contains("limit=5"),
+        targets[0].contains("/data?")
+            && targets[0].contains("limit=5")
+            && targets[0].contains("order=desc"),
         "{targets:?}"
     );
     assert!(!targets[1].contains("limit="), "{targets:?}");

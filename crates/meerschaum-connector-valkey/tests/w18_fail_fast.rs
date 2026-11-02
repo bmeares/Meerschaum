@@ -1,6 +1,9 @@
 //! Wave 18 (DECISIONS item 23): a refused or unresponsive Valkey server fails with one clear
 //! message. Offline: a closed local port and an unroutable address.
 
+#[path = "support/live.rs"]
+mod live;
+
 use std::time::{Duration, Instant};
 
 use meerschaum_connector_valkey::ValkeyConnector;
@@ -66,8 +69,9 @@ async fn an_unroutable_host_is_bounded_by_connect_timeout() {
 
 #[tokio::test]
 async fn the_reachable_test_server_still_connects() {
-    let url = std::env::var("MRSM_VALKEY_TEST_URL")
-        .unwrap_or_else(|_| "redis://localhost:6399/12".to_string());
+    let Some(url) = live::url() else {
+        return;
+    };
     let Ok(connector) = ValkeyConnector::from_uri("w18cn", &url).await else {
         eprintln!("SKIPPED: no Valkey server reachable at {url}");
         return;

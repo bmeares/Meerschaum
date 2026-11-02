@@ -794,7 +794,10 @@ impl Reader {
             .filter(|c| omit.contains(c) || !select.contains(c))
             .collect();
         let mut cols_to_add: IndexMap<String, String> = IndexMap::new();
-        for col in select.iter().filter(|c| !names.contains(c)) {
+        for col in select
+            .iter()
+            .filter(|c| !names.contains(c) && !omit.contains(c))
+        {
             cols_to_add.insert(
                 col.clone(),
                 pipe_dtypes
@@ -1825,6 +1828,18 @@ mod tests {
             },
             GetDataArgs {
                 omit_columns: cols(&["name"]),
+                order: order("asc"),
+                ..Default::default()
+            },
+            GetDataArgs {
+                select_columns: cols(&["dt", "val"]),
+                omit_columns: cols(&["val"]),
+                order: order("asc"),
+                ..Default::default()
+            },
+            GetDataArgs {
+                select_columns: cols(&["dt", "nope"]),
+                omit_columns: cols(&["nope"]),
                 order: order("asc"),
                 ..Default::default()
             },

@@ -27,6 +27,11 @@ TESTS = {
     'instance_pipe_data': 'meerschaum-connector-sql',
     'valkey_first_user': 'meerschaum-connector-valkey',
     'valkey_misc': 'meerschaum-connector-valkey',
+    'pipeline_metadata_move': 'meerschaum-connector-valkey',
+    'rc15_fail_closed': 'meerschaum-connector-valkey',
+    'valkey_registration': 'meerschaum-connector-valkey',
+    'w18_fail_fast': 'meerschaum-connector-valkey',
+    'valkey_replay': 'meerschaum-connector-valkey',
 }
 FILTERS = {'instance_pipe_data': 'test_selected_columns_do_not_reintroduce_omitted_columns'}
 
@@ -126,7 +131,7 @@ def check_test_output(name, output):
     result = re.search(r'test result: ok\. (\d+) passed;', output)
     if result is None or int(result[1]) == 0:
         raise ValueError(f'No passing native tests were recorded: {name}')
-    if name.startswith('valkey_') and 'SKIPPED' in output:
+    if TESTS.get(name) == 'meerschaum-connector-valkey' and 'SKIPPED' in output:
         raise ValueError(f'A required live Valkey check returned without running: {name}')
     if name.startswith('instance_') and re.search(r'Skipping (postgresql|mysql|mariadb):', output):
         raise ValueError(f'A required live SQL check returned without running: {name}')
@@ -176,7 +181,7 @@ def run(root, profile='test', focused_build=False):
         # Same workspace/features as ci.sh test: Cargo reuses the already built executables.
         build = root / 'native-test-artifacts.log'
         if focused_build:
-            # Local iteration need not relink the whole workspace just to run eight targets.
+            # Local iteration need not relink the whole workspace for these selected targets.
             logs = []
             for crate in sorted(set(TESTS.values())):
                 command = ['cargo', 'test', '-p', crate, '--locked', '--no-run', '--message-format=json']

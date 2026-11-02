@@ -27,6 +27,9 @@ def test_missing_or_foreign_native_executables_refuse_the_gate(tmp_path):
     check_test_output('valkey_misc', 'test result: ok. 2 passed; 0 failed; 0 ignored;')
     with pytest.raises(ValueError, match='without running'):
         check_test_output('valkey_misc', 'SKIPPED leases_live\ntest result: ok. 2 passed;')
+    for name in ('pipeline_metadata_move', 'rc15_fail_closed', 'w18_fail_fast'):
+        with pytest.raises(ValueError, match='without running'):
+            check_test_output(name, 'SKIPPED: no owned fixture\ntest result: ok. 2 passed;')
     with pytest.raises(ValueError, match='No passing native tests'):
         check_test_output('instance_users', 'test result: ok. 0 passed;')
     check_test_output('instance_users', 'Skipping oracle: not configured.\ntest result: ok. 2 passed;')

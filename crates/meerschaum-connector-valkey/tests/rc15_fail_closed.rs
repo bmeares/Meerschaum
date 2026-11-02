@@ -2,7 +2,10 @@
 //! (which grants every scope, v4's rule for a user without a `scopes` attribute), so the API
 //! server refuses the request instead of guessing. The read errors are real Valkey errors: a key
 //! holding the wrong type answers `WRONGTYPE`, in memory and on a live server
-//! (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`).
+//! (set `MRSM_VALKEY_TEST_URL` and `MRSM_TEST_ISOLATED=1` for an owned fixture).
+
+#[path = "support/live.rs"]
+mod live;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -120,8 +123,9 @@ async fn user_reads_that_fail_are_errors_in_memory() {
 
 #[tokio::test]
 async fn user_reads_that_fail_are_errors_live() {
-    let url = std::env::var("MRSM_VALKEY_TEST_URL")
-        .unwrap_or_else(|_| "redis://localhost:6399/12".to_string());
+    let Some(url) = live::url() else {
+        return;
+    };
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),

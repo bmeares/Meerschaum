@@ -126,6 +126,24 @@ print('API_CHUNKS:' + json.dumps({{'failed': not success, 'message': message}}))
     assert result['failed']
 
 
+def test_real_api_applies_descending_order_before_its_row_limit(capped_server):
+    server = capped_server
+    result = python_json(server, f'''
+pipe = m.Pipe({SOURCE!r}, {METRIC!r}, instance='api:capped')
+ascending = pipe.get_data(order='asc', limit=2, as_pandas=True).to_dict(orient='records')
+descending = pipe.get_data(order='desc', limit=2, as_pandas=True).to_dict(orient='records')
+bounded = pipe.get_data(begin=2, end=7, order='desc', limit=2,
+                        as_pandas=True).to_dict(orient='records')
+backtrack = pipe.get_backtrack_data(limit=1, as_pandas=True).to_dict(orient='records')
+assert [row['n'] for row in ascending] == [0, 0], ascending
+assert [row['n'] for row in descending] == [9, 9], descending
+assert [row['n'] for row in bounded] == [6, 6], bounded
+assert [row['n'] for row in backtrack] == [9], backtrack
+print('API_CHUNKS:' + json.dumps(True))
+''')
+    assert result
+
+
 @contextmanager
 def failed_existence_proxy(server, suffix='/exists'):
     """Forward the fixture's reads and login; fail one requested metadata probe."""

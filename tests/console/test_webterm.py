@@ -229,22 +229,40 @@ def test_without_the_flag_there_is_no_terminal(server, context):
     assert page.locator('#console-nav-terminal').count() == 0
 
 
+#: What a websocket without a session reads before it closes (`webterm::Access::refusal`).
+DENIED_NOTICE = 'Not logged in, or the session has ended. Log in again to use the terminal.'
+
+
 def test_terminal_requires_a_logged_in_administrator(term_server, context):
     base = term_server.base_url
     page = context.new_page()
     response = page.request.get(f"{base}/webterm/not-a-session")
     assert response.status == 401
     assert 'Unauthorized' in response.text() and '/dash/login' in response.text()
-    ### The websocket is accepted and closed, as in v4.
+    ### The websocket is accepted and closed, as in v4; v5 says why first and ends the terminal
+    ### so the browser does not reconnect. Nothing else is sent, so no shell started.
     page.goto(f"{base}/version")
     closed = page.evaluate(
         """() => new Promise((resolve) => {
+            const messages = [];
             const socket = new WebSocket(`ws://${location.host}/websocket/not-a-session`);
-            socket.onclose = (e) => resolve({code: e.code, clean: e.wasClean});
-            socket.onmessage = (e) => resolve({message: e.data});
+            const timer = setTimeout(() => {
+                socket.close();
+                resolve({timeout: true, messages});
+            }, 20000);
+            socket.onmessage = (e) => messages.push(e.data);
+            socket.onclose = (e) => {
+                clearTimeout(timer);
+                resolve({code: e.code, clean: e.wasClean, messages});
+            };
         })"""
     )
-    assert closed == {'code': 1000, 'clean': True}, closed
+    messages = closed.pop('messages')
+    assert closed == {'code': 1000, 'clean': True}, (closed, messages)
+    assert [json.loads(message) for message in messages] == [
+        ['stdout', f"\r\n[{DENIED_NOTICE}]\r\n"],
+        ['disconnect', 1],
+    ], messages
     ### The console page without a session is the login page.
     anonymous = Tab(context.new_page(), base)
     anonymous.goto('/dash/webterm', '#username-input')

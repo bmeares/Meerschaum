@@ -4,9 +4,12 @@
 //!
 //! - `replay_in_memory` runs offline against the in-memory backend.
 //! - `replay_live` runs against a real Valkey server when one is reachable at
-//!   `MRSM_VALKEY_TEST_URL` (default `redis://localhost:6399/12`, the `valkey` service of
+//!   `MRSM_VALKEY_TEST_URL` and `MRSM_TEST_ISOLATED=1` (an owned fixture, for example the `valkey` service of
 //!   `tests/docker-compose.yaml`, database 12 which it flushes). It is skipped with a message
 //!   otherwise.
+
+#[path = "support/live.rs"]
+mod live;
 
 mod common;
 
@@ -37,8 +40,9 @@ async fn replay_in_memory() {
 
 #[tokio::test]
 async fn replay_live() {
-    let url = std::env::var("MRSM_VALKEY_TEST_URL")
-        .unwrap_or_else(|_| "redis://localhost:6399/12".to_string());
+    let Some(url) = live::url() else {
+        return;
+    };
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),

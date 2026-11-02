@@ -149,17 +149,17 @@ jobs:
         # `MRSM_TEST_NO_CORE=1` still skips the extension-dependent tests locally, where it is not built.
         env:
           MRSM_NO_AUTO_INSTALL: '1'
-          # Live Valkey coverage runs below against owned fixtures, never an ambient service.
-          MRSM_VALKEY_TEST_URL: redis://127.0.0.1:9/12
-        run: scripts/rust/ci.sh test
+        # Live Valkey coverage runs below against owned fixtures, never an ambient service.
+        run: env -u MRSM_VALKEY_TEST_URL -u MRSM_VALKEY_FIRST_USER_TEST_URL scripts/rust/ci.sh test
       - name: Native account regressions on isolated server databases
+        id: native_backend_checks
         if: ${{ needs.changes.outputs.full == 'true' }}
         run: python3 scripts/ci/native_backends.py --root "$RUNNER_TEMP/mrsm-native-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
       - name: Clean up only the native check's owned fixtures
         if: ${{ always() && needs.changes.outputs.full == 'true' }}
         run: python3 scripts/ci/native_backends.py --cleanup --root "$RUNNER_TEMP/mrsm-native-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
       - name: Retain native backend results
-        if: ${{ always() && needs.changes.outputs.full == 'true' }}
+        if: ${{ always() && needs.changes.outputs.full == 'true' && steps.native_backend_checks.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
           name: native-backend-results-${{ github.run_attempt }}

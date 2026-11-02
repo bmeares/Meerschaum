@@ -537,15 +537,15 @@ def test_a_custom_instance_looks_users_up_exactly(tmp_path):
             {'user_id': 'id-under', 'username': '_alice', 'user_type': None},
         ]
 
-        def get_data(self, columns, params=None, debug=False):
-            import pandas as pd
+        def get_data(self, columns, params=None, debug=False, as_docs=False):
+            assert as_docs, 'Identity lookup must not require a DataFrame library.'
             rows = self.rows
             for key, value in (params or {}).items():
                 if str(value).startswith('_'):
                     rows = [r for r in rows if r[key] != value[1:]]
                 else:
                     rows = [r for r in rows if r[key] == value]
-            return pd.DataFrame(rows)[list(columns)] if rows else pd.DataFrame(columns=columns)
+            return [{column: row[column] for column in columns} for row in rows]
 
     users = FakeUsersPipe()
     assert _exact_row(users, 'username', '_alice', ['user_id'])['user_id'] == 'id-under'

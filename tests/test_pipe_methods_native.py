@@ -314,7 +314,8 @@ def _without_dtypes(result):
             item.pop('dtypes', None)
 
 
-def _compare(kind, instance, op, native_calls, binding, n=12, normalize=None, **kwargs):
+def _compare(kind, instance, op, native_calls, binding, n=12, normalize=None,
+             expected_transform=None, **kwargs):
     """
     `op(pipe)` compared with the recorded Python-mode result (on the pipe itself, or on SQLite for Valkey).
     Returns the snapshot after asserting the equality and that `binding` handled a call.
@@ -322,6 +323,8 @@ def _compare(kind, instance, op, native_calls, binding, n=12, normalize=None, **
     pipe = _loaded(instance, n=n, **kwargs)
     try:
         expected = oracle.expected()
+        if expected_transform is not None:
+            expected = expected_transform(expected)
         before = native_calls.handled.get(binding, 0)
         actual = snapshot(op(pipe))
         assert native_calls.handled.get(binding, 0) > before, native_calls.declined
@@ -367,6 +370,18 @@ GET_DATA_CASES = {
 }
 
 
+def _without_snapshot_columns(value, omitted):
+    """Remove a known v4 omission bug from the expected snapshot only."""
+    keep = [i for i, name in enumerate(value['cols']) if name not in omitted]
+    return {
+        **value,
+        'cols': [value['cols'][i] for i in keep],
+        'dtypes': [value['dtypes'][i] for i in keep],
+        'rows': [{key: cell for key, cell in row.items() if key not in omitted}
+                 for row in value['rows']],
+    }
+
+
 @pytest.mark.parametrize('case', sorted(GET_DATA_CASES))
 def test_get_data(case, kind, instance, native_calls):
     kwargs = GET_DATA_CASES[case]
@@ -382,6 +397,10 @@ def test_get_data(case, kind, instance, native_calls):
         kind, instance,
         lambda pipe: pipe.get_data(**copy.deepcopy(kwargs)),
         native_calls, 'pipe_get_data',
+        expected_transform=(
+            (lambda value: _without_snapshot_columns(value, {'val'}))
+            if case == 'select_and_omit' else None
+        ),
     )
 
 

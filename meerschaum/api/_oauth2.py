@@ -342,7 +342,12 @@ def decode_jwt(token: str) -> dict:
     Validate a JWT signed with the API secret (HS256) and return its claims.
     Raises `jwt.PyJWTError` when the signature, expiry or format is invalid.
     """
-    return jwt.decode(token, SECRET, algorithms=['HS256'])
+    try:
+        return jwt.decode(token, SECRET, algorithms=['HS256'])
+    except RecursionError as error:
+        ### PyJWT before 2.14.0 parses the header before the signature and lets a deeply
+        ### nested one raise `RecursionError` (GHSA-8wjv-2p76-3863).
+        raise jwt.DecodeError("Invalid token header.") from error
 
 
 def generate_secret_key() -> bytes:

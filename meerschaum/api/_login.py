@@ -125,7 +125,9 @@ class LoginManager(OAuth2PasswordBearer):
     def _get_payload(self, token: str) -> Dict[str, Any]:
         try:
             return jwt.decode(token, self.secret, algorithms=[self.algorithm])
-        except jwt.PyJWTError:
+        ### PyJWT before 2.14.0 parses the header before the signature and lets a deeply
+        ### nested one raise `RecursionError` (GHSA-8wjv-2p76-3863).
+        except (jwt.PyJWTError, RecursionError):
             raise self.not_authenticated_exception
 
     def _has_scopes(

@@ -1269,8 +1269,22 @@ async fn a_token_carries_at_most_its_owners_scopes() {
         assert!(!detail.contains("'pipes:read'"), "{detail}");
     }
 
-    // No scopes asked for: the owner's own, not the built-in list.
+    // An explicit empty list grants nothing.
     let r = send(&app, register(&ron, "[]")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let empty_id = r.json()["id"].as_str().unwrap().to_string();
+
+    // No scopes asked for: the owner's own, not the built-in list.
+    let r = send(
+        &app,
+        req(
+            "POST",
+            "/tokens/register",
+            Some(&ron),
+            Some(("application/json", br#"{"label": "t"}"#.to_vec())),
+        ),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     let id = r.json()["id"].as_str().unwrap().to_string();
     let listed = send(&app, req("GET", "/tokens", Some(&ron), None))
@@ -1285,6 +1299,7 @@ async fn a_token_carries_at_most_its_owners_scopes() {
             .unwrap()["scopes"]
             .clone()
     };
+    assert_eq!(scopes_of(&empty_id), json!([]));
     assert_eq!(
         scopes_of(&id),
         json!(["pipes:read", "jobs:read", "myplugin:read"])

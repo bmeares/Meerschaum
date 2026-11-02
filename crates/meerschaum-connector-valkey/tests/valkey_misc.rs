@@ -1,7 +1,10 @@
 //! Offline tests (in-memory backend) for the parts of the connector the Python fixture does not
 //! cover: URI building, `push_df` / `read`, `fetch`, tokens through the generic tokens pipe, and
 //! the §5.8 lease pair. `leases_live` repeats the lease checks against a real server when one is
-//! reachable (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`).
+//! reachable (set `MRSM_VALKEY_TEST_URL` and `MRSM_TEST_ISOLATED=1` for an owned fixture).
+
+#[path = "support/live.rs"]
+mod live;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -248,8 +251,9 @@ async fn leases_in_memory() {
 
 #[tokio::test]
 async fn leases_live() {
-    let url = std::env::var("MRSM_VALKEY_TEST_URL")
-        .unwrap_or_else(|_| "redis://localhost:6399/12".to_string());
+    let Some(url) = live::url() else {
+        return;
+    };
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),
@@ -393,8 +397,9 @@ async fn a_pipe_registered_concurrently_is_registered_once() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_pipe_registered_concurrently_is_registered_once_live() {
-    let url = std::env::var("MRSM_VALKEY_TEST_URL")
-        .unwrap_or_else(|_| "redis://localhost:6399/12".to_string());
+    let Some(url) = live::url() else {
+        return;
+    };
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),
