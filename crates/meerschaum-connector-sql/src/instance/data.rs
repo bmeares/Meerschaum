@@ -393,6 +393,16 @@ impl SqlConnector {
             .await)
     }
 
+    /// [`InstanceConnector::pipe_exists_checked`]: a catalog query that fails is an error, never
+    /// "no table" ([`SqlConnector::table_exists_checked`]).
+    ///
+    /// [`InstanceConnector::pipe_exists_checked`]: meerschaum_connector::InstanceConnector::pipe_exists_checked
+    pub async fn pipe_exists_checked(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        let sp = self.sql_pipe(pipe)?;
+        self.table_exists_checked(&sp.target, self.get_pipe_schema(&sp).as_deref())
+            .await
+    }
+
     /// `Pipe.parse_date_bounds(bound)`: coerce a datetime to the axis' timezone (and an
     /// integer axis with `precision` to an epoch integer).
     pub fn parse_date_bound(

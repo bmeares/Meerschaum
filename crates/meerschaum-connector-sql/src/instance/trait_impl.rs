@@ -197,6 +197,12 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::pipe_exists(self, pipe).await
     }
 
+    async fn pipe_exists_checked(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        self.require_schema().await?;
+        let pipe = &self.prepare_pipe(pipe).await;
+        SqlConnector::pipe_exists_checked(self, pipe).await
+    }
+
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         if let Err(e) = self.require_schema().await {
             return SuccessTuple::fail(e.to_string());

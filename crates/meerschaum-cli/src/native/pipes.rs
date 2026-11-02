@@ -245,22 +245,64 @@ pub fn hydrate(rt: &mut Runtime<'_>, inst: &Instance, sp: &mut SelectedPipe) {
     }
     let session = session(rt);
     if let Ok(attrs) = session.block_on(inst.conn().get_pipe_attributes(&sp.pipe)) {
-        if let Some(p) = attrs.get("parameters").and_then(Value::as_map) {
-            let mut params = p.clone();
-            for (k, v) in sp.pipe.raw_parameters() {
-                params.insert(k.clone(), v.clone());
-            }
-            sp.pipe.set_parameters(params);
-        }
-        if let Some(id) = attrs.get("pipe_id") {
-            sp.id = match id {
-                Value::Int(i) => Some(PipeId::Int(*i)),
-                Value::Str(s) => Some(PipeId::parse(s)),
-                _ => sp.id.clone(),
-            };
-        }
+        apply_attributes(sp, &attrs);
     }
     sp.hydrated = true;
+}
+
+/// [`hydrate`] for a pipe known to be registered whose attributes a decision copies or keeps
+/// (`copy pipes`: the source's parameters and locks, an existing destination's access and
+/// locks). A read that fails is an error, and so are attributes that came back with neither
+/// `parameters` nor `pipe_id` (never taken for a pipe with default parameters). Stored
+/// parameters that are empty or `null` with a known ID are valid.
+pub fn hydrate_checked(
+    rt: &mut Runtime<'_>,
+    inst: &Instance,
+    sp: &mut SelectedPipe,
+) -> Result<(), String> {
+    if sp.hydrated {
+        return Ok(());
+    }
+    let session = session(rt);
+    let attrs = session.block_on(inst.conn().get_pipe_attributes(&sp.pipe));
+    hydrate_from(sp, attrs)
+}
+
+/// [`hydrate_checked`] once the attributes were read.
+fn hydrate_from(
+    sp: &mut SelectedPipe,
+    attrs: meerschaum_connector::ConnectorResult<Map>,
+) -> Result<(), String> {
+    let attrs = attrs.map_err(|e| format!("Failed to read the attributes of {}: {e}", sp.pipe))?;
+    let known = |key: &str| attrs.get(key).is_some_and(|v| !v.is_null());
+    if !known("parameters") && !known("pipe_id") {
+        return Err(format!(
+            "{} answered no attributes for {}, a registered pipe.",
+            sp.pipe.instance_keys(),
+            sp.pipe
+        ));
+    }
+    apply_attributes(sp, &attrs);
+    sp.hydrated = true;
+    Ok(())
+}
+
+/// The stored `parameters` under the pipe's own, and the stored `pipe_id`.
+fn apply_attributes(sp: &mut SelectedPipe, attrs: &Map) {
+    if let Some(p) = attrs.get("parameters").and_then(Value::as_map) {
+        let mut params = p.clone();
+        for (k, v) in sp.pipe.raw_parameters() {
+            params.insert(k.clone(), v.clone());
+        }
+        sp.pipe.set_parameters(params);
+    }
+    if let Some(id) = attrs.get("pipe_id") {
+        sp.id = match id {
+            Value::Int(i) => Some(PipeId::Int(*i)),
+            Value::Str(s) => Some(PipeId::parse(s)),
+            _ => sp.id.clone(),
+        };
+    }
 }
 
 /// The keys `pipe_repr` reads.
@@ -335,4 +377,66 @@ pub fn is_python_connector(connector_keys: &str) -> bool {
 /// `string(args, "mrsm_instance")` for messages that print the raw argument.
 pub fn raw_instance_arg(args: &ArgsMap) -> String {
     string(args, "mrsm_instance").unwrap_or_else(|| "None".into())
+}
+
+#[cfg(test)]
+mod hydrate_tests {
+    use super::{SelectedPipe, hydrate_from};
+    use meerschaum_connector::{ConnectorError, PipeId};
+    use meerschaum_core::Pipe;
+    use meerschaum_core::value::{Map, Value};
+
+    fn selected() -> SelectedPipe {
+        let mut own = Map::new();
+        own.insert("target".into(), Value::Str("own_target".into()));
+        SelectedPipe {
+            pipe: Pipe::builder("sql:src", "temp")
+                .instance("sql:dest")
+                .parameters(own)
+                .build()
+                .unwrap(),
+            id: None,
+            hydrated: false,
+        }
+    }
+
+    fn attributes(parameters: Value, pipe_id: Value) -> Map {
+        let mut attrs = Map::new();
+        attrs.insert("parameters".into(), parameters);
+        attrs.insert("pipe_id".into(), pipe_id);
+        attrs
+    }
+
+    #[test]
+    fn a_failed_or_empty_read_is_refused_and_leaves_the_pipe_unhydrated() {
+        let mut sp = selected();
+        let failed = hydrate_from(&mut sp, Err(ConnectorError::Backend("503".into())));
+        assert!(failed.unwrap_err().contains("503"));
+        assert!(!sp.hydrated);
+        assert!(hydrate_from(&mut sp, Ok(Map::new())).is_err());
+        assert!(hydrate_from(&mut sp, Ok(attributes(Value::Null, Value::Null))).is_err());
+        assert!(!sp.hydrated);
+        assert_eq!(
+            sp.pipe.raw_parameters().get("target"),
+            Some(&Value::Str("own_target".into()))
+        );
+    }
+
+    #[test]
+    fn stored_parameters_merge_under_the_pipes_own_and_a_known_id_is_enough() {
+        let mut stored = Map::new();
+        stored.insert("target".into(), Value::Str("stored_target".into()));
+        stored.insert("locks".into(), Value::List(vec![Value::Str("sync".into())]));
+        let mut sp = selected();
+        hydrate_from(&mut sp, Ok(attributes(Value::Map(stored), Value::Int(7)))).unwrap();
+        assert!(sp.hydrated);
+        assert!(matches!(sp.id, Some(PipeId::Int(7))));
+        let params = sp.pipe.raw_parameters();
+        assert_eq!(params.get("target"), Some(&Value::Str("own_target".into())));
+        assert!(params.get("locks").is_some());
+        // `null` parameters with a known ID: a registered pipe without stored parameters.
+        let mut sp = selected();
+        hydrate_from(&mut sp, Ok(attributes(Value::Null, Value::Int(8)))).unwrap();
+        assert!(sp.hydrated && matches!(sp.id, Some(PipeId::Int(8))));
+    }
 }

@@ -685,8 +685,11 @@ async fn get_pipe_attributes(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
 async fn get_pipe_exists(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
     let access = authorize(&ctx, PIPES_READ).await?;
     let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
+    // A catalog query that fails is a `500`, never `false`: a client deciding whether a pipe
+    // has rows to read must not take a failed instance for a missing table (v4 clients still
+    // read any refusal as `False`).
     let exists = conn
-        .pipe_exists(&h.pipe)
+        .pipe_exists_checked(&h.pipe)
         .await
         .map_err(|e| ApiError::exception("pipe_exists", e))?;
     Ok(ok_json(&Json::Bool(exists)))

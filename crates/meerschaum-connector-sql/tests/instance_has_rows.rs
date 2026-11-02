@@ -47,3 +47,51 @@ flavor_tests!(test_pipe_has_rows_checked, |c: Ctx| async move {
     assert!(!has_rows(station("y")).await);
     let _ = c.conn.drop_pipe(&pipe).await;
 });
+
+// `pipe_exists_checked`, which decides whether `copy pipes` reads a source's rows: a missing
+// table is `false`, an existing one `true`.
+flavor_tests!(test_pipe_exists_checked, |c: Ctx| async move {
+    let pipe = c.pipe(
+        "test",
+        "exists_checked",
+        None,
+        r#"{"columns": {"id": "station"}}"#,
+    );
+    assert!(
+        !InstanceConnector::pipe_exists_checked(&c.conn, &pipe)
+            .await
+            .unwrap()
+    );
+    ok(
+        c.sync(&pipe, vec![doc(vec![("station", KValue::Str("x".into()))])])
+            .await,
+    );
+    assert!(
+        InstanceConnector::pipe_exists_checked(&c.conn, &pipe)
+            .await
+            .unwrap()
+    );
+    let _ = c.conn.drop_pipe(&pipe).await;
+});
+
+/// An instance whose database cannot be opened: the checked probe is an error, never "no
+/// table" (`table_exists` reads the same failure as `false`).
+#[tokio::test]
+async fn sqlite_existence_failures_are_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let uri = format!(
+        "sqlite:///{}",
+        dir.path().join("no-such-directory").join("x.db").display()
+    );
+    let broken = meerschaum_connector_sql::SqlConnector::from_uri("rs_exists_broken", &uri)
+        .await
+        .unwrap();
+    let pipe = meerschaum_core::Pipe::builder("test", "exists_broken")
+        .build()
+        .unwrap();
+    assert!(
+        InstanceConnector::pipe_exists_checked(&broken, &pipe)
+            .await
+            .is_err()
+    );
+}

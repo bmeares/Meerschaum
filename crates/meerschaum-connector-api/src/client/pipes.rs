@@ -1014,8 +1014,21 @@ impl APIConnector {
 
     /// `get_pipe_id(pipe)`: `GET /pipes/{keys}/id`.
     ///
-    /// PARITY: a string ID is returned as the raw response text (with its JSON quotes).
+    /// PARITY: a string ID is returned as the raw response text (with its JSON quotes), and any
+    /// refusal reads as unregistered (`None`), as in v4.
     pub async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
+        self.read_pipe_id(pipe, false).await
+    }
+
+    /// [`Self::get_pipe_id`] for a decision that would otherwise register over a pipe: only a
+    /// `404` (unregistered, or hidden from this user, which the server answers alike) is `None`;
+    /// any other refusal or failure (`401`, `403`, `429`, `5xx`) is an error. A successful
+    /// answer is read as [`Self::get_pipe_id`] reads it.
+    pub async fn get_pipe_id_checked(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
+        self.read_pipe_id(pipe, true).await
+    }
+
+    async fn read_pipe_id(&self, pipe: &Pipe, strict: bool) -> ConnectorResult<Option<PipeId>> {
         let r_url = Self::metadata_r_url(pipe) + "/id";
         let response = self
             .get(
@@ -1026,6 +1039,12 @@ impl APIConnector {
                 },
             )
             .await?;
+        if strict && !response.ok() && response.status != 404 {
+            return Err(ConnectorError::Http {
+                status: response.status,
+                body: response.text(),
+            });
+        }
         if Self::is_pipeline_metadata(pipe) {
             // `{"success": true, "message": ..., "id": ...}`, or `404` when not registered.
             if response.status == 404 {
@@ -1045,6 +1064,11 @@ impl APIConnector {
         }
         if !text.is_empty() && !text.starts_with('{') {
             return Ok(Some(PipeId::Str(text)));
+        }
+        if strict && response.ok() {
+            return Err(ConnectorError::Invalid(format!(
+                "Invalid answer for the ID of {pipe}: {text}"
+            )));
         }
         Ok(None)
     }
@@ -1232,6 +1256,43 @@ impl APIConnector {
             }
             other => other.as_i64().is_some_and(|i| i != 0),
         })
+    }
+
+    /// [`Self::pipe_exists`] for a decision that would otherwise skip the pipe's rows: only the
+    /// server's `true` or `false` is an answer. A refused or failed request (`401`, `403`, `429`,
+    /// `5xx`, ...) or a `{"detail": ...}` body is an error, never "no table".
+    pub async fn pipe_exists_checked(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        if crate::engine_pipes::is_engine_pipe(pipe) {
+            return self.engine_pipe_exists(pipe.metric_key()).await;
+        }
+        let r_url = Self::pipe_r_url(pipe) + "/exists";
+        let response = self
+            .get(
+                &r_url,
+                RequestOptions {
+                    query: vec![self.instance_query(pipe, "instance")],
+                    ..Default::default()
+                },
+            )
+            .await?;
+        if !response.ok() {
+            return Err(ConnectorError::Http {
+                status: response.status,
+                body: response.text(),
+            });
+        }
+        match response.json()? {
+            serde_json::Value::Bool(exists) => Ok(exists),
+            serde_json::Value::Object(o) if o.contains_key("detail") => {
+                Err(ConnectorError::Detail(match &o["detail"] {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => crate::models::detail_repr(other),
+                }))
+            }
+            other => Err(ConnectorError::Invalid(format!(
+                "Invalid answer to whether {pipe} exists: {other}"
+            ))),
+        }
     }
 
     /// `create_metadata()`: `POST /metadata`.

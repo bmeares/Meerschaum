@@ -132,7 +132,7 @@ def check_test_output(name, output):
         raise ValueError(f'A required live SQL check returned without running: {name}')
 
 
-def run(root, profile='test'):
+def run(root, profile='test', focused_build=False):
     if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'],
                                cwd=REPO, text=True).strip():
         raise ValueError('Freeze the source before qualifying native backend regressions')
@@ -150,6 +150,7 @@ def run(root, profile='test'):
     report = {'root': str(root), 'nonce': nonce, 'owned_project': False,
               'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'],
               cwd=REPO, text=True).strip(), 'project': project, 'ports': {},
+              'build_mode': 'focused' if focused_build else 'workspace',
               'source_tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'],
               cwd=REPO, text=True).strip(), 'profile': profile,
               'services': list(SERVICES), 'tests': [], 'passed': False, 'cleaned_up': False}
@@ -174,10 +175,25 @@ def run(root, profile='test'):
     try:
         # Same workspace/features as ci.sh test: Cargo reuses the already built executables.
         build = root / 'native-test-artifacts.log'
-        command = ['cargo', 'test', '--workspace', '--locked', '--no-run', '--message-format=json']
-        if profile != 'test':
-            command.extend(['--profile', profile])
-        run_child(command, env, build, timeout=1800)
+        if focused_build:
+            # Local iteration need not relink the whole workspace just to run eight targets.
+            logs = []
+            for crate in sorted(set(TESTS.values())):
+                command = ['cargo', 'test', '-p', crate, '--locked', '--no-run', '--message-format=json']
+                for name, package in TESTS.items():
+                    if package == crate:
+                        command.extend(['--test', name])
+                if profile != 'test':
+                    command.extend(['--profile', profile])
+                log = root / (crate + '-artifacts.log')
+                run_child(command, env, log, timeout=1800)
+                logs.append(log.read_text())
+            build.write_text('\n'.join(logs))
+        else:
+            command = ['cargo', 'test', '--workspace', '--locked', '--no-run', '--message-format=json']
+            if profile != 'test':
+                command.extend(['--profile', profile])
+            run_child(command, env, build, timeout=1800)
         binaries = select_tests(build.read_text().splitlines())
         containers = subprocess.check_output(compose('ps', '--all', '--quiet'),
                                              cwd=REPO, env=env, text=True).strip()
@@ -198,7 +214,8 @@ def run(root, profile='test'):
         report['ports'] = ports
         commands = {
             'postgresql': ['pg_isready', '-h', '127.0.0.1', '-U', 'test', '-d', 'testdb'],
-            'mysql': ['mysql', '-h', '127.0.0.1', '-u', 'test', '-ptest1234', '-e', 'SELECT 1'],
+            # cytopia/mysql-5.7 initializes only root; MYSQL_USER / MYSQL_DATABASE are ignored.
+            'mysql': ['mysql', '-h', '127.0.0.1', '-u', 'root', '-pmy-secret-pw', '-e', 'SELECT 1'],
             'mariadb': ['mariadb', '-h', '127.0.0.1', '-u', 'test', '-ptest1234', '-e', 'SELECT 1'],
             'valkey': ['valkey-cli', 'ping'],
         }
@@ -213,7 +230,9 @@ def run(root, profile='test'):
         # Only these disposable fixtures grant database creation / lock inspection privileges.
         for service, client in (('mysql', 'mysql'), ('mariadb', 'mariadb')):
             run_child(compose('exec', '-T', service, client, '-u', 'root',
-                '-pmy-secret-pw', '-e', "GRANT ALL PRIVILEGES ON *.* TO 'test'@'%';"),
+                '-pmy-secret-pw', '-e', "CREATE DATABASE IF NOT EXISTS testdb; "
+                "CREATE USER IF NOT EXISTS 'test'@'%' IDENTIFIED BY 'test1234'; "
+                "GRANT ALL PRIVILEGES ON *.* TO 'test'@'%';"),
                 env, root / (service + '-test-grants.log'))
         env = native_environment(root, ports, env)
         for name in TESTS:
@@ -232,6 +251,14 @@ def run(root, profile='test'):
     finally:
         try:
             if owned:
+                if not report['passed']:
+                    # These logs belong only to this receipt's disposable project.
+                    with (root / 'services-failure.log').open('w') as output:
+                        try:
+                            subprocess.run(compose('logs', '--no-color', '--tail', '100', *SERVICES),
+                                cwd=REPO, env=env, stdout=output, stderr=subprocess.STDOUT, timeout=15)
+                        except subprocess.TimeoutExpired:
+                            output.write('\nTimed out collecting fixture diagnostics.\n')
                 save_report(receipt, report)
                 cleanup(root)
                 report['cleaned_up'] = json.loads(receipt.read_text())['cleaned_up']
@@ -247,8 +274,10 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--cleanup', action='store_true')
     parser.add_argument('--profile', choices=('test', 'ci', 'release'), default='test')
+    parser.add_argument('--focused-build', action='store_true',
+                        help='Build only the selected integration targets for local iteration.')
     args = parser.parse_args()
     if args.cleanup:
         cleanup(args.root)
     else:
-        run(args.root, args.profile)
+        run(args.root, args.profile, args.focused_build)

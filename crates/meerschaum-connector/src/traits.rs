@@ -507,6 +507,14 @@ pub trait InstanceConnector: Connector {
     /// Return the `id` for the pipe if it exists, else `None`.
     async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>>;
 
+    /// [`Self::get_pipe_id`] for a decision that would otherwise register over a pipe (`copy
+    /// pipes` into a destination): `None` only for a pipe proven unregistered; a lookup that
+    /// fails (an unreachable instance, a refused request) is an error. The default is
+    /// [`Self::get_pipe_id`], whose errors already propagate.
+    async fn get_pipe_id_checked(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
+        self.get_pipe_id(pipe).await
+    }
+
     /// Edit the attributes of the pipe: persist its in-memory parameters.
     ///
     /// `patch`: if `true`, patch the existing parameters instead of replacing them (API only).
@@ -647,6 +655,14 @@ pub trait InstanceConnector: Connector {
 
     /// Check whether a pipe's target table exists.
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool>;
+
+    /// [`Self::pipe_exists`] for a decision that would otherwise skip the pipe's rows (`copy
+    /// pipes` reading a source): `Ok(false)` only for a target proven missing; a probe that fails
+    /// (an unreachable instance, a refused request) is an error, never "no table". The default
+    /// is [`Self::pipe_exists`], whose errors already propagate.
+    async fn pipe_exists_checked(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        self.pipe_exists(pipe).await
+    }
 
     /// Drop a pipe's target table (keep its registration).
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple;

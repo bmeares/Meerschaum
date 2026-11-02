@@ -1,6 +1,12 @@
 """Copy and sync through a real Rust API whose response limit is three rows."""
 
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import pytest
 
@@ -118,3 +124,134 @@ assert pipe.get_rowcount() in (None, 0), 'A truncated tied timestamp was synced.
 print('API_CHUNKS:' + json.dumps({{'failed': not success, 'message': message}}))
 ''')
     assert result['failed']
+
+
+@contextmanager
+def failed_existence_proxy(server, suffix='/exists'):
+    """Forward the fixture's reads and login; fail one requested metadata probe."""
+    failed = []
+    requests = []
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def answer(self):
+            path = urllib.parse.urlsplit(self.path).path
+            requests.append((self.command, path))
+            if path.endswith(suffix):
+                failed.append(self.path)
+                status, body = 503, b'{"detail":"Intentional source catalog failure."}'
+                content_type = 'application/json'
+            else:
+                length = int(self.headers.get('Content-Length', 0))
+                assert 0 <= length <= 65536
+                data = self.rfile.read(length) if length else None
+                headers = {key: self.headers[key] for key in ('Authorization', 'Content-Type')
+                           if key in self.headers}
+                req = urllib.request.Request(server.base_url + self.path, data=data,
+                                             headers=headers, method=self.command)
+                try:
+                    response = opener.open(req, timeout=10)
+                except urllib.error.HTTPError as error:
+                    response = error
+                with response:
+                    status = response.status
+                    content_type = response.headers.get('Content-Type', 'application/json')
+                    body = response.read(512001)
+                    assert len(body) <= 512000
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = answer
+        do_POST = answer
+
+    proxy = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    proxy.daemon_threads = True
+    worker = threading.Thread(target=proxy.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
+    worker.start()
+    try:
+        yield proxy.server_port, failed, requests
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+
+
+def test_real_api_copy_reports_an_unreadable_source_instead_of_a_success(capped_server):
+    server = capped_server
+    missing = 'registered-without-data'
+    python_json(server, f'''
+pipe = m.Pipe({SOURCE!r}, {missing!r}, instance='sql:w7console', parameters={{
+    'columns': {{'datetime': 'n', 'id': 'id'}}, 'dtypes': {{'n': 'int', 'id': 'int'}},
+}})
+success, message = pipe.register()
+assert success, message
+assert not pipe.exists()
+print('API_CHUNKS:true')
+''')
+    # A proven missing table is a valid attributes-only copy, even when data was requested.
+    result = copy(server, missing)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    config = json.loads(server.env['MRSM_CONFIG'])
+    with failed_existence_proxy(server) as (port, failures, _requests):
+        config['meerschaum']['connectors']['api']['capped']['port'] = port
+        server.env['MRSM_CONFIG'] = json.dumps(config)
+        result = copy(server, METRIC)
+        assert failures, 'The intended existence-probe failure was not exercised.'
+        assert result.returncode != 0, result.stdout + result.stderr
+    python_json(server, f'''
+pipe = m.Pipe({SOURCE!r}, {METRIC!r}, instance='sql:dest')
+assert pipe.get_rowcount() in (None, 0)
+print('API_CHUNKS:true')
+''')
+
+
+def test_real_api_copy_does_not_register_after_an_unreadable_destination_id(capped_server):
+    server = capped_server
+    config = json.loads(server.env['MRSM_CONFIG'])
+    with failed_existence_proxy(server, '/id') as (port, failures, requests):
+        config['meerschaum']['connectors']['api']['capped']['port'] = port
+        server.env['MRSM_CONFIG'] = json.dumps(config)
+        result = server.mrsm('copy', 'pipes', 'api:capped', '-i', 'sql:w7console',
+            '-c', SOURCE, '-m', METRIC, '-l', 'None', '--sync-data', 'nothing', '-f', '-y', '--noask')
+        assert failures, 'The intended destination-ID failure was not exercised.'
+        assert result.returncode != 0, result.stdout + result.stderr
+        writes = [(verb, path) for verb, path in requests
+                  if verb in ('POST', 'PUT', 'PATCH', 'DELETE') and path.startswith('/pipes/')]
+        assert not writes, 'A registration was attempted after an unreadable lookup: ' + str(writes)
+
+
+def test_real_api_copy_keeps_destination_metadata_when_its_read_fails(capped_server):
+    server = capped_server
+    before = python_json(server, f'''
+original = m.Pipe({SOURCE!r}, {METRIC!r}, instance='sql:w7console')
+parameters = original.get_parameters(apply_symlinks=False)
+different = m.Pipe({SOURCE!r}, {METRIC!r}, instance='sql:filtered',
+                   parameters={{**parameters, 'copy_sentinel': 'from a different source'}})
+success, message = different.register()
+assert success, message
+print('API_CHUNKS:' + json.dumps(parameters))
+''')
+    config = json.loads(server.env['MRSM_CONFIG'])
+    with failed_existence_proxy(server, '/attributes') as (port, failures, requests):
+        config['meerschaum']['connectors']['api']['capped']['port'] = port
+        server.env['MRSM_CONFIG'] = json.dumps(config)
+        result = server.mrsm('copy', 'pipes', 'api:capped', '-i', 'sql:filtered',
+            '-c', SOURCE, '-m', METRIC, '-l', 'None', '--sync-data', 'nothing', '-f', '-y', '--noask')
+        assert failures, 'The intended destination-metadata failure was not exercised.'
+        assert result.returncode != 0, result.stdout + result.stderr
+        writes = [(verb, path) for verb, path in requests
+                  if verb in ('POST', 'PUT', 'PATCH', 'DELETE') and path.startswith('/pipes/')]
+        assert not writes, 'Destination metadata was edited after an unreadable read: ' + str(writes)
+    after = python_json(server, f'''
+pipe = m.Pipe({SOURCE!r}, {METRIC!r}, instance='sql:w7console')
+print('API_CHUNKS:' + json.dumps(pipe.get_parameters(apply_symlinks=False)))
+''')
+    assert after == before

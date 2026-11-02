@@ -183,6 +183,12 @@ impl InstanceConnector for APIConnector {
         Ok(identity)
     }
 
+    async fn get_pipe_id_checked(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
+        let identity = APIConnector::get_pipe_id_checked(self, pipe).await?;
+        pipe.set_registration_id(identity.as_ref().map(ToString::to_string));
+        Ok(identity)
+    }
+
     async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
         APIConnector::edit_pipe(self, pipe, patch).await
     }
@@ -198,6 +204,10 @@ impl InstanceConnector for APIConnector {
 
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
         APIConnector::pipe_exists(self, pipe).await
+    }
+
+    async fn pipe_exists_checked(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        APIConnector::pipe_exists_checked(self, pipe).await
     }
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {

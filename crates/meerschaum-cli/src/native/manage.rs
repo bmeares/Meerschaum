@@ -22,7 +22,9 @@ use crate::format::rich::pretty::PyObj;
 use crate::format::{OptionsArgs, TupleArgs};
 use crate::value::ArgsMap;
 
-use super::pipes::{SelectedPipe, Selection, build_pipe, explicit_pipes, hydrate, selected_pipes};
+use super::pipes::{
+    SelectedPipe, Selection, build_pipe, explicit_pipes, hydrate, hydrate_checked, selected_pipes,
+};
 use super::show::{bound, bound_str};
 use super::{
     Instance, flag, info, plural, pprint, print_tuple, session, string, thousands, warn, words,
@@ -853,7 +855,16 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let mut failed: Vec<(String, String)> = Vec::new();
     let n = pipes.len();
     for (i, sp) in pipes.iter_mut().enumerate() {
-        hydrate(rt, &src_inst, sp);
+        // The source's parameters and locks are what the copy writes: a read that fails stops
+        // this pipe before anything is written to the destination.
+        if let Err(e) = hydrate_checked(rt, &src_inst, sp) {
+            warn(
+                rt,
+                &format!("Failed to copy {} to '{}'.", sp.pipe, dest.keys()),
+            );
+            failed.push((sp.pipe.to_string(), format!("attributes: {e}")));
+            continue;
+        }
         info(rt, &format!("Copying {} ({} / {n})...", sp.pipe, i + 1));
         // AC4: a copy keeps the source's locks and never takes its access (owner, team,
         // visibility, edit): a new pipe gets the default access and an existing destination
@@ -868,11 +879,23 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             Some(params),
             &defaults,
         )?;
-        let exists = session
-            .block_on(dest.conn().get_pipe_id(&new_pipe))
-            .ok()
-            .flatten()
-            .is_some();
+        // Whether the destination already has this pipe: a lookup that fails is this pipe's
+        // failure, never "not registered" (the copy would otherwise register over it, or lose
+        // an incremental copy's data-only mode).
+        let exists = match session.block_on(dest.conn().get_pipe_id_checked(&new_pipe)) {
+            Ok(id) => id.is_some(),
+            Err(e) => {
+                warn(
+                    rt,
+                    &format!("Failed to copy {} to '{}'.", sp.pipe, dest.keys()),
+                );
+                failed.push((
+                    sp.pipe.to_string(),
+                    format!("attributes: could not tell whether {new_pipe} is registered: {e}"),
+                ));
+                continue;
+            }
+        };
         let mut dest_locks = Locks::new();
         // An incremental copy into an existing pipe without `--force` copies data only (v4's
         // interactive "data only" answer): the destination keeps all of its attributes.
@@ -886,7 +909,16 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             // `hydrate` patches the pipe's own (copied) parameters over the stored ones: start
             // from the stored ones alone to read the destination's access and locks.
             existing.pipe.set_parameters(Map::new());
-            hydrate(rt, &dest, &mut existing);
+            // The destination's access and locks (or, data only, all of its attributes) are kept:
+            // a read that fails stops this pipe before any edit or registration.
+            if let Err(e) = hydrate_checked(rt, &dest, &mut existing) {
+                warn(
+                    rt,
+                    &format!("Failed to copy {} to '{}'.", sp.pipe, dest.keys()),
+                );
+                failed.push((sp.pipe.to_string(), format!("attributes: {e}")));
+                continue;
+            }
             if data_only {
                 new_pipe = existing.pipe;
             } else {
@@ -948,9 +980,27 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             &SuccessTuple::ok(format!("Successfully copied {} to {new_pipe}.", sp.pipe)),
             TupleArgs::default(),
         );
-        let src_exists = session
-            .block_on(src_inst.conn().pipe_exists(&sp.pipe))
-            .unwrap_or(false);
+        // Whether the source has a table to read: a probe that fails is this pipe's failure,
+        // never "no rows to copy" (v4 took any failure for a missing table and reported the pipe
+        // copied without its rows).
+        let src_exists = if mode == CopyData::Nothing {
+            false
+        } else {
+            match session.block_on(src_inst.conn().pipe_exists_checked(&sp.pipe)) {
+                Ok(exists) => exists,
+                Err(e) => {
+                    warn(
+                        rt,
+                        &format!("Failed to copy data from {} to {new_pipe}.", sp.pipe),
+                    );
+                    failed.push((
+                        sp.pipe.to_string(),
+                        format!("data: could not tell whether {} has a table: {e}", sp.pipe),
+                    ));
+                    continue;
+                }
+            }
+        };
         if src_exists && mode != CopyData::Nothing {
             // The rows to read: `None` when nothing is new (incremental), an error when the
             // window cannot be told (never a fall-back to the whole history).
