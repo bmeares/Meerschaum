@@ -163,13 +163,10 @@ async fn register_token(ctx: Ctx, body: Body) -> ApiResult {
         .unwrap_or_else(new_label);
     let expiration = parse_dt(model.get("expiration").unwrap_or(&Json::Null), "expiration")?;
     let mut scopes = scopes_of(model.get("scopes"))?;
-    // A token carries at most its owner's scopes: no scopes asked for means the owner's own, and
+    // A token carries at most its owner's scopes: omitted scopes mean the owner's own, and
     // anything beyond them is refused, never trimmed.
     if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await? {
-        let asked = model
-            .get("scopes")
-            .and_then(Json::as_array)
-            .is_some_and(|a| !a.is_empty());
+        let asked = model.contains_key("scopes");
         if asked {
             let refused = disallowed_scopes(&scopes, &cap, &[]);
             if !refused.is_empty() {
@@ -408,12 +405,9 @@ async fn edit_token(ctx: Ctx, Path(token_id): Path<String>, body: Body) -> ApiRe
     let id = Uuid::parse_str(token_id.trim())
         .map_err(|_| ApiError::new(400, "Token ID must be a UUID."))?;
     let conn = ctx.state.instance();
-    // An edit that omits `scopes` (or sends none) keeps the token's own; the cap applies to the
+    // An edit that omits `scopes` keeps the token's own; the cap applies to the
     // rest, and scopes the token already holds stay, so renaming never fails.
-    let asked = model
-        .get("scopes")
-        .and_then(Json::as_array)
-        .is_some_and(|a| !a.is_empty());
+    let asked = model.contains_key("scopes");
     if asked {
         if let Some(cap) = grantable_scopes(&ctx.state, principal.as_ref()).await? {
             let refused = disallowed_scopes(&scopes, &cap, &existing.scopes);

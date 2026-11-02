@@ -53,6 +53,11 @@ and layering are in `crates/README.md`; the user-facing story is `docs/zensical/
   sessions may share the tree: concurrent builds block on the directory lock, `scripts/rust/build_py.sh`
   takes its own lock (`target/.build-py.lock`; never wrap it in `flock`), and never `git stash` /
   `checkout` / `restore` / `clean` / `reset`.
+- **Qualify one checkout at a time.** Local worktrees sharing a physical target can reuse another
+  checkout's workspace artifacts even after serialized builds. At a checkout transition,
+  invalidate the workspace packages in the affected profile with `cargo clean -p` before
+  counting results; preserve third-party caches. Record the source commit, profile and binary
+  hashes. Never clean a target while another owner is building or testing.
 - **Verify on a fresh root, like CI** (`git clean -ffdx`): tests that need plugin venvs create them in
   fixtures. Leave no processes behind (`pgrep -af 'target/debug/mrsm|meerschaum'`).
 - **Never run two `scripts/test.sh` invocations (or `test.sh` + an `api`-flavor pytest) at once**: they

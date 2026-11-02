@@ -84,6 +84,12 @@ time; MySQL and Valkey retain smaller budgets. `scripts/ci/shards.py` is the sha
 truth. Test evidence artifacts retain per-lane collection reports, the union proof and ownership.
 Rust tests retain their own shared-fixture lock and a bounded nextest budget.
 
+Full release and nightly runs also execute native account and copy checks against fresh PostgreSQL,
+MySQL, MariaDB and Valkey fixtures (`scripts/ci/native_backends.py`). They reuse the compiled
+workspace tests, use bounded containers and random loopback ports, and retain results and cleanup
+receipts. Database-creation privileges exist only in these disposable fixtures. Ordinary PRs
+run the Rust suite without contacting an ambient Valkey service.
+
 ### Release candidate workflow
 
 ```bash
@@ -119,6 +125,12 @@ caches remain keyed by target/profile and save on `main` and `v5`. Self-hosted r
 guard measures the resolved target filesystem and its actual size, including symlinked targets.
 `cargo-nextest` still runs all selected Rust tests, followed by doctests. Tool downloads remain
 version/checksum pinned; mold remains opt-in.
+
+Local worktrees that share one physical target need one active source checkout for qualification.
+When changing checkouts, invalidate only the workspace packages in the affected Cargo profile
+with `cargo clean -p` before counting test results. The build lock serializes writes but does
+not prevent reuse of another checkout's workspace artifacts. Keep third-party dependencies
+cached and record the tested commit, profile and binary hashes. Runner targets remain separate.
 
 ### Parallel self-hosted runners
 

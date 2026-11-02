@@ -764,7 +764,7 @@ impl SqlConnector {
         };
         let cols_to_add: IndexMap<String, String> = user_select
             .iter()
-            .filter(|c| !df.contains(c))
+            .filter(|c| !df.contains(c) && !omit.contains(c))
             .map(|c| {
                 (
                     c.clone(),

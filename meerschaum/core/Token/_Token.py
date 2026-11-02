@@ -56,7 +56,7 @@ class Token:
         self.label = label or get_new_daemon_name()
         self._user = user
         self._user_id = user_id
-        self.scopes = scopes or list(STATIC_CONFIG['tokens']['scopes'])
+        self.scopes = list(STATIC_CONFIG['tokens']['scopes']) if scopes is None else list(scopes)
         self.is_valid = is_valid
         self.id = id
         self.secret = secret

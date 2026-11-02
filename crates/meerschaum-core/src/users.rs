@@ -425,7 +425,8 @@ fn floor_to_day(dt: DateTime<Utc>) -> DateTime<Utc> {
 
 impl Token {
     /// `Token(label, creation, expiration, ...)`. `default_expiration_days` is
-    /// `api:tokens:default_expiration_days` (366); `now` is the current time.
+    /// `api:tokens:default_expiration_days` (366); `now` is the current time. Omitted scopes
+    /// use the defaults; an explicit empty list grants no permissions.
     pub fn new(
         label: Option<&str>,
         expiration: Expiration,
@@ -450,9 +451,7 @@ impl Token {
             instance_keys: None,
             user: None,
             user_id: None,
-            scopes: scopes
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| static_config().scope_names()),
+            scopes: scopes.unwrap_or_else(|| static_config().scope_names()),
             is_valid: true,
             id: None,
             secret: None,

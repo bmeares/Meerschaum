@@ -149,7 +149,23 @@ jobs:
         # `MRSM_TEST_NO_CORE=1` still skips the extension-dependent tests locally, where it is not built.
         env:
           MRSM_NO_AUTO_INSTALL: '1'
+          # Live Valkey coverage runs below against owned fixtures, never an ambient service.
+          MRSM_VALKEY_TEST_URL: redis://127.0.0.1:9/12
         run: scripts/rust/ci.sh test
+      - name: Native account regressions on isolated server databases
+        if: ${{ needs.changes.outputs.full == 'true' }}
+        run: python3 scripts/ci/native_backends.py --root "$RUNNER_TEMP/mrsm-native-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Clean up only the native check's owned fixtures
+        if: ${{ always() && needs.changes.outputs.full == 'true' }}
+        run: python3 scripts/ci/native_backends.py --cleanup --root "$RUNNER_TEMP/mrsm-native-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Retain native backend results
+        if: ${{ always() && needs.changes.outputs.full == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-backend-results-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mrsm-native-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
 
   # The `meerschaum` front crate's features are only ever built together by the workspace: compile it with
   # no default features, with each feature alone and run its tests with `full`, so a missing `cfg` or

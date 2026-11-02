@@ -32,6 +32,57 @@ fn color_docs() -> Vec<Doc> {
     ]
 }
 
+flavor_tests!(
+    test_selected_columns_do_not_reintroduce_omitted_columns,
+    |c: Ctx| async move {
+        let pipe = c.pipe(
+            "test",
+            "select_omit",
+            None,
+            r#"{"columns": {"id": "id"}, "dtypes": {"id": "int", "color": "str"}}"#,
+        );
+        ok(c.sync(&pipe, color_docs()).await);
+        let df = c
+            .get_data(
+                &pipe,
+                DataQuery {
+                    select_columns: Some(vec!["id".into(), "color".into(), "missing".into()]),
+                    omit_columns: Some(vec!["color".into(), "missing".into()]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(df.height(), 3);
+        assert!(df.contains("id"));
+        assert!(
+            !df.contains("color"),
+            "an omitted real column was added back"
+        );
+        assert!(
+            !df.contains("missing"),
+            "an omitted missing column was added back"
+        );
+        let requested = c
+            .get_data(
+                &pipe,
+                DataQuery {
+                    select_columns: Some(vec!["id".into(), "missing".into()]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(requested.contains("missing"));
+        assert!(
+            col(&requested, "missing")
+                .iter()
+                .all(|value| matches!(value, KValue::Null))
+        );
+        c.delete(&pipe).await;
+    }
+);
+
 flavor_tests!(test_get_backtrack_data_limit, |c: Ctx| async move {
     let pipe = c.pipe(
         "test",

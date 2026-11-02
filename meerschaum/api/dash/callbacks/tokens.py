@@ -371,7 +371,7 @@ def edit_token_submit_button_click(
         id=token_id,
         label=label,
         expiration=expiration_date,
-        scopes=(['*'] if grant_all_scopes else scopes),
+        scopes=(['*'] if grant_all_scopes else (scopes or [])),
         instance=get_api_connector(),
     )
 

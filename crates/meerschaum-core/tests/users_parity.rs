@@ -77,6 +77,16 @@ fn edge_cases_match_python() {
     );
 }
 
+#[test]
+fn an_explicit_empty_scope_list_grants_no_permissions() {
+    let now = chrono::Utc::now();
+    let defaults = Token::new(None, Expiration::Never, None, 366, now);
+    assert!(!defaults.scopes.is_empty());
+    let empty = Token::new(None, Expiration::Never, Some(vec![]), 366, now);
+    assert!(empty.scopes.is_empty());
+    assert!(meerschaum_core::access::scopes_to_permissions(&empty.scopes).is_empty());
+}
+
 /// Rust-produced hashes must verify with the Python `verify_password`. Runs the Python side
 /// with `PYTHONPATH` set to the repository root; skipped (with a message) when Python or the
 /// package cannot be imported.
