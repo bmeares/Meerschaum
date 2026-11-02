@@ -14,7 +14,7 @@ use meerschaum_connector::InstanceConnector;
 use meerschaum_connector::pipe_ops::{self, Doc};
 use meerschaum_connector_valkey::keys::{USERS_TABLE, quote_table};
 use meerschaum_connector_valkey::{
-    FaultHook, FredBackend, MemoryBackend, ValkeyBackend, ValkeyConnector,
+    FaultHook, FredBackend, MemoryBackend, ValkeyBackend, ValkeyConnector, WriteOp,
 };
 use meerschaum_core::Map;
 use meerschaum_core::users::User;
@@ -201,6 +201,37 @@ async fn one_first_user_live() {
             .success
     );
     check_unclaimed_and_unreadable_rows(&a).await;
+    check_a_failed_script_leaves_no_claim(a.backend().as_ref()).await;
+}
+
+/// A script the server stops part-way (a score it refuses, after a field was written) never
+/// leaves its claim: the claim is the last write, so the lost-reply recovery never takes a
+/// partial write for a registered user. Only a server fails a script part-way.
+async fn check_a_failed_script_leaves_no_claim(backend: &dyn ValkeyBackend) {
+    let claim = unique("_mrsm_rs_test_claim");
+    let (field, scores) = (format!("{claim}:field"), format!("{claim}:scores"));
+    let ops = [
+        WriteOp::Set {
+            key: field.clone(),
+            value: "written".into(),
+        },
+        WriteOp::ZAdd {
+            key: scores.clone(),
+            member: "m".into(),
+            score: f64::NAN,
+        },
+    ];
+    let users = quote_table(USERS_TABLE);
+    assert!(
+        backend
+            .claim_first_user(&users, &claim, "1", &ops)
+            .await
+            .is_err()
+    );
+    assert_eq!(backend.get(&claim).await.unwrap(), None, "claim_first_user");
+    assert!(backend.claim_and_write(&claim, "1", &ops).await.is_err());
+    assert_eq!(backend.get(&claim).await.unwrap(), None, "claim_and_write");
+    backend.del(&[claim, field, scores]).await.unwrap();
 }
 
 #[tokio::test]

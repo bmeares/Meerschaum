@@ -167,9 +167,10 @@ pub trait ValkeyBackend: Send + Sync {
     async fn compare_and_pexpire(&self, key: &str, value: &str, ms: u64) -> BackendResult<bool>;
     /// Atomically delete `key` if its value is `value`.
     async fn compare_and_delete(&self, key: &str, value: &str) -> BackendResult<bool>;
-    /// Atomically claim `claim_key` and write `ops`: if `claim_key` does not exist, set it to
-    /// `claim_value` (no expiry) and apply every operation, returning `true`; if it exists,
-    /// write nothing and return `false`. An operation against a key of the wrong type is an
+    /// Atomically claim `claim_key` and write `ops`: if `claim_key` does not exist, apply every
+    /// operation and then set it to `claim_value` (no expiry), returning `true`; if it exists,
+    /// write nothing and return `false`. The claim is the last write, so a claim always marks a
+    /// complete write (a script that fails part-way keeps its earlier writes). An operation against a key of the wrong type is an
     /// error, checked before anything is written, so an error also writes nothing. Keys must
     /// be distinct from `claim_key` and from each other's types.
     async fn claim_and_write(

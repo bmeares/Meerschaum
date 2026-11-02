@@ -97,12 +97,13 @@ def root():
 def host(root):
     """Serve the host on a Unix socket and yield an `httpx` client over it."""
     httpx = pytest.importorskip('httpx')
-    ### A valid user JWT must name a principal in this host's own instance.
+    ### A valid user JWT must name a principal in this host's own instance, and holds no more than
+    ### that user does now: an administrator holds the plugin's own scopes.
     setup = _python(root, """
 from meerschaum import get_connector
 from meerschaum.core import User
 instance = get_connector('sql:local')
-assert instance.register_user(User('admin', 'probe-password', instance=instance))[0]
+assert instance.register_user(User('admin', 'probe-password', type='admin', instance=instance))[0]
 """)
     assert setup.returncode == 0, setup.stderr[-4000:]
     sock_dir = pathlib.Path(tempfile.mkdtemp(prefix='mh'))
@@ -348,15 +349,15 @@ def test_jwts_from_the_server_validate_in_the_host(host, root):
     token = mint_jwt(secret, claims)
     response = client.get('/hostdemo/scoped', headers={'Authorization': f'Bearer {token}'})
     assert response.status_code == 200, response.text
+    assert response.json() == {'scopes': ['hostdemo:read']}
+    response = client.get('/hostdemo/whoami', headers={'Authorization': f'Bearer {token}'})
+    assert response.json() == {'username': 'admin'}
 
     ### Issued before 5.0 bound JWTs to their principal and credential: refused.
     for claim in ('mrsm_principal', 'mrsm_credential'):
         legacy = mint_jwt(secret, {k: v for k, v in claims.items() if k != claim})
-        response = client.get('/hostdemo/scoped', headers={'Authorization': f'Bearer {legacy}'})
-        assert response.status_code == 401, (claim, response.text)
-    assert response.json() == {'scopes': ['hostdemo:read']}
-    response = client.get('/hostdemo/whoami', headers={'Authorization': f'Bearer {token}'})
-    assert response.json() == {'username': 'admin'}
+        refused = client.get('/hostdemo/scoped', headers={'Authorization': f'Bearer {legacy}'})
+        assert refused.status_code == 401, (claim, refused.text)
 
     no_scope = mint_jwt(secret, {**claims, 'scopes': ['pipes:read']})
     response = client.get('/hostdemo/scoped', headers={'Authorization': f'Bearer {no_scope}'})

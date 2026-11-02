@@ -156,10 +156,6 @@ impl MemoryBackend {
                 return wrongtype();
             }
         }
-        m.insert(
-            claim_key.to_string(),
-            (Entry::Str(claim_value.to_string()), None),
-        );
         for op in ops {
             match op {
                 WriteOp::Set { key, value } => {
@@ -179,6 +175,11 @@ impl MemoryBackend {
                 }
             }
         }
+        // Last, as in the script: the claim marks a complete write.
+        m.insert(
+            claim_key.to_string(),
+            (Entry::Str(claim_value.to_string()), None),
+        );
         Ok(true)
     }
 

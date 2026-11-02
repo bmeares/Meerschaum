@@ -58,7 +58,6 @@ for j = 1, #KEYS - 1 do
     end
   end
 end
-redis.call('SET', KEYS[1], ARGV[1])
 for j = 1, #KEYS - 1 do
   local kind, a, b = ARGV[3 * j - 1], ARGV[3 * j], ARGV[3 * j + 1]
   if kind == 'set' then
@@ -69,6 +68,7 @@ for j = 1, #KEYS - 1 do
     redis.call('SADD', KEYS[j + 1], a)
   end
 end
+redis.call('SET', KEYS[1], ARGV[1])
 return 1
 "#;
 
@@ -97,7 +97,6 @@ for j = 1, #KEYS - 2 do
     end
   end
 end
-redis.call('SET', KEYS[2], ARGV[1])
 for j = 1, #KEYS - 2 do
   local kind, a, b = ARGV[3 * j - 1], ARGV[3 * j], ARGV[3 * j + 1]
   if kind == 'set' then
@@ -108,6 +107,7 @@ for j = 1, #KEYS - 2 do
     redis.call('SADD', KEYS[j + 2], a)
   end
 end
+redis.call('SET', KEYS[2], ARGV[1])
 return 1
 "#;
 
