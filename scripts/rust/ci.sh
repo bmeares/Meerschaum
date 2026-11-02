@@ -6,7 +6,8 @@
 #
 # Steps:
 #   setup        Ensure rustup/cargo exist (installs rustup non-interactively if ~/.cargo/bin/cargo
-#                is missing) and install the toolchain pinned by rust-toolchain.toml.
+#                is missing) and install the toolchain pinned by rust-toolchain.toml. On GitHub, adds
+#                $CARGO_HOME/bin to later steps' PATH (GITHUB_PATH), installed now or already present.
 #   disk-guard   Run `cargo clean` when free space on the target dir's filesystem is below
 #                MRSM_CI_MIN_FREE_GB (default 10). Self-hosted runner safety valve.
 #   fmt          cargo fmt --all --check
@@ -140,10 +141,11 @@ step_setup() {
     log "Installing rustup (non-interactive)"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
-    # Later workflow steps run in fresh shells; make the new cargo visible to them.
-    if [ -n "${GITHUB_PATH:-}" ]; then
-      echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
-    fi
+  fi
+  # Later workflow steps run in fresh shells: keep rustup's cargo on their PATH whether it was just
+  # installed or the runner already had it. A system cargo is on their PATH already.
+  if [ -n "${GITHUB_PATH:-}" ] && [ -x "$CARGO_HOME/bin/cargo" ]; then
+    echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
   fi
   log "Installing the toolchain from rust-toolchain.toml"
   # rustup >= 1.28 no longer installs on `rustup show`; `toolchain install` with no
