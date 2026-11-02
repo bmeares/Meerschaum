@@ -604,6 +604,33 @@ fn console_status_documents() {
     assert_eq!(status(json!({"console": {"reason": "x"}})), None);
 }
 
+/// `probe` again while the script it runs is "text file busy" (`ETXTBSY`): another test thread
+/// forked while the script was open for writing, and its child holds that descriptor until its
+/// own `exec`. Only these tests write the executables they run.
+#[cfg(unix)]
+fn settled(
+    probe: impl Fn() -> meerschaum_server::host::ConsoleProbe,
+) -> meerschaum_server::host::ConsoleProbe {
+    for _ in 0..100 {
+        let answer = probe();
+        if !answer.missing.iter().any(|m| m.contains("os error 26")) {
+            return answer;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("the probe's script stayed busy");
+}
+
+/// [`probe_console`], [`settled`].
+#[cfg(unix)]
+fn probe_settled(
+    python: &std::path::Path,
+    root: &std::path::Path,
+    env: &[(String, String)],
+) -> meerschaum_server::host::ConsoleProbe {
+    settled(|| probe_console(python, root, env))
+}
+
 #[cfg(unix)]
 #[test]
 fn the_console_probe_reads_the_interpreters_answer() {
@@ -616,16 +643,16 @@ fn the_console_probe_reads_the_interpreters_answer() {
         path
     };
     let root = dir.path();
-    let ok = probe_console(&script("ok", "echo '[]'"), root, &[]);
+    let ok = probe_settled(&script("ok", "echo '[]'"), root, &[]);
     assert!(ok.available && ok.missing.is_empty());
-    let partial = probe_console(&script("partial", "echo '[\"a2wsgi\"]'"), root, &[]);
+    let partial = probe_settled(&script("partial", "echo '[\"a2wsgi\"]'"), root, &[]);
     assert!(!partial.available);
     assert_eq!(partial.missing, vec!["a2wsgi"]);
     let warning = partial.warning();
     assert!(warning.contains("a2wsgi") && warning.contains("pip install \"meerschaum[dash]\""));
-    let broken = probe_console(&script("broken", "exit 3"), root, &[]);
+    let broken = probe_settled(&script("broken", "exit 3"), root, &[]);
     assert!(!broken.available && broken.missing[0].contains("exited"));
-    let garbage = probe_console(&script("garbage", "echo nope"), root, &[]);
+    let garbage = probe_settled(&script("garbage", "echo nope"), root, &[]);
     assert!(!garbage.available);
     let absent = probe_console(&dir.path().join("no-such-python"), root, &[]);
     assert!(!absent.available && absent.missing[0].contains("no Python interpreter"));
@@ -641,12 +668,14 @@ fn a_hung_interpreter_ends_the_probe_at_its_deadline() {
     std::fs::write(&path, "#!/bin/sh\n(sleep 30 &)\nsleep 30\n").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     let started = std::time::Instant::now();
-    let probe = meerschaum_server::host::probe_console_within(
-        &path,
-        dir.path(),
-        &[],
-        std::time::Duration::from_millis(300),
-    );
+    let probe = settled(|| {
+        meerschaum_server::host::probe_console_within(
+            &path,
+            dir.path(),
+            &[],
+            std::time::Duration::from_millis(300),
+        )
+    });
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
     assert!(!probe.available);
     assert!(
