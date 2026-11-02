@@ -114,13 +114,10 @@ def _exact_row(
     text = str(value)
     columns = list(select) + ([column] if column not in select else [])
     params = {column: text} if _literal_param_safe(text) else None
-    df = users_pipe.get_data(columns, params=params, debug=debug)
-    if df is None or len(df) == 0 or column not in df.columns:
-        return None
-    ### A Polars or a pandas frame (the `meerschaum:dataframe` setting).
-    to_dicts = getattr(df, 'to_dicts', None)
-    rows = to_dicts() if callable(to_dicts) else df.to_dict(orient='records')
-    for row in rows:
+    ### Documents need no DataFrame library: an API host installed without Polars or pandas
+    ### still resolves whom a credential belongs to.
+    rows = users_pipe.get_data(columns, params=params, as_docs=True, debug=debug)
+    for row in rows or []:
         found = row.get(column, None)
         if not _is_null(found) and str(found) == text:
             return row

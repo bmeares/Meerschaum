@@ -198,6 +198,14 @@ impl Dedicated {
                 self.database
             )
         };
+        // MySQL and MariaDB refresh the `INFORMATION_SCHEMA.INNODB_TRX` cache only when more than
+        // 0.1 s passed since its *last read*, so polling faster keeps reading a snapshot taken
+        // before the wait began: https://dev.mysql.com/doc/refman/5.7/en/innodb-information-schema-internal-data.html
+        let poll = if self.flavor == "postgresql" {
+            Duration::from_millis(50)
+        } else {
+            Duration::from_millis(200)
+        };
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let waiting = self
@@ -215,7 +223,7 @@ impl Dedicated {
                 Instant::now() < deadline,
                 "no session waits in {statement} ({waiting} of {n})"
             );
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(poll).await;
         }
     }
 
