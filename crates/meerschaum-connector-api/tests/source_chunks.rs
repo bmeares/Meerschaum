@@ -4,8 +4,8 @@
 //! smaller server limit is learned from its refusal, the source's `fetch.params` filter every
 //! read, and each window is read only when the sync asks for the next chunk.
 //!
-//! The server is a routing fake of the four routes involved (`sync_time`, `chunk_bounds`,
-//! `data` and the pipe's metadata), answering at most `max_rows` rows per read as `/data` does.
+//! The server is a routing fake of the routes involved (`sync_time`, `attributes` with the
+//! source's chunk interval, `data`), answering at most `max_rows` rows per read as `/data` does.
 
 use std::sync::{Arc, Mutex};
 
@@ -26,10 +26,10 @@ struct Source {
     rows: Vec<Row>,
     /// The server's `max_response_row_limit`.
     max_rows: i64,
-    /// The width of the server's chunk bounds.
+    /// The source's chunk interval (`verify:chunk_minutes` on an integer axis).
     chunk: i64,
-    /// `/data` answers `500` (a failed read).
-    broken: bool,
+    /// `/data` answers this status and detail instead of rows.
+    fail: Option<(u16, &'static str)>,
     /// Each `/data` request: `(begin, end, limit, station filter)`.
     reads: Mutex<Vec<Read>>,
 }
@@ -81,15 +81,18 @@ impl Source {
             return (200, value.map_or("null".into(), |v| v.to_string()));
         }
         if path.ends_with("/chunk_bounds") {
-            let (begin, end) = (int(&q, "begin").unwrap(), int(&q, "end").unwrap());
-            let mut bounds = Vec::new();
-            let mut b = begin;
-            while b < end {
-                let e = (b + self.chunk).min(end);
-                bounds.push(format!("[{b}, {e}]"));
-                b = e;
-            }
-            return (200, format!("[{}]", bounds.join(", ")));
+            // Windows are made by the client from the source's chunk interval: a server never
+            // builds every bound of a source at once.
+            return (500, r#"{"detail":"chunk_bounds was asked for"}"#.into());
+        }
+        if path.ends_with("/attributes") {
+            return (
+                200,
+                format!(
+                    r#"{{"parameters": {{"columns": {{"datetime": "n"}}, "dtypes": {{"n": "int"}}, "verify": {{"chunk_minutes": {}}}}}}}"#,
+                    self.chunk
+                ),
+            );
         }
         if path.ends_with("/data") {
             let (begin, end, limit) = (int(&q, "begin"), int(&q, "end"), int(&q, "limit"));
@@ -103,8 +106,8 @@ impl Source {
                 .lock()
                 .unwrap()
                 .push((begin, end, limit, station.clone()));
-            if self.broken {
-                return (500, r#"{"detail":"the database is down"}"#.into());
+            if let Some((status, detail)) = self.fail {
+                return (status, format!(r#"{{"detail":"{detail}"}}"#));
             }
             let limit = limit.unwrap_or(self.max_rows);
             if limit > self.max_rows {
@@ -191,13 +194,20 @@ fn source(rows: Vec<Row>, max_rows: i64, chunk: i64) -> Arc<Source> {
         rows,
         max_rows,
         chunk,
-        broken: false,
+        fail: None,
         reads: Mutex::new(Vec::new()),
     })
 }
 
 fn connector(port: u16) -> APIConnector {
+    connector_with(port, None)
+}
+
+fn connector_with(port: u16, max_rows: Option<i64>) -> APIConnector {
     let mut attrs = Map::new();
+    if let Some(max_rows) = max_rows {
+        attrs.insert("max_response_row_limit".into(), Value::Int(max_rows));
+    }
     attrs.insert("host".into(), Value::Str("127.0.0.1".into()));
     attrs.insert("port".into(), Value::Int(port as i64));
     attrs.insert("api_key".into(), Value::Str("k".into()));
@@ -326,11 +336,54 @@ async fn rows_that_cannot_be_read_whole_and_failed_reads_are_errors() {
         "{error}"
     );
 
-    let broken = Arc::new(Source {
-        broken: true,
-        ..Arc::try_unwrap(source(vec![(1, "a")], 5, 10)).ok().unwrap()
-    });
+    let broken = failing(500, "the database is down");
     let conn = connector(serve(broken).await);
     let error = all_chunks(&conn, &pipe(None)).await.unwrap_err();
     assert!(error.contains("the database is down"), "{error}");
+}
+
+fn failing(status: u16, detail: &'static str) -> Arc<Source> {
+    Arc::new(Source {
+        fail: Some((status, detail)),
+        ..Arc::try_unwrap(source(vec![(1, "a")], 5, 10)).ok().unwrap()
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_permission_or_a_rate_limit_is_an_error_never_an_empty_source() {
+    for status in [401, 403, 404, 429] {
+        let src = failing(status, "refused");
+        let conn = connector(serve(src).await);
+        let error = all_chunks(&conn, &pipe(None)).await.unwrap_err();
+        assert!(
+            error.contains(&format!("HTTP {status}")),
+            "{status}: {error}"
+        );
+    }
+    // A failed read whose text happens to name a row limit is not a refusal of the limit.
+    let src = failing(500, "the maximum response size of 1 rows was exceeded");
+    let conn = connector(serve(src.clone()).await);
+    assert!(all_chunks(&conn, &pipe(None)).await.is_err());
+    assert_eq!(src.reads.lock().unwrap().len(), 1, "no renegotiation");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_largest_axis_value_is_read() {
+    // No exclusive end exists past it: the window stays open, the newest row is kept.
+    let src = source(vec![(5, "a"), (i64::MAX, "a")], 100_000, 10);
+    let conn = connector(serve(src).await);
+    let mut got = all_chunks(&conn, &pipe(None)).await.unwrap().concat();
+    got.sort();
+    assert_eq!(got, vec![5, i64::MAX]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_connectors_row_limit_is_asked_for_first() {
+    let src = source((0..8).map(|n| (n, "a")).collect(), 3, 10);
+    let conn = connector_with(serve(src.clone()).await, Some(3));
+    let mut got = all_chunks(&conn, &pipe(None)).await.unwrap().concat();
+    got.sort();
+    assert_eq!(got, (0..8).collect::<Vec<_>>());
+    let reads = src.reads.lock().unwrap().clone();
+    assert!(reads.iter().all(|r| r.2 == Some(3)), "{reads:?}");
 }

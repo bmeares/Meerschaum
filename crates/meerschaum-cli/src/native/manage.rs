@@ -1331,7 +1331,7 @@ async fn copy_windows(
     };
     let end = match &query.end {
         Some(end) => Some(end.clone()),
-        None => sync_time(true).await?.map(just_past),
+        None => sync_time(true).await?.and_then(just_past),
     };
     let (Some(begin), Some(end)) = (begin, end) else {
         return Ok(vec![query.clone()]);
@@ -1412,6 +1412,7 @@ fn copy_chunks(
     };
     let mut queue: std::collections::VecDeque<DataQuery> = windows.into_iter().collect();
     let mut messages = Vec::new();
+    let mut retries = meerschaum_connector::windows::ROW_LIMIT_RETRIES;
     while let Some(window) = queue.pop_front() {
         let synced = messages.len();
         let failed = |message: String| {
@@ -1437,18 +1438,16 @@ fn copy_chunks(
             }
             Ok(None) => continue,
             Err(e) => {
-                // A server that allows fewer rows names its own limit: read with that one.
-                let message = e.to_string();
-                match (
-                    cap,
-                    meerschaum_connector::windows::refused_row_limit(&message),
-                ) {
-                    (Some(asked), Some(allowed)) if allowed < asked => {
+                // A server that allows fewer rows names its own limit in its `413`: read with
+                // that one (a few times at most).
+                match (cap, meerschaum_connector::windows::refused_row_limit(&e)) {
+                    (Some(asked), Some(allowed)) if allowed < asked && retries > 0 => {
                         cap = Some(allowed);
+                        retries -= 1;
                         queue.push_front(window);
                         continue;
                     }
-                    _ => return failed(message),
+                    _ => return failed(e.to_string()),
                 }
             }
         };
@@ -2025,8 +2024,8 @@ mod copy_tests {
                 tz: None,
             })
         };
-        assert_eq!(just_past(at(5, 30)), at(6, 0));
-        assert_eq!(just_past(DateBound::Int(7)), DateBound::Int(8));
+        assert_eq!(just_past(at(5, 30)), Some(at(6, 0)));
+        assert_eq!(just_past(DateBound::Int(7)), Some(DateBound::Int(8)));
         assert_eq!(split_point(&at(0, 0), &at(2, 0)), Some(at(1, 0)));
     }
 
@@ -2085,6 +2084,20 @@ mod copy_tests {
             (windows[0].begin.clone(), windows[0].end.clone()),
             (Some(DateBound::Int(3)), Some(DateBound::Int(7)))
         );
+        // The newest value is the axis's largest: the window stays open at its end (no end past
+        // it exists), never an end that cuts off that row.
+        let windows = block_on(copy_windows(
+            &source(Ok((
+                Some(DateBound::Int(0)),
+                Some(DateBound::Int(i64::MAX)),
+            ))),
+            &dated,
+            &all,
+            &defaults,
+        ))
+        .unwrap();
+        assert_eq!(windows.len(), 1);
+        assert!(windows[0].end.is_none(), "{windows:?}");
         let flat = pipe(r#"{"columns": {"id": "station"}}"#);
         let windows = block_on(copy_windows(
             &source(Err("unused".into())),

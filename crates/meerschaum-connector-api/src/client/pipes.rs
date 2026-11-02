@@ -871,6 +871,19 @@ impl APIConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        self.read_pipe_data(pipe, query, false).await
+    }
+
+    /// [`Self::get_pipe_data`]; with `strict`, only an unregistered pipe (`409`) or one without a
+    /// table yet (`400`) has no data, and any other refusal (`401`, `403`, `404`, `429`, ...) is
+    /// an error ([`ConnectorError::Http`]): a reader that must not take a lost permission or a
+    /// rate limit for an empty source.
+    pub(crate) async fn read_pipe_data(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        strict: bool,
+    ) -> ConnectorResult<Option<Frame>> {
         if crate::engine_pipes::is_engine_pipe(pipe) {
             let q = crate::engine_pipes::EnginePipeQuery::from_data_query(query);
             return self.read_engine_pipe(pipe.metric_key(), &q).await;
@@ -907,11 +920,13 @@ impl APIConnector {
             if let Some(e) = server_failed(pipe, "data", &response) {
                 return Err(e);
             }
-            if response.status == 413 && query.limit.is_some() {
-                return Err(ConnectorError::Backend(format!(
-                    "Failed to get data for {pipe}: the API server refused the row limit:\n{}",
-                    response.text().trim()
-                )));
+            if (response.status == 413 && query.limit.is_some())
+                || (strict && !matches!(response.status, 400 | 409))
+            {
+                return Err(ConnectorError::Http {
+                    status: response.status,
+                    body: response.text(),
+                });
             }
             return Ok(None);
         }
