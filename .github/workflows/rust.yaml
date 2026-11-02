@@ -150,7 +150,7 @@ jobs:
         env:
           MRSM_NO_AUTO_INSTALL: '1'
         # Live Valkey coverage runs below against owned fixtures, never an ambient service.
-        run: env -u MRSM_VALKEY_TEST_URL -u MRSM_VALKEY_FIRST_USER_TEST_URL scripts/rust/ci.sh test
+        run: env -u MRSM_VALKEY_TEST_URL -u MRSM_VALKEY_FIRST_USER_TEST_URL -u MRSM_TEST_VALKEY_URI scripts/rust/ci.sh test
       - name: Native account regressions on isolated server databases
         id: native_backend_checks
         if: ${{ needs.changes.outputs.full == 'true' }}
