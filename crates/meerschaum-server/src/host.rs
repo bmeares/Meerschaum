@@ -864,13 +864,18 @@ async fn endpoint_ready(supervisor: &HostSupervisor, timeout: Duration) -> std::
     let mut impostor = false;
     loop {
         let endpoint = supervisor.endpoint();
-        if crate::proxy::connect_endpoint(&endpoint).await.is_ok() {
-            match endpoint_proves_token(&endpoint).await {
-                Ok(true) => return Ok(()),
-                Ok(false) => impostor = true,
-                // The host accepts connections before its app answers: ask again.
-                Err(_) => {}
-            }
+        // Each attempt (connecting included: a port whose backlog is full never connects) ends
+        // by the deadline.
+        let attempt = async {
+            crate::proxy::connect_endpoint(&endpoint).await?;
+            endpoint_proves_token(&endpoint).await
+        };
+        match tokio::time::timeout_at(deadline, attempt).await {
+            Ok(Ok(true)) => return Ok(()),
+            Ok(Ok(false)) => impostor = true,
+            // Not listening yet, or the host accepts connections before its app answers: ask
+            // again.
+            Ok(Err(_)) | Err(_) => {}
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(if impostor {
@@ -1150,6 +1155,9 @@ impl HostSupervisor {
         {
             let mut started = self.started.lock().await;
             if !*started {
+                if self.stopping() {
+                    return Err(std::io::Error::other("the server is stopping"));
+                }
                 if let Some(wait) = self.refusal_remaining() {
                     return Err(std::io::Error::other(format!(
                         "the API host refused to start (see the earlier message); not asking again for {}s, or until the plugins change",
@@ -1339,16 +1347,18 @@ impl HostSupervisor {
     /// Stop supervising and terminate the host, waiting (up to the termination grace period)
     /// for it to exit so that its own shutdown work (the terminal process) completes.
     pub async fn shutdown(&self) {
-        let running = *self.started.lock().await;
+        // Recorded before anything waits: a launch holding `started` sees it, and every watch is
+        // woken at once.
         self.stopping.store(true, Ordering::SeqCst);
         self.stop.notify_waiters();
+        let bound = TERMINATE_GRACE + Duration::from_secs(5);
+        // A launch still holding `started` past the bound counts as running.
+        let running = tokio::time::timeout(bound, self.started.lock())
+            .await
+            .map_or(true, |started| *started);
         if running {
             let mut terminated = self.terminated.subscribe();
-            let _ = tokio::time::timeout(
-                TERMINATE_GRACE + Duration::from_secs(5),
-                terminated.wait_for(|done| *done),
-            )
-            .await;
+            let _ = tokio::time::timeout(bound, terminated.wait_for(|done| *done)).await;
         }
         let _ = std::fs::remove_file(&self.socket);
     }

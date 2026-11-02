@@ -179,6 +179,17 @@ fn bad_gateway(detail: &str) -> Response {
     resp
 }
 
+/// `future` until `deadline` (`None`: no deadline); `None` past it.
+async fn until<F: std::future::Future>(
+    deadline: Option<tokio::time::Instant>,
+    future: F,
+) -> Option<F::Output> {
+    match deadline {
+        Some(deadline) => tokio::time::timeout_at(deadline, future).await.ok(),
+        None => Some(future.await),
+    }
+}
+
 fn gateway_timeout() -> Response {
     ApiError::new(504, "The API host did not answer in time.").into_response()
 }
@@ -435,21 +446,36 @@ impl HostProxy {
             return bad_gateway("The API host is unavailable.");
         }
         let endpoint = self.endpoint();
-        let stream = match connect_endpoint(&endpoint).await {
-            Ok(s) => s,
-            Err(e) => {
+        // Connecting, the handshake and the wait for the response headers share one deadline: a
+        // host that holds its port but accepts nothing (a full listen backlog) is as hung as one
+        // that never answers. Response bodies, streams and upgrades are not timed.
+        let deadline = self
+            .response_timeout
+            .map(|timeout| tokio::time::Instant::now() + timeout);
+        let timed_out = || {
+            tracing::warn!(
+                "The API host did not answer within {:?}.",
+                self.response_timeout.unwrap_or_default()
+            );
+            gateway_timeout()
+        };
+        let stream = match until(deadline, connect_endpoint(&endpoint)).await {
+            Some(Ok(s)) => s,
+            Some(Err(e)) => {
                 tracing::warn!("Failed to connect to the API host: {e}");
                 return bad_gateway("The API host is unavailable.");
             }
+            None => return timed_out(),
         };
-        let (mut sender, conn) =
-            match hyper::client::conn::http1::handshake(TokioIo::new(stream)).await {
-                Ok(x) => x,
-                Err(e) => {
-                    tracing::warn!("Handshake with the API host failed: {e}");
-                    return bad_gateway("The API host is unavailable.");
-                }
-            };
+        let handshake = hyper::client::conn::http1::handshake(TokioIo::new(stream));
+        let (mut sender, conn) = match until(deadline, handshake).await {
+            Some(Ok(x)) => x,
+            Some(Err(e)) => {
+                tracing::warn!("Handshake with the API host failed: {e}");
+                return bad_gateway("The API host is unavailable.");
+            }
+            None => return timed_out(),
+        };
         tokio::spawn(async move {
             if let Err(e) = conn.with_upgrades().await {
                 tracing::debug!("API host connection closed: {e}");
@@ -482,21 +508,16 @@ impl HostProxy {
             parts.headers.insert(header::HOST, v);
         }
         let upstream_req = hyper::Request::from_parts(parts, body);
-        // Only the wait for the response headers is timed: a host that accepted the request and
-        // never answers (hung) is a `504`, while a long download or stream that started is not.
-        let sending = sender.send_request(upstream_req);
-        let answered = match self.response_timeout {
-            Some(timeout) => match tokio::time::timeout(timeout, sending).await {
-                Ok(answered) => answered,
-                Err(_) => {
-                    if let Some(response) = too_large() {
-                        return response;
-                    }
-                    tracing::warn!("The API host did not answer within {timeout:?}.");
-                    return gateway_timeout();
+        // A host that accepted the request and never answers (hung) is a `504`, while a long
+        // download or stream that started is not.
+        let answered = match until(deadline, sender.send_request(upstream_req)).await {
+            Some(answered) => answered,
+            None => {
+                if let Some(response) = too_large() {
+                    return response;
                 }
-            },
-            None => sending.await,
+                return timed_out();
+            }
         };
         let mut resp = match answered {
             Ok(r) => r,
