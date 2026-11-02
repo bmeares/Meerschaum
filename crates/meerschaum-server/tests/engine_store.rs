@@ -517,7 +517,8 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
     assert_eq!(count("engine_cursors").await, 1);
     assert_eq!(count("engine_state").await, 1);
 
-    // Authorization comes before the body; a body over the cap is a 413.
+    // A body over the cap is a 413 before anything runs, authentication included (its declared
+    // length is refused unread); a body within it still needs a credential.
     let huge = vec![b' '; meerschaum_server::routes::engine::ENGINE_BODY_LIMIT + 1];
     let r = send(
         &app,
@@ -526,6 +527,17 @@ async fn engine_pipe_routes_refuse_unbounded_clears_extra_columns_and_huge_bodie
             write,
             None,
             Some(("application/json", huge.clone())),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE, "{}", r.text());
+    let r = send(
+        &app,
+        req(
+            "POST",
+            write,
+            None,
+            Some(("application/json", b"[]".to_vec())),
         ),
     )
     .await;

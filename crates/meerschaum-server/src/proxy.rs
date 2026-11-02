@@ -195,13 +195,13 @@ fn proxied_body_too_large(limit: usize) -> Response {
 }
 
 /// Apply `limit` to a request about to be forwarded: a declared `Content-Length` over it is
-/// refused at once (nothing is read); a body without a declared length is counted as it streams,
-/// and fails past the limit, setting the returned flag (so the proxy answers `413`, not `502`).
-/// Nothing is buffered either way.
+/// refused at once (nothing is read; the error is the limit, for [`proxied_body_too_large`]); a
+/// body without a declared length is counted as it streams, and fails past the limit, setting
+/// the returned flag (so the proxy answers `413`, not `502`). Nothing is buffered either way.
 fn limit_forwarded_body(
     req: Request,
     limit: Option<usize>,
-) -> Result<(Request, Arc<AtomicBool>), Response> {
+) -> Result<(Request, Arc<AtomicBool>), usize> {
     let exceeded = Arc::new(AtomicBool::new(false));
     let Some(limit) = limit else {
         return Ok((req, exceeded));
@@ -213,7 +213,7 @@ fn limit_forwarded_body(
         .and_then(|v| v.trim().parse::<u64>().ok());
     if let Some(length) = declared {
         if length > limit as u64 {
-            return Err(proxied_body_too_large(limit));
+            return Err(limit);
         }
         // The server's HTTP layer ends a body at its declared length.
         return Ok((req, exceeded));
@@ -222,7 +222,7 @@ fn limit_forwarded_body(
         use axum::body::HttpBody as _;
         let hint = req.body().size_hint();
         if hint.lower() > limit as u64 {
-            return Err(proxied_body_too_large(limit));
+            return Err(limit);
         }
         // An empty body stays as it is (a stream would make the host see a chunked `GET`).
         if hint.exact() == Some(0) {
@@ -421,7 +421,7 @@ impl HostProxy {
     pub async fn forward(&self, req: Request) -> Response {
         let (mut req, exceeded) = match limit_forwarded_body(req, self.body_limit) {
             Ok(limited) => limited,
-            Err(response) => return response,
+            Err(limit) => return proxied_body_too_large(limit),
         };
         let too_large = || {
             exceeded

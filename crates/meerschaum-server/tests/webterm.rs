@@ -952,6 +952,13 @@ async fn shell_state_queries_run_one_at_a_time() {
     shell
         .env
         .push(("FAKE_TMUX_DIR".into(), fake.path().display().to_string()));
+    // Readiness is only read where the shell reports it: without this, no query runs tmux.
+    let state_dir = root.path().join("shell-state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    shell.env.push((
+        "MRSM_WEBTERM_STATE_DIR".into(),
+        state_dir.display().to_string(),
+    ));
     let tmux = TmuxSettings {
         binary: binary.display().to_string(),
         socket: Some(fake.path().join("never.sock")),
@@ -967,7 +974,9 @@ async fn shell_state_queries_run_one_at_a_time() {
     send_json(&mut socket, json!(["stdin", "echo fake-ready\n"])).await;
     read_until(&mut socket, |out| has_line(out, "fake-ready")).await;
 
-    let burst: Vec<String> = (0..20).map(|i| format!("q{i}")).collect();
+    // Within the socket's control queue: replies past it are dropped (the browser gives up on a
+    // probe after two seconds), and this runtime drains the queue only between messages.
+    let burst: Vec<String> = (0..12).map(|i| format!("q{i}")).collect();
     for id in &burst {
         send_json(&mut socket, json!(["shell_state", id])).await;
     }
