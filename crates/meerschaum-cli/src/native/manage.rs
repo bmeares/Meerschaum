@@ -5,10 +5,12 @@
 //! the `copy pipes <instance>` path).
 
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector};
+use meerschaum_connector_sql::instance::data::get_chunk_bounds;
 use meerschaum_core::access::Locks;
 use meerschaum_core::pipe::{ChunkInterval, DEFAULT_BACKTRACK_MINUTES, PipeDefaults};
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{Pipe, SuccessTuple};
+use meerschaum_kernel::Frame;
 use meerschaum_kernel::value::DateTimeValue;
 use meerschaum_plugin::NativePlugins;
 
@@ -979,42 +981,75 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 None => SuccessTuple::ok(format!("No new rows to copy into {new_pipe}.")),
                 Some(query) => {
                     info(rt, &format!("Fetching data from {}...", sp.pipe));
-                    let df = if mode == CopyData::Backtrack {
-                        let minutes =
-                            backtrack_minutes(&sp.pipe, default_backtrack_minutes, &defaults);
-                        session.block_on(src_inst.conn().get_backtrack_data(
-                            &sp.pipe,
-                            minutes,
-                            &DataQuery::default(),
-                        ))
+                    // An `api:` server answers at most `api:data:max_response_row_limit` rows per
+                    // read and drops the rest silently: each read asks for that many explicitly
+                    // (a server allowing fewer refuses it), and a read that comes back full is
+                    // split, never taken for the whole chunk.
+                    let cap = if src_inst.conn().connector_keys().starts_with("api:") {
+                        rt.config()
+                            .get(&["api", "data", "max_response_row_limit"])
+                            .and_then(|v| v.as_i64())
+                            .filter(|n| *n > 0)
+                            .or(Some(DEFAULT_RESPONSE_ROW_LIMIT))
                     } else {
-                        session.block_on(src_inst.conn().get_pipe_data(&sp.pipe, &query))
+                        None
                     };
-                    info(rt, &format!("Syncing into {new_pipe}..."));
-                    match df {
-                        Ok(Some(df)) => {
-                            let mut dest_sp = SelectedPipe {
-                                pipe: new_pipe.clone(),
-                                id: None,
-                                hydrated: true,
-                            };
-                            let sargs = super::sync::SyncArgs {
-                                check_existing: true,
-                                chunksize: Some(-1),
-                                ..Default::default()
-                            };
-                            super::sync::sync_frame_public(
-                                &session,
-                                &dest,
-                                &mut dest_sp,
-                                df,
-                                &sargs,
-                            )
+                    let sync_into = |df| {
+                        let mut dest_sp = SelectedPipe {
+                            pipe: new_pipe.clone(),
+                            id: None,
+                            hydrated: true,
+                        };
+                        let sargs = super::sync::SyncArgs {
+                            check_existing: true,
+                            chunksize: Some(-1),
+                            ..Default::default()
+                        };
+                        super::sync::sync_frame_public(&session, &dest, &mut dest_sp, df, &sargs)
+                    };
+                    // Every mode but `backtrack` reads chunk by chunk, as v4 did
+                    // (`get_data(as_iterator=True)`): never the whole history in one frame.
+                    let windows = if mode == CopyData::Backtrack {
+                        vec![]
+                    } else {
+                        session.block_on(copy_windows(
+                            src_inst.conn().as_ref(),
+                            &sp.pipe,
+                            &query,
+                            &defaults,
+                        ))
+                    };
+                    if windows.len() > 1 || (cap.is_some() && !windows.is_empty()) {
+                        if windows.len() > 1 {
+                            info(
+                                rt,
+                                &format!("Syncing into {new_pipe} in {} chunks...", windows.len()),
+                            );
                         }
-                        Ok(None) => SuccessTuple::fail(format!(
-                            "You passed `None` instead of data into `sync()` for {new_pipe}.\nOmit the DataFrame to infer fetching."
-                        )),
-                        Err(e) => SuccessTuple::fail(e.to_string()),
+                        let read = |window: &DataQuery| {
+                            session.block_on(src_inst.conn().get_pipe_data(&sp.pipe, window))
+                        };
+                        copy_chunks(&sp.pipe, &new_pipe, windows, cap, read, sync_into)
+                    } else {
+                        let df = if mode == CopyData::Backtrack {
+                            let minutes =
+                                backtrack_minutes(&sp.pipe, default_backtrack_minutes, &defaults);
+                            session.block_on(src_inst.conn().get_backtrack_data(
+                                &sp.pipe,
+                                minutes,
+                                &DataQuery::default(),
+                            ))
+                        } else {
+                            session.block_on(src_inst.conn().get_pipe_data(&sp.pipe, &query))
+                        };
+                        info(rt, &format!("Syncing into {new_pipe}..."));
+                        match df {
+                            Ok(Some(df)) => sync_into(df),
+                            Ok(None) => SuccessTuple::fail(format!(
+                                "You passed `None` instead of data into `sync()` for {new_pipe}.\nOmit the DataFrame to infer fetching."
+                            )),
+                            Err(e) => SuccessTuple::fail(e.to_string()),
+                        }
                     }
                 }
             };
@@ -1241,6 +1276,200 @@ fn backtrack_minutes(pipe: &Pipe, default_backtrack_minutes: i64, defaults: &Pip
     }
 }
 
+/// `api:data:max_response_row_limit` when the config has none.
+const DEFAULT_RESPONSE_ROW_LIMIT: i64 = 100_000;
+
+/// The windows `copy pipes` reads one at a time (v4's `get_data(as_iterator=True)`): chunks of
+/// the source's chunk interval (`verify.chunk_minutes`, ...) from the query's `begin` (else the
+/// oldest value) to its `end` (else just past the newest), with the query's `params`. One window,
+/// the query itself, when the pipe has no datetime axis, its bounds cannot be read or they fit in
+/// one chunk.
+async fn copy_windows(
+    src: &dyn InstanceConnector,
+    pipe: &Pipe,
+    query: &DataQuery,
+    defaults: &PipeDefaults,
+) -> Vec<DataQuery> {
+    let whole = || vec![query.clone()];
+    if !pipe.columns().get("datetime").is_some_and(|v| !v.is_null()) {
+        return whole();
+    }
+    let params = query.params.as_ref();
+    let begin = match &query.begin {
+        Some(begin) => Some(begin.clone()),
+        None => src.get_sync_time(pipe, params, false).await.ok().flatten(),
+    };
+    let end = match &query.end {
+        Some(end) => Some(end.clone()),
+        None => src
+            .get_sync_time(pipe, params, true)
+            .await
+            .ok()
+            .flatten()
+            .map(just_past),
+    };
+    let (Some(begin), Some(end)) = (begin, end) else {
+        return whole();
+    };
+    let Ok(interval) = pipe.get_chunk_interval(None, defaults) else {
+        return whole();
+    };
+    match get_chunk_bounds(Some(begin), Some(end), false, interval, false, None, None) {
+        Ok(bounds) if bounds.len() > 1 => bounds
+            .into_iter()
+            .map(|(begin, end)| DataQuery {
+                begin,
+                end,
+                ..query.clone()
+            })
+            .collect(),
+        _ => whole(),
+    }
+}
+
+/// Just past `newest` (v4: an integer plus one; a timestamp plus a minute, rounded down to the
+/// minute).
+fn just_past(newest: DateBound) -> DateBound {
+    use chrono::Timelike;
+    match newest {
+        DateBound::Int(i) => DateBound::Int(i.saturating_add(1)),
+        DateBound::Datetime(dt) => {
+            let next = dt.utc + chrono::Duration::minutes(1);
+            let floored = next
+                .with_second(0)
+                .and_then(|t| t.with_nanosecond(0))
+                .unwrap_or(next);
+            DateBound::Datetime(DateTimeValue {
+                utc: floored,
+                tz: dt.tz,
+            })
+        }
+    }
+}
+
+/// A point strictly inside `[begin, end)`, or `None` when the window cannot be split.
+fn split_point(begin: &DateBound, end: &DateBound) -> Option<DateBound> {
+    match (begin, end) {
+        (DateBound::Int(b), DateBound::Int(e)) if e.checked_sub(*b)? >= 2 => {
+            Some(DateBound::Int(b + (e - b) / 2))
+        }
+        (DateBound::Datetime(b), DateBound::Datetime(e)) => {
+            let half = (e.utc - b.utc) / 2;
+            (half >= chrono::Duration::microseconds(1)).then(|| {
+                DateBound::Datetime(DateTimeValue {
+                    utc: b.utc + half,
+                    tz: b.tz.clone(),
+                })
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Read and sync each window in order, skipping empty ones (v4 never yielded an empty chunk).
+/// With `cap` (an `api:` source's row limit), each read asks for at most `cap` rows, and a read
+/// that comes back with `cap` rows may have been cut: its window is split in two and read again,
+/// and one that cannot be split fails the copy (never a silent loss). The first failure stops
+/// the copy: the windows before it are synced, and an incremental copy resumes from them.
+fn copy_chunks(
+    source: &Pipe,
+    new_pipe: &Pipe,
+    windows: Vec<DataQuery>,
+    cap: Option<i64>,
+    mut read: impl FnMut(&DataQuery) -> meerschaum_connector::ConnectorResult<Option<Frame>>,
+    mut sync: impl FnMut(Frame) -> SuccessTuple,
+) -> SuccessTuple {
+    let label = |window: &DataQuery| {
+        format!(
+            "{} - {}",
+            window
+                .begin
+                .as_ref()
+                .map_or("None".into(), DateBound::py_str),
+            window.end.as_ref().map_or("None".into(), DateBound::py_str)
+        )
+    };
+    let mut queue: std::collections::VecDeque<DataQuery> = windows
+        .into_iter()
+        .map(|window| DataQuery {
+            limit: cap.or(window.limit),
+            ..window
+        })
+        .collect();
+    let mut messages = Vec::new();
+    while let Some(window) = queue.pop_front() {
+        let synced = messages.len();
+        let failed = |message: String| {
+            SuccessTuple::fail(format!(
+                "Failed to copy the rows {} into {new_pipe} ({synced} chunks synced before):\n{message}",
+                label(&window),
+            ))
+        };
+        let df = match read(&window) {
+            Ok(Some(df)) => df,
+            // With a row limit, a refused read (a server allowing fewer rows) answers nothing:
+            // never taken for an empty chunk.
+            Ok(None) if cap.is_some() => {
+                return failed(format!(
+                    "{source} answered no data (does its server allow reads of {} rows? \
+                     `api:data:max_response_row_limit`)",
+                    cap.unwrap_or_default()
+                ));
+            }
+            Ok(None) => continue,
+            Err(e) => return failed(e.to_string()),
+        };
+        if let Some(cap) = cap
+            && i64::try_from(df.height()).unwrap_or(i64::MAX) >= cap
+        {
+            let middle = match (&window.begin, &window.end) {
+                (Some(begin), Some(end)) => split_point(begin, end),
+                _ => None,
+            };
+            match middle {
+                Some(middle) => {
+                    queue.push_front(DataQuery {
+                        begin: Some(middle.clone()),
+                        ..window.clone()
+                    });
+                    queue.push_front(DataQuery {
+                        end: Some(middle),
+                        ..window.clone()
+                    });
+                    continue;
+                }
+                None => {
+                    return failed(format!(
+                        "{source} answered {cap} rows, the most its server sends in one read \
+                         (`api:data:max_response_row_limit`), and these rows cannot be read in \
+                         smaller parts: the rest would be lost. Raise the server's limit, or \
+                         copy from the instance it serves."
+                    ));
+                }
+            }
+        }
+        if df.height() == 0 {
+            continue;
+        }
+        let res = sync(df);
+        if !res.success {
+            return failed(res.message);
+        }
+        messages.push(format!("{}\n{}", label(&window), res.message));
+    }
+    if messages.is_empty() {
+        return SuccessTuple::ok(format!("No rows to copy into {new_pipe}."));
+    }
+    // PARITY: v4's summary of a chunked sync (`Pipe.sync` of an iterator).
+    SuccessTuple::ok(format!(
+        "Synced {} chunk{} to {new_pipe}\n({} succeeded, 0 failed):\n\n{}",
+        messages.len(),
+        if messages.len() == 1 { "" } else { "s" },
+        messages.len(),
+        messages.join("\n\n")
+    ))
+}
+
 /// `a < b` for two bounds on the same axis; an error for a datetime and an integer.
 fn bound_before(a: &DateBound, b: &DateBound, pipe: &Pipe) -> Result<bool, String> {
     match (a, b) {
@@ -1336,7 +1565,8 @@ pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 mod copy_tests {
     use super::{
         CopyData, DataQuery, DateBound, PipeDefaults, axis_pipe, backtrack_from, backtrack_minutes,
-        bound_before, copy_summary, incremental_query, incremental_window,
+        bound_before, copy_chunks, copy_summary, incremental_query, incremental_window, just_past,
+        split_point,
     };
     use chrono::{TimeZone, Utc};
     use meerschaum_core::{Pipe, Value};
@@ -1622,5 +1852,136 @@ mod copy_tests {
             "Copied 0 of 1 pipe to 'sql:dest' (1 skipped).\n  - a: skipped (already on 'sql:dest'; pass --force to overwrite)"
         );
         assert!(!copy_summary("sql:dest", &[], &[], &[]).success);
+    }
+
+    /// A source on an integer axis (`axis[i]` is row `i`'s value) behind a server that answers at
+    /// most `limit` rows per read, silently, as `/data` does.
+    fn capped_reader(
+        axis: Vec<i64>,
+    ) -> impl FnMut(&DataQuery) -> meerschaum_connector::ConnectorResult<Option<meerschaum_kernel::Frame>>
+    {
+        use meerschaum_kernel::value::Value as KValue;
+        move |window: &DataQuery| {
+            let inside = |v: i64| {
+                window
+                    .begin
+                    .as_ref()
+                    .is_none_or(|b| matches!(b, DateBound::Int(b) if v >= *b))
+                    && window
+                        .end
+                        .as_ref()
+                        .is_none_or(|e| matches!(e, DateBound::Int(e) if v < *e))
+            };
+            let docs: Vec<indexmap::IndexMap<String, KValue>> = axis
+                .iter()
+                .copied()
+                .filter(|v| inside(*v))
+                .take(window.limit.map_or(usize::MAX, |l| l as usize))
+                .map(|v| [("n".to_string(), KValue::Int(v))].into_iter().collect())
+                .collect();
+            Ok(Some(
+                meerschaum_kernel::docs::frame_from_docs(&docs).unwrap(),
+            ))
+        }
+    }
+
+    fn int_window(begin: Option<i64>, end: Option<i64>) -> DataQuery {
+        DataQuery {
+            begin: begin.map(DateBound::Int),
+            end: end.map(DateBound::Int),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_full_read_is_split_until_nothing_is_cut() {
+        let pipe = pipe(r#"{"columns": {"datetime": "n"}, "dtypes": {"n": "int"}}"#);
+        let mut synced = 0usize;
+        let res = copy_chunks(
+            &pipe,
+            &pipe,
+            vec![
+                int_window(Some(0), Some(10)),
+                int_window(Some(10), Some(20)),
+            ],
+            Some(3),
+            capped_reader((0..20).collect()),
+            |df| {
+                synced += df.height();
+                meerschaum_core::SuccessTuple::success()
+            },
+        );
+        assert!(res.success, "{}", res.message);
+        assert_eq!(synced, 20, "rows past the server's limit were lost");
+        // Without the limit the same windows read everything in two reads.
+        let mut whole = 0usize;
+        let res = copy_chunks(
+            &pipe,
+            &pipe,
+            vec![
+                int_window(Some(0), Some(10)),
+                int_window(Some(10), Some(20)),
+            ],
+            None,
+            capped_reader((0..20).collect()),
+            |df| {
+                whole += df.height();
+                meerschaum_core::SuccessTuple::success()
+            },
+        );
+        assert!(res.success && whole == 20 && res.message.contains("Synced 2 chunks"));
+    }
+
+    #[test]
+    fn a_full_read_that_cannot_be_split_fails_the_copy() {
+        let pipe = pipe(r#"{"columns": {"datetime": "n"}, "dtypes": {"n": "int"}}"#);
+        // Five rows at one axis value: no smaller window holds fewer.
+        for window in [int_window(Some(4), Some(5)), int_window(None, None)] {
+            let res = copy_chunks(
+                &pipe,
+                &pipe,
+                vec![window],
+                Some(3),
+                capped_reader(vec![4; 5]),
+                |_| meerschaum_core::SuccessTuple::success(),
+            );
+            assert!(!res.success);
+            assert!(
+                res.message.contains("the rest would be lost"),
+                "{}",
+                res.message
+            );
+        }
+        // A read the server refused (nothing) is never an empty chunk.
+        let res = copy_chunks(
+            &pipe,
+            &pipe,
+            vec![int_window(Some(0), Some(10))],
+            Some(3),
+            |_: &DataQuery| Ok(None),
+            |_| meerschaum_core::SuccessTuple::success(),
+        );
+        assert!(!res.success, "{}", res.message);
+    }
+
+    #[test]
+    fn split_points_and_the_end_past_the_newest_value() {
+        assert_eq!(
+            split_point(&DateBound::Int(0), &DateBound::Int(10)),
+            Some(DateBound::Int(5))
+        );
+        assert_eq!(split_point(&DateBound::Int(4), &DateBound::Int(5)), None);
+        let at = |m: u32, s: u32| {
+            DateBound::Datetime(meerschaum_kernel::value::DateTimeValue {
+                utc: Utc
+                    .with_ymd_and_hms(2024, 1, 1, 0, m, s)
+                    .unwrap()
+                    .naive_utc(),
+                tz: None,
+            })
+        };
+        assert_eq!(just_past(at(5, 30)), at(6, 0));
+        assert_eq!(just_past(DateBound::Int(7)), DateBound::Int(8));
+        assert_eq!(split_point(&at(0, 0), &at(2, 0)), Some(at(1, 0)));
     }
 }

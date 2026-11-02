@@ -891,13 +891,27 @@ impl APIConnector {
                 QueryValue::opt(self.get_pipe_instance_keys(pipe)),
             ),
             ("as_chunks", QueryValue::bool(query.as_chunks)),
+            (
+                "limit",
+                query
+                    .limit
+                    .map(QueryValue::from)
+                    .unwrap_or(QueryValue::None),
+            ),
         ]);
         // Q17: an unreachable server or a failed read (`5xx`) is an error, not an empty pipe;
-        // an unregistered pipe (`409`) or one without a table yet (`400`) has no data.
+        // an unregistered pipe (`409`) or one without a table yet (`400`) has no data. A
+        // `limit` the server refuses (`413`, over its `max_response_row_limit`) is an error too.
         let response = self.get(&r_url, opts).await?;
         if !response.ok() {
             if let Some(e) = server_failed(pipe, "data", &response) {
                 return Err(e);
+            }
+            if response.status == 413 && query.limit.is_some() {
+                return Err(ConnectorError::Backend(format!(
+                    "Failed to get data for {pipe}: the API server refused the row limit:\n{}",
+                    response.text().trim()
+                )));
             }
             return Ok(None);
         }

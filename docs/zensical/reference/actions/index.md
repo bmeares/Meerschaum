@@ -255,7 +255,7 @@ Duplicate pipes or connectors. `copy pipes` clones the registration (and optiona
 mrsm copy pipes -c plugin:noaa -m weather -i sql:local
 ```
 
-With a destination instance (`mrsm copy pipes sql:dest -i sql:src -y`), `--sync-data` copies rows too: `all`, `backtrack` (each source pipe's recent rows), `incremental` (each destination pipe's rows after its own sync time, within `--begin`, `--end` and `--params`) or `filter` (exactly `--begin`, `--end` and `--params`). Existing pipes are skipped unless you pass `--force`, which overwrites their attributes; `incremental` copies the new rows into them either way.
+With a destination instance (`mrsm copy pipes sql:dest -i sql:src -y`), `--sync-data` copies rows too: `all`, `backtrack` (each source pipe's recent rows), `incremental` (each destination pipe's rows after its own sync time, within `--begin`, `--end` and `--params`) or `filter` (exactly `--begin`, `--end` and `--params`). Existing pipes are skipped unless you pass `--force`, which overwrites their attributes; `incremental` copies the new rows into them either way. Rows are read and synced one chunk (`verify:chunk_minutes`) at a time.
 
 ### Syncing & Data
 

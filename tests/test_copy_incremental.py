@@ -7,7 +7,8 @@ backtrack window (filtered by `--params`, capped by `--begin` / `--end`); it nev
 source's whole history into a destination that already has rows, and never rewrites the
 destination's older rows. A destination without data is filled from the source (from `--begin`
 when given). `all` keeps copying everything; bounds it would ignore are refused instead.
-`MRSM_BIN` (a standalone `mrsm`) is passed through, so the same tests check a freshly built binary.
+Every mode but `backtrack` reads the source one chunk (`verify.chunk_minutes`) at a time, as
+v4's `get_data(as_iterator=True)` did. `MRSM_BIN` (a standalone `mrsm`) is passed through, so the same tests check a freshly built binary.
 """
 
 from __future__ import annotations
@@ -363,3 +364,20 @@ def test_sync_data_backtrack_uses_the_source_pipes_window(home):
     _seed(home, _spec('sql:src', 'b', _hourly_params(fetch={'backtrack_minutes': 120}), _hourly(range(50))))
     _copy(home, '-y', '--noask', '--sync-data', 'backtrack')
     assert sorted(_rows(home, 'dst', 'b')) == [47, 48, 49]
+
+
+def test_copies_read_the_source_chunk_by_chunk(home):
+    """
+    `all`, `filter` and `incremental` read the source one chunk at a time (here ten hours), never
+    the whole history in one frame, and skip empty chunks.
+    """
+    rows = [i for i in range(50) if not 10 <= i < 40]
+    _seed(home, _spec('sql:src', 'c', _hourly_params(verify={'chunk_minutes': 600}), _hourly(rows)))
+    text = _copy(home, '-y', '--noask', '--sync-data', 'all')
+    assert 'Synced 2 chunks' in text, text
+    assert _rows(home, 'dst', 'c') == {n: n * 10 for n in rows}
+
+    text = _copy(
+        home, '-f', '-y', '--noask', '--sync-data', 'filter', '--begin', _ts(5), '--end', _ts(45),
+    )
+    assert 'Synced 2 chunks' in text, text
