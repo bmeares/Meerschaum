@@ -75,11 +75,7 @@ flavor_tests!(
             .unwrap();
         assert!(requested.contains("missing"));
         assert_eq!(requested.height(), 3);
-        assert!(
-            col(&requested, "missing")
-                .iter()
-                .all(KValue::is_na)
-        );
+        assert!(col(&requested, "missing").iter().all(KValue::is_na));
         c.delete(&pipe).await;
     }
 );
