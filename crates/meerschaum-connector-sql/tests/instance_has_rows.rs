@@ -74,18 +74,16 @@ flavor_tests!(test_pipe_exists_checked, |c: Ctx| async move {
     let _ = c.conn.drop_pipe(&pipe).await;
 });
 
-/// An instance whose database cannot be opened: the checked probe is an error, never "no
-/// table" (`table_exists` reads the same failure as `false`).
+/// A closed instance pool: the checked probe is an error, never "no table"
+/// (`table_exists` reads the same failure as `false`).
 #[tokio::test]
 async fn sqlite_existence_failures_are_errors() {
     let dir = tempfile::tempdir().unwrap();
-    let uri = format!(
-        "sqlite:///{}",
-        dir.path().join("no-such-directory").join("x.db").display()
-    );
+    let uri = format!("sqlite:///{}", dir.path().join("x.db").display());
     let broken = meerschaum_connector_sql::SqlConnector::from_uri("rs_exists_broken", &uri)
         .await
         .unwrap();
+    broken.driver().close().await;
     let pipe = meerschaum_core::Pipe::builder("test", "exists_broken")
         .build()
         .unwrap();
