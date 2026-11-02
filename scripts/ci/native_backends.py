@@ -75,9 +75,11 @@ def select_tests(lines, repo=REPO):
         if name not in TESTS or target['kind'] != ['test']:
             continue
         source = repo / 'crates' / TESTS[name] / 'tests' / (name + '.rs')
+        # Other crates have test targets of the same name: only the intended source is selected.
+        if Path(target['src_path']).resolve() != source.resolve():
+            continue
         binary = Path(row['executable']).resolve()
-        if (Path(target['src_path']).resolve() != source.resolve()
-                or not binary.is_relative_to((repo / 'target').resolve())):
+        if not binary.is_relative_to((repo / 'target').resolve()):
             raise ValueError(f'Unexpected native test artifact: {name}')
         if name in selected and selected[name] != binary:
             raise ValueError(f'Ambiguous native test artifact: {name}')

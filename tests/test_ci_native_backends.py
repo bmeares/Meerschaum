@@ -38,6 +38,37 @@ def test_missing_or_foreign_native_executables_refuse_the_gate(tmp_path):
             check_test_output('instance_users', f'Skipping {flavor}: set URI.\ntest result: ok. 2 passed;')
 
 
+def namesakes(repo, name):
+    """The same test target name compiled by other crates of the workspace."""
+    crates = {
+        'w18_fail_fast': ('meerschaum-connector-api', 'meerschaum-connector-sql'),
+        'pipeline_metadata_move': ('meerschaum-connector-sql',),
+    }[name]
+    return [json.dumps({'reason': 'compiler-artifact',
+        'executable': str(repo / 'target' / 'debug' / 'deps' / f'{name}-{crate}'),
+        'target': {'name': name, 'kind': ['test'],
+                   'src_path': str(repo / 'crates' / crate / 'tests' / (name + '.rs'))}})
+            for crate in crates]
+
+
+@pytest.mark.parametrize('name', ['w18_fail_fast', 'pipeline_metadata_move'])
+def test_equally_named_targets_of_other_crates_are_ignored(tmp_path, name):
+    rows = artifacts(tmp_path)
+    intended = next(row for row in rows if json.loads(row)['target']['name'] == name)
+    others = namesakes(tmp_path, name)
+    rest = [row for row in rows if row != intended]
+    for order in ([*others, *rows], [*rows, *others], [others[0], *rest, intended, *others[1:]]):
+        selected = select_tests(order, tmp_path)
+        assert set(selected) == set(TESTS)
+        assert selected[name] == tmp_path / 'target' / name
+    with pytest.raises(ValueError, match=f"Missing native tests: \\['{name}'\\]"):
+        select_tests([*others, *rest], tmp_path)
+    duplicate = json.loads(intended)
+    duplicate['executable'] = str(tmp_path / 'target' / 'other' / name)
+    with pytest.raises(ValueError, match='Ambiguous native test artifact'):
+        select_tests([*others, *rows, json.dumps(duplicate)], tmp_path)
+
+
 def test_native_connections_drop_ambient_credentials_and_use_distinct_valkey_databases(tmp_path):
     ports = {'postgresql': 43101, 'mysql': 43102, 'mariadb': 43103, 'valkey': 43104}
     env = native_environment(tmp_path, ports, {
