@@ -4,6 +4,7 @@
 //! (`actions/tag.py`), `index pipes` (`actions/index.py`) and `copy pipes` (`actions/copy.py`,
 //! the `copy pipes <instance>` path).
 
+use meerschaum_connector::windows::{just_past, split_point};
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector};
 use meerschaum_connector_sql::instance::data::get_chunk_bounds;
 use meerschaum_core::access::Locks;
@@ -1386,45 +1387,6 @@ async fn backtrack_windows(
     copy_windows(src, pipe, &query, defaults).await
 }
 
-/// Just past `newest` (v4: an integer plus one; a timestamp plus a minute, rounded down to the
-/// minute).
-fn just_past(newest: DateBound) -> DateBound {
-    use chrono::Timelike;
-    match newest {
-        DateBound::Int(i) => DateBound::Int(i.saturating_add(1)),
-        DateBound::Datetime(dt) => {
-            let next = dt.utc + chrono::Duration::minutes(1);
-            let floored = next
-                .with_second(0)
-                .and_then(|t| t.with_nanosecond(0))
-                .unwrap_or(next);
-            DateBound::Datetime(DateTimeValue {
-                utc: floored,
-                tz: dt.tz,
-            })
-        }
-    }
-}
-
-/// A point strictly inside `[begin, end)`, or `None` when the window cannot be split.
-fn split_point(begin: &DateBound, end: &DateBound) -> Option<DateBound> {
-    match (begin, end) {
-        (DateBound::Int(b), DateBound::Int(e)) if e.checked_sub(*b)? >= 2 => {
-            Some(DateBound::Int(b + (e - b) / 2))
-        }
-        (DateBound::Datetime(b), DateBound::Datetime(e)) => {
-            let half = (e.utc - b.utc) / 2;
-            (half >= chrono::Duration::microseconds(1)).then(|| {
-                DateBound::Datetime(DateTimeValue {
-                    utc: b.utc + half,
-                    tz: b.tz.clone(),
-                })
-            })
-        }
-        _ => None,
-    }
-}
-
 /// Read and sync each window in order, skipping empty ones (v4 never yielded an empty chunk).
 /// With `cap` (an `api:` source's row limit), each read asks for at most `cap` rows, and a read
 /// that comes back with `cap` rows may have been cut: its window is split in two and read again,
@@ -1434,7 +1396,7 @@ fn copy_chunks(
     source: &Pipe,
     new_pipe: &Pipe,
     windows: Vec<DataQuery>,
-    cap: Option<i64>,
+    mut cap: Option<i64>,
     mut read: impl FnMut(&DataQuery) -> meerschaum_connector::ConnectorResult<Option<Frame>>,
     mut sync: impl FnMut(Frame) -> SuccessTuple,
 ) -> SuccessTuple {
@@ -1448,13 +1410,7 @@ fn copy_chunks(
             window.end.as_ref().map_or("None".into(), DateBound::py_str)
         )
     };
-    let mut queue: std::collections::VecDeque<DataQuery> = windows
-        .into_iter()
-        .map(|window| DataQuery {
-            limit: cap.or(window.limit),
-            ..window
-        })
-        .collect();
+    let mut queue: std::collections::VecDeque<DataQuery> = windows.into_iter().collect();
     let mut messages = Vec::new();
     while let Some(window) = queue.pop_front() {
         let synced = messages.len();
@@ -1464,7 +1420,11 @@ fn copy_chunks(
                 label(&window),
             ))
         };
-        let df = match read(&window) {
+        let limited = DataQuery {
+            limit: cap.or(window.limit),
+            ..window.clone()
+        };
+        let df = match read(&limited) {
             Ok(Some(df)) => df,
             // With a row limit, a refused read (a server allowing fewer rows) answers nothing:
             // never taken for an empty chunk.
@@ -1476,7 +1436,21 @@ fn copy_chunks(
                 ));
             }
             Ok(None) => continue,
-            Err(e) => return failed(e.to_string()),
+            Err(e) => {
+                // A server that allows fewer rows names its own limit: read with that one.
+                let message = e.to_string();
+                match (
+                    cap,
+                    meerschaum_connector::windows::refused_row_limit(&message),
+                ) {
+                    (Some(asked), Some(allowed)) if allowed < asked => {
+                        cap = Some(allowed);
+                        queue.push_front(window);
+                        continue;
+                    }
+                    _ => return failed(message),
+                }
+            }
         };
         if let Some(cap) = cap
             && i64::try_from(df.height()).unwrap_or(i64::MAX) >= cap

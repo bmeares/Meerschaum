@@ -56,8 +56,42 @@ impl Connector for APIConnector {
     /// `fetch(pipe, begin, end, params)`: read the source pipe named by
     /// `parameters['fetch']['pipe']` (or legacy `connector_keys` / `metric_key` /
     /// `location_key`) from this API, patching `fetch.params` and selecting
-    /// `fetch.select_columns` / `fetch.omit_columns`.
+    /// `fetch.select_columns` / `fetch.omit_columns`. One read: an error, never a truncated
+    /// frame, when the source has more rows than its server sends at once (a sync reads it in
+    /// chunks, [`Connector::fetch_chunked`]).
     async fn fetch(&self, pipe: &Pipe, query: &DataQuery) -> ConnectorResult<Option<Frame>> {
+        let Some((source, q)) = self.fetch_source(pipe, query)? else {
+            return Ok(None);
+        };
+        super::chunked::fetch_whole(self, &source, &q).await
+    }
+
+    /// The source pipe's rows in windows read one at a time as the sync asks for them (v4:
+    /// `get_data(as_iterator=True)`), never past its server's row limit.
+    async fn fetch_chunked(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        _sync_chunks: bool,
+    ) -> ConnectorResult<Option<crate::traits::ChunkedFetch>> {
+        let Some((source, q)) = self.fetch_source(pipe, query)? else {
+            // `fetch` warns and answers no data.
+            return Ok(None);
+        };
+        Ok(Some(crate::traits::ChunkedFetch {
+            chunks: Box::new(super::chunked::SourceChunks::new(self.clone(), source, q)),
+        }))
+    }
+}
+
+impl APIConnector {
+    /// The source pipe of `pipe`'s `fetch` parameters and the query to read it with, or `None`
+    /// (warned) when they name none.
+    fn fetch_source(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<(Pipe, DataQuery)>> {
         let fetch = match pipe.parameters().get("fetch") {
             Some(Value::Map(m)) if !m.is_empty() => m.clone(),
             _ => {
@@ -108,7 +142,7 @@ impl Connector for APIConnector {
             params: Some(meerschaum_core::value::apply_patch_maps(&base, &patch)),
             ..query.clone()
         };
-        APIConnector::get_pipe_data(self, &source, &q).await
+        Ok(Some((source, q)))
     }
 }
 

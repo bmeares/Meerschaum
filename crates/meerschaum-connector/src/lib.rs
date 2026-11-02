@@ -38,6 +38,7 @@ pub mod template;
 #[doc(hidden)]
 pub mod testing;
 pub mod traits;
+pub mod windows;
 
 pub use async_trait::async_trait;
 pub use locks::{edit_refusal, lock_refusal};
