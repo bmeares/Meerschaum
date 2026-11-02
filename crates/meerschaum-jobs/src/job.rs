@@ -525,6 +525,10 @@ impl Job {
             return self.sysargs.clone();
         }
         if let Some(ex) = self.executor() {
+            // `systemd` reads its unit file; other executors send their metadata.
+            if let Some(sysargs) = ex.get_job_command(&self.name) {
+                return sysargs;
+            }
             return ex
                 .get_job_metadata(&self.name)
                 .get("sysargs")

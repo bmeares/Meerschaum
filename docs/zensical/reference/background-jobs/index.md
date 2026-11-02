@@ -21,7 +21,7 @@ Jobs keep running after your terminal closes. Their [executor](executors.md) det
 | `mrsm attach job syncing-engine` | Follow output and answer prompts. |
 | `mrsm show logs syncing-engine` | Follow output without sending input. |
 
-The console's [Jobs page](../api-instance/web-console.md#jobs) offers the same controls. It also shows the job's last successful sync and [health](health.md).
+The console's [Jobs page](../api-instance/web-console.md#jobs) offers the same controls. It also shows when the job last ran and its [health](health.md).
 
 ## Choose what happens next
 

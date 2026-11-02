@@ -1,7 +1,7 @@
 """Lazy, independently refreshed Performance page and Overview card."""
 
 import dash
-from dash import Input, Output, State, MATCH, ClientsideFunction
+from dash import Input, Output, State, MATCH, ALL, ClientsideFunction
 from dash.exceptions import PreventUpdate, MissingCallbackContextException
 import dash_bootstrap_components as dbc
 
@@ -22,6 +22,20 @@ def follow_performance_location(search, path):
     return instance, selected['window'], selected['pipe'], selected['pipeline']
 
 
+#: The mounted parts a refresh updates in place: `(output index from the end, id key)`.
+IN_PLACE = ((-3, 'part'), (-2, 'chart'), (-1, 'group'))
+
+
+def _mounted():
+    """The ids of the `live()` parts, graphs and breakdown stores on the page now."""
+    try:
+        outputs = dash.ctx.outputs_list
+        return [[item['id'][key] for item in outputs[index]] if isinstance(outputs[index], list) else []
+                for index, key in IN_PLACE]
+    except Exception:
+        return [[] for _ in IN_PLACE]
+
+
 @dash_app.callback(
     Output('performance-body', 'children'),
     Output('performance-pipe', 'options'),
@@ -33,6 +47,10 @@ def follow_performance_location(search, path):
     Output('performance-window', 'value'),
     Output('performance-pipe', 'value'),
     Output('performance-pipeline', 'value'),
+    Output('performance-shape', 'data'),
+    Output({'type': 'performance-live', 'part': ALL}, 'children'),
+    Output({'type': 'performance-graph', 'chart': ALL}, 'figure'),
+    Output({'type': 'performance-group-data', 'group': ALL}, 'data'),
     Input('performance-location', 'pathname'),
     Input('performance-location', 'search'),
     Input('performance-window', 'value'),
@@ -44,6 +62,7 @@ def follow_performance_location(search, path):
     Input('performance-instance', 'data'),
     Input('performance-history-page-size', 'value'),
     State('session-store', 'data'),
+    State('performance-shape', 'data'),
     running=[
         (Output('performance-interval', 'disabled'), True, False),
         (Output('performance-refresh', 'disabled'), True, False),
@@ -51,7 +70,15 @@ def follow_performance_location(search, path):
          'performance-refresh-status is-refreshing', 'performance-refresh-status'),
     ],
 )
-def render_performance(path, search, window, pipe, pipeline, refresh, interval, page, instance, page_size, session):
+def render_performance(path, search, window, pipe, pipeline, refresh, interval, page, instance, page_size,
+                       session, shape=None):
+    """
+    Read the metrics afresh for every tick, Refresh, page or selection. When the page already shows
+    this selection with the same sections (`performance.body_shape()`), only the mounted parts
+    change (the stats, coverage, notes and recent syncs, the charts' figures, the breakdowns' rows):
+    replacing the whole body emptied the breakdown tables until `assets/performance.js` refilled
+    them, and the page, shorter for a moment, lost its scroll position.
+    """
     if str(path).rstrip('/') != '/dash/performance':
         raise PreventUpdate
     try:
@@ -63,24 +90,40 @@ def render_performance(path, search, window, pipe, pipeline, refresh, interval, 
     # Values and options share one response / callback owner, so a query cannot clear its
     # Dropdown before the authorized options arrive (nor race another writer of options).
     selection = (instance, window or '24h', pipe, pipeline)
+    mounted = _mounted()
+    unchanged = [[dash.no_update] * len(ids) for ids in mounted]
     try:
         data = performance.metrics(instance, session, window or '24h', pipe, pipeline)
         if trigger in ('performance-window', 'performance-pipe', 'performance-pipeline',
                        'performance-instance', 'performance-location', 'performance-history-page-size'):
             page = 1
         _, page, pages, _ = performance.history_window(data, page, page_size)
-        return (performance.build_body(data, data.get('_instance', instance), window or '24h', page, page_size),
-                performance.filter_options(data.get('_pipe_options'), pipe),
-                performance.filter_options(data.get('_pipeline_options'), pipeline, 'Pipeline'),
-                pages, page, pages <= 1, *selection)
+        shown = data.get('_instance', instance)
+        layout = performance.body_shape(data, shown, window or '24h')
+        controls = (performance.filter_options(data.get('_pipe_options'), pipe),
+                    performance.filter_options(data.get('_pipeline_options'), pipeline, 'Pipeline'),
+                    pages, page, pages <= 1, *selection, layout)
+        if shape != layout:
+            return (performance.build_body(data, shown, window or '24h', page, page_size),
+                    *controls, *unchanged)
+        parts, charts, groups = mounted
+        live = performance.live_parts(data, page, page_size)
+        figures = performance.chart_figures(data, performance._scope(data, shown, window or '24h'))
+        stores = performance.group_stores(data, shown, window or '24h')
+        return (dash.no_update, *controls,
+                [live.get(part, dash.no_update) for part in parts],
+                [figures.get(chart, dash.no_update) for chart in charts],
+                [stores.get(group, dash.no_update) for group in groups])
     except PermissionError:
         return (dbc.Alert('Performance is not available for this selection.', color='secondary'),
                 performance.filter_options(value=pipe),
-                performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection)
+                performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection,
+                None, *unchanged)
     except Exception:
         return (dbc.Alert('Performance could not be loaded. Try Refresh.', color='warning'),
                 performance.filter_options(value=pipe),
-                performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection)
+                performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection,
+                None, *unchanged)
 
 
 dash_app.clientside_callback(

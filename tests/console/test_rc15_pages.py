@@ -4,7 +4,7 @@
 
 """
 The console's Jobs, Users, Plugins and Tokens pages in a browser (rc15): New job, Restart and
-Delete, job health in the status line, the compact jobs table, the users' admin actions and the
+Delete, job health in the Status and Last Run columns, the jobs table, the users' admin actions and the
 last-admin guard, the Installed and Repository tabs with Uninstall and Install, and phone width.
 Opt-in (`MRSM_TEST_CONSOLE=1`); see `tests/console/conftest.py`. All data is synthetic.
 """
@@ -52,25 +52,18 @@ def _cleanup_jobs(server, *names: str) -> None:
 
 
 def _job_unit(page, name: str):
-    """A job's card, or its row of the compact table."""
-    if page.locator('#jobs-table').count():
-        return page.locator(f'#jobs-table tbody tr:has(.job-name-link:text-is("{name}"))')
-    return page.locator(f'.job-card:has(.job-name-link:text-is("{name}"))')
+    """A job's row of the jobs table."""
+    return page.locator(f'#jobs-table tbody tr.job-row:has(.job-name-link:text-is("{name}"))')
 
 
 def _job_action(page, name: str, label: str) -> None:
-    """Click a job's action: a card's button, or the item of a table row's menu."""
-    unit = _job_unit(page, name)
-    if page.locator('#jobs-table').count():
-        unit.locator('.job-row-menu-toggle').click()
-        page.click(f'.dropdown-menu.show .dropdown-item:text-is("{label}")')
-        return
-    ### A card's buttons are rebuilt when its status changes: click the current one.
-    unit.locator(f'button:text-is("{label}")').first.click()
+    """Click the item of a job's row menu."""
+    _job_unit(page, name).locator('.job-row-menu-toggle').click()
+    page.click(f'.dropdown-menu.show .dropdown-item:text-is("{label}")')
 
 
 def _status(page, name: str) -> str:
-    return _job_unit(page, name).locator('.job-status-line').first.inner_text()
+    return _job_unit(page, name).locator('.job-status').first.inner_text()
 
 
 def _dropdown_options(page, dropdown_id: str) -> list:
@@ -122,15 +115,14 @@ def test_new_job_creates_starts_restarts_and_deletes_a_job(server, tab):
         _wait_text(tab.page, '#jobs-alert-div', f"Created job '{name}'.")
         assert _job_exists(server, name)
 
-        ### It is listed, running; with job health its line says when it last synced.
+        ### It is listed, running; with job health its Last Run says when it last synced.
         _job_unit(tab.page, name).wait_for(timeout=30000)
         tab.page.wait_for_function(
-            "(name) => [...document.querySelectorAll('.job-status-line')].some("
-            "el => el.closest('.job-card, tr') && el.closest('.job-card, tr').innerText.includes(name)"
-            " && el.innerText.includes('Running'))",
+            "(name) => [...document.querySelectorAll('#jobs-table tr.job-row')].some("
+            "tr => tr.innerText.includes(name) && tr.querySelector('.job-status').innerText === 'Running')",
             arg=name, timeout=30000,
         )
-        ### Once the job's health reports a good lap, its status line says when.
+        ### Once the job's health reports a good lap, its Last Run says when.
         last_success = None
         deadline = time.time() + 45
         while time.time() < deadline and not last_success:
@@ -147,9 +139,10 @@ def test_new_job_creates_starts_restarts_and_deletes_a_job(server, tab):
             time.sleep(2)
         if last_success:
             tab.page.wait_for_function(
-                "(name) => [...document.querySelectorAll('.job-status-line')].some("
-                "el => el.closest('.job-card, tr').innerText.includes(name)"
-                " && el.innerText.includes('last good sync'))",
+                "(name) => [...document.querySelectorAll('#jobs-table tr.job-row')].some("
+                "tr => tr.innerText.includes(name)"
+                " && /(just now|min ago)$/.test(tr.querySelector('.job-last-run').innerText)"
+                " && tr.querySelector('.job-last-run').title.startsWith('Last sync ended'))",
                 arg=name, timeout=60000,
             )
 
@@ -176,29 +169,29 @@ def test_new_job_creates_starts_restarts_and_deletes_a_job(server, tab):
         )
         confirm.click()
         tab.page.wait_for_selector('.modal.show', state='detached', timeout=30000)
-        ### Gone from the server, then from the page (it drops jobs that went away).
+        ### Gone from the server, then from the page (its refresh hides jobs that went away).
         deadline = time.time() + 30
         while time.time() < deadline and _job_exists(server, name):
             time.sleep(1)
         assert not _job_exists(server, name)
-        _job_unit(tab.page, name).wait_for(state='detached', timeout=30000)
+        _job_unit(tab.page, name).wait_for(state='hidden', timeout=30000)
         assert _errors(tab) == [], _errors(tab)
     finally:
         _cleanup_jobs(server, name)
 
 
 def _row_geometry(page, name: str) -> dict:
-    """A job row's name link, status line and dot on the page (boxes are `[x, y, w, h]`)."""
+    """A job row's name link, Status and its dot on the page (boxes are `[x, y, w, h]`)."""
     return page.evaluate(
         """(name) => {
             const link = [...document.querySelectorAll('#jobs-table .job-name-link')]
                 .find(a => a.textContent === name);
             const row = link.closest('tr');
-            const status = row.querySelector('.job-status-line');
+            const status = row.querySelector('.job-status');
             const box = el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
             return {
                 link: box(link), status: box(status),
-                dot: status.querySelector('.job-status-emoji').textContent,
+                dot: getComputedStyle(status, '::before').backgroundColor,
                 color: getComputedStyle(status).color,
                 text: status.innerText,
             };
@@ -207,7 +200,7 @@ def _row_geometry(page, name: str) -> dict:
     )
 
 
-def test_jobs_page_is_a_table_past_eight_jobs(server, context):
+def test_jobs_page_is_a_table_with_a_filter(server, context):
     names = [f'w7-bulk-{i}' for i in range(9)]
     failed_name = 'w7-bulk-failed'
     try:
@@ -225,26 +218,26 @@ def test_jobs_page_is_a_table_past_eight_jobs(server, context):
         tab = Tab(page, server.base_url)
         tab.login(path='/dash/jobs')
         page.wait_for_selector('#jobs-table', timeout=30000)
-        assert page.locator('#jobs-table tbody tr').count() >= len(names)
+        assert page.locator('#jobs-table tbody tr.job-row').count() >= len(names)
         ### On a phone each row is the job's name on one line (a 44 px link), its status under it.
         for name in names:
             row = _row_geometry(page, name)
             x, y, width, height = row['link']
             assert 44 <= height < 48 and width >= 44, (name, row)
             assert row['status'][1] >= y + height - 1, (name, row)
-        ### A failed run reads "Stopped · last run failed" with a red dot, as on the Overview.
+        ### A failed run's Status is "Failed" with a red dot, as on the Overview.
         page.wait_for_function(
-            "(name) => [...document.querySelectorAll('#jobs-table tr')].some(tr => "
-            "tr.innerText.includes(name) && tr.innerText.includes('last run failed'))",
+            "(name) => [...document.querySelectorAll('#jobs-table tr.job-row')].some(tr => "
+            "tr.innerText.includes(name) && tr.querySelector('.job-status').innerText === 'Failed')",
             arg=failed_name, timeout=60000,
         )
         failed = _row_geometry(page, failed_name)
-        assert failed['dot'] == '🔴' and failed['color'] == 'rgb(255, 123, 114)', failed
+        assert failed['dot'] == 'rgb(255, 123, 114)' and failed['color'] == 'rgb(255, 123, 114)', failed
         ### The filter box narrows the table.
         page.fill('#jobs-filter-input', 'w7-bulk-3')
         page.press('#jobs-filter-input', 'Enter')
         page.wait_for_function(
-            "document.querySelectorAll('#jobs-table tbody tr').length === 1", timeout=30000,
+            "document.querySelectorAll('#jobs-table tbody tr.job-row').length === 1", timeout=30000,
         )
         ### Each row has a menu with the card's actions.
         page.locator('#jobs-table .job-row-menu-toggle').first.click()
@@ -258,7 +251,7 @@ def test_jobs_page_is_a_table_past_eight_jobs(server, context):
         tab.goto('/dash/jobs?status=stopped', '#jobs-table')
         page.wait_for_selector('#jobs-status-filter-clear:visible', timeout=30000)
         assert 'Stopped' in page.inner_text('#jobs-status-filter-clear')
-        assert page.locator('#jobs-table tbody tr').count() >= len(names)
+        assert page.locator('#jobs-table tbody tr.job-row').count() >= len(names)
         page.click('#jobs-status-filter-clear')
         page.wait_for_selector('#jobs-status-filter-clear', state='hidden', timeout=30000)
         assert _errors(tab) == [], _errors(tab)

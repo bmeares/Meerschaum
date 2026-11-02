@@ -150,7 +150,8 @@ def test_connector_and_plugin_inspection_obey_roles(inspection_server,browser,wi
             assert tab.page.locator('#console-nav-connectors').count() == 0
         else:
             tab.page.locator('#connectors-table').wait_for()
-            rows = tab.page.locator('#connectors-table tbody')
+            ### RC28: one row group (`tbody`) per connector type.
+            rows = tab.page.locator('#connectors-table')
             if role == 'admin':
                 own = rows.locator('tr[data-keys="sql:rc16_ops"]')
                 assert rows.locator('button:text-is("Inspect")').count() == 0

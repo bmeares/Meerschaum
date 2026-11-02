@@ -187,6 +187,13 @@
       if (window.terminal && window.terminal.session === session) delete window.terminal;
     };
 
+    // While the program asks for the mouse (tmux: a right click on a window's tab opens its
+    // menu), the browser's own menu would cover it. Shift keeps the browser's menu, as Shift
+    // keeps text selection in xterm.js.
+    el.addEventListener('contextmenu', (event) => {
+      if (term.modes.mouseTrackingMode !== 'none' && !event.shiftKey) event.preventDefault();
+    });
+
     const resizer = new ResizeObserver(scheduleFit);
     resizer.observe(el);
     const themes = new MutationObserver(() => { term.options.theme = dark(mode) ? DARK : LIGHT; });
@@ -318,10 +325,14 @@
     else if (event.data.action === 'instance') {
       const keys = event.data.instance || event.data.subaction_text;
       if (typeof keys === 'string' && keys && !/[\x00-\x1f]/.test(keys)) {
-        if (session.idle && !session.lineDirty) {
+        // Like Exec: only into a shell that waits at an empty prompt right now.
+        const generation = session.inputGeneration;
+        session.queryState().then((state) => {
+          const connected = session.socket && session.socket.readyState === WebSocket.OPEN;
+          if (!connected || !state?.idle || !state?.empty || generation !== session.inputGeneration) return;
           session.idle = false;
           session.send(['stdin', 'instance ' + keys + '\r']);
-        }
+        });
       }
     }
     else if (event.data.action === '__TOGGLE_MOD' && event.data.mod in session.mods) {

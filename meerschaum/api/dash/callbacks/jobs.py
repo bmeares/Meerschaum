@@ -3,8 +3,9 @@
 # vim:fenc=utf-8
 
 """
-Callbacks of the Jobs page: the jobs' cards and table rows (Start, Pause, Stop, Restart, Delete,
-logs), the list's refresh, the filter and the New job form.
+Callbacks of the Jobs page: the jobs table (its rows' actions, its delete dialog and its refresh
+in place), the job cards (Start, Pause, Stop, Restart, Delete, logs), the filter and the New job
+form.
 """
 
 from __future__ import annotations
@@ -24,12 +25,18 @@ from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from meerschaum.api.dash.jobs import (
     STATUS_EMOJI,
-    COMPACT_JOBS_THRESHOLD,
+    JOBS_FILTER_THRESHOLD,
+    JOBS_REFRESH_MS,
+    JOB_GROUPS,
     CONSOLE_EXECUTOR_KEYS,
     build_job_card,
     build_jobs_table,
+    build_jobs_delete_modal,
     build_job_row_menu,
+    build_row_status,
     build_archived_run_card,
+    get_job_snapshots,
+    invalidate_job_snapshots,
     is_automatic_job,
     job_visible_to_session,
     jobs_route_group_allowed,
@@ -47,7 +54,12 @@ from meerschaum.api.dash.jobs import (
     build_new_job_modal,
     JOB_FILTER_STATES,
     job_filter_state,
+    job_group,
+    job_health,
+    job_last_run,
     actions_class_name,
+    group_class_name,
+    row_class_name,
     job_rights,
 )
 from meerschaum.api.dash._support import get_job as _get_job
@@ -206,6 +218,7 @@ def manage_job_button_click(
     except Exception:
         success, msg = False, traceback.format_exc()
 
+    invalidate_job_snapshots()
     ### Wait for a status change before building the elements.
     timeout_seconds = 1.0
     check_interval_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
@@ -294,11 +307,11 @@ def job_delete_modal(
         success, msg = delete_job(job)
     except Exception:
         success, msg = False, traceback.format_exc()
+    invalidate_job_snapshots()
 
     if not success:
         return True, alert_from_success_tuple((success, msg)), no_update
 
-    ### The Jobs page drops the job from its list when the modal closes (`refresh_jobs_list`).
     return False, [], ''
 
 
@@ -321,8 +334,9 @@ def refresh_jobs_on_interval(
     class_names: Optional[List[Optional[str]]] = None,
 ):
     """
-    When the jobs refresh interval fires, refresh the jobs' status lines, and rebuild a job's
-    actions and timestamps only when its status changed (a button being replaced loses a click).
+    When the jobs refresh interval fires, refresh the job cards' status lines, and rebuild a
+    job's actions and timestamps only when its status changed (a button being replaced loses a
+    click). Every card is read from one listing (`get_job_snapshots`).
     """
     session_id = (session_data or {}).get('session-id', None)
     may_manage = _signed_in(session_id)
@@ -335,11 +349,17 @@ def refresh_jobs_on_interval(
         raise PreventUpdate
     class_names = list(class_names or [None] * len(job_names))
 
+    try:
+        snapshots = get_job_snapshots()
+    except Exception:
+        snapshots = {}
+
     ### NOTE: The job may have been deleted, but the card may still exist.
     jobs = []
     for name in job_names:
         try:
-            job = _get_job(name)
+            ### A job the listing does not have (another executor's) is read on its own.
+            job = snapshots.get(name) or _get_job(name)
             job = job if job_visible_to_session(job, session_id) else None
         except Exception:
             job = None
@@ -351,23 +371,19 @@ def refresh_jobs_on_interval(
         new_class_name = actions_class_name(job, variant)
         changed = new_class_name.split() != str(class_name or '').split()
         statuses.append(build_status_children(job))
+        timestamps.append(build_process_timestamps_children(job))
         if not changed:
             buttons.append(no_update)
             buttons_classes.append(no_update)
-            timestamps.append(no_update)
             continue
         buttons.append(build_job_actions(job, variant) if may_manage else [])
         buttons_classes.append(new_class_name)
-        timestamps.append(build_process_timestamps_children(job))
 
     return buttons, buttons_classes, statuses, timestamps
 
 
 #: The tabs of the Jobs page (`/dash/runs` opens `runs`).
 JOBS_PAGE_TABS = ('jobs', 'runs')
-
-#: How often (ms) the Jobs page looks for jobs that appeared or went away.
-JOBS_LIST_REFRESH_MS: int = 5000
 
 
 @dash_app.callback(
@@ -443,9 +459,18 @@ def render_job_page_from_url(
             html.Div(id='jobs-page-tab-content'),
             html.Br(),
             build_new_job_modal(),
+            build_jobs_delete_modal(),
+            ### The refresh (`refresh_jobs_table`): the interval ticks, `gate_jobs_refresh`
+            ### forwards a tick unless the viewer is using the table (`jobs-refresh-tick`), and a
+            ### job that appeared rebuilds the table (`jobs-structure-changed`, then
+            ### `jobs-list-refresh`, when the viewer is not using it either).
+            dcc.Interval(id='jobs-list-interval', interval=JOBS_REFRESH_MS, n_intervals=0),
+            dcc.Store(id='jobs-refresh-tick', data=None),
+            dcc.Store(id='jobs-action-done', data=None),
+            dcc.Store(id='jobs-created', data=None),
+            dcc.Store(id='jobs-structure-changed', data=None),
             dcc.Store(id='jobs-list-refresh', data=0),
             dcc.Store(id='jobs-rendered-names', data=None),
-            dcc.Interval(id='jobs-list-interval', interval=JOBS_LIST_REFRESH_MS, n_intervals=0),
         ]
 
     job = _get_job(job_name)
@@ -474,8 +499,8 @@ def _signed_in(session_id: Optional[str]) -> bool:
 
 
 def _listed_jobs(is_runs: bool, session_id: Optional[str]) -> Dict[str, Any]:
-    """The jobs of a tab the session may see, by name."""
-    jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
+    """The jobs of a tab the session may see, by name (from one listing: `get_job_snapshots`)."""
+    jobs = get_job_snapshots()
     return {
         name: job
         for name, job in sorted(jobs.items())
@@ -505,6 +530,7 @@ def _matches(job, filter_text: Optional[str], status: Optional[str] = None) -> b
     Output('jobs-rendered-names', 'data'),
     Output('jobs-filter-div', 'hidden'),
     Output('jobs-new-button-div', 'hidden'),
+    Output('refresh-jobs-interval', 'disabled'),
     Input('jobs-page-tabs', 'active_tab'),
     Input('jobs-filter-input', 'value'),
     Input('jobs-list-refresh', 'data'),
@@ -519,7 +545,8 @@ def render_jobs_page_tab(
     session_data: Optional[Dict[str, Any]],
 ):
     """
-    Build the active tab of the Jobs page: cards, or a table past `COMPACT_JOBS_THRESHOLD` jobs.
+    Build the active tab of the Jobs page: the jobs table (Jobs), or the runs' cards (Runs, which
+    the cards' own refresh, `refresh-jobs-interval`, keeps current).
     """
     if active_tab not in JOBS_PAGE_TABS:
         raise PreventUpdate
@@ -532,8 +559,9 @@ def render_jobs_page_tab(
     return (
         content,
         {'tab': active_tab, 'names': names, 'filter': filter_text or '', 'status': status},
-        total <= COMPACT_JOBS_THRESHOLD and not filter_text and not status,
+        total <= JOBS_FILTER_THRESHOLD and not filter_text and not status,
         is_runs or not job_rights(_viewer_of(session_id)).get('create', False),
+        not is_runs,
     )
 
 
@@ -558,9 +586,10 @@ def build_jobs_tab(
     status: Optional[str] = None,
 ):
     """
-    The jobs of a tab: persistent jobs, or the console's runs (automatic execution workers and
-    the summaries retained after their output expired). With `with_total`, return
-    `(content, names, total)`: the names shown and how many jobs the tab has before filtering.
+    The jobs of a tab: persistent jobs (the jobs table), or the console's runs (cards of the
+    automatic execution workers and of the summaries retained after their output expired).
+    With `with_total`, return `(content, names, total)`: the names shown and how many jobs the
+    tab has before filtering.
     """
     ### Each control follows the viewer's job permissions (`job_rights`).
     authenticated = _signed_in(session_id)
@@ -594,52 +623,321 @@ def build_jobs_tab(
                 ),
                 className='jobs-empty',
             )
-    elif total > COMPACT_JOBS_THRESHOLD:
-        content = html.Div(
-            [build_jobs_table(shown, authenticated=authenticated)] + (
-                [html.Br(), build_cards_grid(archived, 3)] if archived else []
-            ),
-        )
-    else:
+    elif is_runs:
         cards = [
             build_job_card(job, authenticated=authenticated, include_follow=False)
             for job in shown
         ] + archived
         content = build_cards_grid(cards, 3)
+    else:
+        content = build_jobs_table(shown, authenticated=authenticated)
     if with_total:
         return content, names, total
     return content
 
 
-@dash_app.callback(
-    Output('jobs-list-refresh', 'data'),
+### Forward a refresh tick unless the viewer is using the table: a menu of it is open, or text
+### in it is selected (a refresh would close the menu or lose the selection), or the page is not
+### visible. The next tick tries again. Without a table (no jobs yet, or none matching the
+### filter) the tick goes on too: a job that appears rebuilds the tab.
+JOBS_TABLE_BUSY_JS = """
+    function jobsTableBusy(table){
+        if (!table) return false;
+        if (table.querySelector('.dropdown-menu.show')) return true;
+        const selection = window.getSelection ? window.getSelection() : null;
+        return Boolean(selection && !selection.isCollapsed && (
+            table.contains(selection.anchorNode) || table.contains(selection.focusNode)
+        ));
+    }
+"""
+
+dash_app.clientside_callback(
+    "function(n){" + JOBS_TABLE_BUSY_JS + """
+        if (document.hidden || jobsTableBusy(document.getElementById('jobs-table'))) {
+            return dash_clientside.no_update;
+        }
+        return n;
+    }""",
+    Output('jobs-refresh-tick', 'data'),
     Input('jobs-list-interval', 'n_intervals'),
-    Input({'type': 'job-delete-modal', 'index': ALL}, 'is_open'),
-    State('jobs-rendered-names', 'data'),
+    prevent_initial_call=True,
+)
+
+### A job appeared (or came back into the filter): rebuild the table, unless the viewer is
+### using it (then the next refresh asks again).
+dash_app.clientside_callback(
+    "function(changed, refresh){" + JOBS_TABLE_BUSY_JS + """
+        if (!changed) return dash_clientside.no_update;
+        if (jobsTableBusy(document.getElementById('jobs-table'))) return dash_clientside.no_update;
+        return (refresh || 0) + 1;
+    }""",
+    Output('jobs-list-refresh', 'data'),
+    Input('jobs-structure-changed', 'data'),
     State('jobs-list-refresh', 'data'),
+    prevent_initial_call=True,
+)
+
+
+def table_refresh_outputs(
+    row_names: List[str],
+    row_classes: List[Optional[str]],
+    status_classes: List[Optional[str]],
+    last_runs: List[Any],
+    last_run_titles: List[Any],
+    actions_classes: List[Optional[str]],
+    group_names: List[str],
+    group_classes: List[Optional[str]],
+    group_counts: List[Any],
+    rendered: Dict[str, Any],
+    session_id: Optional[str],
+    snapshots: Optional[Dict[str, Any]] = None,
+    now: Optional[datetime] = None,
+) -> Tuple[Any, ...]:
+    """
+    The outputs of `refresh_jobs_table` from the table's current state: for each row its group
+    class (a job that went away, or out of the filter, is hidden), Status, Last Run and (when the
+    job's status changed) menu, `no_update` where nothing changed; the groups' counts and
+    classes; and `jobs-structure-changed` when a job that is not in the table appeared.
+    """
+    snapshots = get_job_snapshots() if snapshots is None else snapshots
+    filter_text, status = rendered.get('filter'), rendered.get('status')
+    shown = {
+        name: job
+        for name, job in snapshots.items()
+        if not is_automatic_job(job)
+        and job_visible_to_session(job, session_id)
+        and _matches(job, filter_text, status)
+    }
+    may_manage = _signed_in(session_id)
+    rights = job_rights(_viewer_of(session_id)) if may_manage else {}
+
+    def changed(new, old):
+        return no_update if new == old else new
+
+    out_rows, out_status, out_status_class, out_last, out_title, out_menu, out_menu_class = (
+        [], [], [], [], [], [], []
+    )
+    counts = {group: 0 for group, _ in JOB_GROUPS}
+    for index, name in enumerate(row_names):
+        job = shown.get(name)
+        if job is None:
+            ### Gone (deleted, or out of the filter): hidden where it is, until it comes back.
+            current = str(row_classes[index] or 'job-row')
+            gone = current if 'job-row-gone' in current.split() else current + ' job-row-gone'
+            out_rows.append(changed(gone, row_classes[index]))
+            for out in (out_status, out_status_class, out_last, out_title, out_menu, out_menu_class):
+                out.append(no_update)
+            continue
+        counts[job_group(job)] += 1
+        out_rows.append(changed(row_class_name(job), row_classes[index]))
+        health = job_health(job)
+        word, status_class = build_row_status(job, health)
+        new_status_class = changed(status_class, status_classes[index])
+        out_status_class.append(new_status_class)
+        out_status.append(no_update if new_status_class is no_update else word)
+        text, title = job_last_run(job, health, now=now)
+        out_last.append(changed(text, last_runs[index]))
+        out_title.append(changed(title, last_run_titles[index]))
+        menu_class = actions_class_name(job, 'row')
+        if menu_class.split() == str(actions_classes[index] or '').split():
+            out_menu.append(no_update)
+            out_menu_class.append(no_update)
+        else:
+            out_menu.append(build_job_row_menu(job, rights=rights) if may_manage else [])
+            out_menu_class.append(menu_class)
+
+    out_group_classes = [
+        changed(group_class_name(group, counts.get(group, 0)), group_classes[index])
+        for index, group in enumerate(group_names)
+    ]
+    out_group_counts = [
+        changed(str(counts.get(group, 0)), group_counts[index])
+        for index, group in enumerate(group_names)
+    ]
+    appeared = sorted(set(shown) - set(row_names))
+    structure = {'appeared': appeared, 'at': time.time()} if appeared else no_update
+    return (
+        out_rows, out_status, out_status_class, out_last, out_title, out_menu, out_menu_class,
+        out_group_classes, out_group_counts, structure,
+    )
+
+
+@dash_app.callback(
+    Output({'type': 'job-row', 'index': ALL}, 'className'),
+    Output({'type': 'job-row-status', 'index': ALL}, 'children'),
+    Output({'type': 'job-row-status', 'index': ALL}, 'className'),
+    Output({'type': 'job-row-last-run', 'index': ALL}, 'children'),
+    Output({'type': 'job-row-last-run', 'index': ALL}, 'title'),
+    Output({'type': 'job-row-actions', 'index': ALL}, 'children'),
+    Output({'type': 'job-row-actions', 'index': ALL}, 'className'),
+    Output({'type': 'jobs-group', 'index': ALL}, 'className'),
+    Output({'type': 'jobs-group-count', 'index': ALL}, 'children'),
+    Output('jobs-structure-changed', 'data'),
+    Input('jobs-refresh-tick', 'data'),
+    Input('jobs-action-done', 'data'),
+    Input('jobs-created', 'data'),
+    State({'type': 'job-row', 'index': ALL}, 'className'),
+    State({'type': 'job-row-status', 'index': ALL}, 'className'),
+    State({'type': 'job-row-last-run', 'index': ALL}, 'children'),
+    State({'type': 'job-row-last-run', 'index': ALL}, 'title'),
+    State({'type': 'job-row-actions', 'index': ALL}, 'className'),
+    State({'type': 'jobs-group', 'index': ALL}, 'className'),
+    State({'type': 'jobs-group-count', 'index': ALL}, 'children'),
+    State('jobs-rendered-names', 'data'),
     State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def refresh_jobs_list(n_intervals, delete_modals_open, rendered, refresh, session_data):
+def refresh_jobs_table(
+    tick, action_done, created,
+    row_classes, status_classes, last_runs, last_run_titles, actions_classes,
+    group_classes, group_counts, rendered, session_data,
+):
     """
-    Rebuild the list when jobs appeared or went away (a job created from a terminal, a deleted
-    job, a finished run).
+    Refresh the jobs table in place (every `JOBS_REFRESH_MS`, and after an action): each row's
+    group, Status and Last Run, its menu when its status changed, the groups' counts. Nothing is
+    rebuilt, so the page keeps its scroll position, open menus, filter and selection; a job that
+    is not in the table yet rebuilds it (through `jobs-structure-changed`).
     """
-    if not rendered or any(delete_modals_open or []):
+    if not rendered or rendered.get('tab') != 'jobs':
         raise PreventUpdate
+    outputs = dash.callback_context.outputs_list
+    row_names = [item['id']['index'] for item in outputs[0]]
+    group_names = [item['id']['index'] for item in outputs[7]]
     session_id = (session_data or {}).get('session-id', None)
-    is_runs = rendered.get('tab') == 'runs'
     try:
-        listed = _listed_jobs(is_runs, session_id)
+        snapshots = get_job_snapshots()
     except Exception:
         raise PreventUpdate
-    names = [
-        job.name for job in listed.values()
-        if _matches(job, rendered.get('filter'), rendered.get('status'))
-    ]
-    if names == list(rendered.get('names') or []):
+    return table_refresh_outputs(
+        row_names, row_classes, status_classes, last_runs, last_run_titles, actions_classes,
+        group_names, group_classes, group_counts, rendered, session_id, snapshots=snapshots,
+    )
+
+
+@dash_app.callback(
+    Output('jobs-alert-div', 'children', allow_duplicate=True),
+    Output('jobs-action-done', 'data'),
+    Output('jobs-delete-modal', 'is_open'),
+    Output('jobs-delete-target', 'data'),
+    Output('jobs-delete-title', 'children'),
+    Output('jobs-delete-label', 'children'),
+    Output('jobs-delete-name-input', 'value'),
+    Output('jobs-delete-name-input', 'placeholder'),
+    Output('jobs-delete-alert-div', 'children'),
+    Input({'type': 'job-row-action', 'action': ALL, 'index': ALL}, 'n_clicks'),
+    Input('jobs-delete-cancel-button', 'n_clicks'),
+    Input('jobs-delete-confirm-button', 'n_clicks'),
+    State('jobs-delete-target', 'data'),
+    State('jobs-delete-name-input', 'value'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def jobs_table_action(row_clicks, cancel_clicks, confirm_clicks, target, typed_name, session_data):
+    """
+    A jobs table row's action: Start, Resume, Pause, Stop and Restart run at once (the row
+    then refreshes in place); Delete opens the page's delete dialog for the job, which deletes
+    it once its name is typed.
+    """
+    ctx = dash.callback_context
+    trigger = ctx.triggered_id
+    value = ctx.triggered[0]['value'] if ctx.triggered else None
+    session_id = (session_data or {}).get('session-id', None)
+    rights = job_rights(_viewer_of(session_id))
+    username = get_username_from_session(session_id)
+
+    def outputs(alert=no_update, done=no_update, is_open=no_update, target_=no_update,
+                title=no_update, label=no_update, typed=no_update, placeholder=no_update,
+                modal_alert=no_update):
+        return alert, done, is_open, target_, title, label, typed, placeholder, modal_alert
+
+    if trigger == 'jobs-delete-cancel-button':
+        if not cancel_clicks:
+            raise PreventUpdate
+        return outputs(is_open=False, target_=None, typed='', modal_alert=[])
+
+    if trigger == 'jobs-delete-confirm-button':
+        if not confirm_clicks or not target:
+            raise PreventUpdate
+        if not rights.get('delete', False):
+            return outputs(modal_alert=alert_from_success_tuple(
+                (False, f"User '{username}' may not delete jobs.")
+            ))
+        if (typed_name or '').strip() != target:
+            return outputs(modal_alert=alert_from_success_tuple((False, "Type the job's name to delete it.")))
+        try:
+            job = _get_job(target)
+        except Exception:
+            job = None
+        if job is None or not job.exists() or not job_visible_to_session(job, session_id):
+            invalidate_job_snapshots()
+            return outputs(done=time.time(), is_open=False, target_=None, typed='', modal_alert=[])
+        try:
+            success, msg = delete_job(job)
+        except Exception:
+            success, msg = False, traceback.format_exc()
+        invalidate_job_snapshots()
+        if not success:
+            return outputs(modal_alert=alert_from_success_tuple((success, msg)))
+        return outputs(
+            alert=alert_from_success_tuple((True, f"Deleted job '{target}'.")),
+            done=time.time(), is_open=False, target_=None, typed='', modal_alert=[],
+        )
+
+    if not isinstance(trigger, dict) or not value:
         raise PreventUpdate
-    return (refresh or 0) + 1
+    job_name, action = trigger.get('index'), trigger.get('action')
+    if action == 'delete':
+        if not rights.get('delete', False):
+            raise PreventUpdate
+        return outputs(
+            is_open=True,
+            target_=job_name,
+            title=['Delete job ', html.B(job_name), '?'],
+            label=['Type ', html.Code(job_name), ' to confirm'],
+            typed='',
+            placeholder=job_name,
+            modal_alert=[],
+        )
+    if not rights.get(action, False):
+        return outputs(alert=alert_from_success_tuple((False, f"User '{username}' may not {action} jobs.")))
+    try:
+        job = _get_job(job_name)
+    except Exception:
+        job = None
+    if job is None or not job.exists() or not job_visible_to_session(job, session_id):
+        raise PreventUpdate
+    functions = {
+        'start': job.start,
+        'stop': job.stop,
+        'pause': job.pause,
+        'restart': lambda: restart_job(job),
+    }
+    if action not in functions:
+        return outputs(alert=alert_from_success_tuple((False, f"Invalid action '{action}'.")))
+    old_status = job.status
+    try:
+        success, msg = functions[action]()
+    except Exception:
+        success, msg = False, traceback.format_exc()
+    ### Wait (briefly) for the status to change, so the row moves with this refresh.
+    begin = time.perf_counter()
+    interval = mrsm.get_config('system', 'cli', 'refresh_seconds')
+    while success and action != 'restart' and (time.perf_counter() - begin) < 1.0:
+        if job.status != old_status:
+            break
+        time.sleep(interval)
+    invalidate_job_snapshots()
+    return outputs(alert=alert_from_success_tuple((success, msg)), done=time.time())
+
+
+@dash_app.callback(
+    Output('jobs-delete-confirm-button', 'disabled'),
+    Input('jobs-delete-name-input', 'value'),
+    State('jobs-delete-target', 'data'),
+)
+def enable_jobs_delete_confirm(typed_name: Optional[str], target: Optional[str]):
+    """The table's Delete is enabled once the job's name has been typed."""
+    return not target or (typed_name or '').strip() != target
 
 
 ########################################################################################
@@ -904,17 +1202,16 @@ def create_job_from_form(
     Output('new-job-modal', 'is_open', allow_duplicate=True),
     Output('new-job-alert-div', 'children', allow_duplicate=True),
     Output('jobs-alert-div', 'children'),
-    Output('jobs-list-refresh', 'data', allow_duplicate=True),
+    Output('jobs-created', 'data'),
     Input('new-job-create-button', 'n_clicks'),
     *NEW_JOB_FIELDS,
-    State('jobs-list-refresh', 'data'),
     State('session-store', 'data'),
     prevent_initial_call=True,
 )
 def create_new_job(create_clicks, action, connector_keys, metric_keys, location_keys, tags,
-                   pipeline, arguments, repeat, schedule, min_seconds, restart, name, refresh,
+                   pipeline, arguments, repeat, schedule, min_seconds, restart, name,
                    session_data):
-    """Create and start the job the New job form describes."""
+    """Create and start the job the New job form describes (the table then lists it)."""
     if not create_clicks:
         raise PreventUpdate
     session_id = (session_data or {}).get('session-id', None)
@@ -925,9 +1222,10 @@ def create_new_job(create_clicks, action, connector_keys, metric_keys, location_
     if sysargs is None:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     success, message = create_job_from_form(sysargs, str(name or ''), session_id)
+    invalidate_job_snapshots()
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
-    return False, [], alert_from_success_tuple((True, message)), (refresh or 0) + 1
+    return False, [], alert_from_success_tuple((True, message)), time.time()
 
 
 def _read_job_logs(job_name: str, session_id: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -1078,6 +1376,7 @@ def retain_automatic_run(clicks, session):
             get_username_from_session((session or {}).get('session-id')), method='POST')
         if isinstance(result, dict):
             result = (bool(result.get('success')), str(result.get('message', result.get('msg', ''))))
+        invalidate_job_snapshots()
         if result and result[0]:
             return [alert_from_success_tuple((True, 'Kept as a persistent Job.')),
                     html.A('Open Jobs', href='/dash/jobs')]

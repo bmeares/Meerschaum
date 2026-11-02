@@ -3,15 +3,21 @@
 # vim:fenc=utf-8
 
 """
-The console's Jobs page: a card per job (or a compact table past `COMPACT_JOBS_THRESHOLD` jobs),
-each job's status line with its health ("Running · last good sync 2 min ago"), the New job form
-and the command it builds.
+The console's Jobs page: the jobs table (a group per state, running jobs first, each job's
+single-word status, when it last ran and its command), the job cards (the Runs tab, one job's
+page, the Terminal page's Jobs button), the New job form and the command it builds.
+
+The page reads every job from one listing (`get_job_snapshots()`: `meerschaum._core`'s
+`jobs_get_summaries`, one batched `systemctl show` for the `systemd` jobs) instead of asking
+each job for its status, health and times, which cost a few `systemctl` calls per job and value.
 """
 
 from __future__ import annotations
 
 import json
 import shlex
+import threading
+import time
 from datetime import datetime, timezone
 
 from meerschaum.utils.typing import List, Dict, Any, Optional, Tuple, WebState
@@ -41,8 +47,11 @@ EXECUTOR_KEYS: str = get_executor_keys_from_context()
 #: the Jobs page lists and manages (`local` or `systemd`), else `local`.
 CONSOLE_EXECUTOR_KEYS: str = EXECUTOR_KEYS if EXECUTOR_KEYS in ('local', 'systemd') else 'local'
 
-#: More jobs than this are listed as a compact table with a filter box instead of cards.
-COMPACT_JOBS_THRESHOLD: int = 8
+#: Past this many jobs the Jobs tab has a filter box.
+JOBS_FILTER_THRESHOLD: int = 8
+
+#: How often (ms) the Jobs page refreshes its jobs' statuses and Last Run times.
+JOBS_REFRESH_MS: int = 15000
 
 #: The action the New job form starts with.
 DEFAULT_JOB_ACTION: str = 'sync pipes'
@@ -147,7 +156,11 @@ def get_jobs_cards(state: WebState):
     Build cards and alerts lists for jobs (the web terminal page's Jobs button): the jobs the
     session's viewer may see.
     """
-    jobs = get_jobs(executor_keys=EXECUTOR_KEYS, include_hidden=False)
+    jobs = (
+        get_job_snapshots()
+        if EXECUTOR_KEYS in ('local', 'systemd')
+        else get_jobs(executor_keys=EXECUTOR_KEYS, include_hidden=False)
+    )
     session_id = state['session-store.data'].get('session-id', None)
     is_authenticated = may_manage_jobs(session_id) or job_rights().get('logs', False)
 
@@ -159,6 +172,99 @@ def get_jobs_cards(state: WebState):
         cards.append(build_job_card(job, authenticated=is_authenticated))
 
     return cards, []
+
+
+########################################################################################
+# One listing of every job (with its state) for the page's callbacks.
+########################################################################################
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    """`Job.began` and friends: `datetime.fromisoformat()` of the native text (or `None`)."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+class JobSnapshot:
+    """
+    A job as one listing saw it (`meerschaum._core.jobs_get_summaries`): its name, executor,
+    command, status, PID, result, health, times and properties, read in one pass. It answers
+    what the page's helpers ask a `Job` (`status`, `sysargs`, `label`, `health`, `result`,
+    `began`, `get_daemon_properties()`, ...) without another read; to act on the job (start,
+    stop, logs), open it with `meerschaum.api.dash._support.get_job`.
+    """
+
+    __slots__ = (
+        'name', 'executor_keys', 'sysargs', 'label', 'status', 'pid', 'result', 'restart',
+        'health', 'began', 'ended', 'paused', 'stop_time', '_properties',
+    )
+
+    def __init__(self, row: Dict[str, Any]):
+        self.name = str(row.get('name', ''))
+        self.executor_keys = str(row.get('executor_keys') or 'local')
+        self.sysargs = [str(arg) for arg in (row.get('sysargs') or [])]
+        self.label = str(row.get('label') or ' '.join(self.sysargs))
+        self.status = str(row.get('status') or 'stopped')
+        self.pid = row.get('pid')
+        result = row.get('result') or (False, 'No result available.')
+        self.result = (bool(result[0]), str(result[1])) if len(result) == 2 else (False, '')
+        self.restart = bool(row.get('restart'))
+        self.health = row.get('health') if isinstance(row.get('health'), dict) else None
+        self.began = _parse_dt(row.get('began'))
+        self.ended = _parse_dt(row.get('ended'))
+        self.paused = _parse_dt(row.get('paused'))
+        self.stop_time = _parse_dt(row.get('stop_time'))
+        properties = row.get('properties')
+        self._properties = properties if isinstance(properties, dict) else {}
+
+    def get_daemon_properties(self) -> Dict[str, Any]:
+        """The daemon's properties as the listing read them."""
+        return self._properties
+
+    def exists(self) -> bool:
+        """A listed job exists (as of the listing)."""
+        return True
+
+    def __repr__(self) -> str:
+        return f"JobSnapshot({self.name!r}, {self.status!r})"
+
+
+#: How long (seconds) one listing answers the page's callbacks: a page load and the refreshes
+#: of every open tab within this window share it.
+SNAPSHOT_MAX_AGE_SECONDS: float = 2.0
+
+_snapshot_lock = threading.Lock()
+_snapshot_cache: Dict[str, Any] = {}
+
+
+def get_job_snapshots(max_age: Optional[float] = None) -> Dict[str, JobSnapshot]:
+    """
+    Every job the Jobs page lists (`local`, and the `systemd` jobs on a `systemd` host; hidden
+    ones aside), by name, with its state: read at most `max_age` seconds ago
+    (`SNAPSHOT_MAX_AGE_SECONDS` by default). Concurrent callers share one read.
+    """
+    max_age = SNAPSHOT_MAX_AGE_SECONDS if max_age is None else max_age
+    with _snapshot_lock:
+        cached = _snapshot_cache.get('jobs')
+        if cached is not None and (time.monotonic() - cached[0]) <= max_age:
+            return dict(cached[1])
+        from meerschaum.jobs import _native
+        rows = _native.core().jobs_get_summaries(False)
+        snapshots = {}
+        for row in rows:
+            snapshot = JobSnapshot(row)
+            snapshots[snapshot.name] = snapshot
+        _snapshot_cache['jobs'] = (time.monotonic(), snapshots)
+        return dict(snapshots)
+
+
+def invalidate_job_snapshots() -> None:
+    """Forget the last listing (a job was started, stopped, created or deleted)."""
+    with _snapshot_lock:
+        _snapshot_cache.pop('jobs', None)
 
 
 def build_archived_run_card(record):
@@ -185,7 +291,7 @@ def build_archived_run_card(record):
 
 
 ########################################################################################
-# Health and the status line.
+# Status and Last Run.
 ########################################################################################
 
 def job_health(job: Optional[Job]) -> Optional[Dict[str, Any]]:
@@ -247,44 +353,42 @@ def _is_sync_job(job: Job) -> bool:
     return bool(sysargs) and sysargs[0] == 'sync'
 
 
-def job_status_summary(
-    job: Optional[Job],
-    health: Optional[Dict[str, Any]] = None,
-    now: Optional[datetime] = None,
-) -> Tuple[str, str]:
+#: The single word of each state a job's Status shows.
+STATE_LABELS: Dict[str, str] = {
+    'running': 'Running',
+    'stalled': 'Stalled',
+    'failing': 'Failing',
+    'paused': 'Paused',
+    'stopped': 'Stopped',
+    'failed': 'Failed',
+    'dne': 'Missing',
+}
+
+
+def job_state(job: Optional[Job], health: Optional[Dict[str, Any]] = None) -> str:
     """
-    Return `(state, text)` for a job's status line: the state names its color (`running`,
-    `paused`, `stopped`, `stalled`, `failing`, `failed`, `dne`) and the text reads like
-    "Running · last good sync 2 min ago", "Stalled · last good sync 3 h ago", "Failing · 4 failed
-    syncs" or "Stopped". The health (`job.health`) is read when not given; without it the line is
-    the plain status.
+    A job's state: `running`, `stalled` (running, no lap for too long), `failing` (running, its
+    laps fail), `paused`, `stopped`, `failed` (stopped after a failure it was not stopped by
+    hand) or `dne`. The health (`job.health`) is read when not given.
     """
     if job is None:
-        return 'dne', 'Does not exist'
+        return 'dne'
     status = job.status
     health = health if health is not None else job_health(job)
-    noun = 'sync' if _is_sync_job(job) else 'run'
     health = health or {}
     state = str(health.get('state') or '')
-    ago = time_ago(health.get('last_success'), now=now)
-    good = f"last good {noun} {ago}" if ago else ''
     try:
         failures = int(health.get('consecutive_failures') or 0)
     except (TypeError, ValueError):
         failures = 0
-
-    def join(*parts: str) -> str:
-        return ' · '.join(part for part in parts if part)
-
     if status == 'running':
         if state == 'stalled':
-            return 'stalled', join('Stalled', good or f"no good {noun} yet")
+            return 'stalled'
         if state == 'failing' or failures > 0:
-            count = max(failures, 1)
-            return 'failing', join('Failing', f"{count} failed {noun}{'s' if count != 1 else ''}")
-        return 'running', join('Running', good)
+            return 'failing'
+        return 'running'
     if status == 'paused':
-        return 'paused', join('Paused', good)
+        return 'paused'
 
     ### A stopped job's health counts failed laps, not how its one run ended: a job that ended
     ### with a failure (and was not stopped by hand) failed too.
@@ -300,9 +404,67 @@ def job_status_summary(
             )
         except Exception:
             failed = False
-    if failed:
-        return 'failed', join('Stopped', f"last {noun} failed", good)
-    return 'stopped', join('Stopped', good)
+    return 'failed' if failed else 'stopped'
+
+
+def job_status_summary(
+    job: Optional[Job],
+    health: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """
+    Return `(state, word)` for a job's Status: the state (`job_state`) names its color, the word
+    is what the page shows (`Running`, `Stalled`, `Failing`, `Paused`, `Stopped`, `Failed`).
+    When it last ran is `job_last_run`.
+    """
+    state = job_state(job, health)
+    return state, STATE_LABELS.get(state, state.capitalize())
+
+
+def _stamp(value: Any) -> str:
+    ts = _parse_ts(value)
+    return ts.strftime('%Y-%m-%d %H:%M UTC') if ts is not None else ''
+
+
+def job_last_run(
+    job: Optional[Job],
+    health: Optional[Dict[str, Any]] = None,
+    now: Optional[datetime] = None,
+) -> Tuple[str, str]:
+    """
+    Return `(text, title)` for a job's Last Run: when its last lap ended (a job that repeats:
+    `--loop`, `-s`, `--listen`), else when its run ended, or began while it runs (`2 min ago`;
+    `Never` for a job that never ran). The title has the exact times, the last good one when the
+    last runs failed, and how many failed in a row.
+    """
+    if job is None:
+        return '', ''
+    health = health if health is not None else job_health(job)
+    health = health or {}
+    noun = 'sync' if _is_sync_job(job) else 'run'
+    last_lap = health.get('last_lap')
+    status = getattr(job, 'status', 'stopped')
+    if last_lap:
+        when, verb = last_lap, 'ended'
+    elif status in ('running', 'paused') and getattr(job, 'began', None):
+        when, verb = job.began, 'began'
+    elif getattr(job, 'ended', None):
+        when, verb = job.ended, 'ended'
+    elif getattr(job, 'began', None):
+        when, verb = job.began, 'began'
+    else:
+        return 'Never', ''
+    text = time_ago(when, now=now) or 'Never'
+    lines = [f"Last {noun} {verb} {_stamp(when)}"] if _stamp(when) else []
+    last_success = health.get('last_success')
+    try:
+        failures = int(health.get('consecutive_failures') or 0)
+    except (TypeError, ValueError):
+        failures = 0
+    if failures > 0:
+        lines.append(f"{failures} failed {noun}{'s' if failures != 1 else ''} in a row")
+        if last_success:
+            lines.append(f"Last good {noun} {_stamp(last_success)}")
+    return text, '\n'.join(lines)
 
 
 #: The states the Jobs page filters by (`/dash/jobs?status=stalled`, the Overview's Jobs tile).
@@ -320,12 +482,27 @@ def job_filter_state(job: Optional[Job]) -> str:
     A job's state for `?status=`: `running`, `stalled`, `failing` (a running job whose laps fail,
     or a job that stopped with a failure), `paused` or `stopped`.
     """
-    state, _ = job_status_summary(job)
+    state = job_state(job)
     return 'failing' if state == 'failed' else state
 
 
-#: The status line's dot for each state of `job_status_summary`: a running job that stalls or
-#: fails gets the Overview's colors for those states (amber, red), not its process's green.
+#: The groups of the Jobs table, in their order: a job's group is its process's state.
+JOB_GROUPS: Tuple[Tuple[str, str], ...] = (
+    ('running', 'Running'),
+    ('paused', 'Paused'),
+    ('stopped', 'Stopped'),
+)
+
+
+def job_group(job: Optional[Job]) -> str:
+    """`running` (also a stalled or failing job: its process runs), `paused` or `stopped`."""
+    status = getattr(job, 'status', 'stopped') if job is not None else 'stopped'
+    return status if status in ('running', 'paused') else 'stopped'
+
+
+#: The status line's dot for each state of `job_status_summary` (the job cards): a running job
+#: that stalls or fails gets the Overview's colors for those states (amber, red), not its
+#: process's green.
 STATE_EMOJI: Dict[str, str] = {
     'running': STATUS_EMOJI['running'],
     'paused': STATUS_EMOJI['paused'],
@@ -339,8 +516,7 @@ STATE_EMOJI: Dict[str, str] = {
 
 def build_status_children(job: Job) -> Any:
     """
-    Return the status line of a job: the dot and the text of its state (its status with its
-    health).
+    Return the status line of a job card: the dot and the word of its state.
     """
     if job is None:
         return STATUS_EMOJI['dne']
@@ -355,6 +531,12 @@ def build_status_children(job: Job) -> Any:
         className=f"{status_class}job-status-line job-state-{state}",
         title=text,
     )
+
+
+def build_row_status(job: Optional[Job], health: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+    """`(word, className)` of a table row's Status (its dot is the class's, `jobs.css`)."""
+    state, word = job_status_summary(job, health)
+    return word, f"job-status job-state-{state}"
 
 
 ########################################################################################
@@ -473,65 +655,135 @@ def build_job_card(
     )
 
 
-def build_job_row(job: Job, authenticated: bool = False, rights: Optional[Dict[str, bool]] = None) -> Any:
+def row_class_name(job: Optional[Job], gone: bool = False) -> str:
+    """A table row's class: its group (`job-group-running`, ... `jobs.css` orders the groups)."""
+    return f"job-row job-group-{job_group(job)}" + (' job-row-gone' if gone else '')
+
+
+def build_job_row(
+    job: Job,
+    authenticated: bool = False,
+    rights: Optional[Dict[str, bool]] = None,
+    now: Optional[datetime] = None,
+) -> Any:
     """
-    Return a row of the compact jobs table: the job, its status line, its command and a menu
-    with the same actions as a card.
+    Return a row of the jobs table: the job's name, its single-word Status, its Last Run, its
+    command (wrapped, selectable) and a menu with its actions. The refresh updates the row in
+    place (`callbacks/jobs.py`): its group class, Status, Last Run and, when the job's status
+    changed, its menu.
     """
     rights = (rights if rights is not None else job_rights()) if authenticated else {}
-    command = _job_command(job)
+    health = job_health(job)
+    word, status_class = build_row_status(job, health)
+    last_run, last_run_title = job_last_run(job, health, now=now)
+    try:
+        command = str(job.label).strip()
+    except Exception:
+        command = ''
     return html.Tr(
         [
-            html.Td([
-                _job_title(job, size='span'),
-                html.Div(id={'type': 'manage-job-alert-div', 'index': job.name}),
-                build_delete_job_modal(job),
-                html.Div(
-                    build_process_timestamps_children(job),
-                    id={'type': 'process-timestamps-div', 'index': job.name},
-                    hidden=True,
-                ),
-                html.Span(job.label, id={'type': 'job-label-p', 'index': job.name}, hidden=True),
-            ], className='job-row-name'),
             html.Td(
-                html.Div(
-                    build_status_children(job),
-                    id={'type': 'manage-job-status-div', 'index': job.name},
-                ),
-                className='job-row-status',
+                html.A(job.name, href=f"/dash/jobs/{job.name}", className='job-name-link console-name-link'),
+                className='job-row-name',
+                role='cell',
             ),
-            html.Td(html.Code(command, title=command), className='job-row-command d-none d-md-table-cell'),
+            html.Td(
+                html.Span(word, id={'type': 'job-row-status', 'index': job.name}, className=status_class),
+                className='job-row-status',
+                role='cell',
+            ),
+            html.Td(
+                html.Span(
+                    last_run,
+                    id={'type': 'job-row-last-run', 'index': job.name},
+                    title=last_run_title,
+                    className='job-last-run',
+                ),
+                className='job-row-last-run',
+                role='cell',
+            ),
+            html.Td(html.Code(command, className='job-command'), className='job-row-command', role='cell'),
             html.Td(
                 html.Div(
                     build_job_row_menu(job, rights=rights) if authenticated else [],
-                    id={'type': 'manage-job-buttons-div', 'index': job.name},
+                    id={'type': 'job-row-actions', 'index': job.name},
                     className=actions_class_name(job, 'row'),
                 ),
                 className='job-row-menu-cell',
+                role='cell',
             ),
         ],
-        className='job-row',
+        id={'type': 'job-row', 'index': job.name},
+        className=row_class_name(job),
+        role='row',
     )
 
 
-def build_jobs_table(jobs: List[Job], authenticated: bool = False) -> Any:
-    """The compact jobs table (more than `COMPACT_JOBS_THRESHOLD` jobs)."""
+def build_jobs_table(jobs: List[Job], authenticated: bool = False, now: Optional[datetime] = None) -> Any:
+    """
+    The Jobs tab's table: a header row per group (Running, Paused, Stopped, in that order, each
+    with its count; an empty group is hidden) and a row per job, by name. The rows stay in name
+    order in the document and `jobs.css` orders them by their group's class, so the refresh moves
+    a job to another group by changing its class, without rebuilding the table.
+    """
     rights = job_rights() if authenticated else {}
-    return dbc.Table(
+    jobs = sorted(jobs, key=lambda job: job.name.lower())
+    counts = {group: 0 for group, _ in JOB_GROUPS}
+    for job in jobs:
+        counts[job_group(job)] += 1
+    group_rows = [
+        html.Tr(
+            html.Th(
+                [
+                    html.Span(label, className='jobs-group-label'),
+                    html.Span(
+                        str(counts[group]),
+                        id={'type': 'jobs-group-count', 'index': group},
+                        className='jobs-group-count',
+                    ),
+                ],
+                colSpan=5,
+                role='rowheader',
+            ),
+            id={'type': 'jobs-group', 'index': group},
+            className=group_class_name(group, counts[group]),
+            role='row',
+        )
+        for group, label in JOB_GROUPS
+    ]
+    return html.Table(
         [
-            html.Thead(html.Tr([
-                html.Th('Job'),
-                html.Th('Status'),
-                html.Th('Command', className='d-none d-md-table-cell'),
-                html.Th(html.Span('Actions', className='visually-hidden')),
-            ])),
-            html.Tbody([build_job_row(job, authenticated=authenticated, rights=rights) for job in jobs]),
+            html.Thead(
+                html.Tr(
+                    [
+                        html.Th('Job', role='columnheader'),
+                        html.Th('Status', role='columnheader'),
+                        html.Th('Last Run', role='columnheader'),
+                        html.Th('Command', role='columnheader'),
+                        html.Th(html.Span('Actions', className='visually-hidden'), role='columnheader'),
+                    ],
+                    className='jobs-columns-row',
+                    role='row',
+                ),
+                role='rowgroup',
+            ),
+            html.Tbody(
+                group_rows + [
+                    build_job_row(job, authenticated=authenticated, rights=rights, now=now)
+                    for job in jobs
+                ],
+                role='rowgroup',
+            ),
         ],
-        class_name='jobs-table',
-        hover=True,
-        size='sm',
+        className='table jobs-grid',
         id='jobs-table',
+        role='table',
     )
+
+
+def group_class_name(group: str, count: int) -> str:
+    """A group header row's class (`jobs-group-empty` hides it)."""
+    return f"jobs-group-row jobs-group-{group}" + ('' if count else ' jobs-group-empty')
 
 
 def _job_action_specs(job: Job, rights: Optional[Dict[str, bool]] = None) -> List[Tuple[str, str, str]]:
@@ -612,21 +864,21 @@ def build_manage_job_buttons(job: Job, rights: Optional[Dict[str, bool]] = None)
 
 
 def build_job_row_menu(job: Job, rights: Optional[Dict[str, bool]] = None) -> Any:
-    """The `⋮` menu of a row of the jobs table (the actions the viewer may use)."""
+    """
+    The `⋮` menu of a row of the jobs table: the actions the viewer may use (handled by one
+    callback for the table, `callbacks/jobs.py::jobs_table_action`), the logs and Delete (which
+    asks first, in the page's one delete dialog).
+    """
     if job is None:
         return []
     rights = rights if rights is not None else job_rights()
     items = [
         dbc.DropdownMenuItem(
             label,
-            id={'type': 'manage-job-button', 'action': action, 'index': job.name},
+            id={'type': 'job-row-action', 'action': action, 'index': job.name},
         )
         for action, label, _ in _job_action_specs(job, rights=rights)
     ]
-    if is_automatic_job(job) and job.status == 'stopped' and rights.get('retain'):
-        items.append(dbc.DropdownMenuItem(
-            'Keep as Job', id={'type': 'retain-run-button', 'index': job.name},
-        ))
     if rights.get('logs'):
         items += [
             dbc.DropdownMenuItem(divider=True),
@@ -638,7 +890,7 @@ def build_job_row_menu(job: Job, rights: Optional[Dict[str, bool]] = None) -> An
             dbc.DropdownMenuItem(divider=True),
             dbc.DropdownMenuItem(
                 'Delete',
-                id={'type': 'job-delete-button', 'index': job.name},
+                id={'type': 'job-row-action', 'action': 'delete', 'index': job.name},
                 class_name='text-danger',
             ),
         ]
@@ -693,14 +945,64 @@ def build_delete_job_modal(job: Job) -> dbc.Modal:
     )
 
 
+def build_jobs_delete_modal() -> Any:
+    """
+    The Jobs table's one delete dialog (a row's menu > Delete opens it for that job): typing the
+    job's name enables Delete.
+    """
+    return html.Div([
+        dbc.Modal(
+            [
+                dbc.ModalHeader(dbc.ModalTitle(id='jobs-delete-title')),
+                dbc.ModalBody([
+                    html.Div(id='jobs-delete-alert-div'),
+                    dbc.Label(id='jobs-delete-label', html_for='jobs-delete-name-input'),
+                    dbc.Input(id='jobs-delete-name-input', autoComplete='off', debounce=False),
+                ]),
+                dbc.ModalFooter([
+                    dbc.Button('Cancel', color='secondary', id='jobs-delete-cancel-button'),
+                    dbc.Button('Delete', color='danger', disabled=True, id='jobs-delete-confirm-button'),
+                ]),
+            ],
+            id='jobs-delete-modal',
+            is_open=False,
+        ),
+        dcc.Store(id='jobs-delete-target', data=None),
+    ])
+
+
 def build_process_timestamps_children(job: Job) -> List[dbc.Row]:
     """
-    Return the children to the process timestamps in the footer of the job card.
+    Return the children to the process timestamps in the footer of the job card: when it last
+    ran, then when it began, paused and ended.
     """
     if job is None:
         return []
 
+    def row(key: str, value: str, title: str = '') -> Any:
+        return dbc.Row(
+            [
+                dbc.Col(
+                    html.P(key, style={'font-size': 'small'}, className='text-muted mb-0'),
+                    width=4,
+                ),
+                dbc.Col(
+                    html.P(
+                        value,
+                        style={'font-size': 'small', 'text-align': 'right'},
+                        className='text-muted mb-0',
+                        title=title or None,
+                    ),
+                    width=8,
+                ),
+            ],
+            justify='between',
+        )
+
     children = []
+    last_run, last_run_title = job_last_run(job)
+    if last_run:
+        children.append(row('Last run', last_run, last_run_title))
     for timestamp_key, timestamp in sorted_dict(
         {
             'began': job.began,
@@ -710,31 +1012,7 @@ def build_process_timestamps_children(job: Job) -> List[dbc.Row]:
     ).items():
         if timestamp is None:
             continue
-
-        timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M UTC')
-        children.append(
-            dbc.Row(
-                [
-                    dbc.Col(
-                        html.P(
-                            timestamp_key.capitalize(),
-                            style={'font-size': 'small'},
-                            className='text-muted mb-0',
-                        ),
-                        width=4,
-                    ),
-                    dbc.Col(
-                        html.P(
-                            timestamp_str,
-                            style={'font-size': 'small', 'text-align': 'right'},
-                            className='text-muted mb-0',
-                        ),
-                        width=8,
-                    ),
-                ],
-                justify='between',
-            )
-        )
+        children.append(row(timestamp_key.capitalize(), timestamp.strftime('%Y-%m-%d %H:%M UTC')))
     return children
 
 
@@ -742,7 +1020,7 @@ def get_run_cards(state):
     """Automatic execution workers and retained summaries in the Web Console."""
     session_id = (state.get('session-store.data') or {}).get('session-id')
     authenticated = may_manage_jobs(session_id) or job_rights().get('logs', False)
-    jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
+    jobs = get_job_snapshots()
     cards = [build_job_card(job, authenticated=authenticated, include_follow=False)
              for job in jobs.values()
              if is_automatic_job(job) and job_visible_to_session(job, session_id)]

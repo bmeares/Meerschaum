@@ -54,6 +54,30 @@ plugin_row = {'keys':'custom:local','type':'custom','source':'Plugin','plugin':'
               'source_detail':None,'attributes':{},'fields':{}}
 assert '/dash/plugins/installed/modal_source' in str(connectors.build_table([plugin_row], False))
 assert '/dash/plugins/installed/modal_source' in str(connectors.connector_info(plugin_row, True, False))
+# RC28: a plugin's connector links to it once ("View source"), without restating its name.
+data_plugin = {'keys':'plugin:modal_weather','type':'plugin','label':'modal_weather','source':'Plugin',
+               'source_detail':'modal_weather','plugin':None,'attributes':{},'fields':{}}
+def text(node):
+    """The text a component renders (its string children), without its props."""
+    if isinstance(node, (list, tuple)):
+        return ' '.join(text(child) for child in node)
+    if isinstance(node, (str, int, float)):
+        return str(node)
+    return text(getattr(node, 'children', None)) if node is not None else ''
+listed = text(connectors.build_table([data_plugin, plugin_row], False))
+assert listed.count('View source') == 2 and 'Plugin:' not in listed
+assert listed.count('modal_weather') == 1 and 'modal_source' not in listed, listed
+modal = connectors.connector_info(data_plugin, True, False)
+assert 'modal_weather' not in text(modal) and 'Settings' not in text(modal), text(modal)
+assert '/dash/plugins/installed/modal_weather' in str(modal)
+# One group per type, `sql` first; a summary value is not repeated in the other settings.
+sql_row = {'keys':'sql:modal_reports','type':'sql','source':'Config','source_detail':None,
+           'host':'db.invalid','database':'warehouse','attributes':{'host':'db.invalid',
+           'database':'warehouse','username':'reader'},'fields':{}}
+table = connectors.build_table([sql_row, data_plugin], False)
+assert [group.to_plotly_json()['props']['data-type'] for group in table.children[1:]] == ['sql','plugin']
+modal = text(connectors.connector_info(sql_row, True, False))
+assert modal.count('db.invalid') == 1 and modal.count('warehouse') == 1 and 'reader' in modal, modal
 dash_app._setup_server()
 assert any('connector-info-modal.is_open' in key for key in dash_app.callback_map)
 '''))

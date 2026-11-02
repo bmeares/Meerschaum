@@ -41,14 +41,15 @@ runs_page = cj.render_job_page_from_url('/dash/runs', {})
 tabs = find(jobs_page, 'jobs-page-tabs')
 runs_tabs = find(runs_page, 'jobs-page-tabs')
 
-### Jobs and runs land in their own tab.
-cj.get_jobs = lambda **kw: {
+### Jobs and runs land in their own tab: the jobs table and the runs' cards, from one listing.
+cj.get_job_snapshots = lambda: {
     'manual': SimpleNamespace(name='manual'),
     'execute-1': SimpleNamespace(name='execute-1'),
 }
 cj.is_automatic_job = lambda job: job.name.startswith('execute-')
 cj.job_visible_to_session = lambda job, session: True
 cj.build_job_card = lambda job, **kw: job.name
+cj.build_jobs_table = lambda jobs, **kw: [job.name for job in jobs]
 cj.build_cards_grid = lambda cards, n: list(cards)
 print('JSON:' + json.dumps({
     'runs_path': _paths['/dash/runs'] is pages.jobs.layout,

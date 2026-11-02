@@ -1,0 +1,93 @@
+/*
+ * The Connectors page (`pages/connectors.py`): one row group per connector type, each under a
+ * heading with the type's icon, name and count, and the connector modal. Dash loads assets by
+ * name, so this file comes before `console_pages.css` and `overview.css`: its rules are scoped
+ * (`#connectors-table`, `#connectors-page`, `.connector-info-modal`) to take precedence.
+ */
+
+#connectors-table .connectors-group-heading > th {
+  padding: 22px 8px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  box-shadow: none;
+  color: #e5edf3;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+#connectors-table > tbody:first-of-type > .connectors-group-heading > th { padding-top: 14px; }
+#connectors-table.table-hover > tbody > tr.connectors-group-heading:hover > * {
+  --bs-table-bg-state: transparent;
+  --bs-table-accent-bg: transparent;
+}
+#connectors-table .connectors-group-heading .fa-solid {
+  width: 1.25em;
+  margin-right: 8px;
+  color: #85caff;
+  text-align: center;
+}
+#connectors-table .connectors-group-count {
+  margin-left: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #b6bdc5;
+  font-size: 0.75rem;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+#connectors-table .connectors-col-keys { width: 50%; }
+
+/* Source: where the connector comes from, then View source for a plugin's connector. */
+#connectors-table .connectors-col-source .connectors-cell,
+.connector-info-modal .connector-info-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+}
+#connectors-page .connectors-source-detail,
+.connector-info-modal .connectors-source-detail { margin-left: 0; }
+#connectors-page .connectors-plugin,
+.connector-info-modal .connectors-plugin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 0;
+  color: #85caff;
+  font-size: 0.875rem;
+}
+#connectors-page .connectors-plugin:hover,
+#connectors-page .connectors-plugin:focus-visible,
+.connector-info-modal .connectors-plugin:hover,
+.connector-info-modal .connectors-plugin:focus-visible { color: #b5dcff; }
+#connectors-page .connectors-plugin .fa-solid,
+.connector-info-modal .connectors-plugin .fa-solid { font-size: 0.8rem; }
+
+/* The modal: Source and the connection settings in one list, then the other settings. */
+.connector-info-modal .connector-info-summary { align-items: center; margin-bottom: 0; }
+.connector-info-modal .connector-info-summary dt { font-weight: 400; color: #b6bdc5; }
+.connector-info-modal .connector-info-source { margin: 0; }
+.connector-info-modal .connector-inspection h5 { font-size: 1rem; margin-bottom: 4px; }
+
+@media (max-width: 767.98px), (pointer: coarse) {
+  #connectors-page .connectors-plugin,
+  .connector-info-modal .connectors-plugin { min-height: 44px; }
+}
+
+@media (max-width: 767.98px) {
+  #connectors-table .connectors-col-keys { width: 100%; }
+  #connectors-table > tbody.connectors-group { margin-bottom: 4px; }
+  #connectors-table > tbody > tr.connectors-group-heading {
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  #connectors-table .connectors-group-heading > th {
+    display: flex;
+    align-items: center;
+    padding: 18px 0 8px;
+  }
+  #connectors-table > tbody:first-of-type > .connectors-group-heading > th { padding-top: 4px; }
+}

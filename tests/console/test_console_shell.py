@@ -165,7 +165,12 @@ def test_connectors_page_masks_secrets_and_tests_connections(server, context):
     ### The filter keeps the matching rows.
     page.fill('#connectors-filter', 'w7secret')
     page.wait_for_function(
-        "[...document.querySelectorAll('#connectors-table tbody tr')].filter(r => !r.hidden).length === 1"
+        "[...document.querySelectorAll('#connectors-table tr[data-keys]')].filter(r => !r.hidden).length === 1"
+    )
+    ### RC28: and the groups of the other connector types.
+    page.wait_for_function(
+        "[...document.querySelectorAll('#connectors-table tbody.connectors-group')].filter(g => !g.hidden)"
+        ".map(g => g.dataset.type).join() === 'sql'"
     )
     assert CONNECTOR_SECRET not in page.content()
     assert not [body for body in bodies if CONNECTOR_SECRET in body]

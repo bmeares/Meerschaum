@@ -24,12 +24,14 @@
 //!   server of their own: its socket is `tmux.sock` in the webterm resources directory (a `0700`
 //!   directory under the root; a short path in the temporary directory when that one is too long
 //!   for a socket), never the user's default tmux server, and it starts with Meerschaum's
-//!   `tmux.conf` written next to it (no status bar, mouse on, a long history, nothing else
-//!   loaded) or the file `api:webterm:tmux:config` names. A server this process started is
-//!   stopped with the API ([`stop_owned_servers`]).
+//!   `tmux.conf` written next to it ([`TMUX_CONF`]: the session's windows as tabs on a status
+//!   line at the top, mouse on, a long history, nothing else loaded; applied again when a
+//!   terminal attaches to a server that already runs) or the file `api:webterm:tmux:config`
+//!   names. A server this process started is stopped with the API ([`stop_owned_servers`]).
 //! - **The shell** is `<this binary> -i <instance>` (the `mrsm` shell on the server's instance)
-//!   started with the server's connection/config environment. Job execution context and
-//!   `COLUMNS`/`LINES`/`TMUX` are removed so the shell stays interactive on a job-hosted API.
+//!   started with the server's connection/config environment. Job execution context (including
+//!   `MRSM_NONINTERACTIVE`, which every job's environment sets) and `COLUMNS`/`LINES`/`TMUX` are
+//!   removed so the shell stays interactive on a job-hosted API.
 //!   On the tmux path the environment travels in a `0600` file in the webterm resources
 //!   directory that the first shell sources (a pre-existing tmux server would otherwise hand
 //!   the shell its own, older, environment, and argv would expose secrets to `ps`).
@@ -150,8 +152,10 @@ const JOB_CONTEXT_VARS: &[&str] = &[
 ];
 
 /// Every variable a terminal's shell must not inherit from the server ([`scrub_job_context`]):
-/// the job's name, its `systemd` paths and its Compose stamps (by their `static.toml` names), and
-/// `JOB_CONTEXT_VARS`.
+/// the job's name, its `systemd` paths and its Compose stamps (by their `static.toml` names),
+/// `MRSM_NONINTERACTIVE` (every job's environment sets it, `meerschaum_jobs::Job::env`; a shell
+/// that inherits it reads plain lines without its editor, so it draws no toolbar and never reports
+/// an idle prompt to the console's Exec button), and `JOB_CONTEXT_VARS`.
 pub fn job_context_vars() -> Vec<String> {
     let environment = &meerschaum_core::static_config::static_config().environment;
     let mut vars: Vec<String> = [
@@ -162,6 +166,7 @@ pub fn job_context_vars() -> Vec<String> {
         &environment.systemd_delete_job,
         &environment.compose_project,
         &environment.compose_root,
+        &environment.noninteractive,
     ]
     .into_iter()
     .cloned()
@@ -327,11 +332,30 @@ impl WebtermConfig {
     }
 }
 
-/// Meerschaum's tmux configuration for the web terminal's own tmux server.
+/// Meerschaum's tmux configuration for the web terminal's own tmux server. The status line is the
+/// session's window list ([`TMUX_WINDOW_LIST`]), at the top of the terminal in the console's
+/// colors: one tab per window (the console's `+` opens one), the current one highlighted; a click
+/// switches to a window, and `exit` in a window's shell closes it. The shell's own toolbar keeps
+/// the bottom row. Only options every tmux release in use knows: an option a server does not know
+/// makes tmux show its configuration errors over the first shell.
 pub const TMUX_CONF: &str = "\
 # The web terminal's tmux configuration, written by Meerschaum. This tmux server runs only the
 # web terminal's sessions; set `api:webterm:tmux:config` to the path of your own file instead.
-set -g status off
+# The session's windows, as tabs on the first row.
+set -g status on
+set -g status-position top
+set -g status-interval 0
+set -g status-justify left
+set -g status-style \"bg=#17212b,fg=#a8becf\"
+set -g status-left \"\"
+set -g status-right \"\"
+set -g window-status-separator \"\"
+set -g window-status-format \" #I #W \"
+set -g window-status-current-format \" #I #W \"
+set -g window-status-current-style \"bg=#213449,fg=#85caff,bold\"
+set -g base-index 1
+set -g renumber-windows on
+setw -g pane-base-index 1
 set -g mouse on
 set -g history-limit 50000
 set -g default-terminal \"screen-256color\"
@@ -342,6 +366,28 @@ set -g set-titles off
 set -g allow-rename off
 setw -g aggressive-resize on
 ";
+
+/// The window list's options, as [`TMUX_CONF`] sets them (`set -g <name> <value>`), which
+/// [`refresh_tmux_config`] applies again to a tmux server that already runs.
+pub const TMUX_WINDOW_LIST: &[(&str, &str)] = &[
+    ("status", "on"),
+    ("status-position", "top"),
+    ("status-interval", "0"),
+    ("status-justify", "left"),
+    ("status-style", "bg=#17212b,fg=#a8becf"),
+    ("status-left", ""),
+    ("status-right", ""),
+    ("window-status-separator", ""),
+    ("window-status-format", " #I #W "),
+    ("window-status-current-format", " #I #W "),
+    ("window-status-current-style", "bg=#213449,fg=#85caff,bold"),
+    ("base-index", "1"),
+    ("renumber-windows", "on"),
+];
+
+/// The name of every window the terminal opens (the status line's tab label; a window given a
+/// name is never renamed after the program it runs, which is `python` for the Python package).
+pub const TMUX_WINDOW_NAME: &str = "mrsm";
 
 /// The longest Unix socket path used as is (`sun_path` holds 104 bytes on macOS, 108 on Linux).
 const MAX_SOCKET_PATH: usize = 100;
@@ -430,17 +476,45 @@ fn tmux_server_running(tmux: &TmuxSettings, socket: &Path) -> bool {
 }
 
 /// Before a terminal starts on a dedicated socket: remember that this process starts the tmux
-/// server when none answers there yet (so [`stop_owned_servers`] stops it with the API).
-fn claim_tmux_server(tmux: &TmuxSettings) {
+/// server when none answers there yet (so [`stop_owned_servers`] stops it with the API). `true`
+/// when a server already answers there.
+fn claim_tmux_server(tmux: &TmuxSettings) -> bool {
     let Some(socket) = &tmux.socket else {
-        return;
+        return false;
     };
-    if !tmux_server_running(tmux, socket) {
-        owned_servers()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(socket.clone());
+    if tmux_server_running(tmux, socket) {
+        return true;
     }
+    owned_servers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(socket.clone());
+    false
+}
+
+/// Apply Meerschaum's window list ([`TMUX_WINDOW_LIST`]) again to a tmux server that already runs
+/// on the terminal's own socket (one `tmux -S <socket> set-option -g ... ; ...`): a server started
+/// by an earlier release (whose configuration turned the status line off), or left behind by an
+/// API that did not stop cleanly, keeps the options it started with otherwise. Only plain
+/// `set-option -g`s: applying them again changes nothing. A file of the user's own
+/// (`api:webterm:tmux:config`) is theirs to apply; nothing happens without a dedicated socket.
+pub fn refresh_tmux_config(tmux: &TmuxSettings) -> bool {
+    let (Some(socket), Some(file)) = (&tmux.socket, &tmux.config_file) else {
+        return false;
+    };
+    if std::fs::read_to_string(file).ok().as_deref() != Some(TMUX_CONF) {
+        return false;
+    }
+    let mut command = std::process::Command::new(&tmux.binary);
+    command.arg("-S").arg(socket);
+    for (i, (name, value)) in TMUX_WINDOW_LIST.iter().enumerate() {
+        if i > 0 {
+            command.arg(";");
+        }
+        command.args(["set-option", "-g", name, value]);
+    }
+    command.env_remove("TMUX").env_remove("TMUX_PANE");
+    tmux_output(&mut command).is_some_and(|output| output.status.success())
 }
 
 /// Unset the server's job context ([`job_context_vars`]) on the terminal's own tmux server (`-S`,
@@ -1393,7 +1467,9 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
         Some(tmux) => {
             let name = tmux_session_name(term_name, &tmux.session_suffix);
             let wrapped = tmux_shell_argv(tmux, &config.shell)?;
-            claim_tmux_server(tmux);
+            if claim_tmux_server(tmux) {
+                refresh_tmux_config(tmux);
+            }
             scrub_tmux_server_env(tmux, Some(&name));
             builder = CommandBuilder::new(&tmux.binary);
             if let Some(socket) = &tmux.socket {
@@ -1405,7 +1481,8 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
             if let Some(file) = &tmux.config_file {
                 builder.args(["-f", file]);
             }
-            builder.args(["new-session", "-A", "-s", &name]);
+            // `-n`: the first window's tab label (ignored when the session exists already).
+            builder.args(["new-session", "-A", "-s", &name, "-n", TMUX_WINDOW_NAME]);
             builder.args(&wrapped);
             session = Some(name);
         }
@@ -1585,7 +1662,13 @@ fn tmux_new_window(
     }
     // `=`: exactly this session, never another whose name starts with it.
     command
-        .args(["new-window", "-t", &format!("={session}:")])
+        .args([
+            "new-window",
+            "-t",
+            &format!("={session}:"),
+            "-n",
+            TMUX_WINDOW_NAME,
+        ])
         .args(&argv)
         .envs(shell.env.iter().map(|(k, v)| (k, v)))
         .env_remove("TMUX")
@@ -1619,6 +1702,8 @@ mod tests {
             "MRSM_JOB_SUPERVISOR",
             "INVOCATION_ID",
             "JOURNAL_STREAM",
+            // Every job's environment sets it; the terminal's shell would lose its editor.
+            "MRSM_NONINTERACTIVE",
         ] {
             assert!(vars.iter().any(|var| var == name), "{name} must be removed");
         }
@@ -1821,10 +1906,22 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o700);
         }
-        // Meerschaum's configuration (no status bar), private, rewritten when it changed.
+        // Meerschaum's configuration (the window list on top), private, rewritten when it
+        // changed.
         let conf = tmux_config_path(&cfg).unwrap();
         assert_eq!(std::fs::read_to_string(&conf).unwrap(), TMUX_CONF);
-        assert!(TMUX_CONF.contains("set -g status off"));
+        assert!(TMUX_CONF.contains("set -g status on"));
+        assert!(TMUX_CONF.contains("set -g status-position top"));
+        // What a running server gets again is what the file sets.
+        let lines: Vec<&str> = TMUX_CONF.lines().collect();
+        for (name, value) in TMUX_WINDOW_LIST {
+            let plain = format!("set -g {name} {value}");
+            let quoted = format!("set -g {name} \"{value}\"");
+            assert!(
+                lines.iter().any(|line| *line == plain || *line == quoted),
+                "{name} {value:?} is not in TMUX_CONF"
+            );
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

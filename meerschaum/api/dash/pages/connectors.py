@@ -26,6 +26,10 @@ COLUMNS = (
     ('source', 'Source'),
 )
 
+#: The connector types' group headings (any other type is shown as it is spelled) and icons.
+TYPE_LABELS = {'sql': 'SQL', 'api': 'API', 'valkey': 'Valkey', 'plugin': 'Plugin'}
+TYPE_ICONS = {'sql': 'fa-database', 'api': 'fa-server', 'valkey': 'fa-bolt', 'plugin': 'fa-puzzle-piece'}
+
 
 def may_view(session_id: Optional[str]) -> bool:
     """
@@ -70,6 +74,40 @@ def _text(value: Any) -> str:
     return '' if value is None else str(value)
 
 
+def _icon(name: str) -> Any:
+    return html.I(className=f'fa-solid {name}', **{'aria-hidden': 'true'})
+
+
+def connector_plugin(row: Dict[str, Any]) -> Optional[str]:
+    """The plugin behind a connector: a data plugin's `plugin:<name>`, or the plugin of its type."""
+    if row.get('plugin'):
+        return str(row['plugin'])
+    typ, _, label = str(row.get('keys', '')).partition(':')
+    return label if typ == 'plugin' and label else None
+
+
+def source_parts(row: Dict[str, Any]) -> List[Any]:
+    """
+    Where a connector comes from (`Config`, `Default`, `Environment MRSM_SQL_FOO`, `Runtime`) and a
+    View source link to the plugin behind it. A plugin's connectors say nothing more: the plugin's
+    name is in their keys, or on its page.
+    """
+    parts = []
+    if row.get('source') != 'Plugin':
+        source = str(row.get('source') or '')
+        parts.append(html.Span(source, className=f"connectors-source connectors-source-{source.lower()}"))
+        if row.get('source_detail'):
+            parts.append(html.Code(row['source_detail'], className='connectors-source-detail'))
+    plugin = connector_plugin(row)
+    if plugin:
+        parts.append(dcc.Link(
+            [_icon('fa-code'), html.Span('View source')],
+            href='/dash/plugins/installed/' + quote(plugin, safe=''),
+            className='connectors-plugin',
+        ))
+    return parts
+
+
 def _cell(field: str, row: Dict[str, Any]) -> Any:
     if field == 'keys':
         return html.Button(
@@ -79,15 +117,12 @@ def _cell(field: str, row: Dict[str, Any]) -> Any:
             **{'aria-haspopup':'dialog'},
         )
     if field == 'source':
-        parts = [html.Span(row['source'], className=f"connectors-source connectors-source-{row['source'].lower()}")]
-        if row.get('source_detail'):
-            parts.append(html.Code(row['source_detail'], className='connectors-source-detail'))
-        plugin = row.get('plugin') or (row['keys'].split(':',1)[-1] if row.get('type')=='plugin' else None)
-        if plugin:
-            parts.append(dcc.Link('Plugin: '+str(plugin),
-                href='/dash/plugins/installed/'+quote(str(plugin),safe=''),className='connectors-plugin'))
-        return parts
+        return source_parts(row)
     return _text(row.get(field, None))
+
+
+def type_label(typ: str) -> str:
+    return TYPE_LABELS.get(typ, typ)
 
 
 def _search_text(row: Dict[str, Any]) -> str:
@@ -98,9 +133,27 @@ def _search_text(row: Dict[str, Any]) -> str:
     ).lower()
 
 
+def _group_heading(typ: str, count: int) -> Any:
+    return html.Tr(
+        html.Th(
+            [
+                _icon(TYPE_ICONS.get(typ, 'fa-plug')),
+                html.Span(type_label(typ), className='connectors-group-name'),
+                ' ',
+                html.Span(str(count), className='connectors-group-count'),
+            ],
+            colSpan=len(COLUMNS),
+            scope='rowgroup',
+        ),
+        className='connectors-group-heading',
+    )
+
+
 def build_table(rows: List[Dict[str, Any]], testable: bool, details: bool = True) -> Any:
     """
-    Show keys and source; connection details are fetched when a modal opens.
+    Show keys and source, one row group per connector type (in `list_connectors()`'s order:
+    `sql`, `api`, `valkey`, the other types, then `plugin`); connection details are fetched when a
+    modal opens.
     """
     if not rows:
         return html.P('No connectors', className='connectors-none')
@@ -110,8 +163,7 @@ def build_table(rows: List[Dict[str, Any]], testable: bool, details: bool = True
              if key in ('keys', 'type', 'source', 'source_detail', 'plugin')}
             for row in rows
         ]
-    headers = [html.Th(header, scope='col') for _, header in COLUMNS]
-    body = []
+    groups: Dict[str, List[Any]] = {}
     for row in rows:
         cells = []
         for field, header in COLUMNS:
@@ -120,18 +172,27 @@ def build_table(rows: List[Dict[str, Any]], testable: bool, details: bool = True
                 ### One box per cell, so on a phone (a card per connector) its parts wrap beside
                 ### the label instead of running past the card; an empty cell stays `:empty`.
                 (
-                    None if isinstance(content, str) and not content
+                    None if (not content if isinstance(content, (str, list)) else False)
                     else html.Div(content, className='connectors-cell')
                 ),
                 className=f'connectors-col-{field}',
                 **{'data-label': header},
             ))
-        body.append(html.Tr(
+        typ = str(row.get('type') or str(row['keys']).split(':', 1)[0])
+        groups.setdefault(typ, []).append(html.Tr(
             cells,
             **{'data-search': _search_text(row), 'data-keys': row['keys']},
         ))
+    headers = [html.Th(header, scope='col') for _, header in COLUMNS]
     return dbc.Table(
-        [html.Thead(html.Tr(headers)), html.Tbody(body)],
+        [html.Thead(html.Tr(headers))] + [
+            html.Tbody(
+                [_group_heading(typ, len(body))] + body,
+                className='connectors-group',
+                **{'data-type': typ},
+            )
+            for typ, body in groups.items()
+        ],
         id='connectors-table',
         className='connectors-table',
         hover=True,
@@ -149,23 +210,29 @@ def connector_modal():
        class_name='connector-info-modal')
 
 
+#: The connection settings the modal lists first: `(field, label)`.
+SUMMARY = (('flavor', 'Flavor'), ('host', 'Host'), ('port', 'Port'), ('database', 'Database'),
+           ('schema', 'Schema'))
+
+
 def connector_info(row, details, testable):
     """
-    The modal's body and footer for a freshly authorized, secret-masked listing row: with
-    `details`, the connection settings are shown at once. The header's X and a click outside close
-    the modal; the footer only holds Test connection.
+    The modal's body and footer for a freshly authorized, secret-masked listing row: its source,
+    and with `details` the connection settings at once, each value shown once (the title holds the
+    keys). The header's X and a click outside close the modal; the footer only holds Test
+    connection.
     """
     keys = row['keys']
-    entries = []
-    for field,label in (('flavor','Flavor'),('host','Host'),('port','Port'),
-                        ('database','Database'),('schema','Schema')):
+    entries = [html.Dt('Source'), html.Dd(source_parts(row), className='connector-info-source')]
+    shown = {}
+    for field, label in SUMMARY:
         value = row.get(field)
-        if details and value not in (None,''):
-            entries += [html.Dt(label),html.Dd(str(value))]
-    body = [html.Dl(entries,className='connector-info-summary'),
-            html.Div(_cell('source',row),className='connector-info-source')]
+        if details and value not in (None, ''):
+            entries += [html.Dt(label), html.Dd(str(value))]
+            shown[field] = value
+    body = [html.Dl(entries, className='connector-info-summary')]
     if details:
-        body.append(connector_inspection(row))
+        body.append(connector_inspection(row, shown))
     footer = []
     if testable and row.get('testable'):
         footer += [html.Div(id={'type':'connector-test-result','index':keys},role='status',
@@ -175,17 +242,29 @@ def connector_info(row, details, testable):
     return body,footer
 
 
-def connector_inspection(row):
+def connector_inspection(row, shown=None):
+    """
+    The settings the summary does not already show (a URI stays: it is how the connector is
+    configured), and the keys its type requires and supports. `None` when there is nothing more.
+    """
+    shown = shown or {}
+    attributes = {
+        key: value for key, value in (row.get('attributes') or {}).items()
+        if not (key in shown and str(value) == str(shown[key]))
+    }
     fields = row.get('fields') or {}
     metadata = []
     for key,label in (('required','Required keys'),('supported','Supported keys')):
         if fields.get(key):
             metadata += [html.Dt(label),html.Dd(', '.join(fields[key]))]
+    if not attributes and not metadata:
+        return None
     return html.Section([
-        html.H5('Connection settings'),
-        html.Pre(json.dumps(row.get('attributes') or {},indent=2,sort_keys=True,
-                            default=str,ensure_ascii=False),className='connectors-attributes'),
-        html.Dl(metadata,className='connectors-fields'),
+        html.H5('Other settings' if shown else 'Settings') if attributes else None,
+        html.Pre(json.dumps(attributes,indent=2,sort_keys=True,
+                            default=str,ensure_ascii=False),className='connectors-attributes')
+        if attributes else None,
+        html.Dl(metadata,className='connectors-fields') if metadata else None,
     ],className='connector-inspection')
 
 

@@ -109,6 +109,12 @@ pub trait JobExecutor {
             .get("result")
             .and_then(success_tuple_from_value)
     }
+    /// The job's command when the executor can read it on its own, without the job's state
+    /// (`systemd`: its unit file); `None` means "read it from [`JobExecutor::get_job_metadata`]",
+    /// which may ask for the status, PID and result too.
+    fn get_job_command(&self, _name: &str) -> Option<Vec<String>> {
+        None
+    }
 }
 
 /// Resolves executor keys of types the jobs crate does not implement (`<type>:<label>`

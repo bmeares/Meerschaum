@@ -4,8 +4,11 @@
 
 """
 The plugins of this server (`/dash/plugins`): the Installed tab (plugins installed on the server)
-and the Repository tab (`?tab=repository`, the plugins published to this API), and one published
-plugin's page (`/dash/plugins/{name}`).
+and the Repository tab (`?tab=repository`, the plugins published to this API), one published
+plugin's page (`/dash/plugins/{name}`) and one installed plugin's page
+(`/dash/plugins/installed/{name}`, `?file=...&edit=1` opens a file for editing). New plugin (the
+circled plus, for the administrators who may use the web terminal) asks `bootstrap plugins`'s
+questions in a dialog.
 """
 
 from __future__ import annotations
@@ -27,11 +30,65 @@ search_box = dbc.Input(
     autoComplete='off',
 )
 
+
+def _field(label: str, control, field_id: str, hidden: bool = False, label_for: str = None):
+    return html.Div(
+        [dbc.Label(label, html_for=label_for, class_name='plugin-new-label'), control],
+        id=field_id, className='plugin-new-field', hidden=hidden,
+    )
+
+
+#: New plugin: `bootstrap plugins`'s questions (`callbacks/plugins.py` fills the choices).
+new_plugin_modal = dbc.Modal(
+    [
+        dbc.ModalHeader(dbc.ModalTitle('New plugin')),
+        dbc.ModalBody([
+            _field('Name', dbc.Input(
+                id='plugins-new-name', placeholder='my_plugin', type='text', autoComplete='off',
+                maxLength=128,
+            ), 'plugins-new-name-field', label_for='plugins-new-name'),
+            _field('Language', dbc.RadioItems(
+                id='plugins-new-language', options=[], value='Python', inline=True,
+                class_name='plugin-new-languages',
+            ), 'plugins-new-language-field'),
+            _field('Packaging', dbc.RadioItems(
+                id='plugins-new-packaging', options=[], value='file',
+            ), 'plugins-new-packaging-field'),
+            _field('Features', dbc.Checklist(
+                id='plugins-new-features', options=[], value=['fetch'],
+                class_name='plugin-new-features',
+            ), 'plugins-new-features-field'),
+            _field('Action', dbc.Input(
+                id='plugins-new-action', placeholder='sing song', type='text', autoComplete='off',
+                maxLength=128,
+            ), 'plugins-new-action-field', hidden=True, label_for='plugins-new-action'),
+            _field('Datetime column', dbc.Input(
+                id='plugins-new-dt', placeholder='timestamp', type='text', autoComplete='off',
+                maxLength=128,
+            ), 'plugins-new-dt-field', label_for='plugins-new-dt'),
+            _field('Directory', dbc.Select(
+                id='plugins-new-directory', options=[],
+            ), 'plugins-new-directory-field', hidden=True, label_for='plugins-new-directory'),
+            html.Div(id='plugins-new-alert'),
+        ], class_name='plugin-new-body'),
+        dbc.ModalFooter([
+            dbc.Button('Cancel', id='plugins-new-cancel', color='secondary', n_clicks=0),
+            dbc.Button('Create', id='plugins-new-create', color='primary', n_clicks=0),
+        ]),
+    ],
+    id='plugins-new-modal',
+    is_open=False,
+    class_name='plugin-new-modal',
+)
+
 layout = [
     build_pages_navbar(),
     dcc.Location(id='plugins-location'),
     dbc.Container([
-        html.Div(html.H3('Plugins'), id='plugins-header', className='console-page-header'),
+        html.Div(
+            [html.H3('Plugins'), html.Div(id='plugins-header-actions', className='plugins-header-actions')],
+            id='plugins-header', className='console-page-header',
+        ),
         html.Div(
             dbc.Tabs(
                 [
@@ -73,6 +130,9 @@ layout = [
             id='plugins-uninstall-modal',
             is_open=False,
         ),
+        new_plugin_modal,
+        ### Where New plugin goes once the plugin is written (one writer: `create_plugin`).
+        dcc.Store(id='plugins-navigate', data=None),
         dcc.Store(id='plugins-uninstall-target', data=None),
         dcc.Store(id='plugins-refresh', data=0),
         dcc.Store(id='plugins-run', data=None),

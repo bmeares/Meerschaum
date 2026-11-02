@@ -197,8 +197,13 @@ def build_summary(summary: Dict[str, Any], complete=True):
     ], className='performance-stats')
 
 
-def build_charts(data: Dict[str, Any], revision=None):
-    from dash import html, dcc
+#: The charts: `(key, title)`. Each graph's id is `{'type': 'performance-graph', 'chart': key}`,
+#: inside a section `performance-<key>`.
+CHARTS = (('avg_duration_seconds', 'Duration'), ('rows_per_second', 'Write rate'), ('results', 'Results'))
+
+
+def chart_figures(data: Dict[str, Any], revision=None) -> Dict[str, Any]:
+    """The charts' figures by key; a refresh sets them on the mounted graphs (`uirevision` kept)."""
     import plotly.graph_objects as go
     series = data.get('series') or []
     x = [item.get('ts') for item in series]
@@ -221,31 +226,49 @@ def build_charts(data: Dict[str, Any], revision=None):
                        'font': {'color': '#e5edf3'}},
         'uirevision': revision,
     }
-    graphs = []
+    figures = {}
     for key, title, axis, color in (
         ('avg_duration_seconds', 'Duration', 'Seconds / sync', '#85caff'),
         ('rows_per_second', 'Write rate', 'Rows affected/s', '#6bc98d'),
     ):
-        figure = {'data': [{'type': 'scatter', 'mode': 'lines+markers', 'x': x,
-                            'y': [item.get(key) for item in series], 'name': title,
-                            'line': {'color': color}, 'connectgaps': False}],
-                  'layout': {**layout, 'yaxis': {**layout['yaxis'], 'title': {'text': axis}}}}
-        graphs.append(html.Section([html.H2(title), dcc.Graph(
-            id='performance-' + key, figure=go.Figure(figure), responsive=True, style={'height': '280px'},
-            config={'displayModeBar': False, 'scrollZoom': False})], className='performance-chart'))
+        figures[key] = go.Figure({
+            'data': [{'type': 'scatter', 'mode': 'lines+markers', 'x': x,
+                      'y': [item.get(key) for item in series], 'name': title,
+                      'line': {'color': color}, 'connectgaps': False}],
+            'layout': {**layout, 'yaxis': {**layout['yaxis'], 'title': {'text': axis}}},
+        })
     counts = max((item.get('syncs', 0) for item in series), default=0)
-    figure = {'data': [
+    figures['results'] = go.Figure({'data': [
         {'type': 'bar', 'x': x, 'y': [item.get(key, 0) for item in series],
          'name': title, 'marker': {'color': color}, **bar_width}
         for key, title, color in (('succeeded', 'Succeeded', '#6bc98d'), ('failed', 'Failed', '#ec7a7a'))],
         'layout': {**layout, 'barmode': 'stack',
                    'yaxis': {**layout['yaxis'], 'title': {'text': 'Syncs'},
                              'tickformat': ',d', 'nticks': 5,
-                             **({'dtick': 1} if counts <= 8 else {})}}}
-    graphs.append(html.Section([html.H2('Results'), dcc.Graph(
-        id='performance-results', figure=go.Figure(figure), responsive=True, style={'height': '280px'},
-        config={'displayModeBar': False, 'scrollZoom': False})], className='performance-chart'))
-    return html.Div(graphs, className='performance-charts')
+                             **({'dtick': 1} if counts <= 8 else {})}}})
+    return figures
+
+
+def build_charts(data: Dict[str, Any], revision=None):
+    from dash import html, dcc
+    figures = chart_figures(data, revision)
+    return html.Div([
+        html.Section([html.H2(title), dcc.Graph(
+            id={'type': 'performance-graph', 'chart': key}, figure=figures[key], responsive=True,
+            style={'height': '280px'}, config={'displayModeBar': False, 'scrollZoom': False})],
+            id='performance-' + key, className='performance-chart')
+        for key, title in CHARTS
+    ], className='performance-charts')
+
+
+def live(part: str, children: Any = None):
+    """
+    A part of the page a refresh replaces in place (`callbacks/performance.py`): the stats, the
+    coverage line, the notes and the recent syncs. Everything around it stays mounted, so the page
+    keeps its height, its scroll position, the open tab and the breakdowns' search, rank and page.
+    """
+    from dash import html
+    return html.Div(children, id={'type': 'performance-live', 'part': part}, className='performance-live')
 
 
 def _table(headers, rows):
@@ -258,11 +281,25 @@ def _table(headers, rows):
                     className='console-table-scroll')
 
 
-def build_groups(data: Dict[str, Any], instance: str, window: str):
-    from dash import html, dcc
-    import dash_bootstrap_components as dbc
-    sections = []
-    for field, title, filter_key in (('pipes', 'Pipes', 'pipe'), ('pipelines', 'Pipelines', 'pipeline')):
+def _scope(data: Dict[str, Any], instance: str, window: str) -> str:
+    return f"{instance}|{window}|{data.get('_pipe_filter')}|{data.get('_pipeline_filter')}"
+
+
+#: The breakdowns: `(field, plural, filter key, kind)`.
+GROUPS = (('pipes', 'Pipes', 'pipe', 'Pipe'), ('pipelines', 'Pipelines', 'pipeline', 'Pipeline'))
+
+
+def group_stores(data: Dict[str, Any], instance: str, window: str) -> Dict[str, Dict[str, Any]]:
+    """
+    The breakdowns' rows by field (`pipes`, `pipelines`), for the `performance-group-data` stores
+    that `assets/performance.js` searches, ranks and pages in the browser.
+    """
+    stores = {}
+    scope = _scope(data, instance, window)
+    filters = {key: chosen for key, chosen in (
+        ('pipe', data.get('_pipe_filter')), ('pipeline', data.get('_pipeline_filter'))
+    ) if chosen}
+    for field, title, filter_key, kind in GROUPS:
         groups = data.get(field) or []
         if not groups:
             continue
@@ -273,9 +310,6 @@ def build_groups(data: Dict[str, Any], instance: str, window: str):
                 continue
             label = pipe_label(value) if field == 'pipes' else value
             summary = group.get('summary') or {}
-            filters = {key: chosen for key, chosen in (
-                ('pipe', data.get('_pipe_filter')), ('pipeline', data.get('_pipeline_filter'))
-            ) if chosen}
             link = '/dash/performance?' + urlencode({'instance': instance, 'window': window, **filters, filter_key: value})
             rows.append({'label': label, 'key': value, 'href': link,
                          'repr': pipe_repr_parts(value) if field == 'pipes' else None,
@@ -285,14 +319,31 @@ def build_groups(data: Dict[str, Any], instance: str, window: str):
                                    duration(summary.get('avg_duration_seconds')),
                                    duration(summary.get('duration_seconds')),
                                    number(summary.get('rows', 0)), number(summary.get('rows_per_second'), 1)]})
-        def identity(kind):
-            return {'type': 'performance-group-' + kind, 'group': field}
-        scope = f"{instance}|{window}|{data.get('_pipe_filter')}|{data.get('_pipeline_filter')}"
-        kind = 'Pipe' if field == 'pipes' else 'Pipeline'
         headers = [kind, 'Syncs' if field == 'pipes' else 'Runs', 'Failures', 'Avg. duration',
                    'Total time', 'Rows affected', 'Rows affected/s']
+        stores[field] = {'rows': rows, 'headers': headers, 'kind': kind, 'plural': title, 'scope': scope}
+    return stores
+
+
+def _pipelines_note(data: Dict[str, Any]):
+    from dash import html
+    return (html.Small('Recent run totals; refine the time window for more detail.', className='text-muted')
+            if data.get('pipelines_truncated') else None)
+
+
+def build_groups(data: Dict[str, Any], instance: str, window: str):
+    from dash import html, dcc
+    import dash_bootstrap_components as dbc
+    sections = []
+    stores = group_stores(data, instance, window)
+    for field, title, _, kind in GROUPS:
+        if field not in stores:
+            continue
+        def identity(part):
+            return {'type': 'performance-group-' + part, 'group': field}
+        scope = stores[field]['scope']
         sections.append(html.Section([
-            dcc.Store(id=identity('data'), data={'rows': rows, 'headers': headers, 'kind': kind, 'plural': title, 'scope': scope}),
+            dcc.Store(id=identity('data'), data=stores[field]),
             html.Div([
                 html.Label([html.Span('Find a ' + kind, className='visually-hidden'),
                     dbc.Input(id=identity('search'), type='search', placeholder='Find a ' + kind,
@@ -308,8 +359,7 @@ def build_groups(data: Dict[str, Any], instance: str, window: str):
             html.Div(id=identity('body'), className='performance-group-table-wrap'),
             dbc.Pagination(id=identity('page'), active_page=1, max_value=1,
                            first_last=True, previous_next=True, fully_expanded=False, size='sm'),
-            html.Small('Recent run totals; refine the time window for more detail.', className='text-muted')
-            if field == 'pipelines' and data.get('pipelines_truncated') else None,
+            live('pipelines-note', _pipelines_note(data)) if field == 'pipelines' else None,
         ], id='performance-' + field, className='performance-section performance-breakdown'))
     return sections
 
@@ -362,43 +412,77 @@ def build_history(data: Dict[str, Any], page=1, page_size=HISTORY_PAGE_SIZE):
     ], className='performance-section', id='performance-history')
 
 
-def build_body(data: Dict[str, Any], instance: str, window: str, history_page=1, history_page_size=HISTORY_PAGE_SIZE):
+def _complete(data: Dict[str, Any]) -> bool:
+    return bool(data.get('summary_complete', not data.get('truncated')))
+
+
+def _empty(data: Dict[str, Any]) -> bool:
+    return not (data.get('summary') or {}).get('syncs') and not data.get('pipelines')
+
+
+def body_shape(data: Dict[str, Any], instance: str, window: str) -> List[Any]:
+    """
+    What `build_body()` lays out for this data: the selection, and the empty state or the
+    breakdowns it has. A refresh with the same shape updates the mounted page in place
+    (`live_parts()`, `chart_figures()`, `group_stores()`); any other change rebuilds it.
+    """
+    scope = _scope(data, instance, window)
+    if _empty(data):
+        return [scope, 'empty', _complete(data)]
+    return [scope, 'body', [field for field, *_ in GROUPS if data.get(field)]]
+
+
+def live_parts(data: Dict[str, Any], history_page=1, history_page_size=HISTORY_PAGE_SIZE) -> Dict[str, Any]:
+    """The children of each `live()` part of `build_body()`."""
     from dash import html
-    import dash_bootstrap_components as dbc
     summary = data.get('summary') or {}
-    complete = data.get('summary_complete', not data.get('truncated'))
-    if not summary.get('syncs') and not data.get('pipelines'):
-        return html.Div([html.H3('No syncs in this sample' if not complete else 'No syncs in this window'),
-                         html.P(LIMITED_NOTE if not complete else
-                                'Run a Pipe or Pipeline, or choose a longer window.')],
-                        className='console-empty', id='performance-empty')
+    complete = _complete(data)
     notes = []
     if not complete:
         notes.append(LIMITED_NOTE)
     if data.get('retention_days'):
         notes.append(f"History is retained for {number(data['retention_days'])} days.")
-    groups = {section.id: section for section in build_groups(data, instance, window)}
     coverage = ('Totals and trends cover all recorded syncs in the selected window.' if complete else
                 f"Totals and trends cover {number(summary.get('syncs', 0))} sampled syncs.")
     if data.get('history_truncated', data.get('truncated')):
         coverage += f" Recent history shows the latest {number(len(data.get('history') or []))}."
-    return [build_summary(summary, complete),
-            html.P(coverage, id='performance-coverage', className='text-muted small performance-note'),
+    return {
+        'stats': build_summary(summary, complete),
+        'coverage': html.P(coverage, id='performance-coverage', className='text-muted small performance-note'),
+        'history': build_history(data, history_page, history_page_size),
+        'notes': html.P(' '.join(notes), className='text-muted small') if notes else None,
+        'pipelines-note': _pipelines_note(data),
+    }
+
+
+def build_body(data: Dict[str, Any], instance: str, window: str, history_page=1, history_page_size=HISTORY_PAGE_SIZE):
+    from dash import html
+    import dash_bootstrap_components as dbc
+    if _empty(data):
+        complete = _complete(data)
+        return html.Div([html.H3('No syncs in this sample' if not complete else 'No syncs in this window'),
+                         html.P(LIMITED_NOTE if not complete else
+                                'Run a Pipe or Pipeline, or choose a longer window.')],
+                        className='console-empty', id='performance-empty')
+    parts = live_parts(data, history_page, history_page_size)
+    groups = {section.id: section for section in build_groups(data, instance, window)}
+    return [live('stats', parts['stats']),
+            live('coverage', parts['coverage']),
             html.Details([html.Summary('About these measurements'),
                 html.P('Rows affected includes inserts, updates, upserts, and deletions; an unchanged sync affects zero rows. '
                        'Rows affected/s divides by measured sync time, including concurrent sync durations.')],
                 className='performance-measurements text-muted small'),
-            build_charts(data, f"{instance}|{window}|{data.get('_pipe_filter')}|{data.get('_pipeline_filter')}"),
+            build_charts(data, _scope(data, instance, window)),
             dbc.Tabs([
                 dbc.Tab(groups.get('performance-pipes', html.P('No Pipe syncs in this window.')),
                         label='Pipes', tab_id='performance-pipes-tab'),
                 dbc.Tab(groups.get('performance-pipelines', html.P('No Pipeline runs in this window.')),
                         label='Pipelines', tab_id='performance-pipelines-tab'),
-                dbc.Tab(build_history(data, history_page, history_page_size),
+                dbc.Tab(live('history', parts['history']),
                         label='Recent syncs', tab_id='performance-history-tab'),
             ], id='performance-detail-tabs', active_tab='performance-pipes-tab',
                 persistence=True, persistence_type='memory'),
-            html.P(' '.join(notes), className='text-muted small') if notes else None]
+            live('notes', parts['notes'])]
 
 
 def build_overview_card():

@@ -327,19 +327,49 @@ impl ProcessRunner for FakeSystemctl {
                 })
             }
             "show" => {
-                let name = rest.get(1).copied().unwrap_or("");
-                let prop = rest
+                // `show <unit> --property=P`, or the batched `show --property=A,B <unit>...`:
+                // one block of `Key=Value` lines per unit, blank lines between the blocks.
+                let mut units: Vec<&str> = Vec::new();
+                let mut props: Vec<&str> = Vec::new();
+                let mut args = rest.iter().skip(1);
+                while let Some(arg) = args.next() {
+                    if let Some(list) = arg.strip_prefix("--property=") {
+                        props.extend(list.split(',').filter(|p| !p.is_empty()));
+                    } else if *arg == "-p" || *arg == "--property" {
+                        if let Some(list) = args.next() {
+                            props.extend(list.split(',').filter(|p| !p.is_empty()));
+                        }
+                    } else if !arg.starts_with('-') {
+                        units.push(arg);
+                    }
+                }
+                if props.is_empty() {
+                    props.push("");
+                }
+                let blocks: Vec<String> = units
                     .iter()
-                    .find_map(|a| a.strip_prefix("--property="))
-                    .unwrap_or("");
-                let svc = state.services.get(name).cloned().unwrap_or_default();
-                let value = match prop {
-                    "MainPID" => svc.main_pid.to_string(),
-                    "ActiveEnterTimestamp" => svc.active_enter,
-                    "InactiveEnterTimestamp" => svc.inactive_enter,
-                    _ => String::new(),
-                };
-                Ok(CommandOutput::ok(format!("{prop}={value}\n")))
+                    .map(|name| {
+                        let svc = state.services.get(*name).cloned().unwrap_or_default();
+                        props
+                            .iter()
+                            .map(|prop| {
+                                let value = match *prop {
+                                    "Id" => name.to_string(),
+                                    "ActiveState" if svc.active_state.is_empty() => {
+                                        "inactive".to_string()
+                                    }
+                                    "ActiveState" => svc.active_state.clone(),
+                                    "MainPID" => svc.main_pid.to_string(),
+                                    "ActiveEnterTimestamp" => svc.active_enter.clone(),
+                                    "InactiveEnterTimestamp" => svc.inactive_enter.clone(),
+                                    _ => String::new(),
+                                };
+                                format!("{prop}={value}\n")
+                            })
+                            .collect()
+                    })
+                    .collect();
+                Ok(CommandOutput::ok(blocks.join("\n")))
             }
             other => Ok(CommandOutput::failed(format!("unsupported `{other}`"))),
         }

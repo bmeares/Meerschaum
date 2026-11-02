@@ -516,6 +516,8 @@ def test_reload_reattaches_to_the_tmux_session(term_server, context):
         term_server.tmux_socket, term_server, 'list-sessions', '-F', '#{session_name}',
     ).stdout.split()
     assert f"{USERNAME}_mrsm" not in elsewhere, elsewhere
-    ### Meerschaum's tmux configuration: no status bar.
+    ### Meerschaum's tmux configuration: the session's windows on a status line at the top.
     status = _tmux(socket, term_server, 'show-options', '-g', 'status').stdout.strip()
-    assert status == 'status off', status
+    assert status == 'status on', status
+    position = _tmux(socket, term_server, 'show-options', '-g', 'status-position').stdout.strip()
+    assert position == 'status-position top', position

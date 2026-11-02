@@ -48,6 +48,9 @@ impl FakeJob {
                 path("rc25-api.result.json"),
             ),
             ("MRSM_SYSTEMD_STDIN_PATH".into(), path("rc25-api.stdin")),
+            // What `meerschaum_jobs::Job::env` gives every job (RC28: the terminal's shell lost
+            // its editor, toolbar and readiness to it).
+            ("MRSM_NONINTERACTIVE".into(), "true".into()),
         ]
     }
 
@@ -62,6 +65,36 @@ impl FakeJob {
             fifo,
         )
     }
+}
+
+/// `text` without its escape sequences (CSI and OSC), as a terminal would show it.
+fn without_ansi(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 struct Outcome {
@@ -160,6 +193,13 @@ fn a_terminal_shell_stays_interactive_under_a_jobs_environment() {
     let shell = run_shell(&job, root.path(), true);
     assert!(shell.alive, "the scrubbed shell exited: {:?}", shell.output);
     assert!(shell.output.contains("sql:local"), "{:?}", shell.output);
+    // The line editor runs (not the plain line reader `MRSM_NONINTERACTIVE` selects): it draws
+    // the bottom toolbar, the instance followed by the executor.
+    assert!(
+        without_ansi(&shell.output).contains("sql:local | "),
+        "no toolbar: {:?}",
+        shell.output
+    );
     assert!(
         !shell.output.contains("cannot start in a job"),
         "{:?}",
@@ -207,6 +247,7 @@ fn every_job_variable_is_scrubbed() {
         sc.systemd_delete_job.as_str(),
         sc.compose_project.as_str(),
         sc.compose_root.as_str(),
+        sc.noninteractive.as_str(),
     ] {
         assert!(
             scrubbed.iter().any(|var| var == name),

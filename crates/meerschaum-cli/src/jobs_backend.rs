@@ -128,6 +128,8 @@ impl JobsBackend for LocalJobsBackend {
         let ctx = self.ctx.clone();
         blocking(move || {
             let mut out = IndexMap::new();
+            // Every `systemd` job's status, PID and times from one `systemctl show`.
+            let ctx = meerschaum_jobs::summary::listing_context(&ctx, Some("local"), true);
             if let Ok(listing) = get_jobs_for(&ctx, Some("local"), false, true) {
                 for (name, mut job) in listing.jobs {
                     out.insert(name, metadata(&mut job));
@@ -389,6 +391,68 @@ impl LocalJobsBackend {
 #[cfg(test)]
 mod rc6_tests {
     use super::*;
+
+    /// `GET /jobs` reads every `systemd` job's status, PID and times from one `systemctl show`
+    /// (rc28; a few calls per job before), and lists exactly what each job's getters read.
+    #[tokio::test]
+    async fn the_listing_asks_systemctl_once_for_every_unit() {
+        use meerschaum_jobs::executor::JobExecutor;
+        use meerschaum_jobs::runner::FakeService;
+        let root = tempfile::tempdir().unwrap();
+        let fake = std::sync::Arc::new(meerschaum_jobs::FakeSystemctl::new());
+        let mut ctx = JobsContext::for_root(root.path().join("root"));
+        ctx.paths.systemd_user_dir = root.path().join("home/.config/systemd/user");
+        ctx.config.executor = Some("systemd".into());
+        let ctx = ctx
+            .with_launcher(meerschaum_jobs::Launcher {
+                supervisor: vec!["unused".into()],
+                program: vec!["/usr/bin/python3".into()],
+            })
+            .with_process_runner(fake.clone())
+            .with_process_env(vec![("PATH".into(), "/usr/bin:/bin".into())]);
+        let executor = meerschaum_jobs::systemd::SystemdExecutor::new(ctx.clone());
+        for (index, (name, state)) in [("one", "active"), ("two", "inactive"), ("three", "active")]
+            .into_iter()
+            .enumerate()
+        {
+            let sysargs = vec![
+                "show".to_string(),
+                "version".to_string(),
+                "--loop".to_string(),
+            ];
+            assert!(executor.create_job(name, &sysargs, None).success);
+            fake.set_service(
+                &executor.get_service_name(name),
+                FakeService {
+                    active_state: state.into(),
+                    main_pid: if state == "active" {
+                        4_200_000 + index as i32
+                    } else {
+                        0
+                    },
+                    stopped: name == "three",
+                    active_enter: "Tue 2000-01-04 10:00:00 UTC".into(),
+                    ..FakeService::default()
+                },
+            );
+        }
+        fake.clear_calls();
+        let listed = LocalJobsBackend::new(ctx.clone()).list().await;
+        let queries: Vec<String> = fake
+            .rendered_calls()
+            .into_iter()
+            .filter(|c| c.starts_with("show") || c.starts_with("is-active"))
+            .collect();
+        assert_eq!(queries.len(), 1, "{queries:?}");
+        let mut expected = IndexMap::new();
+        for (name, mut job) in get_jobs_for(&ctx, Some("local"), false, true).unwrap().jobs {
+            expected.insert(name, metadata(&mut job));
+        }
+        assert_eq!(listed, expected);
+        assert_eq!(listed["one"]["status"], "running");
+        assert_eq!(listed["two"]["status"], "stopped");
+        assert_eq!(listed["three"]["status"], "paused");
+    }
 
     #[tokio::test]
     async fn promotion_persists_kind_and_preserves_owner() {

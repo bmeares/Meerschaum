@@ -12,7 +12,7 @@
 //! - A failing `uninstall plugin <name> -f` of an existing plugin is reported with its own
 //!   message and ends the wizard, as v4's returned tuple does.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use meerschaum_core::SuccessTuple;
@@ -190,107 +190,22 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
         action_name = get_action_name(rt)?;
         clear_screen(rt, args);
     }
-    let action_spaces = action_name.replace('_', " ");
 
     let mut dt_col = None;
     if features.iter().any(|f| f == "fetch") {
         dt_col = get_dt_col_name(rt);
         clear_screen(rt, args);
     }
-    let dt_col_name = quoted_dt_col_name(dt_col.as_deref());
 
-    let capitalized = {
-        let first = plugin_name
-            .to_lowercase()
-            .split(['-', '_'])
-            .next()
-            .unwrap_or_default()
-            .to_string();
-        let mut chars = first.chars();
-        chars
-            .next()
-            .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
-            .unwrap_or_default()
+    let answers = PluginAnswers {
+        name: plugin_name.to_string(),
+        rust,
+        package,
+        features,
+        action: action_name,
+        dt_col,
     };
-    let lower = plugin_name.to_lowercase();
-    let labels: Vec<(&str, &str)> = vec![
-        ("plugin_name", plugin_name),
-        ("plugin_name_capitalized", &capitalized),
-        ("plugin_name_lower", &lower),
-        ("action_name", &action_name),
-        ("action_spaces", &action_spaces),
-        ("dt_col_name", &dt_col_name),
-    ];
-    let python_body = || {
-        let has = |feature: &str| features.iter().any(|f| f == feature);
-        let imports = |key: &str| py_format(line("imports_lines", key), &labels);
-        let feature = |key: &str| py_format(line("feature_lines", key), &labels);
-
-        let mut body = String::new();
-        body.push_str(&feature("header"));
-        body.push_str(&imports("stdlib"));
-        body.push_str(&imports("default"));
-        if has("connector") && !has("instance-connector") {
-            body.push_str(&imports("connector"));
-        }
-        if has("instance-connector") {
-            body.push_str(&imports("instance-connector"));
-        }
-        if has("action") {
-            body.push_str(&imports("action"));
-        }
-        if has("api") && has("web") {
-            body.push_str(&imports("api+web"));
-        } else if has("api") {
-            body.push_str(&imports("api"));
-        } else if has("web") {
-            body.push_str(&imports("web"));
-        }
-        body.push('\n');
-        body.push_str(&feature("default"));
-        body.push_str(&feature("setup"));
-        if has("fetch") {
-            body.push_str(&feature("register"));
-            body.push_str(&feature("fetch"));
-        }
-        if has("connector") && !has("instance-connector") {
-            body.push_str(&feature("connector"));
-        }
-        if has("instance-connector") {
-            body.push_str(&feature("instance-connector"));
-        }
-        if has("action") {
-            body.push_str(&feature("action"));
-        }
-        if has("api") {
-            body.push_str(&feature("api"));
-        }
-        if has("web") {
-            body.push_str(&feature("web"));
-        }
-        body.trim_end().to_string()
-    };
-    let scaffold = Scaffold {
-        name: plugin_name,
-        features: &features,
-        action: &action_name,
-        dt_col: dt_col.as_deref(),
-    };
-    let files: Vec<(PathBuf, String)> = match (rust, package) {
-        (false, false) => vec![(format!("{plugin_name}.py").into(), python_body())],
-        (false, true) => vec![(
-            PathBuf::from(plugin_name).join("__init__.py"),
-            python_body(),
-        )],
-        (true, false) => vec![(
-            format!("{plugin_name}.rs").into(),
-            rust_scaffold(&scaffold)?.trim_end().to_string(),
-        )],
-        (true, true) => rust_package(&scaffold)?
-            .into_iter()
-            .map(|(path, text)| (PathBuf::from(plugin_name).join(path), text))
-            .collect(),
-    };
+    let files = plugin_files(&answers)?;
     if package {
         let directory = plugins_dir.join(plugin_name);
         if directory.exists() {
@@ -315,7 +230,7 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
         }
     }
     // The file to edit: the module or the crate's `src/lib.rs` (the last file written).
-    let plugin_path = plugins_dir.join(&files[if rust && package { files.len() - 1 } else { 0 }].0);
+    let plugin_path = plugins_dir.join(&files[files.len() - 1].0);
     let created = if package {
         plugins_dir.join(plugin_name)
     } else {
@@ -342,6 +257,290 @@ fn bootstrap_plugin(args: &ArgsMap, rt: &mut Runtime<'_>, plugin_name: &str) -> 
     }
     edit_file(rt, &plugin_path)?;
     Ok(SuccessTuple::success())
+}
+
+/// Everything a new plugin's files depend on: the wizard's answers (or the web console's New
+/// plugin form).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginAnswers {
+    /// The plugin's name (its module, crate, connector type and page path).
+    pub name: String,
+    /// Rust (`true`) or Python.
+    pub rust: bool,
+    /// A package directory (`true`) or a single file.
+    pub package: bool,
+    /// The feature keys picked (see [`plugin_feature_choices`]).
+    pub features: Vec<String>,
+    /// The action's name, subactions joined with `_` (when `action` is picked).
+    pub action: String,
+    /// The datetime column of `fetch` (when `fetch` is picked), `None` to skip.
+    pub dt_col: Option<String>,
+}
+
+impl PluginAnswers {
+    fn has(&self, feature: &str) -> bool {
+        self.features.iter().any(|f| f == feature)
+    }
+}
+
+/// The languages `bootstrap plugins` offers, the first being the default.
+pub const LANGUAGES: [&str; 2] = ["Python", "Rust"];
+
+/// The feature picked when none is chosen.
+pub const DEFAULT_FEATURE: &str = "fetch";
+
+/// The features offered: `(key, description)`, in the wizard's order.
+pub fn plugin_feature_choices() -> Vec<(String, String)> {
+    feature_choices()
+}
+
+/// The packaging choices for `name`: `(single file, package)`, as the wizard words them.
+pub fn packaging_choices(name: &str, rust: bool) -> (String, String) {
+    if rust {
+        (
+            format!("Single file ({name}.rs)"),
+            format!("Package ({name}/Cargo.toml)"),
+        )
+    } else {
+        (
+            format!("Single file ({name}.py)"),
+            format!("Package ({name}/__init__.py)"),
+        )
+    }
+}
+
+/// The Python module `bootstrap plugins` writes (v4's `FEATURE_LINES` and `IMPORTS_LINES`).
+fn python_module(answers: &PluginAnswers) -> String {
+    let plugin_name = answers.name.as_str();
+    let capitalized = {
+        let first = plugin_name
+            .to_lowercase()
+            .split(['-', '_'])
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        let mut chars = first.chars();
+        chars
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+            .unwrap_or_default()
+    };
+    let lower = plugin_name.to_lowercase();
+    let action_spaces = answers.action.replace('_', " ");
+    let dt_col_name = quoted_dt_col_name(answers.dt_col.as_deref());
+    let labels: Vec<(&str, &str)> = vec![
+        ("plugin_name", plugin_name),
+        ("plugin_name_capitalized", &capitalized),
+        ("plugin_name_lower", &lower),
+        ("action_name", &answers.action),
+        ("action_spaces", &action_spaces),
+        ("dt_col_name", &dt_col_name),
+    ];
+    let has = |feature: &str| answers.has(feature);
+    let imports = |key: &str| py_format(line("imports_lines", key), &labels);
+    let feature = |key: &str| py_format(line("feature_lines", key), &labels);
+
+    let mut body = String::new();
+    body.push_str(&feature("header"));
+    body.push_str(&imports("stdlib"));
+    body.push_str(&imports("default"));
+    if has("connector") && !has("instance-connector") {
+        body.push_str(&imports("connector"));
+    }
+    if has("instance-connector") {
+        body.push_str(&imports("instance-connector"));
+    }
+    if has("action") {
+        body.push_str(&imports("action"));
+    }
+    if has("api") && has("web") {
+        body.push_str(&imports("api+web"));
+    } else if has("api") {
+        body.push_str(&imports("api"));
+    } else if has("web") {
+        body.push_str(&imports("web"));
+    }
+    body.push('\n');
+    body.push_str(&feature("default"));
+    body.push_str(&feature("setup"));
+    if has("fetch") {
+        body.push_str(&feature("register"));
+        body.push_str(&feature("fetch"));
+    }
+    if has("connector") && !has("instance-connector") {
+        body.push_str(&feature("connector"));
+    }
+    if has("instance-connector") {
+        body.push_str(&feature("instance-connector"));
+    }
+    if has("action") {
+        body.push_str(&feature("action"));
+    }
+    if has("api") {
+        body.push_str(&feature("api"));
+    }
+    if has("web") {
+        body.push_str(&feature("web"));
+    }
+    body.trim_end().to_string()
+}
+
+/// The files of a new plugin, `(path relative to its plugins directory, contents)`; the last
+/// is the one to edit (the module, or a Rust crate's `src/lib.rs`).
+pub fn plugin_files(answers: &PluginAnswers) -> Result<Vec<(PathBuf, String)>, ActionError> {
+    let plugin_name = answers.name.as_str();
+    let scaffold = Scaffold {
+        name: plugin_name,
+        features: &answers.features,
+        action: &answers.action,
+        dt_col: answers.dt_col.as_deref(),
+    };
+    Ok(match (answers.rust, answers.package) {
+        (false, false) => vec![(format!("{plugin_name}.py").into(), python_module(answers))],
+        (false, true) => vec![(
+            PathBuf::from(plugin_name).join("__init__.py"),
+            python_module(answers),
+        )],
+        (true, false) => vec![(
+            format!("{plugin_name}.rs").into(),
+            rust_scaffold(&scaffold)?.trim_end().to_string(),
+        )],
+        (true, true) => rust_package(&scaffold)?
+            .into_iter()
+            .map(|(path, text)| (PathBuf::from(plugin_name).join(path), text))
+            .collect(),
+    })
+}
+
+/// Whether any plugins directory already holds a plugin (or anything else) named `name`: a
+/// `<name>.py` or `<name>.rs` file, or a `<name>` entry of any kind.
+pub fn plugin_name_taken(dirs: &[PathBuf], name: &str) -> bool {
+    dirs.iter().any(|dir| {
+        [
+            dir.join(name),
+            dir.join(format!("{name}.py")),
+            dir.join(format!("{name}.rs")),
+        ]
+        .iter()
+        .any(|path| path.symlink_metadata().is_ok())
+    })
+}
+
+/// What [`create_plugin`] wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedPlugin {
+    /// The plugin: its single file or its package directory.
+    pub path: PathBuf,
+    /// The files written, in order.
+    pub files: Vec<PathBuf>,
+    /// The file to edit (the module, or a Rust crate's `src/lib.rs`).
+    pub edit: PathBuf,
+}
+
+/// `bootstrap plugins` without questions (the web console's New plugin): the same checks of
+/// the name, the features and the action, and the same files, written into `directory` (one
+/// of `dirs`). A plugin of that name in any plugins directory is refused (the wizard offers to
+/// uninstall it first), and nothing that exists is ever overwritten.
+pub fn create_plugin(
+    dirs: &[PathBuf],
+    directory: &Path,
+    answers: &PluginAnswers,
+) -> Result<CreatedPlugin, String> {
+    let name = answers.name.as_str();
+    super::plugin_files::validate_plugin_name(name)?;
+    if !dirs.iter().any(|dir| dir == directory) {
+        return Err(format!(
+            "'{}' is not one of the plugins directories.",
+            directory.display()
+        ));
+    }
+    if plugin_name_taken(dirs, name) {
+        return Err(format!("Plugin '{name}' already exists."));
+    }
+    if answers.rust {
+        rust_plugin_name(name)?;
+    }
+    let choices = feature_choices();
+    if answers.features.is_empty()
+        || answers
+            .features
+            .iter()
+            .any(|feature| !choices.iter().any(|(key, _)| key == feature))
+    {
+        return Err("Please pick a valid choice.".into());
+    }
+    let mut answers = answers.clone();
+    answers.action = answers.action.trim().replace(' ', "_");
+    if answers.has("action") && answers.action.is_empty() {
+        return Err("Please enter an action.".into());
+    }
+    if !answers.has("action") {
+        answers.action.clear();
+    }
+    let fetch = answers.has("fetch");
+    answers.dt_col = answers.dt_col.take().filter(|dt| fetch && !dt.is_empty());
+    let files = plugin_files(&answers).map_err(|e| e.message)?;
+
+    std::fs::create_dir_all(directory).map_err(|e| {
+        format!(
+            "Failed to create the plugins directory '{}':\n{e}",
+            directory.display()
+        )
+    })?;
+    let plugin_path = if answers.package {
+        let package = directory.join(name);
+        // `create_dir` (not `_all`): a directory made meanwhile is refused, never reused.
+        if let Err(e) = std::fs::create_dir(&package) {
+            return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("Directory '{}' already exists.", package.display())
+            } else {
+                format!("Failed to write file '{}':\n{e}", package.display())
+            });
+        }
+        package
+    } else {
+        directory.join(&files[0].0)
+    };
+    let mut written = Vec::new();
+    for (relative, text) in &files {
+        let path = directory.join(relative);
+        let result = match path.parent() {
+            Some(parent) => std::fs::create_dir_all(parent),
+            None => Ok(()),
+        }
+        .and_then(|_| {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)?;
+            file.write_all(text.as_bytes())?;
+            file.sync_all()
+        });
+        if let Err(e) = result {
+            // Leave nothing half-made: the package directory (made above) or the files written.
+            if answers.package {
+                let _ = std::fs::remove_dir_all(&plugin_path);
+            } else if e.kind() != std::io::ErrorKind::AlreadyExists {
+                let _ = std::fs::remove_file(&path);
+            }
+            return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("Plugin '{name}' already exists.")
+            } else {
+                format!("Failed to write file '{}':\n{e}", path.display())
+            });
+        }
+        written.push(path);
+    }
+    let edit = written
+        .last()
+        .cloned()
+        .unwrap_or_else(|| plugin_path.clone());
+    Ok(CreatedPlugin {
+        path: plugin_path,
+        files: written,
+        edit,
+    })
 }
 
 /// `_get_plugins_dir_path()`.
@@ -486,17 +685,7 @@ fn quoted_dt_col_name(name: Option<&str>) -> String {
 /// Single-file module (default) or a package directory: `<name>/__init__.py` for Python, a
 /// Cargo crate (`plugin.toml`, `Cargo.toml`, `src/lib.rs`) for Rust.
 fn choose_packaging(rt: &mut Runtime<'_>, name: &str, rust: bool) -> Result<bool, ActionError> {
-    let (single, package) = if rust {
-        (
-            format!("Single file ({name}.rs)"),
-            format!("Package ({name}/Cargo.toml)"),
-        )
-    } else {
-        (
-            format!("Single file ({name}.py)"),
-            format!("Package ({name}/__init__.py)"),
-        )
-    };
+    let (single, package) = packaging_choices(name, rust);
     let choice = choose(
         rt,
         "How would you like to package your plugin?",
@@ -1117,6 +1306,195 @@ mod tests {
         ] {
             assert!(!lib.contains(absent), "{absent}\n{lib}");
         }
+    }
+
+    fn answers(name: &str, rust: bool, package: bool, features: &[&str]) -> PluginAnswers {
+        PluginAnswers {
+            name: name.into(),
+            rust,
+            package,
+            features: features.iter().map(|f| f.to_string()).collect(),
+            action: "sing song".into(),
+            dt_col: Some("ts".into()),
+        }
+    }
+
+    #[test]
+    fn create_plugin_writes_the_wizards_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let dirs = vec![dir.path().to_path_buf()];
+        let cases = [
+            (
+                "py_single",
+                false,
+                false,
+                vec!["py_single.py"],
+                "py_single.py",
+            ),
+            (
+                "py_pkg",
+                false,
+                true,
+                vec!["py_pkg/__init__.py"],
+                "py_pkg/__init__.py",
+            ),
+            (
+                "rs_single",
+                true,
+                false,
+                vec!["rs_single.rs"],
+                "rs_single.rs",
+            ),
+            (
+                "rs-pkg",
+                true,
+                true,
+                vec![
+                    "rs-pkg/plugin.toml",
+                    "rs-pkg/Cargo.toml",
+                    "rs-pkg/src/lib.rs",
+                ],
+                "rs-pkg/src/lib.rs",
+            ),
+        ];
+        for (name, rust, package, files, edit) in cases {
+            let answers = answers(name, rust, package, &["fetch", "action"]);
+            let created = create_plugin(&dirs, dir.path(), &answers).unwrap();
+            let written: Vec<String> = created
+                .files
+                .iter()
+                .map(|p| {
+                    p.strip_prefix(dir.path())
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            assert_eq!(written, files, "{name}");
+            assert_eq!(created.edit, dir.path().join(edit), "{name}");
+            // The same text as the wizard (the action's spaces joined with `_`).
+            let mut expected = answers.clone();
+            expected.action = "sing_song".into();
+            for (relative, text) in plugin_files(&expected).unwrap() {
+                assert_eq!(
+                    std::fs::read_to_string(dir.path().join(relative)).unwrap(),
+                    text
+                );
+            }
+        }
+        let python = std::fs::read_to_string(dir.path().join("py_single.py")).unwrap();
+        assert!(python.contains("sing_song"), "{python}");
+        assert!(python.contains("\"ts\""), "{python}");
+    }
+
+    #[test]
+    fn create_plugin_refuses_what_the_wizard_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let dirs = vec![dir.path().to_path_buf(), other.path().to_path_buf()];
+        let create = |answers: &PluginAnswers| create_plugin(&dirs, dir.path(), answers);
+        for invalid in ["", "../escape", "a/b", ".hidden", "mrsm", "a\\b"] {
+            let err = create(&answers(invalid, false, false, &["fetch"])).unwrap_err();
+            assert_eq!(err, format!("Invalid plugin name: '{invalid}'"));
+        }
+        assert!(
+            create(&answers("2nd", true, false, &["fetch"]))
+                .unwrap_err()
+                .starts_with("Rust plugin names must start with a letter")
+        );
+        assert_eq!(
+            create(&answers("demo", false, false, &[])).unwrap_err(),
+            "Please pick a valid choice."
+        );
+        assert_eq!(
+            create(&answers("demo", false, false, &["fetch", "bogus"])).unwrap_err(),
+            "Please pick a valid choice."
+        );
+        let mut no_action = answers("demo", false, false, &["action"]);
+        no_action.action = "  ".into();
+        assert_eq!(create(&no_action).unwrap_err(), "Please enter an action.");
+        let mut bad_action = answers("demo", true, false, &["action"]);
+        bad_action.action = "fetch".into();
+        assert!(
+            create(&bad_action)
+                .unwrap_err()
+                .contains("plugin function name")
+        );
+        assert!(
+            create(&answers("sql", true, false, &["connector"]))
+                .unwrap_err()
+                .contains("connector type")
+        );
+        // A plugin of that name in any plugins directory, in either language or layout.
+        std::fs::write(other.path().join("taken.rs"), "fn setup() {}").unwrap();
+        std::fs::create_dir(dir.path().join("folder")).unwrap();
+        std::fs::write(dir.path().join("module.py"), "keep = True\n").unwrap();
+        for name in ["taken", "folder", "module"] {
+            for rust in [false, true] {
+                for package in [false, true] {
+                    assert_eq!(
+                        create(&answers(name, rust, package, &["fetch"])).unwrap_err(),
+                        format!("Plugin '{name}' already exists.")
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("module.py")).unwrap(),
+            "keep = True\n"
+        );
+        // Only a configured plugins directory.
+        let elsewhere = tempfile::tempdir().unwrap();
+        assert!(
+            create_plugin(
+                &dirs,
+                elsewhere.path(),
+                &answers("demo", false, false, &["fetch"])
+            )
+            .unwrap_err()
+            .contains("is not one of the plugins directories")
+        );
+        // Nothing was written by the refusals.
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["folder", "module.py"]);
+    }
+
+    #[test]
+    fn create_plugin_makes_a_missing_plugins_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join("plugins");
+        let created = create_plugin(
+            std::slice::from_ref(&plugins),
+            &plugins,
+            &answers("fresh", false, false, &["web"]),
+        )
+        .unwrap();
+        assert_eq!(created.path, plugins.join("fresh.py"));
+        assert!(created.path.is_file());
+    }
+
+    #[test]
+    fn packaging_choices_match_the_wizard() {
+        assert_eq!(
+            packaging_choices("demo", false),
+            (
+                "Single file (demo.py)".to_string(),
+                "Package (demo/__init__.py)".to_string()
+            )
+        );
+        assert_eq!(
+            packaging_choices("demo", true),
+            (
+                "Single file (demo.rs)".to_string(),
+                "Package (demo/Cargo.toml)".to_string()
+            )
+        );
+        assert_eq!(LANGUAGES, ["Python", "Rust"]);
+        assert_eq!(plugin_feature_choices()[0].0, DEFAULT_FEATURE);
     }
 
     #[test]

@@ -521,24 +521,21 @@ def test_jobs_page_starts_and_deletes_a_job(server, tab):
     started = server.mrsm('show', 'version', '-d', '--name', 'w7job', '--yes', '--nopretty')
     assert started.returncode == 0, started.stdout + started.stderr
     tab.login()
-    tab.goto('/dash/jobs', '.card-title')
-    tab.page.wait_for_selector('.card-title:has-text("w7job")')
-    ### Other jobs (the actions the dashboard ran) have cards too: work in this job's.
-    card = tab.page.locator('.card:has(.card-title:has-text("w7job"))').first
-    card.locator('button:text-is("Start")').wait_for()
+    tab.goto('/dash/jobs', '#jobs-table')
+    row = tab.page.locator('#jobs-table tr.job-row:has(.job-name-link:text-is("w7job"))')
+    row.wait_for()
     began = lambda: server.python(
         "from meerschaum.jobs import Job\n"
         "job = Job('w7job', executor_keys='local')\n"
         "print(job.began, job.status)"
     ).stdout.strip()
     first_began = began().rsplit(' ', 1)[0]
-    ### The click is a request to the host (a click before the page's callbacks are bound is lost,
-    ### so click again): wait until the job really started again (a new `began`) and ended, or
-    ### deleting it below would race the start.
+    ### Wait until the job really started again (a new `began`) and ended, or deleting it below
+    ### would race the start.
     current = ''
     for attempt in range(4):
-        card.locator('button:text-is("Start")').wait_for()
-        card.locator('button:text-is("Start")').click()
+        row.locator('.job-row-menu-toggle').click()
+        tab.page.click('.dropdown-menu.show .dropdown-item:text-is("Start")')
         deadline = time.time() + 20
         while time.time() < deadline:
             current = began()
@@ -548,20 +545,18 @@ def test_jobs_page_starts_and_deletes_a_job(server, tab):
         if current.rsplit(' ', 1)[0] != first_began:
             break
     assert current.rsplit(' ', 1)[0] != first_began and current.endswith('stopped'), current
-    ### The card shows the status of the job as of its last refresh (every few seconds).
-    time.sleep(4)
-    card.locator('p:has-text("Stopped")').first.wait_for()
-    ### The card's buttons are rebuilt every few seconds: a click that lands on a button which
-    ### is being replaced is lost, so click until the confirmation opens.
-    for attempt in range(3):
-        card.locator('button:text-is("Delete")').wait_for()
-        card.locator('button:text-is("Delete")').click()
-        try:
-            tab.page.wait_for_selector('.modal.show', timeout=15000)
-            break
-        except Exception:
-            if attempt == 2:
-                raise
+    ### The row shows the job's status as of its last refresh (after the action, then every
+    ### few seconds).
+    tab.page.wait_for_function(
+        "() => { const tr = [...document.querySelectorAll('#jobs-table tr.job-row')]"
+        ".find(tr => tr.innerText.includes('w7job'));"
+        " return tr && tr.classList.contains('job-group-stopped')"
+        " && tr.querySelector('.job-status').innerText === 'Stopped'; }",
+        timeout=30000,
+    )
+    row.locator('.job-row-menu-toggle').click()
+    tab.page.click('.dropdown-menu.show .dropdown-item:text-is("Delete")')
+    tab.page.wait_for_selector('.modal.show #jobs-delete-name-input', timeout=15000)
     ### Delete is enabled once the job's name is typed.
     assert tab.page.locator('.modal.show button:text-is("Delete")').is_disabled()
     tab.page.fill('.modal.show input', 'w7job')
@@ -578,7 +573,7 @@ def test_jobs_page_starts_and_deletes_a_job(server, tab):
                     f"The job was not deleted: {tab.page.locator('.modal.show').inner_text()!r}"
                 )
             time.sleep(2)
-    ### Gone from the server (the card stays until the page reloads, as in v4).
+    ### Gone from the server, then from the table.
     deadline = time.time() + 30
     while time.time() < deadline:
         listing = server.mrsm('show', 'jobs', '--nopretty')
@@ -586,9 +581,14 @@ def test_jobs_page_starts_and_deletes_a_job(server, tab):
             break
         time.sleep(1)
     assert 'w7job' not in listing.stdout
+    tab.page.wait_for_function(
+        "() => ![...document.querySelectorAll('#jobs-table tr.job-row')]"
+        ".some(tr => tr.innerText.includes('w7job') && tr.offsetParent !== null)",
+        timeout=30000,
+    )
     tab.goto('/dash/jobs')
     tab.page.wait_for_load_state('networkidle')
-    assert tab.page.locator('.card-title:has-text("w7job")').count() == 0
+    assert tab.page.locator('.job-name-link:text-is("w7job")').count() == 0
     assert _errors(tab) == [], _errors(tab)
 
 
@@ -628,12 +628,12 @@ def test_jobs_page_tabs_and_logs_modal_follow_a_running_job(server, tab):
         tab.goto('/dash/runs', '#jobs-page-tabs')
         tab.page.wait_for_selector('#jobs-page-tabs .nav-link.active:text-is("Runs")')
         tab.page.click('#jobs-page-tabs .nav-link:text-is("Jobs")')
-        tab.page.wait_for_selector('.card-title:has-text("w7view")')
-        card = tab.page.locator('.card:has(.card-title:has-text("w7view"))').first
-        card.locator('.dropdown-toggle:has-text("Logs")').click()
+        row = tab.page.locator('#jobs-table tr.job-row:has(.job-name-link:text-is("w7view"))')
+        row.wait_for()
+        row.locator('.job-row-menu-toggle').click()
         items = tab.page.locator('.dropdown-menu.show .dropdown-item').all_inner_texts()
-        assert items == ['View', 'Download'], items
-        tab.page.click('.dropdown-menu.show .dropdown-item:text-is("View")')
+        assert items == ['Pause', 'Stop', 'Restart', 'View logs', 'Download logs', 'Delete'], items
+        tab.page.click('.dropdown-menu.show .dropdown-item:text-is("View logs")')
         tab.page.wait_for_selector('.modal.show #job-logs-view')
         ### ANSI colors are rendered, not printed.
         tab.page.wait_for_function(

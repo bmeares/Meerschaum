@@ -63,8 +63,11 @@ the HTTPS port gets `/healthcheck` and a `308` to `https://`. HTTP/2 requests ge
 their authority, and every request the peer address (`ConnectInfo`), as on the plain listener.
 
 The web terminal's tmux sessions run on a dedicated tmux server (`webterm::tmux_socket_path`, a
-`0700` directory under the root) started with Meerschaum's `tmux.conf` (`webterm::TMUX_CONF`) or
-`api:webterm:tmux:config`; `webterm::stop_owned_servers` stops the servers this process started.
+`0700` directory under the root) started with Meerschaum's `tmux.conf` (`webterm::TMUX_CONF`: the
+session's windows as tabs on a status line at the top, applied again by `webterm::refresh_tmux_config`
+when a terminal attaches to a server that already runs) or `api:webterm:tmux:config`;
+`webterm::stop_owned_servers` stops the servers this process started. A terminal's shell never
+inherits the server's job context, `MRSM_NONINTERACTIVE` included (`webterm::job_context_vars`).
 
 The MCP registry is v4's (`mcp/registry.json`, generated) with v5's additions (`mcp::v5`: the
 Pipelines, runs, jobs and connectors tools, `sync_pipe`'s `parents` / `children`, bounds typed as

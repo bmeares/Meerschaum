@@ -1392,6 +1392,28 @@ pub fn jobs_get_jobs<'py>(
     Ok((listing_rows(py, listing.jobs)?, listing.warnings))
 }
 
+/// Every job `get_jobs()` lists for `local` (with the `systemd` jobs on a `systemd` context), each
+/// with its state: `[{name, executor_keys, sysargs, label, status, pid, result, restart, health,
+/// began, ended, paused, stop_time, properties}]` (see `meerschaum_jobs::summary`). The `systemd`
+/// jobs' status, PID and times come from one `systemctl show` for all of them. The console's
+/// Jobs page reads this instead of each job's getters.
+#[pyfunction]
+#[pyo3(signature = (include_hidden=false))]
+pub fn jobs_get_summaries<'py>(
+    py: Python<'py>,
+    include_hidden: bool,
+) -> PyResult<Bound<'py, PyList>> {
+    let ctx = build_ctx(py, None)?;
+    let summaries = py
+        .detach(|| meerschaum_jobs::get_job_summaries(&ctx.jobs, include_hidden))
+        .map_err(runtime_err)?;
+    let out = PyList::empty(py);
+    for summary in summaries.values() {
+        out.append(map_to_py(py, summary.to_map())?)?;
+    }
+    Ok(out)
+}
+
 /// `get_filtered_jobs(...)`: `(jobs, listing_warnings, missing)`.
 #[pyfunction]
 #[pyo3(signature = (executor_keys=None, filter_list=None, include_hidden=false, combine_local_and_systemd=true, api_attributes=None))]
@@ -1747,6 +1769,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRotatingFile>()?;
     m.add_class::<PyStdinFile>()?;
     m.add_function(wrap_pyfunction!(jobs_get_jobs, m)?)?;
+    m.add_function(wrap_pyfunction!(jobs_get_summaries, m)?)?;
     m.add_function(wrap_pyfunction!(jobs_get_filtered_jobs, m)?)?;
     m.add_function(wrap_pyfunction!(jobs_executor_keys_from_context, m)?)?;
     m.add_function(wrap_pyfunction!(jobs_daemon_ids, m)?)?;

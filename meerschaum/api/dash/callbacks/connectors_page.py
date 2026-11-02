@@ -63,9 +63,15 @@ def connector_info_click(clicks, session):
 dash_app.clientside_callback(
     """
     function(value){
+        // Hide the connectors that do not match, and each type's group left without one.
         const query = (value || '').trim().toLowerCase();
-        document.querySelectorAll('#connectors-table tbody tr').forEach(function(row){
-            row.hidden = Boolean(query) && !(row.dataset.search || '').includes(query);
+        document.querySelectorAll('#connectors-table tbody.connectors-group').forEach(function(group){
+            let shown = 0;
+            group.querySelectorAll('tr[data-keys]').forEach(function(row){
+                row.hidden = Boolean(query) && !(row.dataset.search || '').includes(query);
+                shown += row.hidden ? 0 : 1;
+            });
+            group.hidden = shown === 0;
         });
         return dash_clientside.no_update;
     }

@@ -1,0 +1,83 @@
+/* The Plugins page: New plugin, the Language column and editing a plugin's files (loaded after
+ * `console_pages.css`, which holds the source view's base styles). */
+
+/* New plugin: a circled plus beside the page title. */
+.plugins-header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.plugin-new-button {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 40px; min-height: 40px; padding: 0; border: 0; border-radius: 50%;
+    background: transparent; color: #85caff; font-size: 1.75rem; line-height: 1;
+}
+.plugin-new-button:hover { color: #b8e0ff; background: transparent; }
+.plugin-new-button:focus-visible { outline: 2px solid #85caff; outline-offset: 2px; color: #b8e0ff; }
+
+/* The languages' logos (Font Awesome brands). */
+.plugin-language { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.plugin-language i { font-size: 1.2rem; }
+.plugin-language-python i { color: #6cb6ff; }
+.plugin-language-rust i { color: #f0a070; }
+.plugins-table .plugin-kind { text-align: left; }
+.plugin-mobile-meta { display: flex; align-items: center; gap: 2px; }
+.plugin-mobile-meta .plugin-language i { font-size: 0.95rem; }
+.plugin-detail-language { display: inline-flex; align-items: center; gap: 8px; }
+.plugin-source-file-kind .plugin-language i { font-size: 1rem; }
+.plugin-source-toolbar .plugin-source-toolbar-language i { font-size: 1.05rem; }
+.plugin-source-toolbar .plugin-source-toolbar-language + code { margin-left: -4px; }
+
+/* The New plugin dialog. */
+.plugin-new-field { margin-bottom: 16px; }
+.plugin-new-label { display: block; margin-bottom: 6px; font-weight: 600; }
+.plugin-new-languages .form-check-label { display: inline-flex; align-items: center; }
+.plugin-new-language { display: inline-flex; align-items: center; gap: 8px; }
+.plugin-new-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; }
+.plugin-new-error { margin: 8px 0 0; overflow-wrap: anywhere; }
+.plugin-new-modal .modal-body { min-width: 0; }
+
+/* Edit, Save and Cancel in a file's toolbar. */
+.plugin-source-action { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; }
+.plugin-source-action i { font-size: 0.9rem; }
+.plugin-source-action.btn-outline-secondary { color: #dceaf6; border-color: #5b6875; }
+.plugin-source-action.btn-outline-secondary:hover, .plugin-source-action.btn-outline-secondary:focus-visible {
+    color: #fff; background: #213449; border-color: #85caff;
+}
+.plugin-source-alert:empty { display: none; }
+.plugin-source-alert .alert { margin: 0 0 8px; overflow-wrap: anywhere; }
+
+/* The editor: the code view's look, with a gutter of line numbers. */
+.plugin-source-code.plugin-source-editor-code {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start;
+    background: #17212b;
+}
+.plugin-source-editor-code:focus-within { box-shadow: inset 0 0 0 1px #85caff; }
+.plugin-source-gutter {
+    margin: 0; padding: 12px 12px 12px 8px; min-width: calc(3ch + 20px); overflow: hidden;
+    border: 0; border-right: 1px solid #2f3d4b; background: #17212b; color: #6b7d8e;
+    font-family: var(--bs-font-monospace); font-size: 0.8rem; line-height: 1.5;
+    text-align: right; white-space: pre; user-select: none;
+}
+.plugin-source-editor {
+    display: block; width: 100%; min-width: 0; min-height: 12rem; max-height: 65vh; margin: 0;
+    padding: 12px 16px 12px 12px; border: 0; border-radius: 0; outline: none; resize: none;
+    background: #17212b; color: #dceaf6; caret-color: #85caff;
+    font-family: var(--bs-font-monospace); font-size: 0.8rem; line-height: 1.5;
+    white-space: pre; overflow: auto; tab-size: 4;
+}
+.plugin-source-editor::selection { background: #24425f; }
+/* `dbc_dark.css` paints every textarea (with `!important`): keep the code view's colors. */
+.dbc_dark .plugin-source-editor-code textarea.plugin-source-editor {
+    background-color: #17212b !important; color: #dceaf6 !important;
+}
+/* The tree keeps the edited file open until Save or Cancel. */
+.plugin-source-browser.plugin-source-editing .plugin-source-file:not(.active) { opacity: 0.55; cursor: not-allowed; }
+.plugin-source-fullscreen .plugin-source-editor-code { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.plugin-source-fullscreen .plugin-source-editor, .plugin-source-fullscreen .plugin-source-gutter { height: 100%; max-height: none; }
+.plugin-source-fullscreen .plugin-source-editor-code { align-items: stretch; }
+
+@media (max-width: 767.98px) {
+    .plugin-new-button { min-width: 44px; min-height: 44px; }
+    .plugin-new-features { grid-template-columns: minmax(0, 1fr); }
+    .plugin-new-modal .form-check { padding-top: 6px; padding-bottom: 6px; }
+    .plugin-new-modal .modal-footer .btn { min-height: 44px; }
+    .plugin-source-action { min-height: 44px; min-width: 44px; justify-content: center; }
+    .plugin-source-editor { max-height: 55vh; }
+}

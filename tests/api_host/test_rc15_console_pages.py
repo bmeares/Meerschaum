@@ -4,7 +4,7 @@
 
 """
 The console's Jobs, Users, Plugins and Tokens pages (rc15): the New job form's command, job
-health in the status line, the compact jobs table, the users' admin actions with the last-admin
+health in the one-word Status and the Last Run column, the grouped jobs table, the users' admin actions with the last-admin
 guard, the Installed plugins listing and the New token button. In process (host mode), with a
 temporary root, plugins directory and SQLite instance; the browser flows are in
 `tests/console/test_rc15_pages.py`.
@@ -197,60 +197,84 @@ print('JSON:' + json.dumps({
     assert out['raw'][1][0]['tags'] == ['solo', 't1', 't2'] and out['raw'][1][1] is True
 
 
-def test_job_status_line_shows_health(sandbox):
+def test_job_status_is_one_word_and_last_run_its_own_column(sandbox):
+    """
+    A job's Status is one word (its health picks it: Stalled, Failing, Failed), and when it last
+    ran is the Last Run column's (`job_last_run`), with the exact times in its title.
+    """
     root, plugins = sandbox
     out = _json(run_python(root, plugins, '''
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from meerschaum.api.dash.jobs import job_status_summary, time_ago
+from meerschaum.api.dash.jobs import job_status_summary, job_last_run, time_ago
 
 now = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
 ago = lambda **kw: (now - timedelta(**kw)).isoformat()
-def job(status, sysargs=('sync', 'pipes'), result=(True, 'ok'), stop_time=None):
-    return SimpleNamespace(status=status, sysargs=list(sysargs), result=result, stop_time=stop_time)
+naive_ago = lambda **kw: (now - timedelta(**kw)).replace(tzinfo=None)
+def job(status, sysargs=('sync', 'pipes'), result=(True, 'ok'), stop_time=None, began=None, ended=None):
+    return SimpleNamespace(status=status, sysargs=list(sysargs), result=result, stop_time=stop_time,
+                           began=began, ended=ended)
 health = lambda state, **kw: {'state': state, 'consecutive_failures': kw.pop('failures', 0), **kw}
 out = {
-    'healthy': job_status_summary(job('running'), health('healthy', last_success=ago(minutes=2)), now=now),
-    'stalled': job_status_summary(job('running'), health('stalled', last_success=ago(hours=3)), now=now),
-    'stalled_never': job_status_summary(job('running'), health('stalled'), now=now),
-    'failing': job_status_summary(job('running'), health('failing', failures=4, last_success=ago(days=2)), now=now),
-    'failing_one_run': job_status_summary(job('running', ('show', 'version')), health('failing', failures=1), now=now),
-    'no_health': job_status_summary(job('running'), {}, now=now),
-    'paused': job_status_summary(job('paused'), health('healthy', last_success=ago(minutes=30)), now=now),
-    'stopped': job_status_summary(job('stopped'), health('stopped', last_success=ago(days=1)), now=now),
-    'stopped_failed': job_status_summary(job('stopped', result=(False, 'boom')), {}, now=now),
+    'healthy': job_status_summary(job('running'), health('healthy', last_success=ago(minutes=2))),
+    'stalled': job_status_summary(job('running'), health('stalled', last_success=ago(hours=3))),
+    'stalled_never': job_status_summary(job('running'), health('stalled')),
+    'failing': job_status_summary(job('running'), health('failing', failures=4, last_success=ago(days=2))),
+    'no_health': job_status_summary(job('running'), {}),
+    'paused': job_status_summary(job('paused'), health('healthy', last_success=ago(minutes=30))),
+    'stopped': job_status_summary(job('stopped'), health('stopped', last_success=ago(days=1))),
+    'stopped_failed': job_status_summary(job('stopped', result=(False, 'boom')), {}),
     ### The health of a stopped one-shot job says `stopped` with no failed laps: its result counts.
     'stopped_failed_health': job_status_summary(
-        job('stopped', ('show', 'pipes'), result=(False, 'boom')), health('stopped'), now=now,
+        job('stopped', ('show', 'pipes'), result=(False, 'boom')), health('stopped'),
     ),
-    'stopped_by_hand': job_status_summary(job('stopped', result=(False, 'x'), stop_time=now), {}, now=now),
+    'stopped_by_hand': job_status_summary(job('stopped', result=(False, 'x'), stop_time=now), {}),
     'missing': job_status_summary(None),
+    ### Last Run: the last lap of a job that repeats, else the run's end (or its start while it
+    ### runs); the title has the exact times and the failures.
+    'last_lap': job_last_run(job('running', began=naive_ago(days=3)),
+                             health('healthy', last_lap=ago(minutes=2), last_success=ago(minutes=2)), now=now),
+    'last_lap_failing': job_last_run(
+        job('running'), health('failing', failures=4, last_lap=ago(minutes=1), last_success=ago(days=2)), now=now,
+    ),
+    'first_lap': job_last_run(job('running', began=naive_ago(minutes=5)), {}, now=now),
+    'one_shot': job_last_run(job('stopped', ('show', 'version'), began=naive_ago(hours=5, minutes=1),
+                                 ended=naive_ago(hours=5)), {}, now=now),
+    'never': job_last_run(job('stopped'), {}, now=now),
     'ago': [time_ago(ago(seconds=10), now), time_ago(ago(minutes=59), now), time_ago(ago(hours=5), now),
             time_ago(ago(days=1, hours=2), now), time_ago(ago(days=12), now), time_ago(None, now),
             time_ago('2026-10-27T11:58:00', now)],
 }
 print('JSON:' + json.dumps(out))
 '''))
-    assert out['healthy'] == ['running', 'Running · last good sync 2 min ago']
-    assert out['stalled'] == ['stalled', 'Stalled · last good sync 3 h ago']
-    assert out['stalled_never'] == ['stalled', 'Stalled · no good sync yet']
-    assert out['failing'] == ['failing', 'Failing · 4 failed syncs']
-    assert out['failing_one_run'] == ['failing', 'Failing · 1 failed run']
+    assert out['healthy'] == ['running', 'Running']
+    assert out['stalled'] == ['stalled', 'Stalled']
+    assert out['stalled_never'] == ['stalled', 'Stalled']
+    assert out['failing'] == ['failing', 'Failing']
     assert out['no_health'] == ['running', 'Running']
-    assert out['paused'] == ['paused', 'Paused · last good sync 30 min ago']
-    assert out['stopped'] == ['stopped', 'Stopped · last good sync 1 day ago']
-    assert out['stopped_failed'] == ['failed', 'Stopped · last sync failed']
-    assert out['stopped_failed_health'] == ['failed', 'Stopped · last run failed']
+    assert out['paused'] == ['paused', 'Paused']
+    assert out['stopped'] == ['stopped', 'Stopped']
+    assert out['stopped_failed'] == ['failed', 'Failed']
+    assert out['stopped_failed_health'] == ['failed', 'Failed']
     assert out['stopped_by_hand'] == ['stopped', 'Stopped']
-    assert out['missing'][0] == 'dne'
+    assert out['missing'] == ['dne', 'Missing']
+    assert out['last_lap'] == ['2 min ago', 'Last sync ended 2026-10-27 11:58 UTC']
+    assert out['last_lap_failing'][0] == '1 min ago'
+    assert out['last_lap_failing'][1].split('\n') == [
+        'Last sync ended 2026-10-27 11:59 UTC', '4 failed syncs in a row', 'Last good sync 2026-10-25 12:00 UTC',
+    ]
+    assert out['first_lap'] == ['5 min ago', 'Last sync began 2026-10-27 11:55 UTC']
+    assert out['one_shot'] == ['5 h ago', 'Last run ended 2026-10-27 07:00 UTC']
+    assert out['never'] == ['Never', '']
     assert out['ago'] == ['just now', '59 min ago', '5 h ago', '1 day ago', '12 days ago', '', '2 min ago']
 
 
 def test_job_status_dot_follows_the_health_state(sandbox):
     """
-    The status line's dot and color follow the job's state, so a running job that fails or
-    stalls is not shown with its process's green (the Overview's colors: red, amber).
+    A job card's status line (the Runs tab, a job's page): its dot and color follow the job's
+    state, so a running job that fails or stalls is not shown with its process's green (the
+    Overview's colors: red, amber), and its text is the state's one word.
     """
     root, plugins = sandbox
     out = _json(run_python(root, plugins, '''
@@ -275,16 +299,16 @@ print('JSON:' + json.dumps({
 }))
 '''))
     emoji = out['emoji']
-    assert out['running']['dot'] == emoji['running']
+    assert out['running']['dot'] == emoji['running'] and out['running']['text'] == 'Running'
     assert {'running-job', 'job-state-running'} <= set(out['running']['class'])
-    assert out['failing']['dot'] == '🔴' and out['failing']['text'] == 'Failing · 20 failed syncs'
+    assert out['failing']['dot'] == '🔴' and out['failing']['text'] == 'Failing'
     assert 'job-state-failing' in out['failing']['class'] and 'running-job' not in out['failing']['class']
     assert out['stalled']['dot'] == '🟠' and 'job-state-stalled' in out['stalled']['class']
     assert 'running-job' not in out['stalled']['class']
     assert out['paused']['dot'] == emoji['paused'] and 'paused-job' in out['paused']['class']
     assert out['stopped']['dot'] == emoji['stopped'] and 'stopped-job' in out['stopped']['class']
     assert out['failed']['dot'] == '🔴' and 'job-state-failed' in out['failed']['class']
-    assert out['failed']['text'] == 'Stopped · last sync failed'
+    assert out['failed']['text'] == 'Failed'
 
 
 def test_new_job_creates_starts_and_restarts_a_job(sandbox):
@@ -338,7 +362,12 @@ print('JSON:' + json.dumps(out))
     assert out['deleted'] and out['gone']
 
 
-def test_jobs_tab_is_a_table_past_eight_jobs_with_a_filter(sandbox):
+def test_jobs_tab_is_a_grouped_table_with_a_filter(sandbox):
+    """
+    The Jobs tab is always the jobs table: a group per state (Running, Paused, Stopped, in that
+    order; an empty one hidden), the rows by name with their Status, Last Run and command; the
+    filter box past eight jobs; `?status=` the jobs in one state.
+    """
     root, plugins = sandbox
     out = _json(run_python(root, plugins, AS_VIEWER + '''
 import json
@@ -346,22 +375,32 @@ from types import SimpleNamespace
 from meerschaum.api.dash import dash_app
 import meerschaum.api.dash.callbacks.jobs as cj
 
-def ids(component):
-    found = []
-    def walk(c):
-        if isinstance(c, (list, tuple)):
-            for x in c: walk(x)
-            return
-        cid = getattr(c, 'id', None)
-        if cid is not None: found.append(cid)
-        walk(getattr(c, 'children', None) or [])
-    walk(component)
+def walk(component, found):
+    if isinstance(component, (list, tuple)):
+        for x in component: walk(x, found)
+        return found
+    if component is None or isinstance(component, (str, int, float)):
+        return found
+    found.append(component)
+    walk(getattr(component, 'children', None), found)
     return found
 
-def fake(name):
-    return SimpleNamespace(name=name, sysargs=['sync', 'pipes', '-m', name], status='stopped',
+def ids(component):
+    return [c.id for c in walk(component, []) if getattr(c, 'id', None) is not None]
+
+def rows(component):
+    out = []
+    for c in walk(component, []):
+        cid = getattr(c, 'id', None)
+        if isinstance(cid, dict) and cid.get('type') == 'job-row':
+            cells = c.children
+            out.append([cid['index'], c.className, cells[1].children.children, cells[3].children.children])
+    return out
+
+def fake(name, status='stopped'):
+    return SimpleNamespace(name=name, sysargs=['sync', 'pipes', '-m', name], status=status,
                            label='sync pipes -m ' + name, began=None, paused=None, ended=None,
-                           result=(True, 'ok'), stop_time=None)
+                           result=(True, 'ok'), stop_time=None, health=None)
 
 jobs = {}
 cj._listed_jobs = lambda is_runs, session_id: dict(jobs)
@@ -369,40 +408,66 @@ as_viewer()
 import meerschaum.api.dash.jobs as jm
 jm.is_automatic_job = lambda job: False
 
-jobs.update({f'job-{i}': fake(f'job-{i}') for i in range(3)})
+jobs.update({'b-stopped': fake('b-stopped'), 'a-running': fake('a-running', 'running'),
+             'c-paused': fake('c-paused', 'paused')})
 few, few_names, few_total = cj.build_jobs_tab(False, 'sid', with_total=True)
+groups = [(c.id['index'], c.className) for c in walk(few, []) if isinstance(getattr(c, 'id', None), dict)
+          and c.id.get('type') == 'jobs-group']
 jobs.update({f'job-{i}': fake(f'job-{i}') for i in range(3, 12)})
 many, many_names, many_total = cj.build_jobs_tab(False, 'sid', with_total=True)
 filtered, filtered_names, _ = cj.build_jobs_tab(False, 'sid', filter_text='job-1', with_total=True)
 ### `?status=` (the Overview's Jobs tile): the jobs in one state.
-jobs['job-0'].result = (False, 'boom')
+jobs['job-3'].result = (False, 'boom')
 stopped, stopped_names, _ = cj.build_jobs_tab(False, 'sid', status='stopped', with_total=True)
 failing, failing_names, _ = cj.build_jobs_tab(False, 'sid', status='failing', with_total=True)
-running = cj.build_jobs_tab(False, 'sid', status='running')
+paused_only = cj.build_jobs_tab(False, 'sid', status='paused')
+stalled = cj.build_jobs_tab(False, 'sid', status='stalled')
+empty_groups = [(c.id['index'], c.className) for c in walk(paused_only, []) if isinstance(getattr(c, 'id', None), dict)
+                and c.id.get('type') == 'jobs-group']
 jobs.clear()
 empty = cj.build_jobs_tab(False, 'sid')
+### The filter box: past eight jobs, or when filtering.
+filter_hidden = []
+for n in (3, 9):
+    jobs.clear(); jobs.update({f'job-{i}': fake(f'job-{i}') for i in range(n)})
+    filter_hidden.append(cj.render_jobs_page_tab('jobs', None, 0, None, {'session-id': 'sid'})[2])
 print('JSON:' + json.dumps({
     'few_table': 'jobs-table' in ids(few),
-    'few_cards': sum(1 for i in ids(few) if isinstance(i, dict) and i.get('type') == 'job-card'),
-    'many_table': 'jobs-table' in ids(many),
-    'many_rows': sum(1 for i in ids(many) if isinstance(i, dict) and i.get('type') == 'manage-job-status-div'),
+    'few_rows': rows(few),
+    'groups': groups,
     'totals': [few_total, many_total],
+    'many_rows': len(rows(many)),
     'filtered': filtered_names,
-    'row_menu': [i['action'] for i in ids(many) if isinstance(i, dict) and i.get('type') == 'manage-job-button'][:2],
+    'row_menu': [i['action'] for i in ids(many) if isinstance(i, dict) and i.get('type') == 'job-row-action'][:3],
     'empty_text': str(empty),
     'stopped': len(stopped_names),
     'failing': failing_names,
-    'running': str(running),
+    'stalled': str(stalled),
+    'empty_groups': empty_groups,
+    'filter_hidden': filter_hidden,
 }))
 '''))
-    assert not out['few_table'] and out['few_cards'] == 3
-    assert out['many_table'] and out['many_rows'] == 12
-    assert out['totals'] == [3, 12]
-    assert out['filtered'] == ['job-1', 'job-10', 'job-11']
-    assert out['row_menu'] == ['start', 'start']
+    assert out['few_table']
+    ### Rows by name; the group is each row's class (`jobs.css` orders the groups).
+    assert out['few_rows'] == [
+        ['a-running', 'job-row job-group-running', 'Running', 'sync pipes -m a-running'],
+        ['b-stopped', 'job-row job-group-stopped', 'Stopped', 'sync pipes -m b-stopped'],
+        ['c-paused', 'job-row job-group-paused', 'Paused', 'sync pipes -m c-paused'],
+    ]
+    assert out['groups'] == [
+        ['running', 'jobs-group-row jobs-group-running'],
+        ['paused', 'jobs-group-row jobs-group-paused'],
+        ['stopped', 'jobs-group-row jobs-group-stopped'],
+    ]
+    assert out['totals'] == [3, 12] and out['many_rows'] == 12
+    assert out['filtered'] == ['job-10', 'job-11']
+    ### A running job's menu: Pause, Stop, Restart; a stopped one's: Start.
+    assert out['row_menu'] == ['pause', 'stop', 'restart']
     assert 'No jobs' in out['empty_text'] and 'New job' in out['empty_text']
-    assert out['stopped'] == 11 and out['failing'] == ['job-0']
-    assert 'No running jobs' in out['running']
+    assert out['stopped'] == 9 and out['failing'] == ['job-3']
+    assert 'No stalled jobs' in out['stalled']
+    assert ['running', 'jobs-group-row jobs-group-running jobs-group-empty'] in out['empty_groups']
+    assert out['filter_hidden'] == [True, False]
 
 
 def test_users_admin_actions_and_the_last_admin(sandbox):

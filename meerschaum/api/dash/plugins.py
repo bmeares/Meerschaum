@@ -5,7 +5,10 @@
 """
 The console's Plugins page: the plugins installed on this server (Installed) and the plugins
 published to this API's repository (Repository). Administrators update, uninstall and install
-plugins with the usual actions (`install plugins`, `uninstall plugins`), run as jobs.
+plugins with the usual actions (`install plugins`, `uninstall plugins`), run as jobs. The
+administrators who may use the web terminal also create plugins (New plugin: `bootstrap
+plugins`'s choices and files, `create_new_plugin`) and edit their files in the source view
+(`plugin_sources.save_source`).
 """
 
 from __future__ import annotations
@@ -241,10 +244,11 @@ def packages_label(plugin: Dict[str, Any]) -> Tuple[str, bool]:
 
 def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = False) -> Any:
     """The Installed tab's table."""
+    from meerschaum.api.dash.plugin_sources import language_logo
     header = [
         html.Th('Plugin'),
         html.Th('Version', className='d-none d-sm-table-cell'),
-        html.Th('Kind', className='d-none d-md-table-cell'),
+        html.Th('Language', className='d-none d-md-table-cell'),
         html.Th('Provides'),
         html.Th('Packages', className='d-none d-md-table-cell'),
     ]
@@ -266,13 +270,13 @@ def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = F
                           className='console-name-link fw-semibold')
                  if admin else html.Span(name, className='fw-semibold')),
                 html.Div(
-                    [plugin['version'] or '', ' · ' if plugin['version'] else '', plugin_kind_label(plugin)],
-                    className='text-muted small d-sm-none',
+                    [plugin['version'] or '', ' · ' if plugin['version'] else '', language_logo(plugin['kind'])],
+                    className='text-muted small d-sm-none plugin-mobile-meta',
                 ),
             ]),
             html.Td(html.Span(plugin['version'] or '—', className='plugin-version-badge'),
                     className='d-none d-sm-table-cell'),
-            html.Td(plugin_kind_label(plugin), className='plugin-kind d-none d-md-table-cell'),
+            html.Td(language_logo(plugin['kind']), className='plugin-kind d-none d-md-table-cell'),
             html.Td(provides or html.Span('—', className='text-muted'), className='plugin-provides'),
             html.Td(
                 html.Span(
@@ -890,14 +894,110 @@ def build_plugin_detail(
     ], className='plugin-detail-wrapper')
 
 
-def _source_browser(kind: str, name: str, session: Any):
+def _source_browser(kind: str, name: str, session: Any, **kwargs):
     from meerschaum.api.dash.plugin_sources import build_source_browser
-    return build_source_browser(kind, name, session)
+    return build_source_browser(kind, name, session, **kwargs)
 
 
-def build_installed_plugin_detail(name: str, session: Any) -> Any:
-    """Read-only installed plugin metadata and source, restricted to session administrators."""
-    from meerschaum.api.dash.plugin_sources import may_read_source
+########################################################################################
+# New plugin (`bootstrap plugins`).
+########################################################################################
+
+#: The name New plugin words its packaging choices with until a name is typed.
+NEW_PLUGIN_PLACEHOLDER: str = 'my_plugin'
+
+
+def new_plugin_choices(name: Optional[str] = None) -> Dict[str, Any]:
+    """
+    What New plugin offers, from `bootstrap plugins` itself (`_core.bootstrap_plugin_choices`):
+    `languages`, `features` (`[(key, label, example)]`), `default_features`, `packaging`
+    (`{language: [single file, package]}` for `name`) and `directories`.
+    """
+    from meerschaum import _core
+    name = str(name or '').strip() or NEW_PLUGIN_PLACEHOLDER
+    choices = dict(_core.bootstrap_plugin_choices(name))
+    features = []
+    for key, description in choices.get('features', []):
+        lines = [line.strip() for line in str(description).strip().splitlines() if line.strip()]
+        label = lines[0] if lines else str(key)
+        example = ' '.join(lines[1:]).strip()
+        if example.startswith('(') and example.endswith(')'):
+            example = example[1:-1]
+        features.append((str(key), label, example))
+    choices['features'] = features
+    return choices
+
+
+def plugin_url(name: str, source: Optional[str] = None, edit: bool = False, created: bool = False) -> str:
+    """An installed plugin's page, with a file of its source (opened for editing when `edit`)."""
+    from urllib.parse import urlencode
+    query = {}
+    if source:
+        query['file'] = source
+    if edit:
+        query['edit'] = '1'
+    if created:
+        query['created'] = '1'
+    return '/dash/plugins/installed/' + name + (('?' + urlencode(query)) if query else '')
+
+
+def create_new_plugin(
+    name: Any,
+    language: Any,
+    packaging: Any,
+    features: Any,
+    action: Any,
+    dt_col: Any,
+    directory: Any,
+    session: Any,
+) -> Tuple[bool, str, Optional[str]]:
+    """
+    Create a plugin with `bootstrap plugins`'s own scaffold (`_core.bootstrap_plugin`: the same
+    checks of the name, features and action, and the same files; a plugin of that name is
+    refused, nothing is overwritten). Returns `(success, message, URL of its source opened for
+    editing)`. Only authors (`plugin_sources.authoring_refusal`, read fresh) may.
+    """
+    from meerschaum.api.dash.plugin_sources import authoring_refusal
+    refusal = authoring_refusal(session)
+    if refusal:
+        return False, refusal, None
+    name = str(name or '').strip()
+    if not name:
+        return False, 'Enter the name of your new plugin.', None
+    if not is_safe_plugin_name(name):
+        return False, f"Invalid plugin name: '{name}' (use letters, digits, '_' and '-').", None
+    features = [str(feature) for feature in (features or []) if feature]
+    try:
+        from meerschaum import _core
+        success, message, created = _core.bootstrap_plugin(
+            name,
+            str(language or 'Python'),
+            packaging == 'package',
+            features,
+            str(action or ''),
+            (str(dt_col).strip() or None) if dt_col else None,
+            (str(directory) if directory else None),
+        )
+    except Exception as e:
+        return False, f"Failed to create plugin '{name}': {e}", None
+    if not success or not created:
+        return False, message, None
+    return True, message, plugin_url(name, created.get('source'), edit=True, created=True)
+
+
+def build_installed_plugin_detail(
+    name: str,
+    session: Any,
+    selected: Optional[str] = None,
+    edit: bool = False,
+    created: bool = False,
+) -> Any:
+    """
+    An installed plugin's metadata and source, restricted to session administrators (the
+    authors among them edit its files: `selected` opened for editing when `edit`, as after New
+    plugin, which also passes `created`).
+    """
+    from meerschaum.api.dash.plugin_sources import may_read_source, language_logo
     back = dcc.Link('← All plugins', href='/dash/plugins', className='plugin-back-link')
     if not may_read_source('installed', session):
         return html.Div([back, html.H5('Installed source is available to administrators.')],
@@ -911,7 +1011,9 @@ def build_installed_plugin_detail(name: str, session: Any) -> Any:
     actions = plugin_action_buttons(installed, size='md')
     if installed.get('origin'):
         actions.append(update_check_store([installed]))
-    info = [('Runtime',installed['kind']),
+    info = [('Language',html.Span([language_logo(installed['kind']),
+                                    html.Span(installed['kind'], **{'aria-hidden': 'true'})],
+                                   className='plugin-detail-language')),
             ('Layout','Single file' if installed['layout']=='file' else 'Package'),
             ('Version',installed['version'] or 'Not declared'),
             ('Installed from',mask_text(installed.get('origin') or 'Local files'))]
@@ -937,7 +1039,11 @@ def build_installed_plugin_detail(name: str, session: Any) -> Any:
                 html.Ul([html.Li(html.Code(item)) for item in requirements]) if requirements
                 else html.P('No additional packages declared.',className='text-muted')]),
         ],className='plugin-detail-metadata'),
-        _source_browser('installed', name, session),
+        _source_browser(
+            'installed', name, session, selected=selected, edit=edit,
+            notice=(dbc.Alert(f"Created plugin '{name}'.", color='success', dismissable=True,
+                              id='plugin-created-alert') if created else None),
+        ),
     ],className='plugin-detail-wrapper')
 
 

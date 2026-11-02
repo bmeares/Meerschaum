@@ -48,6 +48,15 @@ api/dash/
   carry `?status=` (`failing`; `running`, `stalled`, `failing`, `paused`, `stopped`).
 - **Connectors** (`/dash/connectors`): never sends a secret to the browser (names containing
   password, secret, token, key, ...; URI credentials; and the secret values wherever they appear).
+- **Jobs** (`/dash/jobs`, `jobs.py`): every callback reads one listing (`get_job_snapshots()`:
+  `meerschaum._core.jobs_get_summaries`, one batched `systemctl show` for the `systemd` jobs,
+  cached 2 s) instead of each job's getters (a few `systemctl` calls per job and value). The
+  table groups the jobs (Running, Paused, Stopped) with CSS: its rows are subgrids kept in name
+  order and placed by their group's class (`assets/jobs.css`), so the refresh
+  (`refresh_jobs_table`, every 15 s) moves a job by changing that class and otherwise updates
+  only the cells that changed (`no_update` elsewhere). It never rebuilds the table, which would
+  close menus and lose selections; a clientside gate skips a tick while a menu of the table is
+  open or text in it is selected, and only a job that appeared rebuilds it.
 - **Pipes** (`/dash/pipes`): `pages/pipes.py::layout` builds each page per request: the table
   (`pipes_table.py`: keys, tags and targets from one `fetch_pipes_keys`, then the row estimate,
   sync time, sync status and jobs of the rows on screen), `/dash/pipes/new` (`new_pipe.py`) and a

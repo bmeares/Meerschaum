@@ -218,8 +218,10 @@ print('JSON:' + json.dumps({'text': text}))
 '''))
     text = out['text']
     assert 'mrsm-icon-folder' in text and 'mrsm-icon-folder-open' in text
-    assert "mrsm-icon-python" in text and "mrsm-icon-rust" in text
+    ### RC28: the languages' Font Awesome logos, named for assistive technology.
+    assert "fa-brands fa-python" in text and "fa-brands fa-rust" in text
     assert "title='Python'" in text and "title='Rust'" in text
+    assert "aria-label='Python'" in text and "aria-label='Rust'" in text
     ### Other files keep their suffix.
     assert "children='TOML'" in text
 

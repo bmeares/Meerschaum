@@ -51,6 +51,7 @@ pub mod pipe_api;
 pub mod pipe_bridge;
 pub mod pipe_methods;
 pub mod pipe_methods_api;
+pub mod plugin_bootstrap_api;
 pub mod polars_bridge;
 pub mod runtime;
 pub mod sql_api;
@@ -148,6 +149,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_class::<native_plugin_api::PyNativeConnector>()?;
+    // `bootstrap plugins` for the console's New plugin (rc28)
+    plugin_bootstrap_api::register(m)?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
     // The native action dispatcher from Python (wave 16, P2)

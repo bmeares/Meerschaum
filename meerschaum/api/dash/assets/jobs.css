@@ -1,0 +1,179 @@
+/* The Jobs page (`meerschaum/api/dash/jobs.py`): a wide page whose table groups the jobs by
+   state, running jobs first.
+
+   The table is a CSS grid: its rows are subgrids of one set of columns, kept in name order in
+   the document and placed by their group's class (`order`), so the page's refresh moves a job
+   to another group by changing one class, without rebuilding the table (an open menu, a text
+   selection and the scroll position survive it). */
+
+.console-page.jobs-page {
+    max-width: 1840px;
+    padding-left: 24px;
+    padding-right: 24px;
+}
+
+#jobs-table.jobs-grid {
+    display: grid;
+    grid-template-columns:
+        [name] fit-content(22rem)
+        [status] max-content
+        [last-run] max-content
+        [command] minmax(0, 1fr)
+        [menu] 3rem;
+    width: 100%;
+    margin-bottom: 1rem;
+}
+#jobs-table.jobs-grid > thead,
+#jobs-table.jobs-grid > tbody { display: contents; }
+#jobs-table.jobs-grid tr {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+}
+#jobs-table.jobs-grid > thead > tr { order: 0; }
+#jobs-table tr.jobs-group-running, #jobs-table tr.job-group-running { order: 1; }
+#jobs-table tr.jobs-group-paused, #jobs-table tr.job-group-paused { order: 2; }
+#jobs-table tr.jobs-group-stopped, #jobs-table tr.job-group-stopped { order: 3; }
+#jobs-table tr.jobs-group-empty,
+#jobs-table tr.job-row-gone { display: none; }
+
+#jobs-table.jobs-grid th,
+#jobs-table.jobs-grid td {
+    min-width: 0;
+    padding: 0.55rem 0.75rem;
+}
+#jobs-table.jobs-grid > thead th {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+/* A group: its name and count, with room above it. */
+#jobs-table tr.jobs-group-row > th {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 1.4rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #f0f6fc;
+}
+#jobs-table tr.jobs-group-row > th::before {
+    content: '';
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #8b949e;
+}
+#jobs-table tr.jobs-group-running > th::before { background: #7ee2a8; }
+#jobs-table tr.jobs-group-paused > th::before { background: #d2a8ff; }
+.jobs-group-count {
+    min-width: 1.6rem;
+    padding: 0 0.45rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+#jobs-table tr.job-row:hover > td { background-color: rgba(255, 255, 255, 0.035); }
+#jobs-table td.job-row-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+#jobs-table td.job-row-name .job-name-link { color: #f0f6fc; }
+
+/* Status: one word with its state's dot (the Overview's colors). */
+.job-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.86);
+}
+.job-status::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #8b949e;
+}
+.job-status.job-state-running::before { background: #7ee2a8; }
+.job-status.job-state-stalled::before { background: #e0a526; }
+.job-status.job-state-failing::before,
+.job-status.job-state-failed::before { background: #ff7b72; }
+.job-status.job-state-paused::before { background: #d2a8ff; }
+.job-status.job-state-stalled { color: #e0a526; }
+.job-status.job-state-failing,
+.job-status.job-state-failed { color: #ff7b72; }
+
+#jobs-table td.job-row-last-run {
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.7);
+    font-variant-numeric: tabular-nums;
+}
+
+/* The command wraps (chained commands keep a line each) and is selectable: selecting it never
+   follows a link. (`console_pages.css` caps the cells of the older compact table.) */
+#jobs-table td.job-row-command { cursor: text; max-width: none; padding-top: calc(0.55rem + 2px); }
+#jobs-table td.job-row-command .job-command {
+    display: block;
+    white-space: pre-wrap;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    color: #dceaf6;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+#jobs-table td.job-row-menu-cell {
+    width: auto;
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
+    text-align: right;
+}
+#jobs-table .job-row-menu-toggle { min-width: 44px; min-height: 36px; }
+
+/* Phones: each job is a block (its name and menu, its status and last run, its command). */
+@media (max-width: 767.98px) {
+    .console-page.jobs-page { padding-left: 16px; padding-right: 16px; }
+    #jobs-table.jobs-grid {
+        display: flex;
+        flex-direction: column;
+    }
+    #jobs-table.jobs-grid > thead { display: none; }
+    #jobs-table.jobs-grid tr.job-row {
+        grid-template-columns: max-content minmax(0, 1fr) auto;
+        grid-template-areas:
+            "name name menu"
+            "status last-run menu"
+            "command command command";
+        column-gap: 12px;
+        border-bottom: var(--bs-border-width) solid var(--bs-border-color);
+        padding: 4px 0 10px;
+    }
+    #jobs-table.jobs-grid tr.job-row > td {
+        border-bottom-width: 0;
+        padding: 0 4px;
+    }
+    #jobs-table tr.job-row > td.job-row-name { grid-area: name; }
+    #jobs-table tr.job-row > td.job-row-status { grid-area: status; padding-bottom: 4px; }
+    #jobs-table tr.job-row > td.job-row-last-run { grid-area: last-run; padding-bottom: 4px; }
+    #jobs-table tr.job-row > td.job-row-command { grid-area: command; }
+    #jobs-table tr.job-row > td.job-row-menu-cell { grid-area: menu; align-self: center; }
+    #jobs-table td.job-row-command .job-command { font-size: 0.8rem; }
+    #jobs-table .job-row-menu-toggle { min-height: 44px; }
+    #jobs-table tr.jobs-group-row > th { padding-top: 1.1rem; }
+}

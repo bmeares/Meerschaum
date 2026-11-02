@@ -243,10 +243,17 @@ def _executor_keys() -> Optional[str]:
 
 def jobs_summary(viewer: Any = None) -> Dict[str, Any]:
     """`{'total', 'counts': {state: n}}` over the jobs the Jobs page lists for the viewer."""
-    from meerschaum.jobs import get_jobs
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
-    jobs = access.filter_jobs(viewer, get_jobs(executor_keys=_executor_keys(), include_hidden=False) or {})
+    executor_keys = _executor_keys()
+    if executor_keys in (None, 'local', 'systemd'):
+        ### The Jobs page's own listing: one batched `systemctl show` instead of a few per job.
+        from meerschaum.api.dash.jobs import get_job_snapshots
+        listed = get_job_snapshots()
+    else:
+        from meerschaum.jobs import get_jobs
+        listed = get_jobs(executor_keys=executor_keys, include_hidden=False)
+    jobs = access.filter_jobs(viewer, listed or {})
     counts = {state: 0 for state, _ in JOB_STATES}
     total = 0
     for job in jobs.values():

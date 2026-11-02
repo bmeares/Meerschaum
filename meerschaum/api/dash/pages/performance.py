@@ -19,6 +19,8 @@ def route(pathname=None, href=None):
         dcc.Location(id='performance-location', refresh=False),
         dcc.Store(id='performance-instance', data=requested or instance),
         dcc.Interval(id='performance-interval', interval=30000, n_intervals=0),
+        ### What `performance-body` lays out now (`performance.body_shape()`); None: nothing yet.
+        dcc.Store(id='performance-shape'),
         html.Main([
             html.Div([html.H1('Performance'), dbc.Button(
                 'Refresh', id='performance-refresh', size='sm', color='secondary'),

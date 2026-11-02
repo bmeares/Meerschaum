@@ -28,6 +28,8 @@
 //! - [`rotating`], [`stdin`], [`properties`]: the file formats;
 //! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop; [`scheduler`]: per-root schedule
 //!   and debounce state; [`health`]: the lap heartbeats of a job and the health computed from them;
+//! - [`summary`]: every job of a root with its state in one pass (one batched `systemctl show`
+//!   for the `systemd` jobs), for pages that list them;
 //! - [`startup`]: the per-root startup admission gate (jitter, load and memory checks, file-lock
 //!   slots) every job passes before its worker starts;
 //! - [`ownership`]: who a job belongs to (`owner`, `team`: see
@@ -58,6 +60,7 @@ pub mod scheduler;
 pub mod shlex;
 pub mod startup;
 pub mod stdin;
+pub mod summary;
 pub mod supervisor;
 pub mod systemd;
 pub mod systemd_job;
@@ -74,4 +77,5 @@ pub use runner::{FakeSystemctl, ProcessRunner, SystemRunner};
 pub use schedule::{JitterSpec, Trigger, parse_schedule, parse_schedule_jittered};
 pub use scheduler::{RootScheduler, ScheduleState};
 pub use startup::{StartKind, StartupConfig, StartupPolicy};
+pub use summary::{JobSummary, get_job_summaries};
 pub use supervisor::Launcher;

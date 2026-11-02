@@ -546,6 +546,184 @@ pub fn parse_systemd_timestamp(text: &str) -> Option<String> {
     Some(crate::pytime::aware_isoformat(utc))
 }
 
+/// What `systemctl --user show` reports about a unit: the properties the executor reads for a
+/// job's status, PID and times (the texts as printed).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnitState {
+    /// `ActiveState`, what `systemctl is-active` prints (`active`, `activating`, `inactive`, ...).
+    pub active_state: String,
+    /// `MainPID` (`0` when the unit has no main process).
+    pub main_pid: String,
+    /// `ActiveEnterTimestamp` (empty when never active).
+    pub active_enter: String,
+    /// `InactiveEnterTimestamp` (empty when never inactive).
+    pub inactive_enter: String,
+}
+
+/// The properties [`SystemdExecutor::show_units`] asks `systemctl show` for.
+pub const UNIT_STATE_PROPERTIES: &str =
+    "Id,ActiveState,MainPID,ActiveEnterTimestamp,InactiveEnterTimestamp";
+
+/// At most this many units per `systemctl show` (a short command line).
+const SHOW_BATCH: usize = 200;
+
+/// Read the blocks of a batched `systemctl show --property=Id,...` (one block per unit, blank
+/// lines between them; the keys in any order) by unit name. `requested` names the units in the
+/// order they were asked for: a block without an `Id` is matched by its position.
+pub fn parse_unit_states(
+    text: &str,
+    requested: &[String],
+) -> std::collections::HashMap<String, UnitState> {
+    let mut out = std::collections::HashMap::new();
+    let mut blocks: Vec<Vec<(&str, &str)>> = vec![Vec::new()];
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            if blocks.last().is_some_and(|b| !b.is_empty()) {
+                blocks.push(Vec::new());
+            }
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            blocks.last_mut().expect("a block").push((key, value));
+        }
+    }
+    blocks.retain(|b| !b.is_empty());
+    for (index, block) in blocks.iter().enumerate() {
+        let mut state = UnitState::default();
+        let mut id = None;
+        for (key, value) in block {
+            let value = value.to_string();
+            match *key {
+                "Id" => id = Some(value),
+                "ActiveState" => state.active_state = value,
+                "MainPID" => state.main_pid = value,
+                "ActiveEnterTimestamp" => state.active_enter = value,
+                "InactiveEnterTimestamp" => state.inactive_enter = value,
+                _ => {}
+            }
+        }
+        let name = match id {
+            Some(id) if requested.contains(&id) => id,
+            _ if blocks.len() == requested.len() => requested[index].clone(),
+            _ => continue,
+        };
+        out.insert(name, state);
+    }
+    out
+}
+
+impl SystemdExecutor {
+    /// The state of `services` from one `systemctl --user show` per 200 units (a
+    /// unit that is not loaded reads `inactive`, like `is-active`). Units of a failed call are
+    /// left out: their queries then go to `systemctl` one by one.
+    pub fn show_units(&self, services: &[String]) -> std::collections::HashMap<String, UnitState> {
+        let mut out = std::collections::HashMap::new();
+        for chunk in services.chunks(SHOW_BATCH) {
+            let property = format!("--property={UNIT_STATE_PROPERTIES}");
+            let mut args: Vec<&str> = vec!["show", &property];
+            args.extend(chunk.iter().map(String::as_str));
+            match self.ctx.process.run("systemctl", &Self::argv(&args)) {
+                Ok(output) if output.success() => {
+                    out.extend(parse_unit_states(&output.stdout, chunk));
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
+/// A process runner which answers the state queries of some units (`is-active <unit>`,
+/// `show <unit> --property=<one of UNIT_STATE_PROPERTIES>`) from a snapshot and runs everything
+/// else (and the queries of other units) with the runner it wraps.
+#[derive(Debug)]
+struct SnapshotRunner {
+    inner: std::sync::Arc<dyn crate::runner::ProcessRunner>,
+    units: std::collections::HashMap<String, UnitState>,
+}
+
+impl SnapshotRunner {
+    fn answer(&self, args: &[String]) -> Option<crate::runner::CommandOutput> {
+        let rest: Vec<&str> = args
+            .iter()
+            .map(String::as_str)
+            .filter(|a| *a != "--user")
+            .collect();
+        match rest.as_slice() {
+            ["is-active", unit] => {
+                let state = self.units.get(*unit)?;
+                let text = if state.active_state.is_empty() {
+                    "inactive"
+                } else {
+                    state.active_state.as_str()
+                };
+                Some(crate::runner::CommandOutput {
+                    code: Some(if text == "active" { 0 } else { 3 }),
+                    stdout: format!("{text}\n"),
+                    stderr: String::new(),
+                })
+            }
+            ["show", unit, property] => {
+                let property = property.strip_prefix("--property=")?;
+                let state = self.units.get(*unit)?;
+                let value = match property {
+                    "ActiveState" => &state.active_state,
+                    "MainPID" => &state.main_pid,
+                    "ActiveEnterTimestamp" => &state.active_enter,
+                    "InactiveEnterTimestamp" => &state.inactive_enter,
+                    _ => return None,
+                };
+                Some(crate::runner::CommandOutput::ok(format!(
+                    "{property}={value}\n"
+                )))
+            }
+            _ => None,
+        }
+    }
+}
+
+impl crate::runner::ProcessRunner for SnapshotRunner {
+    fn run(&self, program: &str, args: &[String]) -> std::io::Result<crate::runner::CommandOutput> {
+        if program == "systemctl"
+            && let Some(output) = self.answer(args)
+        {
+            return Ok(output);
+        }
+        self.inner.run(program, args)
+    }
+
+    fn process_state(&self, pid: i32) -> ProcState {
+        self.inner.process_state(pid)
+    }
+}
+
+/// A copy of `ctx` whose `systemctl --user` answers the state queries of this root's units
+/// (`is-active`, `show --property=MainPID`, the enter timestamps) from one batched `systemctl
+/// show`: a listing that reads every job's status, PID, result, health and times then costs one
+/// `systemctl` call instead of a few per job (a few seconds on a host with a few dozen jobs). The
+/// answers are as old as the snapshot, so the context is for one listing, never for operations
+/// that wait for a state to change. A root without `systemd` jobs gets `ctx` back as is.
+pub fn snapshot_context(ctx: &JobsContext) -> JobsContext {
+    let executor = SystemdExecutor::new(ctx.clone());
+    let services: Vec<String> = executor
+        .get_job_names()
+        .iter()
+        .map(|name| executor.get_service_name(name))
+        .collect();
+    if services.is_empty() {
+        return ctx.clone();
+    }
+    let units = executor.show_units(&services);
+    if units.is_empty() {
+        return ctx.clone();
+    }
+    ctx.clone()
+        .with_process_runner(std::sync::Arc::new(SnapshotRunner {
+            inner: ctx.process.clone(),
+            units,
+        }))
+}
+
 /// The systemd service's view for [`monitor_log_stream`] (v4 hands the hidden job a
 /// `_rotating_log`, a `_status_hook` and a `_stdin_file`).
 struct SystemdSource<'a> {
@@ -996,6 +1174,10 @@ impl JobExecutor for SystemdExecutor {
 
     fn get_job_result(&self, name: &str) -> Option<SuccessTuple> {
         Some(self.read_job_result(name))
+    }
+
+    fn get_job_command(&self, name: &str) -> Option<Vec<String>> {
+        Some(SystemdExecutor::get_job_sysargs(self, name))
     }
 
     fn get_job_is_blocking_on_stdin(&self, name: &str) -> bool {

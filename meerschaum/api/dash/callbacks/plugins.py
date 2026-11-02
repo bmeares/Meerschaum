@@ -4,8 +4,9 @@
 
 """
 Callbacks for the plugins page: the Installed and Repository tabs, a published plugin's page,
-and the administrators' Update, Uninstall and Install actions (run as jobs and watched until
-they finish).
+the administrators' Update, Uninstall and Install actions (run as jobs and watched until they
+finish), New plugin, and editing an installed plugin's files. Creating and editing re-check
+`plugin_sources.authoring_refusal` (the web terminal's gate) in every callback.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from meerschaum.api.dash.plugins import (
     plugin_action_sysargs,
     start_plugin_run,
 )
+from meerschaum.api.dash.plugin_sources import may_author
 
 PLUGINS_TABS = ('installed', 'repository')
 HIDDEN = {'display': 'none'}
@@ -77,12 +79,14 @@ def choose_plugins_tab(search: Optional[str], browse_clicks: Optional[int]):
     Output('plugins-repository-div', 'hidden'),
     Output('plugins-tabs-div', 'hidden'),
     Output('plugins-header', 'style'),
+    Output('plugins-header-actions', 'children'),
     Input('plugins-location', 'pathname'),
     Input('plugins-tabs', 'active_tab'),
     Input('search-plugins-input', 'value'),
     Input('plugins-pagination', 'active_page'),
     Input('plugins-refresh', 'data'),
     State('session-store', 'data'),
+    State('plugins-location', 'search'),
 )
 def render_plugins_page(
     pathname: Optional[str] = None,
@@ -91,9 +95,11 @@ def render_plugins_page(
     active_page: Optional[int] = None,
     refresh: Any = None,
     session_data: Optional[Dict[str, Any]] = None,
+    search: Optional[str] = None,
 ):
     """
-    Render the active tab (Installed or Repository) or a single published plugin's page.
+    Render the active tab (Installed or Repository) or a single plugin's page. New plugin (the
+    header's circled plus) is shown to the administrators who may author plugins.
     """
     who = viewer(session_data)
     if not who['active'] or not who['viewer'].can('plugins:read'):
@@ -105,23 +111,30 @@ def render_plugins_page(
                     dbc.Button('Sign in', href='/dash/login', color='primary')]),
                 className='console-empty',
             ),
-            HIDDEN, 1, 1, HIDDEN, [], True, False, True, HIDDEN,
+            HIDDEN, 1, 1, HIDDEN, [], True, False, True, HIDDEN, [],
         )
     admin = who['admin']
     plugin_name = _parse_plugin_name_from_pathname(pathname)
     if plugin_name:
-        return (
-            (build_installed_plugin_detail(plugin_name, session_data)
-             if str(pathname).startswith('/dash/plugins/installed/')
-             else build_plugin_detail(plugin_name, session_data, admin=admin)),
-            HIDDEN, 1, 1, HIDDEN, [], True, False, True, HIDDEN,
-        )
+        if str(pathname).startswith('/dash/plugins/installed/'):
+            query = parse_qs(str(search or '').lstrip('?'))
+            content = build_installed_plugin_detail(
+                plugin_name,
+                session_data,
+                selected=(query.get('file') or [None])[0],
+                edit=(query.get('edit') or [''])[0] == '1',
+                created=(query.get('created') or [''])[0] == '1',
+            )
+        else:
+            content = build_plugin_detail(plugin_name, session_data, admin=admin)
+        return (content, HIDDEN, 1, 1, HIDDEN, [], True, False, True, HIDDEN, [])
 
+    header_actions = _new_plugin_button() if admin and may_author(session_data) else []
     if active_tab != 'repository':
         return (
             no_update, no_update, no_update, no_update, no_update,
             build_installed_plugins_tab(admin=admin),
-            False, True, False, {},
+            False, True, False, {}, header_actions,
         )
 
     triggered_id = getattr(dash.callback_context, 'triggered_id', None)
@@ -151,6 +164,18 @@ def render_plugins_page(
         False,
         False,
         {},
+        header_actions,
+    )
+
+
+def _new_plugin_button():
+    """The header's New plugin: a circled plus."""
+    return html.Button(
+        [html.I(className='fa-solid fa-circle-plus', **{'aria-hidden': 'true'}),
+         html.Span('New plugin', className='visually-hidden')],
+        id='plugins-new-button', type='button', n_clicks=0,
+        className='btn plugin-new-button', title='New plugin',
+        **{'aria-label': 'New plugin'},
     )
 
 
@@ -161,16 +186,77 @@ def render_plugins_page(
     State('session-store', 'data'),
 )
 def show_plugin_source(selected, context, session):
-    """Every file selection repeats authentication, membership, and bounded path checks."""
+    """
+    Every file selection repeats authentication, membership, and bounded path checks. An
+    installed plugin's file has Edit for authors; the context's `edit` naming the file opens it
+    in the editor (its text as read now, and the digest a save is checked against).
+    """
     if not selected or not isinstance(context, dict):
         raise PreventUpdate
-    from meerschaum.api.dash.plugin_sources import read_source, source_preview
+    from meerschaum.api.dash.plugin_sources import read_source_with_digest, source_preview
+    kind = context.get('kind')
     try:
-        return source_preview(selected,read_source(context.get('kind'), context.get('name'), selected, session))
+        source, digest = read_source_with_digest(kind, context.get('name'), selected, session)
+        editable = kind == 'installed' and may_author(session)
+        editing = context.get('edit')
+        in_editor = bool(editable and isinstance(editing, dict) and editing.get('path') == selected)
+        return source_preview(selected, source, digest=digest, editable=editable, editing=in_editor)
     except PermissionError:
         return 'Plugin source is not available to your account.'
     except Exception:
         return 'This file cannot be previewed. Choose another source file.'
+
+
+@dash_app.callback(
+    Output('plugin-source-context', 'data'),
+    Output('plugin-source-alert', 'children'),
+    Input({'type': 'plugin-source-action', 'action': ALL}, 'n_clicks'),
+    State('plugin-source-file', 'value'),
+    State('plugin-source-context', 'data'),
+    State('plugin-source-data', 'data', allow_optional=True),
+    State('plugin-source-editor', 'value', allow_optional=True),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def plugin_source_action(clicks, selected, context, data, text, session):
+    """
+    Edit opens the file in the editor (the context's `edit`, which `show_plugin_source` reads),
+    Cancel closes it, Save writes it (`plugin_sources.save_source`: inside the plugin's own
+    directory, atomically, refused if the file changed on disk since it was opened) and closes
+    it. Permission is checked again for each.
+    """
+    ctx = dash.callback_context
+    trigger = ctx.triggered_id
+    if not isinstance(trigger, dict) or not ctx.triggered or not ctx.triggered[0].get('value'):
+        raise PreventUpdate
+    if not isinstance(context, dict) or context.get('kind') != 'installed' or not selected:
+        raise PreventUpdate
+    from meerschaum.api.dash.plugin_sources import authoring_refusal, save_source
+    action = trigger.get('action')
+    closed = {**context, 'edit': None}
+    refusal = authoring_refusal(session)
+    if refusal:
+        return (closed if context.get('edit') else no_update), _source_alert(False, refusal)
+    if action == 'edit':
+        import uuid
+        return {**context, 'edit': {'path': selected, 'nonce': uuid.uuid4().hex}}, []
+    if action == 'cancel':
+        return closed, []
+    if action != 'save':
+        raise PreventUpdate
+    if not isinstance(data, dict) or data.get('path') != selected or not data.get('editing'):
+        return no_update, _source_alert(False, 'Open the file for editing again before saving.')
+    success, message, _ = save_source(context.get('name'), selected, text, data.get('digest'), session)
+    if not success:
+        return no_update, _source_alert(False, message)
+    return closed, _source_alert(True, message)
+
+
+def _source_alert(success: bool, message: str):
+    return dbc.Alert(
+        message, color=('success' if success else 'danger'), dismissable=True,
+        id='plugin-source-save-alert', class_name='plugin-source-save-alert',
+    )
 
 
 ### The file's text, highlighting and line numbers, drawn as text (`assets/plugin_source.js`).
@@ -188,6 +274,8 @@ dash_app.clientside_callback(
         const target = ctx.triggered_id;
         const keep = dash_clientside.no_update;
         if (!target || typeof target.path !== 'string') return [keep, keep];
+        // The file being edited stays open until it is saved or cancelled.
+        if (document.querySelector('.plugin-source-browser.plugin-source-editing')) return [keep, keep];
         const position = (ids || []).findIndex(item => item.path === target.path);
         if (position < 0 || !(clicks || [])[position]) return [keep, keep];
         return [target.path, ids.map(item => 'plugin-source-file' +
@@ -411,3 +499,147 @@ def edit_plugin_description(
         success, _msg = get_api_connector().register_plugin(plugin, debug=debug, force=True)
         msg = _msg if not success else "Successfully updated description."
     return [alert_from_success_tuple((success, msg))]
+
+
+########################################################################################
+# New plugin (`bootstrap plugins`).
+########################################################################################
+
+def _feature_options(choices):
+    return [
+        {'label': html.Span(label, title=(example or None)), 'value': key}
+        for key, label, example in choices.get('features', [])
+    ]
+
+
+def _language_options(choices):
+    from meerschaum.api.dash.plugin_sources import language_logo
+    return [
+        {'label': html.Span([language_logo(language), html.Span(language, **{'aria-hidden': 'true'})],
+                            className='plugin-new-language'),
+         'value': language}
+        for language in choices.get('languages', [])
+    ]
+
+
+@dash_app.callback(
+    Output('plugins-new-modal', 'is_open'),
+    Output('plugins-new-language', 'options'),
+    Output('plugins-new-language', 'value'),
+    Output('plugins-new-features', 'options'),
+    Output('plugins-new-features', 'value'),
+    Output('plugins-new-directory', 'options'),
+    Output('plugins-new-directory', 'value'),
+    Output('plugins-new-directory-field', 'hidden'),
+    Output('plugins-new-name', 'value'),
+    Output('plugins-new-action', 'value'),
+    Output('plugins-new-dt', 'value'),
+    Output('plugins-new-packaging', 'value'),
+    Output('plugins-new-alert', 'children'),
+    Input('plugins-new-button', 'n_clicks', allow_optional=True),
+    Input('plugins-new-cancel', 'n_clicks'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def open_new_plugin(new_clicks, cancel_clicks, session_data):
+    """New plugin opens a blank form (`bootstrap plugins`'s choices) for authors; Cancel closes it."""
+    ctx = dash.callback_context
+    if not ctx.triggered or not ctx.triggered[0].get('value'):
+        raise PreventUpdate
+    keep = [no_update] * 12
+    if ctx.triggered_id == 'plugins-new-cancel':
+        return [False] + keep
+    from meerschaum.api.dash.plugin_sources import authoring_refusal
+    refusal = authoring_refusal(session_data)
+    if refusal:
+        return [False] + keep[:-1] + [no_update]
+    from meerschaum.api.dash.plugins import new_plugin_choices
+    try:
+        choices = new_plugin_choices()
+    except Exception as e:
+        return [True] + keep[:-1] + [_new_plugin_alert(f"New plugin is unavailable: {e}")]
+    directories = choices.get('directories', [])
+    return (
+        True,
+        _language_options(choices),
+        (choices.get('languages') or ['Python'])[0],
+        _feature_options(choices),
+        list(choices.get('default_features', [])),
+        [{'label': directory, 'value': directory} for directory in directories],
+        (directories[0] if directories else None),
+        len(directories) <= 1,
+        '', '', '', 'file',
+        [],
+    )
+
+
+@dash_app.callback(
+    Output('plugins-new-packaging', 'options'),
+    Output('plugins-new-action-field', 'hidden'),
+    Output('plugins-new-dt-field', 'hidden'),
+    Input('plugins-new-name', 'value'),
+    Input('plugins-new-language', 'value'),
+    Input('plugins-new-features', 'value'),
+    prevent_initial_call=True,
+)
+def new_plugin_form(name, language, features):
+    """
+    The packaging choices worded for the name and language; Action and Datetime column as
+    needed. Nothing here is privileged (Create checks the session).
+    """
+    from meerschaum.api.dash.plugins import new_plugin_choices
+    try:
+        packaging = new_plugin_choices(name)['packaging'].get(language or 'Python')
+    except Exception:
+        packaging = None
+    features = features or []
+    options = (
+        [{'label': packaging[0], 'value': 'file'}, {'label': packaging[1], 'value': 'package'}]
+        if packaging else no_update
+    )
+    return options, 'action' not in features, 'fetch' not in features
+
+
+@dash_app.callback(
+    Output('plugins-new-alert', 'children', allow_duplicate=True),
+    Output('plugins-new-modal', 'is_open', allow_duplicate=True),
+    Output('plugins-navigate', 'data'),
+    Input('plugins-new-create', 'n_clicks'),
+    State('plugins-new-name', 'value'),
+    State('plugins-new-language', 'value'),
+    State('plugins-new-packaging', 'value'),
+    State('plugins-new-features', 'value'),
+    State('plugins-new-action', 'value'),
+    State('plugins-new-dt', 'value'),
+    State('plugins-new-directory', 'value'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def create_plugin(clicks, name, language, packaging, features, action, dt_col, directory, session_data):
+    """Create the plugin (`plugins.create_new_plugin`) and open its source for editing."""
+    if not clicks:
+        raise PreventUpdate
+    from meerschaum.api.dash.plugins import create_new_plugin
+    success, message, url = create_new_plugin(
+        name, language, packaging, features, action, dt_col, directory, session_data,
+    )
+    if not success:
+        return _new_plugin_alert(message), no_update, no_update
+    return [], False, url
+
+
+def _new_plugin_alert(message: str):
+    return dbc.Alert(message, color='danger', id='plugins-new-error', class_name='plugin-new-error')
+
+
+dash_app.clientside_callback(
+    """function(url) {
+        // New plugin lands on the plugin's source, the way links move between pages.
+        if (url && window.mrsmNavigate) window.mrsmNavigate(url);
+        else if (url) window.location.assign(url);
+        return dash_clientside.no_update;
+    }""",
+    Output('plugins-navigate', 'modified_timestamp'),
+    Input('plugins-navigate', 'data'),
+    prevent_initial_call=True,
+)

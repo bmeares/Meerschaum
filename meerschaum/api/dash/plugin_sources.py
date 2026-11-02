@@ -1,13 +1,19 @@
-"""Bounded, read-only plugin source inspection. No plugin is imported or archive extracted."""
+"""
+Bounded plugin source inspection (no plugin is imported or archive extracted) and, for the
+administrators who may use the web terminal, editing an installed plugin's files in place.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import pathlib
 import stat
 import tarfile
+import threading
+import uuid
 
-from meerschaum.utils.typing import Any, List
+from meerschaum.utils.typing import Any, List, Optional, Tuple
 
 MAX_FILE_BYTES = 256 * 1024
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
@@ -40,6 +46,42 @@ def may_read_source(kind: str, session: Any) -> bool:
         return False
     # Installed code is server-private. A repository archive is already downloadable.
     return kind == 'repository' or (kind == 'installed' and who.is_admin)
+
+
+#: Why creating and editing plugins is unavailable to a viewer.
+AUTHORING_OFF = 'Creating and editing plugins is turned off on this server.'
+AUTHORING_ADMINS = 'Only administrators can create and edit plugins.'
+
+
+def authoring_refusal(session: Any) -> Optional[str]:
+    """
+    Why this session may not create or edit plugins (`None` when it may). Writing a plugin is
+    running code on the server, so it is gated exactly as the web terminal is: the server serves
+    the terminal (not `--no-webterm`, `--no-dash`, `--no-auth` or `--public`), and the session's
+    user, read fresh, is an administrator who may use it (`webterm:use`). The server must also
+    accept plugins (`api:permissions:registration:plugins`).
+    """
+    try:
+        from meerschaum.api.dash.webterm import webterm_enabled
+        if not webterm_enabled():
+            return AUTHORING_OFF
+        from meerschaum.config import get_config
+        if get_config('api', 'permissions', 'registration', 'plugins', warn=False) is False:
+            return AUTHORING_OFF
+    except Exception:
+        return AUTHORING_OFF
+    try:
+        who = source_viewer(session)
+    except Exception:
+        return AUTHORING_ADMINS
+    if who.no_auth or not who.signed_in or not who.is_admin or not who.can('webterm:use'):
+        return AUTHORING_ADMINS
+    return None
+
+
+def may_author(session: Any) -> bool:
+    """Whether this session may create and edit plugins (`authoring_refusal`)."""
+    return authoring_refusal(session) is None
 
 
 def _relative(value: Any) -> pathlib.PurePosixPath:
@@ -224,25 +266,211 @@ def source_files(kind: str, name: str, session: Any) -> List[str]:
     return _installed_files(name) if kind == 'installed' else _repository_files(name)[0]
 
 
-def read_source(kind: str, name: str, selected: str, session: Any) -> str:
-    _validate(kind, name, session)
+def _installed_target(name: str, selected: str):
+    """`(root, path of the file relative to root)` of a listed file of an installed plugin."""
     _relative(selected)
-    if kind == 'installed':
-        if selected not in _installed_files(name):
-            raise ValueError('This source file is not available.')
-        root, candidate, info = _installed(name)
-        relative = candidate.name if info['layout'] == 'file' else candidate.name + '/' + selected
-        data = _read_file(root, relative)
-    else:
-        files, data = _repository_files(name, selected)
-        if selected not in files or data is None:
-            raise ValueError('This source file is not available.')
+    if selected not in _installed_files(name):
+        raise ValueError('This source file is not available.')
+    root, candidate, info = _installed(name)
+    relative = candidate.name if info['layout'] == 'file' else candidate.name + '/' + selected
+    return root, relative
+
+
+def _decode(data: bytes) -> str:
     if b'\0' in data:
         raise ValueError('This file is binary and cannot be previewed.')
     try:
         return data.decode('utf-8')
     except UnicodeDecodeError:
         raise ValueError('This file is not UTF-8 text.') from None
+
+
+def source_digest(data: bytes) -> str:
+    """The digest a file is loaded and saved against (SHA-256 of its bytes)."""
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_source_with_digest(kind: str, name: str, selected: str, session: Any) -> Tuple[str, str]:
+    """A source file's text and the digest of its bytes (what a save is checked against)."""
+    _validate(kind, name, session)
+    _relative(selected)
+    if kind == 'installed':
+        data = _read_file(*_installed_target(name, selected))
+    else:
+        files, data = _repository_files(name, selected)
+        if selected not in files or data is None:
+            raise ValueError('This source file is not available.')
+    return _decode(data), source_digest(data)
+
+
+def read_source(kind: str, name: str, selected: str, session: Any) -> str:
+    return read_source_with_digest(kind, name, selected, session)[0]
+
+
+########################################################################################
+# Editing an installed plugin's files.
+########################################################################################
+
+class SourceChanged(ValueError):
+    """The file on disk is not the one the editor loaded."""
+
+
+#: One save at a time per process (the digest check and the rename are not atomic together).
+_save_lock = threading.Lock()
+
+
+def _open_parent(root: pathlib.Path, parts) -> int:
+    """A descriptor of the file's directory, every component opened without following links."""
+    directory = os.open(str(root), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+    except BaseException:
+        os.close(directory)
+        raise
+    return directory
+
+
+def _read_at(directory: int, name: str) -> Tuple[bytes, int]:
+    """The bytes and permission bits of the regular file `name` in `directory` (no links)."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('Only regular source files can be edited.')
+        if info.st_size > MAX_FILE_BYTES:
+            raise ValueError(f'This file exceeds the {MAX_FILE_BYTES // 1024} KiB limit.')
+        with os.fdopen(fd, 'rb', closefd=False) as stream:
+            data = stream.read(MAX_FILE_BYTES + 1)
+        if len(data) > MAX_FILE_BYTES:
+            raise ValueError(f'This file exceeds the {MAX_FILE_BYTES // 1024} KiB limit.')
+        return data, stat.S_IMODE(info.st_mode)
+    finally:
+        os.close(fd)
+
+
+def _replace_at(root: pathlib.Path, relative: str, data: bytes, expected: str) -> None:
+    """
+    Replace `root/relative` with `data` if its bytes still hash to `expected`: a temporary file
+    beside it (hidden, created exclusively, never through a link) is written, flushed and
+    renamed over it, and the directory is flushed. Every directory is opened without following
+    links, so nothing outside `root` can be reached.
+    """
+    parts = _relative(relative).parts
+    if os.open not in os.supports_dir_fd or not hasattr(os, 'O_NOFOLLOW'):
+        return _replace_checked_path(root, parts, data, expected)
+    directory = _open_parent(root, parts)
+    name = parts[-1]
+    temporary = f'.{name}.{uuid.uuid4().hex}.mrsm-edit'
+    try:
+        current, mode = _read_at(directory, name)
+        if source_digest(current) != expected:
+            raise SourceChanged(name)
+        fd = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode or 0o644,
+            dir_fd=directory,
+        )
+        try:
+            with os.fdopen(fd, 'wb', closefd=False) as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            ### Checked again just before the rename: a change while writing is refused too.
+            if source_digest(_read_at(directory, name)[0]) != expected:
+                raise SourceChanged(name)
+            os.replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
+        except BaseException:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except OSError:
+                pass
+            raise
+        try:
+            os.fsync(directory)
+        except OSError:
+            pass
+    finally:
+        os.close(directory)
+
+
+def _replace_checked_path(root: pathlib.Path, parts, data: bytes, expected: str) -> None:
+    """Portable fallback where Python cannot open relative directory descriptors (Windows)."""
+    root = root.resolve(strict=True)
+    candidate = root
+    for part in parts:
+        candidate = candidate / part
+        info = candidate.lstat()
+        if (stat.S_ISLNK(info.st_mode)
+            or getattr(info, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0)):
+            raise ValueError('Linked source paths cannot be edited.')
+    candidate.resolve(strict=True).relative_to(root)
+    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
+        raise ValueError('Only regular source files can be edited.')
+    if source_digest(candidate.read_bytes()) != expected:
+        raise SourceChanged(candidate.name)
+    temporary = candidate.with_name(f'.{candidate.name}.{uuid.uuid4().hex}.mrsm-edit')
+    try:
+        with open(temporary, 'xb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if source_digest(candidate.read_bytes()) != expected:
+            raise SourceChanged(candidate.name)
+        os.replace(temporary, candidate)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def save_source(name: str, selected: str, text: Any, expected: Any, session: Any) -> Tuple[bool, str, Optional[str]]:
+    """
+    Save `text` as an installed plugin's listed file `selected`, if it is unchanged on disk since
+    it was loaded (its digest is `expected`). Returns `(success, message, new digest)`. Only a
+    file the source view lists, inside that plugin's own directory, can be written
+    (`authoring_refusal` is checked again here, with a fresh read of the user).
+    """
+    refusal = authoring_refusal(session)
+    if refusal:
+        return False, refusal, None
+    try:
+        _validate('installed', name, session)
+    except PermissionError:
+        return False, AUTHORING_ADMINS, None
+    except ValueError as e:
+        return False, str(e), None
+    try:
+        if not isinstance(text, str):
+            raise ValueError('Nothing to save.')
+        if not isinstance(expected, str) or len(expected) != 64:
+            raise ValueError('Open the file for editing again before saving.')
+        if '\0' in text:
+            raise ValueError('Source files cannot contain NUL characters.')
+        try:
+            data = text.encode('utf-8')
+        except UnicodeEncodeError:
+            raise ValueError('The text is not valid UTF-8.') from None
+        if len(data) > MAX_FILE_BYTES:
+            raise ValueError(f'Source files are limited to {MAX_FILE_BYTES // 1024} KiB.')
+        with _save_lock:
+            root, relative = _installed_target(name, selected)
+            _replace_at(root, relative, data, expected)
+    except SourceChanged:
+        return False, (
+            f"{selected} changed on disk after it was opened, so it was not saved. "
+            "Cancel to load the current file."
+        ), None
+    except (OSError, ValueError) as e:
+        message = str(e) if isinstance(e, ValueError) else (e.strerror or str(e))
+        return False, f"Failed to save {selected}: {message}", None
+    return True, f"Saved {selected}.", source_digest(data)
 
 
 #: The source viewer's language per suffix (Pygments lexer names).
@@ -262,8 +490,36 @@ TOKEN_STYLES = (
 #: hostile, highly fragmented file is highlighted up to here and plain after.
 MAX_TOKEN_RUNS = 60000
 
-#: Icons of a file in the tree, by suffix (`assets/nav.css`); other files show their suffix.
-LANGUAGE_ICONS = {'.py': ('python', 'Python'), '.rs': ('rust', 'Rust')}
+#: The Font Awesome brand logo of each plugin language.
+LANGUAGE_LOGOS = {'Python': 'fa-brands fa-python', 'Rust': 'fa-brands fa-rust'}
+
+#: Icons of a file in the tree, by suffix: `(language, logo)`; other files show their suffix.
+LANGUAGE_ICONS = {
+    '.py': ('Python', LANGUAGE_LOGOS['Python']),
+    '.rs': ('Rust', LANGUAGE_LOGOS['Rust']),
+}
+
+
+def language_logo(language: str, class_name: str = ''):
+    """
+    A language's logo (Font Awesome) with its name as the accessible text: `role="img"`,
+    `aria-label` and `title` on the logo, and the name as visually hidden text.
+    """
+    from dash import html
+    language = str(language or '')
+    logo = LANGUAGE_LOGOS.get(language)
+    if not logo:
+        return html.Span(language, className=('plugin-language ' + class_name).strip())
+    return html.Span(
+        [
+            html.I(className=logo, **{'aria-hidden': 'true'}),
+            html.Span(language, className='visually-hidden'),
+        ],
+        className=(f'plugin-language plugin-language-{language.lower()} ' + class_name).strip(),
+        title=language,
+        role='img',
+        **{'aria-label': language},
+    )
 
 
 def source_mode(path: str) -> str:
@@ -271,7 +527,19 @@ def source_mode(path: str) -> str:
     return SOURCE_MODES.get(pathlib.PurePosixPath(path).suffix.lower(), 'text')
 
 
-def build_source_browser(kind: str, name: str, session: Any):
+def build_source_browser(
+    kind: str,
+    name: str,
+    session: Any,
+    selected: Optional[str] = None,
+    edit: bool = False,
+    notice: Any = None,
+):
+    """
+    A plugin's source: the file tree and the chosen file (`selected`, else the entry point).
+    Administrators who may author plugins can edit an installed plugin's files (`edit` opens
+    `selected` for editing, as New plugin does); `notice` is shown above the files.
+    """
     from dash import html, dcc
     import dash_bootstrap_components as dbc
     from meerschaum.api.dash.components import build_icon
@@ -283,6 +551,11 @@ def build_source_browser(kind: str, name: str, session: Any):
         return dbc.Alert('Source preview is unavailable for this plugin.', color='secondary')
     if not files:
         return html.P('No source files are available to preview.', className='text-muted')
+    first = selected if selected in files else files[0]
+    editing = (
+        {'path': first, 'nonce': uuid.uuid4().hex}
+        if edit and kind == 'installed' and may_author(session) else None
+    )
     ### Fullscreen keeps the tree and the file (`assets/plugin_source.js`; Escape leaves it).
     fullscreen = html.Button(
         [build_icon('fullscreen', 'plugin-source-icon-enter'),
@@ -293,10 +566,13 @@ def build_source_browser(kind: str, name: str, session: Any):
     )
     return html.Section([
         html.Div([html.H4('Source'), fullscreen], className='plugin-source-header'),
-        dcc.Input(id='plugin-source-file',type='hidden',value=files[0]),
-        dcc.Store(id='plugin-source-context', data={'kind': kind, 'name': name}),
+        html.Div(notice, id='plugin-source-alert', className='plugin-source-alert'),
+        dcc.Input(id='plugin-source-file',type='hidden',value=first),
+        ### `edit` is `{path, nonce}` while a file is edited, else `None` (one writer:
+        ### `callbacks/plugins.py::plugin_source_action`).
+        dcc.Store(id='plugin-source-context', data={'kind': kind, 'name': name, 'edit': editing}),
         html.Div([
-            source_tree(files,files[0]),
+            source_tree(files,first),
             dcc.Loading(html.Div(id='plugin-source-content',className='plugin-source-content',
                                 **{'aria-label':'Plugin source'}),type='dot'),
         ],className='plugin-source-workspace'),
@@ -305,11 +581,10 @@ def build_source_browser(kind: str, name: str, session: Any):
 
 def _file_icon(name: str):
     from dash import html
-    from meerschaum.api.dash.components import build_icon
     suffix = pathlib.PurePosixPath(name).suffix.lower()
     if suffix in LANGUAGE_ICONS:
-        icon, language = LANGUAGE_ICONS[suffix]
-        return html.Span(build_icon(icon), className='plugin-source-file-kind', title=language)
+        language, _ = LANGUAGE_ICONS[suffix]
+        return html.Span(language_logo(language), className='plugin-source-file-kind')
     return html.Span(suffix.lstrip('.').upper() or 'FILE', className='plugin-source-file-kind')
 
 
@@ -387,25 +662,65 @@ def source_tokens(path: str, source: str) -> dict:
     }
 
 
-def source_preview(path, source):
+def _source_action_button(action: str, label: str, icon: str, style: str):
+    """Edit, Save or Cancel in a file's toolbar (`callbacks/plugins.py::plugin_source_action`)."""
+    from dash import html
+    return html.Button(
+        [html.I(className=icon, **{'aria-hidden': 'true'}), html.Span(label)],
+        type='button', n_clicks=0,
+        id={'type': 'plugin-source-action', 'action': action},
+        className=f'btn btn-sm {style} plugin-source-action plugin-source-{action}',
+        title=label,
+    )
+
+
+def source_preview(path, source, digest: Optional[str] = None, editable: bool = False,
+                   editing: bool = False):
     """
     One file: its toolbar and its code, which the browser fills from `plugin-source-data`
-    (`assets/plugin_source.js`), always as text, never as the plugin's HTML.
+    (`assets/plugin_source.js`), always as text, never as the plugin's HTML. An `editable` file
+    has Edit; while `editing`, the code is an editor with the same look, with Save and Cancel.
     """
     from dash import html, dcc
     from meerschaum.api.dash.components import build_icon
-    data = source_tokens(path, source)
+    suffix = pathlib.PurePosixPath(str(path)).suffix.lower()
+    logo = language_logo(LANGUAGE_ICONS[suffix][0], 'plugin-source-toolbar-language') if suffix in LANGUAGE_ICONS else None
     lines = len(source.splitlines())
-    copy = html.Button(
-        [build_icon('copy', 'plugin-source-icon-copy'), build_icon('check', 'plugin-source-icon-copied')],
-        type='button', className='btn btn-sm btn-outline-secondary plugin-source-copy',
-        title='Copy source', **{'aria-label': 'Copy source', 'data-source-action': 'copy'},
-    )
+    if editing:
+        data = {'path': path, 'mode': source_mode(path), 'source': source, 'styles': [], 'runs': [],
+                'digest': digest, 'editing': True}
+        toolbar = [
+            logo, html.Code(path),
+            _source_action_button('save', 'Save', 'fa-solid fa-floppy-disk', 'btn-primary'),
+            _source_action_button('cancel', 'Cancel', 'fa-solid fa-xmark', 'btn-outline-secondary'),
+        ]
+        ### The gutter's numbers follow the text (`assets/plugin_source.js`).
+        code = html.Div([
+            html.Pre('\n'.join(str(n) for n in range(1, max(lines, 1) + 1)),
+                     className='plugin-source-gutter', **{'aria-hidden': 'true'}),
+            html.Label(f'Edit {path}', htmlFor='plugin-source-editor', className='visually-hidden'),
+            dcc.Textarea(
+                id='plugin-source-editor', value=source, spellCheck='false', wrap='off',
+                className='plugin-source-editor',
+            ),
+        ], className='plugin-source-code plugin-source-editor-code')
+    else:
+        data = {**source_tokens(path, source), 'digest': digest, 'editing': False}
+        copy = html.Button(
+            [build_icon('copy', 'plugin-source-icon-copy'), build_icon('check', 'plugin-source-icon-copied')],
+            type='button', className='btn btn-sm btn-outline-secondary plugin-source-copy',
+            title='Copy source', **{'aria-label': 'Copy source', 'data-source-action': 'copy'},
+        )
+        toolbar = [logo, html.Code(path), html.Span(f'{lines:,} lines', className='text-muted')]
+        if editable:
+            toolbar.append(_source_action_button(
+                'edit', 'Edit', 'fa-solid fa-pen-to-square', 'btn-outline-secondary'))
+        toolbar.append(copy)
+        code = html.Div(html.Pre(html.Code(id='plugin-source-code', className='language-'+data['mode'])),
+                        className='plugin-source-code')
     return html.Div([
-        html.Div([html.Code(path),html.Span(f'{lines:,} lines',className='text-muted'),copy],
-                 className='plugin-source-toolbar'),
-        html.Div(html.Pre(html.Code(id='plugin-source-code', className='language-'+data['mode'])),
-                 className='plugin-source-code'),
+        html.Div([item for item in toolbar if item is not None], className='plugin-source-toolbar'),
+        code,
         dcc.Store(id='plugin-source-data', data=data),
         html.Div(id='plugin-source-rendered', hidden=True),
-    ],className='plugin-source-preview')
+    ],className='plugin-source-preview' + (' plugin-source-preview-editing' if editing else ''))

@@ -58,6 +58,7 @@ with patch.object(listing, '_test', return_value=(False,'Driver echoed '+quote_p
 def test_performance_query_drilldown_history_pages_and_denied_refresh_are_fresh(sandbox):
     root, plugins = sandbox
     check(run_python(root, plugins, SIGN_IN + '''
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlencode
@@ -127,11 +128,14 @@ with patch.object(performance,'metrics',side_effect=read):
                     if str(rule).endswith('/_dash-update-component'))
     response = dash_app.server.test_client().post(endpoint,json={
         'output':output,
-        'outputs':[{'id':value.component_id,'property':value.component_property}
+        ### A wildcard output lists the matching components (none on a page still loading).
+        'outputs':[[] if isinstance(value.component_id, dict) else
+                   {'id':value.component_id,'property':value.component_property}
                    for value in registered['output']],
         'inputs':[{**value,'value':values[value['id']+'.'+value['property']]}
                   for value in registered['inputs']],
-        'state':[{'id':'session-store','property':'data','value':session}],
+        'state':[{'id':'session-store','property':'data','value':session},
+                 {'id':'performance-shape','property':'data','value':None}],
         'changedPropIds':['performance-history-page.active_page'],
     })
     assert response.status_code == 200, response.get_data(as_text=True)
@@ -141,16 +145,38 @@ with patch.object(performance,'metrics',side_effect=read):
     assert '51–100 of 103 recent syncs' in str(rendered['performance-body'])
     assert rendered['performance-pipe']['value'] == ref
     assert rendered['performance-pipe']['options'] == [{'label':'Readings','value':ref}]
+    # RC28: the next tick of the same selection updates the mounted parts; the body stays.
+    shape = rendered['performance-shape']['data']
+    mounted = iter([[{'id':{'type':'performance-live','part':part},'property':'children'}
+                     for part in ('stats','coverage','history','notes')],
+                    [{'id':{'type':'performance-graph','chart':'results'},'property':'figure'}], []])
+    response = dash_app.server.test_client().post(endpoint,json={
+        'output':output,
+        'outputs':[next(mounted) if isinstance(value.component_id, dict) else
+                   {'id':value.component_id,'property':value.component_property}
+                   for value in registered['output']],
+        'inputs':[{**value,'value':values[value['id']+'.'+value['property']]}
+                  for value in registered['inputs']],
+        'state':[{'id':'session-store','property':'data','value':session},
+                 {'id':'performance-shape','property':'data','value':shape}],
+        'changedPropIds':['performance-interval.n_intervals'],
+    })
+    assert response.status_code == 200, response.get_data(as_text=True)
+    refreshed = response.get_json()['response']
+    assert 'performance-body' not in refreshed, list(refreshed)
+    history_part = json.dumps({'part':'history','type':'performance-live'},separators=(',',':'))
+    assert '51–100 of 103 recent syncs' in str(refreshed[history_part]['children'])
+    assert 'figure' in refreshed[json.dumps({'chart':'results','type':'performance-graph'},separators=(',',':'))]
     with patch.object(callbacks.dash,'ctx',SimpleNamespace(triggered_id='performance-location')):
         query_result = callbacks.render_performance('/dash/performance',query,'24h',None,None,0,0,3,str(c),50,session)
-    assert query_result[6:] == (str(c),'7d',ref,None) and query_result[4] == 1
+    assert query_result[6:10] == (str(c),'7d',ref,None) and query_result[4] == 1
 assert performance.history_window({'history':history*20},9999,50)[1:] == (20,20,1000)
 assert performance.history_window(data,'not-a-page')[1] == 1
 # Permission revocation clears prior data, page controls, and dropdown metadata.
 with patch.object(performance,'metrics',side_effect=PermissionError('PRIVATE STATE')):
     denied = callbacks.render_performance('/dash/performance',None,'7d',ref,None,0,0,2,str(c),50,session)
     assert denied[1:6] == ([{'label':'Selected Pipe','value':ref}],[],1,1,True)
-    assert denied[6:] == (str(c),'7d',ref,None)
+    assert denied[6:10] == (str(c),'7d',ref,None) and denied[10] is None
     assert 'not available' in str(denied[0])
     old = performance.build_overview_body({'summary':{'syncs':99}},str(c))
     tile, digest = callbacks.render_performance_tile(1,{'instance':str(c)},_digest(old),session)

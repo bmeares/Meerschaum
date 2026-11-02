@@ -917,7 +917,7 @@ case "$command" in
         while [ $# -gt 0 ]; do
             case "$1" in
                 -A) shift ;;
-                -s) shift 2 ;;
+                -s|-n) shift 2 ;;
                 *) break ;;
             esac
         done
@@ -1475,7 +1475,7 @@ async fn tmux_windows_are_bounded_across_reconnects() {
 
 /// Q15: with tmux enabled, the terminal's sessions live on a tmux server of their own (a socket
 /// under the root, never the user's default server), started with Meerschaum's configuration
-/// (no status bar), named as before; the server this process started stops with the API.
+/// (the window list on top), named as before; the server this process started stops with the API.
 #[tokio::test]
 async fn terminals_run_on_their_own_tmux_server_with_meerschaums_config() {
     let probe = std::process::Command::new("tmux")
@@ -1549,11 +1549,30 @@ async fn terminals_run_on_their_own_tmux_server_with_meerschaums_config() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    // Meerschaum's configuration: no status bar, mouse on.
+    // Meerschaum's configuration: the window list on top, mouse on.
     let status = String::from_utf8_lossy(&tmux_cmd(&["show-options", "-gv", "status"]).stdout)
         .trim()
         .to_string();
-    assert_eq!(status, "off");
+    assert_eq!(status, "on");
+    let position =
+        String::from_utf8_lossy(&tmux_cmd(&["show-options", "-gv", "status-position"]).stdout)
+            .trim()
+            .to_string();
+    assert_eq!(position, "top");
+    // The first window is named for its tab.
+    let windows = String::from_utf8_lossy(
+        &tmux_cmd(&[
+            "list-windows",
+            "-t",
+            "=admin_mrsm",
+            "-F",
+            "#{window_index}:#{window_name}",
+        ])
+        .stdout,
+    )
+    .trim()
+    .to_string();
+    assert_eq!(windows, format!("1:{}", webterm::TMUX_WINDOW_NAME));
     let mouse = String::from_utf8_lossy(&tmux_cmd(&["show-options", "-gv", "mouse"]).stdout)
         .trim()
         .to_string();
@@ -1582,6 +1601,105 @@ async fn terminals_run_on_their_own_tmux_server_with_meerschaums_config() {
     assert!(!webterm::stop_owned_server(&socket));
 }
 
+/// RC28: a tmux server that already runs on the terminal's own socket (started by an earlier
+/// release, whose configuration turned the status line off, or left behind by an API that did not
+/// stop cleanly) gets Meerschaum's configuration again when a terminal attaches, so the window
+/// list shows; it is not this process's to stop.
+#[tokio::test]
+async fn a_running_tmux_server_gets_the_window_list_again() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP a_running_tmux_server_gets_the_window_list_again: no tmux");
+        return;
+    }
+    let root = short_tmp();
+    let state = state(root.path());
+    let socket = webterm::tmux_socket_path(&state.config).unwrap();
+    // Kill this test's server by its socket (never the default one) even if an assertion fails.
+    struct KillOnDrop(std::path::PathBuf);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("tmux")
+                .arg("-S")
+                .arg(&self.0)
+                .arg("kill-server")
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
+                .output();
+        }
+    }
+    let _kill = KillOnDrop(socket.clone());
+    let tmux_cmd = |args: &[&str]| {
+        std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&socket)
+            .args(args)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap()
+    };
+    // What an earlier release left running: no status line.
+    let started = tmux_cmd(&[
+        "-f",
+        "/dev/null",
+        "new-session",
+        "-d",
+        "-s",
+        "rc28_pre",
+        "sh",
+        ";",
+        "set",
+        "-g",
+        "status",
+        "off",
+    ]);
+    assert!(started.status.success(), "{started:?}");
+    let option = |name: &str| {
+        String::from_utf8_lossy(&tmux_cmd(&["show-options", "-gv", name]).stdout)
+            .trim()
+            .to_string()
+    };
+    assert_eq!(option("status"), "off");
+
+    let cfg = WebtermConfig::new(
+        &state,
+        sessions(),
+        Arc::new(|id| format!("<html>{id}</html>")),
+        sh(),
+    );
+    assert_eq!(
+        cfg.tmux.as_ref().and_then(|t| t.socket.as_deref()),
+        Some(socket.as_path())
+    );
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let mut tab = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut tab).await;
+    send_json(&mut tab, json!(["stdin", "echo ready:$((6*7))\n"])).await;
+    read_until(&mut tab, |out| has_line(out, "ready:42")).await;
+    assert_eq!(option("status"), "on");
+    assert_eq!(option("status-position"), "top");
+    // Applying it again changes nothing else: the server's own options stay.
+    let overrides = || {
+        String::from_utf8_lossy(&tmux_cmd(&["show-options", "-s", "terminal-overrides"]).stdout)
+            .into_owned()
+    };
+    let before = overrides();
+    drop(tab);
+    let mut again = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut again).await;
+    send_json(&mut again, json!(["stdin", "echo again:$((6*7))\n"])).await;
+    read_until(&mut again, |out| has_line(out, "again:42")).await;
+    assert_eq!(overrides(), before);
+    assert_eq!(option("status"), "on");
+    // The server was running before: it is not this process's.
+    assert!(!webterm::owned_server_sockets().contains(&socket));
+}
+
 /// What a `systemd` job's unit gives the server (the API running as a Meerschaum job), plus its
 /// Compose stamp. The paths never exist: a shell that took them as its job would fail.
 const JOB_ENV: &[(&str, &str)] = &[
@@ -1596,11 +1714,13 @@ const JOB_ENV: &[(&str, &str)] = &[
     ("INVOCATION_ID", "rc25invocation"),
     ("JOURNAL_STREAM", "8:1234"),
     ("MRSM__COMPOSE_PROJECT", "rc25"),
+    // Every job's environment (`meerschaum_jobs::Job::env`): a shell with it has no editor.
+    ("MRSM_NONINTERACTIVE", "true"),
 ];
 
 /// The shell prints each job variable (or `-` when unset) and a kept variable.
-const JOB_ENV_PROBE: &str = "echo ctx:${MRSM_DAEMON_ID--}:${MRSM_SYSTEMD_LOG_PATH--}:${MRSM_SYSTEMD_RESULT_PATH--}:${MRSM_SYSTEMD_STDIN_PATH--}:${MRSM_SYSTEMD_DELETE_JOB--}:${INVOCATION_ID--}:${JOURNAL_STREAM--}:${MRSM__COMPOSE_PROJECT--} keep:$MRSM_RC25_KEEP\n";
-const JOB_ENV_CLEAN: &str = "ctx:-:-:-:-:-:-:-:- keep:kept";
+const JOB_ENV_PROBE: &str = "echo ctx:${MRSM_DAEMON_ID--}:${MRSM_SYSTEMD_LOG_PATH--}:${MRSM_SYSTEMD_RESULT_PATH--}:${MRSM_SYSTEMD_STDIN_PATH--}:${MRSM_SYSTEMD_DELETE_JOB--}:${INVOCATION_ID--}:${JOURNAL_STREAM--}:${MRSM__COMPOSE_PROJECT--}:${MRSM_NONINTERACTIVE--} keep:$MRSM_RC25_KEEP\n";
+const JOB_ENV_CLEAN: &str = "ctx:-:-:-:-:-:-:-:-:- keep:kept";
 
 /// RC25: on a server that runs as a Meerschaum `systemd` job, a terminal's `mrsm` inherited the
 /// job's variables, wrapped itself as that job ("an interactive shell cannot start in a job") and
@@ -1898,6 +2018,8 @@ async fn the_mrsm_shell_stays_interactive_on_a_jobs_server() {
         ("MRSM_SYSTEMD_LOG_PATH", log.display().to_string()),
         ("MRSM_SYSTEMD_RESULT_PATH", result.display().to_string()),
         ("MRSM_SYSTEMD_STDIN_PATH", fifo.display().to_string()),
+        // What every job's environment sets (`meerschaum_jobs::Job::env`).
+        ("MRSM_NONINTERACTIVE", "true".into()),
     ] {
         shell.env.push((key.to_string(), value));
     }
@@ -1910,8 +2032,10 @@ async fn the_mrsm_shell_stays_interactive_on_a_jobs_server() {
     let mut socket = connect(addr, ADMIN_SESSION).await;
     expect_setup(&mut socket).await;
     send_json(&mut socket, json!(["set_size", 24, 100, 480, 1000])).await;
-    // The shell's status line names its instance; a job wrapper prints nothing and disconnects.
-    let out = read_until(&mut socket, |out| plain(out).contains("sql:local")).await;
+    // The shell's line editor draws its bottom toolbar (the instance, then the executor); a job
+    // wrapper prints nothing and disconnects, and the plain line reader `MRSM_NONINTERACTIVE`
+    // selects draws no toolbar.
+    let out = read_until(&mut socket, |out| plain(out).contains("sql:local | ")).await;
     assert!(!out.contains("cannot start in a job"), "{out:?}");
     // Still running two seconds later: no `["disconnect", 1]`, no close.
     let quiet = tokio::time::timeout(Duration::from_secs(2), async {
@@ -1927,6 +2051,26 @@ async fn the_mrsm_shell_stays_interactive_on_a_jobs_server() {
     })
     .await;
     assert!(quiet.is_err(), "the shell ended: {quiet:?}");
+    // RC28: the console's Exec button asks whether the shell waits at an empty prompt; the
+    // editor's shell says so (the plain line reader never did, so Exec was always refused).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        send_json(&mut socket, json!(["shell_state", "rc28"])).await;
+        let answer = loop {
+            let message = next_message(&mut socket).await.expect("an open terminal");
+            if message[0] == "shell_state" && message[1] == "rc28" {
+                break message[2].clone();
+            }
+        };
+        if answer == json!({"idle": true, "empty": true}) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the shell never reported an idle, empty prompt: {answer}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     use std::os::unix::fs::FileTypeExt;
     assert!(
         !log.exists() && !result.exists(),
