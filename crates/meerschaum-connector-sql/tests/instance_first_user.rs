@@ -60,6 +60,62 @@ async fn sqlite_first_user_is_registered_once_across_connectors() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// Password hashing leaves the async worker available to advance other registrations.
+#[tokio::test(flavor = "current_thread")]
+async fn hashing_a_first_users_password_never_stalls_the_runtime() {
+    let (path, a, _b) = sqlite_pair("first_hash").await;
+    let started = Instant::now();
+    meerschaum_core::users::hash_password("calibration", None, None).unwrap();
+    let one_hash = started.elapsed();
+    let (longest, first) = longest_stall(InstanceConnector::register_first_user(
+        &a,
+        &mut admin(&unique("hash")),
+    ))
+    .await;
+    assert!(matches!(first, Ok(true)), "{first:?}");
+    assert!(
+        longest < one_hash / 2,
+        "a {one_hash:?} password hash stalled the runtime for {longest:?}"
+    );
+    drop(a);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Measure ticker gaps from before `work` starts until after it finishes.
+async fn longest_stall<F: std::future::Future>(work: F) -> (Duration, F::Output) {
+    let ticks = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Instant>::new()));
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let ticker = tokio::spawn({
+        let ticks = ticks.clone();
+        async move {
+            let mut ready = Some(ready_tx);
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+            loop {
+                interval.tick().await;
+                ticks.lock().unwrap().push(Instant::now());
+                if let Some(ready) = ready.take() {
+                    let _ = ready.send(());
+                }
+            }
+        }
+    });
+    ready_rx.await.unwrap();
+    let output = work.await;
+    let seen = ticks.lock().unwrap().len();
+    let recorded = || ticks.lock().unwrap().len();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while recorded() <= seen {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the ticker stopped");
+    ticker.abort();
+    let ticks = ticks.lock().unwrap().clone();
+    let longest = ticks.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+    (longest, output)
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_a_failed_first_registration_leaves_the_lock_free() {
     let (path, a, b) = sqlite_pair("first_fail").await;
@@ -332,6 +388,66 @@ async fn first_registrations_at_once(flavor: &'static str) {
     let users = InstanceConnector::get_users(&a).await.unwrap();
     assert_eq!(users.len(), 1, "{users:?}");
     d.drop_database(vec![a, b]).await;
+}
+
+/// A registration never succeeds with a reservation whose commit was refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_a_user_is_registered_only_with_a_stored_id_reservation() {
+    use sqlx::ConnectOptions as _;
+    let (path, a, b) = sqlite_pair("reserve_held").await;
+    let first = InstanceConnector::register_first_user(&a, &mut admin(&unique("held0"))).await;
+    assert!(matches!(first, Ok(true)), "{first:?}");
+    let (users, ids) = (
+        a.instance_table_name("mrsm_users"),
+        a.instance_table_name("mrsm_user_ids"),
+    );
+    // Another connection holds a read transaction (a shared lock in the rollback journal) for
+    // longer than the busy timeout, then lets go.
+    let mut reader = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&path)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("BEGIN").execute(&mut reader).await.unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {users}")))
+        .fetch_one(&mut reader)
+        .await
+        .unwrap();
+    let name = unique("held1");
+    let mut user = User::new(&name, Some("test1234"));
+    user.password_hash =
+        Some(meerschaum_core::users::hash_password("test1234", None, Some(1_000)).unwrap());
+    let (registered, ()) = tokio::join!(a.register_user(&mut user), async {
+        tokio::time::sleep(Duration::from_secs(7)).await;
+        sqlx::query("ROLLBACK").execute(&mut reader).await.unwrap();
+    });
+    let id: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT user_id FROM {users} WHERE username = ?"
+    )))
+    .bind(name.as_str())
+    .fetch_optional(&mut reader)
+    .await
+    .unwrap();
+    match id {
+        Some(id) => {
+            assert!(registered.success, "{registered:?}");
+            let stored: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {ids} WHERE user_id = ?"
+            )))
+            .bind(id)
+            .fetch_one(&mut reader)
+            .await
+            .unwrap();
+            assert_eq!(
+                stored, 1,
+                "user {id} was registered with a rolled-back reservation"
+            );
+        }
+        None => assert!(!registered.success, "{registered:?}"),
+    }
+    drop((reader, a, b));
+    let _ = std::fs::remove_file(&path);
 }
 
 macro_rules! server_races {

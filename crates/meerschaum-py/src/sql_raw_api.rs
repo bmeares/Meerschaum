@@ -1422,6 +1422,16 @@ pub fn sql_returns_rows(sql: &str, flavor: &str) -> PyResult<bool> {
     ))
 }
 
+/// `_core.sql_commits_when_finished(sql, flavor)`: whether a statement's write commits only
+/// when it is read to its end (`driver::raw::commits_when_finished`).
+#[pyfunction]
+pub fn sql_commits_when_finished(sql: &str, flavor: &str) -> PyResult<bool> {
+    let flavor: Flavor = flavor
+        .parse()
+        .map_err(|e| PyValueError::new_err(format!("{e:?}")))?;
+    Ok(meerschaum_connector_sql::driver::raw::commits_when_finished(sql, flavor))
+}
+
 /// Register the raw SQL classes and functions on `meerschaum._core._native`.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SqlFrame>()?;
@@ -1429,6 +1439,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SqlTx>()?;
     m.add("SqlDatabaseError", m.py().get_type::<SqlDatabaseError>())?;
     m.add_function(wrap_pyfunction!(sql_returns_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(sql_commits_when_finished, m)?)?;
     Ok(())
 }
 

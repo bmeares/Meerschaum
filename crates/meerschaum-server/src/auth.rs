@@ -456,7 +456,10 @@ pub async fn token_from_authorization(
         return Err(ApiError::unauthorized("Token has expired.", Some("Bearer")));
     }
     let hash = token.secret_hash.clone().unwrap_or_default();
-    if !meerschaum_core::users::verify_password(secret, &hash).unwrap_or(false) {
+    if !meerschaum_connector::passwords::verify(secret, &hash)
+        .await
+        .unwrap_or(false)
+    {
         return Err(ApiError::unauthorized("Invalid secret.", Some("Bearer")));
     }
     Ok(token)

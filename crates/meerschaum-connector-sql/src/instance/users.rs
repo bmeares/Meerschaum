@@ -2,7 +2,7 @@
 //! `meerschaum_core::users` (passlib's `pbkdf2-sha256` modular-crypt format), so v4 user rows
 //! validate unchanged.
 
-use meerschaum_connector::{ConnectorError, ConnectorResult, InstanceConnector};
+use meerschaum_connector::{ConnectorError, ConnectorResult, InstanceConnector, passwords};
 use meerschaum_core::users::{User, valid_username};
 use meerschaum_core::{Map, SuccessTuple, Value};
 
@@ -97,7 +97,7 @@ impl SqlConnector {
             }
             Err(e) => return SuccessTuple::fail(e.to_string()),
         }
-        let password_hash = match user.get_password_hash() {
+        let password_hash = match passwords::user_password_hash(user).await {
             Ok(h) => h,
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
@@ -181,7 +181,7 @@ impl SqlConnector {
         }
         if !user.password.is_empty() {
             let mut u = user.clone();
-            match u.get_password_hash() {
+            match passwords::user_password_hash(&mut u).await {
                 Ok(h) => sets.push(("password_hash", SqlParam::Text(h))),
                 Err(e) => return SuccessTuple::fail(e.to_string()),
             }
@@ -326,6 +326,8 @@ impl SqlConnector {
         if !valid.success {
             return Err(be(valid.message));
         }
+        // Before any database work, so no ID is reserved for a password that cannot be hashed.
+        let password_hash = passwords::user_password_hash(user).await?;
         if !self.ensure_instance_tables(true).await {
             return Err(be(format!(
                 "Could not create the instance tables of {self}."
@@ -347,7 +349,6 @@ impl SqlConnector {
         } else {
             None
         };
-        let password_hash = user.get_password_hash().map_err(be)?;
         let attributes = user.attributes.clone().unwrap_or_default();
         let users = self.instance_table_name("mrsm_users");
         let insert = match reserved {
@@ -533,7 +534,13 @@ impl SqlConnector {
              RETURNING user_id",
             i64::MAX
         );
-        match self.value_checked(&query).await?.and_then(|v| v.as_i64()) {
+        // Drain RETURNING so a refused commit is an error before an ID is handed out.
+        let reserved = self.read(&query).await.map_err(be)?;
+        match frame_docs(&reserved)
+            .first()
+            .and_then(|doc| doc.get("user_id"))
+            .and_then(user_id_of)
+        {
             Some(id) => Ok(id),
             None => Err(be(format!(
                 "No user ID is left on {self}: the largest has been reserved."

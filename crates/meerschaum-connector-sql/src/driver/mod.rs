@@ -987,7 +987,8 @@ impl SqlDriver {
         self.ready().await?;
         let sql = sql.to_string();
         on_native!(self.pool, p => p.value_with(&sql, &[]).await);
-        on_pool!(self.pool, p, B => backend::value::<B>(&p, &sql, persistent).await)
+        let drain = self.drains_returning(&sql);
+        on_pool!(self.pool, p, B => backend::value::<B>(&p, &sql, persistent, drain).await)
     }
 
     /// Execute one statement with bound parameters, returning the rows affected.
@@ -1059,6 +1060,12 @@ impl SqlDriver {
         on_pool!(self.pool, p, B => backend::read_with::<B>(&p, &sql, &params, persistent).await)
     }
 
+    /// Whether `value` reads a statement to its end: SQLite commits a write with `RETURNING`
+    /// only when it finishes, and a commit refused there is reported by the last step only.
+    fn drains_returning(&self, sql: &str) -> bool {
+        matches!(self.pool, Pool::Sqlite(_)) && raw::has_returning(sql)
+    }
+
     /// The first column of the first row of a query with bound parameters.
     pub async fn value_with(&self, sql: &str, params: &[SqlParam]) -> Result<Option<SqlValue>> {
         self.value_with_as(sql, params, false).await
@@ -1100,7 +1107,10 @@ impl SqlDriver {
         self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.value_with(&sql, &params).await);
-        on_pool!(self.pool, p, B => backend::value_with::<B>(&p, &sql, &params, persistent).await)
+        let drain = self.drains_returning(&sql);
+        on_pool!(self.pool, p, B => {
+            backend::value_with::<B>(&p, &sql, &params, persistent, drain).await
+        })
     }
 
     /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction

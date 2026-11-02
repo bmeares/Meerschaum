@@ -26,6 +26,7 @@
 
 pub mod locks;
 pub mod models;
+pub mod passwords;
 pub mod pipe_ops;
 pub mod policy;
 pub mod replace;

@@ -91,39 +91,27 @@ impl ValkeyConnector {
         Ok(all)
     }
 
-    fn password_hash_of(user: &mut User) -> Option<String> {
+    /// The user's password hash (`None` without a password or a stored hash), computed through
+    /// the shared, bounded blocking pool (`meerschaum_connector::passwords`).
+    async fn password_hash_off_runtime(user: &mut User) -> ConnectorResult<Option<String>> {
         if user.password_hash.is_none() && user.password.is_empty() {
-            return None;
+            return Ok(None);
         }
-        user.get_password_hash().ok()
-    }
-
-    /// [`password_hash_of`](Self::password_hash_of) on a blocking thread: PBKDF2 takes long enough
-    /// to starve the client's I/O when several registrations run at once on the runtime's workers.
-    async fn password_hash_off_runtime(user: &mut User) -> Option<String> {
-        if user.password_hash.is_some() || user.password.is_empty() {
-            return Self::password_hash_of(user);
-        }
-        let mut copy = user.clone();
-        match tokio::task::spawn_blocking(move || {
-            let hash = Self::password_hash_of(&mut copy);
-            (copy.password_hash, hash)
-        })
-        .await
-        {
-            Ok((cached, hash)) => {
-                user.password_hash = cached;
-                hash
-            }
-            Err(_) => Self::password_hash_of(user),
-        }
+        meerschaum_connector::passwords::user_password_hash(user)
+            .await
+            .map(Some)
     }
 
     /// Register a new user: a new 12-character `user_id`, a row in `mrsm_users` and one key per
     /// field.
     pub async fn valkey_register_user(&self, user: &mut User) -> SuccessTuple {
         user.user_id = Some(Value::Str((self.id_factory)()));
-        let password_hash = Self::password_hash_off_runtime(user).await;
+        let password_hash = match Self::password_hash_off_runtime(user).await {
+            Ok(hash) => hash,
+            Err(e) => {
+                return SuccessTuple::fail(format!("Failed to register '{}':\n{e}", user.username));
+            }
+        };
         let keys_vals = match Self::get_user_keys_vals(user, password_hash, false) {
             Ok(kv) => kv,
             Err(e) => {
@@ -214,7 +202,7 @@ impl ValkeyConnector {
             return Err(refused(valid.message));
         }
         user.user_id = Some(Value::Str((self.id_factory)()));
-        let password_hash = Self::password_hash_off_runtime(user).await;
+        let password_hash = Self::password_hash_off_runtime(user).await?;
         let keys_vals = Self::get_user_keys_vals(user, password_hash, false).map_err(refused)?;
         let claim_key = get_user_key(&user.username, "user_id", true).map_err(refused)?;
         let user_id = user_id_str(user);
@@ -378,7 +366,10 @@ impl ValkeyConnector {
     /// `edit_user`).
     pub async fn valkey_edit_user(&self, user: &User) -> SuccessTuple {
         let mut user = user.clone();
-        let password_hash = Self::password_hash_off_runtime(&mut user).await;
+        let password_hash = match Self::password_hash_off_runtime(&mut user).await {
+            Ok(hash) => hash,
+            Err(e) => return SuccessTuple::fail(format!("Failed to edit user:\n{e}")),
+        };
         let keys_vals = match Self::get_user_keys_vals(&user, password_hash, true) {
             Ok(kv) => kv,
             Err(e) => return SuccessTuple::fail(format!("Failed to edit user:\n{e}")),

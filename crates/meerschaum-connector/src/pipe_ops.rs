@@ -1051,7 +1051,7 @@ pub async fn default_register_user<C: InstanceConnector + ?Sized>(
     let pipe = conn.get_users_pipe();
     let user_id = Uuid::new_v4();
     user.user_id = Some(Value::Str(user_id.to_string()));
-    let password_hash = match user.get_password_hash() {
+    let password_hash = match crate::passwords::user_password_hash(user).await {
         Ok(h) => h,
         Err(e) => return SuccessTuple::fail(e.to_string()),
     };
@@ -1111,8 +1111,11 @@ pub async fn default_edit_user<C: InstanceConnector + ?Sized>(
         doc.insert("password_hash".into(), KValue::Str(h.clone()));
     } else if !user.password.is_empty() {
         let mut u = user.clone();
-        if let Ok(h) = u.get_password_hash() {
-            doc.insert("password_hash".into(), KValue::Str(h));
+        match crate::passwords::user_password_hash(&mut u).await {
+            Ok(h) => {
+                doc.insert("password_hash".into(), KValue::Str(h));
+            }
+            Err(e) => return SuccessTuple::fail(e.to_string()),
         }
     }
     if let Some(t) = user.user_type.as_ref().filter(|t| !t.is_empty()) {
@@ -1248,7 +1251,7 @@ pub async fn default_register_token<C: InstanceConnector + ?Sized>(
     let Some(user_id) = user_id else {
         return SuccessTuple::fail("Cannot register a token without a user.");
     };
-    let secret_hash = match Token::hash_secret(&secret) {
+    let secret_hash = match crate::passwords::hash_token_secret(&secret).await {
         Ok(h) => h,
         Err(e) => return SuccessTuple::fail(e.to_string()),
     };

@@ -6,7 +6,8 @@ use axum::body::Body;
 use axum::routing::post;
 use base64::Engine;
 use chrono::{Duration, Utc};
-use meerschaum_core::users::{User, verify_password};
+use meerschaum_connector::passwords;
+use meerschaum_core::users::User;
 use meerschaum_core::{Map, Value};
 use serde_json::{Value as Json, json};
 use uuid::Uuid;
@@ -126,7 +127,7 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
                 .await
                 .map_err(|e| ApiError::exception("get_user_password_hash", e))?;
             match hash {
-                Some(h) => verify_password(&password, &h).unwrap_or(false),
+                Some(h) => passwords::verify(&password, &h).await.unwrap_or(false),
                 None => false,
             }
         };
@@ -162,15 +163,20 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
                 .map_err(|e| ApiError::exception("get_token_model", e))?;
             // Client-credentials login must enforce the same lifecycle as direct API
             // keys; otherwise an invalidated or expired key could mint fresh JWTs.
-            token.is_some_and(|token| {
-                token.is_valid
-                    && token
-                        .expiration
-                        .is_none_or(|expiration| expiration > Utc::now())
-                    && token.secret_hash.is_some_and(|hash| {
-                        verify_password(&py_str(&data.client_secret), &hash).unwrap_or(false)
-                    })
-            })
+            let live_hash = token
+                .filter(|token| {
+                    token.is_valid
+                        && token
+                            .expiration
+                            .is_none_or(|expiration| expiration > Utc::now())
+                })
+                .and_then(|token| token.secret_hash);
+            match live_hash {
+                Some(hash) => passwords::verify(&py_str(&data.client_secret), &hash)
+                    .await
+                    .unwrap_or(false),
+                None => false,
+            }
         };
         if !correct {
             return Err(ApiError::invalid_credentials());

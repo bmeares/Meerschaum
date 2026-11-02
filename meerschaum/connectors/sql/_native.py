@@ -497,6 +497,12 @@ def returns_rows(sql: str, flavor: str) -> bool:
     return _core.sql_returns_rows(sql, flavor)
 
 
+def commits_when_finished(sql: str, flavor: str) -> bool:
+    """Whether a write commits only once read to its end (`driver::raw::commits_when_finished`)."""
+    from meerschaum import _core
+    return _core.sql_commits_when_finished(sql, flavor)
+
+
 # ------------------------------------------------------------------------------------------------
 # Results
 
@@ -1197,10 +1203,16 @@ def value(self, query: Any, *args: Any, use_pandas: bool = False, **kw: Any) -> 
             finally:
                 tx.rollback()
             return frame.first_value()
-        source = rust.sql_query(stmt.sql, stmt.params, 1)
+        finish = commits_when_finished(stmt.sql, self.flavor)
+        source = rust.sql_query(stmt.sql, stmt.params, None if finish else 1)
         try:
             for frame in source:
-                return frame.first_value()
+                first = frame.first_value()
+                if finish:
+                    ### The rest is read only to commit the write (a refusal raises here).
+                    for _ in source:
+                        pass
+                return first
             return None
         finally:
             source.close()

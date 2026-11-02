@@ -403,3 +403,56 @@ async fn unsupported_flavors_error_cleanly() {
         }
     }
 }
+
+/// A refused SQLite commit never returns a scalar ID or hands out the same ID twice.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn value_of_a_write_with_returning_reports_a_refused_commit() {
+    use meerschaum_connector_sql::SqlConnector;
+    use meerschaum_connector_sql::driver::SqlParam;
+    use sqlx::ConnectOptions as _;
+    let db = TempDb::new();
+    let conn = SqlConnector::from_uri("rs_returning", &db.uri())
+        .await
+        .unwrap();
+    assert!(
+        conn.exec("CREATE TABLE ids (id INTEGER PRIMARY KEY)")
+            .await
+            .is_some()
+    );
+    let mut reader = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&db.path)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("BEGIN").execute(&mut reader).await.unwrap();
+    sqlx::query("SELECT COUNT(*) FROM ids")
+        .fetch_one(&mut reader)
+        .await
+        .unwrap();
+    let plain = "INSERT INTO ids (id) SELECT COALESCE(MAX(id), 0) + 1 FROM ids RETURNING id";
+    let bound = "INSERT INTO ids (id) SELECT COALESCE(MAX(id), 0) + ? FROM ids RETURNING id";
+    let (first, second, ()) = tokio::join!(
+        conn.value_checked(plain),
+        conn.value_params(bound, &[SqlParam::Int(1)]),
+        async {
+            tokio::time::sleep(std::time::Duration::from_secs(7)).await;
+            sqlx::query("ROLLBACK").execute(&mut reader).await.unwrap();
+        }
+    );
+    let mut returned = Vec::new();
+    for outcome in [first, second] {
+        match outcome {
+            Ok(Some(SqlValue::Int(id))) => returned.push(id),
+            Err(_) => {}
+            other => panic!("{other:?}"),
+        }
+    }
+    let stored: Vec<i64> = sqlx::query_scalar("SELECT id FROM ids ORDER BY id")
+        .fetch_all(&mut reader)
+        .await
+        .unwrap();
+    returned.sort_unstable();
+    assert_eq!(returned, stored, "every returned value is stored, once");
+    drop((reader, conn));
+}

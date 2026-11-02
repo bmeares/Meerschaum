@@ -70,6 +70,17 @@ pub fn returns_rows(sql: &str, flavor: Flavor) -> bool {
     }
 }
 
+/// Whether a statement names `RETURNING` outside literals, quoted identifiers and comments.
+pub fn has_returning(sql: &str) -> bool {
+    significant_words(sql).iter().any(|w| w == "RETURNING")
+}
+
+/// Whether a statement's write commits only when it is read to its end: SQLite commits a write
+/// with `RETURNING` when the statement finishes and reports a refused commit only there.
+pub fn commits_when_finished(sql: &str, flavor: Flavor) -> bool {
+    flavor.driver_family() == DriverFamily::Sqlite && has_returning(sql)
+}
+
 /// The uppercase words of a statement outside string literals, quoted identifiers and comments
 /// (parentheses and punctuation separate words).
 fn significant_words(sql: &str) -> Vec<String> {
@@ -1052,6 +1063,33 @@ impl SqlTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_with_returning_commit_when_finished_on_sqlite() {
+        for sql in [
+            "INSERT INTO t (a) VALUES (1) RETURNING a",
+            "update t set a = 1 returning *",
+            "DELETE FROM t WHERE a = 1 RETURNING a",
+            "WITH x AS (SELECT 1 AS a) INSERT INTO t (a) SELECT a FROM x RETURNING a",
+            "/* lead */ INSERT INTO t (a) VALUES (1)\nRETURNING a -- trail",
+        ] {
+            assert!(commits_when_finished(sql, Flavor::Sqlite), "{sql}");
+            assert!(commits_when_finished(sql, Flavor::Geopackage), "{sql}");
+            assert!(!commits_when_finished(sql, Flavor::Postgresql), "{sql}");
+        }
+        for sql in [
+            "SELECT 1",
+            "WITH x AS (SELECT 1) SELECT * FROM x",
+            "SELECT 'RETURNING' AS a",
+            "SELECT \"returning\" FROM t",
+            "INSERT INTO t VALUES ('returning')",
+            "INSERT INTO t VALUES (1) -- RETURNING a",
+            "INSERT INTO t VALUES (1) /* RETURNING a */",
+            "PRAGMA table_info(t)",
+        ] {
+            assert!(!commits_when_finished(sql, Flavor::Sqlite), "{sql}");
+        }
+    }
 
     #[test]
     fn statements_that_return_rows() {

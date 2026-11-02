@@ -355,22 +355,41 @@ where
     Ok(B::rows_affected(&result))
 }
 
-/// The first column of the first row.
+/// The first row of a statement run to its end, holding no other row: SQLite commits a write
+/// with `RETURNING` only when its statement finishes, and reports a refused commit only there.
+async fn first_of_drained<R>(
+    mut rows: impl futures_util::Stream<Item = std::result::Result<R, sqlx::Error>> + Unpin,
+) -> std::result::Result<Option<R>, sqlx::Error> {
+    let mut first = None;
+    while let Some(row) = rows.next().await {
+        let row = row?;
+        if first.is_none() {
+            first = Some(row);
+        }
+    }
+    Ok(first)
+}
+
+/// The first column of the first row; with `drain`, the statement runs to its end first.
 pub(crate) async fn value<B: Backend>(
     pool: &Pool<B::DB>,
     sql: &str,
     persistent: bool,
+    drain: bool,
 ) -> Result<Option<SqlValue>>
 where
     for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
     for<'q> <B::DB as Database>::Arguments: IntoArguments<B::DB>,
     B::DB: HasStatementCache,
 {
-    let row = match sqlx::query::<B::DB>(AssertSqlSafe(sql))
-        .persistent(statement_persistent::<B>(persistent, sql, 0))
-        .fetch_optional(pool)
-        .await
-    {
+    let query = sqlx::query::<B::DB>(AssertSqlSafe(sql))
+        .persistent(statement_persistent::<B>(persistent, sql, 0));
+    let fetched = if drain {
+        first_of_drained(query.fetch(pool)).await
+    } else {
+        query.fetch_optional(pool).await
+    };
+    let row = match fetched {
         Err(e) if is_stale_statement(&e) => fetch_all_fresh::<B>(pool, sql, &[])
             .await?
             .into_iter()
@@ -453,22 +472,26 @@ where
     Ok(vec![make_batch::<B>(&rows, &mut state)?])
 }
 
-/// The first column of the first row of a query with bound parameters.
+/// The first column of the first row of a query with bound parameters (see [`value`]).
 pub(crate) async fn value_with<B: Backend>(
     pool: &Pool<B::DB>,
     sql: &str,
     params: &[SqlParam],
     persistent: bool,
+    drain: bool,
 ) -> Result<Option<SqlValue>>
 where
     for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
     for<'q> <B::DB as Database>::Arguments: IntoArguments<B::DB>,
     B::DB: HasStatementCache,
 {
-    let row = match bound_as::<B>(sql, params, persistent)
-        .fetch_optional(pool)
-        .await
-    {
+    let query = bound_as::<B>(sql, params, persistent);
+    let fetched = if drain {
+        first_of_drained(query.fetch(pool)).await
+    } else {
+        query.fetch_optional(pool).await
+    };
+    let row = match fetched {
         Err(e) if is_stale_statement(&e) => fetch_all_fresh::<B>(pool, sql, params)
             .await?
             .into_iter()

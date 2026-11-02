@@ -1575,3 +1575,60 @@ async fn tokens_can_only_be_changed_by_their_owner_or_an_administrator() {
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text());
 }
+
+/// A login checks the password off the async threads: PBKDF2 on the thread serving the request
+/// stalled every other task polled there.
+#[tokio::test(flavor = "current_thread")]
+async fn a_login_never_stalls_the_runtime() {
+    use meerschaum_connector::InstanceConnector;
+    use std::time::Instant;
+    let dir = tempfile::tempdir().unwrap();
+    let (state, instance) = state_with(common::config(dir.path()));
+    let started = Instant::now();
+    let hash = meerschaum_core::users::hash_password("slow-pass", None, None).unwrap();
+    let one_hash = started.elapsed();
+    let mut user = meerschaum_core::users::User::new("slow", Some("slow-pass"));
+    user.password_hash = Some(hash);
+    assert!(instance.register_user(&mut user).await.success);
+    let app = meerschaum_server::app(state);
+    let (longest, _) = longest_stall(login(&app, "slow", "slow-pass", None)).await;
+    assert!(
+        longest < one_hash / 2,
+        "a {one_hash:?} password check stalled the runtime for {longest:?}"
+    );
+}
+
+/// Measure ticker gaps from before `work` starts until after it finishes.
+async fn longest_stall<F: std::future::Future>(work: F) -> (Duration, F::Output) {
+    let ticks = Arc::new(std::sync::Mutex::new(Vec::<std::time::Instant>::new()));
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let ticker = tokio::spawn({
+        let ticks = ticks.clone();
+        async move {
+            let mut ready = Some(ready_tx);
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+            loop {
+                interval.tick().await;
+                ticks.lock().unwrap().push(std::time::Instant::now());
+                if let Some(ready) = ready.take() {
+                    let _ = ready.send(());
+                }
+            }
+        }
+    });
+    ready_rx.await.unwrap();
+    let output = work.await;
+    let seen = ticks.lock().unwrap().len();
+    let recorded = || ticks.lock().unwrap().len();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while recorded() <= seen {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the ticker stopped");
+    ticker.abort();
+    let ticks = ticks.lock().unwrap().clone();
+    let longest = ticks.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+    (longest, output)
+}
