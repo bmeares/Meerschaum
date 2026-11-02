@@ -283,7 +283,7 @@ impl APIConnector {
     ///
     /// A logged-in JWT the server refuses (`401`: a changed password, a re-registered user, a
     /// JWT minted before 5.0 bound JWTs to their user) is dropped for one fresh login, at most
-    /// once every [`super::RELOGIN_INTERVAL`]. Only a safe request (`GET`, `HEAD`, `OPTIONS`) is
+    /// once every 30 seconds. Only a safe request (`GET`, `HEAD`, `OPTIONS`) is
     /// sent again; any other returns its `401` and the next request uses the new login. API keys
     /// are never retried, and the login itself sends no token, so it never recurses.
     pub async fn make_request(
