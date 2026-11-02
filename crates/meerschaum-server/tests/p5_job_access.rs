@@ -28,6 +28,8 @@ use serde_json::{Value as Json, json};
 struct FakeJobs {
     jobs: Mutex<IndexMap<String, (Vec<String>, Map)>>,
     retagged: Mutex<Vec<(String, Option<String>)>>,
+    /// How many full listings (each job's status) were asked for.
+    full_listings: std::sync::atomic::AtomicUsize,
 }
 
 impl FakeJobs {
@@ -60,10 +62,25 @@ impl FakeJobs {
 #[async_trait]
 impl JobsBackend for FakeJobs {
     async fn list(&self) -> IndexMap<String, Json> {
+        self.full_listings
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let names: Vec<String> = self.jobs.lock().unwrap().keys().cloned().collect();
         names
             .into_iter()
             .filter_map(|n| self.meta(&n).map(|m| (n, m)))
+            .collect()
+    }
+    // Commands and properties only, as the real backend reads them from the jobs' files.
+    async fn list_definitions(&self) -> IndexMap<String, Json> {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, (sysargs, properties))| {
+                let properties = serde_json::to_value(properties).unwrap();
+                let meta = json!({"sysargs": sysargs, "daemon": {"properties": properties}});
+                (name.clone(), meta)
+            })
             .collect()
     }
     async fn get(&self, name: &str) -> Option<Json> {
@@ -690,6 +707,10 @@ async fn a_pipeline_s_jobs_of_other_teams_are_only_counted() {
         assert_eq!(r.status, StatusCode::OK, "{name}: {}", r.text());
     }
     let attributes = |r: common::Resp| r.json()["attributes"].clone();
+    let listings = f
+        .jobs
+        .full_listings
+        .load(std::sync::atomic::Ordering::SeqCst);
     let mine = attributes(get(&f, &alice, "/pipelines/daily/attributes").await);
     assert_eq!(
         mine["pipeline_referencing_jobs"],
@@ -703,6 +724,13 @@ async fn a_pipeline_s_jobs_of_other_teams_are_only_counted() {
         json!(["data-daily", "ops-daily"])
     );
     assert_eq!(all["pipeline_hidden_referencing_jobs"], json!(0));
+    // Matching a Pipeline's jobs never asks every job for its status (a `systemctl` query each).
+    assert_eq!(
+        f.jobs
+            .full_listings
+            .load(std::sync::atomic::Ordering::SeqCst),
+        listings
+    );
     // Deleting the Pipeline is refused while jobs run it, naming only the visible ones.
     let r = send(
         &f.app,

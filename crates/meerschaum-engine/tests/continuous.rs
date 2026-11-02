@@ -33,6 +33,48 @@ fn source_params() -> serde_json::Value {
     })
 }
 
+/// An unbounded `--loop` (a job runs for months) keeps only the most recent lap summaries.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unbounded_loop_retains_only_recent_laps() {
+    let env = env("retained").await;
+    env.exec("CREATE TABLE src (ts TEXT, id INTEGER, v REAL)")
+        .await;
+    env.exec("INSERT INTO src VALUES ('2026-01-01 00:00:00', 1, 1.0)")
+        .await;
+    env.register("m", &source_params()).await;
+    let engine = env.engine();
+    let stop = StopToken::new();
+    let total = (meerschaum_engine::RETAINED_LAPS + 5) as u64;
+    let on_lap: Arc<dyn Fn(LapEvent) + Send + Sync> = {
+        let stop = stop.clone();
+        Arc::new(move |event| {
+            if let LapEvent::LapFinished(summary) = event
+                && summary.lap >= total
+            {
+                stop.stop();
+            }
+        })
+    };
+    let result = engine
+        .run_loop(
+            RunOptions::default(),
+            LoopOptions {
+                run_loop: true,
+                min_seconds: 0.0,
+                stop,
+                ..Default::default()
+            },
+            on_lap,
+        )
+        .await;
+    assert_eq!(result.laps.len(), meerschaum_engine::RETAINED_LAPS);
+    assert_eq!(result.laps.last().unwrap().lap, total);
+    assert_eq!(
+        result.laps[0].lap,
+        total - meerschaum_engine::RETAINED_LAPS as u64 + 1
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn loop_laps_match_v4_order_sleep_and_filters() {
     let env = env("laps").await;

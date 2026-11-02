@@ -64,7 +64,7 @@ pub mod systemd_job;
 
 pub use config::{JobPaths, JobsConfig, Seconds};
 pub use daemon::{Daemon, JobsContext, Status};
-pub use executor::{JobExecutor, LocalExecutor, get_jobs};
+pub use executor::{JobDefinition, JobExecutor, LocalExecutor, get_job_definitions, get_jobs};
 pub use health::{HealthState, Heartbeat, JobHealth};
 pub use job::{Job, JobOptions, MonitorControl, MonitorOptions};
 pub use laps::{LapPacer, LapPause, LoopControl, LoopRunner, SleepFrom};

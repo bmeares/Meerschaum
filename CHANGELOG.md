@@ -93,6 +93,8 @@ Self-registration closes after the first administrator unless configured otherwi
 - Publish complete Job properties atomically, and finish metadata writes before deleting completed Jobs.
 - Release a Pipe lease even when acquisition completes after cancellation.
 - Back up, restore, and upgrade Stack PostgreSQL through guided commands.
+- Keep long-running jobs' memory bounded: Python workers are replaced after a call or memory limit and stop when idle, and jobs return freed memory between laps.
+- List a Pipeline's scheduled jobs without querying every job's status.
 
 See [Stack upgrades](https://meerschaum.io/reference/stack/upgrades/) and [sync metrics](https://meerschaum.io/reference/api-instance/sync-metrics/).
 

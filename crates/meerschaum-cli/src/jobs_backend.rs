@@ -139,6 +139,24 @@ impl JobsBackend for LocalJobsBackend {
         .unwrap_or_default()
     }
 
+    async fn list_definitions(&self) -> IndexMap<String, Json> {
+        let ctx = self.ctx.clone();
+        blocking(move || {
+            meerschaum_jobs::get_job_definitions(&ctx, false)
+                .into_iter()
+                .map(|(name, definition)| {
+                    let meta = serde_json::json!({
+                        "sysargs": definition.sysargs,
+                        "daemon": {"properties": to_json(&Value::Map(definition.properties))},
+                    });
+                    (name, meta)
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
     async fn get(&self, name: &str) -> Option<Json> {
         let (ctx, name) = (self.ctx.clone(), name.to_string());
         blocking(move || {

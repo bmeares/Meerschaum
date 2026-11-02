@@ -3898,6 +3898,9 @@ All keys live under `system.engine` in your configuration (`mrsm edit config sys
 | `limits.connectors` | none | Per-connector concurrency, e.g. `{'sql:main': 4}` |
 | `limits.instances` | none | Per-instance concurrency |
 | `python_workers` | worker pool size | How many nodes may use Python (plugin) connectors at once |
+| `python_worker_max_calls` | `10000` | Replace a Python worker after this many calls (`0`: never) |
+| `python_worker_max_memory_mb` | `1024` | Replace a Python worker whose private memory exceeds this after a call (`0`: never; Linux) |
+| `python_worker_idle_seconds` | `600` | Stop a Python worker idle for this long (`0`: never); the next call starts a new one |
 | `implicit_edges` | `true` | Treat `{{ Pipe() }}` references as edges |
 | `auto_rebuild` | `false` | Rebuild changed definitions without confirmation |
 | `inclusive_cap` | `true` | Cap children at the parents' watermark plus one unit (`false`: half-open) |
@@ -7107,7 +7110,7 @@ There are two ways to use a token to authenticate with the API:
 
 A token (and a user, through the `scopes` attribute of their account) holds a list of scope strings, and every API route requires the scopes it names (`pipes:read`, `jobs:execute`, `jobs:stop`, ...). A request missing one is refused with `403` and `Missing required scope: '<scope>'`.
 
-- **`*` grants all scopes, including custom and future scopes.** It is stored literally and checked on every request, so a `*` token keeps working when a plugin defines a new scope or a later release adds one. Use it for trusted automation. `edit tokens` and `edit users` keep a `*` you type as `*` (v4 replaced it with the list of built-in scopes), and so do `register tokens --scopes '*'`, `POST /tokens/register` with `"scopes": ["*"]` and the console's token form. When no scopes are given, a new token gets its owner's scopes, and a new user (`register users`) follows the instance's default role (see [Teams, Access and Locks](../actions/teams-and-access.md)).
+- **`*` grants all scopes, including custom and future scopes.** It is stored literally and checked on every request, so a `*` token keeps working when a plugin defines a new scope or a later release adds one. Use it for trusted automation. `edit tokens` and `edit users` keep a `*` you type as `*` (v4 replaced it with the list of built-in scopes), and so do `register tokens --scopes '*'`, `POST /tokens/register` with `"scopes": ["*"]` and the console's token form. When no scopes are given, a new token gets its owner's scopes (an explicitly empty list, `scopes=[]`, stays empty), and a new user (`register users`) follows the instance's default role (see [Teams, Access and Locks](../actions/teams-and-access.md)).
 - **A token carries at most its owner's scopes.** Registering or editing a token with a scope the owner does not hold, or with `*` when the owner is neither an administrator nor a holder of `*`, is refused with `403` (or a failure in `register tokens` / `edit tokens` and the console) naming each disallowed scope; nothing is trimmed. A token registered without scopes gets its owner's own, and editing a token keeps the scopes it already holds. The console's register form starts from your own scopes, and "Grant all scopes" is on by default only for an administrator or a holder of `*`.
 - **Only the owner or an administrator may change a token.** Editing, invalidating or deleting another user's token answers `403`; only an administrator may make an invalidated token valid again; an edit that omits `scopes` or `is_valid` keeps them. `mrsm edit tokens` and the other token actions work on the instance directly with the operator's own access and are trusted; the rule is enforced by an `api:` instance's server.
 - **Custom scopes are plain strings.** A plugin's `@api_plugin` routes may require any scope, for example `ScopedAuth(['myplugin:read'])`, and a token is granted it by listing it explicitly (`--scopes myplugin:read pipes:read`). Meerschaum does not validate scope names, so a typo grants nothing.
@@ -7251,6 +7254,32 @@ api:
 - An entry the server cannot use (a count below 1, a window that is not a positive number, a key it does not know inside an entry, a name that matches no route group) is reported at startup, naming the entry, and the rest of the config still applies.
 
 The client is the connection's address, or behind a trusted proxy (`api:server:forwarded_allow_ips`, `api:server:proxy_headers`) the first untrusted `X-Forwarded-For` address.
+
+## Request size limits
+
+Request bodies are limited before the server reads them: a declared `Content-Length` over the limit is refused at once, and a chunked body is refused when it streams past it. Either way the client gets `413` and nothing larger than the limit is buffered. Meerschaum 4 had no limits.
+
+```yaml
+api:
+  limits:
+    ### `/login`, `/users/register` and `/tokens/*` (64 KiB).
+    auth_bytes: 65536
+    ### Every other JSON or form body, `/execute` and MCP (16 MiB).
+    body_bytes: 16777216
+    ### Pipe data sync, `POST /pipes/{connector}/{metric}/{location}/data` (1 GiB).
+    data_bytes: 1073741824
+    ### Requests forwarded to the API host: plugin routes and console callbacks (16 MiB).
+    proxy_bytes: 16777216
+  host:
+    ### How long a forwarded request waits for the API host to start answering.
+    response_seconds: 300
+```
+
+- Each value is a whole number of bytes. `null` turns that one limit off. A value that is not a byte count (text, a negative number, zero, one too large) stops `start api` with an error naming the key, so a typo never removes a limit.
+- Forwarded requests are counted as they stream to the API host, never buffered.
+- Responses, downloads, event streams and websockets are never limited. The engine routes (64 MiB) and plugin archive uploads (128 MiB) keep their own limits.
+- A forwarded request whose API host does not start answering within `api:host:response_seconds` gets `504`; once the answer starts, it is never timed (`null` waits forever).
+- The server asks the API host every 30 seconds whether it answers. After three checks in a row without an answer (10 seconds each), the host process is stopped (SIGTERM, then SIGKILL after a grace period) and started again, with a restart delay that doubles up to a minute.
 
 
 ---
@@ -9192,6 +9221,8 @@ Duplicate pipes or connectors. `copy pipes` clones the registration (and optiona
 ```bash
 mrsm copy pipes -c plugin:noaa -m weather -i sql:local
 ```
+
+With a destination instance (`mrsm copy pipes sql:dest -i sql:src -y`), `--sync-data` copies rows too: `all`, `backtrack` (each source pipe's recent rows), `incremental` (each destination pipe's rows after its own sync time, within `--begin`, `--end` and `--params`) or `filter` (exactly `--begin`, `--end` and `--params`). Existing pipes are skipped unless you pass `--force`, which overwrites their attributes; `incremental` copies the new rows into them either way. Rows are read and synced one chunk (`verify:chunk_minutes`) at a time.
 
 ### Syncing & Data
 
@@ -14886,6 +14917,7 @@ Everything below is deliberate, and each item links to the section with the deta
 | CLI daemons | `start|stop|restart|show daemons` managed a warm interpreter | There is nothing to keep warm: `show daemons` reports none and `start daemons` / `start worker` explain that actions run natively. [Deployment](#deployment) |
 | Editors | `$EDITOR`, else installed `pyvim` | `$VISUAL`, else `$EDITOR`, else `vi`. Nothing is installed to open an editor. [Deployment](#deployment) |
 | Scopes | `*` entered in `edit tokens` / `edit users` was expanded to the built-in scope list; stopping a job over the API required the misspelled scope `josb:stop`; any user could register a token with any scopes, `*` included | `*` is stored literally and grants every scope, custom and future ones included; `POST /jobs/{name}/stop` requires `jobs:stop` (a token that holds the legacy `josb:stop` is still accepted); **a token carries at most its owner's scopes** (asking for more is refused with a `403` naming them), and only a token's owner or an administrator may edit, invalidate or delete it (only an administrator may make an invalidated token valid again). [Tokens](/reference/api-instance/tokens/#scopes) |
+| A token registered with an empty scope list (`scopes=[]`) | Received the default scopes | Holds no scopes (omitting `scopes` still gives the defaults). Tokens registered that way before keep the scopes they were stored with: review them with `edit tokens`. [Tokens](/reference/api-instance/tokens/#scopes) |
 | `sql <label>` | Passed the connection URL with the password to `pgcli` / `mycli` | Prefers installed Rainfrog for supported flavors; keeps Python/plain fallbacks and configurable preferences. Credentials travel through the child environment, outside argv. `--nopretty` forces the plain client. |
 | `sql <label> "<query>"` | The query went to the driver in one call: SQLite (`sqlite3`) and MySQL / MariaDB (`pymysql`) refused a string holding several statements (`a; b`) with a driver error and ran none of them | The text is sent as written, so `CREATE TABLE t (a INT); INSERT INTO t (a) VALUES (5)` runs on SQLite, MySQL and MariaDB like it already did on PostgreSQL and MSSQL (Oracle still takes one statement per call). Only SQL you type is affected |
 | `sql <label> "<query>"` that contains `select` but changes data | v4 sends any text containing `select` through `read()`, which fails after the statement ran and, on most flavors, rolled it back silently: `INSERT ... SELECT` kept its rows only on MSSQL, and `CREATE VIEW ... AS SELECT` was kept on MSSQL, MySQL, MariaDB, Oracle and SQLite but not on PostgreSQL or DuckDB | The statement runs and is **committed** on every flavor, and the action still prints `None` after "This result object does not return rows" (DuckDB prints its `Count` table). |
@@ -14903,13 +14935,26 @@ Everything below is deliberate, and each item links to the section with the deta
 | `start pipeline` | The serialized form of an action chain (`start pipeline <flags> -P {...}`) | Starts a saved Pipeline's background job. Chains keep their `+` / `:` syntax, and jobs stored in 4.1's form keep running. [Jobs and the CLI](#jobs-and-the-cli) |
 | Executor of a non-default root | `local` | `systemd` on a systemd host, in every root; a root's `local` jobs move on its next `compose up` or `restart jobs`. [Jobs and the CLI](#jobs-and-the-cli) |
 | `copy pipes` | Succeeded when any one pipe was copied | Fails (exit `1`) when any pipe fails, with a line per pipe. [Jobs and the CLI](#jobs-and-the-cli) |
+| `copy pipes --sync-data` | `incremental` ignored `--begin`, `--end` and `--params` and copied the whole history into a destination without a sync time; `-y` skipped existing pipes; `all` and `backtrack` ignored those flags | `incremental` copies each destination pipe's new rows (from its own sync time minus its backtrack window, within those flags), keeps an existing pipe's attributes without `--force`, and fails a pipe that has rows but no datetime axis; `all` and `backtrack` refuse those flags. [Jobs and the CLI](#jobs-and-the-cli) |
 | `mrsm python script.py ...` | Ran `script.py` as a line of code in the REPL | Runs the file; every word after its name is the script's. [Jobs and the CLI](#jobs-and-the-cli) |
 | Pipes with the connector keys `mrsm` | Listed with your pipes | Hidden from listings and bulk actions unless you name them with `-c mrsm`. [Python users](#python-library-users-and-scripts) |
 | `/dash` | The dashboard (key filters, command builder, web terminal) | The Overview. The dashboard is the Terminal page at `/dash/terminal`, and `/dash?action=...` links open it. [Web pages](#web-pages-and-dash-plugins) |
 | Console callbacks | Answered any request | Need a console session, except the login and registration forms and the callbacks a plugin marks public. [Web pages](#web-pages-and-dash-plugins) |
 | A user's scopes that cannot be read | A failed read granted every scope | The login or request is refused (`503`); Valkey's user reads raise `ConnectionError`. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| Sign-ins (JWTs, console sessions) | Outlived a password change, and a re-registered username inherited them | Bound to the current account and password; sign in again once after upgrading ([note](#signing-in-after-the-upgrade)). [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| A deleted user's API keys | Kept working on plugin routes | Removed with the user; every credential needs a current owner. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| The first account of a new instance | Two registrations at once (or two servers) could both become administrators | One administrator at most, decided atomically on SQL and Valkey instances; on custom instances, create it with `mrsm register users`. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| Plugin routes (`ScopedAuth`, `CurrentScopes`) | Trusted a JWT's scopes, or an API key's stored scopes | The owner's and the token's current permissions, as on the server's own routes. [Permissions](/reference/api-instance/permissions/#permissions-fail-closed) |
+| Request bodies | No limit: any body was read whole | Limited before they are read: 64 KiB for login, registration and tokens, 16 MiB for other JSON and form bodies and for requests forwarded to the API host, 1 GiB for pipe data sync. A larger body gets `413`; `api:limits` changes the limits. A forwarded request the API host does not start answering within 300 seconds gets `504`, and a host that stops answering its health checks is restarted. [Request size limits](/reference/api-instance/permissions/#request-size-limits) |
 | `start api --keyfile/--certfile` | HTTPS through Uvicorn | Native HTTPS with rustls when a key and certificate are supplied; plain HTTP otherwise. [Deployment](#deployment) |
 | Web terminal and tmux | Sessions on your default tmux server | A tmux server of its own under the Meerschaum root, with its own configuration. [Deployment](#deployment) |
+
+</details>
+
+<details markdown="1" id="signing-in-after-the-upgrade">
+<summary>Signing in after the upgrade</summary>
+
+JWTs and console sessions issued by 4.1 or by an earlier 5.0 release candidate are refused, so each person signs in once more. Long-lived API keys (`mrsm-key:...`) keep working while their owner exists. An `api:` connector that logs in with a username and password logs in again by itself: it retries a refused read once, while the first write after the upgrade can return `401` once. Changing a password, or deleting a user, ends their sign-ins within the server's identity cache (a few seconds) and open terminals within their check interval.
 
 </details>
 
@@ -15008,7 +15053,7 @@ Everything under `MRSM_ROOT_DIR/config/` is read unchanged. Things to know:
 - **`meerschaum.executor: local`** in a root's config (or a Compose project's `config:`) keeps that root's jobs `local` now that every root defaults to `systemd` on a systemd host (see [Jobs and the CLI](#jobs-and-the-cli)).
 - **Unknown `MRSM_<TYPE>_<LABEL>` variables are ignored.** v4 turned every such variable into a connector (`MRSM_DUCKDB_LIB` became a `duckdb:lib` connector). v5 reads a variable only when `<TYPE>` is a connector type that exists: `sql`, `api`, `valkey`, `plugin`, `systemd`, or a type one of your plugins registers with `@make_connector`. Everything else is skipped (a debug message names it).
 - **Connections fail fast.** The first connection a command makes to a SQL, API or Valkey server reports a refused connection, an unresolvable host or rejected credentials immediately, and a host that does not answer fails after `connect_timeout` seconds (a connector attribute, or `MRSM_CONNECT_TIMEOUT` for every connector; 5 by default). A job that loses a connection it had established keeps v4's retry behavior. Serverless or auto-resuming databases (Azure SQL serverless, Neon, Aurora Serverless) can take 15 to 60 seconds to wake: raise `connect_timeout` for those connectors, and note that a job started before its database is up now exits at once instead of retrying for 30 s, so give it `restart: always` (compose) or a systemd unit with `Restart=`. See [`MRSM_CONNECT_TIMEOUT`](/reference/environment/#mrsm_connect_timeout).
-- **New:** `system.engine.*` keys for the [Syncing Engine](#the-syncing-engine) (`workers`, `python_workers`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`, `default_duration_seconds`). All have defaults; you do not need to set any of them. The full table is in [Engine State](/reference/pipelines/state/#settings).
+- **New:** `system.engine.*` keys for the [Syncing Engine](#the-syncing-engine) (`workers`, `python_workers`, `python_worker_max_calls`, `python_worker_max_memory_mb`, `python_worker_idle_seconds`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`, `default_duration_seconds`). All have defaults; you do not need to set any of them. The full table is in [Engine State](/reference/pipelines/state/#settings).
 
 Run `mrsm show config` on v5 against a v4.1 root directory to see the resolved config.
 
@@ -15067,6 +15112,9 @@ Core actions behave the same and take the same flags: every option string, `dest
 - **`--nopretty` exits `1` when the command fails.** v4 always exited `0` with `--nopretty` (it only set the exit code when it printed the result), so scripts had to parse the output. A failed command still prints nothing extra in this mode.
 - **`show pipes` names failing pipes.** Its pretty output ends with one line for each selected pipe whose latest sync failed (`Pipe('sql:main', 'rollup', 'home') failed its last 3 syncs (latest 2026-10-27 07:39:35 UTC): ...`) and adds nothing while every latest sync succeeded; parse `--nopretty` output instead of the tree. `show actions` sizes its columns to the names instead of cutting them at 80 columns.
 - **`copy pipes` fails when any pipe fails.** It prints a line per pipe that failed or was skipped (`Copied 1 of 3 pipes to 'sql:dest' (1 failed, 1 skipped).`) and exits `1`; 4.1 exited `0` as soon as one pipe was copied. When every pipe is already on the destination (skipped without `--force`) it succeeds (4.1: "No pipes were copied.", exit `1`). When every pipe is copied, the message is 4.1's.
+- **`copy pipes --sync-data incremental` copies only new rows.** Each destination pipe gets the source's rows from its own sync time minus its backtrack window (within `--params`, from a later `--begin`, until `--end`); older destination rows are never rewritten. Without `--force`, an existing destination keeps its attributes and locks and gets the new rows (4.1 skipped it). A destination proven to have no rows is filled from `--begin`, else completely; one with rows but no datetime axis, or whose rows cannot be counted, fails, so use `all` or `filter` for it. `--sync-data all` and `backtrack` refuse `--begin`, `--end` and `--params` (4.1 ignored them and copied everything); use `filter` for exactly those rows.
+- **`copy pipes --sync-data` never drops rows past an `api:` server's row limit.** It reads one chunk (`verify:chunk_minutes`) at a time, as 4.1 did. From an `api:` instance each read (`backtrack` too) asks for at most `api:data:max_response_row_limit` rows; a full read is read again in halves, and rows that cannot be split (more than the limit at one timestamp) fail the copy, where 4.1 kept the first rows silently.
+- **A pipe whose source is an `api:` pipe syncs every row of its source.** Its fetch reads the source one chunk (the source's `verify:chunk_minutes`) at a time, as 4.1 did, each read asking for at most `api:data:max_response_row_limit` rows; a full read is read again in halves, and rows that cannot be split fail the sync, where 4.1 kept the first rows silently. A refused read (a lost permission, a rate limit) fails the sync instead of reading as an empty source, and a one-frame `fetch()` of such a pipe fails instead of answering a cut frame. Set `max_response_row_limit` on an `api:` connector whose server allows fewer than 100,000 rows per read to skip the first refused read.
 - **Colors follow the destination.** `show`, `sync`, tables and messages use the same styles as v4, from the same `formatting` config, but only on a terminal: output redirected to a file or piped to another program is plain text (4.1 kept the escape sequences; set `FORCE_COLOR=1` where a script needs them), and standard output and standard error decide separately (`--debug 2> debug.log` writes a plain log while the terminal stays colored). `NO_COLOR` (any non-empty value) turns every style off, bold and dim included, while the full-screen views keep working; `formatting:ansi: false` also turns the full-screen views off. Jobs keep their colors, so their logs stay colored in the console, and `show logs` prints them plain when its own output is not a terminal. The same rules apply to Python output through `meerschaum.utils.formatting` (a Jupyter notebook counts as a terminal). See [Colors and plain output](/reference/actions/#colors-and-plain-output).
 
 **`--loop --min-seconds N` behaves exactly as laps did** for a flat selection: every selected pipe syncs, then the process sleeps `N` seconds after the lap ends, exactly as v4 does. Jobs like these need no change:
@@ -15554,7 +15602,7 @@ See the concise [v5 changelog](../changelog/v5.md) for Pipelines, metrics, teams
 - **`NO_COLOR` and `FORCE_COLOR`**, and `mrsm help` ([Getting help](/reference/actions/#getting-help)).
 - **`mrsm.SyncResult`:** the tuple subclass `pipe.sync()` returns, with `inserted`, `updated`, `upserted`, `deleted`, `changed_intervals`, `duration`, `begin` and `end`.
 - **Rust plugins**, prebuilt or as source crates, replacing a Python plugin of the same name ([Rust plugins](#rust-plugins)), and the **page contract** for console pages (`meerschaum.plugins.figure()`, `data-mrsm-figure`, `data-mrsm-map`).
-- **Engine settings** under `system.engine.*` (`workers`, `python_workers`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `persist_runs`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`, `default_duration_seconds`; [Engine State](/reference/pipelines/state/#settings)) and `api.permissions.rate_limits` and `api.permissions.log_streams` (`max`, `per_user`).
+- **Engine settings** under `system.engine.*` (`workers`, `python_workers`, `python_worker_max_calls`, `python_worker_max_memory_mb`, `python_worker_idle_seconds`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `persist_runs`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`, `default_duration_seconds`; [Engine State](/reference/pipelines/state/#settings)) and `api.permissions.rate_limits` and `api.permissions.log_streams` (`max`, `per_user`).
 - **Packaging:** one dependency-free `meerschaum` wheel with extras (its `mrsm` console script runs the native CLI), `cargo install meerschaum` for a standalone binary, and the `bmeares/meerschaum:slim` image.
 - **Venv accounting:** `mrsm show venvs`, `mrsm prune venvs`, and attribution of every package installed by `attempt_import`.
 - **Leases:** two jobs never sync the same pipe at once (`mrsm_pipe_leases`), with optional `acquire_pipe_lease` / `release_pipe_lease` on custom instance connectors.
@@ -16281,6 +16329,8 @@ Self-registration closes after the first administrator unless configured otherwi
 - Publish complete Job properties atomically, and finish metadata writes before deleting completed Jobs.
 - Release a Pipe lease even when acquisition completes after cancellation.
 - Back up, restore, and upgrade Stack PostgreSQL through guided commands.
+- Keep long-running jobs' memory bounded: Python workers are replaced after a call or memory limit and stop when idle, and jobs return freed memory between laps.
+- List a Pipeline's scheduled jobs without querying every job's status.
 
 See [Stack upgrades](../reference/stack/upgrades.md) and [sync metrics](../reference/api-instance/sync-metrics.md).
 

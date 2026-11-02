@@ -47,6 +47,17 @@ engine, jobs, server and CLI depend on this crate, never the reverse).
 - **Recycling.** `WorkerPool::recycle()` replaces every worker (idle ones now, busy ones when
   their call returns) so changed plugin sources are re-imported; `ensure_manifest` calls it after
   a rebuild.
+- **Lifetime limits.** Jobs loop for months, and a long-lived interpreter keeps the high-water
+  mark of its largest call (and whatever plugin code accumulates). A worker is replaced after
+  `system.engine.python_worker_max_calls` calls (default 10,000) or when its private resident
+  memory (`RssAnon`, Linux) exceeds `python_worker_max_memory_mb` (default 1,024) after a call;
+  an idle worker stops after `python_worker_idle_seconds` (default 600). `0` turns a limit off.
+  Replacement never fails a call: the worker is shut down in the background and the next call
+  starts a fresh one (`PoolStats::retired`). Plugin module state therefore lasts at most one
+  worker's lifetime, as it always did across the pool's several workers.
+- **Memory release.** A worker idle for one second after a call collects garbage, releases
+  pyarrow's unused pool memory and calls glibc's `malloc_trim(0)`
+  (`meerschaum/worker/_server.py::release_memory`; `MRSM_WORKER_RELEASE_MEMORY=0` skips it).
 - Interpreter: `MRSM_PYTHON`, else `python3` (`python` on Windows). `PoolConfig::from_config`
   passes `MRSM_ROOT_DIR` and `MRSM_PLUGINS_DIR` from the config registry.
 

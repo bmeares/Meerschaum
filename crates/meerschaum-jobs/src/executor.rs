@@ -610,6 +610,56 @@ pub fn get_jobs_for(
     Ok(JobListing { jobs, warnings })
 }
 
+/// One job's command and daemon properties, as [`get_job_definitions`] reads them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct JobDefinition {
+    /// The job's `sysargs`.
+    pub sysargs: Vec<String>,
+    /// The daemon's properties (owner, team, schedule, ...).
+    pub properties: Map,
+}
+
+/// The jobs [`get_jobs_for`] lists for the `local` executor (combined with `systemd` on a
+/// `systemd` context), with only their commands and properties: it reads the jobs' files and
+/// asks no process table, `systemctl` or remote executor for a status, pid or result, so it costs
+/// a few file reads per job. For callers that only match commands, such as the scheduled jobs
+/// that run a saved Pipeline (`GET /pipelines/{name}/attributes`, which was seconds per call on
+/// a host with a few dozen `systemd` jobs).
+pub fn get_job_definitions(
+    ctx: &JobsContext,
+    include_hidden: bool,
+) -> IndexMap<String, JobDefinition> {
+    let mut out = IndexMap::new();
+    for name in get_daemon_ids(&ctx.paths) {
+        let Ok(mut job) = Job::open(&name, ctx) else {
+            continue;
+        };
+        if job.is_externally_managed() || (!include_hidden && job.hidden()) {
+            continue;
+        }
+        let daemon = job.daemon();
+        let definition = JobDefinition {
+            sysargs: daemon.sysargs().to_vec(),
+            properties: daemon.properties(),
+        };
+        out.insert(name, definition);
+    }
+    if crate::job::get_executor_keys_from_context(ctx) == "systemd" {
+        let systemd = crate::systemd::SystemdExecutor::new(ctx.clone());
+        for name in systemd.get_job_names() {
+            if !include_hidden && (name.starts_with('_') || name.starts_with('.')) {
+                continue;
+            }
+            let definition = JobDefinition {
+                sysargs: systemd.get_job_sysargs(&name),
+                properties: systemd.get_job_properties(&name),
+            };
+            out.insert(name, definition);
+        }
+    }
+    out
+}
+
 /// The result of [`get_filtered_jobs_for`].
 #[derive(Debug)]
 pub struct FilteredJobs {

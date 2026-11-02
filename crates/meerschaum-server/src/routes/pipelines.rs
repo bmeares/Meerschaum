@@ -1421,7 +1421,8 @@ async fn referencing_jobs(
 ) -> (Vec<String>, usize) {
     let mut found = Vec::new();
     let mut hidden = 0;
-    for (job_name, meta) in ctx.state.jobs.list().await {
+    // Only the commands and owners: a job's status would cost a `systemctl` query per job.
+    for (job_name, meta) in ctx.state.jobs.list_definitions().await {
         let Some(args) = meta.get("sysargs").and_then(Json::as_array) else {
             continue;
         };

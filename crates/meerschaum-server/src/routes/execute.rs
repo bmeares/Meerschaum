@@ -220,8 +220,10 @@ pub async fn prune_finished(state: &AppState) {
         tracing::warn!(%error, "Unable to create execution archive");
         return;
     }
-    for (name, meta) in state.jobs.list().await {
-        if !is_temporary(&name, &meta) || meta["status"] != "stopped" || !valid_name(&name) {
+    // Every minute: list commands and properties only (a status per job can cost a `systemctl`
+    // query each), then read the full metadata of the temporary executions alone.
+    for (name, meta) in state.jobs.list_definitions().await {
+        if !is_temporary(&name, &meta) || !valid_name(&name) {
             continue;
         }
         // The listing may precede a restart or promotion. Re-read under maintenance lock.

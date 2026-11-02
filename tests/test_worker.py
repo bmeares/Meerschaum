@@ -505,3 +505,26 @@ def test_quiet_connector_builds_keep_a_plugins_own_stderr():
                 proc.wait()
             proc.stderr.close()
         assert 'w17cf2 plugin import note' in stderr, stderr
+
+
+def test_release_memory_trims_the_heap(monkeypatch):
+    """An idle worker hands freed memory back: `release_memory()` calls `malloc_trim(0)`."""
+    from meerschaum.worker import _server
+    calls = []
+    monkeypatch.setattr(_server, '_malloc_trim', lambda: (lambda pad: calls.append(pad) or 1))
+    _server.release_memory()
+    assert calls == [0]
+    monkeypatch.setenv('MRSM_WORKER_RELEASE_MEMORY', '0')
+    _server.release_memory()
+    assert calls == [0]
+
+
+def test_malloc_trim_is_glibc_only():
+    import platform
+    from meerschaum.worker import _server
+    trim = _server._malloc_trim()
+    if sys.platform.startswith('linux') and platform.libc_ver()[0] == 'glibc':
+        assert trim is not None
+        assert trim(0) in (0, 1)
+    else:
+        assert trim is None

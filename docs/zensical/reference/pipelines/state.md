@@ -167,6 +167,9 @@ All keys live under `system.engine` in your configuration (`mrsm edit config sys
 | `limits.connectors` | none | Per-connector concurrency, e.g. `{'sql:main': 4}` |
 | `limits.instances` | none | Per-instance concurrency |
 | `python_workers` | worker pool size | How many nodes may use Python (plugin) connectors at once |
+| `python_worker_max_calls` | `10000` | Replace a Python worker after this many calls (`0`: never) |
+| `python_worker_max_memory_mb` | `1024` | Replace a Python worker whose private memory exceeds this after a call (`0`: never; Linux) |
+| `python_worker_idle_seconds` | `600` | Stop a Python worker idle for this long (`0`: never); the next call starts a new one |
 | `implicit_edges` | `true` | Treat `{{ Pipe() }}` references as edges |
 | `auto_rebuild` | `false` | Rebuild changed definitions without confirmation |
 | `inclusive_cap` | `true` | Cap children at the parents' watermark plus one unit (`false`: half-open) |

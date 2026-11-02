@@ -678,3 +678,50 @@ fn a_python_daemon_matches_only_the_root_it_was_started_with() {
     assert_eq!(found_a, vec![in_a.id() as i32]);
     assert_eq!(found_b, vec![in_b.id() as i32]);
 }
+
+/// `get_job_definitions` reads commands and properties only: not even a job that looks like it
+/// is running (began, never ended, no PID file) makes it look for a process.
+#[test]
+fn job_definitions_read_files_only() {
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    meerschaum_jobs::detached::reset();
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = common::sh_context(dir.path());
+    let sync = ["sync", "pipelines", "weather", "--loop"];
+    write_job(dir.path(), "weather", &sync, Some(ago(30)), None, None);
+    write_job(
+        dir.path(),
+        "done",
+        &["show", "version"],
+        Some(ago(90)),
+        Some(ago(60)),
+        None,
+    );
+    write_job(
+        dir.path(),
+        "_hidden",
+        &["show", "version"],
+        Some(ago(90)),
+        None,
+        None,
+    );
+    let before = cmdline_scans();
+    let definitions = meerschaum_jobs::get_job_definitions(&ctx, false);
+    assert_eq!(
+        cmdline_scans() - before,
+        0,
+        "listing definitions scanned processes"
+    );
+    let mut names: Vec<&str> = definitions.keys().map(String::as_str).collect();
+    names.sort();
+    assert_eq!(names, ["done", "weather"]);
+    assert_eq!(definitions["weather"].sysargs, sync);
+    assert_eq!(
+        definitions["weather"]
+            .properties
+            .get("label")
+            .map(meerschaum_core::value::Value::py_str),
+        Some(sync.join(" "))
+    );
+    assert!(meerschaum_jobs::get_job_definitions(&ctx, true).contains_key("_hidden"));
+}

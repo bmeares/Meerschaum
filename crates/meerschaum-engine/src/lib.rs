@@ -47,6 +47,7 @@ pub mod graph;
 pub mod instance_state;
 pub mod leases;
 pub mod ledger;
+pub mod memory;
 pub mod native;
 pub mod node;
 pub mod plan;
@@ -67,7 +68,7 @@ pub use cadence::{Cadence, PipeSchedules, Timer};
 pub use engine::{
     Engine, EngineConfig, EventGranularity, LapEvent, LapSummary, LoopOptions, LoopResult,
     NodeOutcome, PendingRebuild, PlannedRun, ProcessEventSink, ProcessEventSinkRegistration,
-    RunOptions, RunResult, add_process_event_sink, process_event_sinks,
+    RETAINED_LAPS, RunOptions, RunResult, add_process_event_sink, process_event_sinks,
 };
 pub use events::{ChunkSource, Event, EventKind, EventSink};
 pub use executor::{

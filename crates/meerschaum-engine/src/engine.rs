@@ -550,10 +550,15 @@ pub struct LoopOptions {
     pub run_name: Option<String>,
 }
 
+/// How many lap summaries an unbounded `--loop` keeps for its [`LoopResult`]: the most recent
+/// ones. A loop with [`LoopOptions::max_laps`], or a single run, keeps every lap.
+pub const RETAINED_LAPS: usize = 64;
+
 /// The result of [`Engine::run_loop`].
 #[derive(Debug, Clone)]
 pub struct LoopResult {
-    /// Every lap's summary.
+    /// The laps' summaries, oldest first: every lap of a bounded loop, the last
+    /// [`RETAINED_LAPS`] of an unbounded one (a job loops for months).
     pub laps: Vec<LapSummary>,
     /// v4's final `(success, message)` (the last lap's), given `interval_str` output.
     pub last: Option<RunResult>,
@@ -1461,7 +1466,8 @@ impl Engine {
         let min_seconds = loop_opts.min_seconds;
         let base_cooldown = 2.0 * (min_seconds + 1.0);
         let mut cooldown = base_cooldown;
-        let mut laps = Vec::new();
+        let mut laps: std::collections::VecDeque<LapSummary> = std::collections::VecDeque::new();
+        let retain_all = !loop_opts.run_loop || loop_opts.max_laps.is_some();
         let mut last: Option<RunResult> = None;
         let mut opts = opts;
         let mut streams: Option<tokio::task::JoinSet<()>> = None;
@@ -1613,11 +1619,17 @@ impl Engine {
             cooldown = base_cooldown;
             let summary = result.lap_summary(lap);
             on_lap(LapEvent::LapFinished(summary.clone()));
-            laps.push(summary);
+            if !retain_all && laps.len() >= RETAINED_LAPS {
+                laps.pop_front();
+            }
+            laps.push_back(summary);
             last = Some(result);
             if !loop_opts.run_loop || loop_opts.max_laps.is_some_and(|m| lap >= m) {
                 break;
             }
+            // The lap's frames are gone: return their pages before sleeping (glibc keeps each
+            // thread arena's high-water mark otherwise, for as long as the job runs).
+            crate::memory::release_free_memory();
             if min_seconds > 0.0 {
                 // A schedule due sooner than `--min-seconds` shortens the sleep.
                 let sleep_seconds = schedules
@@ -1652,7 +1664,10 @@ impl Engine {
             stop.stop();
             while set.join_next().await.is_some() {}
         }
-        LoopResult { laps, last }
+        LoopResult {
+            laps: laps.into(),
+            last,
+        }
     }
 
     /// Start supervised subscriptions for the selected stream sources. Returns the tasks and

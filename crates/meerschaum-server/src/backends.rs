@@ -101,6 +101,13 @@ pub trait JobsBackend: Send + Sync {
     /// Every job's metadata (`GET /jobs`): `{name: {sysargs, result, restart, status, daemon}}`.
     async fn list(&self) -> IndexMap<String, Json>;
 
+    /// The same jobs as [`JobsBackend::list`] with only `{sysargs, daemon: {properties}}`: what
+    /// matching commands and checking visibility need, without each job's status, pid, result or
+    /// health (which can cost a process or `systemctl` query per job). Defaults to `list()`.
+    async fn list_definitions(&self) -> IndexMap<String, Json> {
+        self.list().await
+    }
+
     /// One job's metadata, or `None` when the job does not exist.
     async fn get(&self, name: &str) -> Option<Json>;
 

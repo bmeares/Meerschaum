@@ -122,6 +122,54 @@ class Connection:
 
 _DEFINED_CONNECTORS: Dict[str, Any] = {}
 
+### A worker that has been idle this long after a call hands freed memory back to the OS.
+IDLE_RELEASE_SECONDS: float = 1.0
+_MALLOC_TRIM: List[Optional[Callable[[int], int]]] = []
+
+
+def _malloc_trim() -> Optional[Callable[[int], int]]:
+    """glibc's `malloc_trim()`, or `None` elsewhere (musl, macOS and Windows return memory)."""
+    if _MALLOC_TRIM:
+        return _MALLOC_TRIM[0]
+    trim = None
+    if sys.platform.startswith('linux'):
+        try:
+            import ctypes
+            import platform
+            if platform.libc_ver()[0] == 'glibc':
+                trim = ctypes.CDLL(None).malloc_trim
+                trim.argtypes = [ctypes.c_size_t]
+                trim.restype = ctypes.c_int
+        except (OSError, AttributeError, ValueError):
+            trim = None
+    _MALLOC_TRIM.append(trim)
+    return trim
+
+
+def release_memory() -> None:
+    """
+    Return the memory the last calls freed: collect garbage cycles (frames often sit in them),
+    release pyarrow's unused pool memory, and trim glibc's heaps. A long-lived worker otherwise
+    keeps the high-water mark of its largest call in every allocator arena it touched.
+    Set `MRSM_WORKER_RELEASE_MEMORY=0` to skip it.
+    """
+    if os.environ.get('MRSM_WORKER_RELEASE_MEMORY', '1') == '0':
+        return
+    import gc
+    gc.collect()
+    pa = sys.modules.get('pyarrow', None)
+    if pa is not None:
+        try:
+            pa.default_memory_pool().release_unused()
+        except Exception:
+            pass
+    trim = _malloc_trim()
+    if trim is not None:
+        try:
+            trim(0)
+        except Exception:
+            pass
+
 
 def _define_connectors(defined: Optional[Dict[str, Dict[str, Any]]]) -> None:
     """
@@ -190,10 +238,18 @@ def serve(address: str) -> int:
     reader = threading.Thread(target=conn.reader, name='mrsm-worker-reader', daemon=True)
     reader.start()
 
+    worked = False
     while True:
-        item = conn.calls.get()
+        try:
+            item = conn.calls.get(timeout=(IDLE_RELEASE_SECONDS if worked else None))
+        except queue.Empty:
+            ### Idle after some work: give the memory back before waiting for the next call.
+            worked = False
+            release_memory()
+            continue
         if item is None:
             break
+        worked = True
         message, frames = item
         call_id = int(message.get('id', 0))
         op = message.get('op', None)

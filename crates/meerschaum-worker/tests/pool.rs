@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use meerschaum_worker::plugins::{ActionRequest, ping, run_action};
 use meerschaum_worker::protocol::Msg;
-use meerschaum_worker::{CallOptions, PROTOCOL_VERSION, Worker, WorkerError};
+use meerschaum_worker::{
+    CallOptions, PROTOCOL_VERSION, PoolConfig, Worker, WorkerError, WorkerPool,
+};
 
 use common::TestEnv;
 
@@ -156,6 +158,73 @@ async fn pool_runs_calls_concurrently() {
         ping(&pool).await.unwrap_err(),
         WorkerError::ShuttingDown
     ));
+}
+
+/// A worker is replaced after `max_calls` calls, and one whose private memory exceeds
+/// `max_rss_bytes` after a call, without failing a call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn workers_are_replaced_after_their_call_or_memory_limit() {
+    require_python!();
+    let env = TestEnv::new();
+    let pool = WorkerPool::new(PoolConfig {
+        size: 1,
+        worker: env.worker_options(),
+        max_calls: Some(2),
+        ..PoolConfig::default()
+    });
+    let first = ping(&pool).await.unwrap();
+    assert_eq!(ping(&pool).await.unwrap(), first);
+    let second = ping(&pool).await.unwrap();
+    assert_ne!(second, first, "the third call needs a fresh worker");
+    assert_eq!(pool.stats().retired, 1);
+    assert_eq!(pool.stats().discarded, 0);
+    pool.shutdown().await;
+
+    if cfg!(target_os = "linux") {
+        let pool = WorkerPool::new(PoolConfig {
+            size: 1,
+            worker: env.worker_options(),
+            max_rss_bytes: Some(1),
+            ..PoolConfig::default()
+        });
+        let a = ping(&pool).await.unwrap();
+        let b = ping(&pool).await.unwrap();
+        assert_ne!(a, b, "a worker over its memory limit is not reused");
+        assert!(pool.stats().retired >= 1);
+        assert_eq!(pool.idle_count(), 0);
+        pool.shutdown().await;
+    }
+}
+
+/// An idle worker stops after `idle_timeout`; the next call starts a new one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn idle_workers_stop_after_the_idle_timeout() {
+    require_python!();
+    let env = TestEnv::new();
+    let pool = WorkerPool::new(PoolConfig {
+        size: 2,
+        worker: env.worker_options(),
+        idle_timeout: Some(Duration::from_millis(300)),
+        ..PoolConfig::default()
+    });
+    let first = ping(&pool).await.unwrap();
+    assert_eq!(pool.idle_count(), 1);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while pool.idle_count() > 0 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(pool.idle_count(), 0, "the idle worker was not stopped");
+    assert_eq!(pool.stats().retired, 1);
+    let process_gone = |pid: u32| !std::path::Path::new(&format!("/proc/{pid}")).exists();
+    if cfg!(target_os = "linux") {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !process_gone(first) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(process_gone(first), "worker {first} still runs");
+    }
+    assert_ne!(ping(&pool).await.unwrap(), first);
+    pool.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
