@@ -169,6 +169,9 @@ def failed_existence_proxy(server, suffix='/exists'):
 
         do_GET = answer
         do_POST = answer
+        do_PATCH = answer
+        do_PUT = answer
+        do_DELETE = answer
 
     proxy = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     proxy.daemon_threads = True
