@@ -416,8 +416,10 @@ assert success, msg
         return run_python(self.env, code)
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def playwright_instance():
+    # Playwright's sync API keeps an asyncio loop active in this thread. Close it
+    # when leaving a browser test module so later SDK tests can use asyncio.run().
     from tests._binary import skip_or_fail
     try:
         import playwright.sync_api as sync_api
@@ -427,7 +429,7 @@ def playwright_instance():
         yield p
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def browser(playwright_instance):
     try:
         browser = playwright_instance.chromium.launch(headless=True)

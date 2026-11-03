@@ -24,7 +24,7 @@ def test_large_json_sync_and_read_memory(tmp_path):
         'MRSM_NO_AUTO_INSTALL': '1',
     })
     code = r'''
-import json, resource, sys
+import json, sys
 from pathlib import Path
 import pandas as pd
 import meerschaum as mrsm
@@ -45,7 +45,11 @@ else:
     assert len(df) == 100000
     for i in (0, 1, 49999, 99999):
         assert df.iloc[i]['payload'] == payload(i)
-print('RSS:' + json.dumps(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024))
+# Linux rusage may retain the parent's RSS peak across exec, including an xdist
+# worker's earlier tests. VmHWM belongs to this interpreter's address space.
+peak_kib = next(int(line.split()[1]) for line in Path('/proc/self/status').read_text().splitlines()
+                if line.startswith('VmHWM:'))
+print('RSS:' + json.dumps(peak_kib / 1024))
 '''
     for phase in ('sync', 'read'):
         # A separate process for each phase, with a wall-clock and RSS watchdog. The output
