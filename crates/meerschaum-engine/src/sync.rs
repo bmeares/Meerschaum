@@ -509,6 +509,11 @@ fn current_timestamp(unit_name: &str, as_int: bool) -> KValue {
     ))
 }
 
+/// The shortest time between two heap trims at sync and chunk boundaries
+/// ([`crate::memory::release_free_memory_throttled`]). A trim costs about 10 ms on a heap of a
+/// few hundred MiB: at most a few percent of a run of small syncs or small chunks.
+const TRIM_INTERVAL: Duration = Duration::from_millis(250);
+
 /// `Pipe.sync(df, **args)`: the native flow (see the module docs). `input = None` fetches.
 ///
 /// The outcome is recorded in the pipe's sync status
@@ -553,6 +558,8 @@ pub async fn sync_pipe(
         (inner.await, None)
     };
     result.duration.get_or_insert(start.elapsed());
+    // The sync's frames are gone: return their pages (see `crate::memory`).
+    crate::memory::release_free_memory_throttled(TRIM_INTERVAL);
     if records {
         crate::status::record_result_with_registration(
             env.registry,
@@ -1249,6 +1256,7 @@ async fn sync_fetched_chunks(
             observer,
         ))
         .await;
+        crate::memory::release_free_memory_throttled(TRIM_INTERVAL);
         if let Some(o) = observer {
             o.chunk_finished(&info, &result, chunk_start.elapsed());
         }
@@ -1445,6 +1453,7 @@ async fn sync_generator_chunks(
                 }
             }
         };
+        crate::memory::release_free_memory_throttled(TRIM_INTERVAL);
         if let Some(o) = observer {
             o.chunk_finished(&info, &result, started.elapsed());
         }

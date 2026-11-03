@@ -41,6 +41,36 @@ fn planned_span(n: &crate::runs::NodeRow) -> Option<(f64, f64)> {
     (duration > 0.0).then_some((start, start + duration))
 }
 
+/// The critical path in words. Zero-slack nodes planned to start together are parallel
+/// branches, not steps of one chain: name the first and count the others, so
+/// `a1 (+3 in parallel) → b1 (+3 in parallel) → c`.
+fn critical_path_text(run: &RunRecord, critical_path: &[PipeRef]) -> String {
+    let starts: std::collections::HashMap<&PipeRef, f64> = run
+        .nodes
+        .iter()
+        .filter_map(|n| Some((&n.pipe_ref, n.planned_start_seconds?)))
+        .collect();
+    let mut stages: Vec<(String, usize, Option<f64>)> = Vec::new();
+    for r in critical_path {
+        let start = starts.get(r).copied();
+        match stages.last_mut() {
+            Some((_, extra, Some(s))) if start == Some(*s) => *extra += 1,
+            _ => stages.push((r.label(), 0, start)),
+        }
+    }
+    stages
+        .into_iter()
+        .map(|(label, extra, _)| {
+            if extra > 0 {
+                format!("{label} (+{extra} in parallel)")
+            } else {
+                label
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" → ")
+}
+
 /// Render a finished run as a static ASCII Gantt chart: per node, the actual bar (`█`, with
 /// `░` before it and, for a success, after it), its duration, counts and status mark; below
 /// it the planned bar (`▒`: the CPM earliest start and the planned duration, the EWMA of the
@@ -65,11 +95,7 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
         });
     let span = planned_makespan.map_or(wall, |p| p.max(wall));
     let mut out = String::new();
-    let path = critical_path
-        .iter()
-        .map(|r| r.label())
-        .collect::<Vec<_>>()
-        .join(" → ");
+    let path = critical_path_text(run, critical_path);
     let _ = write!(
         out,
         "run {}  {} nodes  {} workers  wall {}",
@@ -219,6 +245,36 @@ mod tests {
         assert!(text.contains("██████████░░░░░░░░░░"), "{text}");
         assert!(text.contains("upstream_failed"), "{text}");
         assert_eq!(fmt_duration(3720.0), "1h02m");
+    }
+
+    #[test]
+    fn parallel_zero_slack_nodes_are_one_stage_of_the_critical_path() {
+        let t0 = Utc::now();
+        let r = |m: &str| PipeRef::new("sql:main", "sql:main", m, None);
+        let node = |m: &str, start: f64| {
+            let mut n = NodeRow::new("run", &r(m), Action::Incremental, "");
+            n.status = NodeStatus::Succeeded;
+            n.planned_start_seconds = Some(start);
+            n
+        };
+        let nodes = vec![
+            node("root1", 0.0),
+            node("root2", 0.0),
+            node("root3", 0.0),
+            node("mid1", 30.0),
+            node("leaf", 60.0),
+        ];
+        let path: Vec<PipeRef> = nodes.iter().map(|n| n.pipe_ref.clone()).collect();
+        let run = RecordBuilder::run(t0, t0 + TimeDelta::seconds(9), nodes);
+        let text = render_gantt(&run, &path, 20);
+        let header = text.lines().next().unwrap();
+        assert!(
+            header.ends_with(
+                "critical path: Pipe('sql:main', 'root1') (+2 in parallel) → \
+                 Pipe('sql:main', 'mid1') → Pipe('sql:main', 'leaf')"
+            ),
+            "{header}"
+        );
     }
 
     struct RecordBuilder;

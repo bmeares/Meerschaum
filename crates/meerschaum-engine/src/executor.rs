@@ -35,8 +35,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 
 use crate::events::{Emitter, EventKind, EventSink};
-use crate::graph::Graph;
-use crate::ledger::EdgeCursor;
+use crate::graph::{EdgeRole, Graph};
+use crate::ledger::{EdgeCursor, map_watermark};
 use crate::node::{PipeRecord, PipeRef};
 use crate::plan::{Action, Bounds, ParentState, Plan, PlanOptions, PlannedNode, Span, plan_node};
 use crate::runs::{NodeRow, NodeStatus, RunRecord, RunRow, new_run_id};
@@ -871,6 +871,12 @@ where
         }
         self.cached.invalidate(r);
         let after = self.cached.watermark(r).await.ok().flatten();
+        if !self.flat
+            && let Some(warning) = held_back_warning(self.ctx.graph, &node, after)
+            && !self.state_warnings.contains(&warning)
+        {
+            self.state_warnings.push(warning);
+        }
         if after != node.watermark {
             self.emitter.emit(
                 Some(r),
@@ -887,6 +893,78 @@ where
             },
         );
     }
+}
+
+/// Children this process already warned about with [`held_back_warning`]: a looping job warns
+/// once per child, and again only after the child has advanced in between.
+static HELD_BACK_WARNED: std::sync::LazyLock<Mutex<HashSet<PipeRef>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// The warning for a child that synced nothing new although its data parents advanced, while it
+/// stays behind the slowest of them by more than its backtrack window (or is still empty).
+///
+/// A child is capped at its parents' watermark (the capping rule), which assumes its datetime
+/// axis is its parents' axis. A child that shifts or scales the axis (`ts * 2`, `dt + 1 year`)
+/// is held back past that watermark without an error. `verify pipes` syncs such gaps; a
+/// `role: lookup` dependency keeps the ordering without the cap.
+pub(crate) fn held_back_warning(
+    graph: &Graph,
+    node: &PlannedNode,
+    after: Option<Bound>,
+) -> Option<String> {
+    if !matches!(
+        node.action,
+        Action::Incremental | Action::Backfill | Action::Rebuild
+    ) {
+        return None;
+    }
+    let child = graph.node(&node.pipe_ref)?;
+    let mut cap: Option<(i64, &PipeRef)> = None;
+    for c in node.consumes.iter().filter(|c| c.role == EdgeRole::Data) {
+        let (Some(watermark), Some(parent)) =
+            (c.parent_watermark.as_ref(), graph.node(&c.parent_ref))
+        else {
+            continue;
+        };
+        let Some(edge) = graph
+            .parent_edges(&node.pipe_ref)
+            .find(|e| e.parent == c.parent_ref)
+        else {
+            continue;
+        };
+        let Some(pos) = map_watermark(watermark, &parent.axis, &child.axis, &edge.options) else {
+            continue;
+        };
+        if cap.is_none_or(|(p, _)| pos < p) {
+            cap = Some((pos, &c.parent_ref));
+        }
+    }
+    let (cap, slowest) = cap?;
+    let behind = match after.as_ref().and_then(|b| child.axis.pos(b)) {
+        None => true,
+        Some(pos) => cap.saturating_sub(pos) > child.axis.backtrack,
+    };
+    let mut warned = HELD_BACK_WARNED.lock().unwrap_or_else(|e| e.into_inner());
+    if after != node.watermark || !behind {
+        warned.remove(&node.pipe_ref);
+        return None;
+    }
+    if !warned.insert(node.pipe_ref.clone()) {
+        return None;
+    }
+    let state = if after.is_none() {
+        "it is still empty"
+    } else {
+        "it is behind that watermark by more than its backtrack window"
+    };
+    Some(format!(
+        "{} synced nothing new although {} advanced, and {state}. A child is never synced past \
+         its parents' watermark, so a child whose datetime column shifts or scales its parents' \
+         axis holds rows back. Run `mrsm verify pipes` on it to sync the gap, or declare the \
+         dependency with `role: lookup`.",
+        node.pipe_ref.label(),
+        slowest.label(),
+    ))
 }
 
 fn try_permits(

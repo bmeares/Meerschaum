@@ -1388,6 +1388,15 @@ impl Engine {
                 .map(|n| format!("{}: {}", n.pipe_ref.label(), n.reason)),
         );
         warnings.extend(self.leases.warnings());
+        // The executor's own warnings (state writes, a child held back by its parents'
+        // watermark) end the run message; show them where every caller shows warnings too.
+        if let Some(message) = record.run.message.as_deref() {
+            for line in message.lines().filter_map(|l| l.strip_prefix("warning: ")) {
+                if !warnings.iter().any(|w| w == line) {
+                    warnings.push(line.to_string());
+                }
+            }
+        }
         let outcomes =
             std::mem::take(&mut *sink.outcomes.lock().unwrap_or_else(|e| e.into_inner()));
         RunResult {

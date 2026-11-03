@@ -718,3 +718,108 @@ async fn a_finished_run_leaves_no_pending_release() {
     assert_eq!(record.node(&r("a")).unwrap().status, NodeStatus::Succeeded);
     assert!(h.leases.held.lock().unwrap().is_empty());
 }
+
+fn shifted_records(raw: &str, shifted: &str) -> Vec<PipeRecord> {
+    vec![
+        rec(raw, r#"{"columns": {"datetime": "ts"}}"#),
+        rec(
+            shifted,
+            &format!(
+                r#"{{"columns": {{"datetime": "ts"}},
+                    "sql": "SELECT ts + interval '365 days' AS ts FROM {{{{ Pipe('sql:main', '{raw}') }}}}"}}"#
+            ),
+        ),
+    ]
+}
+
+fn shifted_state(raw: &str, shifted: &str, child_watermark: Option<Bound>) -> MemoryStateData {
+    let mut s = MemoryStateData::default();
+    s.watermarks.insert(r(raw), Some(dt(12, 9)));
+    s.watermarks.insert(r(shifted), child_watermark);
+    s.cursors.insert(
+        "sql:main".into(),
+        vec![EdgeCursor {
+            parent_ref: r(raw),
+            child_ref: r(shifted),
+            seq: 5,
+            parent_watermark_at_cursor: Some(dt(12, 9)),
+            role: Default::default(),
+        }],
+    );
+    s
+}
+
+fn advance(h: &Harness, raw: &str, hour: u32) {
+    h.fake.script(
+        &r(raw),
+        FakeStep {
+            ledger: vec![(
+                "sql:main".into(),
+                Some(dt(12, hour - 1)),
+                Some(dt(12, hour)),
+            )],
+            watermark: Some(Some(dt(12, hour))),
+            ..FakeStep::ok(Duration::from_secs(1))
+        },
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_child_held_back_by_its_parents_watermark_warns_once() {
+    let (raw, shifted) = ("held_raw", "held_shifted");
+    let h = Harness::new(
+        shifted_records(raw, shifted),
+        shifted_state(raw, shifted, None),
+    );
+    let sel = Selection::refs([r(shifted)]).with_parents(Some(Depth::All));
+    advance(&h, raw, 10);
+    let (_, record) = h.run(sel.clone(), ExecutorOptions::default()).await;
+    assert_eq!(h.fake.synced(), vec![r(raw), r(shifted)]);
+    assert!(record.run.success.unwrap());
+    let message = record.run.message.clone().unwrap();
+    assert!(
+        message.contains("held_shifted") && message.contains("verify pipes"),
+        "{message}"
+    );
+    // A looping job does not repeat it every lap.
+    advance(&h, raw, 11);
+    let (_, again) = h.run(sel, ExecutorOptions::default()).await;
+    assert!(!again.run.message.unwrap().contains("verify pipes"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rollup_within_its_backtrack_window_does_not_warn() {
+    let h = Harness::new(rollup_records(), rollup_state());
+    h.fake.script(
+        &r("raw"),
+        FakeStep {
+            ledger: vec![("sql:main".into(), Some(dt(12, 9)), Some(dt(12, 10)))],
+            watermark: Some(Some(dt(12, 10))),
+            ..FakeStep::ok(Duration::from_secs(1))
+        },
+    );
+    let sel = Selection::refs([r("rollup")]).with_parents(Some(Depth::All));
+    let (_, record) = h.run(sel, ExecutorOptions::default()).await;
+    assert_eq!(h.fake.synced(), vec![r("raw"), r("rollup")]);
+    assert!(!record.run.message.unwrap().contains("verify pipes"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_advancing_child_does_not_warn() {
+    let (raw, shifted) = ("moving_raw", "moving_child");
+    let h = Harness::new(
+        shifted_records(raw, shifted),
+        shifted_state(raw, shifted, Some(dt(1, 0))),
+    );
+    advance(&h, raw, 10);
+    h.fake.script(
+        &r(shifted),
+        FakeStep {
+            watermark: Some(Some(dt(12, 10))),
+            ..FakeStep::ok(Duration::from_secs(1))
+        },
+    );
+    let sel = Selection::refs([r(shifted)]).with_parents(Some(Depth::All));
+    let (_, record) = h.run(sel, ExecutorOptions::default()).await;
+    assert!(!record.run.message.unwrap().contains("verify pipes"));
+}

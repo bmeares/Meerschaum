@@ -366,6 +366,12 @@ Dropping, deleting or fully clearing a pipe (`pipe.drop()`, `pipe.delete()`, `pi
 
 Inside an engine run a child is **never synced past the minimum of its parents' watermarks** (plus one time unit, so rows exactly at a parent's watermark sync together; `system.engine.inclusive_cap: false` makes the bound half-open). This prevents a rollup from computing a partial day. A bare `pipe.sync()` never caps.
 
+The cap compares the child's own datetime column with its parents' watermarks, so it assumes the child keeps its parents' time axis (in the same unit or another one, see `axis` below). A child whose datetime column shifts or scales its parents' (`dt + interval '1 year'`, `ts * 2`) is held back: rows past the parents' watermark wait, and a forward shift syncs nothing until the parents catch up. When a child syncs nothing new although its parents advanced, and it is still empty or behind them by more than its backtrack window, the run ends with a warning naming it (once per process for each child, so a loop does not repeat it every lap).
+
+- Prefer keeping the parents' time as the child's datetime column and putting the shifted or scaled value in another column. The cap then works as intended.
+- `verify pipes` is the remedy for gaps like these: it re-syncs the child chunk by chunk without the cap. Run it on the child, or on a schedule (a `verify pipes --loop` job) when the shift is permanent.
+- To keep the ordering and failure propagation without the cap, declare the dependency with `role: lookup` (see [Lookup inputs](#lookup-inputs)). Each parent change then rechecks the child's history, or only the window you declare for a fixed shift (`lookback_days: 365` when the child moves forward, `lookahead_days: 365` when it moves back).
+
 ### Your `--begin` and `--end`
 
 Roots take them verbatim. Every other node's window is clamped to them. A bound of the wrong kind for a node's axis (a datetime for an integer axis) is ignored with a warning.

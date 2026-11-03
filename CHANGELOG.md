@@ -15,6 +15,8 @@ Save a group of Pipes, preview its plan, then run parents before children. The e
 Lookup dependencies preserve ordering without capping event progress at an old lookup timestamp.
 New tail rows stay incremental; unchanged UPSERTs leave dependents quiet.
 Approved UPSERT rebuilds replay history in chunks while retaining stored rows.
+A run warns when a child syncs nothing while its parents advance, as when it shifts or scales their time axis; `verify pipes` syncs the gap.
+`show run` names parallel branches on the critical path once (`+3 in parallel`).
 
 ```bash
 mrsm register pipelines daily -i sql:local -c sql:local -m daily --parents
@@ -98,6 +100,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - Release a Pipe lease even when acquisition completes after cancellation.
 - Back up, restore, and upgrade Stack PostgreSQL through guided commands.
 - Keep long-running jobs' memory bounded: Python workers are replaced after a call or memory limit and stop when idle, and jobs return freed memory between laps.
+- Return freed memory after each fetched chunk and sync: a 1,000,000-row SQLite fetch sync peaks at about 300 MiB instead of 460.
 - List a Pipeline's scheduled jobs without querying every job's status.
 
 See [Stack upgrades](https://meerschaum.io/reference/stack/upgrades/) and [sync metrics](https://meerschaum.io/reference/api-instance/sync-metrics/).
