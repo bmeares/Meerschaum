@@ -670,7 +670,8 @@ def source_preview(path, source, digest: Optional[str] = None, editable: bool = 
     """
     One file: its toolbar and its code, which the browser fills from `plugin-source-data`
     (`assets/plugin_source.js`), always as text, never as the plugin's HTML. An `editable` file
-    has Edit; while `editing`, the code is an editor with the same look, with Save and Cancel.
+    has Edit; while `editing`, the code is a code editor with the same colors, with Save and Cancel
+    (the editor's script is loaded only then).
     """
     from dash import html, dcc
     from meerschaum.api.dash.components import build_icon
@@ -690,27 +691,26 @@ def source_preview(path, source, digest: Optional[str] = None, editable: bool = 
                                'data-source-action': 'fullscreen'},
     )
     if editing:
-        data = {**source_tokens(path, source),
+        ### The editor (CodeMirror, `assets/codemirror.bundle.js`) is mounted in
+        ### `plugin-source-editor` by `assets/plugin_source.js` and highlights as it is typed; its
+        ### text follows every edit into `plugin-source-draft`, which Save reads.
+        data = {'path': path, 'mode': source_mode(path), 'source': source,
                 'digest': digest, 'editing': True}
         toolbar = [
             logo, html.Code(path),
             _source_action_button('save', 'Save', 'fa-solid fa-floppy-disk', 'btn-primary'),
             _source_action_button('cancel', 'Cancel', 'fa-solid fa-xmark', 'btn-outline-secondary'),
+            ### Vim keybindings, remembered in this browser (`assets/plugin_source.js`).
+            html.Button(
+                'Vim', type='button',
+                className='btn btn-sm btn-outline-secondary plugin-source-action plugin-source-vim',
+                title='Vim keybindings', **{'aria-pressed': 'false', 'data-source-action': 'vim'},
+            ),
         ]
-        ### The gutter's numbers follow the text (`assets/plugin_source.js`).
-        code = html.Div([
-            html.Pre('\n'.join(str(n) for n in range(1, max(lines, 1) + 1)),
-                     className='plugin-source-gutter', **{'aria-hidden': 'true'}),
-            html.Label(f'Edit {path}', htmlFor='plugin-source-editor', className='visually-hidden'),
-            html.Div([
-                html.Pre(html.Code(id='plugin-source-editor-highlight'),
-                         className='plugin-source-editor-highlight', **{'aria-hidden': 'true'}),
-                dcc.Textarea(
-                    id='plugin-source-editor', value=source, spellCheck='false', wrap='off',
-                    className='plugin-source-editor',
-                ),
-            ], className='plugin-source-editor-surface'),
-        ], className='plugin-source-code plugin-source-editor-code')
+        code = html.Div(
+            html.Div(id='plugin-source-editor', className='plugin-source-editor'),
+            className='plugin-source-code plugin-source-editor-code',
+        )
     else:
         data = {**source_tokens(path, source), 'digest': digest, 'editing': False}
         toolbar = [logo, html.Code(path), html.Span(f'{lines:,} lines', className='text-muted')]
@@ -724,8 +724,6 @@ def source_preview(path, source, digest: Optional[str] = None, editable: bool = 
         html.Div([item for item in toolbar if item is not None], className='plugin-source-toolbar'),
         code,
         dcc.Store(id='plugin-source-data', data=data),
-        dcc.Store(id='plugin-source-edit-request'),
-        dcc.Store(id='plugin-source-edit-tokens'),
+        dcc.Store(id='plugin-source-draft', data=(source if editing else None)),
         html.Div(id='plugin-source-rendered', hidden=True),
-        html.Div(id='plugin-source-edit-rendered', hidden=True),
     ],className='plugin-source-preview' + (' plugin-source-preview-editing' if editing else ''))

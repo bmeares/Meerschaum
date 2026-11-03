@@ -21,25 +21,9 @@ use crate::value::{ArgsMap, PyValue};
 
 // Plugin imports may print to stdout. Keep the MCP protocol channel clean even when the
 // supervised API host runs Python plugins with ordinary print() diagnostics.
+// The host is a `HostChild`: its stdin is a pipe this process holds, so a host whose server is
+// killed (SIGKILL, the OOM killer) exits instead of running on as an orphan.
 struct StderrHostLauncher(PythonHostLauncher);
-struct HostChild(tokio::process::Child);
-
-#[async_trait]
-impl HostProcess for HostChild {
-    async fn wait(&mut self) -> std::io::Result<Option<i32>> {
-        Ok(self.0.wait().await?.code())
-    }
-
-    async fn kill(&mut self) -> std::io::Result<()> {
-        // SIGTERM, a grace period, then SIGKILL, and the child awaited (a hung host is replaced
-        // only once it is gone).
-        meerschaum_server::host::terminate_child(
-            &mut self.0,
-            meerschaum_server::host::TERMINATE_GRACE,
-        )
-        .await
-    }
-}
 
 #[async_trait]
 impl HostLauncher for StderrHostLauncher {
@@ -51,26 +35,26 @@ impl HostLauncher for StderrHostLauncher {
         &self,
         endpoint: &HostEndpoint,
     ) -> std::io::Result<Box<dyn HostProcess>> {
-        let mut child = tokio::process::Command::new(&self.0.python)
-            .args([
-                meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
-                "-m",
-                "meerschaum.api.host",
-            ])
-            .args(PythonHostLauncher::endpoint_args(endpoint))
-            .envs(PythonHostLauncher::endpoint_env(endpoint))
-            .envs(self.0.env.iter().map(|(key, value)| (key, value)))
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()?;
-        if let Some(mut stdout) = child.stdout.take() {
+        let mut child = meerschaum_server::host::HostChild::spawn(
+            tokio::process::Command::new(&self.0.python)
+                .args([
+                    meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
+                    "-m",
+                    "meerschaum.api.host",
+                ])
+                .args(PythonHostLauncher::endpoint_args(endpoint))
+                .envs(PythonHostLauncher::endpoint_env(endpoint))
+                .envs(self.0.env.iter().map(|(key, value)| (key, value)))
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit())
+                .kill_on_drop(true),
+        )?;
+        if let Some(mut stdout) = child.child_mut().stdout.take() {
             tokio::spawn(async move {
                 let _ = tokio::io::copy(&mut stdout, &mut tokio::io::stderr()).await;
             });
         }
-        Ok(Box::new(HostChild(child)))
+        Ok(Box::new(child))
     }
 }
 
@@ -403,8 +387,22 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
                 && supervisor.is_needed()
             {
                 let secret = state.secret().to_vec();
+                // `/healthcheck/ready` answers 503 until the host answered (or failed to), for at
+                // most `STARTUP_READY_LIMIT`: a host that cannot start must not keep the server
+                // out of a load balancer (requests for it wait for it, or get `502`).
+                let lifecycle = state.lifecycle.clone();
+                lifecycle.set_starting(true);
                 tokio::spawn(async move {
-                    host.refresh_console(&secret).await;
+                    let refresh = host.refresh_console(&secret);
+                    tokio::pin!(refresh);
+                    if tokio::time::timeout(STARTUP_READY_LIMIT, refresh.as_mut())
+                        .await
+                        .is_err()
+                    {
+                        lifecycle.set_starting(false);
+                        refresh.await;
+                    }
+                    lifecycle.set_starting(false);
                 });
             }
             // Native plugin routes (no host process) are merged with the console's routes.
@@ -439,10 +437,37 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
                 result = shutdown.wait() => result.map(|()| SuccessTuple::success()).map_err(io_error),
             }
         } else {
-            tokio::select! {
-                result = meerschaum_server::serve_with_tls(state, mcp, console, https) => result.map(|()| SuccessTuple::success()).map_err(io_error),
-                result = shutdown.wait() => result.map(|()| SuccessTuple::success()).map_err(io_error),
+            let grace = state.config.shutdown_grace;
+            let lifecycle = state.lifecycle.clone();
+            let serving = meerschaum_server::serve_with_tls(state.clone(), mcp, console, https);
+            tokio::pin!(serving);
+            let result = tokio::select! {
+                result = &mut serving => result.map(|()| SuccessTuple::success()).map_err(io_error),
+                result = shutdown.wait() => match result {
+                    Err(error) => Err(io_error(error)),
+                    // `api:shutdown:grace_seconds: 0`: stop at once.
+                    Ok(()) if grace.is_zero() => Ok(SuccessTuple::success()),
+                    Ok(()) => {
+                        native::info(
+                            rt,
+                            &format!(
+                                "Shutting down: finishing the requests in progress (up to {} s; \
+                                 interrupt again to stop now).",
+                                format_seconds(grace)
+                            ),
+                        );
+                        drain(&lifecycle, serving.as_mut(), &mut shutdown, grace).await
+                    }
+                },
+            };
+            // A drain closed the web terminals: let them deliver their close frames.
+            let deadline = tokio::time::Instant::now() + TERMINALS_CLOSE_TIMEOUT;
+            while meerschaum_server::webterm::active_terminals() > 0
+                && tokio::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
+            result
         };
         watcher.abort();
         // The sync statuses this server recorded (written in the background) before its
@@ -506,6 +531,48 @@ pub fn console(
                 .map(Some)
                 .map_err(io_error)
         }
+    }
+}
+
+/// How long `/healthcheck/ready` waits for the API host at startup before it answers `200`.
+const STARTUP_READY_LIMIT: Duration = Duration::from_secs(30);
+
+/// How long a stopping server lets its web terminals deliver their close frames.
+const TERMINALS_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// `8`, `0.5`: a grace period as its config value reads.
+fn format_seconds(duration: Duration) -> String {
+    let seconds = duration.as_secs_f64();
+    if seconds.fract() == 0.0 {
+        format!("{}", seconds as u64)
+    } else {
+        format!("{seconds}")
+    }
+}
+
+/// Drain the server (`api:shutdown:grace_seconds`): its listeners stop accepting, long-lived
+/// responses end, and the requests in progress finish, for at most `grace`. A second signal
+/// stops at once.
+async fn drain<F>(
+    lifecycle: &meerschaum_server::lifecycle::Lifecycle,
+    serving: std::pin::Pin<&mut F>,
+    shutdown: &mut ShutdownSignal,
+    grace: Duration,
+) -> ActionResult
+where
+    F: std::future::Future<Output = std::io::Result<()>>,
+{
+    lifecycle.begin_drain();
+    tokio::select! {
+        result = serving => result.map(|()| SuccessTuple::success()).map_err(io_error),
+        () = tokio::time::sleep(grace) => {
+            tracing::warn!(
+                "The requests still in progress after {} s were cut off.",
+                format_seconds(grace)
+            );
+            Ok(SuccessTuple::success())
+        }
+        _ = shutdown.wait() => Ok(SuccessTuple::success()),
     }
 }
 

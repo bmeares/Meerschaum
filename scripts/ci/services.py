@@ -210,6 +210,8 @@ def run(args):
         print(json.dumps({'project': state['project'], 'root': state['root'],
                           'shard': args.shard, 'workers': workers, 'ports': ports}), flush=True)
         forwarded = args.pytest_args[1:] if args.pytest_args[:1] == ['--'] else args.pytest_args
+        # The lane's xdist scheduler goes first, so an explicit `--dist` from the caller still wins.
+        forwarded = ['--dist', SHARDS[args.shard].get('dist', 'load'), *forwarded]
         child = subprocess.Popen([str(REPO / 'scripts' / 'test.sh'), *forwarded],
                                  cwd=REPO, env=env, start_new_session=True)
         return child.wait()

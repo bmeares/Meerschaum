@@ -82,6 +82,36 @@ def _open_new_plugin(tab, name):
     page.fill('#plugins-new-name', name)
 
 
+def _editor(page):
+    """
+    The open code editor (CodeMirror, `assets/codemirror.bundle.js`): wait until it is mounted
+    and return its editable content.
+    """
+    page.locator('.plugin-source-preview[data-editor-ready="true"] #plugin-source-editor .cm-content').wait_for(
+        timeout=30000,
+    )
+    return page.locator('#plugin-source-editor .cm-content')
+
+
+def _editor_text(page) -> str:
+    return page.evaluate('window.dash_clientside.mrsmPluginSource.text()')
+
+
+def _replace_editor_text(page, text: str) -> None:
+    """Select everything in the editor and type `text` (as a person would)."""
+    _editor(page).click()
+    page.keyboard.press('Control+A')
+    page.keyboard.press('Delete')
+    page.keyboard.insert_text(text)
+
+
+def _keyword_highlighted(page) -> bool:
+    """A Python/Rust keyword in the editor has the reader's keyword color."""
+    return page.evaluate("""() => [...document.querySelectorAll('#plugin-source-editor .cm-line span')]
+        .some(s => ['def', 'fn', 'use', 'import', 'pub'].includes(s.textContent.trim())
+                   && getComputedStyle(s).color === 'rgb(215, 168, 255)')""")
+
+
 def _no_horizontal_scroll(page) -> bool:
     return page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
 
@@ -140,36 +170,48 @@ def test_new_python_plugin_opens_in_the_editor_and_saves(plugins_server, browser
         screenshot(page, f'plugins-new-python-{width}')
         page.click('#plugins-new-create')
         page.wait_for_url(f'**/dash/plugins/installed/{name}?*', timeout=30000)
-        editor = page.locator('#plugin-source-editor')
-        editor.wait_for(timeout=30000)
-        assert 'def sing_song(' in editor.input_value()
-        assert '"timestamp"' in editor.input_value()
+        editor = _editor(page)
+        assert 'def sing_song(' in _editor_text(page)
+        assert '"timestamp"' in _editor_text(page)
         assert f"Created plugin '{name}'." in page.inner_text('#plugin-source-alert')
         assert page.get_by_role('button', name='Save').is_visible()
         assert _no_horizontal_scroll(page)
-        ### The input sits over highlighted text, with the code view's background.
-        assert editor.evaluate('e => getComputedStyle(e).backgroundColor') == 'rgba(0, 0, 0, 0)'
-        page.locator('#plugin-source-editor-highlight .source-token-keyword').first.wait_for()
-        ### The gutter is exactly as tall as the editor (its numbers scroll with the text).
-        heights = page.evaluate("""() => [
-            document.getElementById('plugin-source-editor').getBoundingClientRect().height,
-            document.querySelector('.plugin-source-gutter').getBoundingClientRect().height,
-        ]""")
-        assert abs(heights[0] - heights[1]) <= 1, heights
+        ### The code view's background, highlighting and line numbers.
+        background = page.evaluate(
+            "getComputedStyle(document.querySelector('#plugin-source-editor .cm-editor')).backgroundColor"
+        )
+        assert background == 'rgb(23, 33, 43)', background
+        page.wait_for_function(
+            "document.querySelectorAll('#plugin-source-editor .cm-lineNumbers .cm-gutterElement').length > 1"
+        )
+        assert _keyword_highlighted(page)
         page.locator('.plugin-source-workspace').scroll_into_view_if_needed()
         screenshot(page, f'plugins-editor-python-{width}')
 
-        ### Typing: Tab indents (four spaces); Save writes the file and closes the editor.
+        ### RC31: typing never re-renders the editor or asks the server anything (the old editor
+        ### was a Dash input re-highlighted by a callback, and it refreshed while typed in).
+        page.evaluate("document.querySelector('#plugin-source-editor .cm-editor').dataset.rc31 = 'kept'")
+        requests = []
+        page.on('request', lambda request: requests.append(request.url))
         editor.click()
         page.keyboard.press('Control+End')
-        page.keyboard.type('\n\ndef edited_in_the_console():\n')
-        page.keyboard.press('Tab')
+        ### A new line keeps the indentation of the body above it: Shift+Tab dedents it, the
+        ### line after `def ...:` is indented for its body, and Tab and Shift+Tab indent the line.
+        page.keyboard.type('\n\n')
+        page.keyboard.press('Shift+Tab')
+        page.keyboard.type('def edited_in_the_console():\n')
         page.keyboard.type('return 28')
-        assert editor.input_value().endswith('def edited_in_the_console():\n    return 28')
-        page.wait_for_function("document.querySelector('#plugin-source-editor-highlight')?.textContent === document.querySelector('#plugin-source-editor')?.value")
-        page.locator('#plugin-source-editor-highlight .source-token-keyword').first.wait_for()
-        gutter = page.locator('.plugin-source-gutter').inner_text().split()
-        assert gutter[-1] == str(editor.input_value().count('\n') + 1)
+        page.keyboard.press('Tab')
+        assert _editor_text(page).endswith('\n\ndef edited_in_the_console():\n        return 28')
+        page.keyboard.press('Shift+Tab')
+        assert _editor_text(page).endswith('def edited_in_the_console():\n    return 28')
+        assert page.evaluate("document.activeElement.classList.contains('cm-content')")
+        page.wait_for_timeout(500)
+        assert page.evaluate("document.querySelector('#plugin-source-editor .cm-editor').dataset.rc31") == 'kept'
+        assert not [url for url in requests if '_dash-update-component' in url], requests
+        assert _keyword_highlighted(page)
+        lines = page.locator('#plugin-source-editor .cm-lineNumbers .cm-gutterElement').all_inner_texts()
+        assert str(_editor_text(page).count('\n') + 1) in lines, lines
         page.get_by_role('button', name='Save').click()
         page.locator('#plugin-source-save-alert').wait_for(timeout=30000)
         assert f'Saved {name}.py.' in page.inner_text('#plugin-source-save-alert')
@@ -203,9 +245,8 @@ def test_new_rust_package_lands_on_its_crate_source(plugins_server, browser):
         screenshot(page, 'plugins-new-rust-1440')
         page.click('#plugins-new-create')
         page.wait_for_url(f'**/dash/plugins/installed/{name}?*', timeout=30000)
-        editor = page.locator('#plugin-source-editor')
-        editor.wait_for(timeout=30000)
-        assert f'meerschaum_plugin::export_plugin!(Rc28Rs);' in editor.input_value()
+        editor = _editor(page)
+        assert f'meerschaum_plugin::export_plugin!(Rc28Rs);' in _editor_text(page)
         assert page.inner_text('.plugin-source-toolbar code') == 'src/lib.rs'
         for path in ('plugin.toml', 'Cargo.toml', 'src/lib.rs'):
             assert (plugins_server.plugins / name / path).is_file(), path
@@ -222,8 +263,8 @@ def test_new_rust_package_lands_on_its_crate_source(plugins_server, browser):
         assert page.locator('[data-source-action=copy] + [data-source-action=fullscreen]').count() == 1
         page.get_by_role('button', name='Fullscreen', exact=True).click()
         assert not page.locator('.plugin-source-header').is_visible()
-        page.locator('#plugin-source-editor-highlight .source-token-keyword').first.wait_for()
-        box = editor.bounding_box()
+        assert _keyword_highlighted(page)
+        box = page.locator('#plugin-source-editor .cm-editor').bounding_box()
         assert box['height'] > 0.6 * page.viewport_size['height'], box
         screenshot(page, 'plugins-editor-rust-fullscreen-1440')
         page.get_by_role('button', name='Exit fullscreen', exact=True).click()
@@ -254,19 +295,22 @@ def test_a_file_changed_on_disk_is_not_overwritten(plugins_server, browser, widt
     try:
         tab.login(path='/dash')
         tab.goto('/dash/plugins/installed/rc28_conflict', '#plugin-source-content')
+        ### Reading a file never loads the editor's script.
+        page.locator('#plugin-source-code .source-line').first.wait_for()
+        assert page.evaluate("window.MrsmCodeEditor === undefined")
+        assert page.locator('script[src*="codemirror.bundle.js"]').count() == 0
         page.get_by_role('button', name='Edit').click()
-        editor = page.locator('#plugin-source-editor')
-        editor.wait_for(timeout=30000)
-        assert editor.input_value() == 'VALUE = "start"\n'
+        _editor(page)
+        assert _editor_text(page) == 'VALUE = "start"\n'
         path.write_text('VALUE = "disk"\n')
-        editor.fill('VALUE = "browser"\n')
+        _replace_editor_text(page, 'VALUE = "browser"\n')
         page.get_by_role('button', name='Save').click()
         page.locator('#plugin-source-save-alert').wait_for(timeout=30000)
         message = page.inner_text('#plugin-source-save-alert')
         assert 'rc28_conflict.py changed on disk after it was opened, so it was not saved.' in message
         assert path.read_text() == 'VALUE = "disk"\n'
         ### The editor keeps what was typed.
-        assert editor.input_value() == 'VALUE = "browser"\n'
+        assert _editor_text(page) == 'VALUE = "browser"\n'
         assert _no_horizontal_scroll(page)
         page.locator('.plugin-source-workspace').scroll_into_view_if_needed()
         screenshot(page, f'plugins-conflict-{width}')
@@ -277,6 +321,48 @@ def test_a_file_changed_on_disk_is_not_overwritten(plugins_server, browser, widt
         assert not tab.errors, tab.errors
     finally:
         context.close()
+
+
+def test_vim_keybindings_save_with_colon_w_and_are_remembered(plugins_server, browser):
+    """RC31: the editor's Vim button switches Vim keybindings; `:w` saves; the browser remembers."""
+    path = plugins_server.plugins / 'rc31_vim.py'
+    path.write_text('VALUE = 1\n')
+    context, tab = _new_tab(browser, plugins_server, 1440)
+    page = tab.page
+    try:
+        tab.login(path='/dash')
+        tab.goto('/dash/plugins/installed/rc31_vim', '#plugin-source-content')
+        page.get_by_role('button', name='Edit').click()
+        _editor(page)
+        vim = page.locator('[data-source-action="vim"]')
+        assert vim.get_attribute('aria-pressed') == 'false'
+        vim.click()
+        assert vim.get_attribute('aria-pressed') == 'true'
+        page.locator('#plugin-source-editor .cm-vim-panel').wait_for()
+        ### Normal mode: `gg` to the first line, `o` opens a line below it, Escape, then `:w`.
+        page.keyboard.press('Escape')
+        page.keyboard.type('ggo')
+        page.keyboard.type('VIM = 31')
+        page.keyboard.press('Escape')
+        page.keyboard.type(':w')
+        screenshot(page, 'plugins-editor-vim-1440')
+        page.keyboard.press('Enter')
+        page.locator('#plugin-source-save-alert').wait_for(timeout=30000)
+        assert 'Saved rc31_vim.py.' in page.inner_text('#plugin-source-save-alert')
+        assert path.read_text() == 'VALUE = 1\nVIM = 31\n', path.read_text()
+        ### The next edit starts in Vim mode again, until it is switched off.
+        page.reload()
+        page.get_by_role('button', name='Edit').click()
+        _editor(page)
+        assert vim.get_attribute('aria-pressed') == 'true'
+        vim.click()
+        assert vim.get_attribute('aria-pressed') == 'false'
+        assert page.locator('#plugin-source-editor .cm-vim-panel').count() == 0
+        page.get_by_role('button', name='Cancel').click()
+        assert not tab.errors, tab.errors
+    finally:
+        context.close()
+        path.unlink(missing_ok=True)
 
 
 def _session_id(context) -> str:
@@ -350,7 +436,7 @@ def test_non_administrators_cannot_create_or_edit_plugins(plugins_server, browse
                     'path': 'rc28_conflict.py', 'editing': True,
                     'digest': __import__('hashlib').sha256(before.encode()).hexdigest(),
                 }},
-                {'id': 'plugin-source-editor', 'property': 'value', 'value': 'FORGED = True\n'},
+                {'id': 'plugin-source-draft', 'property': 'data', 'value': 'FORGED = True\n'},
                 {'id': 'session-store', 'property': 'data', 'value': session},
             ])
             assert status == 200 and REFUSAL in body, (action, status, body[:500])

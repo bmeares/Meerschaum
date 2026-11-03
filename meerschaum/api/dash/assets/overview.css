@@ -13,16 +13,22 @@
   margin: 4px 0 16px;
 }
 
-/* Tiles: three across (Recent runs below, full width), two on tablets, one on phones. */
+/*
+ * Tiles. Desktop: Pipes (two columns) beside Jobs, then Pipelines beside Recent runs (two
+ * columns), then Performance. Tablets: two columns, Pipes and Recent runs full width. Phones: one.
+ */
 .overview-grid {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.overview-tile-pipes,
 .overview-tile-runs {
-  grid-column: 1 / -1;
+  grid-column: span 2;
 }
 .overview-tile {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   padding: 16px 18px;
   background: #2a3037;
@@ -46,8 +52,21 @@ a.overview-tile-title:focus-visible {
   color: #fff;
   text-decoration: underline;
 }
+/* The body fills the tile, so a chart (the Pipelines' history) can take the row's height. */
 .overview-tile-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-height: 64px;
+}
+.overview-tile-body[hidden] { display: none; }
+
+/* The number, with a short fact beside it. */
+.overview-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 14px;
 }
 .overview-stat-link,
 .overview-stat-link:hover {
@@ -63,23 +82,63 @@ a.overview-tile-title:focus-visible {
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
-.overview-substat {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  margin-left: 14px;
-  text-decoration: none;
-  font-weight: 600;
+.overview-aside {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  white-space: nowrap;
 }
-.overview-substat-bad { color: #ff7b72; }
-.overview-substat-ok { color: #7ee2a8; }
-.overview-substat:hover { text-decoration: underline; }
 .overview-tile-action {
   margin-left: 14px;
   min-height: 36px;
 }
+.overview-headline .overview-tile-action { margin-left: 0; }
 
-/* Lists inside tiles (Pipelines, job states, runs): 44px rows. */
+/* A bar split by state, each part as wide as its share. */
+.overview-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin: 6px 0 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.overview-bar-part {
+  flex-basis: 0;
+  min-width: 4px;
+}
+
+/* State colors: bars, the history's columns and the dots before each state. */
+.overview-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8b949e;
+}
+.overview-bar-ok,
+.overview-bar-succeeded,
+.overview-bar-running,
+.overview-dot-ok,
+.overview-dot-succeeded,
+.overview-dot-running { background: #7ee2a8; }
+.overview-bar-failing,
+.overview-bar-failed,
+.overview-dot-failing,
+.overview-dot-failed { background: #ff7b72; }
+.overview-bar-stalled,
+.overview-dot-stalled { background: #e0a526; }
+.overview-bar-paused,
+.overview-dot-paused { background: #d2a8ff; }
+.overview-bar-stopped,
+.overview-dot-stopped { background: #8b949e; }
+.overview-bar-unrecorded,
+.overview-bar-none { background: rgba(255, 255, 255, 0.2); }
+/* A Pipeline run in progress is blue, as in Recent runs (a running job is green). */
+.overview-tile-pipelines .overview-bar-running,
+.overview-tile-pipelines .overview-dot-running { background: #79c0ff; }
+
+/* Lists inside tiles (states, latest syncs, runs): 44px rows. */
 .overview-list {
   list-style: none;
   margin: 6px 0 0;
@@ -131,7 +190,7 @@ a.overview-tile-title:focus-visible {
   overflow-wrap: anywhere;
 }
 
-/* Run and Pipeline statuses. */
+/* Run statuses. */
 .overview-status {
   flex: 0 0 auto;
   padding: 2px 8px;
@@ -151,7 +210,7 @@ a.overview-tile-title:focus-visible {
 .overview-status-stopped,
 .overview-status-none { color: #d0d7de; background: rgba(255, 255, 255, 0.12); }
 
-/* Jobs by state. */
+/* States (pipes, Pipelines, jobs): a dot, the state and the count, linked to the filtered page. */
 .overview-job-link {
   display: flex;
   align-items: center;
@@ -161,28 +220,203 @@ a.overview-tile-title:focus-visible {
   color: rgba(255, 255, 255, 0.86);
   text-decoration: none;
 }
-.overview-job-link:hover { color: #fff; }
+a.overview-job-link:hover { color: #fff; }
+a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
 .overview-job-count {
   margin-left: auto;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.overview-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #8b949e;
+/* Beside a taller tile, the jobs' rows share its height (up to 64px each) instead of leaving a gap. */
+.overview-tile-jobs .overview-tile-body > .overview-job-states {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
 }
-.overview-dot-running { background: #7ee2a8; }
-.overview-dot-stalled { background: #e0a526; }
-.overview-dot-failing { background: #ff7b72; }
-.overview-dot-paused { background: #d2a8ff; }
-.overview-dot-stopped { background: #8b949e; }
+.overview-tile-jobs .overview-job-states > .overview-row {
+  flex: 1 1 44px;
+  align-items: stretch;
+  max-height: 64px;
+}
+/* No recorded sync, never run: a ring, not a color. */
+.overview-dot-unrecorded,
+.overview-dot-none {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+/* Pipes: the states beside the latest syncs and the connectors. */
+.overview-pipes-layout {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  column-gap: 28px;
+}
+.overview-pipes-detail {
+  padding-left: 28px;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+.overview-pipes-detail,
+.overview-pipes-detail > .overview-pipes-section,
+#overview-pipes-latest {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+/* The latest syncs share the column's height like the jobs' rows. */
+#overview-pipes-latest > .overview-row {
+  flex: 1 1 44px;
+  max-height: 64px;
+}
+.overview-pipes-section + .overview-pipes-section { margin-top: 14px; }
+.overview-pipes-connectors { margin-top: 10px; }
+.overview-subheading {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.overview-pipes-section .overview-list { margin-top: 0; }
+.overview-latest-pipe {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.overview-latest-pipe .overview-pipe-link { display: block; }
+.overview-latest-failing .overview-when { color: #ff9b94; }
+.overview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.overview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  text-decoration: none;
+}
+.overview-chip code {
+  min-width: 0;
+  overflow: hidden;
+  color: #dceaf6;
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overview-chip-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.overview-chip:hover,
+.overview-chip:focus-visible {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Pipelines: their states in two columns, then their runs over the last day, hour by hour (the chart takes the row's spare height). */
+#overview-pipelines-states {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+}
+.overview-history {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin-top: 14px;
+}
+.overview-history-bars {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: 3px;
+  min-height: 56px;
+  max-height: 140px;
+}
+.overview-hour {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column-reverse;
+  gap: 1px;
+  min-width: 0;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.14);
+}
+.overview-hour-part {
+  min-height: 3px;
+  border-radius: 2px 2px 0 0;
+}
+.overview-hour-unread { border-bottom-style: dotted; border-bottom-color: rgba(255, 255, 255, 0.08); }
+.overview-history-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.75rem;
+}
+.overview-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 0;
+}
+.overview-fact { min-width: 0; }
+.overview-fact dt {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+.overview-fact dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+.overview-fact-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+.overview-fact-link:hover,
+.overview-fact-link:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+}
+.overview-fact-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overview-fact-none {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: rgba(255, 255, 255, 0.5);
+}
+#overview-pipelines-last-failure .overview-fact-link { color: #ff9b94; }
 
 /* Recent runs: status, what ran, when, how long, what changed. */
 .overview-run {
   display: grid;
-  grid-template-columns: 7.5rem minmax(0, 1fr) 6.5rem 5rem minmax(0, 14rem);
+  grid-template-columns: 7rem minmax(0, 1fr) 5.5rem 4.5rem minmax(0, 11rem);
   gap: 12px;
 }
 .overview-run .overview-when { margin-left: 0; text-align: right; }
@@ -197,6 +431,7 @@ a.overview-tile-title:focus-visible {
   color: rgba(255, 255, 255, 0.55);
   font-size: 0.8rem;
 }
+.overview-failures { color: #ff9b94; }
 .overview-duration,
 .overview-counts {
   color: rgba(255, 255, 255, 0.6);
@@ -262,17 +497,25 @@ a.overview-tile-title:focus-visible {
 
 @media (max-width: 991.98px) {
   .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-tile-pipes,
+  .overview-tile-runs { grid-column: 1 / -1; }
 }
+/* Recent runs on a narrow screen: the status and when, then what ran, then how long and what changed. */
 @media (max-width: 767.98px) {
   .overview-run {
     grid-template-columns: auto minmax(0, 1fr) auto;
-    row-gap: 2px;
+    grid-template-areas:
+      "status . when"
+      "what what what"
+      "duration counts counts";
+    row-gap: 0;
     padding: 6px 0;
   }
-  .overview-run .overview-duration,
-  .overview-run .overview-counts {
-    grid-column: 2 / -1;
-  }
+  .overview-run .overview-status { grid-area: status; }
+  .overview-run .overview-when { grid-area: when; }
+  .overview-run .overview-run-what { grid-area: what; }
+  .overview-run .overview-duration { grid-area: duration; }
+  .overview-run .overview-counts { grid-area: counts; }
 }
 @media (max-width: 575.98px) {
   .overview-page,
@@ -280,6 +523,14 @@ a.overview-tile-title:focus-visible {
     padding: 12px 16px 24px;
   }
   .overview-grid { grid-template-columns: minmax(0, 1fr); }
+  .overview-tile-pipes,
+  .overview-tile-runs { grid-column: auto; }
+  .overview-pipes-layout { grid-template-columns: minmax(0, 1fr); }
+  .overview-pipes-detail {
+    margin-top: 14px;
+    padding: 0;
+    border-left: 0;
+  }
 }
 /* Phones, narrow windows and touch screens: every link and button of the tiles is a 44px target. */
 @media (max-width: 767.98px), (pointer: coarse) {
@@ -294,6 +545,9 @@ a.overview-tile-title:focus-visible {
     align-items: center;
     min-height: 44px;
   }
+  .overview-chip,
+  .overview-fact-link,
+  .overview-fact-none { min-height: 44px; }
 }
 
 /* Connectors: a table on wide screens, one card per connector on phones. */

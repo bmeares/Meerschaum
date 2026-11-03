@@ -74,6 +74,105 @@ def jsonrpc_error(
     return {'jsonrpc': '2.0', 'id': request_id, 'error': error}
 
 
+def _bind_error(handler: Any, arguments: Dict[str, Any]) -> Optional[str]:
+    """
+    Return why `handler` cannot accept `arguments` (an argument outside its signature, or a
+    missing one), or `None` when it can (or its signature cannot be read).
+
+    This is checked before the call so that a `TypeError` raised *inside* the handler
+    (e.g. `if pd.NA:`) is never mistaken for an argument error.
+    """
+    import inspect
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return None
+    try:
+        signature.bind(**arguments)
+    except TypeError as e:
+        return str(e)
+    return None
+
+
+def _frame_module_prefix(handler: Any) -> str:
+    """
+    Return the module prefix whose frames belong to the handler's owner: a plugin's package
+    (`plugins.<name>`), or else the handler's top-level package.
+    """
+    module = getattr(handler, '__module__', None) or ''
+    parts = module.split('.')
+    if parts[0] == 'plugins' and len(parts) > 1:
+        return '.'.join(parts[:2])
+    return parts[0]
+
+
+def _display_path(filename: str) -> str:
+    """
+    Return `filename` relative to the plugins directory it lives in, when it does.
+    """
+    import pathlib
+    try:
+        from meerschaum.config._paths import PLUGINS_DIR_PATHS, PLUGINS_RESOURCES_PATH
+        roots = [*PLUGINS_DIR_PATHS, PLUGINS_RESOURCES_PATH]
+    except Exception:
+        roots = []
+
+    path = pathlib.Path(filename)
+    candidates = [path]
+    try:
+        candidates.append(path.resolve())
+    except Exception:
+        pass
+    for root in roots:
+        for root_path in (pathlib.Path(root), pathlib.Path(root).resolve()):
+            for candidate in candidates:
+                try:
+                    return candidate.relative_to(root_path).as_posix()
+                except ValueError:
+                    continue
+    return filename
+
+
+def _raised_at(error: BaseException, handler: Any) -> Optional[str]:
+    """
+    Return where `error` was raised, as `file:line in function`: the innermost traceback frame
+    of the handler's own code (a plugin's package), else the innermost frame.
+    """
+    import traceback
+    frames = traceback.extract_tb(error.__traceback__)
+    ### The first frame is the dispatcher's own call.
+    frames = frames[1:] or frames
+    if not frames:
+        return None
+
+    prefix = _frame_module_prefix(handler)
+    module_files = set()
+    tb = error.__traceback__
+    while tb is not None:
+        name = tb.tb_frame.f_globals.get('__name__', '') or ''
+        if prefix and (name == prefix or name.startswith(prefix + '.')):
+            module_files.add(tb.tb_frame.f_code.co_filename)
+        tb = tb.tb_next
+
+    owned = [frame for frame in frames if frame.filename in module_files]
+    frame = (owned or frames)[-1]
+    return f"{_display_path(frame.filename)}:{frame.lineno} in {frame.name}"
+
+
+def _exception_text(error: BaseException, handler: Any) -> str:
+    """
+    Return `"{ExceptionType}: {message} (raised at file:line in function)"`.
+    """
+    text = f"{type(error).__name__}: {error}"
+    try:
+        location = _raised_at(error, handler)
+    except Exception:
+        location = None
+    if location:
+        text += f" (raised at {location})"
+    return text
+
+
 def _tool_error(request_id: Any, message: str) -> Dict[str, Any]:
     """
     Return a tool result flagged as an error.
@@ -210,13 +309,19 @@ def _call_tool(
                 request_id, f"Missing required argument '{required_arg}'."
             )
 
+    ### Only arguments the handler cannot accept are invalid arguments: a `TypeError` raised
+    ### while the tool runs is an execution error like any other.
+    bind_error = _bind_error(tool.handler, arguments)
+    if bind_error is not None:
+        return _tool_error(request_id, f"Invalid arguments for '{tool_name}': {bind_error}")
+
     try:
         result = tool.handler(**arguments)
-    except TypeError as e:
-        ### An unexpected keyword means the client sent an argument outside the schema.
-        return _tool_error(request_id, f"Invalid arguments for '{tool_name}': {e}")
     except Exception as e:
-        return _tool_error(request_id, f"{type(e).__name__}: {e}")
+        return _tool_error(
+            request_id,
+            f"Error in tool '{tool_name}': {_exception_text(e, tool.handler)}",
+        )
 
     text = json.dumps(result, default=json_serialize_value, indent=2)
     tool_result: Dict[str, Any] = {
@@ -253,7 +358,7 @@ def _read_resource(
             text = resource.handler(**template_variables)
         except Exception as e:
             return jsonrpc_error(
-                request_id, INTERNAL_ERROR, f"{type(e).__name__}: {e}"
+                request_id, INTERNAL_ERROR, _exception_text(e, resource.handler)
             )
 
         return jsonrpc_result(request_id, {
@@ -311,14 +416,18 @@ def _get_prompt(
             f"Missing required argument(s) for '{prompt_name}': {', '.join(missing)}.",
         )
 
+    bind_error = _bind_error(prompt.handler, arguments)
+    if bind_error is not None:
+        return jsonrpc_error(
+            request_id, INVALID_PARAMS, f"Invalid arguments for '{prompt_name}': {bind_error}"
+        )
+
     try:
         messages = prompt.handler(**arguments)
-    except TypeError as e:
-        return jsonrpc_error(
-            request_id, INVALID_PARAMS, f"Invalid arguments for '{prompt_name}': {e}"
-        )
     except Exception as e:
-        return jsonrpc_error(request_id, INTERNAL_ERROR, f"{type(e).__name__}: {e}")
+        return jsonrpc_error(
+            request_id, INTERNAL_ERROR, _exception_text(e, prompt.handler)
+        )
 
     return jsonrpc_result(request_id, {
         'description': prompt.description,

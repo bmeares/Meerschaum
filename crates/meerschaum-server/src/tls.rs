@@ -20,9 +20,9 @@
 //!   it starts (plugin installs from this server). Its address goes into the host's configuration
 //!   through the `internal_addr` field of [`ServerConfig`].
 //! - [`serve`] runs the HTTPS listener and the internal one. Plain HTTP that reaches the HTTPS port
-//!   gets `/healthcheck` answered, so container healthchecks such as
+//!   gets `/healthcheck` (and `/healthcheck/ready`) answered, so container healthchecks such as
 //!   `curl --fail http://localhost:8000/healthcheck` keep working, and a redirect to `https://`
-//!   for everything else.
+//!   for everything else. [`serve_until`] also drains (see [`crate::lifecycle`]).
 //!
 //! HTTP/2 requests carry their authority in the URI, not in a `Host` header; [`serve`] adds the
 //! header so routes and the API host see the same request over HTTP/1.1 and HTTP/2. WebSockets use
@@ -67,6 +67,9 @@ pub const ALPN_PROTOCOLS: &[&[u8]] = &[b"h2", b"http/1.1"];
 
 /// The path plain HTTP may still reach on the HTTPS port (container healthchecks).
 pub const HEALTHCHECK_PATH: &str = "/healthcheck";
+
+/// The readiness check plain HTTP may also reach on the HTTPS port (load balancers' probes).
+pub const READY_PATH: &str = "/healthcheck/ready";
 
 /// The first byte of every TLS connection (a handshake record).
 const TLS_HANDSHAKE_RECORD: u8 = 0x16;
@@ -999,6 +1002,17 @@ pub async fn serve(
     app: Router,
     https: Https,
 ) -> std::io::Result<()> {
+    serve_until(listener, app, https, crate::lifecycle::DrainSignal::never()).await
+}
+
+/// [`serve`] until `drain` fires, then drain: both listeners stop accepting, requests in progress
+/// finish, idle connections close, and the future completes once no connection is left.
+pub async fn serve_until(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    https: Https,
+    drain: crate::lifecycle::DrainSignal,
+) -> std::io::Result<()> {
     let Https {
         certificate,
         config,
@@ -1010,7 +1024,16 @@ pub async fn serve(
         .map(tokio::net::TcpListener::from_std)
         .transpose()?;
     let acceptor = tokio_rustls::TlsAcceptor::from(config);
-    let public = accept_loop(listener, acceptor, app.clone());
+    // Every connection of the HTTPS listener holds a sender: once all are dropped, `recv` ends.
+    let (connections, mut all_closed) = tokio::sync::mpsc::channel::<()>(1);
+    let public = accept_loop(
+        listener,
+        acceptor,
+        app.clone(),
+        drain.clone(),
+        connections.clone(),
+    );
+    let internal_drain = drain.clone();
     let internal = async move {
         match internal {
             Some(listener) => {
@@ -1018,26 +1041,40 @@ pub async fn serve(
                     listener,
                     app.into_make_service_with_connect_info::<SocketAddr>(),
                 )
+                .with_graceful_shutdown(internal_drain.wait())
                 .await
             }
-            None => std::future::pending().await,
+            None => Ok(()),
         }
     };
+    let listeners = async { tokio::try_join!(public, internal).map(|_| ()) };
     tokio::select! {
-        result = public => result,
-        result = internal => result,
-        () = reload_loop(certificate, events, reload_interval) => Ok(()),
+        result = listeners => result?,
+        () = reload_loop(certificate, events, reload_interval) => return Ok(()),
     }
+    // Drained: wait for the connections of the HTTPS listener.
+    drop(connections);
+    let _ = all_closed.recv().await;
+    Ok(())
 }
 
-/// Accept connections forever (accept errors are retried, as `axum::serve` does).
+/// Accept connections until `drain` fires (accept errors are retried, as `axum::serve` does).
 async fn accept_loop(
     listener: tokio::net::TcpListener,
     acceptor: tokio_rustls::TlsAcceptor,
     app: Router,
+    drain: crate::lifecycle::DrainSignal,
+    connections: tokio::sync::mpsc::Sender<()>,
 ) -> std::io::Result<()> {
+    let stop = drain.clone().wait();
+    tokio::pin!(stop);
     loop {
-        let (tcp, peer) = match listener.accept().await {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            // The listener is dropped on return: new connections are refused.
+            () = &mut stop => return Ok(()),
+        };
+        let (tcp, peer) = match accepted {
             Ok(accepted) => accepted,
             Err(e) => {
                 if !matches!(
@@ -1054,17 +1091,24 @@ async fn accept_loop(
         };
         let acceptor = acceptor.clone();
         let app = app.clone();
-        tokio::spawn(connection(tcp, peer, acceptor, app));
+        let drain = drain.clone();
+        let held = connections.clone();
+        tokio::spawn(async move {
+            connection(tcp, peer, acceptor, app, drain).await;
+            drop(held);
+        });
     }
 }
 
 /// One connection: TLS (served as HTTP/2 or HTTP/1.1 with upgrades), or plain HTTP (the
-/// healthcheck and a redirect to `https://`), told apart by the first byte.
+/// healthcheck and a redirect to `https://`), told apart by the first byte. When `drain` fires
+/// it shuts down gracefully (the request in progress finishes, then the connection closes).
 async fn connection(
     tcp: tokio::net::TcpStream,
     peer: SocketAddr,
     acceptor: tokio_rustls::TlsAcceptor,
     app: Router,
+    drain: crate::lifecycle::DrainSignal,
 ) {
     let _ = tcp.set_nodelay(true);
     let deadline = tokio::time::Instant::now() + HANDSHAKE_TIMEOUT;
@@ -1075,10 +1119,17 @@ async fn connection(
     }
     if first[0] != TLS_HANDSHAKE_RECORD {
         let service = TowerToHyperService::new(plain_service(app, peer));
-        if let Err(e) = hyper::server::conn::http1::Builder::new()
-            .serve_connection(TokioIo::new(tcp), service)
-            .await
-        {
+        let conn =
+            hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(tcp), service);
+        tokio::pin!(conn);
+        let result = tokio::select! {
+            result = conn.as_mut() => result,
+            () = drain.wait() => {
+                conn.as_mut().graceful_shutdown();
+                conn.await
+            }
+        };
+        if let Err(e) = result {
             tracing::trace!("plain HTTP connection on the HTTPS port: {e}");
         }
         return;
@@ -1095,10 +1146,17 @@ async fn connection(
         }
     };
     let service = TowerToHyperService::new(tls_service(app, peer));
-    if let Err(e) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-        .serve_connection_with_upgrades(TokioIo::new(stream), service)
-        .await
-    {
+    let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    let conn = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
+    tokio::pin!(conn);
+    let result = tokio::select! {
+        result = conn.as_mut() => result,
+        () = drain.wait() => {
+            conn.as_mut().graceful_shutdown();
+            conn.await
+        }
+    };
+    if let Err(e) = result {
         tracing::trace!("HTTPS connection: {e}");
     }
 }
@@ -1143,7 +1201,8 @@ pub fn authority_as_host<B>(req: &mut Request<B>) {
     }
 }
 
-/// Plain HTTP on the HTTPS port: `/healthcheck` is answered by the application, everything else
+/// Plain HTTP on the HTTPS port: `/healthcheck` (and `/healthcheck/ready`) is answered by the
+/// application, everything else
 /// is redirected to `https://` on the same host and port.
 fn plain_service(
     app: Router,
@@ -1158,7 +1217,7 @@ fn plain_service(
     tower::service_fn(move |mut req: Request<Incoming>| {
         let app = app.clone();
         async move {
-            if req.uri().path() == HEALTHCHECK_PATH
+            if matches!(req.uri().path(), HEALTHCHECK_PATH | READY_PATH)
                 && matches!(*req.method(), Method::GET | Method::HEAD)
             {
                 req.extensions_mut().insert(ConnectInfo(peer));

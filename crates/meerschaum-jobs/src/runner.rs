@@ -97,6 +97,12 @@ pub struct FakeService {
     pub stopped: bool,
     /// `MainPID` names a process which no longer exists.
     pub process_gone: bool,
+    /// `Result` of the last run (`success`, `signal`, `oom-kill`, ...; empty: never ran).
+    pub result: String,
+    /// `ExecMainCode` of the last run (`1` exited, `2` killed, `3` dumped core).
+    pub exec_main_code: String,
+    /// `ExecMainStatus` of the last run (its exit code, or the signal that ended it).
+    pub exec_main_status: String,
 }
 
 #[derive(Debug, Default)]
@@ -362,6 +368,9 @@ impl ProcessRunner for FakeSystemctl {
                                     "MainPID" => svc.main_pid.to_string(),
                                     "ActiveEnterTimestamp" => svc.active_enter.clone(),
                                     "InactiveEnterTimestamp" => svc.inactive_enter.clone(),
+                                    "Result" => svc.result.clone(),
+                                    "ExecMainCode" => svc.exec_main_code.clone(),
+                                    "ExecMainStatus" => svc.exec_main_status.clone(),
                                     _ => String::new(),
                                 };
                                 format!("{prop}={value}\n")

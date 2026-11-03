@@ -66,6 +66,9 @@ pub const DEFAULT_PROXY_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_HOST_RESPONSE_SECONDS: u64 = 300;
 /// The longest `api:host:response_seconds` (larger values are refused as overflowing).
 const MAX_HOST_RESPONSE_SECONDS: f64 = 1e9;
+/// The default `api:shutdown:grace_seconds`: how long a stopping server lets the requests in
+/// progress finish. Under Docker's default stop timeout (10 s, then `SIGKILL`).
+pub const DEFAULT_SHUTDOWN_GRACE_SECONDS: u64 = 8;
 
 /// `api:limits` (new in v5; v4 had none): the largest request body each kind of route accepts,
 /// enforced before the body is buffered (a declared `Content-Length` over the limit is refused at
@@ -240,6 +243,47 @@ pub fn parse_host_response_timeout(
     }
 }
 
+/// `api:shutdown:grace_seconds` (v5): how long a server told to stop (`SIGTERM` / `SIGINT`)
+/// waits for the requests in progress (default [`DEFAULT_SHUTDOWN_GRACE_SECONDS`]; `0`: stop at
+/// once, as before 5.0). A value that is not a number of seconds `>= 0` is an error.
+pub fn parse_shutdown_grace(value: Option<&Value>, errors: &mut Vec<String>) -> Duration {
+    let default = Duration::from_secs(DEFAULT_SHUTDOWN_GRACE_SECONDS);
+    let map = match value {
+        None | Some(Value::Null) => return default,
+        Some(Value::Map(map)) => map,
+        Some(other) => {
+            errors.push(format!(
+                "`api:shutdown` must be a mapping (`grace_seconds`); got {}.",
+                other.type_name()
+            ));
+            return default;
+        }
+    };
+    let value = match map.get("grace_seconds") {
+        None | Some(Value::Null) => return default,
+        Some(value) => value,
+    };
+    let seconds = match value {
+        Value::Int(n) => Some(*n as f64),
+        Value::Float(f) => Some(*f),
+        Value::Str(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|s| s.is_finite() && *s >= 0.0 && *s <= MAX_HOST_RESPONSE_SECONDS);
+    match seconds {
+        Some(seconds) => Duration::from_secs_f64(seconds),
+        None => {
+            errors.push(format!(
+                "`api:shutdown:grace_seconds` must be a number of seconds (0 or more); got {} \
+                 ({}).",
+                value.py_str(),
+                value.type_name()
+            ));
+            default
+        }
+    }
+}
+
 /// The name of the public preset (`api:permissions:preset: public`, `start api --public`).
 pub const PUBLIC_PRESET: &str = "public";
 
@@ -402,6 +446,9 @@ pub struct ServerConfig {
     /// its response headers (`504` after). `None`: no limit. Bodies, streams and websockets are
     /// never timed once the headers arrived.
     pub host_response_timeout: Option<Duration>,
+    /// `api:shutdown:grace_seconds`: how long a stopping server drains the requests in progress
+    /// (`0`: it stops at once).
+    pub shutdown_grace: Duration,
     /// Configuration that cannot be used (an `api:limits` or `api:host` value that is not a
     /// number): the server refuses to start with these ([`crate::state::AppStateBuilder::build`]).
     pub errors: Vec<String>,
@@ -660,6 +707,7 @@ impl ServerConfig {
                 Some(Duration::from_secs(DEFAULT_HOST_RESPONSE_SECONDS))
             }
         };
+        let shutdown_grace = parse_shutdown_grace(get(cfg, &["api", "shutdown"]), &mut errors);
         // `api:server:*` wins; `api:uvicorn:*` is honored with a deprecation notice when it
         // differs from the v4 default.
         let server_or_uvicorn = |key: &str, notices: &mut Vec<String>| -> Option<Value> {
@@ -914,6 +962,7 @@ impl ServerConfig {
             internal_addr: None,
             limits,
             host_response_timeout,
+            shutdown_grace,
             errors,
         }
     }

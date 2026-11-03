@@ -214,7 +214,7 @@ def show_plugin_source(selected, context, session):
     State('plugin-source-file', 'value'),
     State('plugin-source-context', 'data'),
     State('plugin-source-data', 'data', allow_optional=True),
-    State('plugin-source-editor', 'value', allow_optional=True),
+    State('plugin-source-draft', 'data', allow_optional=True),
     State('session-store', 'data'),
     prevent_initial_call=True,
 )
@@ -264,40 +264,6 @@ dash_app.clientside_callback(
     ClientsideFunction(namespace='mrsmPluginSource', function_name='render'),
     Output('plugin-source-rendered', 'children'),
     Input('plugin-source-data', 'data'),
-)
-
-
-@dash_app.callback(
-    Output('plugin-source-edit-tokens', 'data'),
-    Input('plugin-source-edit-request', 'data'),
-    State('plugin-source-context', 'data'),
-    State('session-store', 'data'),
-    prevent_initial_call=True,
-)
-def highlight_plugin_edit(request, context, session):
-    """Highlight bounded editor text after typing pauses, without writing the source file."""
-    from meerschaum.api.dash.plugin_sources import MAX_FILE_BYTES, source_tokens
-    if not isinstance(request, dict) or not isinstance(context, dict) or not may_author(session):
-        raise PreventUpdate
-    editing = context.get('edit')
-    source, path = request.get('source'), request.get('path')
-    if (context.get('kind') != 'installed' or not isinstance(editing, dict)
-            or editing.get('path') != path or not isinstance(path, str)
-            or not isinstance(source, str)):
-        raise PreventUpdate
-    try:
-        if len(source.encode('utf-8')) > MAX_FILE_BYTES:
-            raise PreventUpdate
-    except UnicodeError:
-        raise PreventUpdate
-    return source_tokens(path, source)
-
-
-dash_app.clientside_callback(
-    ClientsideFunction(namespace='mrsmPluginSource', function_name='highlight'),
-    Output('plugin-source-edit-rendered', 'children'),
-    Input('plugin-source-edit-tokens', 'data'),
-    prevent_initial_call=True,
 )
 
 

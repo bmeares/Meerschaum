@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fetch trusted Actions candidates and reuse full checks for an identical PR tree."""
+"""Fetch trusted Actions candidates and reuse full checks for an identical tree.
+
+Push and PR checks of a commit whose full release candidate is already running wait for it
+(bounded, on a hosted runner) instead of competing with it for the self-hosted runners, then
+reuse it only with the complete proof below. Anything else runs the ordinary checks.
+"""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +15,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 
 spec = importlib.util.spec_from_file_location('candidate_release_gate', Path(__file__).with_name('release_gate.py'))
 gate = importlib.util.module_from_spec(spec)
@@ -59,9 +65,35 @@ def download(run_id: str, output: Path, *names: str) -> None:
     subprocess.run(command, check=True)
 
 
+def in_flight(head: str) -> list[int]:
+    """Release candidate runs at this exact commit that have not finished yet."""
+    if not re.fullmatch('[0-9a-f]{40}', head):
+        raise ValueError('Use the full head SHA.')
+    runs = api(f'repos/{repository()}/actions/workflows/release.yaml/runs?head_sha={head}'
+               '&event=workflow_dispatch&per_page=100')['workflow_runs']
+    return sorted(run['id'] for run in runs
+                  if run.get('head_sha') == head and run.get('status') != 'completed')
+
+
+def wait_for_candidates(head: str, minutes: float, *, poll: float = 30.0,
+                        clock=time.monotonic, sleep=time.sleep) -> None:
+    """Wait at most `minutes` for candidates already running at `head`; never starts one.
+
+    A PR merge tree that differs from the head commit's tree can never reuse that candidate,
+    so it runs its ordinary checks at once.
+    """
+    head_tree = api(f'repos/{repository()}/commits/{head}')['commit']['tree']['sha']
+    if gate.artifacts.checkout()['tree'] != head_tree:
+        return
+    deadline = clock() + minutes * 60
+    while (pending := in_flight(head)) and clock() < deadline:
+        print(f'Waiting for release candidate run(s) {pending} at {head}.', flush=True)
+        sleep(poll)
+
+
 def reuse(head: str, output: Path) -> dict | None:
     if not re.fullmatch('[0-9a-f]{40}', head):
-        raise ValueError('Use the full PR head SHA.')
+        raise ValueError('Use the full head SHA.')
     runs = api(f'repos/{repository()}/actions/workflows/release.yaml/runs?head_sha={head}'
                '&event=workflow_dispatch&status=success&per_page=100')['workflow_runs']
     for run in runs:
@@ -88,9 +120,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--head-sha', required=True)
     parser.add_argument('--github-output', type=Path, required=True)
+    parser.add_argument('--wait-minutes', type=float, default=0.0,
+                        help='Wait this long for a candidate already running at this commit.')
     args = parser.parse_args()
     # An unavailable candidate falls back to the ordinary checks, never to a skip.
     try:
+        if args.wait_minutes > 0:
+            wait_for_candidates(args.head_sha, args.wait_minutes)
         with tempfile.TemporaryDirectory(prefix='mrsm-candidate-') as temp:
             record = reuse(args.head_sha, Path(temp))
     except (ValueError, OSError, KeyError, subprocess.SubprocessError):
@@ -102,7 +138,7 @@ def main() -> None:
         url = f'https://github.com/{repository()}/actions/runs/{record["run_id"]}'
         message = f'Full release checks reused for identical tree {record["source"]["tree"]}: {url}'
     else:
-        message = 'No complete, current candidate matches this merge tree; ordinary checks run.'
+        message = 'No complete, current candidate matches this tree; ordinary checks run.'
     print(message)
     if summary := os.environ.get('GITHUB_STEP_SUMMARY'):
         with Path(summary).open('a') as stream:

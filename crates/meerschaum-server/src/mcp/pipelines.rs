@@ -77,11 +77,11 @@ fn limit_arg(args: &Map, key: &str, default: usize, max: usize) -> Result<usize,
         Some(Value::Int(n)) if *n >= 1 => Ok(usize::try_from(*n).unwrap_or(max).min(max)),
         Some(Value::Str(s)) => match s.trim().parse::<usize>() {
             Ok(n) if n >= 1 => Ok(n.min(max)),
-            _ => Err(ToolError::type_error(format!(
+            _ => Err(ToolError::invalid_argument(format!(
                 "`{key}` must be a positive whole number."
             ))),
         },
-        Some(_) => Err(ToolError::type_error(format!(
+        Some(_) => Err(ToolError::invalid_argument(format!(
             "`{key}` must be a positive whole number."
         ))),
     }

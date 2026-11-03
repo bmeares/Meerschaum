@@ -43,51 +43,34 @@
 .plugin-source-alert:empty { display: none; }
 .plugin-source-alert .alert { margin: 0 0 8px; overflow-wrap: anywhere; }
 
-/* The editor: the code view's look, with a gutter of line numbers. */
-.plugin-source-code.plugin-source-editor-code {
-    display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start;
-    background: #17212b;
-}
+/* The editor (CodeMirror, `codemirror.bundle.js`): the code view's colors and size. */
+.plugin-source-code.plugin-source-editor-code { display: flex; flex-direction: column; background: #17212b; }
 .plugin-source-editor-code:focus-within { box-shadow: inset 0 0 0 1px #85caff; }
-.plugin-source-gutter {
-    margin: 0; padding: 12px 12px 12px 8px; min-width: calc(3ch + 20px); overflow: hidden;
-    border: 0; border-right: 1px solid #2f3d4b; background: #17212b; color: #6b7d8e;
-    font-family: var(--bs-font-monospace); font-size: 0.8rem; line-height: 1.5;
-    text-align: right; white-space: pre; user-select: none;
-}
-.plugin-source-editor {
-    display: block; width: 100%; min-width: 0; min-height: 12rem; max-height: 65vh; margin: 0;
-    padding: 12px 16px 12px 12px; border: 0; border-radius: 0; outline: none; resize: none;
-    background: #17212b; color: #dceaf6; caret-color: #85caff;
+.plugin-source-editor { min-width: 0; min-height: 12rem; }
+.plugin-source-editor .cm-editor { min-height: 12rem; max-height: 65vh; }
+.plugin-source-editor[aria-busy="true"] { background: #17212b; }
+/* Vim: pressed while Vim keybindings are on; Vim's status line matches the editor. */
+.plugin-source-vim.active, .plugin-source-vim[aria-pressed="true"] { color: #fff; background: #24425f; border-color: #85caff; }
+.plugin-source-editor .cm-vim-panel { padding: 2px 12px; background: #131c25; color: #dceaf6;
+    font-family: var(--bs-font-monospace); font-size: 0.8rem; }
+.plugin-source-editor .cm-vim-panel input { background: transparent; color: #dceaf6; border: 0; outline: none; }
+.plugin-source-editor .cm-fat-cursor { background: #85caff !important; color: #17212b !important; }
+/* Without the editor's script: a plain text area with the same look. */
+.plugin-source-plain-editor,
+.dbc_dark .plugin-source-editor-code textarea.plugin-source-plain-editor {
+    display: block; width: 100%; min-height: 12rem; height: 65vh; margin: 0; padding: 12px 16px;
+    border: 0; border-radius: 0; outline: none; resize: vertical;
+    background-color: #17212b !important; color: #dceaf6 !important; caret-color: #85caff;
     font-family: var(--bs-font-monospace); font-size: 0.8rem; line-height: 1.5;
     white-space: pre; overflow: auto; tab-size: 4;
 }
-.plugin-source-editor::selection { background: #24425f; }
-/* `dbc_dark.css` paints every textarea (with `!important`): keep the code view's colors. */
-.dbc_dark .plugin-source-editor-code textarea.plugin-source-editor {
-    background-color: #17212b !important; color: #dceaf6 !important;
-}
 /* The tree keeps the edited file open until Save or Cancel. */
 .plugin-source-browser.plugin-source-editing .plugin-source-file:not(.active) { opacity: 0.55; cursor: not-allowed; }
-.plugin-source-fullscreen .plugin-source-editor-code { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); }
-.plugin-source-fullscreen .plugin-source-editor, .plugin-source-fullscreen .plugin-source-gutter { height: 100%; max-height: none; }
-.plugin-source-fullscreen .plugin-source-editor-code { align-items: stretch; }
+.plugin-source-fullscreen .plugin-source-editor-code { flex: 1 1 auto; min-height: 0; }
+.plugin-source-fullscreen .plugin-source-editor { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.plugin-source-fullscreen .plugin-source-editor .cm-editor { flex: 1 1 auto; max-height: none; height: 100%; }
+.plugin-source-fullscreen .plugin-source-plain-editor { flex: 1 1 auto; height: auto; }
 .plugin-source-fullscreen .plugin-source-header { display: none; }
-.plugin-source-editor-surface { position: relative; min-width: 0; min-height: 0; }
-.plugin-source-code pre.plugin-source-editor-highlight {
-    position: absolute; inset: 0; margin: 0; padding: 12px 16px 12px 12px;
-    max-height: none; overflow: hidden; pointer-events: none;
-    font-family: var(--bs-font-monospace); font-size: 0.8rem; line-height: 1.5;
-    white-space: pre; tab-size: 4; color: #dceaf6;
-}
-.plugin-source-editor-highlight .source-line { display: inline; }
-.plugin-source-editor-highlight .source-line::before { display: none; }
-.plugin-source-editor-surface .plugin-source-editor,
-.dbc_dark .plugin-source-editor-surface textarea.plugin-source-editor {
-    position: relative; background: transparent !important; color: transparent !important;
-    caret-color: #85caff;
-}
-.plugin-source-editor-surface .plugin-source-editor::selection { background: #24425f80; }
 
 @media (max-width: 767.98px) {
     .plugin-new-button { min-width: 44px; min-height: 44px; }
@@ -95,5 +78,8 @@
     .plugin-new-modal .form-check { padding-top: 6px; padding-bottom: 6px; }
     .plugin-new-modal .modal-footer .btn { min-height: 44px; }
     .plugin-source-action { min-height: 44px; min-width: 44px; justify-content: center; }
-    .plugin-source-editor { max-height: 55vh; }
+    .plugin-source-editor .cm-editor { max-height: 55vh; }
+    /* With Save and Cancel, the file's path takes the first row instead of wrapping by letter. */
+    .plugin-source-preview-editing .plugin-source-toolbar code { flex: 1 0 calc(100% - 3rem); }
+    .plugin-source-plain-editor { height: 55vh; }
 }

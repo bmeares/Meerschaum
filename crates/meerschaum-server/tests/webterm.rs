@@ -1716,11 +1716,14 @@ const JOB_ENV: &[(&str, &str)] = &[
     ("MRSM__COMPOSE_PROJECT", "rc25"),
     // Every job's environment (`meerschaum_jobs::Job::env`): a shell with it has no editor.
     ("MRSM_NONINTERACTIVE", "true"),
+    // RC31: a server restarted by an unattended script carries it; a shell with it asks nothing
+    // (`python` exits at once, `bootstrap pipes` refuses to ask).
+    ("MRSM_NOASK", "1"),
 ];
 
 /// The shell prints each job variable (or `-` when unset) and a kept variable.
-const JOB_ENV_PROBE: &str = "echo ctx:${MRSM_DAEMON_ID--}:${MRSM_SYSTEMD_LOG_PATH--}:${MRSM_SYSTEMD_RESULT_PATH--}:${MRSM_SYSTEMD_STDIN_PATH--}:${MRSM_SYSTEMD_DELETE_JOB--}:${INVOCATION_ID--}:${JOURNAL_STREAM--}:${MRSM__COMPOSE_PROJECT--}:${MRSM_NONINTERACTIVE--} keep:$MRSM_RC25_KEEP\n";
-const JOB_ENV_CLEAN: &str = "ctx:-:-:-:-:-:-:-:-:- keep:kept";
+const JOB_ENV_PROBE: &str = "echo ctx:${MRSM_DAEMON_ID--}:${MRSM_SYSTEMD_LOG_PATH--}:${MRSM_SYSTEMD_RESULT_PATH--}:${MRSM_SYSTEMD_STDIN_PATH--}:${MRSM_SYSTEMD_DELETE_JOB--}:${INVOCATION_ID--}:${JOURNAL_STREAM--}:${MRSM__COMPOSE_PROJECT--}:${MRSM_NONINTERACTIVE--}:${MRSM_NOASK--} keep:$MRSM_RC25_KEEP\n";
+const JOB_ENV_CLEAN: &str = "ctx:-:-:-:-:-:-:-:-:-:- keep:kept";
 
 /// RC25: on a server that runs as a Meerschaum `systemd` job, a terminal's `mrsm` inherited the
 /// job's variables, wrapped itself as that job ("an interactive shell cannot start in a job") and
@@ -2083,4 +2086,23 @@ async fn the_mrsm_shell_stays_interactive_on_a_jobs_server() {
             .is_fifo()
     );
     drop(socket);
+}
+
+/// A draining server closes its terminals at once (`1001 Going Away`) and their plain shells
+/// end; without `["disconnect", 1]`, so the browser may reconnect once a server is back.
+#[tokio::test]
+async fn a_draining_server_closes_its_terminals() {
+    let root = tempfile::tempdir().unwrap();
+    let state = state(root.path());
+    let cfg = config(&state, sh(), None);
+    let addr = serve(webterm::routes(state.clone(), cfg)).await;
+    let mut socket = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut socket).await;
+    let pid = shell_pid(&mut socket).await;
+    state.lifecycle.begin_drain();
+    let (out, disconnected, code) = ending(&mut socket, Duration::from_secs(3)).await;
+    assert!(out.contains("server shutting down"), "{out:?}");
+    assert!(!disconnected);
+    assert_eq!(code, Some(1001));
+    assert_shell_ends(pid).await;
 }

@@ -33,7 +33,7 @@ See [Pipelines in Compose](https://meerschaum.io/reference/pipelines/compose/).
 
 #### A fuller web console
 
-Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
+Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. The Overview summarizes Pipes by sync status, connector and latest sync, and Pipelines by last-run status with a 24-hour run chart, beside Jobs and Recent runs. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
 
 Performance totals and charts cover the selected SQL history window; recent records are paged
 separately. Search and rank results, with cards on phones. Refreshes keep charts visible,
@@ -50,10 +50,10 @@ axes show readable UTC sync times using their declared precision.
 
 Jobs are grouped with running jobs first, show a one-word status and a Last Run time, and refresh in place. Job listings read every systemd job's state with one `systemctl` call.
 Connectors are grouped by type. Create a plugin from the console with the same choices as `bootstrap plugins`, then edit its source in place (administrators who may use the web terminal).
-The source editor keeps syntax highlighting while typing. Fullscreen sits beside Copy and hides the Source heading.
+Edit opens a code editor with highlighting, indentation, search, undo, and optional Vim keybindings (`:w` saves); it loads only when you choose Edit and never refreshes while you type. Fullscreen sits beside Copy and hides the Source heading. A plugin's connectors link to its source with an icon.
 Publish an installed plugin to a configured API repository, signing in with a username and password, client credentials, or an API key. Keep credentials temporarily in the browser session or save them to the selected connector.
 Copy token details includes the API key and every displayed field.
-The web terminal shows its tmux windows as tabs, and an API run as a job keeps its terminal's shell interactive.
+The web terminal shows its tmux windows as tabs, and an API run as a job keeps its terminal's shell interactive, even when an unattended script started it with `MRSM_NOASK`: `python` opens a REPL and `bootstrap` asks its questions.
 
 Relationship views read graph metadata without planning a sync. Plans bound the total chunk list
 per Pipe before allocating it, including disjoint dirty ranges.
@@ -106,6 +106,11 @@ Self-registration closes after the first administrator unless configured otherwi
 - Reduce memory use when syncing and reading JSON columns through pandas.
 - Return freed memory after each fetched chunk and sync: a 1,000,000-row SQLite fetch sync peaks at about 300 MiB instead of 460.
 - List a Pipeline's scheduled jobs without querying every job's status.
+- Drain the API on shutdown: it stops accepting connections, finishes requests in flight within `api.shutdown.grace_seconds` (8 by default, an upper bound), and ends streams at once. `GET /healthcheck/ready` returns 503 while it starts or drains.
+- Report a job killed by a signal as failed and name the signal, instead of showing a stale or successful result.
+- Report an error raised inside an MCP tool as that error and where it was raised, not as invalid arguments.
+- Stop the Python API host when its server is killed, and let the next API take over and stop a killed API's web terminal tmux server.
+- Find `sql` clients outside a service's reduced `PATH` (`~/.cargo/bin`, `~/.local/bin`, Meerschaum's virtual environments), and offer to install the flavor's Python client when none is found.
 
 See [Stack upgrades](https://meerschaum.io/reference/stack/upgrades/) and [sync metrics](https://meerschaum.io/reference/api-instance/sync-metrics/).
 

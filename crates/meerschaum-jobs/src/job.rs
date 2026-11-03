@@ -363,6 +363,15 @@ impl Job {
                 ));
             }
         }
+        // An API server drains its requests first (`api.shutdown.grace_seconds`): an explicit
+        // timeout wins, the default gives it the drain.
+        let timeout_seconds = match timeout_seconds {
+            Some(timeout) => Some(timeout),
+            None => {
+                let sysargs = self.sysargs();
+                Some(self.ctx.config.stop_timeout(&sysargs))
+            }
+        };
         let quit = self.daemon().quit(timeout_seconds);
         if quit.success {
             return SuccessTuple::ok(format!("Stopped {self}."));

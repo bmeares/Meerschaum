@@ -6911,6 +6911,28 @@ The 4.1 keys `api:uvicorn:ssl_keyfile` and `api:uvicorn:ssl_certfile` still work
 
 A reverse proxy that terminates TLS, such as Caddy or NGINX, remains a fine choice, for example to serve several sites on port 443: see the [example NGINX configuration](/reference/api-instance/nginx/). Behind a proxy, set `api:server:forwarded_allow_ips` and `api:server:proxy_headers` so that the server sees each client's address (see [Permissions](/reference/api-instance/permissions/)).
 
+### Stopping and Restarting
+
+When the API server gets `SIGTERM` or `SIGINT` (Ctrl-C, `docker stop`, `mrsm stop job`), it stops gracefully:
+
+- It stops accepting new connections at once.
+- Requests in progress finish. The server exits as soon as the last one is done.
+- An idle server exits immediately.
+- Event streams, log streams and websockets (the web terminal) close at once. A tmux session in the web terminal survives.
+- A second `SIGTERM` or `SIGINT` stops the server immediately.
+
+`api:shutdown:grace_seconds` caps how long the server waits for requests in progress (default `8`). It is an upper bound, not a delay. `0` stops at once without waiting.
+
+```yaml
+api:
+  shutdown:
+    grace_seconds: 8
+```
+
+The default stays under Docker's stop timeout (10 seconds, then `SIGKILL`). If you raise `grace_seconds`, also raise the time your supervisor waits: `stop_grace_period` in Docker Compose, `docker stop --time`, or `terminationGracePeriodSeconds` in Kubernetes. `mrsm stop job` waits for an API job's grace period plus 2 seconds before it signals again. With the local executor, an explicit `--timeout` wins.
+
+Behind a load balancer, probe `GET /healthcheck/ready`. It answers `503` with `"The server is shutting down."` once the server drains, and `"The server is starting."` until the web console's host is up. `GET /healthcheck` is unchanged, so uptime monitors keep matching it. A proxy that retries the next upstream on a refused connection or a `503` (NGINX's `proxy_next_upstream error http_503`) moves clients to another server during a restart.
+
 ### Docker
 
 If you're building your own Docker images, consider basing off the [`bmeares/meerschaum` Docker image](https://hub.docker.com/r/bmeares/meerschaum), as is done in the [`mrsm compose` template repository](https://github.com/bmeares/mrsm-compose-template/blob/main/docker/Dockerfile):
@@ -7563,9 +7585,9 @@ The console answers only signed-in visitors: a page shows the login form until y
 
 `/dash` is the Overview of the selected instance, with a tile for each part of it:
 
-- **Pipes**: how many are registered and how many are failing (their last sync failed); the failing count opens the Pipes page filtered to them;
-- **Pipelines**: each saved Pipeline with its last run (failed ones first), opening it on that run;
-- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state;
+- **Pipes**: how many are registered and when the latest one synced; how many synced, are failing (their last sync failed) or have no recorded sync, each count opening the Pipes page filtered to them; the connectors with the most pipes; and the latest syncs, failures first;
+- **Pipelines**: how many are saved and how many ran in the last 24 hours; how many are running, succeeded, failed or have not run, by each one's last run; their runs over the last 24 hours, hour by hour; and the last success and failure, each opening its Pipeline on that run;
+- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state, and how many run on a schedule;
 - **Recent runs**: the latest runs of the Syncing Engine, failures first. A job that syncs the same pipes again and again takes one row (`×12`).
 - **Performance**: sync counts, failures, average duration, and rows affected/s over the last 24 hours.
 
@@ -15428,7 +15450,7 @@ Existing Dash pages remain supported. Console callbacks require a session unless
 
 The web console is **the Plotly Dash app of v4.1**, ported onto the v5 façade and served by the Python API host at the same `/dash` paths (`/dash`, `/dash/pipes`, `/dash/jobs`, `/dash/login`, ...). It needs `pip install meerschaum[dash]` (the `full` Docker image has it). The standalone binary (`cargo install meerschaum`, the `rust` image) has no Python in it: it serves the API, `/docs`, `/engine/*`, MCP and the web terminal, and `/dash` shows a pointer page. The `api.permissions.routes.allowlist` route groups hide console pages as in v4. What moved and what is new:
 
-- **`/dash` is the Overview** (the instance's pipes and how many are failing, its saved Pipelines with their last runs, the jobs that are running, stalled, failing or stopped, and the recent runs). The dashboard you knew, with its key filters, command builder and web terminal, is the **Terminal** page at `/dash/terminal` (also `/dash/webterm`), and a bookmark to `/dash` with an action in its query (`?action=...`, `?connector_keys=...`) opens it.
+- **`/dash` is the Overview** (the instance's pipes by sync status, connector and latest sync; its saved Pipelines by last-run status with a 24-hour run chart; the jobs that are running, stalled, failing or stopped; and the recent runs). The dashboard you knew, with its key filters, command builder and web terminal, is the **Terminal** page at `/dash/terminal` (also `/dash/webterm`), and a bookmark to `/dash` with an action in its query (`?action=...`, `?connector_keys=...`) opens it.
 - **A top navigation on every console page** replaces the logo's page list and the dashboard's **More** menu: the logo opens the Overview, then Pipes, Pipelines, Jobs, Connectors, Plugins and Terminal, a **Pages** menu for plugin pages (grouped by `page_group`), the instance selector and a user menu with Users & Teams, Tokens, Settings and Sign out.
 - **The Pipes page is a table**, and each pipe has its own page at `/dash/pipes/<connector>/<metric>[/<location>]` with Overview, Data, Parameters, Definition, Lineage (its parents and children) and Runs tabs; editing happens in Edit mode, and destructive actions ask you to type the metric key. The cards remain behind the Terminal page's **Pipes** button, and `/dash/pipes?...` bookmarks keep working. **New pipe** (`/dash/pipes/new`) registers a pipe from the console. **Preview** and every sync of a SQL pipe read with the chosen connector's credentials, so whoever may register pipes can read what those connectors can; limit `pipes:register` / `pipes:define_sql` grants and connector `teams` where that matters. SQL checks refuse internal and hidden targets, but strict isolation requires separate connectors and database users.
 - **New pages:** the read-only **Connectors** page (connection settings only, every other value masked; administrators only under `--secure`) and the [`pipelines` pages](/reference/pipelines/visualization/#in-the-web-console). The Jobs page creates, restarts and deletes jobs, the Users page is a table where administrators manage users (instead of `edit users` / `delete users` in the web terminal), and `/dash/plugins` opens on the installed plugins, the repository listing being its **Repository** tab (`?tab=repository`). `/dash/users` and `/dash/plugins` need a signed-in session.
@@ -16286,7 +16308,7 @@ See [Pipelines in Compose](../reference/pipelines/compose.md).
 
 ### A fuller web console
 
-Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
+Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. The Overview summarizes Pipes by sync status, connector and latest sync, and Pipelines by last-run status with a 24-hour run chart, beside Jobs and Recent runs. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
 
 Performance totals and charts cover the selected SQL history window; recent records are paged
 separately. Search and rank results, with cards on phones. Refreshes keep charts visible,
@@ -16303,10 +16325,10 @@ axes show readable UTC sync times using their declared precision.
 
 Jobs are grouped with running jobs first, show a one-word status and a Last Run time, and refresh in place. Job listings read every systemd job's state with one `systemctl` call.
 Connectors are grouped by type. Create a plugin from the console with the same choices as `bootstrap plugins`, then edit its source in place (administrators who may use the web terminal).
-The source editor keeps syntax highlighting while typing. Fullscreen sits beside Copy and hides the Source heading.
+Edit opens a code editor with highlighting, indentation, search, undo, and optional Vim keybindings (`:w` saves); it loads only when you choose Edit and never refreshes while you type. Fullscreen sits beside Copy and hides the Source heading. A plugin's connectors link to its source with an icon.
 Publish an installed plugin to a configured API repository, signing in with a username and password, client credentials, or an API key. Keep credentials temporarily in the browser session or save them to the selected connector.
 Copy token details includes the API key and every displayed field.
-The web terminal shows its tmux windows as tabs, and an API run as a job keeps its terminal's shell interactive.
+The web terminal shows its tmux windows as tabs, and an API run as a job keeps its terminal's shell interactive, even when an unattended script started it with `MRSM_NOASK`: `python` opens a REPL and `bootstrap` asks its questions.
 
 Relationship views read graph metadata without planning a sync. Plans bound the total chunk list
 per Pipe before allocating it, including disjoint dirty ranges.
@@ -16359,6 +16381,11 @@ Self-registration closes after the first administrator unless configured otherwi
 - Reduce memory use when syncing and reading JSON columns through pandas.
 - Return freed memory after each fetched chunk and sync: a 1,000,000-row SQLite fetch sync peaks at about 300 MiB instead of 460.
 - List a Pipeline's scheduled jobs without querying every job's status.
+- Drain the API on shutdown: it stops accepting connections, finishes requests in flight within `api.shutdown.grace_seconds` (8 by default, an upper bound), and ends streams at once. `GET /healthcheck/ready` returns 503 while it starts or drains.
+- Report a job killed by a signal as failed and name the signal, instead of showing a stale or successful result.
+- Report an error raised inside an MCP tool as that error and where it was raised, not as invalid arguments.
+- Stop the Python API host when its server is killed, and let the next API take over and stop a killed API's web terminal tmux server.
+- Find `sql` clients outside a service's reduced `PATH` (`~/.cargo/bin`, `~/.local/bin`, Meerschaum's virtual environments), and offer to install the flavor's Python client when none is found.
 
 See [Stack upgrades](../reference/stack/upgrades.md) and [sync metrics](../reference/api-instance/sync-metrics.md).
 

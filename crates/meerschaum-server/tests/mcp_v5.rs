@@ -455,6 +455,54 @@ async fn sync_pipe_takes_parents_and_children() {
     assert!(bad.unwrap_err().contains("Invalid arguments"));
 }
 
+/// A `TypeError` raised while a tool runs (here from the pipe's own `verify` parameters, with
+/// valid arguments) is an execution error, not "Invalid arguments".
+#[tokio::test]
+async fn a_failure_inside_a_tool_is_not_reported_as_invalid_arguments() {
+    let f = fixture(|_| {});
+    let parameters = serde_json::from_value::<Value>(json!({
+        "columns": {"datetime": "dt"},
+        "verify": {"bound_years": 1},
+    }))
+    .unwrap()
+    .to_map();
+    let pipe = Pipe::builder("sql:x", "bounded")
+        .instance("sql:fixture")
+        .parameters(parameters)
+        .build()
+        .unwrap();
+    assert!(f.instance.register_pipe(&pipe).await.success);
+    let synced = f
+        .instance
+        .sync_pipe(
+            &pipe,
+            meerschaum_kernel::Frame::empty(),
+            &meerschaum_connector::SyncOptions::default(),
+        )
+        .await;
+    assert!(synced.success, "{synced:?}");
+    let err = call(
+        &f,
+        &admin(),
+        "get_pipe_stats",
+        json!({"connector_keys": "sql:x", "metric_key": "bounded"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(!err.contains("Invalid arguments"), "{err}");
+    assert!(err.starts_with("TypeError: "), "{err}");
+    assert!(err.contains("'years'"), "{err}");
+
+    // An argument the tool rejects is still reported as invalid arguments.
+    let bad = call(&f, &admin(), "list_runs", json!({"limit": "many"}))
+        .await
+        .unwrap_err();
+    assert!(
+        bad.starts_with("Invalid arguments for 'list_runs':"),
+        "{bad}"
+    );
+}
+
 #[tokio::test]
 async fn pipe_tools_refuse_the_internal_mrsm_keys() {
     let f = fixture(|_| {});

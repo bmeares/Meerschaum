@@ -89,7 +89,7 @@ def connector_plugin(row: Dict[str, Any]) -> Optional[str]:
 def source_parts(row: Dict[str, Any]) -> List[Any]:
     """
     Where a connector comes from (`Config`, `Default`, `Environment MRSM_SQL_FOO`, `Runtime`) and a
-    View source link to the plugin behind it. A plugin's connectors say nothing more: the plugin's
+    View source link (an icon; the label is its accessible name and tooltip) to the plugin behind it. A plugin's connectors say nothing more: the plugin's
     name is in their keys, or on its page.
     """
     parts = []
@@ -101,9 +101,10 @@ def source_parts(row: Dict[str, Any]) -> List[Any]:
     plugin = connector_plugin(row)
     if plugin:
         parts.append(dcc.Link(
-            [_icon('fa-code'), html.Span('View source')],
+            [_icon('fa-code'), html.Span('View source', className='visually-hidden')],
             href='/dash/plugins/installed/' + quote(plugin, safe=''),
             className='connectors-plugin',
+            title='View source',
         ))
     return parts
 

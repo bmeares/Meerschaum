@@ -27,7 +27,9 @@
 //!   `tmux.conf` written next to it ([`TMUX_CONF`]: the session's windows as tabs on a status
 //!   line at the top, mouse on, a long history, nothing else loaded; applied again when a
 //!   terminal attaches to a server that already runs) or the file `api:webterm:tmux:config`
-//!   names. A server this process started is stopped with the API ([`stop_owned_servers`]).
+//!   names. A server this process started is stopped with the API ([`stop_owned_servers`]); its
+//!   owner is recorded next to the socket ([`tmux_owner_path`]), so the next API on the root
+//!   takes over (and later stops) a server whose API was killed before it could.
 //! - **The shell** is `<this binary> -i <instance>` (the `mrsm` shell on the server's instance)
 //!   started with the server's connection/config environment. Job execution context (including
 //!   `MRSM_NONINTERACTIVE`, which every job's environment sets) and `COLUMNS`/`LINES`/`TMUX` are
@@ -115,6 +117,9 @@ const CONTROL_QUEUE: usize = 16;
 /// pane's process, scrubbing the environment); it is killed after that.
 const TMUX_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Why a draining server closes its terminals.
+const SHUTTING_DOWN: &str = "server shutting down";
+
 /// How often the thread that reaps a PTY's process checks whether it has exited.
 const EXIT_POLL: Duration = Duration::from_millis(200);
 
@@ -155,7 +160,10 @@ const JOB_CONTEXT_VARS: &[&str] = &[
 /// the job's name, its `systemd` paths and its Compose stamps (by their `static.toml` names),
 /// `MRSM_NONINTERACTIVE` (every job's environment sets it, `meerschaum_jobs::Job::env`; a shell
 /// that inherits it reads plain lines without its editor, so it draws no toolbar and never reports
-/// an idle prompt to the console's Exec button), and `JOB_CONTEXT_VARS`.
+/// an idle prompt to the console's Exec button), `MRSM_NOASK` (a server restarted by an unattended
+/// script carries it; a shell that inherits it answers every question with its default, so
+/// `python` exits at once and `bootstrap pipes` refuses to ask), and `JOB_CONTEXT_VARS`.
+/// A terminal is interactive by definition.
 pub fn job_context_vars() -> Vec<String> {
     let environment = &meerschaum_core::static_config::static_config().environment;
     let mut vars: Vec<String> = [
@@ -167,6 +175,7 @@ pub fn job_context_vars() -> Vec<String> {
         &environment.compose_project,
         &environment.compose_root,
         &environment.noninteractive,
+        &environment.noask,
     ]
     .into_iter()
     .cloned()
@@ -283,7 +292,11 @@ impl WebtermConfig {
         }
         let tmux = if state.config.webterm_tmux_enabled && tmux_available("tmux", &shell.env) {
             match dedicated_tmux(&state.config) {
-                Ok(tmux) => Some(tmux),
+                Ok(tmux) => {
+                    // A server left behind by a killed API on this root is this one's to stop.
+                    adopt_orphaned_server(&tmux);
+                    Some(tmux)
+                }
                 Err(error) => {
                     // A terminal without tmux still works; one on the user's own tmux server
                     // must never be started.
@@ -460,6 +473,12 @@ fn owned_servers() -> &'static std::sync::Mutex<std::collections::BTreeSet<PathB
     OWNED.get_or_init(Default::default)
 }
 
+/// The record next to a terminal's tmux socket naming the process (its id) that started the
+/// server there and stops it with itself: `tmux.owner` next to `tmux.sock`.
+pub fn tmux_owner_path(socket: &Path) -> PathBuf {
+    socket.with_extension("owner")
+}
+
 /// Whether a tmux server answers on `socket`.
 fn tmux_server_running(tmux: &TmuxSettings, socket: &Path) -> bool {
     std::process::Command::new(&tmux.binary)
@@ -483,13 +502,79 @@ fn claim_tmux_server(tmux: &TmuxSettings) -> bool {
         return false;
     };
     if tmux_server_running(tmux, socket) {
+        adopt_orphaned_server(tmux);
         return true;
     }
     owned_servers()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(socket.clone());
+    record_owner(socket);
     false
+}
+
+/// The process recorded as the owner of the tmux server on `socket` ([`tmux_owner_path`]).
+fn recorded_owner(socket: &Path) -> Option<u32> {
+    std::fs::read_to_string(tmux_owner_path(socket))
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+}
+
+/// Record this process as the owner of the tmux server on `socket`.
+fn record_owner(socket: &Path) {
+    let _ = write_private_file(
+        &tmux_owner_path(socket),
+        std::process::id().to_string().as_bytes(),
+    );
+}
+
+/// Whether the process `pid` no longer runs (never this process). Only Unix can tell (tmux
+/// runs nowhere else); elsewhere a recorded owner counts as running.
+fn owner_gone(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .is_some_and(|pid| {
+                matches!(
+                    rustix::process::test_kill_process(pid),
+                    Err(rustix::io::Errno::SRCH)
+                )
+            })
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+/// Take over the tmux server on the terminal's own socket when the API that started it is gone
+/// (killed, so it never stopped it): this process then stops it with itself
+/// ([`stop_owned_servers`]), and its sessions stay until then. A server whose recorded owner
+/// still runs (another API on the same root) or that has no record (started by an earlier
+/// release) is left alone. Called when the terminal is configured, so a server left behind is
+/// stopped even when no terminal opens, and again before each terminal starts. `true` when
+/// adopted.
+fn adopt_orphaned_server(tmux: &TmuxSettings) -> bool {
+    let Some(socket) = &tmux.socket else {
+        return false;
+    };
+    let Some(owner) = recorded_owner(socket) else {
+        return false;
+    };
+    if !owner_gone(owner) || !tmux_server_running(tmux, socket) {
+        return false;
+    }
+    owned_servers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(socket.clone());
+    record_owner(socket);
+    true
 }
 
 /// Apply Meerschaum's window list ([`TMUX_WINDOW_LIST`]) again to a tmux server that already runs
@@ -637,6 +722,9 @@ fn kill_tmux_server(socket: &Path) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
+    if recorded_owner(socket) == Some(std::process::id()) {
+        let _ = std::fs::remove_file(tmux_owner_path(socket));
+    }
 }
 
 /// The sockets of the tmux servers this process started (for tests).
@@ -1042,8 +1130,19 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
     let mut shell_job: Option<tokio::task::JoinHandle<Option<Value>>> = None;
     let mut shell_request: Option<String> = None;
     let mut shell_waiting: Option<String> = None;
+    // A draining server closes the terminal at once (`1001 Going Away`): the process on the PTY
+    // ends (a tmux session survives it), and the browser may reconnect once a server is back.
+    let drain = inner.state.lifecycle.signal().wait();
+    tokio::pin!(drain);
     loop {
         tokio::select! {
+            () = &mut drain => {
+                queue(&control, [
+                    reason_message(SHUTTING_DOWN),
+                    close_message(1001, SHUTTING_DOWN),
+                ]);
+                break;
+            }
             snapshot = joined(&mut shell_job), if shell_job.is_some() => {
                 shell_job = None;
                 let snapshot = snapshot.ok().flatten();
@@ -1704,6 +1803,8 @@ mod tests {
             "JOURNAL_STREAM",
             // Every job's environment sets it; the terminal's shell would lose its editor.
             "MRSM_NONINTERACTIVE",
+            // An unattended restart's environment; the shell would answer no question.
+            "MRSM_NOASK",
         ] {
             assert!(vars.iter().any(|var| var == name), "{name} must be removed");
         }

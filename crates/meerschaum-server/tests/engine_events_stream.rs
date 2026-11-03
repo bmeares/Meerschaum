@@ -1125,3 +1125,35 @@ async fn huge_waits_are_clamped() {
     assert!(ended, "{got:?}");
     assert_eq!(got.len(), 7);
 }
+
+/// A draining server ends its event streams at once instead of holding the drain open until
+/// the grace period ends (the client resumes elsewhere with `Last-Event-ID`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_draining_server_ends_its_streams() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = state(dir.path(), &dir.path().join("store.db")).await;
+    let app = meerschaum_server::app(state.clone());
+    let admin = login(&app, "admin", "pass", None).await;
+    let rows = run_rows("draining-run");
+    record_run(&app, &admin, "draining-run", false).await;
+    write_events(&app, &admin, &rows[..2]).await;
+    let (status, _, body) = open(
+        &app,
+        "/engine/runs/draining-run/events/stream",
+        &[("authorization", &admin)],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let reading = tokio::spawn(frames(body, 100, Duration::from_secs(20)));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let began = std::time::Instant::now();
+    state.lifecycle.begin_drain();
+    let (got, ended) = reading.await.unwrap();
+    assert!(ended, "{got:?}");
+    assert!(
+        began.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        began.elapsed()
+    );
+    assert_eq!(names(&got), ["run_started", "node_planned"]);
+}

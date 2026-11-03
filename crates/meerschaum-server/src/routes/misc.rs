@@ -1,5 +1,5 @@
 //! `/`, `/favicon.ico`, `/chaining`, `/info`, `/healthcheck` and (with `--debug`) `/id`
-//! (`api/routes/_index.py`, `_misc.py`).
+//! (`api/routes/_index.py`, `_misc.py`), plus v5's `/healthcheck/ready`.
 
 use axum::Router;
 use axum::http::{HeaderValue, StatusCode, header};
@@ -20,12 +20,13 @@ pub fn index_routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppSta
     app.route("/", get(index))
 }
 
-/// Register the `misc` route group. The public preset keeps only `/healthcheck` and
-/// `/favicon.ico` (unless the allowlist names `misc`).
+/// Register the `misc` route group. The public preset keeps only `/healthcheck`,
+/// `/healthcheck/ready` and `/favicon.ico` (unless the allowlist names `misc`).
 pub fn routes(app: Router<AppState>, cfg: &ServerConfig) -> Router<AppState> {
     let app = app
         .route("/favicon.ico", get(get_favicon))
-        .route("/healthcheck", get(get_healthcheck));
+        .route("/healthcheck", get(get_healthcheck))
+        .route(READY_PATH, get(get_ready));
     if !cfg.serves_full_misc() {
         return app;
     }
@@ -133,6 +134,46 @@ async fn get_healthcheck(ctx: Ctx) -> ApiResult {
         status,
         &json!({"success": success, "message": message}),
     ))
+}
+
+/// `GET /healthcheck/ready` (v5): whether this server should get new requests. `503` while it
+/// is still starting (the API host it needs is not up yet) or draining (shutting down: see
+/// [`crate::lifecycle`]), or when its instance does not answer; `/healthcheck` is unchanged.
+pub const READY_PATH: &str = "/healthcheck/ready";
+
+/// The message of `/healthcheck/ready` while the server drains.
+pub const SHUTTING_DOWN_MESSAGE: &str = "The server is shutting down.";
+
+/// The message of `/healthcheck/ready` while the server starts.
+pub const STARTING_MESSAGE: &str = "The server is starting.";
+
+async fn get_ready(ctx: Ctx) -> ApiResult {
+    let lifecycle = &ctx.state.lifecycle;
+    let refusal = if lifecycle.is_draining() {
+        Some(SHUTTING_DOWN_MESSAGE)
+    } else if lifecycle.is_starting() {
+        Some(STARTING_MESSAGE)
+    } else if !ctx
+        .state
+        .instance()
+        .test_connection()
+        .await
+        .unwrap_or(false)
+    {
+        Some("Failed to connect to instance connector.")
+    } else {
+        None
+    };
+    let (status, success, message) = match refusal {
+        Some(message) => (StatusCode::SERVICE_UNAVAILABLE, false, message),
+        None => (StatusCode::OK, true, "Success"),
+    };
+    let mut response = json_response(status, &json!({"success": success, "message": message}));
+    // A readiness answer is never cached by a proxy in front of the server.
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }
 
 async fn get_ids(ctx: Ctx) -> ApiResult {

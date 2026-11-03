@@ -268,6 +268,11 @@ default_api_config = {
         'host': '127.0.0.1',
         'port': 8765,
     },
+    ### v5: how long a stopping API server lets the requests in progress finish
+    ### (an upper bound: an idle server stops at once; 0 stops at once).
+    'shutdown': {
+        'grace_seconds': 8,
+    },
 }
 
 default_pipes_config = {

@@ -599,17 +599,48 @@ pub async fn terminate_child(
     child.kill().await
 }
 
-struct ChildProcess(tokio::process::Child);
+/// Set on the host's environment: its stdin is a pipe whose write end this server holds and never
+/// writes to. When this server dies without stopping the host (SIGKILL, the OOM killer), the
+/// kernel closes it, and the host (`meerschaum.api.host._app.exit_with_parent`) shuts down
+/// instead of running on as an orphan.
+pub const PARENT_PIPE_ENV: &str = "MRSM_API_HOST_PARENT_PIPE";
+
+/// A running host process and the write end of its stdin ([`PARENT_PIPE_ENV`]). Every launcher
+/// of the Python host spawns it with [`HostChild::spawn`].
+pub struct HostChild {
+    child: tokio::process::Child,
+    /// Held, never written, for as long as the process runs. Taken out of `child`, since
+    /// `Child::wait` closes the stdin it still holds.
+    #[cfg_attr(not(test), allow(dead_code))]
+    parent_pipe: Option<tokio::process::ChildStdin>,
+}
+
+impl HostChild {
+    /// Spawn `command` with its stdin a pipe this process holds and [`PARENT_PIPE_ENV`] set.
+    pub fn spawn(command: &mut tokio::process::Command) -> std::io::Result<HostChild> {
+        let mut child = command
+            .stdin(std::process::Stdio::piped())
+            .env(PARENT_PIPE_ENV, "1")
+            .spawn()?;
+        let parent_pipe = child.stdin.take();
+        Ok(HostChild { child, parent_pipe })
+    }
+
+    /// The child process (to take its `stdout`, say).
+    pub fn child_mut(&mut self) -> &mut tokio::process::Child {
+        &mut self.child
+    }
+}
 
 #[async_trait]
-impl HostProcess for ChildProcess {
+impl HostProcess for HostChild {
     async fn wait(&mut self) -> std::io::Result<Option<i32>> {
-        Ok(self.0.wait().await?.code())
+        Ok(self.child.wait().await?.code())
     }
     async fn kill(&mut self) -> std::io::Result<()> {
-        // SIGTERM first so the host runs its shutdown events (it stops the terminal process and
-        // its tmux session); SIGKILL only when it does not exit within the grace period.
-        terminate_child(&mut self.0, TERMINATE_GRACE).await
+        // SIGTERM first so the host runs its shutdown events; SIGKILL only when it does not exit
+        // within the grace period.
+        terminate_child(&mut self.child, TERMINATE_GRACE).await
     }
 }
 
@@ -623,6 +654,12 @@ impl HostLauncher for PythonHostLauncher {
         &self,
         endpoint: &HostEndpoint,
     ) -> std::io::Result<Box<dyn HostProcess>> {
+        Ok(Box::new(self.spawn_child(endpoint)?))
+    }
+}
+
+impl PythonHostLauncher {
+    fn spawn_child(&self, endpoint: &HostEndpoint) -> std::io::Result<HostChild> {
         // `python -c <guard> + runpy` instead of `python -m`: the guard refuses a `meerschaum`
         // this program cannot work with before anything of it is imported (importing a stale v4
         // would run its start-up), then the module runs as `-m` would run it.
@@ -630,7 +667,8 @@ impl HostLauncher for PythonHostLauncher {
             "{}\n_mrsm_guard()\nimport runpy\nrunpy.run_module('meerschaum.api.host', run_name='__main__', alter_sys=True)\n",
             meerschaum_core::python_guard::SCRIPT
         );
-        let child = tokio::process::Command::new(&self.python)
+        HostChild::spawn(
+            tokio::process::Command::new(&self.python)
             .args([
                 meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
                 "-c",
@@ -647,9 +685,8 @@ impl HostLauncher for PythonHostLauncher {
                 "Then restart `mrsm start api` (or it is retried within 5 minutes, and when the plugins change).",
             )
             .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-            .kill_on_drop(true)
-            .spawn()?;
-        Ok(Box::new(ChildProcess(child)))
+            .kill_on_drop(true),
+        )
     }
 }
 
@@ -1633,6 +1670,57 @@ mod tests {
         assert_eq!(host_config(&cfg)["server_url"], "http://127.0.0.1:40123");
     }
 
+    /// The host's stdin is a pipe whose write end this server holds (`PARENT_PIPE_ENV`), and
+    /// waiting for the host never closes it: only this server going away does, which is how a
+    /// host outlives no server that was SIGKILLed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_host_holds_a_pipe_that_closes_only_with_the_server() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        let script = dir.path().join("fake-python");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho \"pipe=$MRSM_API_HOST_PARENT_PIPE\" > \"$FAKE_OUT\"\ncat > /dev/null\necho eof >> \"$FAKE_OUT\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let launcher = PythonHostLauncher {
+            python: script,
+            env: vec![("FAKE_OUT".into(), out.display().to_string())],
+        };
+        let mut proc = launcher
+            .spawn_child(&HostEndpoint::from(dir.path().join("host.sock")))
+            .unwrap();
+        let read = || std::fs::read_to_string(&out).unwrap_or_default();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !read().contains("pipe=") {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the host never started"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(read().trim(), "pipe=1");
+        // Waiting on the host (what the supervisor does all along) leaves the pipe open.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), proc.wait())
+                .await
+                .is_err(),
+            "the host saw end of file while its server runs: {}",
+            read()
+        );
+        // What the kernel does when this server dies.
+        drop(proc.parent_pipe.take());
+        let code = tokio::time::timeout(Duration::from_secs(10), proc.wait())
+            .await
+            .expect("the host exits when its server is gone")
+            .unwrap();
+        assert_eq!(code, Some(0));
+        assert!(read().contains("eof"), "{}", read());
+    }
+
     #[test]
     fn endpoints_become_host_arguments_and_environment() {
         let unix = HostEndpoint::from(PathBuf::from("/r/host.sock"));
@@ -1696,12 +1784,12 @@ mod tests {
             "trap 'touch {}; exit 0' TERM; while true; do sleep 0.05; done",
             marker.display()
         );
-        let child = tokio::process::Command::new("sh")
-            .args(["-c", &script])
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let mut process = ChildProcess(child);
+        let mut process = HostChild::spawn(
+            tokio::process::Command::new("sh")
+                .args(["-c", &script])
+                .kill_on_drop(true),
+        )
+        .unwrap();
         // Let the shell install its trap.
         tokio::time::sleep(Duration::from_millis(300)).await;
         let started = std::time::Instant::now();

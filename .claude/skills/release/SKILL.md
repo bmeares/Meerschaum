@@ -123,10 +123,16 @@ Dispatch the single release candidate workflow on the exact branch commit:
 
 ```bash
 SHA=$(git rev-parse HEAD)
-gh workflow run release.yaml --ref v5
+git push origin v5 && gh workflow run release.yaml --ref v5   # dispatch immediately after the push
 # Optional: add -f experimental=true for the separately gated Linux cp314t wheel.
 gh run list --workflow release.yaml --limit 3 --json databaseId,status,conclusion,headSha
 ```
+
+Do not cancel the push/PR checks of this commit for runner capacity: their hosted `changes` job
+sees the running candidate, waits for it and then reuses it (no self-hosted time), so they finish
+green right after the candidate. Only a run that had already started its ordinary checks before
+the dispatch existed needs `gh run cancel` + `gh run rerun`. A push run superseded by its PR run
+(shared concurrency group) can be re-run any time after the candidate; it reuses it in a minute.
 
 For a final release use `--ref main` after its reviewed PR merge. The candidate runs reusable
 `wheels.yaml`, full `rust.yaml`, full `pytest.yaml` against the already-built release wheel/CLI,
@@ -297,6 +303,9 @@ gh workflow run docker-build.yaml --ref v5 -f candidate_run_id=SDK_RUN_ID -f siz
 # After the Docker candidate passes, and publication is authorized:
 gh workflow run docker-build.yaml --ref v5 -f publish=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID -f size_gate=enforce
 ```
+
+Dispatch the Docker candidate as soon as the SDK candidate succeeds (about 9 minutes on
+one self-hosted runner) and do the dev host upgrade and other preparation while it runs.
 
 The first run loads and tests every selected architecture, enforces the existing
 size limits, runs the offline facade smoke, and records immutable image IDs in

@@ -382,6 +382,10 @@ fn without_v5_defaults(spec: J) -> J {
                 {
                     dash.remove("callbacks_require_session");
                 }
+                // `api.shutdown.grace_seconds` (rc31: graceful shutdown) is v5-only.
+                if let Some(api) = parsed.get_mut("api").and_then(J::as_object_mut) {
+                    api.remove("shutdown");
+                }
                 // Intentional defaults: Polars output and closed registration after the
                 // first administrator, with role-based actions (RC15-R3-001, AC1/AC2).
                 if let Some(meerschaum) = parsed.get_mut("meerschaum").and_then(J::as_object_mut) {

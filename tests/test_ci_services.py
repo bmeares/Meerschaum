@@ -134,6 +134,36 @@ def test_startup_collision_never_cleans_up_the_existing_project(tmp_path, monkey
     assert not any('down' in cmd or 'up' in cmd for cmd in calls)
 
 
+@pytest.mark.parametrize('shard, extra, expected', [
+    ('core', [], ['--dist', 'loadfile']),
+    ('core', ['--', '-k', 'console'], ['--dist', 'loadfile', '-k', 'console']),
+    ('core', ['--', '--dist', 'load'], ['--dist', 'loadfile', '--dist', 'load']),
+])
+def test_each_lane_runs_with_its_own_xdist_scheduler(tmp_path, monkeypatch, shard, extra, expected):
+    """The core lane groups by file so one worker never holds the whole browser suite."""
+    launched = []
+
+    class Child:
+        pid = 0
+        def wait(self, timeout=None): return 0
+        def poll(self): return 0
+
+    def popen(command, **kwargs):
+        launched.append(command)
+        return Child()
+
+    monkeypatch.setattr(services.subprocess, 'Popen', popen)
+    args = argparse.Namespace(root=tmp_path / 'owned', shard=shard, workers=None, pytest_args=extra)
+    assert services.run(args) == 0
+    assert launched == [[str(services.REPO / 'scripts' / 'test.sh'), *expected]]
+
+
+def test_only_the_core_lane_changes_the_default_scheduler():
+    assert {name: spec.get('dist', 'load') for name, spec in SHARDS.items()} == {
+        'core': 'loadfile', 'oracle': 'load', 'mssql-valkey': 'load', 'postgres': 'load', 'mysql': 'load',
+    }
+
+
 def test_partial_startup_failure_cleans_only_the_new_project(tmp_path, monkeypatch):
     calls = []
 

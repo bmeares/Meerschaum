@@ -413,8 +413,21 @@ async fn monitor_socket(state: AppState, name: String, mut socket: WebSocket) {
         let _ = socket.send(Message::Close(None)).await;
         return;
     };
+    let drain = state.lifecycle.signal().wait();
+    tokio::pin!(drain);
     loop {
         tokio::select! {
+            // A draining server closes the socket at once (`1001 Going Away`): the client
+            // reconnects to another server.
+            () = &mut drain => {
+                let _ = socket
+                    .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                        code: 1001,
+                        reason: "The server is shutting down.".into(),
+                    })))
+                    .await;
+                return;
+            }
             event = monitor.events.recv() => match event {
                 Some(LogEvent::Line(text)) => {
                     if socket.send(Message::Text(text.into())).await.is_err() {

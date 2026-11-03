@@ -735,3 +735,67 @@ async fn certificates_reload_when_their_files_change() {
     })
     .await;
 }
+
+/// A draining HTTPS server (`tls::serve_until`): both listeners stop accepting, the request in
+/// progress over TLS finishes, and serving ends once no connection is left.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_draining_https_server_finishes_the_request_in_progress() {
+    let dir = tempfile::tempdir().unwrap();
+    let pki = Pki::new();
+    let (key, cert, _) = pki.leaf(&["localhost"]);
+    let https = Https::new(write_pair(dir.path(), &key, &cert))
+        .unwrap()
+        .with_internal_listener()
+        .unwrap();
+    let internal = https.internal_addr().expect("the internal listener");
+    let mut cfg = common::config(dir.path());
+    cfg.no_auth = true;
+    let state = common::state_with(cfg).0;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = meerschaum_server::app(state.clone());
+    let serving = tokio::spawn(meerschaum_server::tls::serve_until(
+        listener,
+        app,
+        https,
+        state.lifecycle.signal(),
+    ));
+    let mut stream = tls(
+        addr,
+        &connector(Some(&pki.root()), &[b"http/1.1"], ALL_VERSIONS),
+    )
+    .await
+    .unwrap();
+    let ping = r#"{"jsonrpc": "2.0", "id": 7, "method": "ping"}"#;
+    stream
+        .write_all(
+            format!(
+                "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                ping.len(),
+                &ping[..10]
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    stream.flush().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    state.lifecycle.begin_drain();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(TcpStream::connect(addr).await.is_err());
+    assert!(TcpStream::connect(internal).await.is_err());
+    assert!(!serving.is_finished());
+    stream.write_all(&ping.as_bytes()[10..]).await.unwrap();
+    let mut out = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut out))
+        .await
+        .expect("an answer")
+        .ok();
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.starts_with("HTTP/1.1 200"), "{text}");
+    tokio::time::timeout(Duration::from_secs(5), serving)
+        .await
+        .expect("the server kept serving")
+        .unwrap()
+        .unwrap();
+}

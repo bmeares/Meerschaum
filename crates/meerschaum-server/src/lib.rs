@@ -28,6 +28,7 @@
 //! | [`mcp`] | The MCP server (`/mcp`, stdio) and its federation with the API host |
 //! | [`tls`] | Native HTTPS (`--keyfile` / `--certfile`): rustls, HTTP/2, certificate reloads |
 //! | [`sql_guard`] | What non-administrators may put in a pipe's SQL definition through the API |
+//! | [`lifecycle`] | Starting, serving and draining: graceful shutdown, `/healthcheck/ready` |
 //!
 //! All pipe operations go through `Arc<dyn InstanceConnector>`.
 
@@ -45,6 +46,7 @@ pub mod execute_access;
 pub mod execute_policy;
 pub mod host;
 pub mod json;
+pub mod lifecycle;
 pub mod mcp;
 pub mod native;
 pub mod openapi;
@@ -118,6 +120,10 @@ pub async fn serve_with_mcp_and_console(
 /// [`serve_with_mcp_and_console`] with HTTPS made ready by the caller ([`tls::prepare`]): `Some`
 /// serves HTTPS on `host:port` (and plain HTTP on its loopback-only internal listener), `None`
 /// plain HTTP on `host:port`, exactly as without TLS.
+///
+/// Once the state's drain begins ([`lifecycle::Lifecycle::begin_drain`]) every listener stops
+/// accepting, requests in progress finish, idle connections close, and the future completes
+/// when no connection is left. The caller bounds that wait (`api:shutdown:grace_seconds`).
 pub async fn serve_with_tls(
     state: AppState,
     mcp: std::sync::Arc<mcp::McpServer>,
@@ -136,6 +142,7 @@ pub async fn serve_with_tls(
     )
     .await;
     let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let drain = state.lifecycle.signal();
     let app = app_with_mcp_and_console(state, mcp, console);
     match https {
         None => {
@@ -143,9 +150,10 @@ pub async fn serve_with_tls(
                 listener,
                 app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
+            .with_graceful_shutdown(drain.wait())
             .await
         }
-        Some(https) => tls::serve(listener, app, https).await,
+        Some(https) => tls::serve_until(listener, app, https, drain).await,
     }
 }
 

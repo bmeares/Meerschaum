@@ -141,6 +141,8 @@ pub struct HostProxy {
     body_limit: Option<usize>,
     /// `api:host:response_seconds`: the longest wait for the host's response headers.
     response_timeout: Option<Duration>,
+    /// Fires when the server drains: proxied event streams and upgraded connections end then.
+    drain: crate::lifecycle::DrainSignal,
 }
 
 impl std::fmt::Debug for HostProxy {
@@ -271,6 +273,7 @@ impl HostProxy {
             response_timeout: Some(Duration::from_secs(
                 crate::config::DEFAULT_HOST_RESPONSE_SECONDS,
             )),
+            drain: crate::lifecycle::DrainSignal::never(),
         }
     }
 
@@ -293,6 +296,13 @@ impl HostProxy {
     ) -> HostProxy {
         self.body_limit = body_limit;
         self.response_timeout = response_timeout;
+        self
+    }
+
+    /// This proxy ending its long-lived responses (event streams, upgraded connections) when
+    /// `drain` fires ([`crate::state::AppStateBuilder::build`] passes the server's).
+    pub fn with_drain(mut self, drain: crate::lifecycle::DrainSignal) -> HostProxy {
+        self.drain = drain;
         self
     }
 
@@ -539,12 +549,17 @@ impl HostProxy {
                 return bad_gateway("The API host switched protocols without an upgrade request.");
             };
             let host_upgrade = hyper::upgrade::on(&mut resp);
+            let drain = self.drain.clone();
             tokio::spawn(async move {
                 match tokio::try_join!(client_upgrade, host_upgrade) {
                     Ok((client, host)) => {
                         let mut client = TokioIo::new(client);
                         let mut host = TokioIo::new(host);
-                        let _ = tokio::io::copy_bidirectional(&mut client, &mut host).await;
+                        // A drain ends the bridge (both sides are closed as they are dropped).
+                        tokio::select! {
+                            _ = tokio::io::copy_bidirectional(&mut client, &mut host) => {}
+                            () = drain.wait() => {}
+                        }
                     }
                     Err(e) => tracing::warn!("Failed to bridge an upgraded connection: {e}"),
                 }
@@ -555,6 +570,19 @@ impl HostProxy {
 
         let (mut parts, body) = resp.into_parts();
         strip_hop_by_hop(&mut parts.headers, false);
+        // An event stream would hold a drain open until its grace ends: it ends at the drain.
+        let event_stream = parts
+            .headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.trim_start().starts_with("text/event-stream"));
+        if event_stream {
+            let stream = crate::lifecycle::until_drain(
+                Body::new(body).into_data_stream(),
+                self.drain.clone(),
+            );
+            return Response::from_parts(parts, Body::from_stream(stream));
+        }
         Response::from_parts(parts, Body::new(body))
     }
 }

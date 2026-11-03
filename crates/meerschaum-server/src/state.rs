@@ -103,6 +103,8 @@ pub struct Inner {
     access_cache: crate::access::AccessCache,
     /// Serializes the first account's registration (an empty user store).
     pub(crate) first_user: tokio::sync::Mutex<()>,
+    /// Starting, serving or draining ([`crate::lifecycle`]).
+    pub lifecycle: Arc<crate::lifecycle::Lifecycle>,
 }
 
 impl Deref for AppState {
@@ -180,6 +182,7 @@ impl AppStateBuilder {
         // The proxy forwards with this server's `api:limits:proxy_bytes` and
         // `api:host:response_seconds`; its supervisor probes the host's health with internal
         // tokens signed by this server's secret.
+        let lifecycle = Arc::new(crate::lifecycle::Lifecycle::default());
         let host = self.host.map(|host| {
             if let Some(supervisor) = host.supervisor() {
                 supervisor.set_internal_secret(&secret);
@@ -187,7 +190,8 @@ impl AppStateBuilder {
             Arc::new(
                 host.as_ref()
                     .clone()
-                    .with_limits(self.config.limits.proxy, self.config.host_response_timeout),
+                    .with_limits(self.config.limits.proxy, self.config.host_response_timeout)
+                    .with_drain(lifecycle.signal()),
             )
         });
         let rate_limiter = RateLimiter::new(&self.config);
@@ -209,6 +213,7 @@ impl AppStateBuilder {
             instances: Mutex::new(HashMap::new()),
             access_cache: Default::default(),
             first_user: tokio::sync::Mutex::new(()),
+            lifecycle,
         })))
     }
 }

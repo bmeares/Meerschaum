@@ -304,7 +304,7 @@ def source_action(action, session, text='VALUE = 2\\n', editing=True):
         {'id': 'plugin-source-context', 'property': 'data', 'value': {'kind': 'installed', 'name': 'rc28_cb'}},
         {'id': 'plugin-source-data', 'property': 'data',
          'value': {'path': 'rc28_cb.py', 'digest': digest, 'editing': editing}},
-        {'id': 'plugin-source-editor', 'property': 'value', 'value': text},
+        {'id': 'plugin-source-draft', 'property': 'data', 'value': text},
         {'id': 'session-store', 'property': 'data', 'value': session},
     ])
 

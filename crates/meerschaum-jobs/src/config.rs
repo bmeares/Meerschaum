@@ -107,6 +107,10 @@ pub struct JobsConfig {
     pub startup: crate::startup::StartupConfig,
     /// `jobs.schedule.jitter_seconds`: the fixed per-job offset bound of `-s` schedules (v5).
     pub schedule_jitter_seconds: f64,
+    /// `api.shutdown.grace_seconds` (default 8): how long a stopping API server drains its
+    /// requests. `stop` waits that long for an API job before it escalates
+    /// ([`JobsConfig::stop_timeout`]).
+    pub api_shutdown_grace_seconds: f64,
 }
 
 impl Default for JobsConfig {
@@ -129,9 +133,16 @@ impl Default for JobsConfig {
             detached: crate::detached::Limits::default(),
             startup: crate::startup::StartupConfig::default(),
             schedule_jitter_seconds: 0.0,
+            api_shutdown_grace_seconds: DEFAULT_API_SHUTDOWN_GRACE_SECONDS,
         }
     }
 }
+
+/// The default `api.shutdown.grace_seconds` (the server's `DEFAULT_SHUTDOWN_GRACE_SECONDS`).
+pub const DEFAULT_API_SHUTDOWN_GRACE_SECONDS: f64 = 8.0;
+
+/// How much longer than its drain `stop` waits for an API job (its cleanup after the drain).
+const API_STOP_MARGIN_SECONDS: f64 = 2.0;
 
 impl JobsConfig {
     /// Read the values from a config registry (missing or ill-typed keys keep their defaults).
@@ -227,7 +238,31 @@ impl JobsConfig {
         {
             out.schedule_jitter_seconds = n;
         }
+        if let Some(n) = get(&["api", "shutdown", "grace_seconds"])
+            .filter(|v| !matches!(v, Value::Bool(_)))
+            .and_then(|v| v.as_f64())
+            .filter(|n| n.is_finite() && *n >= 0.0)
+        {
+            out.api_shutdown_grace_seconds = n;
+        }
         out
+    }
+
+    /// How long `stop` waits for a job to quit before it escalates (SIGTERM, then SIGKILL; a
+    /// `systemctl stop`): `jobs.timeout_seconds`, or, for an API server (`start api`), long
+    /// enough for its drain (`api.shutdown.grace_seconds` plus 2 s), since a second signal
+    /// stops a draining server at once.
+    pub fn stop_timeout(&self, sysargs: &[String]) -> Seconds {
+        let is_api = sysargs.len() >= 2 && sysargs[0] == "start" && sysargs[1] == "api";
+        if !is_api || self.api_shutdown_grace_seconds <= 0.0 {
+            return self.timeout_seconds;
+        }
+        let drain = self.api_shutdown_grace_seconds + API_STOP_MARGIN_SECONDS;
+        if drain > self.timeout_seconds.as_f64() {
+            Seconds::Float(drain)
+        } else {
+            self.timeout_seconds
+        }
     }
 }
 
@@ -385,5 +420,28 @@ mod tests {
         let paths = JobPaths::from_config(&config);
         assert!(paths.jobs_dir.ends_with("jobs"));
         assert!(paths.logs_dir.ends_with("logs"));
+    }
+
+    /// `stop` gives an API server job its drain (`api:shutdown:grace_seconds`) before it
+    /// escalates: the second signal would stop the server at once.
+    #[test]
+    fn api_jobs_get_their_drain_before_stop_escalates() {
+        let args = |line: &str| line.split(' ').map(str::to_string).collect::<Vec<_>>();
+        let mut jobs = JobsConfig::default();
+        assert_eq!(
+            jobs.stop_timeout(&args("sync pipes --loop")),
+            Seconds::Int(4)
+        );
+        assert_eq!(
+            jobs.stop_timeout(&args("start api --no-auth -p 8000")),
+            Seconds::Float(10.0)
+        );
+        jobs.api_shutdown_grace_seconds = 0.0;
+        assert_eq!(jobs.stop_timeout(&args("start api")), Seconds::Int(4));
+        jobs.api_shutdown_grace_seconds = 1.0;
+        assert_eq!(jobs.stop_timeout(&args("start api")), Seconds::Int(4));
+        jobs.timeout_seconds = Seconds::Int(60);
+        jobs.api_shutdown_grace_seconds = 30.0;
+        assert_eq!(jobs.stop_timeout(&args("start api")), Seconds::Int(60));
     }
 }

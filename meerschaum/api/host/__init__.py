@@ -44,6 +44,9 @@ TOKEN_HEADER: str = 'x-mrsm-host-token'
 TOKEN_CLAIM: str = 'mrsm_host'
 PROXY_TOKEN_ENV: str = 'MRSM_API_HOST_PROXY_TOKEN'
 PROXY_TOKEN_HEADER: str = 'x-mrsm-host-proxy-token'
+#: Set by the Rust server, which holds the write end of the host's stdin: the host exits when that
+#: pipe closes (the server died without stopping it).
+PARENT_PIPE_ENV: str = 'MRSM_API_HOST_PARENT_PIPE'
 
 __all__ = (
     'build_app',

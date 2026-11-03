@@ -48,10 +48,24 @@ def test_overview_tiles_link_to_their_pages(server, tab):
     page = tab.page
     page.wait_for_selector('#overview-pipes-total')
     assert int(page.inner_text('#overview-pipes-total').replace(',', '')) >= 2
-    ### Saved Pipelines with their last run; the run is in Recent runs too.
-    _wait_text(page, '#overview-pipelines-list', "'overview-line'")
+    ### The pipes by sync status, each linked to the Pipes page filtered by it.
+    page.wait_for_selector('#overview-pipes-ok')
+    assert int(page.inner_text('#overview-pipes-ok .overview-job-count')) >= 2
+    assert page.get_attribute('#overview-pipes-failing', 'href') == '/dash/pipes?status=failing'
+    ### The latest syncs link to their pipes, and each connector to the pipes it feeds.
+    page.wait_for_selector('#overview-pipes-latest .overview-pipe-link')
+    assert page.get_attribute('#overview-pipes-latest .overview-pipe-link', 'href').startswith('/dash/pipes/')
+    chips = page.locator('#overview-pipes-connectors a:not(.overview-chip-more)')
+    assert chips.count() >= 1
+    assert all(href.startswith('/dash/pipes?connector_keys=') for href in chips.evaluate_all(
+        'links => links.map(link => link.getAttribute("href"))'))
+    ### The saved Pipelines by their last run, without a list of them; the run is in Recent runs.
+    _wait_text(page, '#overview-pipelines-succeeded', '1')
+    assert page.locator('#overview-pipelines-list').count() == 0
+    _wait_text(page, '#overview-pipelines-runs', 'run')
+    assert page.locator('#overview-pipelines-history .overview-hour').count() == 24
+    _wait_text(page, '#overview-pipelines-last-success', 'overview-line')
     _wait_text(page, '#overview-runs-list', "'overview-line'")
-    assert 'Succeeded' in page.inner_text('#overview-pipelines-list').title()
     page.wait_for_selector('#overview-jobs-total')
     for state in ('running', 'stalled', 'failing', 'stopped'):
         assert page.locator(f'#overview-jobs-{state}').count() == 1, state
@@ -59,8 +73,8 @@ def test_overview_tiles_link_to_their_pages(server, tab):
     ### Not an empty instance: the tiles, not the empty state.
     assert not page.locator('#overview-empty').is_visible()
 
-    ### Each tile opens its page; a Pipeline opens on its last run.
-    link = page.locator('#overview-pipelines-list a', has_text='overview-line').first
+    ### Each tile opens its page; the last success opens its Pipeline on that run.
+    link = page.locator('#overview-pipelines-last-success a')
     assert 'run_id=overview-line-' in link.get_attribute('href')
     link.click()
     page.wait_for_function("location.pathname === '/dash/pipelines/overview-line'")
@@ -220,9 +234,12 @@ def test_overview_and_connectors_fit_a_phone(server, browser):
         tab.login(path='/dash')
         page = tab.page
         page.wait_for_selector('#overview-pipes-total')
-        _wait_text(page, '#overview-pipelines-list', "'overview-line'")
+        _wait_text(page, '#overview-pipelines-last-success', 'overview-line')
         _wait_text(page, '#overview-runs-list', "'overview-line'")
         page.wait_for_selector('#overview-jobs-total')
+        page.wait_for_selector('#overview-pipes-latest')
+        ### Nothing is wider than the phone.
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
         ### An opened run of several pipes lists its pipes' links (the markup of
         ### `overview.build_runs_body`, which this server's runs do not need).
         page.evaluate("""() => {

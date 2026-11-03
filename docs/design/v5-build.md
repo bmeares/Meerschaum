@@ -57,11 +57,18 @@ Tests install the complete wheel into their venv. Source-reading tests also rece
 native payload, including bundled libraries, while tracked Python files must match the wheel.
 Dependency-free installed-wheel smokes remain separate from backend/extras tests.
 
-PRs may reuse a successful full release candidate when its Git tree exactly
-matches the checked-out merge tree. The proof requires the same repository, a
-successful release workflow, every mandatory gate and an unexpired artifact catalog.
-A changed base, expired payload or unavailable proof runs the ordinary checks.
+Branch pushes and same-repository PRs may reuse a successful full release candidate when its
+Git tree exactly matches the checked-out tree (the PR merge tree for a PR). The proof requires
+the same repository, a successful release workflow, every mandatory gate and an unexpired
+artifact catalog. A changed base, expired payload or unavailable proof runs the ordinary checks.
 Shipping artifacts still require the exact commit, profile and every payload digest.
+
+When a candidate for the same commit is already queued or running, the hosted `changes` job of
+`rust.yaml` and `pytest.yaml` waits for it (at most 75 minutes; the job's timeout is 90) instead
+of competing with it for the self-hosted runners, then applies the same proof. A failed,
+cancelled or late candidate, or any API error, runs the ordinary checks. Only a candidate that
+exists when `changes` starts is waited for, so dispatch it right after the push. A PR whose merge
+tree differs from its head commit's tree cannot reuse that candidate and does not wait.
 
 ### Isolated backend lanes
 
@@ -71,18 +78,27 @@ including after cancellation. Existing shared test services and production servi
 All unparameterized tests run once; parameterized cases are assigned by backend. A collection
 proof rejects missing, repeated, unknown or conflicting cases before the full run.
 
-| Lane | Workers |
-|---|---:|
-| Core / SQLite / API-host | 4 |
-| PostgreSQL family and API | 2 |
-| MySQL / MariaDB | 1 |
-| MSSQL / Valkey | 1 |
-| Oracle | 8 |
+| Lane | Workers | xdist scheduler | Release run (RC30) |
+|---|---:|---|---:|
+| Core / SQLite / API-host / console browsers | 4 | `loadfile` | 20.9 min with `load` |
+| Oracle | 8 | `load` | 7.7 min |
+| MSSQL / Valkey | 1 | `load` | 5.7 min |
+| PostgreSQL family and API | 2 | `load` | 3.0 min |
+| MySQL / MariaDB | 1 | `load` | 1.9 min |
 
 The combined budget is 16 workers. Oracle gets more slots because it dominated recorded call
 time; MySQL and Valkey retain smaller budgets. `scripts/ci/shards.py` is the shared source of
 truth. Test evidence artifacts retain per-lane collection reports, the union proof and ownership.
 Rust tests retain their own shared-fixture lock and a bounded nextest budget.
+
+Lanes are listed longest first and the matrix runs at most three at once (`max-parallel: 3`, one
+per self-hosted runner). Matrix jobs are created in that order, so the core lane takes the first
+free runner instead of queueing behind short lanes (it queued 5 to 17 minutes in RC26 to RC30).
+Raise `max-parallel` with the runner count. The core lane uses `--dist loadfile`: xdist's default
+`load` hands each worker one contiguous chunk of the collection and never rebalances it, so the
+whole browser suite ran on one worker for 18 to 20 minutes while the other three finished in 8
+to 11. Grouping by file keeps each module's order and module-scoped fixtures (Playwright, the
+browser) on one worker; the summed test time is about 46 minutes, about 12 per worker.
 
 Full release and nightly runs also execute native account and copy checks against fresh PostgreSQL,
 MySQL, MariaDB and Valkey fixtures (`scripts/ci/native_backends.py`). They reuse the compiled
@@ -93,9 +109,15 @@ run the Rust suite without contacting an ambient Valkey service.
 ### Release candidate workflow
 
 ```bash
-gh workflow run release.yaml --ref v5
+git push origin v5 && gh workflow run release.yaml --ref v5   # dispatch at once (push/PR checks then wait for it)
 gh run list --workflow release.yaml --limit 3 --json databaseId,headSha,status,conclusion
 ```
+
+Push and PR checks of the same commit wait for this candidate and reuse it ("Artifact reuse"),
+so they need neither cancelling nor a later re-run. If one of them had already started its
+ordinary checks before the dispatch existed, cancel it and `gh run rerun` it: the new attempt
+waits for the candidate. (A PR run still supersedes the push run of the same commit through the
+shared `auto` concurrency group; re-running that push run later costs one hosted minute.)
 
 One run builds shipping artifacts and runs Rust, all Python lanes and the strict docs build.
 The final gate verifies required platforms and seals every artifact digest in
@@ -116,6 +138,9 @@ remain available for local development. Publish with the same SDK run plus
 `image_run_id=DOCKER_RUN_ID`: the job pushes the image IDs that passed the candidate's
 smokes and size gates, then verifies registry config digests. Publication does not
 rebuild. Missing images stop it unless an explicit rebuild reruns every image gate.
+Dispatch the Docker candidate as soon as the SDK candidate succeeds (about 9 minutes on one
+self-hosted runner); it can overlap the other pre-publication steps. Promotion pushes the
+tested images without rebuilding (about 8 minutes, mostly upload).
 
 ### Build caches
 

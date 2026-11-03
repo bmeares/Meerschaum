@@ -559,7 +559,8 @@ def test_shared_rust_state_is_locked_and_pytest_shards_are_isolated(rust, pytest
         assert rust['jobs'][job]['concurrency'] == {'group': group, 'cancel-in-progress': False}, job
     tests = pytest_workflow['jobs']['tests']
     assert 'concurrency' not in tests, 'isolated service projects can run concurrently'
-    assert tests['strategy']['max-parallel'] == 5
+    ### One lane per self-hosted runner, created longest first (scripts/ci/shards.py).
+    assert tests['strategy']['max-parallel'] == 3
     run = next(step['run'] for step in tests['steps']
                if 'scripts/ci/services.py run ' in step.get('run', ''))
     assert '--shard "${{ matrix.shard }}"' in run

@@ -111,7 +111,7 @@ fn fallback_cli(flavor: &str) -> Option<&'static str> {
 
 /// `SQLConnector.cli()`: launch the flavor's interactive client.
 pub fn open_cli(rt: &mut Runtime<'_>, label: &str) -> ActionResult {
-    open_cli_with_options(rt, label, false)
+    open_cli_with_options(rt, label, false, false)
 }
 
 fn rainfrog_driver(flavor: &str) -> Option<&'static str> {
@@ -127,7 +127,25 @@ fn rainfrog_driver(flavor: &str) -> Option<&'static str> {
     }
 }
 
-fn open_cli_with_options(rt: &mut Runtime<'_>, label: &str, nopretty: bool) -> ActionResult {
+/// The Python client of a flavor and its install name (the `cli-tools` extra), which `sql` offers
+/// to install into the `mrsm` virtual environment when no client is found.
+fn installable_cli(flavor: &str) -> Option<(&'static str, &'static str)> {
+    let cli = flavor_cli(flavor)?;
+    Some(match cli {
+        "pgcli" => (cli, "pgcli>=3.1.0"),
+        "mycli" => (cli, "mycli>=1.23.2"),
+        "litecli" => (cli, "litecli>=1.5.0"),
+        "gadwall" => (cli, "gadwall>=0.2.0"),
+        _ => return None,
+    })
+}
+
+fn open_cli_with_options(
+    rt: &mut Runtime<'_>,
+    label: &str,
+    nopretty: bool,
+    noask: bool,
+) -> ActionResult {
     let keys = format!("sql:{label}");
     let failed = |message: String| {
         Ok(SuccessTuple::fail(format!(
@@ -169,15 +187,62 @@ fn open_cli_with_options(rt: &mut Runtime<'_>, label: &str, nopretty: bool) -> A
         candidates.push(plain.into());
     }
     let path = rt.config().paths();
-    let selected = candidates
-        .iter()
-        .find_map(|name| find_program(rt, name, &path).map(|program| (name.clone(), program)));
-    let Some((cli, program)) = selected else {
+    let find = |rt: &mut Runtime<'_>| {
+        candidates
+            .iter()
+            .find_map(|name| find_client(rt, name, &path).map(|client| (name.clone(), client)))
+    };
+    let mut selected = find(rt);
+    // Nothing on this host: offer the flavor's Python client (installed into the `mrsm` virtual
+    // environment, which is searched next time too) instead of only failing. Without a terminal
+    // or with `--noask` / `MRSM_NOASK`, the message says how to install one.
+    let installable = installable_cli(&flavor).filter(|_| !nopretty);
+    if selected.is_none()
+        && let Some((name, requirement)) = installable
+        && !super::check_noask(rt, noask)
+        && std::io::IsTerminal::is_terminal(&std::io::stdin())
+        && yes_no(
+            rt,
+            &format!(
+                "No SQL client for '{flavor}' was found. Install {name} into the Meerschaum \
+                 virtual environment now?"
+            ),
+            "y",
+            false,
+            noask,
+        )?
+    {
+        let env = super::pip::PipEnv::new(rt);
+        let installed = super::pip::pip_install(
+            &env,
+            rt,
+            &super::pip::PipInstall {
+                names: vec![requirement.to_string()],
+                venv: "mrsm".into(),
+                ..super::pip::PipInstall::default()
+            },
+        );
+        if !installed {
+            return failed(format!(
+                "Failed to install {name}. Install it with `mrsm install packages {name}`."
+            ));
+        }
+        selected = find(rt);
+    }
+    let Some((cli, client)) = selected else {
+        let install = match installable {
+            Some((name, _)) => {
+                format!("`mrsm install packages {name}` (or `meerschaum[cli-tools]`)")
+            }
+            None => "`meerschaum[cli-tools]`".to_string(),
+        };
         return failed(format!(
-            "Cannot find a SQL client for '{flavor}' (tried {}). Install Rainfrog with \
-             `cargo install rainfrog --locked`, install `meerschaum[cli-tools]`, or add the \
-             plain flavor client to PATH.",
-            candidates.join(", ")
+            "Cannot find a SQL client for '{flavor}' (tried {}) on PATH ({}), in ~/.cargo/bin, \
+             ~/.local/bin or Meerschaum's virtual environments. Install {install}, install \
+             Rainfrog with `cargo install rainfrog --locked`, or add the plain flavor client to \
+             PATH.",
+            candidates.join(", "),
+            (rt.env)("PATH").unwrap_or_default(),
         ));
     };
     let is_file = matches!(flavor.as_str(), "sqlite" | "duckdb" | "geopackage");
@@ -219,8 +284,9 @@ fn open_cli_with_options(rt: &mut Runtime<'_>, label: &str, nopretty: bool) -> A
         _ => vec![target.clone()],
     };
     let mut command = CommandSpec {
-        program,
-        args,
+        program: client.program,
+        args: client.prefix.into_iter().chain(args).collect(),
+        env: client.env,
         ..CommandSpec::default()
     };
     if cli == "rainfrog" {
@@ -367,17 +433,101 @@ fn mssql_args(spec: &meerschaum_connector_sql::uri::ConnectionSpec) -> Vec<Strin
     args
 }
 
-/// `which(program)` over `PATH` and the root's virtual environments.
-fn find_program(rt: &mut Runtime<'_>, program: &str, paths: &Paths) -> Option<String> {
+/// How a SQL client starts: its program, the arguments before the client's own, and variables.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Client {
+    program: String,
+    prefix: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+impl Client {
+    fn program(path: &std::path::Path) -> Client {
+        Client {
+            program: path.display().to_string(),
+            prefix: Vec::new(),
+            env: Vec::new(),
+        }
+    }
+}
+
+/// The directories searched after `PATH`: a service's `PATH` is often reduced
+/// (`/usr/local/bin:/usr/bin:/bin`), which hides the user's own tools. `~/.cargo/bin` (or
+/// `$CARGO_HOME/bin`: `cargo install rainfrog`), `~/.local/bin` (`pip install --user`), and the
+/// directory of the configured interpreter (`MRSM_PYTHON`: a virtual environment's `bin`).
+fn extra_client_dirs(rt: &Runtime<'_>) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut dirs = Vec::new();
+    if let Some(cargo) = (rt.env)("CARGO_HOME").filter(|v| !v.is_empty()) {
+        dirs.push(PathBuf::from(cargo).join("bin"));
+    }
+    if let Some(home) = (rt.env)("HOME").filter(|v| !v.is_empty()) {
+        let home = PathBuf::from(home);
+        dirs.push(home.join(".cargo").join("bin"));
+        dirs.push(home.join(".local").join("bin"));
+    }
+    if let Some(python) = (rt.env)("MRSM_PYTHON").filter(|v| !v.trim().is_empty()) {
+        let python = PathBuf::from(python.trim());
+        if python.is_absolute()
+            && let Some(dir) = python.parent()
+        {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    dirs.dedup();
+    dirs
+}
+
+/// `which(program)` over `PATH`, [`extra_client_dirs`], and the root's virtual environments: a
+/// venv's own `bin`, and the scripts `mrsm install packages` writes beside its packages
+/// (`site-packages/bin`, run with the venv's interpreter and those packages on its path).
+fn find_client(rt: &mut Runtime<'_>, program: &str, paths: &Paths) -> Option<Client> {
     let path_var = (rt.env)("PATH");
     if let Some(found) = super::pip::which(program, path_var.as_deref()) {
-        return Some(found.display().to_string());
+        return Some(Client::program(&found));
     }
-    let venvs = paths.venvs_dir.clone()?;
-    for entry in std::fs::read_dir(venvs).ok()?.flatten() {
-        let candidate = entry.path().join("bin").join(program);
-        if candidate.is_file() {
-            return Some(candidate.display().to_string());
+    let extra = std::env::join_paths(extra_client_dirs(rt))
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
+    if let Some(found) = super::pip::which(program, extra.as_deref()) {
+        return Some(Client::program(&found));
+    }
+    // `MRSM_VENVS_DIR`, else `<root>/venvs` (`VIRTENV_RESOURCES_PATH`).
+    let venvs = paths
+        .venvs_dir
+        .clone()
+        .unwrap_or_else(|| paths.root_dir.join("venvs"));
+    let mut entries: Vec<_> = std::fs::read_dir(venvs).ok()?.flatten().collect();
+    // `mrsm` (where `sql` installs its clients) first, then the others by name.
+    entries.sort_by_key(|e| (e.file_name() != "mrsm", e.file_name()));
+    for entry in entries {
+        let venv = entry.path();
+        let bin = venv.join(if cfg!(windows) { "Scripts" } else { "bin" });
+        if let Some(found) = super::pip::which(program, bin.to_str()) {
+            return Some(Client::program(&found));
+        }
+        let python = bin.join(if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python"
+        });
+        for site in super::venvs::site_packages(&venv) {
+            let script = site.join("bin").join(program);
+            if !script.is_file() || !python.is_file() {
+                continue;
+            }
+            let mut pythonpath = vec![site.clone()];
+            if let Some(existing) = (rt.env)("PYTHONPATH").filter(|v| !v.is_empty()) {
+                pythonpath.extend(std::env::split_paths(&existing));
+            }
+            let pythonpath = std::env::join_paths(pythonpath)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| site.display().to_string());
+            return Some(Client {
+                program: python.display().to_string(),
+                prefix: vec![script.display().to_string()],
+                env: vec![("PYTHONPATH".into(), pythonpath)],
+            });
         }
     }
     None
@@ -395,7 +545,7 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         return Ok(SuccessTuple::fail("Query must not be empty."));
     }
     if action.is_empty() {
-        return open_cli_with_options(rt, "main", nopretty);
+        return open_cli_with_options(rt, "main", nopretty, flag(args, "noask"));
     }
     let sql_section = rt
         .config()
@@ -416,7 +566,7 @@ pub fn sql(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let keys = format!("sql:{label}");
     // `sql <label>` only opens the client, which connects on its own (the database may be down).
     if query == label {
-        return open_cli_with_options(rt, &label, nopretty);
+        return open_cli_with_options(rt, &label, nopretty, flag(args, "noask"));
     }
     let sess = session(rt);
     let conn = match sess.instance(&keys, rt.config()) {

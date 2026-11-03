@@ -226,9 +226,13 @@ def test_connectors_are_grouped_by_type_and_name_a_plugin_once(rc28_server, brow
         row = page.locator('#connectors-table tr[data-keys="plugin:rc28_weather"]')
         assert row.inner_text().count('rc28_weather') == 1, row.inner_text()
         source = row.locator('td.connectors-col-source')
-        assert source.inner_text().strip() == 'View source', source.inner_text()
         link = source.get_by_role('link', name='View source')
         assert link.get_attribute('href') == '/dash/plugins/installed/rc28_weather'
+        ### RC31: the link is its icon; "View source" is only its accessible name and tooltip.
+        assert link.get_attribute('title') == 'View source'
+        assert link.locator('.fa-code').is_visible()
+        label_box = link.locator('.visually-hidden').bounding_box()
+        assert label_box is None or label_box['width'] <= 1, label_box
 
         ### The modal names the connector once (its title) and links to the plugin's page once.
         row.get_by_role('button', name='plugin:rc28_weather', exact=True).click()

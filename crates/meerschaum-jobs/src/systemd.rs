@@ -476,7 +476,9 @@ impl SystemdExecutor {
     pub fn read_job_result(&self, name: &str) -> SuccessTuple {
         let path = self.get_result_path(name);
         if !path.exists() {
-            return SuccessTuple::fail("No result available.");
+            return self
+                .unrecorded_failure(name)
+                .unwrap_or_else(|| SuccessTuple::fail("No result available."));
         }
         let parsed = std::fs::read_to_string(&path)
             .ok()
@@ -487,6 +489,46 @@ impl SystemdExecutor {
         {
             Some(t) => t,
             None => SuccessTuple::fail(format!("Could not read result for Job '{name}'.")),
+        }
+    }
+
+    /// v5: the failure of a run that recorded no result, as systemd saw it end (`Result`,
+    /// `ExecMainCode`, `ExecMainStatus`): the wrapper removes the result file when the job
+    /// starts, so a wrapper killed before it wrote one (`TimeoutStopSec=`, the OOM killer, `kill
+    /// -9`) leaves none. `None` when systemd reports no failure (v4: "No result available.").
+    fn unrecorded_failure(&self, name: &str) -> Option<SuccessTuple> {
+        let service = self.get_service_name(name);
+        let output = self.run_command_output(&[
+            "show",
+            &service,
+            &format!("--property={RUN_END_PROPERTIES}"),
+        ]);
+        let mut result = "";
+        let mut code = "";
+        let mut status = "";
+        for line in output.lines() {
+            match line.split_once('=') {
+                Some(("Result", v)) => result = v.trim(),
+                Some(("ExecMainCode", v)) => code = v.trim(),
+                Some(("ExecMainStatus", v)) => status = v.trim(),
+                _ => {}
+            }
+        }
+        // `CLD_KILLED` (2) / `CLD_DUMPED` (3): `ExecMainStatus` is the signal.
+        #[cfg(unix)]
+        if matches!(code, "2" | "3")
+            && let Ok(signal) = status.parse::<i32>()
+        {
+            return Some(SuccessTuple::fail(crate::supervisor::signal_message(
+                name, signal,
+            )));
+        }
+        let _ = (code, status);
+        match result {
+            "" | "success" => None,
+            other => Some(SuccessTuple::fail(format!(
+                "The service of job '{name}' failed ({other})."
+            ))),
         }
     }
 
@@ -558,11 +600,20 @@ pub struct UnitState {
     pub active_enter: String,
     /// `InactiveEnterTimestamp` (empty when never inactive).
     pub inactive_enter: String,
+    /// `Result` of the last run (`success`, `signal`, `oom-kill`, ...).
+    pub result: String,
+    /// `ExecMainCode` of the last run (`1` exited, `2` killed, `3` dumped core).
+    pub exec_main_code: String,
+    /// `ExecMainStatus` of the last run (its exit code, or the signal that ended it).
+    pub exec_main_status: String,
 }
 
 /// The properties [`SystemdExecutor::show_units`] asks `systemctl show` for.
-pub const UNIT_STATE_PROPERTIES: &str =
-    "Id,ActiveState,MainPID,ActiveEnterTimestamp,InactiveEnterTimestamp";
+pub const UNIT_STATE_PROPERTIES: &str = "Id,ActiveState,MainPID,ActiveEnterTimestamp,\
+     InactiveEnterTimestamp,Result,ExecMainCode,ExecMainStatus";
+
+/// How a unit's last run ended ([`SystemdExecutor`] reads it when the run recorded no result).
+const RUN_END_PROPERTIES: &str = "Result,ExecMainCode,ExecMainStatus";
 
 /// At most this many units per `systemctl show` (a short command line).
 const SHOW_BATCH: usize = 200;
@@ -599,6 +650,9 @@ pub fn parse_unit_states(
                 "MainPID" => state.main_pid = value,
                 "ActiveEnterTimestamp" => state.active_enter = value,
                 "InactiveEnterTimestamp" => state.inactive_enter = value,
+                "Result" => state.result = value,
+                "ExecMainCode" => state.exec_main_code = value,
+                "ExecMainStatus" => state.exec_main_status = value,
                 _ => {}
             }
         }
@@ -664,18 +718,23 @@ impl SnapshotRunner {
                 })
             }
             ["show", unit, property] => {
-                let property = property.strip_prefix("--property=")?;
+                let properties = property.strip_prefix("--property=")?;
                 let state = self.units.get(*unit)?;
-                let value = match property {
-                    "ActiveState" => &state.active_state,
-                    "MainPID" => &state.main_pid,
-                    "ActiveEnterTimestamp" => &state.active_enter,
-                    "InactiveEnterTimestamp" => &state.inactive_enter,
-                    _ => return None,
-                };
-                Some(crate::runner::CommandOutput::ok(format!(
-                    "{property}={value}\n"
-                )))
+                let mut text = String::new();
+                for property in properties.split(',') {
+                    let value = match property {
+                        "ActiveState" => &state.active_state,
+                        "MainPID" => &state.main_pid,
+                        "ActiveEnterTimestamp" => &state.active_enter,
+                        "InactiveEnterTimestamp" => &state.inactive_enter,
+                        "Result" => &state.result,
+                        "ExecMainCode" => &state.exec_main_code,
+                        "ExecMainStatus" => &state.exec_main_status,
+                        _ => return None,
+                    };
+                    text.push_str(&format!("{property}={value}\n"));
+                }
+                Some(crate::runner::CommandOutput::ok(text))
             }
             _ => None,
         }
@@ -1063,7 +1122,9 @@ impl JobExecutor for SystemdExecutor {
             let _ = job.daemon().write_stop_file("quit");
         }
         let _ = self.run_command(&["kill", "-s", "SIGINT", &service]);
-        let (timeout, interval) = self.timeout();
+        let (_, interval) = self.timeout();
+        // An API server drains its requests before `systemctl stop` signals it again.
+        let timeout = self.ctx.config.stop_timeout(&self.get_job_sysargs(name));
         let begin = Instant::now();
         while begin.elapsed() < timeout.duration() {
             if self.get_job_status(name) == "stopped" {

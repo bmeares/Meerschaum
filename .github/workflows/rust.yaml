@@ -49,7 +49,8 @@ jobs:
   changes:
     name: changes
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Normally seconds; up to 75 minutes while waiting for a release candidate of this commit.
+    timeout-minutes: 90
     outputs:
       rust: ${{ steps.changes.outputs.rust }}
       rust_test: ${{ steps.changes.outputs.rust_test }}
@@ -63,12 +64,14 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}' }
       - id: reuse
-        name: Reuse full checks only for the identical PR merge tree
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        # A candidate already running at this commit is waited for on this hosted runner instead of
+        # racing it for the self-hosted runners; reuse still needs the complete identical-tree proof.
+        name: Reuse full checks only for the identical tree (waits for a running candidate)
+        if: (github.event_name == 'push' && github.ref_type == 'branch') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: python3 scripts/ci/candidates.py --head-sha "$PR_HEAD" --github-output "$GITHUB_OUTPUT"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/ci/candidates.py --head-sha "$HEAD_SHA" --wait-minutes 75 --github-output "$GITHUB_OUTPUT"
       - id: changes
         name: Which jobs does this change need?
         env:

@@ -223,6 +223,12 @@ mod imp {
         let (program, leading) = meerschaum_core::self_exe::self_program();
         let child_result = job.log_path.with_extension("child-result.json");
         let _ = fs::remove_file(&child_result);
+        // The previous run's result must not stand in for this one: a wrapper killed before it
+        // records a result (`TimeoutStopSec=`, the OOM killer) leaves none, and the executor
+        // reads systemd's account of the run instead.
+        if let Some(path) = &job.result_path {
+            let _ = fs::remove_file(path);
+        }
         let mut cmd = Command::new(program);
         cmd.args(leading)
             .args(args)
@@ -352,18 +358,27 @@ mod imp {
             }
         }
 
-        let result = read_result(&child_result).or_else(|| {
-            status.as_ref().ok().map(|s| {
-                if s.success() {
-                    (true, "Success".to_string())
-                } else {
-                    (
+        // The child writes its result as it exits: after a signal ended it (other than the one
+        // a stop sends), the signal is the result.
+        let killed_by = status.as_ref().ok().and_then(|s| {
+            use std::os::unix::process::ExitStatusExt;
+            s.signal()
+        });
+        let result = match killed_by {
+            Some(sig) if forwarded.load(Ordering::SeqCst) != sig => {
+                Some((false, crate::supervisor::signal_message(&job.name, sig)))
+            }
+            _ => read_result(&child_result).or_else(|| {
+                status.as_ref().ok().map(|s| match killed_by {
+                    Some(sig) => (false, crate::supervisor::signal_message(&job.name, sig)),
+                    None if s.success() => (true, "Success".to_string()),
+                    None => (
                         false,
                         format!("Returned exit code: {}", s.code().unwrap_or(1)),
-                    )
-                }
-            })
-        });
+                    ),
+                })
+            }),
+        };
         let _ = fs::remove_file(&child_result);
         if job.delete_job {
             if let Some(ctx) = ctx {

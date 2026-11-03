@@ -1632,3 +1632,50 @@ async fn longest_stall<F: std::future::Future>(work: F) -> (Duration, F::Output)
     let longest = ticks.windows(2).map(|w| w[1] - w[0]).max().unwrap();
     (longest, output)
 }
+
+/// A draining server closes the logs websocket at once (`1001 Going Away`) instead of holding
+/// the drain open while the job runs.
+#[tokio::test]
+async fn a_draining_server_closes_the_logs_websocket() {
+    use tokio_tungstenite::tungstenite::Message;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("fixture"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    let state = AppState::builder(common::config(dir.path()), instance)
+        .secret(SECRET.to_vec())
+        .jobs(Arc::new(FakeJobs))
+        .build()
+        .unwrap();
+    let app = meerschaum_server::app(state.clone());
+    let admin = login(&app, "admin", "pass", None).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/logs/j/ws"))
+        .await
+        .unwrap();
+    ws.send(Message::Text(admin.trim_start_matches("Bearer ").into()))
+        .await
+        .unwrap();
+    // The job waits for input: the socket would stay open.
+    let mut texts = Vec::new();
+    while texts.len() < 2 {
+        if let Some(Ok(Message::Text(t))) = ws.next().await {
+            texts.push(t.to_string());
+        }
+    }
+    assert_eq!(texts, ["line 1\n", "MRSM_STDIN"]);
+    state.lifecycle.begin_drain();
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(frame))) => return frame.map(|f| u16::from(f.code)),
+                Some(Ok(_)) => {}
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .expect("the websocket stayed open");
+    assert_eq!(closed, Some(1001));
+}

@@ -34,9 +34,9 @@ The console answers only signed-in visitors: a page shows the login form until y
 
 `/dash` is the Overview of the selected instance, with a tile for each part of it:
 
-- **Pipes**: how many are registered and how many are failing (their last sync failed); the failing count opens the Pipes page filtered to them;
-- **Pipelines**: each saved Pipeline with its last run (failed ones first), opening it on that run;
-- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state;
+- **Pipes**: how many are registered and when the latest one synced; how many synced, are failing (their last sync failed) or have no recorded sync, each count opening the Pipes page filtered to them; the connectors with the most pipes; and the latest syncs, failures first;
+- **Pipelines**: how many are saved and how many ran in the last 24 hours; how many are running, succeeded, failed or have not run, by each one's last run; their runs over the last 24 hours, hour by hour; and the last success and failure, each opening its Pipeline on that run;
+- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state, and how many run on a schedule;
 - **Recent runs**: the latest runs of the Syncing Engine, failures first. A job that syncs the same pipes again and again takes one row (`×12`).
 - **Performance**: sync counts, failures, average duration, and rows affected/s over the last 24 hours.
 

@@ -562,10 +562,14 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     tail.poll
         .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     tail.read_persisted().await;
+    let drain = tail.state.lifecycle.signal();
     let stream = futures_util::stream::unfold(tail, |mut tail| async move {
         let event = tail.next().await?;
         Some((Ok::<_, Infallible>(event), tail))
     });
+    // A draining server ends the stream at once: the client resumes elsewhere with
+    // `Last-Event-ID`.
+    let stream = crate::lifecycle::until_drain(stream, drain);
     let mut response = Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(HEARTBEAT).text("keep-alive"))
         .into_response();

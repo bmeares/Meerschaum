@@ -55,6 +55,30 @@ pub const PROGRAM_ENV: &str = "MRSM_JOB_PROGRAM";
 /// The result file a worker may write (`jobs/<id>/.result.json`).
 pub const RESULT_FILE_NAME: &str = ".result.json";
 
+/// The failure recorded for a worker a signal ended (other than the SIGTERM / SIGINT a stop
+/// sends): `Daemon '<id>' was killed by signal 9 (SIGKILL).`, or `... was terminated by signal
+/// <n> (<NAME>).` for the others.
+#[cfg(unix)]
+pub fn signal_message(daemon_id: &str, signal: i32) -> String {
+    let verb = if signal == libc::SIGKILL {
+        "killed"
+    } else {
+        "terminated"
+    };
+    match signal_name(signal) {
+        Some(name) => format!("Daemon '{daemon_id}' was {verb} by signal {signal} ({name})."),
+        None => format!("Daemon '{daemon_id}' was {verb} by signal {signal}."),
+    }
+}
+
+/// The name of a signal (`SIGKILL`), when this platform knows it.
+#[cfg(unix)]
+fn signal_name(signal: i32) -> Option<&'static str> {
+    nix::sys::signal::Signal::try_from(signal)
+        .ok()
+        .map(|s| s.as_str())
+}
+
 /// The key under `properties['process']` that names the current launch (see [`launch_state`]).
 pub const LAUNCH_ID_KEY: &str = "launch_id";
 
@@ -510,12 +534,10 @@ mod imp {
             Some(s) if s == libc::SIGTERM => Some((true, format!("Stopped daemon '{daemon_id}'."))),
             // PARITY: an unhandled SIGINT surfaces as `KeyboardInterrupt`, recorded as a failure.
             Some(s) if s == libc::SIGINT => Some((false, "KeyboardInterrupt".to_string())),
-            // PARITY: a SIGKILLed Python daemon never records a result (nor `ended`).
-            Some(s) if s == libc::SIGKILL => None,
-            Some(s) => Some((
-                false,
-                format!("Daemon '{daemon_id}' was terminated by signal {s}."),
-            )),
+            // v4 recorded nothing for a SIGKILLed daemon (the daemon was the process that died,
+            // so the job read "No result available."). The supervisor outlives its worker and
+            // records the failure with its cause.
+            Some(s) => Some((false, super::signal_message(daemon_id, s))),
             None => Some((false, "Unknown exit status.".to_string())),
         }
     }
@@ -909,6 +931,13 @@ mod imp {
         done.store(true, Ordering::Relaxed);
 
         let result = match &status {
+            // The worker writes its result as it exits: after a signal ended it, a result file
+            // came from someone else (a descendant that inherited `MRSM_JOB_RESULT_PATH`), and
+            // the signal is the result.
+            Ok(s) if std::os::unix::process::ExitStatusExt::signal(s).is_some() => {
+                let _ = fs::remove_file(&result_path);
+                result_from_status(s, &opts.daemon_id)
+            }
             Ok(s) => {
                 read_result_file(&result_path).or_else(|| result_from_status(s, &opts.daemon_id))
             }

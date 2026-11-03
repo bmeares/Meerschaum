@@ -259,6 +259,22 @@ pub fn operations() -> Vec<Operation> {
         ),
         op(
             "get",
+            "/healthcheck/ready",
+            "misc",
+            &["Misc"],
+            "Get Readiness",
+            &[],
+            None,
+            Never,
+        )
+        .described(
+            "Whether this server should get new requests: `200`, or `503` while it starts, \
+             while it shuts down (draining the requests in progress) or when its instance does \
+             not answer. `/healthcheck` stays `200` during a shutdown.",
+            &[],
+        ),
+        op(
+            "get",
             "/jobs",
             "jobs",
             &["Jobs"],
@@ -1443,11 +1459,15 @@ pub fn is_served(op: &Operation, cfg: &ServerConfig) -> bool {
             .iter()
             .any(|pattern| crate::config::fnmatch("login", pattern)),
         "docs" => true,
-        // The public preset keeps only `/healthcheck` and `/favicon.ico` of `misc`.
+        // The public preset keeps only `/healthcheck` (and its `/ready`) and `/favicon.ico` of
+        // `misc`.
         "misc" => {
             cfg.route_group_is_allowed("misc")
                 && (cfg.serves_full_misc()
-                    || matches!(op.path.as_str(), "/healthcheck" | "/favicon.ico"))
+                    || matches!(
+                        op.path.as_str(),
+                        "/healthcheck" | "/healthcheck/ready" | "/favicon.ico"
+                    ))
         }
         g => cfg.route_group_is_allowed(g),
     }

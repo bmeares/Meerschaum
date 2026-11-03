@@ -545,9 +545,11 @@ if internal.get_id() is None:
     internal.register()
 
 ref = lambda metric: overview.pipe_ref(str(instance), 'shell', metric, None)
+recently = lambda minutes: (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
 statuses = {
-    ref('alpha'): {'consecutive_failures': 2, 'success': False},
-    ref('beta'): {'consecutive_failures': 0, 'success': True},
+    ref('alpha'): {'consecutive_failures': 2, 'success': False,
+                   'last_attempt': recently(5), 'last_failure': recently(5)},
+    ref('beta'): {'consecutive_failures': 0, 'success': True, 'last_attempt': recently(2 * 24 * 60)},
 }
 had = hasattr(mrsm, 'get_sync_statuses')
 original = getattr(mrsm, 'get_sync_statuses', None)
@@ -585,8 +587,18 @@ overview._list_pipelines = lambda instance, **kwargs: {'daily': {'name': 'daily'
 from meerschaum.jobs import Job
 real_state = overview.job_state(Job('shell-overview-job', 'show version', executor_keys='local'))
 recent = overview.recent_runs(instance)
-pipelines = overview.pipelines_summary(instance)
+pipelines = overview.pipelines_summary(instance, now=now)
 body = overview.build_runs_body(recent)
+dump = lambda value: json.dumps(value, cls=__import__('plotly').utils.PlotlyJSONEncoder)
+pipes_body = dump(overview.build_pipes_body(with_statuses, 'sql:apihosttest'))
+pipelines_body = dump(overview.build_pipelines_body(pipelines))
+jobs_body = dump(overview.build_jobs_body({
+    'total': 3, 'counts': {'running': 2, 'stalled': 0, 'failing': 1, 'paused': 0, 'stopped': 0},
+    'scheduled': 1,
+}))
+scheduled = [overview.is_scheduled_job(SimpleNamespace(sysargs=args)) for args in (
+    ['sync', 'pipes', '-s', 'every 5 minutes'], ['sync', 'pipes', '--schedule=daily'], ['show', 'version'],
+)]
 
 print('JSON:' + json.dumps({
     'without': overview.pipes_summary(instance) if not had else None,
@@ -600,12 +612,43 @@ print('JSON:' + json.dumps({
     'counts': overview.counts_text({'succeeded': 2, 'skipped': 0, 'upstream_failed': 1}),
     'query': overview.with_query('/dash/pipes', status='failing', instance=None),
     'empty_runs': str(overview.build_runs_body([])),
+    'pipes_body': pipes_body,
+    'pipelines_body': pipelines_body,
+    'jobs_body': jobs_body,
+    'scheduled': scheduled,
 }, default=str))
 '''))
     if out['without'] is not None:
-        assert out['without'] == {'total': 3, 'failing': None, 'statuses': False}
+        assert out['without']['total'] == 3
+        assert out['without']['statuses'] is False and out['without']['failing'] is None
     ### Internal `mrsm` pipes (saved Pipelines' registry) do not count.
-    assert out['with'] == {'total': 3, 'failing': 1, 'statuses': True}
+    summary = out['with']
+    assert {key: summary[key] for key in ('total', 'statuses', 'ok', 'failing', 'unrecorded')} == {
+        'total': 3, 'statuses': True, 'ok': 1, 'failing': 1, 'unrecorded': 1,
+    }
+    ### Only one of them synced in the last day; the latest sync is the failing pipe's.
+    assert summary['synced_24h'] == 1
+    assert summary['last_sync'] is not None
+    ### The latest syncs: failing ones first; a pipe without a recorded sync is not listed.
+    assert [(item['ref'].split('|')[2], item['state'], item['failures']) for item in summary['latest']] == [
+        ('alpha', 'failing', 2), ('beta', 'ok', 0),
+    ]
+    assert summary['connectors'] == [['shell', 3]]
+    ### Each state links to the Pipes page filtered by it (the Pipes page has no filter for a pipe
+    ### without a recorded sync, so that count is not a link), and each connector to its pipes.
+    pipes_body = out['pipes_body']
+    for element_id in ('overview-pipes-total', 'overview-pipes-bar', 'overview-pipes-ok',
+                       'overview-pipes-failing', 'overview-pipes-unrecorded', 'overview-pipes-latest',
+                       'overview-pipes-connectors', 'overview-pipes-last-sync'):
+        assert element_id in pipes_body, element_id
+    assert '/dash/pipes?status=ok&instance=sql%3Aapihosttest' in pipes_body
+    assert '/dash/pipes?status=failing&instance=sql%3Aapihosttest' in pipes_body
+    assert '/dash/pipes?connector_keys=shell&instance=sql%3Aapihosttest' in pipes_body
+    assert '/dash/pipes?status=unrecorded' not in pipes_body
+    ### Jobs: the scheduled count beside the total, and a bar of the states.
+    assert 'overview-jobs-bar' in out['jobs_body'] and '1 on a schedule' in out['jobs_body']
+    assert '/dash/jobs?status=failing' in out['jobs_body']
+    assert out['scheduled'] == [True, True, False]
     assert out['states'] == ['running', 'stalled', 'failing', 'paused', 'stopped', 'failing', 'running']
     ### A real job's state is one the Jobs page filters by.
     assert out['real_state'] in ('running', 'stalled', 'failing', 'paused', 'stopped')
@@ -615,9 +658,28 @@ print('JSON:' + json.dumps({
         ['pipeline-a', 'succeeded', 2, None],
         ['pipeline-c', 'succeeded', 1, None],
     ]
-    assert out['pipelines']['count'] == 1
-    assert out['pipelines']['pipelines'][0]['status'] == 'failed'
-    assert out['pipelines']['pipelines'][0]['run_id'] == 'daily-1'
+    ### Pipelines: counted by their last run, with no per-Pipeline list (Recent runs has them).
+    pipelines = out['pipelines']
+    assert pipelines['count'] == 1
+    assert 'pipelines' not in pipelines
+    assert pipelines['states'] == {'running': 0, 'succeeded': 0, 'failed': 1, 'stopped': 0, 'none': 0}
+    ### Only the saved Pipeline's run is in its history: one failed run 30 minutes ago.
+    assert pipelines['runs_24h'] == 1 and pipelines['failed_24h'] == 1
+    assert len(pipelines['hours']) == 24
+    assert sum(hour['failed'] for hour in pipelines['hours'][-2:]) == 1
+    assert not any(hour['unread'] for hour in pipelines['hours'])
+    assert pipelines['last_failure']['run_id'] == 'daily-1'
+    assert pipelines['last_failure']['name'] == 'daily'
+    assert pipelines['last_success'] is None
+    pipelines_body = out['pipelines_body']
+    for element_id in ('overview-pipelines-total', 'overview-pipelines-bar', 'overview-pipelines-failed',
+                       'overview-pipelines-history', 'overview-pipelines-last-failure',
+                       'overview-pipelines-runs'):
+        assert element_id in pipelines_body, element_id
+    assert 'overview-pipelines-list' not in pipelines_body
+    ### Stopped is shown only when a Pipeline's last run stopped.
+    assert 'overview-pipelines-stopped' not in pipelines_body
+    assert '/dash/pipelines/daily?run_id=daily-1' in pipelines_body
     assert out['ago'] == ['just now', '5 min ago', '2 h ago', '2 d ago']
     assert out['durations'] == ['0.4 s', '12 s', '5 min', '2 h 5 min']
     assert out['counts'] == '2 succeeded · 1 upstream failed'
@@ -719,8 +781,9 @@ print('JSON:' + json.dumps({
     assert out['empty'] == [False, True]
     assert 'overview-empty' in out['layout']['pipes_tile']
     assert 'overview-pipes-body' in out['layout']['pipes_tile']
+    ### Pipes beside Jobs, then Pipelines beside Recent runs.
     assert out['layout']['grid'] == [
-        'overview-pipes', 'overview-empty', 'overview-pipelines', 'overview-jobs', 'overview-runs',
+        'overview-pipes', 'overview-empty', 'overview-jobs', 'overview-pipelines', 'overview-runs',
     ]
     assert out['layout']['tiles_hidden'] in (None, False)
     assert 'overview-pipes-body.hidden' in out['outputs'] and 'overview-tiles' not in out['outputs']

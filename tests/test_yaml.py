@@ -499,6 +499,8 @@ def _without_v5_defaults(spec):
         parsed.get('system', {}).pop('engine', None)
         ### PARITY (rc15, RC15-D-001): console callbacks need a session by default.
         parsed.get('api', {}).get('dash', {}).pop('callbacks_require_session', None)
+        ### v5 (rc31): the API server's graceful shutdown.
+        parsed.get('api', {}).pop('shutdown', None)
         ### PARITY (rc15, RC15-R3-001): a new root returns Polars DataFrames by default.
         parsed.get('meerschaum', {}).pop('dataframe', None)
         ### PARITY (rc15, AC1/AC2): registration closes after bootstrap; role permissions

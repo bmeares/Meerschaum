@@ -82,7 +82,7 @@ def render_pipes_tile(n_intervals, store, digest, session_data):
 
 
 def render_pipelines_tile(n_intervals, store, digest, session_data):
-    """The Pipelines tile: each saved Pipeline's last run."""
+    """The Pipelines tile: the saved Pipelines by their last run, and their runs over the last day."""
     viewer = _viewer(session_data)
     try:
         children = overview.build_pipelines_body(

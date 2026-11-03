@@ -181,6 +181,9 @@ def _build(debug: bool = False):
         external_stylesheets=stylesheets,
         update_title=None,
         suppress_callback_exceptions=True,
+        ### `*.bundle.js` (the plugin source editor) is served from `assets/` but loaded only by
+        ### the page that needs it (`assets/plugin_source.js`), never on every page.
+        assets_ignore=r'\.bundle\.js$',
         **extra_kwargs
     )
 

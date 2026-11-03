@@ -1984,6 +1984,159 @@ fn sql_prefers_rainfrog_and_nopretty_forces_plain_client() {
     assert!(!plain.text.contains("s%40cret"), "{}", plain.text);
 }
 
+/// RC31: a service's reduced `PATH` (`/usr/local/bin:/usr/bin:/bin`) hid every client the user
+/// had installed; `sql` also searches `~/.cargo/bin`, `~/.local/bin` and Meerschaum's virtual
+/// environments, where `mrsm install packages pgcli` puts its script beside the packages.
+#[test]
+fn sql_finds_clients_outside_a_reduced_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let write = |path: &std::path::Path, body: &str| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let empty = tempfile::tempdir().unwrap();
+    let reduced = empty.path().display().to_string();
+
+    // `pip install --user pgcli`: `~/.local/bin`.
+    let home = Home::new()
+        .with_env("PATH", reduced.clone())
+        .with_env("MRSM_SQL_PG", "postgresql://alice@127.0.0.1:1/db");
+    write(
+        &home.path().join(".local/bin/pgcli"),
+        "echo LOCAL_PGCLI: \"$@\"",
+    );
+    let local = home.run(&["sql", "pg"]);
+    assert_eq!(local.code, 0, "{}", local.text);
+    assert!(
+        local
+            .text
+            .contains("LOCAL_PGCLI: postgresql://alice@127.0.0.1:1/db"),
+        "{}",
+        local.text
+    );
+    // `cargo install rainfrog`: `~/.cargo/bin` comes before the Python client.
+    write(
+        &home.path().join(".cargo/bin/rainfrog"),
+        "echo CARGO_RAINFROG: \"$@\"",
+    );
+    let cargo = home.run(&["sql", "pg"]);
+    assert!(
+        cargo.text.contains("CARGO_RAINFROG: --driver postgres"),
+        "{}",
+        cargo.text
+    );
+
+    // `mrsm install packages pgcli`: the script beside the venv's packages runs with the venv's
+    // interpreter and those packages on its path.
+    let venv_home = Home::new()
+        .with_env("PATH", reduced.clone())
+        .with_env("MRSM_SQL_PG", "postgresql://alice@127.0.0.1:1/db");
+    let venv = venv_home.path().join("venvs").join("mrsm");
+    let site = venv.join("lib").join("python3.99").join("site-packages");
+    write(
+        &venv.join("bin/python"),
+        "echo VENV_PYTHON: \"$@\" PYTHONPATH=$PYTHONPATH",
+    );
+    write(&site.join("bin/pgcli"), "exit 9");
+    let installed = venv_home.run(&["sql", "pg"]);
+    assert_eq!(installed.code, 0, "{}", installed.text);
+    let expected = format!(
+        "VENV_PYTHON: {} postgresql://alice@127.0.0.1:1/db PYTHONPATH={}",
+        site.join("bin/pgcli").display(),
+        site.display()
+    );
+    assert!(installed.text.contains(&expected), "{}", installed.text);
+
+    // Nothing anywhere, and nothing can be asked: the message names what was searched and how
+    // to install a client.
+    let none = Home::new()
+        .with_env("PATH", reduced.clone())
+        .with_env("MRSM_SQL_PG", "postgresql://alice@127.0.0.1:1/db");
+    let missing = none.run(&["sql", "pg", "--noask"]);
+    assert_eq!(missing.code, 1, "{}", missing.text);
+    assert!(
+        missing.text.contains(&format!("on PATH ({reduced})")),
+        "{}",
+        missing.text
+    );
+    assert!(
+        missing.text.contains("mrsm install packages pgcli"),
+        "{}",
+        missing.text
+    );
+}
+
+/// RC31: in a terminal with no client anywhere, `sql` offers to install the flavor's Python
+/// client into the `mrsm` virtual environment instead of only failing; declining fails with the
+/// install command.
+#[test]
+fn sql_offers_to_install_a_client_in_a_terminal() {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    let home = Home::new();
+    let empty = tempfile::tempdir().unwrap();
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 200,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mrsm-cli"));
+    cmd.env_clear();
+    cmd.env("PATH", empty.path());
+    cmd.env("HOME", home.path());
+    cmd.env("MRSM_ROOT_DIR", home.path());
+    cmd.env("MRSM_PLUGINS_DIR", home.plugins.path());
+    cmd.env("MRSM_PYTHON", home.path().join("no-python"));
+    cmd.env("MRSM_SQL_PG", "postgresql://alice@127.0.0.1:1/db");
+    cmd.args(["sql", "pg"]);
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let mut writer = pair.master.take_writer().unwrap();
+    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let sink = output.clone();
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 4096];
+        while let Ok(n) = std::io::Read::read(&mut reader, &mut buffer) {
+            if n == 0 {
+                break;
+            }
+            sink.lock().unwrap().extend_from_slice(&buffer[..n]);
+        }
+    });
+    let text = |output: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>| {
+        strip_ansi(&String::from_utf8_lossy(&output.lock().unwrap()))
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !text(&output).contains("Install pgcli into the Meerschaum virtual environment now?") {
+        assert!(
+            Instant::now() < deadline,
+            "no install offer:\n{}",
+            text(&output)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::io::Write::write_all(&mut writer, b"n\r").unwrap();
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "sql did not end:\n{}",
+            text(&output)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let shown = text(&output);
+    assert!(shown.contains("Cannot find a SQL client"), "{shown}");
+    assert!(shown.contains("mrsm install packages pgcli"), "{shown}");
+}
+
 #[test]
 fn sql_propagates_interactive_client_failure() {
     use std::os::unix::fs::PermissionsExt;

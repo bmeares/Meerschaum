@@ -3,11 +3,13 @@
 # vim:fenc=utf-8
 
 """
-The Overview (`/dash`): the console's home page. Tiles for the instance's pipes (how many, how
-many failing), its saved Pipelines (each one's last run), the jobs (running, stalled, failing,
-stopped) and the recent runs (failures first), each linked to its page. On an instance without
-pipes the Pipes tile shows New pipe and Open terminal instead of its numbers; the other tiles
-stay (the server's jobs are not the instance's).
+The Overview (`/dash`): the console's home page. Tiles for the instance's pipes (by sync status,
+the latest syncs and their connectors), the jobs (running, stalled, failing, stopped), its saved
+Pipelines (by their last run, and their runs over the last day) and the recent runs (failures
+first), each linked to its page. On a wide screen the Pipes tile spans two columns beside Jobs,
+and Recent runs spans two beside Pipelines. On an instance without pipes the Pipes tile shows New
+pipe and Open terminal instead of its numbers; the other tiles stay (the server's jobs are not the
+instance's).
 
 The page is built per request (`route`) for its instance: the console's global instance, or a
 `?instance=` link's. The tiles load after the page (`callbacks/overview.py`) and refresh every
@@ -30,8 +32,8 @@ from meerschaum.api.dash.overview import OVERVIEW_REFRESH_MS
 #: The tiles, in order: `(key, title, path)`.
 TILES = (
     ('pipes', 'Pipes', '/dash/pipes'),
-    ('pipelines', 'Pipelines', '/dash/pipelines'),
     ('jobs', 'Jobs', '/dash/jobs'),
+    ('pipelines', 'Pipelines', '/dash/pipelines'),
     ('runs', 'Recent runs', None),
 )
 

@@ -2,3 +2,6 @@ Consult the text file 'ACKNOWLEDGEMENTS.md' for licensing information regarding 
 
 
 DuckDB (MIT License, https://duckdb.org) is not part of Meerschaum: the DuckDB flavor loads the official `libduckdb` release build at run time, downloaded from the DuckDB project on first use or provided by you (`MRSM_DUCKDB_LIB`). Meerschaum neither compiles in nor redistributes it.
+
+
+The web console's plugin source editor bundles CodeMirror 6 (MIT License, https://codemirror.net) and its language packages in `meerschaum/api/dash/assets/codemirror.bundle.js`, built by `scripts/console/editor/build.sh`. Each bundled package's license is in `meerschaum/api/dash/assets/codemirror.bundle.LICENSE`.

@@ -240,6 +240,49 @@ class ProxyTokenMiddleware:
         await self.app(scope, receive, send)
 
 
+#: How long the host may take to shut down after its server is gone before it exits outright.
+PARENT_GONE_GRACE_SECONDS: float = 10.0
+
+
+def exit_with_parent() -> Optional[threading.Thread]:
+    """
+    When the Rust server started this host (`MRSM_API_HOST_PARENT_PIPE=1`), watch stdin, whose
+    write end the server holds: end of file means the server is gone (killed without stopping
+    the host), so shut down (SIGTERM to this process, which uvicorn handles), and exit outright
+    if that takes longer than `PARENT_GONE_GRACE_SECONDS`. Return the watcher thread, or `None`.
+    """
+    from meerschaum.api.host import PARENT_PIPE_ENV
+    if os.environ.get(PARENT_PIPE_ENV) != '1':
+        return None
+
+    def _watch() -> None:
+        import signal
+        import time
+        try:
+            fd = sys.stdin.fileno() if sys.stdin is not None else 0
+        except (AttributeError, OSError, ValueError):
+            fd = 0
+        while True:
+            try:
+                chunk = os.read(fd, 4096)
+            except InterruptedError:
+                continue
+            except OSError:
+                break
+            if not chunk:
+                break
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception:
+            os._exit(1)
+        time.sleep(PARENT_GONE_GRACE_SECONDS)
+        os._exit(1)
+
+    thread = threading.Thread(target=_watch, name='mrsm-host-parent-watch', daemon=True)
+    thread.start()
+    return thread
+
+
 def run_tcp(host: str, port: int, debug: bool = False) -> None:
     """
     Serve the host app with uvicorn on a TCP port (the Windows transport); see
@@ -247,6 +290,7 @@ def run_tcp(host: str, port: int, debug: bool = False) -> None:
     """
     from meerschaum.api.host import PROXY_TOKEN_ENV
     from meerschaum.utils.venv import Venv
+    exit_with_parent()
     with Venv('mrsm', debug=debug):
         uvicorn = _import_uvicorn()
         app = build_app(debug=debug)
@@ -277,6 +321,7 @@ def run(socket_path: str, debug: bool = False) -> None:
     has returned, so the environment holding them must stay on `sys.path` until the server stops.
     """
     from meerschaum.utils.venv import Venv
+    exit_with_parent()
     with Venv('mrsm', debug=debug):
         uvicorn = _import_uvicorn()
         app = build_app(debug=debug)

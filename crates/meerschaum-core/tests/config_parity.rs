@@ -45,6 +45,11 @@ fn v4_view(value: &Value) -> Value {
                         && v.get("inclusive_cap").is_some()
                         && v.get("flat_ledger").is_some())
                 })
+                // `api.shutdown.grace_seconds` (rc31: graceful shutdown) is v5-only.
+                .filter(|(k, v)| {
+                    !(k.as_str() == "shutdown"
+                        && v.as_map().is_some_and(|m| m.contains_key("grace_seconds")))
+                })
                 // `api.dash.callbacks_require_session` (rc15, PARITY.md RC15-D-001) is v5-only.
                 .filter(|(k, v)| {
                     !(k.as_str() == "callbacks_require_session" && matches!(v, Value::Bool(_)))

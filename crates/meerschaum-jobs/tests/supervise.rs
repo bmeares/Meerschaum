@@ -198,6 +198,55 @@ fn pause_resume_stop_and_restart() {
     assert!(!dir.path().join("jobs/looper").exists());
 }
 
+/// A worker killed by a signal fails with the signal's name, even when a result file says
+/// otherwise: the worker writes its result as it exits, so a file found after a signal came
+/// from someone else (a descendant which inherited `MRSM_JOB_RESULT_PATH`).
+#[test]
+fn a_worker_killed_by_a_signal_fails_with_the_signal() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = common::sh_context(dir.path());
+    let mut job = sh_job(
+        &ctx,
+        "sigkilled",
+        r#"printf '[true, "Success"]' > "$MRSM_JOB_RESULT_PATH"; exec sleep 30"#,
+        JobOptions::default(),
+    );
+    assert!(job.start().success);
+    assert!(common::wait_for(10.0, || job.status() == Status::Running
+        && job.daemon().paths().pid.exists()
+        && dir.path().join("jobs/sigkilled/.result.json").exists()));
+    let pid = job.pid().unwrap();
+    assert!(
+        std::process::Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    wait_stopped(&mut job);
+    let result = job.result();
+    assert_eq!(
+        (result.success, result.message.as_str()),
+        (
+            false,
+            "Daemon 'sigkilled' was killed by signal 9 (SIGKILL)."
+        )
+    );
+    assert!(job.ended().is_some());
+    assert!(!dir.path().join("jobs/sigkilled/.result.json").exists());
+
+    let mut usr1 = sh_job(&ctx, "usr1", "kill -USR1 $$", JobOptions::default());
+    assert!(usr1.start().success);
+    wait_stopped(&mut usr1);
+    assert_eq!(
+        usr1.result().message,
+        format!(
+            "Daemon 'usr1' was terminated by signal {} (SIGUSR1).",
+            libc::SIGUSR1
+        )
+    );
+}
+
 #[test]
 fn stopping_a_paused_job_kills_it() {
     let dir = tempfile::tempdir().unwrap();
@@ -213,11 +262,15 @@ fn stopping_a_paused_job_kills_it() {
     assert!(job.pause(None).success);
     let stopped = job.stop(Some(Seconds::Int(5)));
     assert!(stopped.success, "{stopped}");
-    assert!(common::wait_for(10.0, || job.status() == Status::Stopped));
-    // PARITY: like a SIGKILLed Python daemon, no result and no `ended` are recorded.
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    assert_eq!(job.result().message, "No result available.");
-    assert!(job.ended().is_none());
+    wait_stopped(&mut job);
+    // v4 recorded nothing for a SIGKILLed daemon ("No result available."). The supervisor
+    // outlives its worker, so the job fails with the signal that ended it.
+    let result = job.result();
+    assert_eq!(
+        (result.success, result.message.as_str()),
+        (false, "Daemon 'frozen' was killed by signal 9 (SIGKILL).")
+    );
+    assert!(job.ended().is_some());
     assert_eq!(
         job.daemon()
             .read_stop_file()

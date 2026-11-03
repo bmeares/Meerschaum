@@ -5,9 +5,11 @@
 """
 What the console's Overview (`/dash`) shows about an instance, and its tiles:
 
-- **Pipes**: how many are registered (internal `mrsm` pipes excluded) and how many are failing
-  (their last sync failed, from the per-pipe sync statuses `mrsm.get_sync_statuses()`);
-- **Pipelines**: the saved Pipelines and each one's last run;
+- **Pipes**: how many are registered (internal `mrsm` pipes excluded), how many synced, are
+  failing or have no recorded sync (the per-pipe sync statuses, `mrsm.get_sync_statuses()`), the
+  latest syncs (failures first) and the connectors the pipes read from;
+- **Pipelines**: the saved Pipelines by their last run's status, their runs over the last 24 hours
+  hour by hour, and the last success and failure;
 - **Jobs**: the jobs by state (running, stalled, failing, paused, stopped; `job.health`);
 - **Recent runs**: the Syncing Engine's runs, failures first.
 
@@ -18,7 +20,7 @@ the `build_*` functions turn them into components. Features other parts of the r
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
 import meerschaum as mrsm
@@ -32,9 +34,31 @@ import dash_bootstrap_components as dbc
 #: How often (ms) the Overview refreshes its tiles.
 OVERVIEW_REFRESH_MS: int = 30 * 1000
 
-#: How many Pipelines and runs a tile lists.
-MAX_PIPELINES: int = 6
+#: How many runs Recent runs lists, and how many pipes and connectors the Pipes tile lists.
 MAX_RUNS: int = 8
+MAX_LATEST_SYNCS: int = 5
+MAX_CONNECTORS: int = 4
+
+#: The pipe states the Pipes tile counts, in order: `(state, label)`. `ok` and `failing` are the
+#: Pipes page's `?status=` values; `unrecorded` is a pipe without a recorded sync.
+PIPE_STATES = (
+    ('ok', 'Synced'),
+    ('failing', 'Failing'),
+    ('unrecorded', 'No sync recorded'),
+)
+
+#: The states the Pipelines tile counts (each Pipeline's last run), in order: `(state, label)`.
+PIPELINE_STATES = (
+    ('running', 'Running'),
+    ('succeeded', 'Succeeded'),
+    ('failed', 'Failed'),
+    ('stopped', 'Stopped'),
+    ('none', 'Not run'),
+)
+
+#: How many hours the Pipelines tile's run history covers, and how many runs it reads at most.
+HISTORY_HOURS: int = 24
+HISTORY_LIMIT: int = 200
 
 #: The job states the Jobs tile counts, in order: `(state, label)`.
 JOB_STATES = (
@@ -88,27 +112,81 @@ def is_failing(status: Optional[Dict[str, Any]]) -> bool:
     return failures > 0 or status.get('success', None) is False
 
 
-def pipes_summary(instance: Any, viewer: Any = None) -> Dict[str, Any]:
+def pipes_summary(instance: Any, viewer: Any = None, now: Optional[datetime] = None) -> Dict[str, Any]:
     """
-    `{'total', 'failing', 'statuses'}`: the registered pipes `viewer` (by default the request's)
-    may see (without the internal `mrsm` ones), how many are failing (`None` without sync
-    statuses) and whether statuses were available.
+    What the Pipes tile shows about the registered pipes `viewer` (by default the request's) may
+    see, without the internal `mrsm` ones, from one listing and one read of the sync statuses:
+
+    - `total`: how many;
+    - `statuses`: whether this build records sync statuses (else the counts below are `None`);
+    - `ok`, `failing`, `unrecorded`: how many synced, are failing or have no recorded sync;
+    - `last_sync`: when the latest recorded sync of any of them ended (ISO-8601), or `None`;
+    - `synced_24h`: how many had a sync end in the last 24 hours;
+    - `latest`: up to `MAX_LATEST_SYNCS` pipes by their latest sync, failing ones first
+      (`{ref, state, when, failures}`);
+    - `connectors`: `[(connector_keys, count)]`, most pipes first.
     """
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
-    refs = {
-        pipe_ref(str(instance), ck, mk, lk)
-        for ck, mk, lk, parameters in access.registered_pipes(instance)
-        if str(ck) != 'mrsm' and access.can_see_pipe(viewer, parameters)
+    refs = {}
+    for ck, mk, lk, parameters in access.registered_pipes(instance):
+        if str(ck) != 'mrsm' and access.can_see_pipe(viewer, parameters):
+            refs[pipe_ref(str(instance), ck, mk, lk)] = str(ck)
+    connectors: Dict[str, int] = {}
+    for ck in refs.values():
+        connectors[ck] = connectors.get(ck, 0) + 1
+    summary: Dict[str, Any] = {
+        'total': len(refs),
+        'statuses': hasattr(mrsm, 'get_sync_statuses'),
+        'ok': None,
+        'failing': None,
+        'unrecorded': None,
+        'last_sync': None,
+        'synced_24h': None,
+        'latest': [],
+        'connectors': sorted(connectors.items(), key=lambda item: (-item[1], item[0])),
     }
-    has_statuses = hasattr(mrsm, 'get_sync_statuses')
-    statuses = get_sync_statuses(instance) if has_statuses and refs else {}
-    failing = (
-        sum(1 for ref in refs if is_failing(statuses.get(ref, None)))
-        if has_statuses
-        else None
-    )
-    return {'total': len(refs), 'failing': failing, 'statuses': has_statuses}
+    if not summary['statuses']:
+        return summary
+    statuses = get_sync_statuses(instance) if refs else {}
+    now = now or datetime.now(timezone.utc)
+    counts = {state: 0 for state, _ in PIPE_STATES}
+    synced_24h = 0
+    last_sync = None
+    latest = []
+    for ref in refs:
+        status = statuses.get(ref, None)
+        if not status:
+            counts['unrecorded'] += 1
+            continue
+        failing = is_failing(status)
+        counts['failing' if failing else 'ok'] += 1
+        attempt = parse_timestamp(status.get('last_attempt', None))
+        if attempt is not None:
+            if last_sync is None or attempt > last_sync:
+                last_sync = attempt
+            if (now - attempt).total_seconds() <= 86400:
+                synced_24h += 1
+        when = (status.get('last_failure', None) if failing else None) or status.get('last_attempt', None)
+        try:
+            failures = int(status.get('consecutive_failures') or (1 if failing else 0))
+        except (TypeError, ValueError):
+            failures = 1 if failing else 0
+        latest.append({
+            'ref': ref,
+            'state': 'failing' if failing else 'ok',
+            'when': when,
+            'failures': failures,
+        })
+    latest.sort(key=lambda item: str(item['when'] or ''), reverse=True)
+    latest.sort(key=lambda item: 0 if item['state'] == 'failing' else 1)
+    summary.update(counts)
+    summary.update({
+        'last_sync': last_sync.isoformat() if last_sync is not None else None,
+        'synced_24h': synced_24h,
+        'latest': latest[:MAX_LATEST_SYNCS],
+    })
+    return summary
 
 
 def run_pipeline_name(run: Dict[str, Any], definitions: Dict[str, Dict[str, Any]]) -> Optional[str]:
@@ -145,36 +223,93 @@ def _get_runs(instance: Any, limit: int, viewer: Any = None) -> List[Dict[str, A
     return get_runs(instance, limit=limit, viewer=viewer) or []
 
 
-def pipelines_summary(instance: Any, viewer: Any = None, definitions=None, runs=None) -> Dict[str, Any]:
+def run_state(status: Optional[str]) -> str:
+    """A run's status as the Pipelines tile counts it (`PIPELINE_STATES`)."""
+    if status in FAILED_STATUSES:
+        return 'failed'
+    if status in ('succeeded', 'running'):
+        return status
+    return 'stopped' if status else 'none'
+
+
+def pipelines_summary(
+    instance: Any,
+    viewer: Any = None,
+    definitions=None,
+    runs=None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
     """
-    `{'count', 'pipelines': [{name, status, started, run_id}, ...]}`: the saved Pipelines
-    `viewer` (by default the request's) may see, with their last runs, failed and running ones
-    first.
+    What the Pipelines tile shows about the saved Pipelines `viewer` (by default the request's)
+    may see, from the registry and one bounded read of the run history:
+
+    - `count`: how many;
+    - `states`: how many by their last run (`PIPELINE_STATES`; `none`: no run in the history read);
+    - `hours`: their runs over the last `HISTORY_HOURS` hours, oldest hour first
+      (`{start, succeeded, failed, running, stopped}`; `unread` when the history read is shorter);
+    - `runs_24h`, `failed_24h`: how many of those runs there were, and how many failed;
+    - `last_success`, `last_failure`: the newest succeeded and failed runs
+      (`{name, started, run_id}`), or `None`.
     """
     definitions = _list_pipelines(instance, viewer=viewer) if definitions is None else definitions
     try:
-        runs = (_get_runs(instance, 200, viewer=viewer) if definitions else []) if runs is None else runs
+        runs = (_get_runs(instance, HISTORY_LIMIT, viewer=viewer) if definitions else []) if runs is None else runs
     except Exception:
         runs = []
+    now = now or datetime.now(timezone.utc)
+    window_end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    window_start = window_end - timedelta(hours=HISTORY_HOURS)
+    hours = [
+        {
+            'start': (window_start + timedelta(hours=i)).isoformat(),
+            'succeeded': 0, 'failed': 0, 'running': 0, 'stopped': 0, 'unread': False,
+        }
+        for i in range(HISTORY_HOURS)
+    ]
     latest: Dict[str, Dict[str, Any]] = {}
+    last_success = last_failure = None
+    runs_24h = failed_24h = 0
+    oldest = None
     for run in runs:
+        record = run.get('run', {}) or {}
+        started = parse_timestamp(record.get('started', None))
+        if started is not None and (oldest is None or started < oldest):
+            oldest = started
         name = run_pipeline_name(run, definitions)
-        if name and name not in latest:
-            latest[name] = run
-    items = []
-    for name in sorted(definitions):
-        run = latest.get(name, None)
-        record = (run or {}).get('run', {}) or {}
-        items.append({
-            'name': name,
-            'status': (run or {}).get('status', None),
-            'started': record.get('started', None),
-            'run_id': record.get('run_id', None),
-        })
-    rank = {status: 0 for status in FAILED_STATUSES}
-    rank.update({'running': 1})
-    items.sort(key=lambda item: (rank.get(item['status'], 2), item['name']))
-    return {'count': len(definitions), 'pipelines': items}
+        if not name:
+            continue
+        status = run.get('status', None)
+        state = run_state(status)
+        item = {'name': name, 'started': record.get('started', None), 'run_id': record.get('run_id', None)}
+        if name not in latest:
+            latest[name] = {'status': status, **item}
+        if state == 'succeeded' and last_success is None:
+            last_success = item
+        if state == 'failed' and last_failure is None:
+            last_failure = item
+        if started is None or not (window_start <= started < window_end):
+            continue
+        hour = hours[int((started - window_start).total_seconds() // 3600)]
+        hour[state if state != 'none' else 'stopped'] += 1
+        runs_24h += 1
+        failed_24h += int(state == 'failed')
+    ### A full history read that ends inside the window says nothing about the hours before it.
+    if oldest is not None and len(runs) >= HISTORY_LIMIT:
+        for hour in hours:
+            if parse_timestamp(hour['start']) + timedelta(hours=1) <= oldest:
+                hour['unread'] = True
+    states = {state: 0 for state, _ in PIPELINE_STATES}
+    for name in definitions:
+        states[run_state((latest.get(name, None) or {}).get('status', None))] += 1
+    return {
+        'count': len(definitions),
+        'states': states,
+        'hours': hours,
+        'runs_24h': runs_24h,
+        'failed_24h': failed_24h,
+        'last_success': last_success,
+        'last_failure': last_failure,
+    }
 
 
 def job_state(job: Any) -> str:
@@ -241,8 +376,20 @@ def _executor_keys() -> Optional[str]:
         return None
 
 
+def is_scheduled_job(job: Any) -> bool:
+    """Whether a job runs on a schedule (`-s` / `--schedule`)."""
+    try:
+        sysargs = [str(arg) for arg in (getattr(job, 'sysargs', None) or [])]
+    except Exception:
+        return False
+    return any(arg.split('=', 1)[0] in ('-s', '--schedule') for arg in sysargs)
+
+
 def jobs_summary(viewer: Any = None) -> Dict[str, Any]:
-    """`{'total', 'counts': {state: n}}` over the jobs the Jobs page lists for the viewer."""
+    """
+    `{'total', 'counts': {state: n}, 'scheduled'}` over the jobs the Jobs page lists for the
+    viewer (`scheduled`: how many run on a schedule).
+    """
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
     executor_keys = _executor_keys()
@@ -255,14 +402,15 @@ def jobs_summary(viewer: Any = None) -> Dict[str, Any]:
         listed = get_jobs(executor_keys=executor_keys, include_hidden=False)
     jobs = access.filter_jobs(viewer, listed or {})
     counts = {state: 0 for state, _ in JOB_STATES}
-    total = 0
+    total = scheduled = 0
     for job in jobs.values():
         if _is_automatic_job(job):
             continue
         total += 1
+        scheduled += int(is_scheduled_job(job))
         state = job_state(job)
         counts[state] = counts.get(state, 0) + 1
-    return {'total': total, 'counts': counts}
+    return {'total': total, 'counts': counts, 'scheduled': scheduled}
 
 
 def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None, definitions=None, runs=None) -> List[Dict[str, Any]]:
@@ -315,7 +463,7 @@ def engine_summary(instance: Any, viewer: Any = None) -> Dict[str, Any]:
     Member access is checked by the run reader, rather than walking a graph for each saved name.
     """
     definitions = _list_pipelines(instance, viewer=viewer)
-    runs = _get_runs(instance, 200 if definitions else 100, viewer=viewer)
+    runs = _get_runs(instance, HISTORY_LIMIT if definitions else 100, viewer=viewer)
     return {
         'pipelines': pipelines_summary(instance, viewer=viewer, definitions=definitions, runs=runs),
         'runs': recent_runs(instance, viewer=viewer, definitions=definitions, runs=runs[:100]),
@@ -394,7 +542,8 @@ def pipe_label(ref: str) -> Any:
     if is_hidden_ref(ref):
         return html.Span(ref_label(ref), className='overview-hidden-pipe')
     try:
-        return dcc.Link(html.Code(ref_label(ref)), href=pipe_href(ref), className='overview-pipe-link')
+        label = ref_label(ref)
+        return dcc.Link(html.Code(label), href=pipe_href(ref), className='overview-pipe-link', title=label)
     except Exception:
         return html.Code(str(ref))
 
@@ -413,81 +562,267 @@ def _stat(value: Any, href: Optional[str], label: str, element_id: str) -> Any:
     return number
 
 
-def build_pipes_body(summary: Dict[str, Any], instance_query: Optional[str] = None) -> List[Any]:
-    """The Pipes tile: the total and the failing count."""
-    children = [
-        _stat(summary['total'], with_query('/dash/pipes', instance=instance_query), 'All pipes',
-              'overview-pipes-total'),
-    ]
-    failing = summary.get('failing', None)
-    if failing is not None:
-        children.append(dcc.Link(
-            f"{failing:,} failing",
-            href=with_query('/dash/pipes', status='failing', instance=instance_query),
-            id='overview-pipes-failing',
-            className='overview-substat' + (' overview-substat-bad' if failing else ' overview-substat-ok'),
+def _headline(stat: Any, aside: Any = None) -> Any:
+    """The tile's number, with a short fact beside it."""
+    return html.Div([stat] + ([aside] if aside else []), className='overview-headline')
+
+
+def _aside(text: str, element_id: str, title: Optional[str] = None) -> Any:
+    return html.Span(text, className='overview-aside', id=element_id, title=title or text)
+
+
+def _bar(segments: List[Any], element_id: str) -> Any:
+    """
+    A bar split by state (`[(state, label, count)]`), each part as wide as its share; its label
+    reads the counts.
+    """
+    shown = [(state, label, count) for state, label, count in segments if count]
+    text = ', '.join(f"{count:,} {label.lower()}" for _, label, count in shown) or 'None'
+    return html.Div(
+        [
+            html.Span(
+                className=f'overview-bar-part overview-bar-{state}',
+                style={'flexGrow': count},
+                title=f"{label}: {count:,}",
+            )
+            for state, label, count in shown
+        ],
+        className='overview-bar',
+        id=element_id,
+        role='img',
+        **{'aria-label': text},
+    )
+
+
+def _state_rows(rows: List[Any], list_id: Optional[str] = None) -> Any:
+    """
+    The states of a tile (`[(state, label, count, href, element_id)]`): a dot, the label and the
+    count, linked to the page filtered by it (`href`; a row without one is not a link).
+    """
+    items = []
+    for state, label, count, href, element_id in rows:
+        content = [
+            html.Span(className=f'overview-dot overview-dot-{state}', **{'aria-hidden': 'true'}),
+            html.Span(label, className='overview-job-state'),
+            html.Span(f"{count:,}", className='overview-job-count'),
+        ]
+        items.append(html.Li(
+            dcc.Link(content, href=href, className='overview-job-link', id=element_id)
+            if href else
+            html.Div(content, className='overview-job-link overview-state-plain', id=element_id),
+            className='overview-row',
         ))
-    return children
+    return html.Ul(items, className='overview-list overview-job-states', **({'id': list_id} if list_id else {}))
+
+
+def build_pipes_body(summary: Dict[str, Any], instance_query: Optional[str] = None) -> List[Any]:
+    """
+    The Pipes tile: the total, the pipes by sync status (each linked to the Pipes page filtered
+    by it) and the connectors with the most pipes, beside the latest syncs (failures first).
+    """
+    has_statuses = summary.get('ok', None) is not None
+    last_sync = summary.get('last_sync', None)
+    overview_column = [
+        _headline(
+            _stat(summary['total'], with_query('/dash/pipes', instance=instance_query), 'All pipes',
+                  'overview-pipes-total'),
+            _aside(f"last sync {time_ago(last_sync)}", 'overview-pipes-last-sync', str(last_sync))
+            if last_sync else None,
+        ),
+    ]
+    if has_statuses:
+        hrefs = {
+            'ok': with_query('/dash/pipes', status='ok', instance=instance_query),
+            'failing': with_query('/dash/pipes', status='failing', instance=instance_query),
+            'unrecorded': None,
+        }
+        overview_column += [
+            _bar([(state, label, summary.get(state, 0) or 0) for state, label in PIPE_STATES],
+                 'overview-pipes-bar'),
+            _state_rows([
+                (state, label, summary.get(state, 0) or 0, hrefs[state], f'overview-pipes-{state}')
+                for state, label in PIPE_STATES
+            ]),
+        ]
+    detail_column = []
+    if summary.get('latest'):
+        rows = []
+        for item in summary['latest']:
+            failing = item['state'] == 'failing'
+            failures = int(item.get('failures') or 0)
+            rows.append(html.Li([
+                html.Span(className=f"overview-dot overview-dot-{item['state']}", **{'aria-hidden': 'true'}),
+                html.Div(pipe_label(item['ref']), className='overview-latest-pipe'),
+                html.Span(f"×{failures}", className='overview-repeat overview-failures',
+                          title=f"{failures} failed syncs in a row") if failing and failures > 1 else None,
+                html.Span(time_ago(item['when']), className='overview-when', title=str(item['when'] or '')),
+            ], className='overview-row overview-latest' + (' overview-latest-failing' if failing else '')))
+        detail_column.append(html.Section([
+            html.H3('Latest syncs', className='overview-subheading'),
+            html.Ul(rows, className='overview-list', id='overview-pipes-latest'),
+        ], className='overview-pipes-section'))
+    connectors = list(summary.get('connectors', None) or [])
+    if connectors:
+        chips = [
+            dcc.Link(
+                [html.Code(str(ck)), html.Span(f"{count:,}", className='overview-chip-count')],
+                href=with_query('/dash/pipes', connector_keys=ck, instance=instance_query),
+                className='overview-chip',
+                title=f"{count:,} pipes from {ck}",
+            )
+            for ck, count in connectors[:MAX_CONNECTORS]
+        ]
+        more = len(connectors) - MAX_CONNECTORS
+        if more > 0:
+            chips.append(dcc.Link(
+                f"{more} more", href=with_query('/dash/pipes', instance=instance_query),
+                className='overview-chip overview-chip-more',
+            ))
+        overview_column.append(html.Section([
+            html.H3('Connectors', className='overview-subheading'),
+            html.Div(chips, className='overview-chips', id='overview-pipes-connectors'),
+        ], className='overview-pipes-section overview-pipes-connectors'))
+    return [html.Div(
+        [html.Div(overview_column, className='overview-pipes-overview')]
+        + ([html.Div(detail_column, className='overview-pipes-detail')] if detail_column else []),
+        className='overview-pipes-layout',
+    )]
+
+
+def _hour_label(start: Any) -> str:
+    moment = parse_timestamp(start)
+    if moment is None:
+        return ''
+    return moment.strftime('%H:00') + ' UTC'
+
+
+def build_history(summary: Dict[str, Any]) -> Any:
+    """The Pipelines' runs over the last 24 hours, hour by hour, stacked by status."""
+    hours = summary.get('hours', None) or []
+    ### Bottom to top: the bars stack upward (`column-reverse`), failures on top.
+    states = ('succeeded', 'running', 'stopped', 'failed')
+    peak = max([sum(hour.get(state, 0) for state in states) for hour in hours] + [1])
+    columns = []
+    for hour in hours:
+        total = sum(hour.get(state, 0) for state in states)
+        if hour.get('unread'):
+            title = f"{_hour_label(hour['start'])}: not read"
+        else:
+            title = f"{_hour_label(hour['start'])}: " + (
+                ', '.join(f"{hour[state]:,} {state}" for state in states if hour.get(state))
+                or 'no runs'
+            )
+        columns.append(html.Span(
+            [
+                html.Span(
+                    className=f'overview-hour-part overview-bar-{state}',
+                    style={'height': f"{100 * hour[state] / peak:.1f}%"},
+                )
+                for state in states if hour.get(state)
+            ],
+            className='overview-hour' + (
+                ' overview-hour-unread' if hour.get('unread') else (' overview-hour-empty' if not total else '')
+            ),
+            title=title,
+        ))
+    runs, failed = summary.get('runs_24h', 0) or 0, summary.get('failed_24h', 0) or 0
+    return html.Div(
+        [
+            html.Div(
+                columns, className='overview-history-bars', role='img',
+                **{'aria-label': f"Runs per hour over the last {HISTORY_HOURS} hours: "
+                                 f"{runs:,} runs, {failed:,} failed"},
+            ),
+            html.Div(
+                [html.Span(f"{HISTORY_HOURS} h ago"), html.Span('now')],
+                className='overview-history-axis', **{'aria-hidden': 'true'},
+            ),
+        ],
+        className='overview-history',
+        id='overview-pipelines-history',
+    )
+
+
+def _run_fact(label: str, item: Optional[Dict[str, Any]], element_id: str, instance_query: Optional[str]) -> Any:
+    """`Last success` / `Last failure`: when, linked to that run, and which Pipeline."""
+    if not item:
+        value = html.Span('none', className='overview-fact-none')
+        name = None
+    else:
+        value = dcc.Link(
+            time_ago(item['started']) or 'unknown',
+            href=with_query(
+                '/dash/pipelines/' + quote(str(item['name']), safe=''),
+                run_id=item['run_id'], instance=instance_query,
+            ),
+            className='overview-fact-link',
+            title=str(item['started'] or ''),
+        )
+        name = html.Span(str(item['name']), className='overview-fact-name', title=str(item['name']))
+    return html.Div(
+        [html.Dt(label), html.Dd([value] + ([name] if name is not None else []))],
+        className='overview-fact', id=element_id,
+    )
 
 
 def build_pipelines_body(summary: Dict[str, Any], instance_query: Optional[str] = None) -> List[Any]:
-    """The Pipelines tile: the count and each Pipeline's last run."""
-    from meerschaum.api.dash.pipeline_management import pipeline_title
+    """
+    The Pipelines tile: how many, how many by their last run's status, their runs over the last
+    24 hours, and the last success and failure.
+    """
+    href = with_query('/dash/pipelines', instance=instance_query)
+    runs = summary.get('runs_24h', 0) or 0
     children = [
-        _stat(summary['count'], with_query('/dash/pipelines', instance=instance_query),
-              'All Pipelines', 'overview-pipelines-total'),
+        _headline(
+            _stat(summary['count'], href, 'All Pipelines', 'overview-pipelines-total'),
+            _aside(f"{runs:,} run{'' if runs == 1 else 's'} in {HISTORY_HOURS} h", 'overview-pipelines-runs')
+            if summary['count'] else None,
+        ),
     ]
-    if not summary['pipelines']:
+    if not summary['count']:
         children.append(dbc.Button(
             'New pipeline', href='/dash/pipelines/new', size='sm', color='secondary',
             id='overview-new-pipeline', class_name='overview-tile-action',
         ))
         return children
-    rows = []
-    for item in summary['pipelines'][:MAX_PIPELINES]:
-        href = with_query(
-            '/dash/pipelines/' + quote(item['name'], safe=''),
-            run_id=item['run_id'], instance=instance_query,
-        )
-        rows.append(html.Li([
-            dcc.Link(pipeline_title(item['name']), href=href, className='overview-pipeline-link'),
-            status_chip(item['status']),
-            html.Span(time_ago(item['started']), className='overview-when',
-                      title=str(item['started'] or '')),
-        ], className='overview-row'))
-    children.append(html.Ul(rows, className='overview-list', id='overview-pipelines-list'))
-    more = len(summary['pipelines']) - MAX_PIPELINES
-    if more > 0:
-        children.append(dcc.Link(
-            f"{more} more", href=with_query('/dash/pipelines', instance=instance_query),
-            className='overview-more',
-        ))
+    states = summary.get('states', None) or {}
+    shown = [
+        (state, label) for state, label in PIPELINE_STATES
+        if state != 'stopped' or states.get(state, 0)
+    ]
+    children += [
+        _bar([(state, label, states.get(state, 0)) for state, label in shown], 'overview-pipelines-bar'),
+        _state_rows(
+            [(state, label, states.get(state, 0), href, f'overview-pipelines-{state}') for state, label in shown],
+            'overview-pipelines-states',
+        ),
+        build_history(summary),
+        html.Dl([
+            _run_fact('Last success', summary.get('last_success'), 'overview-pipelines-last-success', instance_query),
+            _run_fact('Last failure', summary.get('last_failure'), 'overview-pipelines-last-failure', instance_query),
+        ], className='overview-facts'),
+    ]
     return children
 
 
 def build_jobs_body(summary: Dict[str, Any]) -> List[Any]:
     """The Jobs tile: the jobs by state, each linked to the Jobs page filtered by it."""
-    rows = []
-    for state, label in JOB_STATES:
-        count = summary['counts'].get(state, 0)
-        if state == 'paused' and not count:
-            continue
-        rows.append(html.Li(
-            dcc.Link(
-                [
-                    html.Span(className=f'overview-dot overview-dot-{state}', **{'aria-hidden': 'true'}),
-                    html.Span(label, className='overview-job-state'),
-                    html.Span(f"{count:,}", className='overview-job-count'),
-                ],
-                href=with_query('/dash/jobs', status=state),
-                className='overview-job-link',
-                id=f'overview-jobs-{state}',
-            ),
-            className='overview-row',
-        ))
+    shown = [
+        (state, label) for state, label in JOB_STATES
+        if state != 'paused' or summary['counts'].get(state, 0)
+    ]
     return [
-        _stat(summary['total'], '/dash/jobs', 'All jobs', 'overview-jobs-total'),
-        html.Ul(rows, className='overview-list overview-job-states'),
+        _headline(
+            _stat(summary['total'], '/dash/jobs', 'All jobs', 'overview-jobs-total'),
+            _aside(f"{summary['scheduled']:,} on a schedule", 'overview-jobs-scheduled')
+            if summary.get('scheduled') else None,
+        ),
+        _bar([(state, label, summary['counts'].get(state, 0)) for state, label in shown], 'overview-jobs-bar'),
+        _state_rows([
+            (state, label, summary['counts'].get(state, 0), with_query('/dash/jobs', status=state),
+             f'overview-jobs-{state}')
+            for state, label in shown
+        ]),
     ]
 
 

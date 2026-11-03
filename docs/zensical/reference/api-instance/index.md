@@ -132,6 +132,28 @@ The 4.1 keys `api:uvicorn:ssl_keyfile` and `api:uvicorn:ssl_certfile` still work
 
 A reverse proxy that terminates TLS, such as Caddy or NGINX, remains a fine choice, for example to serve several sites on port 443: see the [example NGINX configuration](/reference/api-instance/nginx/). Behind a proxy, set `api:server:forwarded_allow_ips` and `api:server:proxy_headers` so that the server sees each client's address (see [Permissions](/reference/api-instance/permissions/)).
 
+### Stopping and Restarting
+
+When the API server gets `SIGTERM` or `SIGINT` (Ctrl-C, `docker stop`, `mrsm stop job`), it stops gracefully:
+
+- It stops accepting new connections at once.
+- Requests in progress finish. The server exits as soon as the last one is done.
+- An idle server exits immediately.
+- Event streams, log streams and websockets (the web terminal) close at once. A tmux session in the web terminal survives.
+- A second `SIGTERM` or `SIGINT` stops the server immediately.
+
+`api:shutdown:grace_seconds` caps how long the server waits for requests in progress (default `8`). It is an upper bound, not a delay. `0` stops at once without waiting.
+
+```yaml
+api:
+  shutdown:
+    grace_seconds: 8
+```
+
+The default stays under Docker's stop timeout (10 seconds, then `SIGKILL`). If you raise `grace_seconds`, also raise the time your supervisor waits: `stop_grace_period` in Docker Compose, `docker stop --time`, or `terminationGracePeriodSeconds` in Kubernetes. `mrsm stop job` waits for an API job's grace period plus 2 seconds before it signals again. With the local executor, an explicit `--timeout` wins.
+
+Behind a load balancer, probe `GET /healthcheck/ready`. It answers `503` with `"The server is shutting down."` once the server drains, and `"The server is starting."` until the web console's host is up. `GET /healthcheck` is unchanged, so uptime monitors keep matching it. A proxy that retries the next upstream on a refused connection or a `503` (NGINX's `proxy_next_upstream error http_503`) moves clients to another server during a restart.
+
 ### Docker
 
 If you're building your own Docker images, consider basing off the [`bmeares/meerschaum` Docker image](https://hub.docker.com/r/bmeares/meerschaum), as is done in the [`mrsm compose` template repository](https://github.com/bmeares/mrsm-compose-template/blob/main/docker/Dockerfile):

@@ -304,3 +304,54 @@ fn a_signal_the_service_manager_delivered_to_the_cgroup_is_not_forwarded_again()
         "the job was force-quit by a second SIGINT: {result}"
     );
 }
+
+/// A job killed by a signal (the OOM killer, `kill -9`) fails with the signal's name, and the
+/// result of an earlier run never stands in for a run that recorded none: the wrapper removes
+/// the unit's result file when the job starts (a wrapper killed itself, by `TimeoutStopSec=`,
+/// records nothing, and the executor then reads systemd's own account of the run).
+#[cfg(unix)]
+#[test]
+fn a_unit_whose_job_is_killed_records_the_signal() {
+    let unit = Unit::new();
+    let result_path = unit.path("systemd/services/sysjob/mrsm-sysjob.service.result.json");
+    std::fs::write(&result_path, r#"[true, "Success"]"#).unwrap();
+    let mut wrapper = unit.command(&["sh", "sleep", "20"]).spawn().unwrap();
+    let _reaper = Reaper::new(vec![wrapper.id()]);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let child_pid = loop {
+        let pids = Command::new("pgrep")
+            .args(["-P", &wrapper.id().to_string()])
+            .output()
+            .unwrap();
+        let pid = String::from_utf8_lossy(&pids.stdout)
+            .split_whitespace()
+            .next()
+            .and_then(|p| p.parse::<u32>().ok());
+        if let Some(pid) = pid
+            && !descendants(pid).is_empty()
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "the job did not start");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    // The previous run's result is gone while this run goes on.
+    assert!(unit.result().is_none(), "{:?}", unit.result());
+    let mut tree = descendants(wrapper.id());
+    tree.push(wrapper.id());
+    let _tree = Reaper::new(tree);
+    assert!(
+        Command::new("kill")
+            .args(["-KILL", &child_pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let status = wait_exit(&mut wrapper, 30);
+    // Not a stop on request: systemd may restart the unit.
+    assert!(!status.success(), "{status:?}");
+    assert_eq!(
+        unit.result().expect("a result file"),
+        serde_json::json!([false, "Daemon 'sysjob' was killed by signal 9 (SIGKILL)."])
+    );
+}

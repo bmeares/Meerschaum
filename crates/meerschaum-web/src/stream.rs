@@ -171,6 +171,7 @@ pub(crate) async fn logs(
     let mut ticker =
         tokio::time::interval_at(tokio::time::Instant::now() + SESSION_CHECK, SESSION_CHECK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let drain = state.server.lifecycle.signal();
     let stream = futures_util::stream::unfold(
         (monitor, state, session_id, false, ticker, slot),
         |(mut monitor, state, id, done, mut ticker, slot)| async move {
@@ -211,6 +212,8 @@ pub(crate) async fn logs(
             ))
         },
     );
+    // A draining server ends the stream at once (the browser reconnects to another server).
+    let stream = meerschaum_server::lifecycle::until_drain(stream, drain);
     let mut response = Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response();

@@ -31,6 +31,9 @@ pub struct ToolError {
     pub kind: &'static str,
     /// `str(e)`.
     pub message: String,
+    /// The tool refused one of its arguments (reported as "Invalid arguments"), as opposed to
+    /// failing while it ran.
+    pub invalid_argument: bool,
 }
 
 impl ToolError {
@@ -39,6 +42,7 @@ impl ToolError {
         ToolError {
             kind: "PermissionError",
             message: message.into(),
+            invalid_argument: false,
         }
     }
 
@@ -47,14 +51,25 @@ impl ToolError {
         ToolError {
             kind: "ValueError",
             message: message.into(),
+            invalid_argument: false,
         }
     }
 
-    /// `TypeError(message)`: reported as invalid arguments.
+    /// `TypeError(message)` raised while the tool runs: reported as `TypeError: {message}`.
     pub fn type_error(message: impl Into<String>) -> ToolError {
         ToolError {
             kind: "TypeError",
             message: message.into(),
+            invalid_argument: false,
+        }
+    }
+
+    /// An argument the tool refuses (`TypeError(message)`): reported as
+    /// `Invalid arguments for '{tool}': {message}`.
+    pub fn invalid_argument(message: impl Into<String>) -> ToolError {
+        ToolError {
+            invalid_argument: true,
+            ..ToolError::type_error(message)
         }
     }
 
@@ -63,6 +78,7 @@ impl ToolError {
         ToolError {
             kind: "Exception",
             message: message.into(),
+            invalid_argument: false,
         }
     }
 }
@@ -621,7 +637,7 @@ fn depth_arg(args: &Map, key: &str) -> Result<Option<Value>, ToolError> {
         Some(Value::Bool(true)) => Ok(Some(Value::Bool(true))),
         Some(Value::Int(0)) => Ok(None),
         Some(Value::Int(n)) if *n > 0 => Ok(Some(Value::Int(*n))),
-        Some(other) => Err(ToolError::type_error(format!(
+        Some(other) => Err(ToolError::invalid_argument(format!(
             "`{key}` must be true or a positive number of generations, got {}.",
             other.py_str()
         ))),

@@ -1071,3 +1071,42 @@ fn a_local_job_moves_to_systemd_and_keeps_its_logs() {
             .is_some_and(|text| text.contains("earlier lap"))
     );
 }
+
+/// A unit whose run recorded no result (its wrapper was killed: `TimeoutStopSec=`, the OOM
+/// killer) reports systemd's account of the run: the signal that ended it, never a success.
+#[test]
+fn a_run_without_a_result_reports_how_systemd_saw_it_end() {
+    let f = Fixture::new();
+    let ex = f.executor();
+    setup_lifecycle(&f, "gone", None);
+    let svc = "mrsm-gone.service";
+    let mut killed = service("failed", 0, false);
+    killed.result = "signal".into();
+    killed.exec_main_code = "2".into();
+    killed.exec_main_status = "9".into();
+    f.fake.set_service(svc, killed);
+    let r = ex.read_job_result("gone");
+    assert_eq!(
+        (r.success, r.message.as_str()),
+        (false, "Daemon 'gone' was killed by signal 9 (SIGKILL).")
+    );
+    let mut oom = service("failed", 0, false);
+    oom.result = "oom-kill".into();
+    oom.exec_main_code = "1".into();
+    oom.exec_main_status = "1".into();
+    f.fake.set_service(svc, oom);
+    let r = ex.read_job_result("gone");
+    assert_eq!(
+        (r.success, r.message.as_str()),
+        (false, "The service of job 'gone' failed (oom-kill).")
+    );
+    // A clean run without a result file (v4's layout) keeps v4's answer.
+    let mut clean = service("inactive", 0, false);
+    clean.result = "success".into();
+    f.fake.set_service(svc, clean);
+    let r = ex.read_job_result("gone");
+    assert_eq!(
+        (r.success, r.message.as_str()),
+        (false, "No result available.")
+    );
+}

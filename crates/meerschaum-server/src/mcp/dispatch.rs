@@ -340,7 +340,9 @@ impl McpServer {
             };
             match tools::call(&name, &arguments, &cx).await {
                 Ok(v) => v,
-                Err(e) if e.kind == "TypeError" => {
+                // Only an argument the tool refused is "Invalid arguments": a `TypeError` raised
+                // while the tool runs is an execution error like any other.
+                Err(e) if e.invalid_argument => {
                     return tool_error(
                         id,
                         format!("Invalid arguments for '{name}': {}", e.message),
