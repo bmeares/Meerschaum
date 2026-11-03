@@ -60,7 +60,7 @@ print('JSON:' + json.dumps({
     'anonymous': publish.publish(context, 'api:mrsm', {}),
     'viewer': publish.publish(context, 'api:mrsm', viewer),
     'login': publish.login_repository(context, 'api:mrsm', viewer, 'password',
-                                      'someone', 'secret', '', '', ''),
+                                      'someone', 'secret', '', '', '')[:2],
     'unknown': publish.publish(context, 'api:notconfigured', admin),
     'traversal': publish.publish({'name': '../rc30_access'}, 'api:mrsm', admin),
     'repositories': publish.repositories(viewer),
@@ -71,3 +71,64 @@ print('JSON:' + json.dumps({
     assert out['unknown'] == [False, 'Select a configured API repository.']
     assert out['traversal'] == [False, 'This plugin is not installed.']
     assert out['repositories'] == []
+
+
+def test_publish_storage_preserves_other_settings_and_reports_write_failures(plugins_dir):
+    root, plugins = plugins_dir
+    out = _json(run_python(root, plugins, '''
+import copy, json, os
+from unittest.mock import patch
+import meerschaum as mrsm
+from meerschaum.config import get_config
+from meerschaum.config._read_config import read_config
+from meerschaum.config._edit import write_config
+from meerschaum.api.dash import plugin_publish as publishing
+config = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
+api = config['meerschaum']['connectors']['api']
+api['rc30save'] = {'host': '127.0.0.1', 'port': 18400, 'protocol': 'http',
+                   'username': 'old', 'password': 'old-test-password', 'verify': False}
+api['rc30other'] = {'host': '127.0.0.1', 'port': 18401, 'password': 'other-test-password'}
+assert write_config(config)
+get_config('meerschaum', 'connectors', 'api').update(copy.deepcopy(api))
+conn = mrsm.get_connector('api:rc30save', refresh=True)
+before = copy.deepcopy(config)
+publishing._save_credentials('api:rc30save', conn, {'api_key': 'fixture-key'})
+after = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
+saved = after['meerschaum']['connectors']['api']['rc30save']
+assert saved['api_key'] == 'fixture-key' and saved['password'] is None
+assert saved['verify'] is False and saved['port'] == 18400
+before['meerschaum']['connectors']['api'].pop('rc30save')
+without_selected = copy.deepcopy(after)
+without_selected['meerschaum']['connectors']['api'].pop('rc30save')
+assert without_selected == before
+assert mrsm.get_connector('api:rc30save').login_scheme == 'api_key'
+with patch('meerschaum.config._edit.write_config', return_value=False):
+    try:
+        publishing._save_credentials('api:rc30save', conn, {'api_key': 'not-saved'})
+        raise AssertionError('A failed write must be reported')
+    except publishing.PublishError:
+        pass
+assert read_config(keys=['meerschaum'], write_missing=False, substitute=False) == after
+assert mrsm.get_connector('api:rc30save').api_key == 'fixture-key'
+os.environ['MRSM_API_RC30SAVE'] = 'http://environment:controlled@127.0.0.1:18400'
+try:
+    publishing._save_credentials('api:rc30save', conn, {'api_key': 'not-saved'})
+    raise AssertionError('Environment credentials would override the saved key')
+except publishing.PublishError as error:
+    assert 'environment settings' in str(error)
+assert read_config(keys=['meerschaum'], write_missing=False, substitute=False) == after
+browser = {'session': 'session-a', 'repositories': {'api:rc30save': {
+    'url': conn.url, 'credentials': {'api_key': 'temporary-key'}}}}
+assert publishing.browser_credentials(browser, ('session-a', 'api:rc30save'), conn.url)
+assert publishing.browser_credentials(browser, ('session-b', 'api:rc30save'), conn.url) is None
+assert publishing.browser_credentials(browser, ('session-a', 'api:rc30save'), 'http://127.0.0.1:18402') is None
+print('JSON:' + json.dumps({'preserved': True}))
+'''))
+    assert out == {'preserved': True}
+    fresh = _json(run_python(root, plugins, '''
+import json, meerschaum as mrsm
+conn = mrsm.get_connector('api:rc30save')
+print('JSON:' + json.dumps({'saved': conn.api_key == 'fixture-key',
+                          'scheme': conn.login_scheme}))
+'''))
+    assert fresh == {'saved': True, 'scheme': 'api_key'}

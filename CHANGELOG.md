@@ -51,7 +51,7 @@ axes show readable UTC sync times using their declared precision.
 Jobs are grouped with running jobs first, show a one-word status and a Last Run time, and refresh in place. Job listings read every systemd job's state with one `systemctl` call.
 Connectors are grouped by type. Create a plugin from the console with the same choices as `bootstrap plugins`, then edit its source in place (administrators who may use the web terminal).
 The source editor keeps syntax highlighting while typing. Fullscreen sits beside Copy and hides the Source heading.
-Publish an installed plugin to a configured API repository, signing in with a username and password, client credentials, or an API key.
+Publish an installed plugin to a configured API repository, signing in with a username and password, client credentials, or an API key. Keep credentials temporarily in the browser session or save them to the selected connector.
 Copy token details includes the API key and every displayed field.
 The web terminal shows its tmux windows as tabs, and an API run as a job keeps its terminal's shell interactive.
 

@@ -18,7 +18,8 @@ def publishing_server():
     server = Server('rc30-publish', native=False,
                     config={'api': {'webterm': {'tmux': {'enabled': False}}}})
     # Every repository in this test points to this fixture, including the default label.
-    for label in ('MRSM', 'RC30PASSWORD', 'RC30CLIENT', 'RC30KEY', 'RC30CONFIGURED'):
+    for label in ('MRSM', 'RC30PASSWORD', 'RC30CLIENT', 'RC30KEY', 'RC30CONFIGURED',
+                  'RC30PASSWORD_SAVED', 'RC30CLIENT_SAVED', 'RC30KEY_SAVED'):
         server.env[f'MRSM_API_{label}'] = server.base_url
     config = json.loads(server.env['MRSM_CONFIG'])
     config['meerschaum']['connectors'] = {'api': {'rc30configured': {
@@ -27,7 +28,7 @@ def publishing_server():
     }}}
     # URI variables supply the address; configured credentials exercise automatic login.
     server.env['MRSM_CONFIG'] = json.dumps(config)
-    for method in ('password', 'client', 'key', 'configured'):
+    for method in ('password', 'client', 'key', 'configured', 'password_saved', 'client_saved', 'key_saved'):
         (server.plugins / f'rc30_{method}.py').write_text(
             f'"""Publish test {method}."""\n__version__ = "1.2.3"\nVALUE = "source"\n')
     try:
@@ -43,21 +44,28 @@ print('INTEROP:' + json.dumps({'id': str(token.id), 'secret': token.secret, 'key
         server.stop()
 
 
-@pytest.mark.parametrize('method', ['password', 'client', 'key', 'configured'])
-def test_publish_authentication_and_current_source(publishing_server, browser, method):
+@pytest.mark.parametrize('method,persist', [
+    ('password', False), ('client', False), ('key', False), ('configured', False),
+    ('password', True), ('client', True), ('key', True),
+])
+def test_publish_authentication_and_current_source(publishing_server, browser, method, persist):
     server = publishing_server
     context = browser.new_context(viewport={'width': 1200, 'height': 900})
     tab = Tab(context.new_page(), server.base_url)
     page = tab.page
-    name = f'rc30_{method}'
+    suffix = method + ('_saved' if persist else '')
+    name = f'rc30_{suffix}'
+    repository = f'api:rc30{suffix}'
     try:
         tab.login(path='/dash')
         tab.goto(f'/dash/plugins/installed/{name}', '#plugin-publish-open')
         page.click('#plugin-publish-open')
         page.locator('#plugin-publish-modal').wait_for()
-        page.select_option('#plugin-publish-repository', f'api:rc30{method}')
+        page.select_option('#plugin-publish-repository', repository)
         if method != 'configured':
             page.locator('#plugin-publish-login').wait_for(state='visible')
+            if persist:
+                page.locator('#plugin-publish-persist').check()
             if method == 'password':
                 page.fill('#plugin-publish-username', USERNAME)
                 page.fill('#plugin-publish-password', 'wrong-password')
@@ -77,32 +85,55 @@ def test_publish_authentication_and_current_source(publishing_server, browser, m
         assert not page.locator('#plugin-publish-auth').is_visible()
         for field in ('password', 'client-secret', 'api-key'):
             assert page.locator(f'#plugin-publish-{field}').input_value() == ''
+        if method != 'configured':
+            stored = page.evaluate("JSON.parse(sessionStorage.getItem('plugin-publish-credentials'))")
+            entries = stored.get('repositories', {})
+            assert (repository in entries) is (not persist)
+            if not persist:
+                assert entries[repository]['credentials']
+            # A reload retains temporary browser credentials; saved credentials also work in
+            # a fresh server-side connector, so neither path relies on a server memory cache.
+            tab.goto(f'/dash/plugins/installed/{name}', '#plugin-publish-open')
+            page.click('#plugin-publish-open')
+            page.select_option('#plugin-publish-repository', repository)
+            page.wait_for_function("!document.querySelector('#plugin-publish-submit')?.disabled")
+            assert not page.locator('#plugin-publish-auth').is_visible()
+            saved = python_json(server, f'''
+from meerschaum.config._read_config import read_config
+attrs = read_config(keys=['meerschaum'], write_missing=False, substitute=False)['meerschaum'].get('connectors', {{}}).get('api', {{}}).get({repository.split(':', 1)[1]!r}, {{}})
+print('INTEROP:' + json.dumps({{'saved': any(attrs.get(key) for key in ('password', 'client_secret', 'api_key'))}}))
+''')
+            assert saved['saved'] is persist
         # Package the current on-disk source, even when it changed after opening the dialog.
         path = server.plugins / f'{name}.py'
         path.write_text(path.read_text().replace('source', 'updated'))
         page.click('#plugin-publish-submit')
-        page.get_by_text(f"Published '{name}' to api:rc30{method}.", exact=True).wait_for(timeout=30000)
+        page.get_by_text(f"Published '{name}' to {repository}.", exact=True).wait_for(timeout=30000)
         caller = login(server)
         status, attributes = request(server, f'/plugins/{name}/attributes', caller)
         assert status == 200, attributes
-        assert attributes['description'] == f'Publish test {method}.'
+        assert attributes['description'] == f'Publish test {suffix}.'
         download = urllib.request.Request(server.base_url + f'/plugins/{name}',
                                          headers={'Authorization': 'Bearer ' + caller})
         with urllib.request.urlopen(download, timeout=30) as response:
             with tarfile.open(fileobj=io.BytesIO(response.read()), mode='r:gz') as archive:
                 assert archive.extractfile(f'{name}.py').read().decode() == path.read_text()
         assert not tab.errors, tab.errors
-        if method == 'password':
-            # A different browser session cannot reuse credentials entered by this one.
+        if method == 'password' or persist:
+            # Saved credentials work in another browser; temporary credentials stay here.
             other = browser.new_context()
             try:
                 visitor = Tab(other.new_page(), server.base_url)
                 visitor.login(path='/dash')
                 visitor.goto(f'/dash/plugins/installed/{name}', '#plugin-publish-open')
                 visitor.page.click('#plugin-publish-open')
-                visitor.page.select_option('#plugin-publish-repository', 'api:rc30password')
-                visitor.page.locator('#plugin-publish-login').wait_for(state='visible')
-                assert visitor.page.locator('#plugin-publish-submit').is_disabled()
+                visitor.page.select_option('#plugin-publish-repository', repository)
+                if persist:
+                    visitor.page.wait_for_function("!document.querySelector('#plugin-publish-submit')?.disabled")
+                    assert not visitor.page.locator('#plugin-publish-auth').is_visible()
+                else:
+                    visitor.page.locator('#plugin-publish-login').wait_for(state='visible')
+                    assert visitor.page.locator('#plugin-publish-submit').is_disabled()
             finally:
                 other.close()
     except Exception:

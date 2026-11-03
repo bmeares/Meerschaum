@@ -298,11 +298,4 @@ class APIConnector(InstanceConnector):
         """
         Return the login scheme to use based on the configured credentials.
         """
-        if 'username' in self.__dict__:
-            return 'password'
-        if 'client_id' in self.__dict__:
-            return 'client_credentials'
-        elif 'api_key' in self.__dict__:
-            return 'api_key'
-
-        return 'password'
+        return self._rust_client().login_scheme

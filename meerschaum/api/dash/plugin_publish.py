@@ -1,9 +1,8 @@
-"""Publish installed plugins with repository credentials private to a console session."""
+"""Publish plugins with temporary browser credentials or saved API connector credentials."""
 from __future__ import annotations
 
 import copy
 import threading
-import time
 import uuid
 from types import SimpleNamespace
 
@@ -13,9 +12,7 @@ import dash_bootstrap_components as dbc
 from meerschaum.api.dash.plugin_sources import may_read_source, source_viewer
 
 _AUTH_FIELDS = ('username', 'password', 'client_id', 'client_secret', 'api_key')
-_CONNECTIONS = {}
 _LOCK = threading.Lock()
-_SESSION_SECONDS = 3600
 
 
 class PublishError(ValueError):
@@ -47,27 +44,40 @@ def _key(context, repository, session):
     return session_id or nonce, repository
 
 
-def _connection(context, repository, session, credentials=None):
+def browser_credentials(browser, key, url):
+    """Accept only credentials entered for this login session and this repository address."""
+    if not isinstance(browser, dict) or browser.get('session') != key[0]:
+        return None
+    entries = browser.get('repositories')
+    entry = entries.get(key[1]) if isinstance(entries, dict) else None
+    if not isinstance(entry, dict) or entry.get('url') != url:
+        return None
+    fields = entry.get('credentials')
+    if not isinstance(fields, dict) or set(fields) not in (
+        {'username', 'password'}, {'client_id', 'client_secret'}, {'api_key'},
+    ):
+        return None
+    if not all(isinstance(value, str) and value.strip() and len(value) <= 4096
+               for value in fields.values()):
+        return None
+    return fields
+
+
+def _connection(context, repository, session, credentials=None, browser=None):
     import meerschaum as mrsm
     key = _key(context, repository, session)
     configured = mrsm.get_connector(repository)
     if configured is None:
         raise PublishError('The selected API repository is unavailable.')
-    now = time.monotonic()
-    with _LOCK:
-        for expired in [k for k, (until, _, _) in _CONNECTIONS.items() if until <= now]:
-            _CONNECTIONS.pop(expired, None)
-        cached = _CONNECTIONS.get(key)
-    if credentials is None and cached and cached[1] == configured.url:
-        return key, cached[2], configured.url
-    # Copying resets the native HTTP client. Never change the globally cached connector.
+    if credentials is None:
+        credentials = browser_credentials(browser, key, configured.url)
+    # Copying resets the native HTTP client. Validate entered credentials on a private copy.
     conn = copy.copy(configured)
     conn.connect_timeout = 10
     conn.timeout = 30
     if credentials is not None:
         for field in _AUTH_FIELDS:
             conn.__dict__.pop(field, None)
-        # The parsed host / port / protocol remain; the URI must not restore old credentials.
         conn.__dict__.pop('uri', None)
         conn.__dict__.update(credentials)
     elif configured._token:
@@ -76,12 +86,70 @@ def _connection(context, repository, session, credentials=None):
     return key, conn, configured.url
 
 
-def _remember(key, conn, url):
+def _browser_update(browser, key, url, fields):
+    entries = (browser.get('repositories') or {}).copy() if (
+        isinstance(browser, dict) and browser.get('session') == key[0]
+        and isinstance(browser.get('repositories'), dict)
+    ) else {}
+    entries.pop(key[1], None)
+    if fields is not None:
+        while len(entries) >= 128:
+            entries.pop(next(iter(entries)))
+        entries[key[1]] = {'url': url, 'credentials': fields}
+    return {'session': key[0], 'repositories': entries}
+
+
+def _save_credentials(repository, conn, fields):
+    """Change only the selected connector, preserving other files and environment settings."""
+    import os
+    import json
+    from meerschaum.config import get_config, _config
+    from meerschaum.config._read_config import read_config
+    from meerschaum.config._edit import write_config
+    from meerschaum.api.dash.connector_listing import _env_patches
+    label = repository.split(':', 1)[1]
+    overrides = [patch.get('api', {}).get(label, {}) for _, patch in _env_patches()]
+    variable = os.environ.get('MRSM_API_' + label.upper())
+    if variable:
+        overrides.append(json.loads(variable) if variable.lstrip().startswith('{')
+                         else {'uri': variable})
+    for override in overrides:
+        if not isinstance(override, dict):
+            continue
+        values = dict(override)
+        if isinstance(values.get('uri'), str):
+            values.update(conn.from_uri(values['uri'], as_dict=True))
+        if any(values.get(field) and values[field] != fields.get(field) for field in _AUTH_FIELDS):
+            raise PublishError('This connector has credentials in environment settings. '
+                               'Update those settings or choose temporary browser storage.')
     with _LOCK:
-        if len(_CONNECTIONS) >= 128:
-            oldest = min(_CONNECTIONS, key=lambda k: _CONNECTIONS[k][0])
-            _CONNECTIONS.pop(oldest, None)
-        _CONNECTIONS[key] = (time.monotonic() + _SESSION_SECONDS, url, conn)
+        disk = read_config(keys=['meerschaum'], write_missing=False, substitute=False,
+                           raise_parsing_errors=True)
+        section = disk.setdefault('meerschaum', {})
+        apis = section.setdefault('connectors', {}).setdefault('api', {})
+        attributes = copy.deepcopy(apis.get(label) or {})
+        # A URI may contain the previous credentials. Keep the same address without them.
+        if 'uri' in attributes or not attributes.get('host'):
+            attributes['uri'] = conn.url
+        attributes.update({field: None for field in _AUTH_FIELDS})
+        attributes.update(fields)
+        apis[label] = attributes
+        if not write_config({'meerschaum': section}):
+            raise PublishError('Could not save credentials to this API connector.')
+        # The live config is a shared dictionary; the native registry reads it on every call.
+        live = get_config('meerschaum', 'connectors', 'api')
+        updated = copy.deepcopy(live.get(label) or {})
+        updated.update({field: None for field in _AUTH_FIELDS})
+        updated.update(fields)
+        if 'uri' in updated or not updated.get('host'):
+            updated['uri'] = conn.url
+        live[label] = updated
+        links = _config().get('_symlinks', {}).get('meerschaum', {}).get('connectors', {}).get('api', {}).get(label, {})
+        if isinstance(links, dict):
+            for field in (*_AUTH_FIELDS, 'uri'):
+                links.pop(field, None)
+        import meerschaum as mrsm
+        mrsm.get_connector(repository, refresh=True)
 
 
 def _authenticated(conn):
@@ -94,11 +162,10 @@ def _authenticated(conn):
     return False
 
 
-def repository_status(context, repository, session):
+def repository_status(context, repository, session, browser=None):
     try:
-        key, conn, url = _connection(context, repository, session)
+        key, conn, url = _connection(context, repository, session, browser=browser)
         if _authenticated(conn):
-            _remember(key, conn, url)
             return True, f'Ready to publish to {repository}.'
         return False, f'Sign in to {repository} to publish.'
     except (PublishError, PermissionError) as exc:
@@ -108,30 +175,40 @@ def repository_status(context, repository, session):
 
 
 def login_repository(context, repository, session, method, username, password,
-                     client_id, client_secret, api_key):
+                     client_id, client_secret, api_key, persist=False, browser=None):
     fields = {
         'password': {'username': username, 'password': password},
         'client_credentials': {'client_id': client_id, 'client_secret': client_secret},
         'api_key': {'api_key': api_key},
     }.get(method)
-    if not fields or not all(isinstance(value, str) and value.strip() for value in fields.values()):
-        return False, 'Fill in the credentials for the selected sign-in method.'
+    if not fields or not all(isinstance(value, str) and value.strip() and len(value) <= 4096
+                             for value in fields.values()):
+        return False, 'Fill in the credentials for the selected sign-in method.', browser
     try:
         key, conn, url = _connection(context, repository, session, fields)
         if not conn.login(warn=False)[0]:
-            return False, 'Sign-in failed. Check your credentials and try again.'
-        _remember(key, conn, url)
-        return True, f'Ready to publish to {repository}.'
+            return False, 'Sign-in failed. Check your credentials and try again.', browser
+        if persist is True:
+            try:
+                _save_credentials(repository, conn, fields)
+            except PublishError:
+                raise
+            except Exception:
+                raise PublishError('Could not save credentials to this API connector. '
+                                   'Check its configuration permissions or choose temporary browser storage.') from None
+        stored = _browser_update(browser, key, url, None if persist is True else fields)
+        destination = 'Saved to the API connector.' if persist is True else 'Stored for this browser session.'
+        return True, f'Ready to publish to {repository}. {destination}', stored
     except (PublishError, PermissionError) as exc:
-        return False, str(exc)
+        return False, str(exc), browser
     except Exception:
-        return False, 'Could not sign in to this repository. Check its connection settings and try again.'
+        return False, 'Could not sign in to this repository. Check its connection settings and try again.', browser
 
 
-def publish(context, repository, session):
+def publish(context, repository, session, browser=None):
     """Package current source with the CLI's archiver, then upload using the API client."""
     try:
-        key, conn, url = _connection(context, repository, session)
+        key, conn, url = _connection(context, repository, session, browser=browser)
         if not _authenticated(conn):
             return False, 'Sign in to this repository before publishing.'
         from meerschaum import _core
@@ -144,7 +221,6 @@ def publish(context, repository, session):
         ok, message = conn._rust_client().register_plugin(
             plugin, package['archive'], context['name'] + '.tar.gz',
         )
-        _remember(key, conn, url)
         if ok:
             return True, f"Published '{context['name']}' to {repository}."
         from meerschaum.api.dash.connector_listing import collect_secrets, scrub
@@ -173,6 +249,7 @@ def build_publish_dialog(name, origin, session):
         dbc.ModalBody([
             html.P('Publish uploads the saved source. Save edits before publishing.'),
             dcc.Store(id='plugin-publish-context', data={'name': name, 'nonce': str(uuid.uuid4())}),
+            dcc.Store(id='plugin-publish-credentials', storage_type='session'),
             dbc.Label('API repository', html_for='plugin-publish-repository'),
             dbc.Select(id='plugin-publish-repository',
                        options=[{'label': keys, 'value': keys} for keys in choices], value=selected),
@@ -193,7 +270,9 @@ def build_publish_dialog(name, origin, session):
                          id='plugin-publish-client-fields', hidden=True, className='mt-3'),
                 html.Div(field('API key', 'plugin-publish-api-key', True),
                          id='plugin-publish-key-fields', hidden=True, className='mt-3'),
-                html.P('Credentials are used only for this browser session.', className='text-muted'),
+                dbc.Switch(id='plugin-publish-persist', label='Save credentials to this API connector', value=False),
+                html.P('Off: temporary browser storage, cleared when this browser session ends. '
+                       'On: save on the server for future use of this connector.', className='text-muted mt-2'),
                 dbc.Button('Sign in', id='plugin-publish-login', n_clicks=0, color='primary'),
             ], id='plugin-publish-auth', hidden=True),
         ]),

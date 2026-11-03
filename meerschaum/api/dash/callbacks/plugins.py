@@ -707,6 +707,7 @@ dash_app.clientside_callback(
     Output('plugin-publish-password', 'value'),
     Output('plugin-publish-client-secret', 'value'),
     Output('plugin-publish-api-key', 'value'),
+    Output('plugin-publish-credentials', 'data'),
     Input('plugin-publish-modal', 'is_open'),
     Input('plugin-publish-repository', 'value'),
     Input('plugin-publish-login', 'n_clicks'),
@@ -719,26 +720,31 @@ dash_app.clientside_callback(
     State('plugin-publish-client-id', 'value'),
     State('plugin-publish-client-secret', 'value'),
     State('plugin-publish-api-key', 'value'),
+    State('plugin-publish-persist', 'value'),
+    State('plugin-publish-credentials', 'data'),
     prevent_initial_call=True,
     running=[(Output('plugin-publish-auth', 'disabled'), True, False),
              (Output('plugin-publish-controls', 'disabled'), True, False),
              (Output('plugin-publish-repository', 'disabled'), True, False)],
 )
 def plugin_publish_action(is_open, repository, login_clicks, publish_clicks, context, session,
-                          method, username, password, client_id, client_secret, api_key):
+                          method, username, password, client_id, client_secret, api_key, persist, browser):
     from meerschaum.api.dash import plugin_publish as publishing
     if not is_open:
-        return no_update, True, True, '', '', ''
+        return no_update, True, True, '', '', '', no_update
     trigger = dash.callback_context.triggered_id
     if trigger == 'plugin-publish-submit' and publish_clicks:
-        ok, message = publishing.publish(context, repository, session)
+        ok, message = publishing.publish(context, repository, session, browser=browser)
         # A permission error is not a request to overwrite the repository's authentication.
-        ready, _ = publishing.repository_status(context, repository, session)
-        return dbc.Alert(message, color='success' if ok else 'danger'), ready, not ready, '', '', ''
+        ready, _ = publishing.repository_status(context, repository, session, browser=browser)
+        return dbc.Alert(message, color='success' if ok else 'danger'), ready, not ready, '', '', '', no_update
     if trigger == 'plugin-publish-login' and login_clicks:
-        ready, message = publishing.login_repository(
+        ready, message, stored = publishing.login_repository(
             context, repository, session, method, username, password, client_id, client_secret, api_key,
+            persist=persist, browser=browser,
         )
-        return dbc.Alert(message, color='success' if ready else 'danger'), ready, not ready, '', '', ''
-    ready, message = publishing.repository_status(context, repository, session)
-    return dbc.Alert(message, color='success' if ready else 'secondary'), ready, not ready, '', '', ''
+        return dbc.Alert(message, color='success' if ready else 'danger'), ready, not ready, '', '', '', stored
+    ready, message = publishing.repository_status(context, repository, session, browser=browser)
+    identity = (session or {}).get('session-id') or (context or {}).get('nonce')
+    stored = no_update if isinstance(browser, dict) and browser.get('session') == identity else {}
+    return dbc.Alert(message, color='success' if ready else 'secondary'), ready, not ready, '', '', '', stored
