@@ -60,7 +60,12 @@ def test_overview_tiles_link_to_their_pages(server, tab):
     assert all(href.startswith('/dash/pipes?connector_keys=') for href in chips.evaluate_all(
         'links => links.map(link => link.getAttribute("href"))'))
     ### The saved Pipelines by their last run, without a list of them; the run is in Recent runs.
-    _wait_text(page, '#overview-pipelines-succeeded', '1')
+    ### The session's server is shared with other files' tests, whose Pipelines count too.
+    page.wait_for_function(
+        "() => parseInt(document.querySelector('#overview-pipelines-succeeded .overview-job-count')"
+        "?.textContent.replace(/,/g, '') || '0', 10) >= 1",
+        timeout=30000,
+    )
     assert page.locator('#overview-pipelines-list').count() == 0
     _wait_text(page, '#overview-pipelines-runs', 'run')
     assert page.locator('#overview-pipelines-history .overview-hour').count() == 24

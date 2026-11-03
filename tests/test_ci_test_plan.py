@@ -52,7 +52,7 @@ def test_full_validation_is_exhaustive_and_has_one_shared_worker_budget():
 
 def test_lanes_start_longest_first_one_per_self_hosted_runner():
     """Matrix jobs are created in order and at most three run, so core never waits behind short lanes."""
-    import yaml
+    from meerschaum.utils.yaml import yaml
     order = [entry['shard'] for entry in test_plan.plan([], full=True)['matrix']['include']]
     assert order == ['core', 'oracle', 'mssql-valkey', 'postgres', 'mysql']
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / '.github/workflows/pytest.yaml').read_text())

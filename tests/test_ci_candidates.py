@@ -126,7 +126,7 @@ def test_a_failed_wait_falls_back_to_the_ordinary_checks(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize('workflow', ['rust.yaml', 'pytest.yaml'])
 def test_push_and_pr_checks_wait_for_a_running_candidate_within_their_timeout(workflow):
-    import yaml
+    from meerschaum.utils.yaml import yaml
     path = Path(__file__).resolve().parents[1] / '.github/workflows' / workflow
     job = yaml.safe_load(path.read_text())['jobs']['changes']
     step = next(s for s in job['steps'] if s.get('id') == 'reuse')
