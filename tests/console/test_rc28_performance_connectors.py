@@ -104,13 +104,17 @@ def test_performance_refresh_keeps_scroll_tab_and_components(rc28_server, browse
         before = page.evaluate('Math.round(window.scrollY)')
         assert before > 150, before
         ### A refresh updates the mounted components: nothing below the filters is rebuilt.
-        page.evaluate("""() => {
-            for (const selector of ['#performance-results .js-plotly-plot', '#performance-detail-tabs',
-                                    '#performance-pipes .performance-group-table-wrap',
-                                    '#performance-pipes .performance-group-table tbody']) {
+        mounted = ['#performance-results .js-plotly-plot', '#performance-detail-tabs',
+                   '#performance-pipes .performance-group-table-wrap',
+                   '#performance-pipes .performance-group-table tbody']
+        # Charts mount after the tables (later still on a phone): wait for all of them first.
+        page.wait_for_function('selectors => selectors.every(s => document.querySelector(s))',
+                               arg=mounted)
+        page.evaluate("""selectors => {
+            for (const selector of selectors) {
                 document.querySelector(selector).dataset.rc28 = 'mounted';
             }
-        }""")
+        }""", mounted)
         rows = pipes.locator('tbody tr').count()
         ### The shortest the page gets while it refreshes (measured at every change, which also
         ### lays it out there): a page that collapses, even for a moment, loses its scroll position.
