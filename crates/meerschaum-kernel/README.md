@@ -17,6 +17,11 @@ Integral floats outside `[-2**63, 2**63)` stay floating-point when pandas cannot
 int64 without loss. The released-v4 generator `tests/fixtures/gen_big_floats.py` records the boundary
 cases; `big_floats` tests cover document inference, casting, enforcement and filtering.
 
+`ColumnData::Object` shares its cells through `Arc<Vec<Value>>`; mutations use copy on write.
+JSON cells keep compact shared text, so row selection does not clone parsed trees. Convert with
+`JsonValue::to_json()` only when inspecting a cell; Python and wire boundaries retain their
+original dict/list behavior.
+
 Use fresh temporary `MRSM_ROOT_DIR` and empty `MRSM_PLUGINS_DIR` for every test and reference run.
 Run `cargo test -p meerschaum-kernel`, crate-scoped fmt/clippy, and the generators through
 `scripts/parity/run.sh`. `field_tags` verifies metadata and Arrow geometry extension export.

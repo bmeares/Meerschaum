@@ -152,7 +152,7 @@ pub fn json_serialize_value(x: &Value) -> serde_json::Value {
         },
         Value::Geometry(g) => J::String(g.to_wkb_hex(true)),
         v if value_is_null(v) => J::Null,
-        Value::Json(j) => J::String(compact_json(j)),
+        Value::Json(j) => J::String(ensure_ascii(j.as_text())),
         other => J::String(other.py_str()),
     }
 }
@@ -203,7 +203,7 @@ fn ensure_ascii(s: &str) -> String {
 /// for a single value (as `to_polars` serializes JSON columns).
 pub fn json_dumps_value(value: &Value) -> String {
     match value {
-        Value::Json(j) => compact_json(j),
+        Value::Json(j) => ensure_ascii(j.as_text()),
         Value::Str(s) => compact_json(&serde_json::Value::String(s.clone())),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => meerschaum_core::pyfmt::float_repr(*f),

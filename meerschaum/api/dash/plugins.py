@@ -1009,6 +1009,7 @@ def build_installed_plugin_detail(
     from meerschaum.api.dash.connector_listing import mask_text
     description = installed.get('description') or _installed_description(name,session)
     actions = plugin_action_buttons(installed, size='md')
+    actions.append(dbc.Button('Publish', id='plugin-publish-open', n_clicks=0, color='primary'))
     if installed.get('origin'):
         actions.append(update_check_store([installed]))
     info = [('Language',html.Span([language_logo(installed['kind']),
@@ -1023,6 +1024,7 @@ def build_installed_plugin_detail(
     for label,value in info:
         details += [html.Dt(label),html.Dd(value)]
     requirements = installed['required']+installed.get('plugin_requirements',[])
+    from meerschaum.api.dash.plugin_publish import build_publish_dialog
     return html.Div([
         back,
         html.Header([
@@ -1044,6 +1046,7 @@ def build_installed_plugin_detail(
             notice=(dbc.Alert(f"Created plugin '{name}'.", color='success', dismissable=True,
                               id='plugin-created-alert') if created else None),
         ),
+        build_publish_dialog(name, installed.get('origin'), session),
     ],className='plugin-detail-wrapper')
 
 

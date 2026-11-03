@@ -76,7 +76,7 @@ pub fn add_missing_cols(df: &Frame, dtypes: &IndexMap<String, String>) -> Frame 
                 n,
                 &dtype,
             )),
-            None => ColumnData::Object(vec![Value::NA; n]),
+            None => ColumnData::object(vec![Value::NA; n]),
         };
         let _ = out.set(col, data);
     }
@@ -86,7 +86,7 @@ pub fn add_missing_cols(df: &Frame, dtypes: &IndexMap<String, String>) -> Frame 
 /// `json.dumps(x, sort_keys=True, separators=(',', ':'), default=str)`.
 fn json_dumps_sorted(v: &Value) -> String {
     match v {
-        Value::Json(j) => compact_json_sorted(j),
+        Value::Json(j) => compact_json_sorted(&j.to_json()),
         Value::Null => "null".into(),
         Value::Bool(b) => if *b { "true" } else { "false" }.into(),
         Value::Int(i) => i.to_string(),
@@ -137,7 +137,7 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>, literal: &[String]
         let data = match &col.data {
             ColumnData::Native(s) if matches!(s.dtype(), DataType::String) => {
                 if kind.is_object() {
-                    ColumnData::Object(
+                    ColumnData::object(
                         col.data
                             .values()
                             .into_iter()
@@ -153,7 +153,7 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>, literal: &[String]
                     continue;
                 }
             }
-            ColumnData::Native(_) if kind.is_object() => ColumnData::Object(col.data.values()),
+            ColumnData::Native(_) if kind.is_object() => ColumnData::object(col.data.values()),
             ColumnData::Native(_) => continue,
             ColumnData::Object(values) => {
                 let values: Vec<Value> = values
@@ -169,7 +169,7 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>, literal: &[String]
                     .and_then(|dtype| values_to_series(&col.name, &values, &dtype));
                 match native {
                     Some(series) => ColumnData::Native(series),
-                    None => ColumnData::Object(values),
+                    None => ColumnData::object(values),
                 }
             }
         };
@@ -188,7 +188,7 @@ fn applied_column(name: &str, values: Vec<Value>) -> ColumnData {
         .and_then(|dtype| values_to_series(name, &values, &dtype));
     match native {
         Some(series) => ColumnData::Native(series),
-        None => ColumnData::Object(values),
+        None => ColumnData::object(values),
     }
 }
 
@@ -328,7 +328,7 @@ fn anti_join_rows(new: &Frame, old: &Frame, cols: &[String], literal: &[String])
     for col in cols {
         let normalize = !literal.contains(col);
         let (Ok(n), Ok(o)) = (new.data(col), old.data(col)) else {
-            let empty = ColumnData::Object(vec![]);
+            let empty = ColumnData::object(vec![]);
             let n = new.data(col).unwrap_or(&empty);
             let o = old.data(col).unwrap_or(&empty);
             new_keys.push(values_key(n, normalize));
@@ -450,7 +450,7 @@ fn cast_column(data: &ColumnData, spec: &CastSpec, name: &str) -> Result<ColumnD
                 data,
                 ColumnData::Native(s) if s.dtype().is_integer() && s.null_count() > 0
             );
-            Ok(ColumnData::Object(
+            Ok(ColumnData::object(
                 data.values()
                     .iter()
                     .map(|v| {
@@ -644,7 +644,7 @@ fn filter_unseen_df_against(old: &Frame, new: &Frame, opts: &FilterUnseenOptions
                 .iter()
                 .map(|v| Value::Str(json_dumps_sorted(v)))
                 .collect();
-            let _ = frame.set(col, ColumnData::Object(values));
+            let _ = frame.set(col, ColumnData::object(values));
         }
     }
     let new_numeric = get_numeric_cols(&new);
@@ -666,7 +666,7 @@ fn filter_unseen_df_against(old: &Frame, new: &Frame, opts: &FilterUnseenOptions
                     _ => v,
                 })
                 .collect();
-            let _ = frame.set(col, ColumnData::Object(values));
+            let _ = frame.set(col, ColumnData::object(values));
         }
     }
     for frame in [&mut old, &mut new] {
@@ -1248,7 +1248,7 @@ pub fn filter_existing(
                 .iter()
                 .map(|v| Value::Str(json_dumps_sorted(v)))
                 .collect();
-            frame.set(col, ColumnData::Object(values))?;
+            frame.set(col, ColumnData::object(values))?;
         }
     }
     let casted_cols: Vec<String> = unhashable_delta

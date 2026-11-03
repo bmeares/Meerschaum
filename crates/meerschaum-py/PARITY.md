@@ -1773,3 +1773,9 @@ databases); the rows below are the deliberate differences and the gaps the compa
 |---|---|---|---|
 | RC15-P1-REVIEW-1 | Empty explicit scopes restored the default role, and local Rust scope helpers used v4 all-scopes defaults | Empty scopes revoke all permissions; stored/default roles apply to local token caps and native page callers too | `access::tests::stored_user_records`, `users::tests::scopes_fail_closed_on_a_failed_read`, `tests/test_access.py::test_user_roles_and_permissions`, server access matrix |
 | RC15-CONFIG-REVIEW | Released fixtures contain open user registration and an implicit non-admin action grant | New defaults close registration after first-admin bootstrap and use Editor permissions; comparison helpers normalize only these deliberate differences and the Polars key | `core/tests/config_parity.rs`, `core/tests/yaml_parity.rs`, `tests/test_yaml.py`; generated v4 fixtures unchanged |
+
+## RC30: publishing with repository tokens
+
+| ID | v4 behavior | v5 behavior | Reason and coverage |
+|---|---|---|---|
+| RC30-001 | Uploading a plugin with a token principal fails while reading its user ID | Client credentials and API keys publish as their token's owner, requiring `plugins:write` within the owner's current permissions; an existing plugin retains its owner | Required by the maintainer's console Publish flow (2026-11-03). `rc15_access_matrix::plugin_upload_tokens_use_current_owner_permissions_and_keep_ownership` covers scopes, current owner permissions, updates and ownership conflicts; `tests/console/test_rc30_publish.py` covers all login methods and the uploaded archive. |

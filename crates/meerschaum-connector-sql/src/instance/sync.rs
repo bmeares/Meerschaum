@@ -666,7 +666,7 @@ impl SqlConnector {
         }
 
         let filter_start = std::time::Instant::now();
-        let (mut unseen_df, mut update_df, mut delta_df) = if replace {
+        let (mut unseen_df, mut update_df) = if replace {
             let (inside, skipped) = meerschaum_connector::replace::rows_in_window(
                 sp.column("datetime").as_deref(),
                 &df,
@@ -680,12 +680,18 @@ impl SqlConnector {
                 // `fetch: {replace: true}` pipe whose fetch is empty succeeds like a merge).
                 return Ok(replace_result(0, 0, skipped, true));
             }
-            (inside.clone(), None, inside)
+            (inside, None)
         } else if check_existing {
             let (u, up, d) = self.filter_existing_frame(&sp, &state, df).await?;
-            (u, Some(up), d)
+            if upsert {
+                (d.clear(), Some(d))
+            } else {
+                (u, Some(up))
+            }
+        } else if upsert {
+            (df.clear(), Some(df))
         } else {
-            (df.clone(), None, df)
+            (df, None)
         };
         crate::facade::trace("sql: filter existing", filter_start);
         meerschaum_core::dprint!(
@@ -695,10 +701,6 @@ impl SqlConnector {
             unseen_df.height(),
             update_df.as_ref().map_or(0, |u| u.height())
         );
-        if upsert && !replace {
-            unseen_df = delta_df.clear();
-            update_df = Some(delta_df.clone());
-        }
 
         let dt_col = sp.column("datetime");
         let primary_key = sp.column("primary");
@@ -736,13 +738,9 @@ impl SqlConnector {
                 .is_some_and(|pk| unseen_df.contains(pk))
             && pk_has_values(&unseen_df);
         if autoincrement && let Some(pk) = &primary_key {
-            for f in [
-                Some(&mut unseen_df),
-                update_df.as_mut(),
-                Some(&mut delta_df),
-            ]
-            .into_iter()
-            .flatten()
+            for f in [Some(&mut unseen_df), update_df.as_mut()]
+                .into_iter()
+                .flatten()
             {
                 if f.contains(pk)
                     && !f
@@ -2598,11 +2596,8 @@ impl SqlConnector {
                 }
             })
             .collect();
-        let columns: Vec<Vec<KValue>> = cols
-            .iter()
-            .map(|c| df.data(c).map(|d| d.values()).unwrap_or_default())
-            .collect();
         let n = df.height();
+        let columns: Vec<_> = df.columns().iter().map(|c| &c.data).collect();
         let table_name = sql_item_name(&truncated, flavor, schema);
 
         if flavor.driver_family() == DriverFamily::Postgres && self.settings.bulk_insert {
@@ -2619,7 +2614,7 @@ impl SqlConnector {
             for i in 0..n {
                 fields.clear();
                 for (j, enc) in encodings.iter().enumerate() {
-                    fields.push(encode_copy_field(&columns[j][i], enc));
+                    fields.push(encode_copy_field(&columns[j].value_ref(i), enc));
                 }
                 csv_row(&fields, &mut buf);
             }
@@ -2701,7 +2696,7 @@ impl SqlConnector {
             for i in start..end {
                 let mut cells = Vec::with_capacity(cols.len());
                 for (j, enc) in encodings.iter().enumerate() {
-                    let param = encode_param(&columns[j][i], flavor, enc);
+                    let param = encode_param(&columns[j].value_ref(i), flavor, enc);
                     cells.push(typed_placeholder(
                         flavor,
                         params.len() + 1,
@@ -2775,7 +2770,7 @@ impl SqlConnector {
 fn mssql_insert_json_statements(
     table_name: &str,
     cols: &[String],
-    columns: &[Vec<KValue>],
+    columns: &[&meerschaum_kernel::ColumnData],
     encodings: &[ColumnEncoding],
     dtype: &IndexMap<String, String>,
     numeric_cols: &[String],
@@ -2830,7 +2825,7 @@ fn mssql_insert_json_statements(
                 for (j, enc) in encodings.iter().enumerate() {
                     doc.insert(
                         cols[j].clone(),
-                        encode_json_cell(&columns[j][i], flavor, enc),
+                        encode_json_cell(&columns[j].value_ref(i), flavor, enc),
                     );
                 }
                 serde_json::Value::Object(doc)

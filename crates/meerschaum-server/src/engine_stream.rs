@@ -259,7 +259,7 @@ impl Drop for Slot {
 fn doc_json(v: &KValue) -> Json {
     match v {
         v if v.is_na() => Json::Null,
-        KValue::Json(j) => j.clone(),
+        KValue::Json(j) => j.to_json(),
         KValue::Str(s) => serde_json::from_str(s).unwrap_or_else(|_| Json::String(s.clone())),
         KValue::Bool(b) => Json::Bool(*b),
         KValue::Int(i) => Json::from(*i),
@@ -913,7 +913,7 @@ mod tests {
             ("event", KValue::Str(event.into())),
             (
                 "payload",
-                KValue::Json(serde_json::json!({"event": event, "attempt": 1})),
+                KValue::json(serde_json::json!({"event": event, "attempt": 1})),
             ),
         ]
         .into_iter()

@@ -367,7 +367,7 @@ pub fn to_json_value(v: &KValue, opts: &ToJsonOptions) -> String {
             Ok(Some(GeometryOutput::Bytes(b))) => ujson_string(&String::from_utf8_lossy(&b)),
             _ => "null".into(),
         },
-        KValue::Json(j) => ujson_json(j, opts.double_precision),
+        KValue::Json(j) => ujson_json(&j.to_json(), opts.double_precision),
         other => ujson_string(&other.py_str()),
     }
 }

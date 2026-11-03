@@ -118,7 +118,7 @@ pub fn attempt_cast_to_geometry(value: &Value) -> Value {
     match value {
         Value::Geometry(_) => return value.clone(),
         Value::Json(j) => {
-            return Geometry::from_geojson(j)
+            return Geometry::from_geojson(&j.to_json())
                 .map(Value::Geometry)
                 .unwrap_or_else(|_| value.clone());
         }

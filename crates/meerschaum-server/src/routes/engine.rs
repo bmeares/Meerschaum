@@ -308,7 +308,7 @@ async fn write_pipe(ctx: Ctx, Path(metric): Path<String>, body: Body) -> ApiResu
         let mut selections: Vec<Json> = docs
             .iter()
             .map(|doc| match doc.get("selection") {
-                Some(meerschaum_kernel::value::Value::Json(value)) => value.clone(),
+                Some(meerschaum_kernel::value::Value::Json(value)) => value.to_json(),
                 Some(meerschaum_kernel::value::Value::Str(text)) => {
                     serde_json::from_str(text).unwrap_or(Json::Null)
                 }

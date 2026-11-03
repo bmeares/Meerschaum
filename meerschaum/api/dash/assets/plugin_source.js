@@ -11,7 +11,9 @@
 
     const INDENT = '    ';
     let loaded = null;
+    let highlighted = null;
     let tabReleased = false;
+    let highlightTimer = null;
 
     function editor() { return document.getElementById('plugin-source-editor'); }
 
@@ -21,7 +23,7 @@
     // screen); the gutter is exactly as tall, so its numbers never stretch the row.
     function fitEditor(area) {
         const browser = area.closest('.plugin-source-browser');
-        const gutter = area.parentElement && area.parentElement.querySelector('.plugin-source-gutter');
+        const gutter = area.closest('.plugin-source-editor-code')?.querySelector('.plugin-source-gutter');
         if (browser && browser.classList.contains('plugin-source-fullscreen')) {
             area.style.height = '';
             if (gutter) gutter.style.height = '';
@@ -36,7 +38,7 @@
     }
 
     function updateGutter(area) {
-        const gutter = area && area.parentElement && area.parentElement.querySelector('.plugin-source-gutter');
+        const gutter = area?.closest('.plugin-source-editor-code')?.querySelector('.plugin-source-gutter');
         if (!gutter) return;
         const count = lineCount(area.value);
         if (Number(gutter.dataset.lines) !== count) {
@@ -46,6 +48,11 @@
             gutter.dataset.lines = String(count);
         }
         gutter.scrollTop = area.scrollTop;
+        const highlight = area.parentElement.querySelector('.plugin-source-editor-highlight');
+        if (highlight) {
+            highlight.scrollTop = area.scrollTop;
+            highlight.scrollLeft = area.scrollLeft;
+        }
     }
 
     function renderCode(code, data) {
@@ -86,26 +93,69 @@
         code.replaceChildren(fragment);
     }
 
+    function renderHighlight(data) {
+        highlighted = data;
+        renderCode(document.getElementById('plugin-source-editor-highlight'), data);
+    }
+
+    function previewEdit(source) {
+        const before = highlighted?.source || '';
+        let prefix = 0, suffix = 0;
+        while (prefix < before.length && prefix < source.length && before[prefix] === source[prefix]) prefix++;
+        // Keep a UTF-16 surrogate pair in the same text node.
+        if (prefix && /[\uD800-\uDBFF]/.test(before[prefix - 1])) prefix--;
+        while (suffix < before.length - prefix && suffix < source.length - prefix
+               && before[before.length - suffix - 1] === source[source.length - suffix - 1]) suffix++;
+        if (suffix && /[\uDC00-\uDFFF]/.test(before[before.length - suffix])) suffix--;
+        const runs = highlighted?.runs?.length ? highlighted.runs : [[before.length, -1]];
+        const slice = (start, end) => {
+            let offset = 0;
+            return runs.flatMap(([length, style]) => {
+                const size = Math.max(0, Math.min(offset + length, end) - Math.max(offset, start));
+                offset += length;
+                return size ? [[size, style]] : [];
+            });
+        };
+        // Keep existing colors on unchanged text while the server tokenizes the edit.
+        renderHighlight({source, styles: highlighted?.styles || [], runs: [
+            ...slice(0, prefix), [source.length - prefix - suffix, -1],
+            ...slice(before.length - suffix, before.length),
+        ]});
+    }
+
     function render(data) {
         if (!data || typeof data.source !== 'string') return window.dash_clientside.no_update;
         const editing = !!data.editing;
         const target = editing ? editor() : document.getElementById('plugin-source-code');
         if (!target) return window.dash_clientside.no_update;
         const browser = target.closest('.plugin-source-browser');
-        if (browser) browser.classList.toggle('plugin-source-editing', editing);
+        if (browser) {
+            browser.classList.toggle('plugin-source-editing', editing);
+            setFullscreen(browser, browser.classList.contains('plugin-source-fullscreen'));
+        }
         loaded = editing ? {path: data.path, source: data.source} : null;
         if (editing) {
+            renderHighlight(data);
             updateGutter(target);
             fitEditor(target);
             target.focus({preventScroll: true});
             target.setSelectionRange(0, 0);
         } else {
+            highlighted = null;
             renderCode(target, data);
         }
         target.closest('.plugin-source-preview')?.setAttribute('data-rendered', 'true');
         return window.dash_clientside.no_update;
     }
-    window.dash_clientside.mrsmPluginSource = { render: render };
+    function highlight(data) {
+        const area = editor();
+        if (area && loaded && data && data.path === loaded.path && data.source === area.value) {
+            renderHighlight(data);
+            updateGutter(area);
+        }
+        return window.dash_clientside.no_update;
+    }
+    window.dash_clientside.mrsmPluginSource = {render, highlight};
 
     function dirty() {
         const area = editor();
@@ -136,7 +186,7 @@
             setFullscreen(browser, !browser.classList.contains('plugin-source-fullscreen'));
         } else if (action === 'copy') {
             const store = document.getElementById('plugin-source-code');
-            const text = store ? store.textContent : '';
+            const text = editor()?.value ?? (store ? store.textContent : '');
             if (!navigator.clipboard) return;
             navigator.clipboard.writeText(text).then(function () {
                 button.classList.add('copied');
@@ -147,8 +197,19 @@
 
     document.addEventListener('input', function (event) {
         if (event.target && event.target.id === 'plugin-source-editor') {
+            previewEdit(event.target.value);
             updateGutter(event.target);
             fitEditor(event.target);
+            clearTimeout(highlightTimer);
+            const area = event.target;
+            const path = loaded?.path;
+            highlightTimer = setTimeout(() => {
+                if (area.isConnected && loaded?.path === path) {
+                    window.dash_clientside.set_props('plugin-source-edit-request', {
+                        data: {path, source: area.value},
+                    });
+                }
+            }, 180);
         }
     });
 

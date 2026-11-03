@@ -14,11 +14,11 @@ use meerschaum_kernel::{Column, ColumnData, Frame, Geometry, Value};
 fn frame(ids: &[i64], points: &[(f64, f64)], crs: Option<i64>) -> Frame {
     let ids = Column::new(
         "id",
-        ColumnData::Object(ids.iter().map(|i| Value::Int(*i)).collect()),
+        ColumnData::object(ids.iter().map(|i| Value::Int(*i)).collect()),
     );
     let mut geom = Column::new(
         "geom",
-        ColumnData::Object(
+        ColumnData::object(
             points
                 .iter()
                 .map(|(x, y)| {

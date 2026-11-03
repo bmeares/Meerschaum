@@ -123,7 +123,7 @@ async fn frame(conn: &SqlConnector, pipe: &Pipe, docs: Vec<Vec<(&str, KValue)>>)
 }
 
 fn json_doc(v: serde_json::Value) -> KValue {
-    KValue::Json(v)
+    KValue::json(v)
 }
 
 async fn stored_dtypes(conn: &SqlConnector, pipe: &Pipe) -> IndexMap<String, String> {

@@ -73,7 +73,7 @@ pub fn kvalue(j: &J) -> KValue {
                 _ => KValue::Str(v.to_string()),
             }
         }
-        other => KValue::Json(untag(other)),
+        other => KValue::json(untag(other)),
     }
 }
 
@@ -88,7 +88,7 @@ pub fn tag(v: &KValue) -> J {
         KValue::Datetime(d) => json!({"t": "dt", "v": d.isoformat()}),
         KValue::Decimal(d) => json!({"t": "dec", "v": d.to_sci_string()}),
         KValue::Uuid(u) => json!({"t": "uuid", "v": u.to_string()}),
-        KValue::Json(j) => j.clone(),
+        KValue::Json(j) => j.to_json(),
         other => J::String(other.py_str()),
     }
 }
@@ -177,7 +177,7 @@ pub fn frame(j: &J) -> Frame {
             .map(kvalue)
             .collect();
         let data = if dtype == "object" {
-            ColumnData::Object(values)
+            ColumnData::object(values)
         } else {
             let normalized: Vec<KValue> = values
                 .iter()
@@ -187,7 +187,7 @@ pub fn frame(j: &J) -> Frame {
                 .and_then(|t| values_to_series(name, &normalized, &t))
             {
                 Some(s) => ColumnData::Native(s),
-                None => ColumnData::Object(values),
+                None => ColumnData::object(values),
             }
         };
         cols.push(Column::new(name, data));

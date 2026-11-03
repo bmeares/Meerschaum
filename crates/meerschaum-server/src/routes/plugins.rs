@@ -8,11 +8,12 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use meerschaum_connector::{PluginRecord, pipe_ops};
+use meerschaum_core::users::User;
 use meerschaum_core::{Map, Value};
 use serde_json::json;
 
 use super::Ctx;
-use crate::auth::{Principal, manager, scoped_auth_if_private};
+use crate::auth::{Principal, load_user_or_token, manager, scoped_auth_if_private};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, tuple, tuple_response};
@@ -52,7 +53,31 @@ fn record(name: &str) -> PluginRecord {
 
 async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> ApiResult {
     let state = ctx.state.clone();
-    let principal = manager(&state, &ctx.headers).await?;
+    let principal = if ctx
+        .headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|auth| auth.contains("mrsm-key:"))
+    {
+        load_user_or_token(&state, &ctx.headers).await?
+    } else {
+        manager(&state, &ctx.headers).await?
+    };
+    let user = match principal {
+        Principal::User(user) => user,
+        Principal::Token(_) => {
+            // RC30: publishing with client credentials or an API key acts as its owner,
+            // with the token's scopes capped by that owner's current permissions.
+            let access =
+                crate::access::require_fresh(&state, &ctx.headers, &["plugins:write"]).await?;
+            User::new(
+                access
+                    .username()
+                    .ok_or_else(|| ApiError::new(403, "This token has no owner."))?,
+                None,
+            )
+        }
+    };
     // `archive: UploadFile = File(...)`.
     let mut archive: Option<bytes::Bytes> = None;
     if let Ok(mut mp) = Multipart::from_request(req, &state).await {
@@ -104,16 +129,12 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
             _ => Map::new(),
         },
     };
-    let Principal::User(user) = &principal else {
-        // PARITY: `get_user_id(token)` raises `AttributeError` (a 500).
-        return Err(ApiError::internal());
-    };
     let plugin_user_id = conn
         .get_plugin_user_id(&plugin)
         .await
         .map_err(|e| ApiError::exception("get_plugin_user_id", e))?;
     let curr_user_id = conn
-        .get_user_id(user)
+        .get_user_id(&user)
         .await
         .map_err(|e| ApiError::exception("get_user_id", e))?;
     if let Some(owner) = &plugin_user_id

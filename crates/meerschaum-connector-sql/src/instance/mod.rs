@@ -967,7 +967,7 @@ pub(crate) fn kv_str(v: Option<&KValue>) -> Option<String> {
         None => None,
         Some(v) if v.is_na() => None,
         Some(KValue::Str(s)) => Some(s.clone()),
-        Some(KValue::Json(j)) => Some(serde_json::to_string(j).unwrap_or_default()),
+        Some(KValue::Json(j)) => Some(j.to_string()),
         Some(other) => Some(other.py_str()),
     }
 }

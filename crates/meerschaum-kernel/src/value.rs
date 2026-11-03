@@ -182,6 +182,57 @@ impl DateTimeValue {
     }
 }
 
+/// An immutable JSON value stored as compact, shared text. Keeping parsed trees for every
+/// row costs far more than the payload itself. Parse only the cell being inspected, and
+/// share the text when a frame is cloned or rows are selected.
+#[derive(Clone, Debug)]
+pub struct JsonValue(std::sync::Arc<str>);
+
+impl JsonValue {
+    pub fn new(value: serde_json::Value) -> Self {
+        Self(value.to_string().into())
+    }
+
+    pub fn as_text(&self) -> &str {
+        &self.0
+    }
+
+    /// Construction always serializes valid JSON. `float_roundtrip` preserves the exact
+    /// numbers when a caller needs the parsed value again.
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut parser = serde_json::Deserializer::from_str(&self.0);
+        // This is our own serialized value, which can already be deeper than the external
+        // JSON parser's default limit (for example a nested Python dict).
+        parser.disable_recursion_limit();
+        serde::Deserialize::deserialize(&mut parser).expect("stored JSON is valid")
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.0.starts_with('[')
+    }
+
+    pub fn is_object(&self) -> bool {
+        self.0.starts_with('{')
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.0.as_ref() == "null"
+    }
+}
+
+impl PartialEq for JsonValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 || self.to_json() == other.to_json()
+    }
+}
+impl Eq for JsonValue {}
+
+impl fmt::Display for JsonValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A Python-like scalar.
 #[derive(Clone, Debug, Default)]
 pub enum Value {
@@ -202,12 +253,17 @@ pub enum Value {
     Datetime(DateTimeValue),
     Date(NaiveDate),
     /// A `dict` or `list` (JSON container; scalars inside are plain JSON).
-    Json(serde_json::Value),
+    Json(JsonValue),
     /// A shapely geometry.
     Geometry(Geometry),
 }
 
 impl Value {
+    /// Store a JSON container as compact, shared text.
+    pub fn json(value: serde_json::Value) -> Self {
+        Self::Json(JsonValue::new(value))
+    }
+
     /// `pd.isna(value)`: `None`, `pd.NA`, `pd.NaT`, float `NaN` and `Decimal('NaN')`.
     pub fn is_na(&self) -> bool {
         match self {
@@ -233,7 +289,7 @@ impl Value {
             Value::Uuid(u) => u.hyphenated().to_string(),
             Value::Datetime(dt) => dt.format_with_sep(' '),
             Value::Date(d) => d.format("%Y-%m-%d").to_string(),
-            Value::Json(j) => py_repr_json(j),
+            Value::Json(j) => py_repr_json(&j.to_json()),
             Value::Geometry(g) => g.to_wkt_full(),
         }
     }
@@ -313,7 +369,7 @@ impl Hash for Value {
             }
             Value::Json(j) => {
                 8u8.hash(state);
-                j.to_string().hash(state)
+                j.as_text().hash(state)
             }
             Value::Geometry(g) => {
                 9u8.hash(state);
@@ -379,7 +435,7 @@ impl From<&meerschaum_core::Value> for Value {
             V::Float(f) => Value::Float(*f),
             V::Str(s) => Value::Str(s.clone()),
             V::List(_) | V::Map(_) => {
-                Value::Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+                Value::json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
             }
         }
     }
@@ -403,7 +459,7 @@ impl Value {
             Value::Int(i) => V::Int(*i),
             Value::Float(f) => V::Float(*f),
             Value::Str(s) => V::Str(s.clone()),
-            Value::Json(j) => serde_json::from_value(j.clone()).ok()?,
+            Value::Json(j) => serde_json::from_value(j.to_json()).ok()?,
             _ => return None,
         })
     }

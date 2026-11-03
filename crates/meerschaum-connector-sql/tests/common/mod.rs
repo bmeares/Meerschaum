@@ -358,7 +358,7 @@ pub fn fl(v: f64) -> KValue {
 
 /// A JSON cell.
 pub fn j(v: &str) -> KValue {
-    KValue::Json(serde_json::from_str(v).unwrap())
+    KValue::json(serde_json::from_str(v).unwrap())
 }
 
 /// A cell's integer value (ints, whole floats, decimals).

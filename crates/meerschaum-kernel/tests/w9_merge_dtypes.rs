@@ -181,7 +181,7 @@ fn object_floats_infer_to_float64() {
 fn object_floats_truncate_into_arrow_ints() {
     use meerschaum_kernel::Value;
     use meerschaum_kernel::enforce::pandas_astype;
-    let object = ColumnData::Object(vec![Value::Float(2.5), Value::Float(-2.5), Value::Null]);
+    let object = ColumnData::object(vec![Value::Float(2.5), Value::Float(-2.5), Value::Null]);
     let casted = pandas_astype("v", &object, "int64[pyarrow]").unwrap();
     assert_eq!(
         casted.values(),

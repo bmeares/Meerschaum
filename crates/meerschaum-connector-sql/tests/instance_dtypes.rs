@@ -36,7 +36,7 @@ fn uuid(s: &str) -> KValue {
 
 fn json_of(v: &KValue) -> serde_json::Value {
     match v {
-        KValue::Json(j) => j.clone(),
+        KValue::Json(j) => j.to_json(),
         other => panic!("not JSON: {other:?}"),
     }
 }
@@ -169,10 +169,7 @@ flavor_tests!(test_dtype_enforcement, |c: Ctx| async move {
         let v = &col(&df, &name)[0];
         match pipe_dtype.as_str() {
             "json" => {
-                assert!(
-                    matches!(v, KValue::Json(serde_json::Value::Object(_))),
-                    "{v:?}"
-                );
+                assert!(matches!(v, KValue::Json(j) if j.is_object()), "{v:?}");
                 pipe_dtype = "object".into();
             }
             "numeric" => {

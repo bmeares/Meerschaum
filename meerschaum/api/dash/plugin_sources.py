@@ -542,7 +542,6 @@ def build_source_browser(
     """
     from dash import html, dcc
     import dash_bootstrap_components as dbc
-    from meerschaum.api.dash.components import build_icon
     if not may_read_source(kind, session):
         return None
     try:
@@ -556,16 +555,8 @@ def build_source_browser(
         {'path': first, 'nonce': uuid.uuid4().hex}
         if edit and kind == 'installed' and may_author(session) else None
     )
-    ### Fullscreen keeps the tree and the file (`assets/plugin_source.js`; Escape leaves it).
-    fullscreen = html.Button(
-        [build_icon('fullscreen', 'plugin-source-icon-enter'),
-         build_icon('fullscreen-exit', 'plugin-source-icon-exit')],
-        type='button', className='btn btn-sm btn-outline-secondary plugin-source-fullscreen-button',
-        title='Fullscreen', **{'aria-label': 'Fullscreen', 'aria-pressed': 'false',
-                               'data-source-action': 'fullscreen'},
-    )
     return html.Section([
-        html.Div([html.H4('Source'), fullscreen], className='plugin-source-header'),
+        html.Div(html.H4('Source'), className='plugin-source-header'),
         html.Div(notice, id='plugin-source-alert', className='plugin-source-alert'),
         dcc.Input(id='plugin-source-file',type='hidden',value=first),
         ### `edit` is `{path, nonce}` while a file is edited, else `None` (one writer:
@@ -686,8 +677,20 @@ def source_preview(path, source, digest: Optional[str] = None, editable: bool = 
     suffix = pathlib.PurePosixPath(str(path)).suffix.lower()
     logo = language_logo(LANGUAGE_ICONS[suffix][0], 'plugin-source-toolbar-language') if suffix in LANGUAGE_ICONS else None
     lines = len(source.splitlines())
+    copy = html.Button(
+        [build_icon('copy', 'plugin-source-icon-copy'), build_icon('check', 'plugin-source-icon-copied')],
+        type='button', className='btn btn-sm btn-outline-secondary plugin-source-copy',
+        title='Copy source', **{'aria-label': 'Copy source', 'data-source-action': 'copy'},
+    )
+    fullscreen = html.Button(
+        [build_icon('fullscreen', 'plugin-source-icon-enter'),
+         build_icon('fullscreen-exit', 'plugin-source-icon-exit')],
+        type='button', className='btn btn-sm btn-outline-secondary plugin-source-fullscreen-button',
+        title='Fullscreen', **{'aria-label': 'Fullscreen', 'aria-pressed': 'false',
+                               'data-source-action': 'fullscreen'},
+    )
     if editing:
-        data = {'path': path, 'mode': source_mode(path), 'source': source, 'styles': [], 'runs': [],
+        data = {**source_tokens(path, source),
                 'digest': digest, 'editing': True}
         toolbar = [
             logo, html.Code(path),
@@ -699,28 +702,30 @@ def source_preview(path, source, digest: Optional[str] = None, editable: bool = 
             html.Pre('\n'.join(str(n) for n in range(1, max(lines, 1) + 1)),
                      className='plugin-source-gutter', **{'aria-hidden': 'true'}),
             html.Label(f'Edit {path}', htmlFor='plugin-source-editor', className='visually-hidden'),
-            dcc.Textarea(
-                id='plugin-source-editor', value=source, spellCheck='false', wrap='off',
-                className='plugin-source-editor',
-            ),
+            html.Div([
+                html.Pre(html.Code(id='plugin-source-editor-highlight'),
+                         className='plugin-source-editor-highlight', **{'aria-hidden': 'true'}),
+                dcc.Textarea(
+                    id='plugin-source-editor', value=source, spellCheck='false', wrap='off',
+                    className='plugin-source-editor',
+                ),
+            ], className='plugin-source-editor-surface'),
         ], className='plugin-source-code plugin-source-editor-code')
     else:
         data = {**source_tokens(path, source), 'digest': digest, 'editing': False}
-        copy = html.Button(
-            [build_icon('copy', 'plugin-source-icon-copy'), build_icon('check', 'plugin-source-icon-copied')],
-            type='button', className='btn btn-sm btn-outline-secondary plugin-source-copy',
-            title='Copy source', **{'aria-label': 'Copy source', 'data-source-action': 'copy'},
-        )
         toolbar = [logo, html.Code(path), html.Span(f'{lines:,} lines', className='text-muted')]
         if editable:
             toolbar.append(_source_action_button(
                 'edit', 'Edit', 'fa-solid fa-pen-to-square', 'btn-outline-secondary'))
-        toolbar.append(copy)
         code = html.Div(html.Pre(html.Code(id='plugin-source-code', className='language-'+data['mode'])),
                         className='plugin-source-code')
+    toolbar.extend([copy, fullscreen])
     return html.Div([
         html.Div([item for item in toolbar if item is not None], className='plugin-source-toolbar'),
         code,
         dcc.Store(id='plugin-source-data', data=data),
+        dcc.Store(id='plugin-source-edit-request'),
+        dcc.Store(id='plugin-source-edit-tokens'),
         html.Div(id='plugin-source-rendered', hidden=True),
+        html.Div(id='plugin-source-edit-rendered', hidden=True),
     ],className='plugin-source-preview' + (' plugin-source-preview-editing' if editing else ''))

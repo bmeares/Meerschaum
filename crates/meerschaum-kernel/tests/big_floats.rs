@@ -80,9 +80,9 @@ fn astype_int_rejects_out_of_range_floats() {
             pandas_astype("a", &native, "int64[pyarrow]").is_err(),
             "{f}"
         );
-        let object = ColumnData::Object(vec![Value::Float(f)]);
+        let object = ColumnData::object(vec![Value::Float(f)]);
         assert!(pandas_astype("a", &object, "int64").is_err(), "{f}");
-        let decimal = ColumnData::Object(vec![Value::Decimal(
+        let decimal = ColumnData::object(vec![Value::Decimal(
             Decimal::parse(&format!("{f:.0}")).unwrap(),
         )]);
         assert!(pandas_astype("a", &decimal, "Int64").is_err(), "{f}");

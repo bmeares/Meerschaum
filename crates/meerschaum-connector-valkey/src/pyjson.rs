@@ -72,7 +72,7 @@ pub fn write_value(v: &KValue, sort_keys: bool, out: &mut String) {
         KValue::Int(i) => out.push_str(&i.to_string()),
         KValue::Float(f) => write_float(*f, out),
         KValue::Str(s) => out.push_str(&json_dumps_str(s, true)),
-        KValue::Json(j) => write_json(j, sort_keys, out),
+        KValue::Json(j) => write_json(&j.to_json(), sort_keys, out),
         other => write_json(&json_serialize_value(other), sort_keys, out),
     }
 }
@@ -134,7 +134,7 @@ pub fn json_scalar_to_kernel(v: serde_json::Value) -> KValue {
             }
         },
         serde_json::Value::String(s) => KValue::Str(s),
-        other => KValue::Json(other),
+        other => KValue::json(other),
     }
 }
 
@@ -208,7 +208,7 @@ mod tests {
             ("na".to_string(), KValue::NA),
             (
                 "j".to_string(),
-                KValue::Json(serde_json::json!({"b": 1.0, "a": [1, "x"]})),
+                KValue::json(serde_json::json!({"b": 1.0, "a": [1, "x"]})),
             ),
         ]
         .into_iter()

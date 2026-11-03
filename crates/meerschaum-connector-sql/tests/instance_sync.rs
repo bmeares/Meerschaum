@@ -322,7 +322,7 @@ flavor_tests!(test_id_index_col, |c: Ctx| async move {
                 doc(vec![
                     ("id", i(k)),
                     ("a", i(k * mul)),
-                    ("b", KValue::Json(serde_json::json!({ "c": c }))),
+                    ("b", KValue::json(serde_json::json!({ "c": c }))),
                 ])
             })
             .collect()
@@ -335,7 +335,7 @@ flavor_tests!(test_id_index_col, |c: Ctx| async move {
             let (KValue::Json(sj), KValue::Json(ej)) = (&s["b"], &e["b"]) else {
                 panic!("b is not JSON: {:?}", s["b"]);
             };
-            assert_eq!(sj["c"].as_f64(), ej["c"].as_f64());
+            assert_eq!(sj.to_json()["c"].as_f64(), ej.to_json()["c"].as_f64());
         }
     };
     let docs = make(100, 2, 2.0, false);
@@ -409,7 +409,7 @@ flavor_tests!(test_add_new_columns, |c: Ctx| async move {
         assert!(docs[0].contains_key(k), "missing {k}");
     }
     match &docs[0]["d"] {
-        KValue::Json(j) => assert!(j.get("e").is_some()),
+        KValue::Json(j) => assert!(j.to_json().get("e").is_some()),
         other => panic!("d is not JSON: {other:?}"),
     }
     c.delete(&pipe).await;

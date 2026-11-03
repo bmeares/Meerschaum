@@ -281,7 +281,7 @@ async fn ledger_extent(chain: &Chain) -> Option<meerschaum_core::success::Bound>
     assert!(!docs.is_empty(), "no ledger entries for {}", chain.raw);
     docs.iter()
         .filter_map(|d| match d.get("end")? {
-            meerschaum_kernel::value::Value::Json(j) => bound_from_json(j),
+            meerschaum_kernel::value::Value::Json(j) => bound_from_json(&j.to_json()),
             meerschaum_kernel::value::Value::Str(s) => {
                 bound_from_json(&serde_json::from_str(s).ok()?)
             }

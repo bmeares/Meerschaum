@@ -373,8 +373,11 @@ pub async fn check_rows_editable(
         }
         if let Some(targets) = row.get("targets") {
             let targets: Vec<String> = match targets {
-                meerschaum_kernel::value::Value::Json(Json::Array(items)) => items
-                    .iter()
+                meerschaum_kernel::value::Value::Json(j) => j
+                    .to_json()
+                    .as_array()
+                    .into_iter()
+                    .flatten()
                     .filter_map(Json::as_str)
                     .map(str::to_string)
                     .collect(),

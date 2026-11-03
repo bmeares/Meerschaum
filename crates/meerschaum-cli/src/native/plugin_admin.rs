@@ -499,37 +499,13 @@ pub fn register_uploads(
         record.attributes = session
             .block_on(connector.get_plugin_attributes(&record))
             .map_err(|e| ActionError::new("Exception", e.to_string()))?;
-        let native = native_plugin_path(&dirs, name);
-        let file = if let Some(path) = &native {
-            native_source(path)
-        } else {
-            plugin_file(&dirs, name)
-        };
-        let source = file
-            .as_ref()
-            .and_then(|f| std::fs::read_to_string(f).ok())
-            .unwrap_or_default();
-        record.version = if let Some(path) = &native {
-            native_version(path)
-        } else {
-            declared_version(&source).ok().flatten()
-        };
+        let (version, doc) = plugin_metadata(&dirs, name);
+        record.version = version;
         let existing = record
             .attributes
             .get("description")
             .map(pyfmt::py_str)
             .unwrap_or_default();
-        let doc = if native.is_some() {
-            source
-                .lines()
-                .take_while(|line| line.trim().starts_with("//!") || line.trim().is_empty())
-                .filter_map(|line| line.trim().strip_prefix("//!"))
-                .map(str::trim)
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            file.as_deref().map(plugin_docstring).unwrap_or_default()
-        };
         let mut desc: Option<String> = Some(if existing.is_empty() { doc } else { existing });
 
         let current = desc.clone().unwrap_or_default();
@@ -595,11 +571,6 @@ pub fn register_uploads(
 /// `Plugin.make_tar()`: compress the plugin's sources into `<archives>/<name>.tar.gz`.
 fn make_tar(rt: &mut Runtime<'_>, name: &str, debug: bool) -> Result<PathBuf, ActionError> {
     let dirs = plugins_dirs(rt);
-    let native = native_plugin_path(&dirs, name);
-    let file = native
-        .clone()
-        .or_else(|| plugin_file(&dirs, name))
-        .ok_or_else(|| exception(format!("Could not find file for plugin '{name}'.")))?;
     let archive_path = {
         let paths = rt.config().paths();
         paths
@@ -614,16 +585,34 @@ fn make_tar(rt: &mut Runtime<'_>, name: &str, debug: bool) -> Result<PathBuf, Ac
             })
             .join(format!("{name}.tar.gz"))
     };
+    let bytes = plugin_archive(&dirs, name, debug)?;
+    if let Some(parent) = archive_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| ActionError::new("OSError", e.to_string()))?;
+    }
+    std::fs::write(&archive_path, bytes).map_err(|e| ActionError::new("OSError", e.to_string()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&archive_path, std::fs::Permissions::from_mode(0o775));
+    }
+    Ok(archive_path)
+}
+
+/// Package an installed Python or Rust plugin using the CLI's source filters, without
+/// importing it or changing the process's working directory.
+pub fn plugin_archive(dirs: &[PathBuf], name: &str, debug: bool) -> Result<Vec<u8>, ActionError> {
+    if name.is_empty() || name.contains(['/', '\\', '\0']) || matches!(name, "." | "..") {
+        return Err(exception("Invalid plugin name."));
+    }
+    let native = native_plugin_path(dirs, name);
+    let file = native
+        .clone()
+        .or_else(|| plugin_file(dirs, name))
+        .ok_or_else(|| exception(format!("Could not find file for plugin '{name}'.")))?;
     let is_dir = file.is_dir() || file.file_name().is_some_and(|n| n == "__init__.py");
     let real = std::fs::canonicalize(&file).unwrap_or(file.clone());
-    let write = || -> std::io::Result<()> {
-        if let Some(parent) = archive_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let encoder = flate2::write::GzEncoder::new(
-            std::fs::File::create(&archive_path)?,
-            flate2::Compression::default(),
-        );
+    let write = || -> std::io::Result<Vec<u8>> {
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut builder = tar::Builder::new(encoder);
         builder.follow_symlinks(false);
         if !is_dir {
@@ -667,16 +656,39 @@ fn make_tar(rt: &mut Runtime<'_>, name: &str, debug: bool) -> Result<PathBuf, Ac
                 builder.append_path_with_name(root.join(&relative), &member)?;
             }
         }
-        builder.into_inner()?.finish()?;
-        Ok(())
+        builder.into_inner()?.finish()
     };
-    write().map_err(|e| ActionError::new("OSError", e.to_string()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&archive_path, std::fs::Permissions::from_mode(0o775));
-    }
-    Ok(archive_path)
+    write().map_err(|e| ActionError::new("OSError", e.to_string()))
+}
+
+/// Read the version and default description from current source, without loading the plugin.
+pub fn plugin_metadata(dirs: &[PathBuf], name: &str) -> (Option<String>, String) {
+    let native = native_plugin_path(dirs, name);
+    let file = native
+        .as_ref()
+        .map(|p| native_source(p))
+        .unwrap_or_else(|| plugin_file(dirs, name));
+    let source = file
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default();
+    let version = if let Some(path) = &native {
+        native_version(path)
+    } else {
+        declared_version(&source).ok().flatten()
+    };
+    let description = if native.is_some() {
+        source
+            .lines()
+            .take_while(|line| line.trim().starts_with("//!") || line.trim().is_empty())
+            .filter_map(|line| line.trim().strip_prefix("//!"))
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        file.as_deref().map(plugin_docstring).unwrap_or_default()
+    };
+    (version, description)
 }
 
 /// Files below `dir` as `/`-joined relative paths (`os.walk` with `followlinks=False`: a

@@ -191,7 +191,7 @@ fn serialize_parity() {
                 geom_col.crs = Some(srid);
                 let meta = Column::object(
                     "meta",
-                    vec![Value::Json(json!({"b": 1, "a": 2})), Value::Null],
+                    vec![Value::json(json!({"b": 1, "a": 2})), Value::Null],
                 );
                 let id = Column::native(polars::prelude::Series::new("id".into(), [1i64, 2]));
                 let frame = Frame::new(vec![id, geom_col, meta]).unwrap();

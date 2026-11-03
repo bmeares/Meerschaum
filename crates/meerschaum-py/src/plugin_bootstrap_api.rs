@@ -10,7 +10,7 @@ use meerschaum_cli::native::bootstrap_plugins::{
     plugin_feature_choices,
 };
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
 
 /// The configured plugins directories, first first.
 fn plugins_dirs(py: Python<'_>) -> PyResult<Vec<PathBuf>> {
@@ -138,5 +138,24 @@ pub fn bootstrap_plugin<'py>(
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bootstrap_plugin_choices, m)?)?;
     m.add_function(wrap_pyfunction!(bootstrap_plugin, m)?)?;
+    m.add_function(wrap_pyfunction!(plugin_archive, m)?)?;
     Ok(())
+}
+
+/// Package current source for Publish with the same filters as `register plugins`.
+#[pyfunction]
+pub fn plugin_archive<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyDict>> {
+    let dirs = plugins_dirs(py)?;
+    let (archive, version, description) = py.detach(|| {
+        use meerschaum_cli::native::plugin_admin;
+        let archive = plugin_admin::plugin_archive(&dirs, name, false)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.message))?;
+        let (version, description) = plugin_admin::plugin_metadata(&dirs, name);
+        Ok::<_, PyErr>((archive, version, description))
+    })?;
+    let out = PyDict::new(py);
+    out.set_item("archive", PyBytes::new(py, &archive))?;
+    out.set_item("version", version)?;
+    out.set_item("description", description)?;
+    Ok(out)
 }

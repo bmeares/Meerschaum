@@ -1272,7 +1272,7 @@ pub async fn default_register_token<C: InstanceConnector + ?Sized>(
         ("is_valid".to_string(), KValue::Bool(token.is_valid)),
         (
             "scopes".to_string(),
-            KValue::Json(serde_json::Value::Array(
+            KValue::json(serde_json::Value::Array(
                 token
                     .scopes
                     .iter()
@@ -1335,7 +1335,7 @@ pub async fn default_edit_token<C: InstanceConnector + ?Sized>(
         doc.insert("is_valid".into(), KValue::Bool(token.is_valid));
         doc.insert(
             "scopes".into(),
-            KValue::Json(serde_json::Value::Array(
+            KValue::json(serde_json::Value::Array(
                 token
                     .scopes
                     .iter()

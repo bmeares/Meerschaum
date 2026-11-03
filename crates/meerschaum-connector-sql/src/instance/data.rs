@@ -106,7 +106,7 @@ fn sqlite_datetimes_as_text(mut df: Frame) -> Result<Frame, String> {
                 other => other,
             })
             .collect();
-        df.set(&name, ColumnData::Object(values))
+        df.set(&name, ColumnData::object(values))
             .map_err(|e| e.to_string())?;
     }
     Ok(df)

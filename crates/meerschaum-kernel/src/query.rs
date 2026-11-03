@@ -382,7 +382,10 @@ pub fn query_df(df: &Frame, opts: &QueryOptions) -> Result<QueryResult, EnforceE
     // Object columns of nulls stay object columns, as pandas keeps them.
     for col in result.columns_mut() {
         if let ColumnData::Object(values) = &mut col.data {
-            for v in values.iter_mut() {
+            if !values.iter().any(|v| matches!(v, Value::Null)) {
+                continue;
+            }
+            for v in std::sync::Arc::make_mut(values).iter_mut() {
                 if matches!(v, Value::Null) {
                     *v = Value::NA;
                 }

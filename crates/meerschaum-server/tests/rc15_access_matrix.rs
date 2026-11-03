@@ -2478,3 +2478,84 @@ async fn a_listing_reads_the_pipes_in_bulk_and_reuses_them() {
     }
     assert!(f.instance.pipes_listings.load(Ordering::SeqCst) - before <= 2);
 }
+
+#[tokio::test]
+async fn plugin_upload_tokens_use_current_owner_permissions_and_keep_ownership() {
+    for use_jwt in [false, true] {
+        let f = fixture().await;
+        async fn credential(f: &Fixture, user: &str, scopes: &[&str], use_jwt: bool) -> String {
+            let key = key_for(f, user, scopes).await;
+            if !use_jwt {
+                return key;
+            }
+            let response = send(
+                &f.app,
+                req(
+                    "POST",
+                    "/login",
+                    Some(&key),
+                    Some(("application/x-www-form-urlencoded", Vec::new())),
+                ),
+            )
+            .await;
+            assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+            format!(
+                "Bearer {}",
+                response.json()["access_token"].as_str().unwrap()
+            )
+        }
+        async fn upload(f: &Fixture, auth: &str, version: &str, body: &str) -> Resp {
+            let multipart = format!(
+                "--rc30boundary\r\nContent-Disposition: form-data; name=\"archive\"; filename=\"rc30.tar.gz\"\r\nContent-Type: application/gzip\r\n\r\n{body}\r\n--rc30boundary--\r\n"
+            );
+            send(
+                &f.app,
+                req(
+                    "POST",
+                    &format!("/plugins/rc30?version={version}"),
+                    Some(auth),
+                    Some((
+                        "multipart/form-data; boundary=rc30boundary",
+                        multipart.into_bytes(),
+                    )),
+                ),
+            )
+            .await
+        }
+        let read_only = credential(&f, "admin", &["plugins:read"], use_jwt).await;
+        assert_eq!(
+            upload(&f, &read_only, "1.0", "refused").await.status,
+            StatusCode::FORBIDDEN
+        );
+        let owner_key = credential(&f, "oscar", &["plugins:write"], use_jwt).await;
+        let first = upload(&f, &owner_key, "1.0", "first").await;
+        assert_eq!(first.status, StatusCode::OK, "{}", first.text());
+        assert!(tuple_of(&first).0, "{}", first.text());
+        let plugin = meerschaum_connector::PluginRecord {
+            name: "rc30".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            f.instance.get_plugin_user_id(&plugin).await.unwrap(),
+            f.instance
+                .get_user_id(&User::new("oscar", None))
+                .await
+                .unwrap()
+        );
+        let updated = upload(&f, &owner_key, "2.0", "updated").await;
+        assert!(tuple_of(&updated).0, "{}", updated.text());
+        // Even another administrator's write token may not take over this plugin.
+        let other_owner = credential(&f, "admin", &["plugins:write"], use_jwt).await;
+        let rejected = upload(&f, &other_owner, "3.0", "stolen").await;
+        assert_eq!(rejected.status, StatusCode::OK);
+        assert!(!tuple_of(&rejected).0);
+        assert_eq!(get(&f, &owner_key, "/plugins/rc30").await.text(), "updated");
+        // This credential still lists plugins:write, but its owner no longer holds it.
+        f.instance
+            .seed_user_attributes("oscar", map(json!({"scopes": ["plugins:read"]})));
+        assert_eq!(
+            upload(&f, &owner_key, "3.0", "revoked").await.status,
+            StatusCode::FORBIDDEN
+        );
+    }
+}

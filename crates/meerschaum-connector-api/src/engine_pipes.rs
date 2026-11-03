@@ -206,7 +206,7 @@ mod tests {
             ("seq", KValue::Int(7)),
             (
                 "begin",
-                KValue::Json(serde_json::json!({"datetime": "2026-01-01T00:00:00+00:00"})),
+                KValue::json(serde_json::json!({"datetime": "2026-01-01T00:00:00+00:00"})),
             ),
             ("end", KValue::Null),
         ]

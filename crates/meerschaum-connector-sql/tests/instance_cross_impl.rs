@@ -139,7 +139,7 @@ fn decode(v: &J) -> KValue {
                 other => panic!("unknown tag {other}"),
             }
         }
-        other => KValue::Json(other.clone()),
+        other => KValue::json(other.clone()),
     }
 }
 

@@ -50,6 +50,9 @@ axes show readable UTC sync times using their declared precision.
 
 Jobs are grouped with running jobs first, show a one-word status and a Last Run time, and refresh in place. Job listings read every systemd job's state with one `systemctl` call.
 Connectors are grouped by type. Create a plugin from the console with the same choices as `bootstrap plugins`, then edit its source in place (administrators who may use the web terminal).
+The source editor keeps syntax highlighting while typing. Fullscreen sits beside Copy and hides the Source heading.
+Publish an installed plugin to a configured API repository, signing in with a username and password, client credentials, or an API key.
+Copy token details includes the API key and every displayed field.
 The web terminal shows its tmux windows as tabs, and an API run as a job keeps its terminal's shell interactive.
 
 Relationship views read graph metadata without planning a sync. Plans bound the total chunk list
@@ -100,6 +103,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - Release a Pipe lease even when acquisition completes after cancellation.
 - Back up, restore, and upgrade Stack PostgreSQL through guided commands.
 - Keep long-running jobs' memory bounded: Python workers are replaced after a call or memory limit and stop when idle, and jobs return freed memory between laps.
+- Reduce memory use when syncing and reading JSON columns through pandas.
 - Return freed memory after each fetched chunk and sync: a 1,000,000-row SQLite fetch sync peaks at about 300 MiB instead of 460.
 - List a Pipeline's scheduled jobs without querying every job's status.
 

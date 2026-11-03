@@ -129,7 +129,7 @@ pub fn encode(v: &Value) -> J {
             json!({"t": "dt", "v": d.isoformat(), "tz": d.tz.as_ref().map(|t| t.name())})
         }
         Value::Date(d) => json!({"t": "date", "v": d.format("%Y-%m-%d").to_string()}),
-        Value::Json(j) => json!({"t": "json", "v": j}),
+        Value::Json(j) => json!({"t": "json", "v": j.to_json()}),
         Value::Geometry(g) => {
             json!({"t": "geom", "wkt": g.to_wkt_full(), "wkb": g.to_wkb_hex(false)})
         }
@@ -285,7 +285,7 @@ pub fn decode_frame(j: &J) -> Frame {
                 "could not build native column {name} ({dtype})"
             );
         }
-        let data = data.unwrap_or(ColumnData::Object(values));
+        let data = data.unwrap_or(ColumnData::object(values));
         let mut column = Column::new(name, data);
         if let Some(crs) = c.get("crs").and_then(|c| c.as_str()) {
             column.crs = Some(

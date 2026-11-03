@@ -47,10 +47,15 @@ pub enum ColumnData {
     /// A typed Polars column (pandas: a NumPy / nullable / Arrow-backed column).
     Native(Series),
     /// An object column (pandas `object`).
-    Object(Vec<Value>),
+    Object(Arc<Vec<Value>>),
 }
 
 impl ColumnData {
+    /// Store object values with copy-on-write ownership, like a native Polars column.
+    pub fn object(values: Vec<Value>) -> Self {
+        Self::Object(Arc::new(values))
+    }
+
     pub fn len(&self) -> usize {
         match self {
             ColumnData::Native(s) => s.len(),
@@ -74,7 +79,15 @@ impl ColumnData {
     pub fn values(&self) -> Vec<Value> {
         match self {
             ColumnData::Native(s) => series_to_values(s),
-            ColumnData::Object(v) => v.clone(),
+            ColumnData::Object(v) => v.as_ref().clone(),
+        }
+    }
+
+    /// Read all cells without copying object storage. Native columns are materialized.
+    pub fn values_ref(&self) -> std::borrow::Cow<'_, [Value]> {
+        match self {
+            ColumnData::Object(values) => std::borrow::Cow::Borrowed(values),
+            ColumnData::Native(s) => std::borrow::Cow::Owned(series_to_values(s)),
         }
     }
 
@@ -85,6 +98,16 @@ impl ColumnData {
                 .map(|av| any_value_to_value(&av, s.dtype()))
                 .unwrap_or(Value::Null),
             ColumnData::Object(v) => v.get(ix).cloned().unwrap_or(Value::Null),
+        }
+    }
+
+    /// Borrow an object cell or materialize a single native cell, without copying the column.
+    pub fn value_ref(&self, ix: usize) -> std::borrow::Cow<'_, Value> {
+        match self {
+            ColumnData::Object(values) => {
+                std::borrow::Cow::Borrowed(values.get(ix).unwrap_or(&Value::Null))
+            }
+            ColumnData::Native(_) => std::borrow::Cow::Owned(self.get(ix)),
         }
     }
 
@@ -139,7 +162,7 @@ impl ColumnData {
                 ColumnData::Native(s.take(&idx).expect("indices in bounds"))
             }
             ColumnData::Object(v) => {
-                ColumnData::Object(indices.iter().map(|i| v[*i].clone()).collect())
+                ColumnData::object(indices.iter().map(|i| v[*i].clone()).collect())
             }
         }
     }
@@ -160,7 +183,7 @@ impl ColumnData {
             ColumnData::Native(s) => {
                 ColumnData::Native(Series::full_null(s.name().clone(), n, s.dtype()))
             }
-            ColumnData::Object(_) => ColumnData::Object(vec![Value::Null; n]),
+            ColumnData::Object(_) => ColumnData::object(vec![Value::Null; n]),
         }
     }
 
@@ -233,7 +256,7 @@ impl Column {
     }
 
     pub fn object(name: impl Into<String>, values: Vec<Value>) -> Self {
-        Self::new(name, ColumnData::Object(values))
+        Self::new(name, ColumnData::object(values))
     }
 
     pub fn native(series: Series) -> Self {
@@ -450,7 +473,13 @@ impl Frame {
                 }
                 ColumnData::Native(_) => {}
                 ColumnData::Object(values) => {
-                    for v in values.iter_mut() {
+                    if !values
+                        .iter()
+                        .any(|v| matches!(v, Value::Str(s) if s.is_empty()))
+                    {
+                        continue;
+                    }
+                    for v in Arc::make_mut(values).iter_mut() {
                         if matches!(v, Value::Str(s) if s.is_empty()) {
                             *v = Value::Null;
                         }
@@ -509,7 +538,7 @@ impl Frame {
                 }
                 match out {
                     Some(s) => ColumnData::Native(s.with_name(name.into())),
-                    None => ColumnData::Object(Vec::new()),
+                    None => ColumnData::object(Vec::new()),
                 }
             } else {
                 let mut values = Vec::with_capacity(height);
@@ -519,7 +548,7 @@ impl Frame {
                         None => values.extend(std::iter::repeat_n(Value::Null, *rows)),
                     }
                 }
-                ColumnData::Object(values)
+                ColumnData::object(values)
             };
             columns.push(Column {
                 name: name.to_string(),
@@ -970,7 +999,7 @@ pub fn json_to_value(j: serde_json::Value) -> Value {
             }
         }
         serde_json::Value::String(s) => Value::Str(s),
-        other => Value::Json(other),
+        other => Value::json(other),
     }
 }
 

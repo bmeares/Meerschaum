@@ -117,7 +117,7 @@ pub fn object_string_nulls(
     for data in [old, new, delta] {
         match data {
             ColumnData::Object(values) => {
-                for value in values {
+                for value in values.iter() {
                     match value {
                         Cell::Str(_) => has_string = true,
                         Cell::Null | Cell::NA | Cell::Bool(_) | Cell::Int(_) | Cell::Float(_) => {}
@@ -136,7 +136,7 @@ pub fn object_string_nulls(
         }
     }
     has_string.then(|| {
-        ColumnData::Object(
+        ColumnData::object(
             delta
                 .values()
                 .into_iter()
@@ -193,7 +193,7 @@ pub fn object_special_nulls(
     };
     // Native bytes (including empty deltas) must also regain the object merge dtype.
     (special && (has_nulls || matches!(delta, ColumnData::Native(_)))).then(|| {
-        ColumnData::Object(
+        ColumnData::object(
             delta
                 .values()
                 .into_iter()
@@ -228,7 +228,7 @@ pub fn object_json_nulls(
         ColumnData::Native(series) => series.null_count() > 0,
     };
     has_nulls.then(|| {
-        ColumnData::Object(
+        ColumnData::object(
             delta
                 .values()
                 .into_iter()
@@ -675,7 +675,9 @@ fn column_identical(input: &Column, output: &Column) -> bool {
             a.equals_missing(b)
         }
         (ColumnData::Object(a), ColumnData::Object(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| cells_identical(x, y))
+            std::sync::Arc::ptr_eq(a, b)
+                || (a.len() == b.len()
+                    && a.iter().zip(b.iter()).all(|(x, y)| cells_identical(x, y)))
         }
         _ => false,
     }
@@ -820,7 +822,7 @@ fn default_target(data: &ColumnData) -> Option<String> {
 }
 
 /// Choose the pandas dtype for an output column.
-fn choose_target(data: &ColumnData, hint: Option<&String>) -> Option<String> {
+pub(crate) fn choose_target(data: &ColumnData, hint: Option<&String>) -> Option<String> {
     let Some(hint) = hint else {
         return default_target(data);
     };
@@ -944,7 +946,7 @@ fn column_to_series<'py>(
     let base = match (&col.data, arrow_col) {
         (ColumnData::Native(_), Some(chunked)) => {
             if target == Some("object") {
-                return object_series(&col.data.values());
+                return object_series(&col.data.values_ref());
             }
             if let Some(series) = target.and_then(|t| datetime_series(ctx, chunked, t).transpose())
             {
@@ -956,7 +958,7 @@ fn column_to_series<'py>(
                 .call1((chunked,))?;
             pd.getattr("Series")?.call1((arr,))?
         }
-        _ => object_series(&col.data.values())?,
+        _ => object_series(&col.data.values_ref())?,
     };
     let Some(target) = target else {
         return Ok(base);
@@ -973,7 +975,7 @@ fn column_to_series<'py>(
             match fallback {
                 Some(t) if t != current && t != target => {
                     if t == "object" {
-                        return object_series(&col.data.values());
+                        return object_series(&col.data.values_ref());
                     }
                     Ok(base
                         .call_method1(intern!(py, "astype"), (t,))
@@ -1310,8 +1312,8 @@ mod tests {
 
     #[test]
     fn ordinary_object_string_nulls_keep_special_values_and_inference_separate() {
-        let old = ColumnData::Object(vec![Cell::Str("a".into()), Cell::Int(1)]);
-        let new = ColumnData::Object(vec![Cell::Null, Cell::Str("b".into()), Cell::Int(2)]);
+        let old = ColumnData::object(vec![Cell::Str("a".into()), Cell::Int(1)]);
+        let new = ColumnData::object(vec![Cell::Null, Cell::Str("b".into()), Cell::Int(2)]);
         let normalized = object_string_nulls(&old, &new, &new, true).unwrap();
         let ColumnData::Object(values) = normalized else {
             panic!("ordinary object merge must stay object");
@@ -1323,22 +1325,22 @@ mod tests {
         let strings = ColumnData::Native(Series::new("s".into(), &[None, Some("b")]));
         assert!(object_string_nulls(&old, &new, &strings, true).is_none());
         assert!(object_string_nulls(&old, &new, &strings, false).is_some());
-        let no_nulls = ColumnData::Object(vec![Cell::Str("b".into()), Cell::Int(2)]);
+        let no_nulls = ColumnData::object(vec![Cell::Str("b".into()), Cell::Int(2)]);
         assert!(object_string_nulls(&old, &new, &no_nulls, false).is_none());
         let no_null_strings = ColumnData::Native(Series::new("s".into(), &["b"]));
         assert!(object_string_nulls(&old, &new, &no_null_strings, false).is_none());
 
         for special in [
-            Cell::Json(serde_json::json!({"x": 1})),
+            Cell::json(serde_json::json!({"x": 1})),
             Cell::Decimal(meerschaum_kernel::Decimal::parse("1.1").unwrap()),
             Cell::Bytes(vec![1]),
             Cell::Uuid(uuid::Uuid::nil()),
         ] {
-            let mixed = ColumnData::Object(vec![Cell::Str("a".into()), special, Cell::Null]);
+            let mixed = ColumnData::object(vec![Cell::Str("a".into()), special, Cell::Null]);
             assert!(object_string_nulls(&mixed, &new, &mixed, false).is_none());
         }
-        let encoded = ColumnData::Object(vec![Cell::Str("{\"x\":1}".into())]);
-        let decoded = ColumnData::Object(vec![Cell::Null, Cell::Json(serde_json::json!({"x": 2}))]);
+        let encoded = ColumnData::object(vec![Cell::Str("{\"x\":1}".into())]);
+        let decoded = ColumnData::object(vec![Cell::Null, Cell::json(serde_json::json!({"x": 2}))]);
         assert!(object_string_nulls(&encoded, &encoded, &decoded, false).is_none());
     }
 
@@ -1392,14 +1394,14 @@ mod tests {
         );
         let nullable = ColumnData::Native(Series::new("a".into(), &[Some(1i64), None]));
         assert_eq!(choose_target(&nullable, None).as_deref(), Some("Int64"));
-        let decimals = ColumnData::Object(vec![Cell::Decimal(
+        let decimals = ColumnData::object(vec![Cell::Decimal(
             meerschaum_kernel::Decimal::parse("1.5").unwrap(),
         )]);
         assert_eq!(
             choose_target(&decimals, Some(&"int64".to_string())).as_deref(),
             Some("object")
         );
-        let nulls = ColumnData::Object(vec![Cell::Null, Cell::NA]);
+        let nulls = ColumnData::object(vec![Cell::Null, Cell::NA]);
         assert_eq!(
             choose_target(&nulls, Some(&"Int64".to_string())).as_deref(),
             Some("Int64")

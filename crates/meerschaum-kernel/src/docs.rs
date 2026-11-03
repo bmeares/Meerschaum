@@ -66,7 +66,7 @@ pub fn convert_dtypes(name: &str, values: &[Value]) -> ColumnData {
                 return ColumnData::Native(series);
             }
         }
-        return ColumnData::Object(values.iter().map(|_| Value::NA).collect());
+        return ColumnData::object(values.iter().map(|_| Value::NA).collect());
     }
     let all = |f: fn(&Value) -> bool| non_null.iter().all(|v| f(v));
     let normalized: Vec<Value> = values
@@ -106,7 +106,7 @@ pub fn convert_dtypes(name: &str, values: &[Value]) -> ColumnData {
         None
     };
     result.unwrap_or_else(|| {
-        ColumnData::Object(
+        ColumnData::object(
             values
                 .iter()
                 .map(|v| if v.is_na() { Value::NA } else { v.clone() })

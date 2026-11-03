@@ -469,7 +469,7 @@ flavor_tests!(upserts_compare_stored_json_values, |c: Ctx| async move {
                     meerschaum_kernel::value::Value::Str(actual),
                 ) => assert_eq!(
                     &serde_json::from_str::<serde_json::Value>(actual).unwrap(),
-                    expected
+                    &expected.to_json()
                 ),
                 _ => assert_eq!(actual, &value),
             }

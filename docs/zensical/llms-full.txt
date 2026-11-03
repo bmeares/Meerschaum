@@ -7713,12 +7713,14 @@ The **Plugins** page has two tabs:
 - **Installed** (`/dash/plugins`): the plugins installed on the server, with their version, their **Language** (the Python or Rust logo; a Rust plugin is a single `.rs` file or a directory with a `plugin.toml`), what each provides (connectors, a data source, actions, pages, API routes, MCP tools, sync hooks) and whether the packages it requires are installed. A plugin that failed to import says so. Administrators can **Update** a plugin installed from a repository (the latest version from that repository) and **Uninstall** it.
 - **Repository** (`/dash/plugins?tab=repository`): the plugins published to this API as a [repository](/reference/connectors/#instances-and-repositories) (`mrsm register plugin <name> -r api:<label>`), to read and download. A plugin's owner edits its description here. Administrators can **Install** a published plugin on the server (**Reinstall** when it is installed already).
 
-Open a published plugin's page to inspect its **Source**, then choose a file. Administrators can also open an installed plugin's name to read its local source. A published plugin's source is read-only; large, binary, or linked files may not have a preview.
+Open a published plugin's page to inspect its **Source**, then choose a file. Administrators can also open an installed plugin's name to read its local source. A published plugin's source is read-only; large, binary, or linked files may not have a preview. **Fullscreen**, beside **Copy**, fills the screen with the file tree and source.
 
 Administrators can also write plugins from the console, which is running code on the server, so it needs what the [terminal](#terminal) needs: an administrator, and a server that serves the terminal (not started with `--no-webterm`, `--no-auth` or `--public`) and accepts plugins (`api:permissions:registration:plugins`).
 
 - **New plugin** (the circled plus beside the title) asks what [`mrsm bootstrap plugins`](../plugins/writing-plugins.md) asks: the name, the language (Python or Rust), a single file or a package, and the features (fetch data, a connector, an instance connector, actions, API endpoints, a web console page), with the action's name and the datetime column when those are picked. It writes the same files into the plugins directory (an existing plugin of that name is refused, nothing is overwritten) and opens the new plugin's source for editing.
-- **Edit**, on a file of an installed plugin's source, turns the file into an editor (Tab indents; Ctrl+S saves). **Save** replaces the file in place, and refuses when the file changed on disk after you opened it (**Cancel** then loads the current file). Only the files the source lists, inside that plugin's own directory, can be saved.
+- **Edit**, on a file of an installed plugin's source, turns the file into an editor with syntax highlighting (Tab indents; Ctrl+S saves). **Save** replaces the file in place, and refuses when the file changed on disk after you opened it (**Cancel** then loads the current file). Only the files the source lists, inside that plugin's own directory, can be saved.
+
+Administrators can **Publish** from an installed plugin's page. Select a configured API repository; if it needs a login, enter a username and password, a client ID and secret, or an API key. Credentials entered here remain private to this console session and are forgotten after an hour of inactivity. **Publish** packages the current saved source and uploads it to that repository. Save any edits before publishing.
 
 Install, Update and Uninstall run the usual actions (`install plugins`, `uninstall plugins`) as one of the console's runs, listed under Jobs > **Runs**; the page says when the action finished, with **View output**. When the change adds or removes a plugin's pages or API routes, the server restarts its Python host to load it. An install from this server's repository downloads the plugin from the server itself (the job's connector `api:this_server`, also recorded as the plugin's origin for **Update**); on a `--private` server that connector carries a token of the administrator who clicked, which may only read plugins (`plugins:read`) and expires after 30 minutes.
 
@@ -16301,6 +16303,9 @@ axes show readable UTC sync times using their declared precision.
 
 Jobs are grouped with running jobs first, show a one-word status and a Last Run time, and refresh in place. Job listings read every systemd job's state with one `systemctl` call.
 Connectors are grouped by type. Create a plugin from the console with the same choices as `bootstrap plugins`, then edit its source in place (administrators who may use the web terminal).
+The source editor keeps syntax highlighting while typing. Fullscreen sits beside Copy and hides the Source heading.
+Publish an installed plugin to a configured API repository, signing in with a username and password, client credentials, or an API key.
+Copy token details includes the API key and every displayed field.
 The web terminal shows its tmux windows as tabs, and an API run as a job keeps its terminal's shell interactive.
 
 Relationship views read graph metadata without planning a sync. Plans bound the total chunk list
@@ -16351,6 +16356,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - Release a Pipe lease even when acquisition completes after cancellation.
 - Back up, restore, and upgrade Stack PostgreSQL through guided commands.
 - Keep long-running jobs' memory bounded: Python workers are replaced after a call or memory limit and stop when idle, and jobs return freed memory between laps.
+- Reduce memory use when syncing and reading JSON columns through pandas.
 - Return freed memory after each fetched chunk and sync: a 1,000,000-row SQLite fetch sync peaks at about 300 MiB instead of 460.
 - List a Pipeline's scheduled jobs without querying every job's status.
 

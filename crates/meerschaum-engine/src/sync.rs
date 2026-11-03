@@ -942,7 +942,9 @@ async fn sync_inner(
         }),
     };
     let mut attempt = 1;
+    let mut input = Some(df);
     let mut result = loop {
+        let df = input.as_ref().expect("sync input retained for retries");
         let write_started = std::time::Instant::now();
         meerschaum_core::dprint!(
             "Writing {} rows to {pipe} (attempt {attempt}, check_existing={}).",
@@ -950,9 +952,12 @@ async fn sync_inner(
             opts.check_existing
         );
         // With the row counts: the `api:` client's message has none.
-        let res = instance
-            .sync_pipe_with_counts(&pipe, df.clone(), &opts)
-            .await;
+        let write_df = if args.force && attempt < args.retries {
+            df.clone()
+        } else {
+            input.take().expect("final sync attempt owns its input")
+        };
+        let res = instance.sync_pipe_with_counts(&pipe, write_df, &opts).await;
         meerschaum_core::dprint!(
             "Wrote {pipe} in {:?}: {}",
             write_started.elapsed(),

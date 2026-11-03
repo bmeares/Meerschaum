@@ -358,26 +358,61 @@ fn enforced_frame<'py>(
             }
         }
     }
-    let df = frame_out_with(py, frame, &hint_dtypes, as_polars, hinted)?;
     let Some(ctx) = ctx.filter(|c| !c.dtypes.is_empty() && !as_polars) else {
-        return Ok(df);
+        return frame_out_with(py, frame, &hint_dtypes, as_polars, hinted);
     };
     let explicit = if ctx.enforce {
         ctx.explicit_dtypes.clone()
     } else {
         IndexMap::new()
     };
-    crate::kernel_api::enforce_dtypes(
-        py,
-        df,
-        dtypes_dict(py, &ctx.dtypes)?.into_any(),
-        Some(dtypes_dict(py, &explicit)?.into_any()),
-        true,
-        ctx.mixed_numerics,
-        ctx.enforce,
-        !ctx.tz_aware,
-        false,
-        false,
+    // The reader already returned a typed kernel frame. Keep it there during enforcement:
+    // exporting JSON objects to pandas and importing them again duplicates every parsed tree.
+    let hints = if hinted {
+        read_hints(&hint_dtypes)
+    } else {
+        crate::api_client_api::nullable_hints(frame)
+    };
+    let input = crate::pandas_bridge::PyFrame {
+        frame: frame.clone(),
+        kind: FrameKind::Pandas,
+        index: None,
+        dtypes: frame
+            .columns()
+            .iter()
+            .filter_map(|col| {
+                crate::pandas_bridge::choose_target(&col.data, hints.get(&col.name))
+                    .map(|dtype| (col.name.clone(), dtype))
+            })
+            .collect(),
+        labels: IndexMap::new(),
+        series: IndexMap::new(),
+        placeholders: Vec::new(),
+        polars_objects: Vec::new(),
+    };
+    let opts = meerschaum_kernel::enforce::EnforceOptions {
+        explicit_dtypes: explicit,
+        coerce_numeric: ctx.mixed_numerics,
+        coerce_timezone: ctx.enforce,
+        strip_timezone: !ctx.tz_aware,
+    };
+    let (out, path) = py
+        .detach(|| {
+            meerschaum_kernel::enforce::enforce_dtypes_with_report(frame, &ctx.dtypes, &opts)
+        })
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let native = path == meerschaum_kernel::enforce::EnforcePath::Native;
+    let arrow_columns = match path {
+        meerschaum_kernel::enforce::EnforcePath::Subset(cols) => cols,
+        _ => Vec::new(),
+    };
+    crate::kernel_api::enforce_output(
+        &PyCtx::new(py)?,
+        &input,
+        &out,
+        &ctx.dtypes,
+        native,
+        arrow_columns,
     )
 }
 
@@ -394,7 +429,19 @@ fn data_out<'py>(
         Data::Missing => Ok(py.None().into_bound(py)),
         Data::Docs(docs) => Ok(docs_out(py, &docs)?.into_any()),
         Data::TypedDocs(docs, integers) => Ok(docs_out_typed(py, &docs, &integers)?.into_any()),
-        Data::Frame(frame, dtypes) => enforced_frame(py, &frame, &dtypes, ctx, as_polars, hinted),
+        Data::Frame(frame, dtypes) => {
+            // Large reads have dropped their driver buffers and intermediate frames. Return
+            // those freed pages before allocating the Python objects on another thread's heap.
+            // Small reads avoid a trim; successive chunks share the sync engine's throttle.
+            if frame.height() >= 50_000 {
+                py.detach(|| {
+                    meerschaum_engine::memory::release_free_memory_throttled(
+                        std::time::Duration::from_millis(250),
+                    );
+                });
+            }
+            enforced_frame(py, &frame, &dtypes, ctx, as_polars, hinted)
+        }
     }
 }
 
@@ -995,7 +1042,7 @@ fn nan_decimals_to_null(mut frame: Frame) -> Frame {
                 other => other.clone(),
             })
             .collect();
-        let _ = frame.set(&name, meerschaum_kernel::ColumnData::Object(cleaned));
+        let _ = frame.set(&name, meerschaum_kernel::ColumnData::object(cleaned));
     }
     frame
 }

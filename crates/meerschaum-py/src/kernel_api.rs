@@ -192,7 +192,7 @@ fn keep_datetime_unit(hint: String, input: Option<&String>) -> String {
 }
 
 /// The pandas frame `enforce_dtypes` returns for `out` (also used by `query_df`).
-fn enforce_output<'py>(
+pub(crate) fn enforce_output<'py>(
     ctx: &PyCtx<'py>,
     input: &PyFrame<'py>,
     out: &meerschaum_kernel::Frame,
@@ -384,7 +384,7 @@ pub fn filter_unseen_df<'py>(
                         .map(|v| if v.is_na() { Cell::NA } else { v })
                         .collect();
                     delta
-                        .set(col, meerschaum_kernel::ColumnData::Object(values))
+                        .set(col, meerschaum_kernel::ColumnData::object(values))
                         .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 }
             } else if merge_target == "object"

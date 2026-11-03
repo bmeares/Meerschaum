@@ -977,7 +977,7 @@ fn node_reference(doc: &Doc) -> Option<String> {
 
 fn json_field(doc: &Doc, key: &str) -> serde_json::Value {
     match doc.get(key) {
-        Some(meerschaum_kernel::value::Value::Json(value)) => value.clone(),
+        Some(meerschaum_kernel::value::Value::Json(value)) => value.to_json(),
         _ => doc_str(doc, key)
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default(),

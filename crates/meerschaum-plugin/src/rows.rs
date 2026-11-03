@@ -90,7 +90,7 @@ pub(crate) fn frame_rows(frame: &Frame) -> Vec<Value> {
                                 meerschaum_kernel::Value::Bool(v) => json!(v),
                                 meerschaum_kernel::Value::Int(v) => json!(v),
                                 meerschaum_kernel::Value::Float(v) => json!(v),
-                                meerschaum_kernel::Value::Json(v) => v.clone(),
+                                meerschaum_kernel::Value::Json(v) => v.to_json(),
                                 // Text as it is: `json_serialize_value` reads 4.1's null-like
                                 // strings ('', 'None', 'nan', ...) as `null`.
                                 meerschaum_kernel::Value::Str(v) => json!(v),

@@ -107,7 +107,7 @@ fn parse_dt(s: &str) -> Option<DateTime<Utc>> {
 }
 
 fn kv_json(b: Option<&Bound>) -> KValue {
-    b.map(|b| KValue::Json(bound_to_json(b)))
+    b.map(|b| KValue::json(bound_to_json(b)))
         .unwrap_or(KValue::Null)
 }
 
@@ -134,7 +134,7 @@ fn kv_float(f: Option<f64>) -> KValue {
 /// Read a doc field as a bound.
 fn doc_bound(doc: &Doc, key: &str) -> Option<Bound> {
     match doc.get(key)? {
-        KValue::Json(j) => bound_from_json(j),
+        KValue::Json(j) => bound_from_json(&j.to_json()),
         KValue::Str(s) => serde_json::from_str(s)
             .ok()
             .and_then(|j: serde_json::Value| bound_from_json(&j))
@@ -340,7 +340,7 @@ pub fn run_doc(run: &RunRow) -> Doc {
         ("message", kv_opt_str(run.message.as_deref())),
         (
             "targets",
-            KValue::Json(serde_json::Value::Array(
+            KValue::json(serde_json::Value::Array(
                 run.targets
                     .iter()
                     .map(|t| serde_json::Value::String(t.to_string()))
@@ -361,8 +361,11 @@ pub fn run_doc(run: &RunRow) -> Doc {
 /// A `mrsm:engine_runs` document as a row.
 pub fn run_from_doc(doc: &Doc) -> Option<RunRow> {
     let targets = match doc.get("targets") {
-        Some(KValue::Json(serde_json::Value::Array(a))) => a
-            .iter()
+        Some(KValue::Json(j)) => j
+            .to_json()
+            .as_array()
+            .into_iter()
+            .flatten()
             .filter_map(|v| v.as_str().map(PipeRef::from_string))
             .collect(),
         Some(KValue::Str(s)) => serde_json::from_str::<Vec<String>>(s)
@@ -845,7 +848,7 @@ impl InstanceState {
                     (
                         "payload",
                         serde_json::from_str(&e.payload)
-                            .map(KValue::Json)
+                            .map(KValue::json)
                             .unwrap_or_else(|_| kv_str(&e.payload)),
                     ),
                 ]

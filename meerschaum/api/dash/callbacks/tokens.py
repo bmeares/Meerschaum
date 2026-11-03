@@ -264,23 +264,21 @@ def register_token_modal_close_refresh(
     Output('tokens-register-copy-button', 'children'),
     Input('tokens-register-copy-button', 'n_clicks'),
     State('tokens-register-clipboard', 'n_clicks'),
-    State('token-id-pre', 'children'),
-    State('token-secret-pre', 'children'),
+    State('tokens-register-details', 'data'),
     prevent_initial_call=True,
 )
 def copy_token_button_click(
     n_clicks: int,
     clipboard_n_clicks: Optional[int],
-    token_id: str,
-    token_secret: str,
+    details: Optional[Dict[str, str]],
 ) -> Tuple[str, int, str]:
     """
-    Copy the token's ID and secret to the clipboard.
+    Copy every detail shown after registration, including the API key.
     """
     if not n_clicks:
         raise PreventUpdate
     return (
-        f"Client ID: {token_id}\nClient Secret: {token_secret}",
+        "\n".join(f"{label}: {value}" for label, value in (details or {}).items()),
         (clipboard_n_clicks or 0) + 1,
         "Copied!",
     )

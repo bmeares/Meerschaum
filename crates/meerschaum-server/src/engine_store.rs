@@ -189,7 +189,7 @@ fn kv_json(v: &KValue) -> Json {
             .map(Json::Number)
             .unwrap_or(Json::Null),
         KValue::Str(s) => Json::String(s.clone()),
-        KValue::Json(j) => j.clone(),
+        KValue::Json(j) => j.to_json(),
         KValue::Datetime(d) => Json::String(d.isoformat()),
         other => Json::String(other.py_str()),
     }
@@ -227,9 +227,9 @@ fn json_to_core(j: Json) -> Value {
 fn bound_to_store(v: &Value) -> KValue {
     match &core_to_json(v) {
         Json::Null => KValue::Null,
-        Json::String(s) => KValue::Json(serde_json::json!({"datetime": s})),
-        Json::Number(n) if n.is_i64() => KValue::Json(serde_json::json!({"int": n})),
-        other => KValue::Json(other.clone()),
+        Json::String(s) => KValue::json(serde_json::json!({"datetime": s})),
+        Json::Number(n) if n.is_i64() => KValue::json(serde_json::json!({"int": n})),
+        other => KValue::json(other.clone()),
     }
 }
 
@@ -240,7 +240,7 @@ fn bound_from_store(v: Option<&KValue>) -> Value {
 
 fn bound_json_from_store(v: Option<&KValue>) -> Json {
     let j = match v {
-        Some(KValue::Json(j)) => j.clone(),
+        Some(KValue::Json(j)) => j.to_json(),
         Some(KValue::Str(s)) => serde_json::from_str(s).unwrap_or(Json::String(s.clone())),
         Some(other) => kv_json(other),
         None => Json::Null,
@@ -699,7 +699,7 @@ impl EngineBackend for InstanceEngine {
                     e.pipe_ref.clone().map(KValue::Str).unwrap_or(KValue::Null),
                 ),
                 ("event", KValue::Str(e.event.clone())),
-                ("payload", KValue::Json(core_to_json(&e.payload))),
+                ("payload", KValue::json(core_to_json(&e.payload))),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))

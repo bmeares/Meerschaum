@@ -9,7 +9,7 @@ use meerschaum_kernel::frame::ColumnData;
 use meerschaum_kernel::value::Value;
 
 fn object(values: Vec<Value>) -> ColumnData {
-    ColumnData::Object(values)
+    ColumnData::object(values)
 }
 
 #[test]

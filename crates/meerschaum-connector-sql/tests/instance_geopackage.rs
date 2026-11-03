@@ -373,7 +373,7 @@ fn decode(v: &J) -> KValue {
             KValue::Datetime(DateTimeValue::utc(dt.naive_utc()))
         }
         J::Object(o) if o.contains_key("$wkt") => geom(o["$wkt"].as_str().unwrap()),
-        other => KValue::Json(other.clone()),
+        other => KValue::json(other.clone()),
     }
 }
 

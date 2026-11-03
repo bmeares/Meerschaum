@@ -72,6 +72,22 @@
 .plugin-source-fullscreen .plugin-source-editor-code { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .plugin-source-fullscreen .plugin-source-editor, .plugin-source-fullscreen .plugin-source-gutter { height: 100%; max-height: none; }
 .plugin-source-fullscreen .plugin-source-editor-code { align-items: stretch; }
+.plugin-source-fullscreen .plugin-source-header { display: none; }
+.plugin-source-editor-surface { position: relative; min-width: 0; min-height: 0; }
+.plugin-source-code pre.plugin-source-editor-highlight {
+    position: absolute; inset: 0; margin: 0; padding: 12px 16px 12px 12px;
+    max-height: none; overflow: hidden; pointer-events: none;
+    font-family: var(--bs-font-monospace); font-size: 0.8rem; line-height: 1.5;
+    white-space: pre; tab-size: 4; color: #dceaf6;
+}
+.plugin-source-editor-highlight .source-line { display: inline; }
+.plugin-source-editor-highlight .source-line::before { display: none; }
+.plugin-source-editor-surface .plugin-source-editor,
+.dbc_dark .plugin-source-editor-surface textarea.plugin-source-editor {
+    position: relative; background: transparent !important; color: transparent !important;
+    caret-color: #85caff;
+}
+.plugin-source-editor-surface .plugin-source-editor::selection { background: #24425f80; }
 
 @media (max-width: 767.98px) {
     .plugin-new-button { min-width: 44px; min-height: 44px; }

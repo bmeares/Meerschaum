@@ -311,8 +311,19 @@ fn enforce_native_columns(
         if norm.as_deref() == Some("json") {
             // PARITY: `to_polars(json_cols=...)` dumps each value and `to_pandas()` `json.loads`
             // it back; pandas infers the dtype.
-            let values = json_roundtrip_values(&col.data);
-            replace(&mut out, col, apply_result(&col.name, values))?;
+            let data = if let ColumnData::Object(values) = &col.data
+                && values.iter().any(|v| matches!(v, Value::Json(_)))
+                && values
+                    .iter()
+                    .all(|v| matches!(v, Value::Json(_) | Value::Null))
+            {
+                // Already decoded containers and None survive the JSON round trip unchanged,
+                // and pandas keeps their object dtype. Retain the shared storage.
+                col.data.clone()
+            } else {
+                apply_result(&col.name, json_roundtrip_values(&col.data))
+            };
+            replace(&mut out, col, data)?;
             continue;
         }
         let series = to_polars_column(col)?;
@@ -717,12 +728,12 @@ pub fn apply_result(name: &str, values: Vec<Value>) -> ColumnData {
         {
             ColumnData::Native(s)
         }
-        _ => ColumnData::Object(values),
+        _ => ColumnData::object(values),
     }
 }
 
 fn apply_values(data: &ColumnData, f: impl Fn(&Value) -> Value) -> Vec<Value> {
-    data.values().iter().map(f).collect()
+    data.values_ref().iter().map(f).collect()
 }
 
 fn enforce_object_path(
@@ -776,6 +787,14 @@ fn enforce_object_path(
     if !json_cols.is_empty() && df.height() > 0 {
         for col in json_cols {
             let Ok(data) = df.data(col) else { continue };
+            if let ColumnData::Object(values) = data
+                && values.iter().any(|v| matches!(v, Value::Json(_)))
+                && values
+                    .iter()
+                    .all(|v| matches!(v, Value::Json(_) | Value::Null))
+            {
+                continue;
+            }
             // PARITY: one unparseable string aborts the whole column's `apply`; it stays as-is.
             let mut out = Vec::with_capacity(data.len());
             let mut failed = false;
@@ -808,7 +827,7 @@ fn enforce_object_path(
         // PARITY: a `Decimal` that fails to quantize raises inside `apply`; the column is left
         // unchanged (the exception is only logged in debug mode).
         if let Ok(values) = results {
-            df.set(col, ColumnData::Object(values))?;
+            df.set(col, ColumnData::object(values))?;
         }
     }
 
@@ -930,7 +949,7 @@ fn enforce_object_path(
                     attempt_cast_to_numeric(v, false, None, None).unwrap_or_else(|_| v.clone())
                 })
                 .collect();
-            df.set(col, ColumnData::Object(values))?;
+            df.set(col, ColumnData::object(values))?;
             continue;
         }
         let target = &common[col];
@@ -1076,7 +1095,7 @@ pub fn series_attempt_cast_to_geometry(col: &Column) -> Result<Column, String> {
             }
         }
     };
-    out.data = ColumnData::Object(new_values);
+    out.data = ColumnData::object(new_values);
     // A successful cast changes the authoritative Arrow field tag as well as the values.
     out.tags.dtype = Some("geometry".into());
     out.tags.db_type = None;
@@ -1140,7 +1159,7 @@ fn astype_is_identity(s: &Series, dtype: &DataType) -> bool {
 /// safe-cast semantics (lossy float → int casts fail).
 pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<ColumnData, String> {
     if target == "object" {
-        return Ok(ColumnData::Object(data.values()));
+        return Ok(ColumnData::object(data.values()));
     }
     let Some(dtype) = polars_dtype_for_pandas(target) else {
         return Err(format!("Cannot cast to '{target}'"));
@@ -1399,14 +1418,18 @@ pub fn pipe_enforce_dtypes(
             continue;
         };
         let norm = normalized(dtype);
-        let all_values =
-            |matches: fn(&Value) -> bool| col.data.values().iter().all(|v| v.is_na() || matches(v));
+        let all_values = |matches: fn(&Value) -> bool| {
+            col.data
+                .values_ref()
+                .iter()
+                .all(|v| v.is_na() || matches(v))
+        };
         let matches = match norm.as_str() {
             "json" => {
                 path == EnforcePath::Native
                     || matches!(&path, EnforcePath::Subset(names) if names.contains(name))
                     || df.data(name).is_ok_and(|source| {
-                        source.values().iter().all(|v| match v {
+                        source.values_ref().iter().all(|v| match v {
                             Value::Str(s) => serde_json::from_str::<serde_json::Value>(s).is_ok(),
                             _ => true,
                         })
@@ -1481,7 +1504,7 @@ mod tests {
     fn coerce_timezone_reads_integers_as_microseconds() {
         // v4: `coerce_timezone(pd.Series([1791900000001]))[0]` is
         // `1970-01-21 17:45:00.000001+00:00`.
-        let data = ColumnData::Object(vec![Value::Int(1_791_900_000_001)]);
+        let data = ColumnData::object(vec![Value::Int(1_791_900_000_001)]);
         let out = series_coerce_timezone(&data, false).unwrap();
         match &out.values()[0] {
             Value::Datetime(d) => {

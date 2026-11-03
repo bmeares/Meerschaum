@@ -147,8 +147,9 @@ def test_new_python_plugin_opens_in_the_editor_and_saves(plugins_server, browser
         assert f"Created plugin '{name}'." in page.inner_text('#plugin-source-alert')
         assert page.get_by_role('button', name='Save').is_visible()
         assert _no_horizontal_scroll(page)
-        ### The editor keeps the code view's colors (not the theme's textarea grey).
-        assert editor.evaluate('e => getComputedStyle(e).backgroundColor') == 'rgb(23, 33, 43)'
+        ### The input sits over highlighted text, with the code view's background.
+        assert editor.evaluate('e => getComputedStyle(e).backgroundColor') == 'rgba(0, 0, 0, 0)'
+        page.locator('#plugin-source-editor-highlight .source-token-keyword').first.wait_for()
         ### The gutter is exactly as tall as the editor (its numbers scroll with the text).
         heights = page.evaluate("""() => [
             document.getElementById('plugin-source-editor').getBoundingClientRect().height,
@@ -165,6 +166,8 @@ def test_new_python_plugin_opens_in_the_editor_and_saves(plugins_server, browser
         page.keyboard.press('Tab')
         page.keyboard.type('return 28')
         assert editor.input_value().endswith('def edited_in_the_console():\n    return 28')
+        page.wait_for_function("document.querySelector('#plugin-source-editor-highlight')?.textContent === document.querySelector('#plugin-source-editor')?.value")
+        page.locator('#plugin-source-editor-highlight .source-token-keyword').first.wait_for()
         gutter = page.locator('.plugin-source-gutter').inner_text().split()
         assert gutter[-1] == str(editor.input_value().count('\n') + 1)
         page.get_by_role('button', name='Save').click()
@@ -216,7 +219,10 @@ def test_new_rust_package_lands_on_its_crate_source(plugins_server, browser):
         assert page.inner_text('.plugin-source-toolbar code') == 'src/lib.rs'
         screenshot(page, 'plugins-editor-rust-1440')
         ### Fullscreen gives the editor the rest of the screen.
+        assert page.locator('[data-source-action=copy] + [data-source-action=fullscreen]').count() == 1
         page.get_by_role('button', name='Fullscreen', exact=True).click()
+        assert not page.locator('.plugin-source-header').is_visible()
+        page.locator('#plugin-source-editor-highlight .source-token-keyword').first.wait_for()
         box = editor.bounding_box()
         assert box['height'] > 0.6 * page.viewport_size['height'], box
         screenshot(page, 'plugins-editor-rust-fullscreen-1440')

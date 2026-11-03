@@ -564,56 +564,37 @@ def build_tokens_register_input_modal(user: Optional[mrsm.core.User] = None) -> 
     ]
 
 
-def build_register_table_from_token(token: Token) -> dbc.Table:
-    """
-    Return a table with the token's metadata.
-    """
-    table_header = []
+def token_registration_details(token: Token) -> dict[str, str]:
+    """The details shown once when a token is created, also used by Copy token details."""
+    user = token.user
+    return {
+        'Label': str(token.label),
+        'Client ID': str(token.id),
+        'Client Secret': str(token.secret),
+        'API Key': token.get_api_key(),
+        'Expiration': token.expiration.isoformat() if token.expiration is not None else 'Does not expire',
+        'Scopes': ' '.join(token.scopes),
+        'User': user.username if user is not None else '',
+    }
+
+
+def build_register_table_from_token(token: Token, details=None) -> dbc.Table:
+    """Return a table with the token's metadata."""
+    details = token_registration_details(token) if details is None else details
+    ids = {'Client ID': 'token-id-pre', 'Client Secret': 'token-secret-pre'}
     pre_style = {'white-space': 'pre-wrap', 'word-break': 'break-all'}
     rows = [
         html.Tr([
-            html.Td(html.B("Client ID")),
-            html.Td(html.Pre(
-                str(token.id),
-                style=pre_style,
-                id='token-id-pre',
-            )),
-        ]),
-        html.Tr([
-            html.Td(html.B("Client Secret")),
-            html.Td(html.Pre(
-                str(token.secret),
-                style=pre_style,
-                id='token-secret-pre',
-            )),
-        ]),
-        html.Tr([
-            html.Td(html.B("API Key")),
-            html.Td(html.Pre(token.get_api_key(), style=pre_style)),
-        ]),
-        html.Tr([
-            html.Td(html.B("Expiration")),
+            html.Td(html.B(label)),
             html.Td(
-                html.Pre(token.expiration.isoformat(), style=pre_style)
-                if token.expiration is not None
-                else "Does not expire"
+                html.P(value, style={'word-break': 'normal'}) if label == 'Scopes'
+                else value if label == 'User' or (label == 'Expiration' and token.expiration is None)
+                else html.Pre(value, style=pre_style, **({'id': ids[label]} if label in ids else {}))
             ),
-        ]),
-        html.Tr([
-            html.Td(html.B("Scopes")),
-            html.Td(html.P(' '.join(token.scopes), style={'word-break': 'normal'})),
-        ]),
-        html.Tr([
-            html.Td(html.B("User")),
-            html.Td(token.user.username if token.user is not None else ""),
-        ]),
+        ])
+        for label, value in details.items() if label != 'Label'
     ]
-    table_body = [html.Tbody(rows)]
-    table = dbc.Table(
-        table_header + table_body,
-        id='tokens-register-table',
-    )
-    return table
+    return dbc.Table([html.Tbody(rows)], id='tokens-register-table')
 
 
 def build_tokens_register_output_modal(token: Token) -> List[Any]:
@@ -621,6 +602,7 @@ def build_tokens_register_output_modal(token: Token) -> List[Any]:
     Return the layout for the tokens register output modal.
     """
     success, msg = token.register(debug=debug)
+    details = token_registration_details(token) if success else {}
     header_text = (
         "Registered token "
         if success
@@ -647,7 +629,8 @@ def build_tokens_register_output_modal(token: Token) -> List[Any]:
                 direction='horizontal',
                 gap=2,
             ),
-            build_register_table_from_token(token),
+            build_register_table_from_token(token, details),
+            dcc.Store(id='tokens-register-details', data=details),
         ]
         if success
         else alert_from_success_tuple((False, msg))

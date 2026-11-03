@@ -292,7 +292,7 @@ pub fn kernel_to_wire(v: &KValue) -> Wire {
         KValue::Uuid(u) => Wire::Ext(ext::UUID, u.as_bytes().to_vec()),
         KValue::Datetime(dt) => Wire::Ext(ext::DATETIME, dt.isoformat().into_bytes()),
         KValue::Date(d) => Wire::Ext(ext::DATE, d.format("%Y-%m-%d").to_string().into_bytes()),
-        KValue::Json(j) => json_to_wire(j),
+        KValue::Json(j) => json_to_wire(&j.to_json()),
         KValue::Geometry(g) => Wire::Ext(ext::GEOMETRY, g.to_wkb(false)),
     }
 }
@@ -377,7 +377,7 @@ pub fn wire_to_kernel(v: &Wire) -> KValue {
                 .unwrap_or_else(|| String::from_utf8_lossy(s.as_bytes()).into_owned()),
         ),
         Wire::Binary(b) => KValue::Bytes(b.clone()),
-        Wire::Array(_) | Wire::Map(_) => KValue::Json(wire_to_json(v)),
+        Wire::Array(_) | Wire::Map(_) => KValue::json(wire_to_json(v)),
         Wire::Ext(code, data) => match *code {
             ext::DATETIME => parse_datetime_value(&ext_str(data))
                 .map(KValue::Datetime)

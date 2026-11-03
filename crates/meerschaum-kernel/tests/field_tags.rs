@@ -63,7 +63,7 @@ fn native_cast_updates_tag_and_failed_cast_retains_source() {
             .as_deref(),
         Some("int")
     );
-    col.data = meerschaum_kernel::ColumnData::Object(vec![Value::Str("not an integer".into())]);
+    col.data = meerschaum_kernel::ColumnData::object(vec![Value::Str("not an integer".into())]);
     let out = enforce(col, "int");
     assert_ne!(out.column("n").unwrap().tags.dtype.as_deref(), Some("int"));
     assert_eq!(

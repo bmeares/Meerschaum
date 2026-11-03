@@ -181,7 +181,7 @@ fn ktag(v: &KValue) -> J {
         KValue::Str(s) => json!(s),
         KValue::Datetime(d) => json!({"t": "dt", "v": d.isoformat()}),
         KValue::Uuid(u) => json!({"t": "uuid", "v": u.to_string()}),
-        KValue::Json(j) => j.clone(),
+        KValue::Json(j) => j.to_json(),
         other => json!(other.py_str()),
     }
 }

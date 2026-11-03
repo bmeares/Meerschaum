@@ -64,6 +64,7 @@ pub struct PyCtx<'py> {
     pub nat: Option<Bound<'py, PyAny>>,
     pub timestamp_cls: Option<Bound<'py, PyAny>>,
     shapely: std::cell::OnceCell<Option<Bound<'py, PyAny>>>,
+    json_loads: std::cell::OnceCell<Bound<'py, PyAny>>,
 }
 
 impl<'py> PyCtx<'py> {
@@ -103,6 +104,7 @@ impl<'py> PyCtx<'py> {
             nat,
             timestamp_cls,
             shapely: std::cell::OnceCell::new(),
+            json_loads: std::cell::OnceCell::new(),
         })
     }
 
@@ -447,7 +449,7 @@ pub fn py_to_cell(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
         return Ok(Cell::NaT);
     }
     if obj.is_instance_of::<PyDict>() || obj.is_instance_of::<PyList>() {
-        return Ok(Cell::Json(py_to_json(obj)?));
+        return Ok(Cell::json(py_to_json(obj)?));
     }
     if let Ok(b) = obj.cast::<PyBytes>() {
         return Ok(Cell::Bytes(b.as_bytes().to_vec()));
@@ -488,7 +490,7 @@ pub fn py_to_cell(ctx: &PyCtx<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
         return Ok(Cell::Int(obj.extract::<i64>()?));
     }
     if obj.is_instance_of::<PyTuple>() {
-        return Ok(Cell::Json(py_to_json(obj)?));
+        return Ok(Cell::json(py_to_json(obj)?));
     }
     if let Some(v) = numpy_scalar(obj)? {
         return Ok(v);
@@ -597,7 +599,15 @@ pub fn cell_to_py<'py>(ctx: &PyCtx<'py>, value: &Cell) -> PyResult<Bound<'py, Py
         }
         Cell::Datetime(dt) => datetime_to_py(ctx, dt)?,
         Cell::Date(d) => ctx.date_cls.call1((d.year(), d.month(), d.day()))?,
-        Cell::Json(j) => json_to_py(py, j)?,
+        Cell::Json(j) => {
+            if ctx.json_loads.get().is_none() {
+                let _ = ctx.json_loads.set(py.import("json")?.getattr("loads")?);
+            }
+            ctx.json_loads
+                .get()
+                .expect("json.loads resolved")
+                .call1((j.as_text(),))?
+        }
         Cell::Geometry(g) => {
             let shapely = ctx.shapely()?;
             shapely

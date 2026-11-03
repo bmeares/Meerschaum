@@ -248,16 +248,18 @@ pub fn encode_param(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> SqlPara
             SqlParam::Date(*d)
         }
         KValue::Date(d) => SqlParam::Text(d.format("%Y-%m-%d").to_string()),
-        KValue::Json(j) => match j {
-            serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+        KValue::Json(j) => {
+            if j.is_object() || j.is_array() {
+                let parsed = j.to_json();
                 if flavor.is_json_flavor() {
-                    SqlParam::Json(j.clone())
+                    SqlParam::Json(parsed)
                 } else {
-                    SqlParam::Text(json_dumps_default(j, true))
+                    SqlParam::Text(json_dumps_default(&parsed, true))
                 }
+            } else {
+                SqlParam::Text(j.to_string())
             }
-            other => SqlParam::Text(other.to_string()),
-        },
+        }
         KValue::Geometry(g) => match flavor {
             // `geometry_format` in `to_sql` (`_sql.py:942`).
             Flavor::Mssql => SqlParam::Text(g.to_wkt()),
@@ -313,12 +315,13 @@ pub fn encode_json_cell(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> ser
             }
         }
         KValue::Date(d) => J::String(d.format("%Y-%m-%d").to_string()),
-        KValue::Json(j) => match j {
-            serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
-                J::String(json_dumps_default(j, true))
+        KValue::Json(j) => {
+            if j.is_object() || j.is_array() {
+                J::String(json_dumps_default(&j.to_json(), true))
+            } else {
+                j.to_json()
             }
-            other => other.clone(),
-        },
+        }
         KValue::Geometry(g) => J::String(g.to_wkt()),
         KValue::Null | KValue::NA | KValue::NaT => J::Null,
     }
@@ -330,7 +333,6 @@ pub fn encode_json_cell(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> ser
 /// with [`ColumnEncoding::keep_null_markers`] writes its null-like strings as text (an empty
 /// string as a quoted `""`, which `COPY ... CSV` reads as an empty string, not `NULL`).
 pub fn encode_copy_field(v: &KValue, enc: &ColumnEncoding) -> Option<String> {
-    use serde_json::Value as J;
     if v.is_na() {
         return None;
     }
@@ -339,8 +341,12 @@ pub fn encode_copy_field(v: &KValue, enc: &ColumnEncoding) -> Option<String> {
             return Some(s.replace('\0', ""));
         }
         KValue::Str(s) if value_is_null(s) => return None,
-        KValue::Json(J::String(s)) if value_is_null(s) => return None,
-        KValue::Json(J::Null) => return None,
+        KValue::Json(j)
+            if j.as_text().starts_with('"') && j.to_json().as_str().is_some_and(value_is_null) =>
+        {
+            return None;
+        }
+        KValue::Json(j) if j.is_null() => return None,
         KValue::Float(f) if f.is_nan() => return None,
         _ => {}
     }
@@ -348,7 +354,7 @@ pub fn encode_copy_field(v: &KValue, enc: &ColumnEncoding) -> Option<String> {
     let strip_nul = |s: String| s.replace('\0', "").replace("\\u0000", "");
     Some(match v {
         KValue::Str(s) => strip_nul(s.clone()),
-        KValue::Json(j) => strip_nul(json_dumps_default(j, false)),
+        KValue::Json(j) => strip_nul(json_dumps_default(&j.to_json(), false)),
         KValue::Bool(b) => if *b { "True" } else { "False" }.to_string(),
         KValue::Int(i) => i.to_string(),
         KValue::Float(f) => float_repr(*f),
@@ -478,7 +484,7 @@ mod tests {
         assert_eq!(encode_copy_field(&KValue::Float(f64::NAN), &enc), None);
         assert_eq!(
             encode_copy_field(
-                &KValue::Json(serde_json::Value::String(String::new())),
+                &KValue::json(serde_json::Value::String(String::new())),
                 &enc
             ),
             None

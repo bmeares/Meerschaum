@@ -56,7 +56,9 @@ pub fn separate_negation_values(values: &[String]) -> (Vec<String>, Vec<String>)
 /// `{}` (`get_pipe_attributes`, `_pipes.py:1718`).
 pub fn parse_parameters(v: Option<&KValue>) -> Map {
     match v {
-        Some(KValue::Json(j)) => meerschaum_connector::pipe_ops::json_to_core(j).to_map(),
+        Some(KValue::Json(j)) => {
+            meerschaum_connector::pipe_ops::json_to_core(&j.to_json()).to_map()
+        }
         Some(KValue::Str(s)) => match Value::from_json_str(s) {
             Ok(Value::Map(m)) => m,
             Ok(Value::Str(inner)) if inner.starts_with('{') => Value::from_json_str(&inner)

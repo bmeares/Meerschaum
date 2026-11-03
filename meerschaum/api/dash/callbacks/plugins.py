@@ -267,6 +267,40 @@ dash_app.clientside_callback(
 )
 
 
+@dash_app.callback(
+    Output('plugin-source-edit-tokens', 'data'),
+    Input('plugin-source-edit-request', 'data'),
+    State('plugin-source-context', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def highlight_plugin_edit(request, context, session):
+    """Highlight bounded editor text after typing pauses, without writing the source file."""
+    from meerschaum.api.dash.plugin_sources import MAX_FILE_BYTES, source_tokens
+    if not isinstance(request, dict) or not isinstance(context, dict) or not may_author(session):
+        raise PreventUpdate
+    editing = context.get('edit')
+    source, path = request.get('source'), request.get('path')
+    if (context.get('kind') != 'installed' or not isinstance(editing, dict)
+            or editing.get('path') != path or not isinstance(path, str)
+            or not isinstance(source, str)):
+        raise PreventUpdate
+    try:
+        if len(source.encode('utf-8')) > MAX_FILE_BYTES:
+            raise PreventUpdate
+    except UnicodeError:
+        raise PreventUpdate
+    return source_tokens(path, source)
+
+
+dash_app.clientside_callback(
+    ClientsideFunction(namespace='mrsmPluginSource', function_name='highlight'),
+    Output('plugin-source-edit-rendered', 'children'),
+    Input('plugin-source-edit-tokens', 'data'),
+    prevent_initial_call=True,
+)
+
+
 dash_app.clientside_callback(
     """
     function(clicks, ids) {
@@ -643,3 +677,68 @@ dash_app.clientside_callback(
     Input('plugins-navigate', 'data'),
     prevent_initial_call=True,
 )
+
+
+@dash_app.callback(
+    Output('plugin-publish-modal', 'is_open'),
+    Input('plugin-publish-open', 'n_clicks'),
+    Input('plugin-publish-close', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def toggle_plugin_publish(open_clicks, close_clicks):
+    return dash.callback_context.triggered_id == 'plugin-publish-open' and bool(open_clicks)
+
+
+dash_app.clientside_callback(
+    """function(method) {
+        return [method !== 'password', method !== 'client_credentials', method !== 'api_key'];
+    }""",
+    Output('plugin-publish-password-fields', 'hidden'),
+    Output('plugin-publish-client-fields', 'hidden'),
+    Output('plugin-publish-key-fields', 'hidden'),
+    Input('plugin-publish-method', 'value'),
+)
+
+
+@dash_app.callback(
+    Output('plugin-publish-alert', 'children'),
+    Output('plugin-publish-auth', 'hidden'),
+    Output('plugin-publish-submit', 'disabled'),
+    Output('plugin-publish-password', 'value'),
+    Output('plugin-publish-client-secret', 'value'),
+    Output('plugin-publish-api-key', 'value'),
+    Input('plugin-publish-modal', 'is_open'),
+    Input('plugin-publish-repository', 'value'),
+    Input('plugin-publish-login', 'n_clicks'),
+    Input('plugin-publish-submit', 'n_clicks'),
+    State('plugin-publish-context', 'data'),
+    State('session-store', 'data'),
+    State('plugin-publish-method', 'value'),
+    State('plugin-publish-username', 'value'),
+    State('plugin-publish-password', 'value'),
+    State('plugin-publish-client-id', 'value'),
+    State('plugin-publish-client-secret', 'value'),
+    State('plugin-publish-api-key', 'value'),
+    prevent_initial_call=True,
+    running=[(Output('plugin-publish-auth', 'disabled'), True, False),
+             (Output('plugin-publish-controls', 'disabled'), True, False),
+             (Output('plugin-publish-repository', 'disabled'), True, False)],
+)
+def plugin_publish_action(is_open, repository, login_clicks, publish_clicks, context, session,
+                          method, username, password, client_id, client_secret, api_key):
+    from meerschaum.api.dash import plugin_publish as publishing
+    if not is_open:
+        return no_update, True, True, '', '', ''
+    trigger = dash.callback_context.triggered_id
+    if trigger == 'plugin-publish-submit' and publish_clicks:
+        ok, message = publishing.publish(context, repository, session)
+        # A permission error is not a request to overwrite the repository's authentication.
+        ready, _ = publishing.repository_status(context, repository, session)
+        return dbc.Alert(message, color='success' if ok else 'danger'), ready, not ready, '', '', ''
+    if trigger == 'plugin-publish-login' and login_clicks:
+        ready, message = publishing.login_repository(
+            context, repository, session, method, username, password, client_id, client_secret, api_key,
+        )
+        return dbc.Alert(message, color='success' if ready else 'danger'), ready, not ready, '', '', ''
+    ready, message = publishing.repository_status(context, repository, session)
+    return dbc.Alert(message, color='success' if ready else 'secondary'), ready, not ready, '', '', ''
