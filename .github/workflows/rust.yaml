@@ -249,11 +249,15 @@ jobs:
   # ---------------------------------------------------------------- hosted (compile only)
   # ubuntu-latest keeps compile errors visible when the self-hosted runner is down.
   # windows/macos are allowed to fail until the §15 Windows/macOS work lands.
+  # macOS legs run on the self-hosted Mac (labels self-hosted/macOS/ARM64/mrsm-mac) when the repository
+  # variable MACOS_RUNNER is `self-hosted`, except for pull requests, which always use hosted
+  # `macos-latest` (fork code never reaches the Mac). `gh variable set MACOS_RUNNER --body hosted`
+  # sends them back to GitHub's runners (a job queued for an offline self-hosted runner only waits).
   check:
     name: check (${{ matrix.os }})
     needs: changes
     if: ${{ needs.changes.outputs.rust == 'true' }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event_name != 'pull_request' && vars.MACOS_RUNNER == 'self-hosted') && fromJSON('["self-hosted","macOS","ARM64","mrsm-mac"]') || matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -266,6 +270,8 @@ jobs:
       - uses: actions/checkout@v4
         with: { persist-credentials: false, ref: '${{ github.sha }}' }
       - uses: actions/setup-python@v5
+        # The self-hosted Mac keeps Python 3.13 on its runner PATH (setup-python cannot install there).
+        if: ${{ runner.environment == 'github-hosted' }}
         with:
           python-version: '3.13'
       - name: Toolchain
@@ -287,12 +293,13 @@ jobs:
   # tests run against it. Linux arm64 uses the `linux-arm64` zip, macOS (arm64) the `osx-universal`
   # one, Windows the `windows-amd64` / `windows-arm64` DLLs. Required on Linux arm64, macOS and
   # Windows x64; `windows-11-arm` stays optional (its runner image and toolchain are newer).
+  # The macOS leg follows MACOS_RUNNER as `check` does.
   # Runs when the DuckDB loader (or its installer script) changed, and on a dispatch / tag.
   duckdb-platforms:
     name: duckdb (${{ matrix.os }})
     needs: changes
     if: ${{ needs.changes.outputs.duckdb == 'true' }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event_name != 'pull_request' && vars.MACOS_RUNNER == 'self-hosted') && fromJSON('["self-hosted","macOS","ARM64","mrsm-mac"]') || matrix.os }}
     timeout-minutes: 40
     continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
     strategy:
@@ -306,6 +313,8 @@ jobs:
       - uses: actions/checkout@v4
         with: { persist-credentials: false, ref: '${{ github.sha }}' }
       - uses: actions/setup-python@v5
+        # The self-hosted Mac keeps Python 3.13 on its runner PATH (setup-python cannot install there).
+        if: ${{ runner.environment == 'github-hosted' }}
         with:
           python-version: '3.13'
       - name: Toolchain
