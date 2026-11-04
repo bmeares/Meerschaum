@@ -944,6 +944,26 @@ def get_runs(
     return runs
 
 
+def get_run_activity(
+    instance: Any = None,
+    since: Any = None,
+    bucket_seconds: int = 3600,
+    limit: int = 100_000,
+) -> Dict[str, Any]:
+    """
+    The runs started since `since`, counted per `bucket_seconds`, run name and status, with each
+    run name's latest run, last success and last failure (`{buckets, names, runs, oldest,
+    truncated}`). One light read of at most `limit` runs: no selections, targets or nodes, so
+    nothing here names a pipe. Callers show only the run names of Pipelines a viewer may see.
+    """
+    instance = instance if instance is not None else get_instance()
+    request = _request(instance)
+    request['since'] = since.isoformat() if isinstance(since, datetime) else since
+    request['bucket_seconds'] = int(bucket_seconds)
+    request['limit'] = int(limit)
+    return _call('engine_run_activity', request)
+
+
 def get_run_detail(instance: Any, run_id: str, viewer: Any = None) -> Optional[Dict[str, Any]]:
     """
     One run with its nodes and the planned-versus-actual bars (`None` for an unknown run, or one

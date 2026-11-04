@@ -584,6 +584,17 @@ runs = [
 ]
 overview._get_runs = lambda instance, limit, **kwargs: list(runs)
 overview._list_pipelines = lambda instance, **kwargs: {'daily': {'name': 'daily', 'targets': []}}
+daily_started = runs[2]['run']['started']
+daily_hour = overview.parse_timestamp(daily_started).replace(minute=0, second=0, microsecond=0).isoformat()
+daily_run = {'run_id': 'daily-1', 'started': daily_started, 'status': 'failed'}
+overview._get_run_activity = lambda instance, since, **kwargs: {
+    'buckets': [
+        {'start': daily_hour, 'name': 'daily', 'status': 'failed', 'count': 1},
+        {'start': daily_hour, 'name': 'pipeline', 'status': 'succeeded', 'count': 3},
+    ],
+    'names': [{'name': 'daily', 'latest': daily_run, 'last_success': None, 'last_failure': daily_run}],
+    'runs': 4, 'oldest': daily_started, 'truncated': False,
+}
 from meerschaum.jobs import Job
 real_state = overview.job_state(Job('shell-overview-job', 'show version', executor_keys='local'))
 recent = overview.recent_runs(instance)
@@ -595,7 +606,17 @@ pipelines_body = dump(overview.build_pipelines_body(pipelines))
 jobs_body = dump(overview.build_jobs_body({
     'total': 3, 'counts': {'running': 2, 'stalled': 0, 'failing': 1, 'paused': 0, 'stopped': 0},
     'scheduled': 1,
+    'next_runs': [{'name': 'nightly totals', 'when': (now + timedelta(minutes=4, seconds=5)).isoformat(),
+                   'label': 'sync pipelines totals -s daily'}],
 }))
+soon = lambda **kw: (now + timedelta(**kw)).isoformat()
+next_runs = [overview.next_run(job) for job in (
+    job('running', {'state': 'healthy', 'next_run': soon(minutes=5)}),
+    job('running', {'state': 'healthy', 'next_run': None}),
+    job('stopped', {'state': 'stopped', 'next_run': soon(minutes=5)}),
+    job('running', None),
+)]
+until = [overview.time_until(soon(seconds=s), now) for s in (-5, 30, 300, 7200, 172800)]
 scheduled = [overview.is_scheduled_job(SimpleNamespace(sysargs=args)) for args in (
     ['sync', 'pipes', '-s', 'every 5 minutes'], ['sync', 'pipes', '--schedule=daily'], ['show', 'version'],
 )]
@@ -616,6 +637,8 @@ print('JSON:' + json.dumps({
     'pipelines_body': pipelines_body,
     'jobs_body': jobs_body,
     'scheduled': scheduled,
+    'next_runs': next_runs,
+    'until': until,
 }, default=str))
 '''))
     if out['without'] is not None:
@@ -649,6 +672,11 @@ print('JSON:' + json.dumps({
     assert 'overview-jobs-bar' in out['jobs_body'] and '1 on a schedule' in out['jobs_body']
     assert '/dash/jobs?status=failing' in out['jobs_body']
     assert out['scheduled'] == [True, True, False]
+    ### Next runs: a waiting job's next lap, linked to its job, with the exact time on hover.
+    assert 'overview-next-runs' in out['jobs_body'] and 'in 4 min' in out['jobs_body']
+    assert '/dash/jobs/nightly%20totals' in out['jobs_body']
+    assert out['next_runs'][0] is not None and out['next_runs'][1:] == [None, None, None]
+    assert out['until'] == ['due', 'in 30 s', 'in 5 min', 'in 2 h', 'in 2 d']
     assert out['states'] == ['running', 'stalled', 'failing', 'paused', 'stopped', 'failing', 'running']
     ### A real job's state is one the Jobs page filters by.
     assert out['real_state'] in ('running', 'stalled', 'failing', 'paused', 'stopped')

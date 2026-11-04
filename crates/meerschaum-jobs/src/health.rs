@@ -506,6 +506,10 @@ pub struct JobHealth {
     pub consecutive_failures: u64,
     /// The interval laps are expected at (`None`: the job has no cadence).
     pub expected_interval_seconds: Option<f64>,
+    /// When the next lap is due (ISO-8601 UTC) while the job waits for it (`--min-seconds`, a
+    /// cooldown after a failure, a schedule's next fire); `None` while a lap runs, for a job
+    /// without a cadence, or one that is not running.
+    pub next_run: Option<String>,
     /// What to show next to the state: `last good sync 2 min ago`, `last 3 laps failed`, ...
     pub message: String,
 }
@@ -519,6 +523,7 @@ impl JobHealth {
             last_lap: None,
             consecutive_failures: 0,
             expected_interval_seconds: None,
+            next_run: None,
             message: message.into(),
         }
     }
@@ -533,7 +538,7 @@ impl JobHealth {
     }
 
     /// As JSON (`{"state", "last_success", "last_lap", "consecutive_failures",
-    /// "expected_interval_seconds", "message"}`).
+    /// "expected_interval_seconds", "next_run", "message"}`).
     pub fn to_json(&self) -> Json {
         json!({
             "state": self.state.as_str(),
@@ -541,6 +546,7 @@ impl JobHealth {
             "last_lap": self.last_lap,
             "consecutive_failures": self.consecutive_failures,
             "expected_interval_seconds": self.expected_interval_seconds,
+            "next_run": self.next_run,
             "message": self.message,
         })
     }
@@ -567,6 +573,7 @@ impl JobHealth {
             expected_interval_seconds: value
                 .get("expected_interval_seconds")
                 .and_then(Value::as_f64),
+            next_run: text("next_run"),
             message: text("message").unwrap_or_default(),
         })
     }
@@ -594,6 +601,22 @@ fn ago(now: DateTime<Utc>, then: DateTime<Utc>) -> String {
         return "just now".into();
     }
     format!("{} ago", humanize_seconds(seconds))
+}
+
+/// When the next lap is due, while the loop waits for it: a `next_lap` recorded after the
+/// current (last) lap began and after the last lap ended. A lap that began since supersedes it.
+fn waiting_until(record: &LapRecord) -> Option<DateTime<Utc>> {
+    let next = record.next_lap?;
+    let began = [record.lap_started, record.last_lap]
+        .into_iter()
+        .flatten()
+        .max();
+    // `waiting()` records `now + pause` after the lap ended, so a due time before the last
+    // lap ended belongs to an earlier wait.
+    match began {
+        Some(began) if next <= began => None,
+        _ => Some(next),
+    }
 }
 
 /// The health of a job from its heartbeat `record`, its `status`, when its current run `began`
@@ -630,6 +653,7 @@ pub fn assess(
         last_lap: record.last_lap.map(crate::pytime::aware_isoformat),
         consecutive_failures: record.consecutive_failures,
         expected_interval_seconds: expected,
+        next_run: waiting_until(record).map(crate::pytime::aware_isoformat),
         message: String::new(),
     };
     let last_good = record
@@ -983,11 +1007,54 @@ mod tests {
     }
 
     #[test]
+    fn the_next_run_is_known_only_while_the_loop_waits() {
+        let mut r = record(Some(300.0));
+        r.lap_started = Some(at(0));
+        r.last_lap = Some(at(2));
+        r.last_success = Some(at(2));
+        r.next_lap = Some(at(302));
+        let iso = |t| Some(crate::pytime::aware_isoformat(at(t)));
+        assert_eq!(
+            assess(Some(&r), Status::Running, None, at(100)).next_run,
+            iso(302)
+        );
+        // Overdue (the next lap has not begun yet): still the time it was due.
+        assert_eq!(
+            assess(Some(&r), Status::Running, None, at(400)).next_run,
+            iso(302)
+        );
+        // The next lap began: no wait until it ends.
+        r.lap_started = Some(at(303));
+        assert_eq!(
+            assess(Some(&r), Status::Running, None, at(310)).next_run,
+            None
+        );
+        // A job that is not running has no next run.
+        r.lap_started = Some(at(0));
+        assert_eq!(
+            assess(Some(&r), Status::Stopped, None, at(100)).next_run,
+            None
+        );
+        assert_eq!(
+            assess(Some(&r), Status::Paused, None, at(100)).next_run,
+            None
+        );
+        // A loop without waits (no `--min-seconds`) has none either.
+        r.next_lap = None;
+        assert_eq!(
+            assess(Some(&r), Status::Running, None, at(100)).next_run,
+            None
+        );
+    }
+
+    #[test]
     fn health_round_trips_through_metadata() {
         let mut r = record(Some(60.0));
         r.last_lap = Some(at(100));
         r.last_success = Some(at(100));
-        let h = assess(Some(&r), Status::Running, None, at(160));
+        r.next_lap = Some(at(160));
+        let h = assess(Some(&r), Status::Running, None, at(130));
+        assert!(h.next_run.is_some());
         let value = Value::from_json_str(&h.to_json().to_string()).unwrap();
         assert_eq!(JobHealth::from_value(&value), Some(h.clone()));
         assert_eq!(

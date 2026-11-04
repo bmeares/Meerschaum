@@ -268,9 +268,12 @@ pub fn operations() -> Vec<Operation> {
             Never,
         )
         .described(
-            "Whether this server should get new requests: `200`, or `503` while it starts, \
-             while it shuts down (draining the requests in progress) or when its instance does \
-             not answer. `/healthcheck` stays `200` during a shutdown.",
+            "Whether this server should get new requests: `200` once it serves everything it \
+             mounts, or `503` while it starts, while the Python API host it needs is not \
+             serving (starting, restarting or failed), while it shuts down (draining the \
+             requests in progress) or when its instance does not answer. A `503` names its \
+             `reason`: `starting`, `host_unavailable`, `draining` or `instance_unavailable`. \
+             `/healthcheck` stays `200` during a shutdown.",
             &[],
         ),
         op(

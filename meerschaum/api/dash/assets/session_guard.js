@@ -3,6 +3,7 @@
  * `X-Mrsm-Login` (the login page's path). Send the browser there (with `?next=` the current page)
  * instead of leaving the page waiting for an update that never comes. Nothing happens while the
  * login or registration form is shown, and a burst of redirects stops after a few in a row.
+ * A `409` with `X-Mrsm-Reload` (a page loaded from an older console) reloads the page.
  */
 (function () {
   if (window.__mrsmSessionGuard || !window.fetch) { return; }
@@ -33,8 +34,39 @@
     return (input && input.url) || '';
   }
 
+  var RELOAD_KEY = 'mrsm-stale-reloads';
+  var reloading = false;
+
+  /* A page loaded from an older console asks for callbacks the server no longer has: the server
+   * answers `409` with `X-Mrsm-Reload`, and the page reloads (at most twice a minute). */
+  function reloadStalePage(response, input) {
+    if (
+      reloading
+      || response.status !== 409
+      || !response.headers.get('X-Mrsm-Reload')
+      || requestUrl(input).indexOf('_dash-update-component') === -1
+    ) {
+      return;
+    }
+    var stamps = [];
+    var now = Date.now();
+    try {
+      stamps = JSON.parse(window.sessionStorage.getItem(RELOAD_KEY) || '[]')
+        .filter(function (stamp) { return now - stamp < 60000; });
+    } catch (e) { stamps = []; }
+    if (stamps.length >= 2) {
+      console.warn('Meerschaum: this page is out of date, and reloading it did not help.');
+      return;
+    }
+    stamps.push(now);
+    try { window.sessionStorage.setItem(RELOAD_KEY, JSON.stringify(stamps)); } catch (e) { /* storage may be unavailable */ }
+    reloading = true;
+    window.location.reload();
+  }
+
   window.fetch = function (input, init) {
     return originalFetch(input, init).then(function (response) {
+      try { reloadStalePage(response, input); } catch (e) { /* never break the response */ }
       try {
         var loginPath = response.headers.get('X-Mrsm-Login');
         if (

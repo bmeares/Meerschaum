@@ -4,8 +4,9 @@
 //! listeners stop accepting connections, requests in progress finish, and long-lived responses
 //! (Server-Sent Events, websockets, upgraded connections to the API host) end at once, so they
 //! never hold the drain open. `GET /healthcheck/ready` answers `503` from the moment the drain
-//! begins (and while the server is still starting), so that a load balancer stops sending it
-//! new requests; `GET /healthcheck` is unchanged (uptime monitors match it).
+//! begins (and while the server is still starting, or while the API host it needs is not
+//! serving: [`crate::host::HostSupervisor::is_serving`]), so that a load balancer stops sending
+//! it new requests; `GET /healthcheck` is unchanged (uptime monitors match it).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

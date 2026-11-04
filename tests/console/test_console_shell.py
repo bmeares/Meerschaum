@@ -318,3 +318,62 @@ def test_shell_at_phone_width(server, browser):
         assert _errors(tab) == [], _errors(tab)
     finally:
         context.close()
+
+
+#: A Pipeline whose name is longer than the Recent runs column (RC31 cut it off with an ellipsis).
+LONG_PIPELINE = 'overview-line-with-a-name-longer-than-the-recent-runs-column-holds'
+
+
+def test_overview_shows_next_runs_and_whole_pipeline_names(server, tab):
+    import os
+    import pathlib
+    setup = server.python(SHELL_SETUP + OVERVIEW_PIPELINE.replace("'overview-line'", repr(LONG_PIPELINE)))
+    assert setup.returncode == 0, setup.stderr[-2000:]
+    sync = server.mrsm('sync', 'pipelines', LONG_PIPELINE, '-i', 'sql:w7console', '--nopretty')
+    assert sync.returncode == 0, sync.stdout[-1500:] + sync.stderr[-1500:]
+    ### A job waiting ten minutes between laps.
+    name = 'w32-next-run'
+    started = server.mrsm(
+        'show', 'version', '--loop', '--min-seconds', '600', '-d', '--name', name, '--yes',
+        '--nopretty', '--no-stagger',
+    )
+    assert started.returncode == 0, started.stdout + started.stderr
+    try:
+        tab.login(path='/dash')
+        page = tab.page
+        page.wait_for_selector('#overview-jobs-total')
+        ### The tiles refresh every 30 s: reload until the job's first lap has ended.
+        for _ in range(12):
+            if page.locator('#overview-next-runs .overview-next-job', has_text=name).count():
+                break
+            page.wait_for_timeout(2500)
+            page.reload()
+            page.wait_for_selector('#overview-jobs-total')
+        row = page.locator('#overview-next-runs .overview-next-run', has_text=name)
+        assert row.count() == 1
+        assert row.locator('a').get_attribute('href') == f'/dash/jobs/{name}'
+        assert row.locator('.overview-when').inner_text() in ('in 9 min', 'in 10 min')
+        assert 'UTC' in row.locator('.overview-when').get_attribute('title')
+
+        ### Recent runs: the whole name, wrapped, not cut off.
+        _wait_text(page, '#overview-runs-list', LONG_PIPELINE)
+        link = page.locator('#overview-runs-list .overview-pipeline-link', has_text=LONG_PIPELINE)
+        assert link.count() == 1
+        clipped = link.evaluate('el => el.scrollWidth > el.clientWidth + 1')
+        assert not clipped
+        assert link.evaluate('el => getComputedStyle(el).textOverflow') != 'ellipsis'
+        ### The last success names its Pipeline in full too.
+        _wait_text(page, '#overview-pipelines-last-success', LONG_PIPELINE)
+        fact = page.locator('#overview-pipelines-last-success .overview-fact-name')
+        assert not fact.evaluate('el => el.scrollWidth > el.clientWidth + 1')
+        shots = os.environ.get('MRSM_TEST_CONSOLE_SHOTS')
+        if shots:
+            pathlib.Path(shots).mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(pathlib.Path(shots) / 'rc32-overview.png'), full_page=True)
+            page.set_viewport_size({'width': 390, 'height': 844})
+            page.wait_for_timeout(500)
+            page.screenshot(path=str(pathlib.Path(shots) / 'rc32-overview-phone.png'), full_page=True)
+        assert _errors(tab) == [], _errors(tab)
+    finally:
+        server.mrsm('stop', 'jobs', name, '--yes', '--nopretty')
+        server.mrsm('delete', 'jobs', name, '--yes', '--nopretty')

@@ -280,6 +280,17 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
   font-weight: 600;
 }
 .overview-pipes-section .overview-list { margin-top: 0; }
+/* Next runs (Jobs tile): each waiting job and when its next lap is due. */
+.overview-jobs-section { margin-top: 14px; }
+.overview-jobs-section .overview-list { margin-top: 0; }
+.overview-next-job {
+  min-width: 0;
+  color: #dceaf6;
+  font-size: 0.875rem;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.overview-next-job:hover { text-decoration: underline; }
 .overview-latest-pipe {
   flex: 1 1 auto;
   min-width: 0;
@@ -399,11 +410,9 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
 .overview-fact-name {
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   color: rgba(255, 255, 255, 0.6);
   font-size: 0.8125rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .overview-fact-none {
   display: inline-flex;
@@ -455,6 +464,16 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
   margin: 0;
 }
 .overview-run-failed .overview-run-what { font-weight: 600; }
+/* Recent runs show what ran in full: a long Pipeline or pipe name wraps instead of being cut. */
+.overview-run-what > .overview-pipeline-link,
+.overview-run-what > .overview-pipe-link,
+.overview-run-what > .overview-hidden-pipe {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.overview-run-what > .overview-pipeline-link .mrsm-pipeline-repr { overflow-wrap: anywhere; }
 
 /* Loading: two pulsing lines. */
 .overview-skeleton-line {
@@ -539,6 +558,13 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
   .overview-pipe-link {
     display: block;
     line-height: 44px;
+  }
+  .overview-run-what > .overview-pipeline-link,
+  .overview-run-what > .overview-pipe-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    line-height: 1.35;
   }
   .overview-tile-action {
     display: inline-flex;

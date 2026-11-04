@@ -583,6 +583,9 @@ class Job:
         - `consecutive_failures`: laps that failed in a row.
         - `expected_interval_seconds`: how often laps are expected (`--min-seconds`, the
           schedule's period, an hour for `--listen`), or `None`.
+        - `next_run`: while a running job waits for its next lap (`--min-seconds`, a cooldown
+          after a failure, a schedule's next fire), when that lap is due (ISO-8601 UTC);
+          otherwise `None`.
         - `message`: what to show next to the state, e.g. `'last good sync 2 min ago'`.
 
         Examples

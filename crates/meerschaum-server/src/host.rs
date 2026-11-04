@@ -818,6 +818,13 @@ pub struct HostSupervisor {
     refusals: std::sync::Mutex<Refusals>,
     /// The server's secret, which signs the health checks' internal tokens (no checks without).
     internal_secret: std::sync::Mutex<Option<Vec<u8>>>,
+    /// Whether the current host process serves: its endpoint accepted (and proved itself) and
+    /// its last health check, if any, was answered. `false` from each launch until then, and
+    /// from the moment its watch ends (an exit, a hang, a restart, a stop). Readiness
+    /// (`GET /healthcheck/ready`) follows it.
+    serving: tokio::sync::watch::Sender<bool>,
+    /// A background start ([`HostSupervisor::start_in_background`]) is in flight.
+    starting_in_background: AtomicBool,
 }
 
 /// A host that refused to start (its guard found a `meerschaum` package this program cannot work
@@ -983,6 +990,8 @@ impl HostSupervisor {
             ever_ready: AtomicBool::new(false),
             refusals: std::sync::Mutex::new(Refusals::NONE),
             internal_secret: std::sync::Mutex::new(None),
+            serving: tokio::sync::watch::channel(false).0,
+            starting_in_background: AtomicBool::new(false),
         })
     }
 
@@ -1045,6 +1054,45 @@ impl HostSupervisor {
     /// Whether the manifest says a plugin needs the host (else it is never started).
     pub fn is_needed(&self) -> bool {
         self.needed.load(Ordering::SeqCst)
+    }
+
+    /// Whether the current host process serves requests: it accepted connections (and proved
+    /// itself on TCP) and has not failed a health check since. `false` before the first start,
+    /// while a host restarts, after it refused to start and once the server stops.
+    pub fn is_serving(&self) -> bool {
+        *self.serving.borrow()
+    }
+
+    /// A receiver of [`HostSupervisor::is_serving`]'s changes.
+    pub fn serving_changes(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.serving.subscribe()
+    }
+
+    fn set_serving(&self, serving: bool) {
+        self.serving.send_if_modified(|current| {
+            let changed = *current != serving;
+            *current = serving;
+            changed
+        });
+    }
+
+    /// Start the host in the background when it is needed and neither serving nor already
+    /// being started this way (at most one such start at a time). A readiness probe calls this:
+    /// a host that stopped (it refused to start, or no request asked for it since the plugins
+    /// changed) is started again even while a load balancer sends this server no requests.
+    /// A remembered refusal still holds ([`HostSupervisor::clear_refusal`]).
+    pub fn start_in_background(self: &Arc<Self>) {
+        if !self.is_needed() || self.is_serving() || self.stopping() {
+            return;
+        }
+        if self.starting_in_background.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let me = self.clone();
+        tokio::spawn(async move {
+            let _ = me.ensure_started().await;
+            me.starting_in_background.store(false, Ordering::SeqCst);
+        });
     }
 
     /// Apply a manifest: when it differs from the current one, a running host is restarted (to
@@ -1173,8 +1221,9 @@ impl HostSupervisor {
             .endpoint
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = endpoint.clone();
-        // A new process has not said anything about the console yet.
+        // A new process has not said anything about the console yet, nor served anything.
         self.set_console_status(ConsoleStatus::Unknown);
+        self.set_serving(false);
         let proc = self.launcher.launch_endpoint(&endpoint).await?;
         self.terminated.send_replace(false);
         self.starts.fetch_add(1, Ordering::SeqCst);
@@ -1240,6 +1289,7 @@ impl HostSupervisor {
             return (WatchEvent::Unready, None);
         }
         self.ever_ready.store(true, Ordering::SeqCst);
+        self.set_serving(true);
         let ready_at = tokio::time::Instant::now();
         let interval = self.opts.health_interval.max(Duration::from_millis(1));
         let mut checks = tokio::time::interval_at(ready_at + interval, interval);
@@ -1256,6 +1306,8 @@ impl HostSupervisor {
                 () = self.stop_requested() => WatchEvent::Stop,
                 () = self.restart.notified() => WatchEvent::Restart,
                 healthy = check => {
+                    // A host that does not answer is not serving, until it answers again.
+                    self.set_serving(healthy);
                     if healthy {
                         failures = 0;
                         continue;
@@ -1278,6 +1330,8 @@ impl HostSupervisor {
         let mut backoff = self.opts.backoff_initial;
         loop {
             let (event, ready_at) = self.watch(proc.as_mut()).await;
+            // Whatever ended the watch, this process serves no more.
+            self.set_serving(false);
             // A process that stayed ready long enough was working: the delay starts over.
             if ready_at.is_some_and(|at| at.elapsed() >= self.opts.stable_after) {
                 backoff = self.opts.backoff_initial;
@@ -1388,6 +1442,7 @@ impl HostSupervisor {
         // woken at once.
         self.stopping.store(true, Ordering::SeqCst);
         self.stop.notify_waiters();
+        self.set_serving(false);
         let bound = TERMINATE_GRACE + Duration::from_secs(5);
         // A launch still holding `started` past the bound counts as running.
         let running = tokio::time::timeout(bound, self.started.lock())

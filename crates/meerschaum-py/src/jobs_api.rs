@@ -483,7 +483,7 @@ impl PyJob {
     }
 
     /// The job's health (`job.health`, see `meerschaum_jobs::health`): `{"state",
-    /// "last_success", "last_lap", "consecutive_failures", "expected_interval_seconds",
+    /// "last_success", "last_lap", "consecutive_failures", "expected_interval_seconds", "next_run",
     /// "message"}`.
     fn health<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let health = py.detach(|| self.lock().health());

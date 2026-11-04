@@ -136,9 +136,13 @@ async fn get_healthcheck(ctx: Ctx) -> ApiResult {
     ))
 }
 
-/// `GET /healthcheck/ready` (v5): whether this server should get new requests. `503` while it
-/// is still starting (the API host it needs is not up yet) or draining (shutting down: see
-/// [`crate::lifecycle`]), or when its instance does not answer; `/healthcheck` is unchanged.
+/// `GET /healthcheck/ready` (v5): whether this server should get new requests. `200` only once
+/// it serves everything it mounts; `503` while it is still starting, while the Python API host
+/// it needs (for Python plugins and the web console) is not serving (not started yet, refused
+/// to start, restarting or not answering its health checks: no timeout turns this into a `200`),
+/// while it drains (shutting down: see [`crate::lifecycle`]), or when its instance does not
+/// answer. The body is `{"success", "message"}`, plus `"reason"` on a `503` (see
+/// [`NotReady::reason`]). `/healthcheck` is unchanged.
 pub const READY_PATH: &str = "/healthcheck/ready";
 
 /// The message of `/healthcheck/ready` while the server drains.
@@ -147,28 +151,96 @@ pub const SHUTTING_DOWN_MESSAGE: &str = "The server is shutting down.";
 /// The message of `/healthcheck/ready` while the server starts.
 pub const STARTING_MESSAGE: &str = "The server is starting.";
 
-async fn get_ready(ctx: Ctx) -> ApiResult {
-    let lifecycle = &ctx.state.lifecycle;
-    let refusal = if lifecycle.is_draining() {
-        Some(SHUTTING_DOWN_MESSAGE)
-    } else if lifecycle.is_starting() {
-        Some(STARTING_MESSAGE)
-    } else if !ctx
-        .state
-        .instance()
-        .test_connection()
-        .await
-        .unwrap_or(false)
+/// The message of `/healthcheck/ready` while the API host the server needs is not serving.
+pub const HOST_UNAVAILABLE_MESSAGE: &str =
+    "The API host (Python plugins and the web console) is not serving.";
+
+/// The message of `/healthcheck/ready` when the instance does not answer.
+pub const INSTANCE_UNAVAILABLE_MESSAGE: &str = "Failed to connect to instance connector.";
+
+/// Why `/healthcheck/ready` answers `503`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotReady {
+    /// The server drains (shutting down).
+    Draining,
+    /// The server is starting (its API host has not answered for the first time yet).
+    Starting,
+    /// The API host the server needs is not serving.
+    HostUnavailable,
+    /// The instance connector does not answer.
+    InstanceUnavailable,
+}
+
+impl NotReady {
+    /// The body's `reason`: `draining`, `starting`, `host_unavailable` or
+    /// `instance_unavailable`.
+    pub fn reason(self) -> &'static str {
+        match self {
+            NotReady::Draining => "draining",
+            NotReady::Starting => "starting",
+            NotReady::HostUnavailable => "host_unavailable",
+            NotReady::InstanceUnavailable => "instance_unavailable",
+        }
+    }
+
+    /// The body's `message`.
+    pub fn message(self) -> &'static str {
+        match self {
+            NotReady::Draining => SHUTTING_DOWN_MESSAGE,
+            NotReady::Starting => STARTING_MESSAGE,
+            NotReady::HostUnavailable => HOST_UNAVAILABLE_MESSAGE,
+            NotReady::InstanceUnavailable => INSTANCE_UNAVAILABLE_MESSAGE,
+        }
+    }
+}
+
+/// Whether the server is ready, short of asking its instance: `Some` reason when it drains, is
+/// starting, or needs an API host that is not serving. A host that is needed and not serving is
+/// started in the background ([`crate::host::HostSupervisor::start_in_background`]), so a
+/// server out of a load balancer's rotation still gets ready again.
+pub fn not_ready(state: &AppState) -> Option<NotReady> {
+    let lifecycle = &state.lifecycle;
+    if lifecycle.is_draining() {
+        return Some(NotReady::Draining);
+    }
+    if lifecycle.is_starting() {
+        return Some(NotReady::Starting);
+    }
+    if let Some(supervisor) = state.host.as_ref().and_then(|host| host.supervisor())
+        && supervisor.is_needed()
+        && !supervisor.is_serving()
     {
-        Some("Failed to connect to instance connector.")
-    } else {
-        None
+        supervisor.start_in_background();
+        return Some(NotReady::HostUnavailable);
+    }
+    None
+}
+
+async fn get_ready(ctx: Ctx) -> ApiResult {
+    let refusal = match not_ready(&ctx.state) {
+        Some(refusal) => Some(refusal),
+        None if !ctx
+            .state
+            .instance()
+            .test_connection()
+            .await
+            .unwrap_or(false) =>
+        {
+            Some(NotReady::InstanceUnavailable)
+        }
+        None => None,
     };
-    let (status, success, message) = match refusal {
-        Some(message) => (StatusCode::SERVICE_UNAVAILABLE, false, message),
-        None => (StatusCode::OK, true, "Success"),
+    let (status, body) = match refusal {
+        Some(refusal) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"success": false, "message": refusal.message(), "reason": refusal.reason()}),
+        ),
+        None => (
+            StatusCode::OK,
+            json!({"success": true, "message": "Success"}),
+        ),
     };
-    let mut response = json_response(status, &json!({"success": success, "message": message}));
+    let mut response = json_response(status, &body);
     // A readiness answer is never cached by a proxy in front of the server.
     response
         .headers_mut()

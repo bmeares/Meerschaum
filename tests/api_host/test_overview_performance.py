@@ -18,8 +18,11 @@ runs = [{'run': {'run_id': 'r1', 'targets': ['sql:apihosttest|fixture|a|None'],
          'status': 'succeeded', 'counts': {'succeeded': 1}}]
 overview._list_pipelines = lambda *a, **kw: calls.append('registry') or definitions
 overview._get_runs = lambda *a, **kw: calls.append('history') or runs
+overview._get_run_activity = lambda *a, **kw: calls.append('activity') or {
+    'buckets': [], 'names': [], 'runs': 0, 'oldest': None, 'truncated': False,
+}
 summary = overview.engine_summary('sql:apihosttest')
-assert calls == ['registry', 'history'], calls
+assert calls == ['registry', 'history', 'activity'], calls
 assert summary['pipelines']['count'] == 1
 assert summary['runs'][0]['pipeline'] == 'daily'
 # Snapshot metadata cannot reveal a Pipeline absent from the viewer's registry list.
@@ -111,4 +114,67 @@ _saved.registration = lambda *a: SimpleNamespace(get_parameters=parameters)
 assert _saved.list_pipelines(conn)['daily']['description'] == 'first'
 definition['description'] = 'edited elsewhere'
 assert _saved.list_pipelines(conn)['daily']['description'] == 'edited elsewhere'
+'''))
+
+
+def test_pipelines_history_counts_every_run_of_the_day_not_the_newest_page(sandbox):
+    """A Pipeline running every few seconds fills 24 hourly bars, not one capped bar."""
+    root, plugins = sandbox
+    check(run_python(root, plugins, '''
+from datetime import datetime, timedelta, timezone
+import meerschaum as mrsm
+from meerschaum.api.dash import overview
+from meerschaum.core.Pipeline._engine import call, build_request
+now = datetime(2026, 11, 4, 12, 30, tzinfo=timezone.utc)
+definitions = {'Sync pings!': {'name': 'Sync pings!', 'targets': []}, 'daily': {'name': 'daily', 'targets': []}}
+assert overview.run_slug('Sync pings!') == 'Sync-pings-'
+assert overview.run_slug('***') == 'pipeline'
+hour = lambda h: (datetime(2026, 11, 4, 12, tzinfo=timezone.utc) - timedelta(hours=h)).isoformat()
+activity = {
+    'buckets': (
+        [{'start': hour(h), 'name': 'Sync-pings-', 'status': 'succeeded', 'count': 180} for h in range(24)]
+        + [{'start': hour(5), 'name': 'Sync-pings-', 'status': 'failed', 'count': 2},
+           {'start': hour(3), 'name': 'hidden', 'status': 'failed', 'count': 9},
+           {'start': hour(30), 'name': 'daily', 'status': 'succeeded', 'count': 1}]
+    ),
+    'names': [
+        {'name': 'Sync-pings-', 'latest': {'run_id': 'p-new', 'started': hour(0), 'status': 'running'},
+         'last_success': {'run_id': 'p-ok', 'started': hour(0), 'status': 'succeeded'},
+         'last_failure': {'run_id': 'p-bad', 'started': hour(5), 'status': 'failed'}},
+        {'name': 'hidden', 'latest': {'run_id': 'h', 'started': hour(3), 'status': 'failed'},
+         'last_success': None, 'last_failure': {'run_id': 'h', 'started': hour(3), 'status': 'failed'}},
+    ],
+    'runs': 4325, 'oldest': hour(23), 'truncated': False,
+}
+### The recent-runs read knows the newest run's worker stopped.
+runs = [{'run': {'run_id': 'p-new', 'started': hour(0), 'targets': [],
+                 'selection': {'pipeline_definitions': [{'name': 'Sync pings!'}]}},
+         'status': 'stopped', 'counts': {}}]
+summary = overview.pipelines_summary('sql:apihosttest', definitions=definitions, runs=runs, now=now,
+                                     activity=activity)
+assert summary['runs_24h'] == 24 * 180 + 2, summary['runs_24h']
+assert summary['failed_24h'] == 2
+assert [h['succeeded'] for h in summary['hours']] == [180] * 24
+assert not any(h['unread'] for h in summary['hours'])
+assert summary['states'] == {'running': 0, 'succeeded': 0, 'failed': 0, 'stopped': 1, 'none': 1}, summary['states']
+assert summary['last_failure']['run_id'] == 'p-bad' and summary['last_failure']['name'] == 'Sync pings!'
+assert summary['last_success']['run_id'] == 'p-ok'
+
+### A count cut short by its limit marks the hours it did not reach.
+short = dict(activity, truncated=True, oldest=hour(2))
+summary = overview.pipelines_summary('sql:apihosttest', definitions=definitions, runs=[], now=now,
+                                     activity=short)
+assert [h['unread'] for h in summary['hours']] == [True] * 21 + [False] * 3
+
+### Without a count (an instance that cannot count), the recent runs are counted.
+def unavailable(*args, **kwargs):
+    raise RuntimeError('no activity')
+overview._get_run_activity = unavailable
+summary = overview.pipelines_summary('sql:apihosttest', definitions=definitions, runs=runs, now=now)
+assert summary['runs_24h'] == 1 and summary['hours'][-1]['stopped'] == 1
+
+### The real binding: an empty instance has nothing to count.
+real = call('engine_run_activity', dict(build_request('sql:apihosttest'),
+                                         since=(now - timedelta(days=1)).isoformat()))
+assert set(real) == {'buckets', 'names', 'runs', 'oldest', 'truncated'}, real
 '''))

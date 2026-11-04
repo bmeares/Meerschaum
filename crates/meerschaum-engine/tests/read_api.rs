@@ -784,3 +784,109 @@ async fn concurrent_first_runs_initialize_progress_tables_safely() {
         assert_eq!(detail.summary.status, RunStatus::Succeeded);
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_activity_counts_a_window_by_hour_name_and_status_without_selections_or_nodes() {
+    use chrono::{TimeDelta, Timelike, Utc};
+    use meerschaum_engine::instance_state::{InstanceState, run_doc};
+    use meerschaum_engine::runs::{EnginePipe, RunRow};
+    let env = env("run_activity").await;
+    let state = InstanceState::new(env.registry.clone(), &env.config().home_instance);
+    let hour = Utc::now()
+        .with_minute(0)
+        .and_then(|t| t.with_second(0))
+        .and_then(|t| t.with_nanosecond(0))
+        .unwrap();
+    // 300 runs of `fast` in the current hour (more than the console's old 200-run read),
+    // one failed `daily` run three hours ago, one running `daily` run, and a run from before
+    // the window.
+    let mut rows = Vec::new();
+    let mut add =
+        |name: &str, started: chrono::DateTime<Utc>, finished: bool, success: bool, n: usize| {
+            let run: RunRow = serde_json::from_value(serde_json::json!({
+                "run_id": format!("{name}-{}-{n:08x}", started.format("%Y-%m-%dT%H-%M-%S%.6fZ")),
+                "started": started,
+                "finished": if finished { Some(started) } else { None },
+                "success": if finished { Some(success) } else { None },
+                "targets": [env.pipe_ref("raw")], "workers": 1, "num_nodes": 1, "holder": "fixture",
+                "selection": "x".repeat(4096),
+            }))
+            .unwrap();
+            rows.push(run_doc(&run));
+        };
+    for index in 0..300 {
+        add(
+            "fast",
+            hour + TimeDelta::milliseconds(index * 10),
+            true,
+            true,
+            index as usize,
+        );
+    }
+    add("daily", hour - TimeDelta::hours(3), true, false, 1);
+    add("daily", hour - TimeDelta::hours(2), true, true, 2);
+    add("daily", hour + TimeDelta::seconds(5), false, false, 3);
+    add("old", hour - TimeDelta::hours(30), true, true, 4);
+    state
+        .write_rows(&env.config().home_instance, EnginePipe::Runs, rows)
+        .await
+        .unwrap();
+    let reader = EngineReader::new(env.registry.clone(), env.config());
+    env.conn.enable_query_log();
+    let since = hour - TimeDelta::hours(23);
+    let activity = reader.run_activity(since, 3600, 10_000).await.unwrap();
+    let log = env.conn.take_query_log();
+    assert!(
+        log.iter().all(|query| !query.contains("mrsm_engine_nodes")),
+        "{log:#?}"
+    );
+    assert!(
+        log.iter()
+            .filter(|query| query.contains("mrsm_engine_runs"))
+            .all(|query| !query.contains("selection")),
+        "{log:#?}"
+    );
+    assert_eq!(activity.runs, 303);
+    assert!(!activity.truncated);
+    let count = |name: &str, start, status| {
+        activity
+            .buckets
+            .iter()
+            .filter(|b| b.name.as_deref() == Some(name) && b.start == start && b.status == status)
+            .map(|b| b.count)
+            .sum::<u64>()
+    };
+    assert_eq!(count("fast", hour, RunStatus::Succeeded), 300);
+    assert_eq!(
+        count("daily", hour - TimeDelta::hours(3), RunStatus::Failed),
+        1
+    );
+    assert_eq!(
+        count("daily", hour - TimeDelta::hours(2), RunStatus::Succeeded),
+        1
+    );
+    assert_eq!(count("daily", hour, RunStatus::Running), 1);
+    assert!(
+        activity
+            .buckets
+            .iter()
+            .all(|b| b.name.as_deref() != Some("old"))
+    );
+    let daily = activity.names.iter().find(|n| n.name == "daily").unwrap();
+    assert_eq!(daily.latest.status, RunStatus::Running);
+    assert_eq!(
+        daily.last_success.as_ref().unwrap().started,
+        hour - TimeDelta::hours(2)
+    );
+    assert_eq!(
+        daily.last_failure.as_ref().unwrap().started,
+        hour - TimeDelta::hours(3)
+    );
+    assert_eq!(activity.names[0].name, "daily");
+
+    // A read cut short by its limit says so, and from when it is complete.
+    let short = reader.run_activity(since, 3600, 50).await.unwrap();
+    assert!(short.truncated);
+    assert_eq!(short.runs, 50);
+    assert!(short.oldest.unwrap() >= hour);
+}

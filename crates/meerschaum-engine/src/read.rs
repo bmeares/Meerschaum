@@ -204,6 +204,60 @@ impl PipelineView {
     }
 }
 
+/// How many runs of one name started in one time bucket with one status
+/// ([`EngineReader::run_activity`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityBucket {
+    /// When the bucket begins (a multiple of the bucket size since the Unix epoch).
+    pub start: DateTime<Utc>,
+    /// The run name ([`crate::runs::run_name`]), `None` for IDs not made by the engine.
+    pub name: Option<String>,
+    /// The runs' status.
+    pub status: RunStatus,
+    /// How many.
+    pub count: u64,
+}
+
+/// One run named in [`RunActivity::names`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityRun {
+    /// The run ID.
+    pub run_id: String,
+    /// When it started.
+    pub started: DateTime<Utc>,
+    /// Its status.
+    pub status: RunStatus,
+}
+
+/// The latest runs of one run name in [`RunActivity`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NameActivity {
+    /// The run name.
+    pub name: String,
+    /// The newest run.
+    pub latest: ActivityRun,
+    /// The newest run that succeeded.
+    pub last_success: Option<ActivityRun>,
+    /// The newest run that failed.
+    pub last_failure: Option<ActivityRun>,
+}
+
+/// The runs started since a time, counted per bucket, name and status, from one light read
+/// (no selections, targets or node rows): what an activity chart draws.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunActivity {
+    /// The counts, oldest bucket first.
+    pub buckets: Vec<ActivityBucket>,
+    /// Per run name, its latest runs, most recently run first.
+    pub names: Vec<NameActivity>,
+    /// How many runs were read.
+    pub runs: u64,
+    /// When the oldest run read started.
+    pub oldest: Option<DateTime<Utc>>,
+    /// Whether the read stopped at its limit: buckets before `oldest` were not read.
+    pub truncated: bool,
+}
+
 /// Read-only access to engine state for the console.
 pub struct EngineReader {
     registry: Arc<dyn ConnectorRegistry>,
@@ -216,6 +270,74 @@ impl std::fmt::Debug for EngineReader {
         f.debug_struct("EngineReader")
             .field("home", &self.config.home_instance)
             .finish_non_exhaustive()
+    }
+}
+
+/// [`EngineReader::run_activity`] over rows already read (newest first).
+fn aggregate_activity(
+    rows: &[crate::instance_state::ActivityRow],
+    bucket_seconds: i64,
+    limit: usize,
+) -> RunActivity {
+    let bucket_seconds = bucket_seconds.max(1);
+    let mut buckets: BTreeMap<(i64, Option<String>, &'static str), (RunStatus, u64)> =
+        BTreeMap::new();
+    let mut names: Vec<NameActivity> = Vec::new();
+    let mut positions: HashMap<String, usize> = HashMap::new();
+    let mut ordered: Vec<&crate::instance_state::ActivityRow> = rows.iter().collect();
+    ordered.sort_by(|a, b| b.started.cmp(&a.started).then(b.run_id.cmp(&a.run_id)));
+    for row in &ordered {
+        let status = match (row.finished, row.success) {
+            (None, _) => RunStatus::Running,
+            (Some(_), Some(false)) => RunStatus::Failed,
+            (Some(_), _) => RunStatus::Succeeded,
+        };
+        let name = crate::runs::run_name(&row.run_id).map(str::to_owned);
+        let start = row.started.timestamp().div_euclid(bucket_seconds) * bucket_seconds;
+        buckets
+            .entry((start, name.clone(), status.name()))
+            .or_insert((status, 0))
+            .1 += 1;
+        let Some(name) = name else {
+            continue;
+        };
+        let run = ActivityRun {
+            run_id: row.run_id.clone(),
+            started: row.started,
+            status,
+        };
+        let index = *positions.entry(name.clone()).or_insert_with(|| {
+            names.push(NameActivity {
+                name,
+                latest: run.clone(),
+                last_success: None,
+                last_failure: None,
+            });
+            names.len() - 1
+        });
+        let entry = &mut names[index];
+        match status {
+            RunStatus::Succeeded if entry.last_success.is_none() => entry.last_success = Some(run),
+            RunStatus::Failed if entry.last_failure.is_none() => entry.last_failure = Some(run),
+            _ => {}
+        }
+    }
+    RunActivity {
+        buckets: buckets
+            .into_iter()
+            .filter_map(|((start, name, _), (status, count))| {
+                Some(ActivityBucket {
+                    start: DateTime::from_timestamp(start, 0)?,
+                    name,
+                    status,
+                    count,
+                })
+            })
+            .collect(),
+        names,
+        runs: rows.len() as u64,
+        oldest: ordered.last().map(|row| row.started),
+        truncated: limit > 0 && rows.len() >= limit,
     }
 }
 
@@ -346,6 +468,19 @@ impl EngineReader {
             }
         }
         Ok(out)
+    }
+
+    /// The runs started at or after `since`, counted per `bucket_seconds`-long bucket, run name
+    /// and status, with each name's latest run, last success and last failure. At most `limit`
+    /// runs are read (the newest); [`RunActivity::truncated`] says whether that cut the read short.
+    pub async fn run_activity(
+        &self,
+        since: DateTime<Utc>,
+        bucket_seconds: i64,
+        limit: usize,
+    ) -> Result<RunActivity, StateError> {
+        let rows = self.state.run_activity_rows(since, limit).await?;
+        Ok(aggregate_activity(&rows, bucket_seconds, limit))
     }
 
     /// Run history, newest first, using indexed pages and bulk node reads.

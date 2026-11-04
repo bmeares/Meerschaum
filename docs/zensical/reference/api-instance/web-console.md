@@ -35,9 +35,9 @@ The console answers only signed-in visitors: a page shows the login form until y
 `/dash` is the Overview of the selected instance, with a tile for each part of it:
 
 - **Pipes**: how many are registered and when the latest one synced; how many synced, are failing (their last sync failed) or have no recorded sync, each count opening the Pipes page filtered to them; the connectors with the most pipes; and the latest syncs, failures first;
-- **Pipelines**: how many are saved and how many ran in the last 24 hours; how many are running, succeeded, failed or have not run, by each one's last run; their runs over the last 24 hours, hour by hour; and the last success and failure, each opening its Pipeline on that run;
-- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state, and how many run on a schedule;
-- **Recent runs**: the latest runs of the Syncing Engine, failures first. A job that syncs the same pipes again and again takes one row (`×12`).
+- **Pipelines**: how many are saved and how many runs they had in the last 24 hours; how many are running, succeeded, failed or have no recent run (none in the last 24 hours or among the latest runs), by each one's last run; every one of their runs over the last 24 hours, hour by hour (hover a bar for its counts); and the last success and failure, each opening its Pipeline on that run;
+- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state, and how many run on a schedule. **Next runs** lists the jobs waiting for their next lap (`--loop --min-seconds`, a `-s` schedule, a cooldown after a failure), soonest first, each opening its job; hover the time for the exact one (`job.health['next_run']`);
+- **Recent runs**: the latest runs of the Syncing Engine, failures first, with each Pipeline's or pipe's full name (long names wrap). A job that syncs the same pipes again and again takes one row (`×12`).
 - **Performance**: sync counts, failures, average duration, and rows affected/s over the last 24 hours.
 
 The tiles refresh every 30 seconds. On an instance without pipes, the Pipes tile shows **New pipe** and **Open terminal** instead of its numbers; the other tiles stay.

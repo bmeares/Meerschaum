@@ -387,21 +387,14 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
                 && supervisor.is_needed()
             {
                 let secret = state.secret().to_vec();
-                // `/healthcheck/ready` answers 503 until the host answered (or failed to), for at
-                // most `STARTUP_READY_LIMIT`: a host that cannot start must not keep the server
-                // out of a load balancer (requests for it wait for it, or get `502`).
+                // `/healthcheck/ready` answers 503 ("starting") until the host answered or
+                // failed to (bounded by `api:host:response_seconds` and the supervisor's
+                // readiness wait), then 503 ("host_unavailable") for as long as the host is not
+                // serving: no timeout makes a server that cannot serve its plugins look ready.
                 let lifecycle = state.lifecycle.clone();
                 lifecycle.set_starting(true);
                 tokio::spawn(async move {
-                    let refresh = host.refresh_console(&secret);
-                    tokio::pin!(refresh);
-                    if tokio::time::timeout(STARTUP_READY_LIMIT, refresh.as_mut())
-                        .await
-                        .is_err()
-                    {
-                        lifecycle.set_starting(false);
-                        refresh.await;
-                    }
+                    host.refresh_console(&secret).await;
                     lifecycle.set_starting(false);
                 });
             }
@@ -533,9 +526,6 @@ pub fn console(
         }
     }
 }
-
-/// How long `/healthcheck/ready` waits for the API host at startup before it answers `200`.
-const STARTUP_READY_LIMIT: Duration = Duration::from_secs(30);
 
 /// How long a stopping server lets its web terminals deliver their close frames.
 const TERMINALS_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);

@@ -10,7 +10,8 @@ What the console's Overview (`/dash`) shows about an instance, and its tiles:
   latest syncs (failures first) and the connectors the pipes read from;
 - **Pipelines**: the saved Pipelines by their last run's status, their runs over the last 24 hours
   hour by hour, and the last success and failure;
-- **Jobs**: the jobs by state (running, stalled, failing, paused, stopped; `job.health`);
+- **Jobs**: the jobs by state (running, stalled, failing, paused, stopped; `job.health`) and the
+  next runs of the jobs waiting for their next lap (`job.health['next_run']`);
 - **Recent runs**: the Syncing Engine's runs, failures first.
 
 Each `*_summary` function reads with one bulk call (no per-pipe query) and returns plain values;
@@ -34,8 +35,10 @@ import dash_bootstrap_components as dbc
 #: How often (ms) the Overview refreshes its tiles.
 OVERVIEW_REFRESH_MS: int = 30 * 1000
 
-#: How many runs Recent runs lists, and how many pipes and connectors the Pipes tile lists.
+#: How many runs Recent runs lists, how many upcoming runs the Jobs tile lists, and how many
+#: pipes and connectors the Pipes tile lists.
 MAX_RUNS: int = 8
+MAX_NEXT_RUNS: int = 5
 MAX_LATEST_SYNCS: int = 5
 MAX_CONNECTORS: int = 4
 
@@ -53,12 +56,16 @@ PIPELINE_STATES = (
     ('succeeded', 'Succeeded'),
     ('failed', 'Failed'),
     ('stopped', 'Stopped'),
-    ('none', 'Not run'),
+    ('none', 'No recent run'),
 )
 
-#: How many hours the Pipelines tile's run history covers, and how many runs it reads at most.
+#: How many hours the Pipelines tile's run history covers, and how many runs it counts at most
+#: (run IDs and statuses only: a pipeline running every second fits).
 HISTORY_HOURS: int = 24
-HISTORY_LIMIT: int = 200
+ACTIVITY_LIMIT: int = 100_000
+
+#: How many of the newest runs (with their nodes) Recent runs reads.
+MAX_RECENT_READ: int = 100
 
 #: The job states the Jobs tile counts, in order: `(state, label)`.
 JOB_STATES = (
@@ -232,72 +239,171 @@ def run_state(status: Optional[str]) -> str:
     return 'stopped' if status else 'none'
 
 
-def pipelines_summary(
-    instance: Any,
-    viewer: Any = None,
-    definitions=None,
-    runs=None,
-    now: Optional[datetime] = None,
-) -> Dict[str, Any]:
+def run_slug(name: Any) -> str:
     """
-    What the Pipelines tile shows about the saved Pipelines `viewer` (by default the request's)
-    may see, from the registry and one bounded read of the run history:
+    The name a Pipeline's run IDs begin with (the engine's `new_named_run_id()`): characters other
+    than ASCII letters, digits, `-`, `_` and `.` become `-`, at most 128 of them.
+    """
+    slug = ''.join(
+        char if (char.isascii() and char.isalnum()) or char in '-_.' else '-'
+        for char in str(name)[:128]
+    )
+    return slug if slug.strip('-') else 'pipeline'
 
-    - `count`: how many;
-    - `states`: how many by their last run (`PIPELINE_STATES`; `none`: no run in the history read);
-    - `hours`: their runs over the last `HISTORY_HOURS` hours, oldest hour first
-      (`{start, succeeded, failed, running, stopped}`; `unread` when the history read is shorter);
-    - `runs_24h`, `failed_24h`: how many of those runs there were, and how many failed;
-    - `last_success`, `last_failure`: the newest succeeded and failed runs
-      (`{name, started, run_id}`), or `None`.
+
+def _get_run_activity(instance: Any, since: datetime, viewer: Any = None) -> Optional[Dict[str, Any]]:
     """
-    definitions = _list_pipelines(instance, viewer=viewer) if definitions is None else definitions
-    try:
-        runs = (_get_runs(instance, HISTORY_LIMIT, viewer=viewer) if definitions else []) if runs is None else runs
-    except Exception:
-        runs = []
-    now = now or datetime.now(timezone.utc)
-    window_end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    window_start = window_end - timedelta(hours=HISTORY_HOURS)
-    hours = [
+    The runs started since `since` by hour, run name and status (`engine.get_run_activity`), or
+    `None` when this instance cannot count them (the tile then counts the recent runs it read).
+    """
+    from meerschaum.api.dash.engine import get_run_activity
+    return get_run_activity(instance, since=since, bucket_seconds=3600, limit=ACTIVITY_LIMIT)
+
+
+def _empty_hours(window_start: datetime) -> List[Dict[str, Any]]:
+    return [
         {
             'start': (window_start + timedelta(hours=i)).isoformat(),
             'succeeded': 0, 'failed': 0, 'running': 0, 'stopped': 0, 'unread': False,
         }
         for i in range(HISTORY_HOURS)
     ]
+
+
+def _newer(item: Optional[Dict[str, Any]], other: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Whichever of two runs (`{started}`) started later."""
+    if not item or not other:
+        return item or other
+    return item if str(item.get('started') or '') >= str(other.get('started') or '') else other
+
+
+def pipelines_summary(
+    instance: Any,
+    viewer: Any = None,
+    definitions=None,
+    runs=None,
+    now: Optional[datetime] = None,
+    activity=None,
+) -> Dict[str, Any]:
+    """
+    What the Pipelines tile shows about the saved Pipelines `viewer` (by default the request's)
+    may see, from the registry, a count of the last `HISTORY_HOURS` hours of runs
+    (`_get_run_activity`: run IDs and statuses only) and the recent runs read for Recent runs:
+
+    - `count`: how many;
+    - `states`: how many by their last run (`PIPELINE_STATES`; `none`: no run in the last
+      `HISTORY_HOURS` hours nor among the recent runs);
+    - `hours`: their runs over the last `HISTORY_HOURS` hours, oldest hour first
+      (`{start, succeeded, failed, running, stopped}`; `unread` when the count stopped at its
+      limit before that hour);
+    - `runs_24h`, `failed_24h`: how many of those runs there were, and how many failed;
+    - `last_success`, `last_failure`: the newest succeeded and failed runs
+      (`{name, started, run_id}`), or `None`.
+
+    Runs are matched to a Pipeline by the name their run IDs begin with (`run_slug`). When the
+    instance cannot count runs, the recent runs are counted instead.
+    """
+    definitions = _list_pipelines(instance, viewer=viewer) if definitions is None else definitions
+    try:
+        runs = (_get_runs(instance, MAX_RECENT_READ, viewer=viewer) if definitions else []) if runs is None else runs
+    except Exception:
+        runs = []
+    now = now or datetime.now(timezone.utc)
+    window_end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    window_start = window_end - timedelta(hours=HISTORY_HOURS)
+    if activity is None and definitions:
+        try:
+            activity = _get_run_activity(instance, window_start, viewer=viewer)
+        except Exception:
+            activity = None
+    hours = _empty_hours(window_start)
     latest: Dict[str, Dict[str, Any]] = {}
     last_success = last_failure = None
     runs_24h = failed_24h = 0
-    oldest = None
+
+    ### The recent runs (newest first): their statuses account for stopped workers.
+    known_statuses = {}
+    recent_latest: Dict[str, Dict[str, Any]] = {}
+    recent_success = recent_failure = None
     for run in runs:
         record = run.get('run', {}) or {}
-        started = parse_timestamp(record.get('started', None))
-        if started is not None and (oldest is None or started < oldest):
-            oldest = started
+        known_statuses[record.get('run_id', None)] = run.get('status', None)
         name = run_pipeline_name(run, definitions)
         if not name:
             continue
         status = run.get('status', None)
         state = run_state(status)
         item = {'name': name, 'started': record.get('started', None), 'run_id': record.get('run_id', None)}
-        if name not in latest:
-            latest[name] = {'status': status, **item}
-        if state == 'succeeded' and last_success is None:
-            last_success = item
-        if state == 'failed' and last_failure is None:
-            last_failure = item
+        if name not in recent_latest:
+            recent_latest[name] = {'status': status, **item}
+        if state == 'succeeded' and recent_success is None:
+            recent_success = item
+        if state == 'failed' and recent_failure is None:
+            recent_failure = item
+        if activity is not None:
+            continue
+        started = parse_timestamp(record.get('started', None))
         if started is None or not (window_start <= started < window_end):
             continue
         hour = hours[int((started - window_start).total_seconds() // 3600)]
         hour[state if state != 'none' else 'stopped'] += 1
         runs_24h += 1
         failed_24h += int(state == 'failed')
-    ### A full history read that ends inside the window says nothing about the hours before it.
-    if oldest is not None and len(runs) >= HISTORY_LIMIT:
-        for hour in hours:
-            if parse_timestamp(hour['start']) + timedelta(hours=1) <= oldest:
-                hour['unread'] = True
+
+    if activity is not None:
+        names = {}
+        for name in definitions:
+            names.setdefault(run_slug(name), name)
+        for bucket in activity.get('buckets', None) or []:
+            name = names.get(bucket.get('name', None), None)
+            started = parse_timestamp(bucket.get('start', None))
+            if not name or started is None or not (window_start <= started < window_end):
+                continue
+            state = run_state(bucket.get('status', None))
+            count = int(bucket.get('count', 0) or 0)
+            hour = hours[int((started - window_start).total_seconds() // 3600)]
+            hour[state if state != 'none' else 'stopped'] += count
+            runs_24h += count
+            failed_24h += count * int(state == 'failed')
+        for entry in activity.get('names', None) or []:
+            name = names.get(entry.get('name', None), None)
+            if not name or name in latest:
+                continue
+            run = entry.get('latest', None) or {}
+            status = known_statuses.get(run.get('run_id', None), None) or run.get('status', None)
+            latest[name] = {'status': status, 'name': name, 'started': run.get('started', None),
+                            'run_id': run.get('run_id', None)}
+            for key, current in (('last_success', last_success), ('last_failure', last_failure)):
+                found = entry.get(key, None)
+                if found:
+                    found = {'name': name, 'started': found.get('started', None), 'run_id': found.get('run_id', None)}
+                    if key == 'last_success':
+                        last_success = _newer(current, found)
+                    else:
+                        last_failure = _newer(current, found)
+        ### A count that stopped at its limit says nothing about the hours before its oldest run.
+        oldest = parse_timestamp(activity.get('oldest', None))
+        if activity.get('truncated') and oldest is not None:
+            for hour in hours:
+                if parse_timestamp(hour['start']) + timedelta(hours=1) <= oldest:
+                    hour['unread'] = True
+    elif runs and len(runs) >= MAX_RECENT_READ:
+        oldest = min(
+            (moment for moment in (parse_timestamp((run.get('run', {}) or {}).get('started', None)) for run in runs)
+             if moment is not None),
+            default=None,
+        )
+        if oldest is not None:
+            for hour in hours:
+                if parse_timestamp(hour['start']) + timedelta(hours=1) <= oldest:
+                    hour['unread'] = True
+
+    ### Pipelines not run within the window keep their latest recent run.
+    for name, item in recent_latest.items():
+        latest.setdefault(name, item)
+    last_success = last_success or recent_success
+    last_failure = last_failure or recent_failure
+
     states = {state: 0 for state, _ in PIPELINE_STATES}
     for name in definitions:
         states[run_state((latest.get(name, None) or {}).get('status', None))] += 1
@@ -385,10 +491,23 @@ def is_scheduled_job(job: Any) -> bool:
     return any(arg.split('=', 1)[0] in ('-s', '--schedule') for arg in sysargs)
 
 
+def next_run(job: Any) -> Optional[str]:
+    """When a running job's next lap is due (ISO-8601 UTC, `job.health['next_run']`), else `None`."""
+    if str(getattr(job, 'status', '') or '') != 'running':
+        return None
+    try:
+        health = getattr(job, 'health', None)
+    except Exception:
+        return None
+    when = health.get('next_run', None) if isinstance(health, dict) else None
+    return str(when) if when and parse_timestamp(when) is not None else None
+
+
 def jobs_summary(viewer: Any = None) -> Dict[str, Any]:
     """
-    `{'total', 'counts': {state: n}, 'scheduled'}` over the jobs the Jobs page lists for the
-    viewer (`scheduled`: how many run on a schedule).
+    `{'total', 'counts': {state: n}, 'scheduled', 'next_runs'}` over the jobs the Jobs page lists
+    for the viewer (`scheduled`: how many run on a schedule; `next_runs`: the `MAX_NEXT_RUNS`
+    soonest laps of the jobs waiting for their next one, `{name, when, label}`).
     """
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
@@ -403,14 +522,25 @@ def jobs_summary(viewer: Any = None) -> Dict[str, Any]:
     jobs = access.filter_jobs(viewer, listed or {})
     counts = {state: 0 for state, _ in JOB_STATES}
     total = scheduled = 0
-    for job in jobs.values():
+    upcoming = []
+    for name, job in jobs.items():
         if _is_automatic_job(job):
             continue
         total += 1
         scheduled += int(is_scheduled_job(job))
         state = job_state(job)
         counts[state] = counts.get(state, 0) + 1
-    return {'total': total, 'counts': counts, 'scheduled': scheduled}
+        when = next_run(job)
+        if when:
+            label = getattr(job, 'label', None) or ' '.join(str(arg) for arg in (getattr(job, 'sysargs', None) or []))
+            upcoming.append({'name': str(getattr(job, 'name', name) or name), 'when': when, 'label': str(label)})
+    upcoming.sort(key=lambda item: (parse_timestamp(item['when']), item['name']))
+    return {
+        'total': total,
+        'counts': counts,
+        'scheduled': scheduled,
+        'next_runs': upcoming[:MAX_NEXT_RUNS],
+    }
 
 
 def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None, definitions=None, runs=None) -> List[Dict[str, Any]]:
@@ -421,7 +551,7 @@ def recent_runs(instance: Any, limit: int = MAX_RUNS, viewer: Any = None, defini
     every minute takes one row). Only runs with a pipe `viewer` (by default the request's) may
     see, the other pipes anonymized.
     """
-    runs = _get_runs(instance, 100, viewer=viewer) if runs is None else runs
+    runs = _get_runs(instance, MAX_RECENT_READ, viewer=viewer) if runs is None else runs
     try:
         definitions = _list_pipelines(instance, viewer=viewer) if definitions is None else definitions
     except Exception:
@@ -463,10 +593,10 @@ def engine_summary(instance: Any, viewer: Any = None) -> Dict[str, Any]:
     Member access is checked by the run reader, rather than walking a graph for each saved name.
     """
     definitions = _list_pipelines(instance, viewer=viewer)
-    runs = _get_runs(instance, HISTORY_LIMIT if definitions else 100, viewer=viewer)
+    runs = _get_runs(instance, MAX_RECENT_READ, viewer=viewer)
     return {
         'pipelines': pipelines_summary(instance, viewer=viewer, definitions=definitions, runs=runs),
-        'runs': recent_runs(instance, viewer=viewer, definitions=definitions, runs=runs[:100]),
+        'runs': recent_runs(instance, viewer=viewer, definitions=definitions, runs=runs),
     }
 
 
@@ -499,6 +629,26 @@ def time_ago(text: Any, now: Optional[datetime] = None) -> str:
         return f"{int(seconds // 3600)} h ago"
     if seconds < 30 * 86400:
         return f"{int(seconds // 86400)} d ago"
+    return moment.strftime('%Y-%m-%d')
+
+
+def time_until(text: Any, now: Optional[datetime] = None) -> str:
+    """`in 30 s`, `in 5 min`, `in 3 h`, `in 2 d`, else the date; `due` once the time has passed."""
+    moment = parse_timestamp(text)
+    if moment is None:
+        return ''
+    now = now or datetime.now(timezone.utc)
+    seconds = (moment - now).total_seconds()
+    if seconds <= 0:
+        return 'due'
+    if seconds < 60:
+        return f"in {int(seconds)} s"
+    if seconds < 3600:
+        return f"in {int(seconds // 60)} min"
+    if seconds < 86400:
+        return f"in {int(seconds // 3600)} h"
+    if seconds < 30 * 86400:
+        return f"in {int(seconds // 86400)} d"
     return moment.strftime('%Y-%m-%d')
 
 
@@ -805,12 +955,38 @@ def build_pipelines_body(summary: Dict[str, Any], instance_query: Optional[str] 
     return children
 
 
+def build_next_runs(next_runs: List[Dict[str, Any]], now: Optional[datetime] = None) -> Any:
+    """Next runs: the jobs waiting for their next lap, soonest first, each linked to its job."""
+    rows = []
+    for item in next_runs:
+        when = item.get('when', None)
+        moment = parse_timestamp(when)
+        exact = moment.strftime('%Y-%m-%d %H:%M:%S UTC') if moment is not None else str(when or '')
+        rows.append(html.Li([
+            dcc.Link(
+                item['name'],
+                href='/dash/jobs/' + quote(str(item['name']), safe=''),
+                className='overview-next-job',
+                title=item.get('label', None) or item['name'],
+            ),
+            html.Span(time_until(when, now), className='overview-when', title=exact),
+        ], className='overview-row overview-next-run'))
+    return html.Section([
+        html.H3('Next runs', className='overview-subheading'),
+        html.Ul(rows, className='overview-list', id='overview-next-runs'),
+    ], className='overview-jobs-section')
+
+
 def build_jobs_body(summary: Dict[str, Any]) -> List[Any]:
-    """The Jobs tile: the jobs by state, each linked to the Jobs page filtered by it."""
+    """
+    The Jobs tile: the jobs by state, each linked to the Jobs page filtered by it, and the next
+    runs of the jobs waiting for their next lap.
+    """
     shown = [
         (state, label) for state, label in JOB_STATES
         if state != 'paused' or summary['counts'].get(state, 0)
     ]
+    next_runs = summary.get('next_runs', None) or []
     return [
         _headline(
             _stat(summary['total'], '/dash/jobs', 'All jobs', 'overview-jobs-total'),
@@ -823,7 +999,7 @@ def build_jobs_body(summary: Dict[str, Any]) -> List[Any]:
              f'overview-jobs-{state}')
             for state, label in shown
         ]),
-    ]
+    ] + ([build_next_runs(next_runs)] if next_runs else [])
 
 
 def build_runs_body(runs: List[Dict[str, Any]], instance_query: Optional[str] = None) -> List[Any]:

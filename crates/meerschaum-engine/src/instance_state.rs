@@ -390,6 +390,19 @@ pub fn run_from_doc(doc: &Doc) -> Option<RunRow> {
     })
 }
 
+/// A run as [`InstanceState::run_activity_rows`] reads it: when it started and how it ended.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivityRow {
+    /// The run ID (name, UTC start time, and collision suffix).
+    pub run_id: String,
+    /// When the run started.
+    pub started: DateTime<Utc>,
+    /// When the run ended (`None` while running).
+    pub finished: Option<DateTime<Utc>>,
+    /// Whether it succeeded.
+    pub success: Option<bool>,
+}
+
 /// Serializes sequence allocation for one `(instance, pipe_ref)` in this process.
 type SeqLock = Arc<tokio::sync::Mutex<()>>;
 
@@ -658,6 +671,54 @@ impl InstanceState {
         runs.retain(|run| since.is_none_or(|since| run.started >= since));
         runs.truncate(limit);
         Ok(runs)
+    }
+
+    /// The runs started at or after `since`, newest first, at most `limit`, with only the
+    /// columns that say when a run started and how it ended: `(run_id, started, finished,
+    /// success)`. The selection, targets and messages are not read, so a day of a pipeline
+    /// that runs every few seconds stays a small read.
+    pub async fn run_activity_rows(
+        &self,
+        since: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<ActivityRow>, StateError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn(&self.home)?;
+        let pipe = engine_pipe_on(conn.as_ref(), &self.home, EnginePipe::Runs)
+            .await
+            .map_err(|error| unreachable(&self.home, error))?;
+        let query = DataQuery {
+            select_columns: Some(
+                ["run_id", "started", "finished", "success"]
+                    .map(String::from)
+                    .to_vec(),
+            ),
+            limit: i64::try_from(limit).ok(),
+            order: Some("desc".into()),
+            begin: Some(DateBound::utc(since.with_nanosecond(0).unwrap_or(since))),
+            ..Default::default()
+        };
+        let mut rows: Vec<ActivityRow> = match conn.get_pipe_data(&pipe, &query).await {
+            Ok(Some(frame)) => frame_to_docs(&frame)
+                .iter()
+                .filter_map(|doc| {
+                    Some(ActivityRow {
+                        run_id: doc_str(doc, "run_id")?,
+                        started: doc_dt(doc, "started")?,
+                        finished: doc_dt(doc, "finished"),
+                        success: doc_bool(doc, "success"),
+                    })
+                })
+                .filter(|row| row.started >= since)
+                .collect(),
+            Ok(None) => Vec::new(),
+            Err(error) => return Err(unreachable(&self.home, error)),
+        };
+        rows.sort_by(|a, b| b.started.cmp(&a.started).then(b.run_id.cmp(&a.run_id)));
+        rows.truncate(limit);
+        Ok(rows)
     }
 
     /// Complete the boundary second, including fractional timestamps and ties. Equality on

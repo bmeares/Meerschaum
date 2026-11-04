@@ -374,12 +374,82 @@ def install_callback_guard(dash_app: Any) -> bool:
     return True
 
 
+#: The header of the `409` answering a callback this server does not have (a page loaded from
+#: an older version of the console): `assets/session_guard.js` reloads the page.
+RELOAD_HEADER: str = 'X-Mrsm-Reload'
+_STALE_ATTR: str = '_mrsm_stale_layout_guard'
+_stale_outputs_logged: set = set()
+
+
+def _stale_layout_response(output: str):
+    """
+    The `409` answering a callback request for an output no callback writes: the page was
+    loaded from an older layout (a tab left open across an upgrade). The browser reloads it.
+    """
+    from flask import Response
+    body = json.dumps({
+        'success': False,
+        'message': "This page is out of date. Reload it to continue.",
+        'reload': True,
+    })
+    response = Response(body, status=409, mimetype='application/json')
+    response.headers[RELOAD_HEADER] = '1'
+    response.headers['Cache-Control'] = 'no-store'
+    if output not in _stale_outputs_logged and len(_stale_outputs_logged) < 256:
+        _stale_outputs_logged.add(output)
+        from meerschaum.utils.warnings import warn
+        warn(
+            "A console page loaded from an older version requested a callback this server "
+            f"does not have (output '{output[:200]}'); the browser was asked to reload it. "
+            "Later requests for it are not logged.",
+            stack=False,
+        )
+    return response
+
+
+def install_stale_layout_guard(dash_app: Any) -> bool:
+    """
+    Answer a callback request for an output no callback writes with `409` and `X-Mrsm-Reload`
+    (logged once per output) instead of Dash's `KeyError` (a `500` and a traceback on every
+    poll of a tab opened before an upgrade). Installed once, whether or not callbacks need a
+    session.
+    """
+    if getattr(dash_app, _STALE_ATTR, False):
+        return True
+    setattr(dash_app, _STALE_ATTR, True)
+    server = dash_app.server
+
+    @server.before_request
+    def _mrsm_reload_stale_layouts():
+        from flask import request
+        path = request.path or ''
+        if request.method != 'POST' or not path.rstrip('/').endswith('/' + CALLBACK_ROUTE):
+            return None
+        body = request.get_json(silent=True)
+        output = body.get('output', None) if isinstance(body, dict) else None
+        if not isinstance(output, str) or not output:
+            return None
+        ### Dash fills `callback_map` on its first request (`_setup_server`, idempotent).
+        setup = getattr(dash_app, '_setup_server', None)
+        if callable(setup):
+            try:
+                setup()
+            except Exception:
+                return None
+        if output in (getattr(dash_app, 'callback_map', None) or {}):
+            return None
+        return _stale_layout_response(output)
+
+    return True
+
+
 def secure_console(dash_app: Any) -> Dict[str, Any]:
     """
-    Apply the console's callback rules to the built Dash app: mark the page router public and
-    install the guard. Return `{'router': n_marked, 'guard': bool}`.
+    Apply the console's callback rules to the built Dash app: mark the page router public,
+    install the guard and answer callbacks of out-of-date pages with a reload. Return
+    `{'router': n_marked, 'guard': bool, 'stale': bool}`.
     """
-    return {
-        'router': mark_console_router_public(dash_app),
-        'guard': install_callback_guard(dash_app),
-    }
+    ### The session guard runs first: a visitor without a session signs in before anything else.
+    router = mark_console_router_public(dash_app)
+    guard = install_callback_guard(dash_app)
+    return {'router': router, 'guard': guard, 'stale': install_stale_layout_guard(dash_app)}

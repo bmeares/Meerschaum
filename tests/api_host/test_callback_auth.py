@@ -449,3 +449,48 @@ print('JSON:' + json.dumps(out))
     assert out['anonymous'] == 401
     assert out['ghost'] == 401
     assert out['token'] not in (401, 403, 404), out
+
+
+def test_a_page_from_an_older_console_is_asked_to_reload(sandbox):
+    """
+    A tab opened before an upgrade polls callbacks the new server does not have: a signed-in
+    request gets `409` + `X-Mrsm-Reload` (logged once per output), not Dash's `500` per poll.
+    """
+    root, plugins = sandbox
+    write_plugin(plugins, 'cbauth', PLUGIN)
+    code = PRELUDE + '''
+import io, contextlib
+CBA_SESSION = '00000000-0000-4000-8000-0000000cba02'
+from meerschaum.api import get_api_connector as _get_instance
+from meerschaum.core import User as _User
+_instance = _get_instance()
+_instance.register_user(_User('bob', 'bob-password-9', instance=_instance))
+sessions.set_session(CBA_SESSION, {'username': 'bob'})
+stale = '..performance-body.children...performance-old.options..'
+logs = io.StringIO()
+with contextlib.redirect_stderr(logs), contextlib.redirect_stdout(io.StringIO()):
+    out['stale'] = [
+        fire('cba-private-out', click('cba-private-btn'), cookies={'mrsm-session-id': CBA_SESSION},
+             output=stale)
+        for _ in range(3)
+    ]
+    out['headers'] = dict(client.post('/dash/_dash-update-component', json={
+        'output': stale, 'outputs': [], 'inputs': [], 'changedPropIds': [], 'state': [],
+    }, cookies={'mrsm-session-id': CBA_SESSION}).headers)
+out['logged'] = logs.getvalue().count('older version')
+out['anonymous'] = fire('cba-private-out', click('cba-private-btn'), output=stale)
+out['current'] = fire('cba-private-out', click('cba-private-btn'), cookies={'mrsm-session-id': CBA_SESSION})
+print('JSON:' + json.dumps(out))
+'''
+    for name, extra_env in (('guarded', {}), ('off', {
+        'MRSM_CONFIG': json.dumps({'api': {'dash': {'callbacks_require_session': False}}}),
+    })):
+        out = _out(run_python(root, plugins, code, extra_env=extra_env))
+        for response in out['stale']:
+            assert response['status'] == 409, (name, response)
+            assert response['body']['reload'] is True
+        assert out['headers'].get('x-mrsm-reload') == '1', (name, out['headers'])
+        assert out['logged'] == 1, (name, out['logged'])
+        assert out['current']['status'] == 200, (name, out['current'])
+        ### Without a session, signing in comes first.
+        assert out['anonymous']['status'] == (401 if name == 'guarded' else 409), (name, out['anonymous'])

@@ -325,6 +325,23 @@ pub fn new_named_run_id(name: &str) -> String {
     )
 }
 
+/// The name a run ID was made from (`daily` for `daily-2026-11-04T01-03-05.201182Z-0a1b2c3d`),
+/// or `None` for an ID without the engine's timestamp and collision suffix. The name is the
+/// slug [`new_named_run_id`] made (characters other than ASCII letters, digits, `-`, `_` and `.`
+/// become `-`, at most 128).
+pub fn run_name(run_id: &str) -> Option<&str> {
+    let (rest, suffix) = run_id.rsplit_once('-')?;
+    // `-YYYY-MM-DDTHH-MM-SS.ffffffZ` is 28 bytes.
+    let split = rest.len().checked_sub(28)?;
+    let (name, timestamp) = (rest.get(..split)?, rest.get(split + 1..)?);
+    (rest.as_bytes().get(split) == Some(&b'-')
+        && !name.is_empty()
+        && suffix.len() == 8
+        && suffix.bytes().all(|b| b.is_ascii_hexdigit())
+        && chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H-%M-%S%.6fZ").is_ok())
+    .then_some(name)
+}
+
 /// Match a complete pipeline name before the generated timestamp and collision suffix.
 pub fn run_has_name(run_id: &str, name: &str) -> bool {
     let Some(rest) = run_id.strip_prefix(&format!("{name}-")) else {
@@ -385,5 +402,35 @@ mod tests {
         let named = new_named_run_id("daily-totals");
         assert!(run_has_name(&named, "daily-totals"));
         assert!(!run_has_name(&named, "daily"));
+    }
+
+    #[test]
+    fn run_names_come_back_from_run_ids() {
+        assert_eq!(
+            run_name(&new_named_run_id("daily-totals")),
+            Some("daily-totals")
+        );
+        assert_eq!(
+            run_name(&new_named_run_id("daily totals")),
+            Some("daily-totals")
+        );
+        assert_eq!(run_name(&new_named_run_id("a.b_c-1")), Some("a.b_c-1"));
+        assert_eq!(run_name(&new_run_id()), Some("pipeline"));
+        assert_eq!(
+            run_name("x-2026-11-04T01-03-05.201182Z-0a1b2c3d"),
+            Some("x")
+        );
+        for invalid in [
+            "",
+            "daily",
+            "-2026-11-04T01-03-05.201182Z-0a1b2c3d",
+            "x-2026-11-04T01-03-05.201182Z-0a1b2c3",
+            "x-2026-11-04T01-03-05.201182Z-0a1b2c3g",
+            "x_2026-11-04T01-03-05.201182Z-0a1b2c3d",
+            "x-2026-13-04T01-03-05.201182Z-0a1b2c3d",
+            "é-2026-11-04T01-03-05.201182Z-0a1b2c3d€",
+        ] {
+            assert_eq!(run_name(invalid), None, "{invalid}");
+        }
     }
 }

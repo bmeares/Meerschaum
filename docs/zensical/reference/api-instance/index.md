@@ -152,7 +152,20 @@ api:
 
 The default stays under Docker's stop timeout (10 seconds, then `SIGKILL`). If you raise `grace_seconds`, also raise the time your supervisor waits: `stop_grace_period` in Docker Compose, `docker stop --time`, or `terminationGracePeriodSeconds` in Kubernetes. `mrsm stop job` waits for an API job's grace period plus 2 seconds before it signals again. With the local executor, an explicit `--timeout` wins.
 
-Behind a load balancer, probe `GET /healthcheck/ready`. It answers `503` with `"The server is shutting down."` once the server drains, and `"The server is starting."` until the web console's host is up. `GET /healthcheck` is unchanged, so uptime monitors keep matching it. A proxy that retries the next upstream on a refused connection or a `503` (NGINX's `proxy_next_upstream error http_503`) moves clients to another server during a restart.
+Behind a load balancer, probe `GET /healthcheck/ready`. It answers `200` only once the server can serve everything it mounts, including the Python API host that serves Python plugins and the web console. Otherwise it answers `503` with a `reason`:
+
+| `reason` | `message` | When |
+|---|---|---|
+| `starting` | `"The server is starting."` | The server has started but its API host has not answered yet. |
+| `host_unavailable` | `"The API host (Python plugins and the web console) is not serving."` | The API host is needed but not serving: it refused to start, crashed and is restarting, or stopped answering its health checks. No timeout turns this into a `200`; probing it starts a stopped host again. |
+| `draining` | `"The server is shutting down."` | The server got `SIGTERM` or `SIGINT` and is finishing requests in progress. |
+| `instance_unavailable` | `"Failed to connect to instance connector."` | The instance does not answer. |
+
+```json
+{"success": false, "message": "The server is shutting down.", "reason": "draining"}
+```
+
+A server whose plugins need no API host (only Rust plugins, or `--no-dash` without Python plugins) does not wait for one. `GET /healthcheck` is unchanged, so uptime monitors keep matching it. A proxy that retries the next upstream on a refused connection or a `503` (NGINX's `proxy_next_upstream error http_503`) moves clients to another server during a restart.
 
 ### Docker
 

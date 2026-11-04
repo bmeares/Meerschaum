@@ -183,9 +183,10 @@ def test_job_health_reports_the_laps_of_a_loop(local_jobs):
     health = job.health
     assert set(health) == {
         'state', 'last_success', 'last_lap', 'consecutive_failures',
-        'expected_interval_seconds', 'message',
+        'expected_interval_seconds', 'next_run', 'message',
     }
     assert health['state'] == 'stopped', health
+    assert health['next_run'] is None
     assert job.start()[0]
     assert _wait_for(lambda: job.health['state'] == 'healthy', timeout=60), job.health
     health = job.health
@@ -195,6 +196,19 @@ def test_job_health_reports_the_laps_of_a_loop(local_jobs):
     assert health['last_success'].endswith('+00:00'), health
     assert job.stop()[0]
     assert _wait_for(lambda: job.health['state'] == 'stopped'), job.health
+
+
+def test_job_health_says_when_a_waiting_loop_runs_next(local_jobs):
+    """`job.health['next_run']`: while a loop waits for its next lap, when that lap is due."""
+    from datetime import datetime, timedelta, timezone
+    job = local_jobs(['show', 'version', '--loop', '--min-seconds', '120'])
+    assert job.start()[0]
+    assert _wait_for(lambda: job.health.get('next_run'), timeout=60), job.health
+    due = datetime.fromisoformat(job.health['next_run'])
+    now = datetime.now(timezone.utc)
+    assert now < due <= now + timedelta(seconds=121), (now, due)
+    assert job.stop()[0]
+    assert _wait_for(lambda: job.health.get('next_run') is None), job.health
 
 
 def test_a_job_that_does_not_lap_has_unknown_health(local_jobs):

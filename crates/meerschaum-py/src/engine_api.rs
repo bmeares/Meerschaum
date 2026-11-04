@@ -693,6 +693,34 @@ pub fn engine_runs(py: Python<'_>, request: &str) -> PyResult<String> {
     to_json_string(&runs)
 }
 
+/// `engine_run_activity(request) -> json`: the runs started since `since` (required), counted
+/// per `bucket_seconds` (default 3600), run name and status, from at most `limit` runs (default
+/// 100000) read without their selections or nodes (`RunActivity`).
+#[pyfunction]
+pub fn engine_run_activity(py: Python<'_>, request: &str) -> PyResult<String> {
+    let request = parse_request(request)?;
+    let since = since_field(&request)?.ok_or_else(|| value_err("`since` is required."))?;
+    let bucket_seconds = match request.get("bucket_seconds") {
+        None | Some(Json::Null) => 3600,
+        Some(value) => value
+            .as_i64()
+            .filter(|n| *n > 0)
+            .ok_or_else(|| value_err("`bucket_seconds` must be a positive integer."))?,
+    };
+    let limit = match request.get("limit") {
+        None | Some(Json::Null) => 100_000,
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| value_err("`limit` must be a non-negative integer."))?
+            as usize,
+    };
+    let (session, reader) = reader(py, &request)?;
+    let activity = py
+        .detach(|| session.block_on(reader.run_activity(since, bucket_seconds, limit)))
+        .map_err(|e| runtime_err(e.to_string()))?;
+    to_json_string(&activity)
+}
+
 /// Private host authorization evidence; stored node identities never leave this call.
 #[pyfunction]
 pub fn engine_run_generations(py: Python<'_>, request: &str) -> PyResult<String> {

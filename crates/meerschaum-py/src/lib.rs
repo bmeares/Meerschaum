@@ -125,6 +125,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(engine_api::engine_runs, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_run_generations, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_run_detail, m)?)?;
+    m.add_function(wrap_pyfunction!(engine_api::engine_run_activity, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_run_events, m)?)?;
 
     // D14 runway (wave 8)
