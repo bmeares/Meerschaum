@@ -29,6 +29,7 @@
 //! | [`tls`] | Native HTTPS (`--keyfile` / `--certfile`): rustls, HTTP/2, certificate reloads |
 //! | [`sql_guard`] | What non-administrators may put in a pipe's SQL definition through the API |
 //! | [`lifecycle`] | Starting, serving and draining: graceful shutdown, `/healthcheck/ready` |
+//! | [`plugin_tokens`] | Tokens native plugins mint and revoke for their callers (`host::mint_token`) |
 //!
 //! All pipe operations go through `Arc<dyn InstanceConnector>`.
 
@@ -51,6 +52,7 @@ pub mod mcp;
 pub mod native;
 pub mod openapi;
 pub mod pipe_methods;
+pub mod plugin_tokens;
 pub mod proxy;
 pub mod query;
 pub mod ratelimit;

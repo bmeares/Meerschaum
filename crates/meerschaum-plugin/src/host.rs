@@ -1,8 +1,11 @@
 //! Trusted-library loading and safe connector adapters, and, for plugin authors, the host calls
 //! that are not about one Pipe ([`pipe`], [`read_sql`], [`exec_sql`], [`plugin_config`],
-//! [`write_plugin_config`], [`config`]; see [`crate::callbacks`]).
+//! [`write_plugin_config`], [`config`], and in API requests [`mint_token`], [`revoke_token`] and
+//! [`draining`]; see [`crate::callbacks`]).
+pub use crate::callbacks::MintedToken;
 pub use crate::callbacks::calls::{
-    available, config, exec_sql, pipe, plugin_config, read_sql, write_plugin_config,
+    available, config, draining, exec_sql, mint_token, pipe, plugin_config, read_sql, revoke_token,
+    write_plugin_config,
 };
 use crate::{
     Frame, Result,

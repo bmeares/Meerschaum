@@ -1623,6 +1623,70 @@ impl PluginHost {
         Ok(meerschaum_engine::Engine::new(Arc::new(registry), config))
     }
 
+    /// `host::mint_token(...)` and `host::revoke_token(...)`: only during an API request, for its
+    /// caller, with the custom scopes the calling plugin declares
+    /// ([`meerschaum_server::plugin_tokens`] has the rules).
+    async fn serve_token(
+        &self,
+        call: &meerschaum_plugin::HostCall,
+    ) -> HostResult<serde_json::Value> {
+        use meerschaum_plugin::callbacks::method as m;
+        use meerschaum_server::plugin_tokens;
+        let name = format!("host::{}()", call.method);
+        let Some(api) = &self.api else {
+            return Err(host_error(format!(
+                "`{name}` works only during an API request (a route, console page or MCP \
+                 entry), for its caller."
+            )));
+        };
+        let allowed = plugin_tokens::plugin_scopes(meerschaum_plugin::manifest::declared_scopes(
+            self.env()?.natives.plugin_entry(&call.plugin),
+        ));
+        if call.method == m::REVOKE_TOKEN {
+            let id = call.str_arg("id").unwrap_or_default();
+            return plugin_tokens::revoke(
+                &api.state,
+                api.principal.as_ref(),
+                &call.plugin,
+                &allowed,
+                id,
+            )
+            .await
+            .map(|revoked| tuple_json(&revoked))
+            .map_err(host_error);
+        }
+        let scopes: Vec<String> = match call.arg("scopes") {
+            serde_json::Value::Null => Vec::new(),
+            value => serde_json::from_value(value.clone())
+                .map_err(|e| host_error(format!("invalid `scopes`: {e}")))?,
+        };
+        let expiration = match call.bound("expiration")? {
+            None => None,
+            Some(meerschaum_plugin::Bound::Int(seconds)) => Some(
+                chrono::DateTime::from_timestamp(seconds, 0)
+                    .ok_or_else(|| host_error(format!("invalid `expiration`: {seconds}")))?,
+            ),
+            Some(bound) => Some(
+                bound
+                    .to_datetime()
+                    .map_err(|_| host_error(format!("invalid `expiration`: '{bound}'")))?,
+            ),
+        };
+        plugin_tokens::mint(
+            &api.state,
+            api.principal.as_ref(),
+            &api.scopes,
+            &call.plugin,
+            &allowed,
+            call.str_arg("label").unwrap_or_default(),
+            &scopes,
+            expiration,
+        )
+        .await
+        .map(|minted| minted.to_json())
+        .map_err(host_error)
+    }
+
     async fn serve(
         &self,
         request: &meerschaum_plugin::Request,
@@ -1633,6 +1697,12 @@ impl PluginHost {
         use meerschaum_plugin::callbacks::method as m;
         let json = HostReply::json;
         match call.method.as_str() {
+            m::DRAINING => Ok(json(serde_json::json!(
+                self.api
+                    .as_ref()
+                    .is_some_and(|api| api.state.lifecycle.is_draining())
+            ))),
+            m::MINT_TOKEN | m::REVOKE_TOKEN => self.serve_token(call).await.map(json),
             m::PLUGIN_CONFIG => Ok(json(self.env()?.plugin_config(&call.plugin))),
             m::WRITE_PLUGIN_CONFIG => {
                 let written = self

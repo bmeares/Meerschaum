@@ -181,6 +181,18 @@ impl HostServices for Memory {
                 *self.config.lock().unwrap() = call.arg("config").clone();
                 HostReply::json(json!([true, "Wrote"]))
             }
+            // The host enforces who may mint what; this one records the arguments.
+            "mint_token" => HostReply::json(json!({
+                "id": "00000000-0000-4000-8000-000000000002", "label": call.arg("label"),
+                "scopes": call.arg("scopes"),
+                "expiration": (call.arg("expiration") == 1_900_000_000).then_some("2030-03-17T17:46:40Z"),
+                "secret": "synthetic-secret", "api_key": "mrsm-key:synthetic",
+            })),
+            "revoke_token" => HostReply::json(json!([
+                true,
+                format!("revoked {}", call.str_arg("id").unwrap_or_default())
+            ])),
+            "draining" => HostReply::json(json!(false)),
             other => return Err(meerschaum_plugin::Error::Unsupported(other.into())),
         })
     }
@@ -448,6 +460,78 @@ fn single_file_plugins_make_every_host_call_with_rows() {
         .unwrap()
         .to_string();
     assert!(error.contains("host calls are unavailable"), "{error}");
+}
+
+const TOKENS: &str = r#"
+/// A device's heartbeat: mint its successor, revoke the token it called with.
+#[api_route(POST, "/devices/heartbeat", scopes = ["devices:ingest"])]
+fn heartbeat(request: &RouteRequest) -> Result<Value> {
+    let old = request.principal.as_ref().and_then(|p| p.token_id.clone()).unwrap_or_default();
+    let next = host::mint_token("device-17", &["devices:ingest"], Some(Bound::Int(1_900_000_000)))?;
+    let revoked = host::revoke_token(&old)?;
+    Ok(json!({"next": next.to_json(), "debug": format!("{next:?}"), "revoked": revoked.message,
+        "draining": host::draining()?}))
+}
+"#;
+
+#[test]
+fn single_file_routes_mint_revoke_and_see_the_drain() {
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    std::fs::create_dir(&plugins).unwrap();
+    std::fs::write(plugins.join("devices.rs"), TOKENS).unwrap();
+    let found = discovery::discover_report_in(&[plugins], &root.path().join("build"));
+    assert!(found.skipped.is_empty(), "{:?}", found.skipped);
+    support::compile_single_file::compile(&found.candidates[0]);
+    // SAFETY: the fixture above is trusted code built with this SDK.
+    let plugin = unsafe { LoadedPlugin::load(&found.candidates[0].library) }.unwrap();
+    let route = RouteRequest {
+        name: "heartbeat".into(),
+        method: "POST".into(),
+        path: "/devices/heartbeat".into(),
+        principal: Some(
+            serde_json::from_value(json!({"kind": "token",
+                "token_id": "00000000-0000-4000-8000-000000000001", "label": "device-17"}))
+            .unwrap(),
+        ),
+        ..Default::default()
+    };
+    let host = Memory::default();
+    let response = plugin.api_route_with_host(&route, Some(&host)).unwrap();
+    let body: Value = serde_json::from_slice(&response.body).unwrap();
+    assert_eq!(response.status, 200, "{body}");
+    assert_eq!(body["next"]["label"], "device-17");
+    assert_eq!(body["next"]["scopes"], json!(["devices:ingest"]));
+    assert_eq!(body["next"]["expiration"], "2030-03-17T17:46:40Z");
+    assert_eq!(body["next"]["api_key"], "mrsm-key:synthetic");
+    assert!(
+        !body["debug"].as_str().unwrap().contains("synthetic"),
+        "{body}"
+    );
+    assert_eq!(
+        body["revoked"],
+        "revoked 00000000-0000-4000-8000-000000000001"
+    );
+    assert_eq!(body["draining"], false);
+    assert_eq!(
+        host.calls.lock().unwrap().clone(),
+        ["mint_token", "revoke_token", "draining"]
+    );
+
+    // A host from before these calls names the release that has them.
+    struct Old;
+    impl HostServices for Old {
+        fn call(&self, _: &Request, method: &str, _: Option<Frame>) -> Result<Value> {
+            Err(meerschaum_plugin::Error::Unsupported(method.into()))
+        }
+    }
+    let error = plugin
+        .api_route_with_host(&route, Some(&Old))
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains("`host::mint_token()`"), "{error}");
+    assert!(error.contains("upgrade Meerschaum to 5.0.0rc34"), "{error}");
 }
 
 const STREAMS: &str = r#"

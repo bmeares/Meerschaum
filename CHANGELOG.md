@@ -108,7 +108,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - List a Pipeline's scheduled jobs without querying every job's status.
 - Drain the API on shutdown: it stops accepting connections, finishes requests in flight within `api.shutdown.grace_seconds` (8 by default, an upper bound), and ends streams at once. `GET /healthcheck/ready` returns 503 while it starts or drains, and while the Python API host it needs is not serving (no timeout makes it 200); a 503 names its `reason`.
 - Report a job killed by a signal as failed and name the signal, instead of showing a stale or successful result.
-- Run a scheduled job once at its first fire after a restart between two fires, instead of twice in a row.
+- Run a scheduled job once at its first fire after a restart between two fires, instead of twice in a row, and keep an interval such as `daily` counted from that fire, not from the restart.
 - A plugin action that loops by itself reports its laps with `mrsm.jobs.report_lap(success, message, next_in=...)`, so its job shows health and its next run.
 - Ask a console tab opened before an upgrade to reload when it requests a callback the server no longer has, instead of answering every poll with an error.
 - Report an error raised inside an MCP tool as that error and where it was raised, not as invalid arguments.
@@ -120,6 +120,8 @@ See [Stack upgrades](https://meerschaum.io/reference/stack/upgrades/) and [sync 
 #### Rust plugins and applications
 
 A plugin can be one `.rs` file, or a crate using the native SDK. Applications can embed the Pipe and engine APIs without compiling the CLI. The [developer guides](https://meerschaum.io/docs/) cover both Python and Rust.
+
+- A native plugin's routes mint and revoke API tokens with the plugin's own scopes for their caller (`host::mint_token`, `host::revoke_token`), so a device can be provisioned and rotate its own token, and a long poll ends as soon as the server drains (`host::draining()`). See [Tokens and draining](https://meerschaum.io/reference/plugins/rust-plugins/routes-and-mcp/#tokens-and-draining).
 
 #### Before upgrading
 

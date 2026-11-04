@@ -361,6 +361,26 @@ pub fn complete(manifest: Value, name: &str, version: &str) -> Value {
     Value::Object(manifest)
 }
 
+/// The scopes a plugin's manifest entry declares: every `scopes` of its `api_routes`,
+/// `mcp_tools`, `mcp_resources` and `mcp_prompts`, in order, without duplicates and without `*`.
+/// These are the scopes a host lets the plugin put on tokens it mints (less the core ones).
+pub fn declared_scopes(entry: &Value) -> Vec<String> {
+    let mut scopes: Vec<String> = Vec::new();
+    for key in ["api_routes", "mcp_tools", "mcp_resources", "mcp_prompts"] {
+        for item in entry[key].as_array().into_iter().flatten() {
+            for scope in item["scopes"].as_array().into_iter().flatten() {
+                if let Some(scope) = scope.as_str()
+                    && scope != "*"
+                    && !scopes.iter().any(|s| s == scope)
+                {
+                    scopes.push(scope.to_string());
+                }
+            }
+        }
+    }
+    scopes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +424,24 @@ mod tests {
         assert_eq!(manifest["pre_sync_hooks"], json!([]));
         assert_eq!(manifest["meerschaum_version"], env!("CARGO_PKG_VERSION"));
         assert!(manifest["plugins"].get(PLUGIN_KEY).is_none());
+    }
+
+    #[test]
+    fn declared_scopes_are_those_of_routes_and_mcp_entries() {
+        let entry = json!({
+            "api_routes": [
+                {"name": "a", "path": "/a", "scopes": ["devices:ingest", "pipes:read"]},
+                {"name": "b", "path": "/b", "scopes": ["devices:ingest", "*"], "host_scopes": ["devices:host"]},
+            ],
+            "mcp_tools": [{"name": "t", "scopes": ["devices:report"]}],
+            "mcp_prompts": [{"name": "p", "scopes": [7]}],
+            "web_pages": [{"path": "/dash/x", "scopes": ["devices:page"]}],
+        });
+        assert_eq!(
+            declared_scopes(&entry),
+            ["devices:ingest", "pipes:read", "devices:report"]
+        );
+        assert!(declared_scopes(&json!({})).is_empty());
     }
 
     #[test]

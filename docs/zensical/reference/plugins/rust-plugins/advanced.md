@@ -709,6 +709,9 @@ fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
 | `host::plugin_config()` | `Value` (`null` when unset) | `get_plugin_config()` |
 | `host::write_plugin_config(&json!({...}))` | `SuccessTuple` | `write_plugin_config({...})` |
 | `host::config(&["meerschaum", "instance"])` | `Value` | `get_config('meerschaum', 'instance')` |
+| `host::mint_token(label, &["devices:ingest"], expiration)` | `MintedToken` | `POST /tokens/register` for the caller, with the plugin's own scopes ([routes only](routes-and-mcp.md#tokens-and-draining)) |
+| `host::revoke_token(id)` | `SuccessTuple` | `DELETE /tokens/{id}` of a token the plugin may revoke |
+| `host::draining()` | `bool` | whether the API server is shutting down (`false` outside a request) |
 
 "Rows" are `Vec<Value>` JSON objects in a single-file plugin (datetimes as ISO strings) and an
 Arrow-backed `Frame` in a Cargo plugin (`frame.to_rows()` gives the JSON objects). `begin` and
@@ -764,6 +767,8 @@ the core API would require:
 | `exec_sql` | `actions:execute`, and a caller who may run actions (below) |
 | `config` | every scope (`*`: an administrator, or `--no-auth`) |
 | `plugin_config`, `write_plugin_config` | none: the plugin's own settings |
+| `mint_token`, `revoke_token` | a signed-in caller holding each scope minted; only the plugin's own custom scopes ([rules](routes-and-mcp.md#tokens-and-draining)) |
+| `draining` | none |
 
 - **Pipes** are reached only on the instances the server allows (`api:permissions:instances`),
   and never Meerschaum's internal `mrsm` pipes. The caller must be able to see the pipe, and
@@ -808,8 +813,9 @@ the core API would require:
   of the local user.
 
 A host older than these calls answers each new one with an error such as "This Meerschaum
-cannot run `pipe.get_data()` for plugins: upgrade Meerschaum to 5.0.0rc15 or later."; the
-original `pipe.get_sync_time()` and `pipe.sync(data)` still work there.
+cannot run `pipe.get_data()` for plugins: upgrade Meerschaum to 5.0.0rc15 or later." (5.0.0rc34
+for `mint_token`, `revoke_token` and `draining`); the original `pipe.get_sync_time()` and
+`pipe.sync(data)` still work there.
 
 An integer-axis sync plugin can be just:
 

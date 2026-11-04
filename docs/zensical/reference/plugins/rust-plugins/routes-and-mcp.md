@@ -166,6 +166,64 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
   (or `mrsm start mcp`) starts. Installing, updating or removing a native plugin takes effect
   after a restart; unlike Python plugins, the running server does not pick it up.
 
+## 🔑 Tokens and draining
+
+A plugin that serves devices can issue their tokens itself. `host::mint_token(label, scopes,
+expiration)` registers an API token for the request's caller and returns it once, secret and API
+key included (`MintedToken`: `id`, `label`, `scopes`, `expiration`, `secret`, `api_key`;
+`token.to_json()` in a single-file plugin). `host::revoke_token(id)` deletes one. Together they
+provision and rotate per-device credentials:
+
+```rust
+/// An administrator provisions a device (a token with only `devices:ingest`).
+#[api_route(POST, "/devices/{id}/provision", scopes = ["devices:admin"])]
+fn provision(request: &RouteRequest) -> Result<Value> {
+    let device = request.path_param("id").unwrap_or_default();
+    Ok(host::mint_token(device, &["devices:ingest"], None)?.to_json())
+}
+
+/// The device's heartbeat, sent with its token: hand back a successor, revoke the old one.
+#[api_route(POST, "/devices/heartbeat", scopes = ["devices:ingest"])]
+fn heartbeat(request: &RouteRequest) -> Result<Value> {
+    let caller = request.principal.clone().unwrap_or_default();
+    let next = host::mint_token(caller.label.as_deref().unwrap_or_default(), &["devices:ingest"], None)?;
+    host::revoke_token(caller.token_id.as_deref().unwrap_or_default())?;
+    Ok(next.to_json())
+}
+```
+
+- **Only in an API request** (a route, console page or MCP entry), for a signed-in caller. The
+  token belongs to the caller's user, or, when the caller is a token (the heartbeat above), to
+  that token's owner. Anonymous callers and servers started with `--no-auth` cannot mint.
+- **Only the plugin's own scopes.** Each scope must be a custom scope that the plugin's own
+  routes or MCP entries declare (`devices:ingest` above), never `*`, a core scope (`pipes:read`,
+  or any `pipes:`, `users:`, `jobs:` ... scope) or another plugin's scope, and the caller must
+  hold it. Expiration is a `Bound` (an ISO timestamp, or Unix seconds as `Bound::Int`); `None`
+  never expires.
+- **Revocation** deletes a token of the caller's user that carries nothing but the plugin's own
+  scopes. Any other id (another user's token, one with a core scope, one that does not exist) is
+  refused with the same error. Every request reads its token from the instance, so the next
+  request with a revoked token is refused (`401`), and so are the remaining host calls of a
+  request still running with it.
+
+`host::draining()` is `true` once the server has begun to shut down. A handler that holds a long
+poll checks it in its loop and returns early, instead of being cut off at the end of
+`api.shutdown.grace_seconds`:
+
+```rust
+#[api_route(GET, "/devices/commands", scopes = ["devices:ingest"])]
+fn commands(_request: &RouteRequest) -> Result<Value> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(25);
+    while !host::draining()? && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(json!({"commands": []}))
+}
+```
+
+Outside an API request `draining()` is `false`. These three calls need Meerschaum 5.0.0rc34 or
+later; an older server answers them with an error asking for the upgrade.
+
 ## 🤖 MCP tools, resources and prompts
 
 Declare entries under `mcp_tools`, `mcp_resources` and `mcp_prompts` and implement the matching

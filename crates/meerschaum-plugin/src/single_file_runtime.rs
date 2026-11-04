@@ -403,10 +403,18 @@ fn host_call(
     // SAFETY: the host owns and releases this allocation exactly once.
     unsafe { decode(host.free_bytes, result) }.map_err(|e| match e {
         Error::Unsupported(_) => Error::Unsupported(format!(
-            "This Meerschaum cannot run `{name}` for plugins: upgrade Meerschaum to 5.0.0rc15 or later."
+            "This Meerschaum cannot run `{name}` for plugins: upgrade Meerschaum to {} or later.",
+            minimum_version(method)
         )),
         other => other,
     })
+}
+/// The first Meerschaum whose hosts answer `method` (for the upgrade message of an older host).
+fn minimum_version(method: &str) -> &'static str {
+    match method {
+        "mint_token" | "revoke_token" | "draining" => "5.0.0rc34",
+        _ => "5.0.0rc15",
+    }
 }
 fn host_tuple(value: Value) -> Result<SuccessTuple> {
     serde_json::from_value(value).map_err(|e| error(format!("invalid host success tuple: {e}")))
@@ -755,6 +763,97 @@ pub mod host {
     /// The Meerschaum config value at `keys` (`get_config(*keys)`), or `null`.
     pub fn config(keys: &[&str]) -> Result<Value> {
         call("config", json!({"keys": keys}))
+    }
+    /// A token [`mint_token`] registered. `secret` and `api_key` (the `Authorization: Bearer`
+    /// value) are shown here only, once: the instance keeps a hash of the secret. `Debug` leaves
+    /// both out.
+    #[derive(Clone, PartialEq, Eq)]
+    pub struct MintedToken {
+        /// The token's id (a UUID), what [`revoke_token`] takes.
+        pub id: String,
+        pub label: String,
+        pub scopes: Vec<String>,
+        /// When it expires (ISO-8601, UTC), `None` never.
+        pub expiration: Option<String>,
+        /// The secret of `client_credentials` logins (`client_id` is the id).
+        pub secret: String,
+        /// `mrsm-key:...`, sent as `Authorization: Bearer <api_key>`.
+        pub api_key: String,
+    }
+    impl std::fmt::Debug for MintedToken {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("MintedToken")
+                .field("id", &self.id)
+                .field("label", &self.label)
+                .field("scopes", &self.scopes)
+                .field("expiration", &self.expiration)
+                .finish_non_exhaustive()
+        }
+    }
+    impl MintedToken {
+        fn from_json(value: &Value) -> Result<Self> {
+            let text = |key: &str| {
+                value[key]
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| error(format!("invalid minted token: no `{key}`")))
+            };
+            Ok(Self {
+                id: text("id")?,
+                label: text("label")?,
+                scopes: value["scopes"]
+                    .as_array()
+                    .map(|s| {
+                        s.iter()
+                            .filter_map(|s| s.as_str().map(str::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                expiration: value["expiration"].as_str().map(str::to_owned),
+                secret: text("secret")?,
+                api_key: text("api_key")?,
+            })
+        }
+        /// The token as JSON (`id`, `label`, `scopes`, `expiration`, `secret`, `api_key`), to
+        /// return to whoever provisions the device.
+        pub fn to_json(&self) -> Value {
+            json!({"id": self.id, "label": self.label, "scopes": self.scopes,
+                "expiration": self.expiration, "secret": self.secret, "api_key": self.api_key})
+        }
+    }
+    /// Mint an API token labeled `label` (a device's id, say) with `scopes`, owned by the
+    /// caller's user, during an API request (a route, console page or MCP entry). `scopes` are
+    /// custom scopes this plugin's own routes and MCP entries declare, never `*` or a core scope,
+    /// and the caller must hold each. `expiration`: an ISO timestamp (`Bound::from("...")`) or
+    /// Unix seconds (`Bound::Int`); `None` never expires. The secret and API key are in the
+    /// result only: hand them to the device now.
+    pub fn mint_token(
+        label: &str,
+        scopes: &[&str],
+        expiration: Option<Bound>,
+    ) -> Result<MintedToken> {
+        let expiration = match expiration {
+            None => Value::Null,
+            Some(Bound::Int(seconds)) => json!(seconds),
+            Some(Bound::Datetime(text)) => json!(text),
+        };
+        MintedToken::from_json(&call(
+            "mint_token",
+            json!({"label": label, "scopes": scopes, "expiration": expiration}),
+        )?)
+    }
+    /// Revoke (delete) the token `id` during an API request: a token of the caller's user that
+    /// carries nothing but this plugin's own scopes (a device's previous token, when it rotates).
+    /// Any other id is refused alike, whether it exists or not. The next request with the token
+    /// is refused.
+    pub fn revoke_token(id: &str) -> Result<SuccessTuple> {
+        host_tuple(call("revoke_token", json!({"id": id}))?)
+    }
+    /// Whether the API server serving this request has begun to drain (it is shutting down): a
+    /// handler holding a long poll returns then instead of running into the shutdown's grace
+    /// period. `false` outside an API request. Cheap enough to check in a polling loop.
+    pub fn draining() -> Result<bool> {
+        Ok(call("draining", json!({}))?.as_bool().unwrap_or(false))
     }
     /// Whether host calls can run here (inside a plugin call that has a host).
     pub fn available() -> bool {

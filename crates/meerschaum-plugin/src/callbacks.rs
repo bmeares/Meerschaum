@@ -166,6 +166,55 @@ pub mod method {
     pub const WRITE_PLUGIN_CONFIG: &str = "write_plugin_config";
     /// `{"keys": [...]}` -> the config value at the keys or `null`.
     pub const CONFIG: &str = "config";
+    /// `{"label", "scopes": [...], "expiration"}` (`expiration`: a bound, Unix seconds or an
+    /// ISO timestamp; `null` never expires) -> the registered token `{"id", "label", "scopes",
+    /// "expiration", "secret", "api_key"}`. Only during an API request, with the calling
+    /// plugin's own custom scopes; the token belongs to the caller's user.
+    pub const MINT_TOKEN: &str = "mint_token";
+    /// `{"id"}` -> a success tuple (the token is deleted). Only during an API request, for a
+    /// token of the caller's user that carries nothing but the calling plugin's own scopes.
+    pub const REVOKE_TOKEN: &str = "revoke_token";
+    /// `{}` -> whether the API server serving the request has begun to drain (`false` outside
+    /// an API request).
+    pub const DRAINING: &str = "draining";
+
+    /// The first Meerschaum whose hosts answer `method` (for the upgrade message of an older
+    /// host).
+    pub(crate) fn minimum_version(method: &str) -> &'static str {
+        match method {
+            MINT_TOKEN | REVOKE_TOKEN | DRAINING => "5.0.0rc34",
+            _ => "5.0.0rc15",
+        }
+    }
+}
+
+/// A token [`host::mint_token`](crate::host::mint_token) registered. `secret` and `api_key` (the
+/// `Authorization: Bearer` value) are shown here only, once: the instance keeps a hash of the
+/// secret. `Debug` leaves both out.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MintedToken {
+    /// The token's id (a UUID), what [`host::revoke_token`](crate::host::revoke_token) takes.
+    pub id: String,
+    pub label: String,
+    pub scopes: Vec<String>,
+    /// When it expires (ISO-8601, UTC), `None` never.
+    #[serde(default)]
+    pub expiration: Option<String>,
+    /// The secret of `client_credentials` logins (`client_id` is the id).
+    pub secret: String,
+    /// `mrsm-key:...`, sent as `Authorization: Bearer <api_key>`.
+    pub api_key: String,
+}
+
+impl std::fmt::Debug for MintedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MintedToken")
+            .field("id", &self.id)
+            .field("label", &self.label)
+            .field("scopes", &self.scopes)
+            .field("expiration", &self.expiration)
+            .finish_non_exhaustive()
+    }
 }
 
 /// One call a plugin makes into its host ([`HostServices::host_call`]).
@@ -404,13 +453,15 @@ fn invoke(
     // call. The host moves the input out of `stream` and may write its result in its place.
     let result = unsafe { (host.invoke)(host.context, Bytes::borrowed(&bytes), &mut stream) };
     // SAFETY: result bytes are owned by this host and released with its callback once.
-    let value = unsafe { crate::host::decode_with(host.free_bytes, result) }.map_err(|e| match e {
-        crate::Error::Unsupported(_) => crate::Error::Unsupported(format!(
-            "This Meerschaum cannot run `{}` for plugins: upgrade Meerschaum to 5.0.0rc15 or later.",
-            call_name(method, on_pipe)
-        )),
-        other => other,
-    })?;
+    let value =
+        unsafe { crate::host::decode_with(host.free_bytes, result) }.map_err(|e| match e {
+            crate::Error::Unsupported(_) => crate::Error::Unsupported(format!(
+                "This Meerschaum cannot run `{}` for plugins: upgrade Meerschaum to {} or later.",
+                call_name(method, on_pipe),
+                method::minimum_version(method)
+            )),
+            other => other,
+        })?;
     let data = sdk::frame(std::mem::replace(
         &mut stream,
         FFI_ArrowArrayStream::empty(),
@@ -841,6 +892,56 @@ pub(crate) mod calls {
         .map(|(value, _)| value)
     }
 
+    /// Mint an API token labeled `label` (a device's id, say) with `scopes`, owned by the
+    /// caller's user, during an API request (a route, console page or MCP entry). `scopes` are
+    /// custom scopes this plugin's own routes and MCP entries declare, never `*` or a core scope,
+    /// and the caller must hold each. `expiration`: a datetime (`Bound::from(datetime)`, an ISO
+    /// string) or Unix seconds (`Bound::Int`); `None` never expires. The secret and API key are
+    /// in the result only: hand them to the device now.
+    pub fn mint_token(
+        label: &str,
+        scopes: &[&str],
+        expiration: Option<Bound>,
+    ) -> Result<MintedToken> {
+        let (value, _) = invoke(
+            None,
+            method::MINT_TOKEN,
+            None,
+            json!({
+                "label": label,
+                "scopes": scopes,
+                "expiration": Bound::json(expiration.as_ref()),
+            }),
+            None,
+            false,
+        )?;
+        serde_json::from_value(value).map_err(|e| error(format!("invalid minted token: {e}")))
+    }
+
+    /// Revoke (delete) the token `id` during an API request: a token of the caller's user that
+    /// carries nothing but this plugin's own scopes (a device's previous token, when it rotates).
+    /// Any other id is refused alike, whether it exists or not. The next request with the token
+    /// is refused.
+    pub fn revoke_token(id: &str) -> Result<SuccessTuple> {
+        let (value, _) = invoke(
+            None,
+            method::REVOKE_TOKEN,
+            None,
+            json!({"id": id}),
+            None,
+            false,
+        )?;
+        tuple(value)
+    }
+
+    /// Whether the API server serving this request has begun to drain (it is shutting down): a
+    /// handler holding a long poll returns then instead of running into the shutdown's grace
+    /// period. `false` outside an API request. Cheap enough to check in a polling loop.
+    pub fn draining() -> Result<bool> {
+        let (value, _) = invoke(None, method::DRAINING, None, json!({}), None, false)?;
+        Ok(value.as_bool().unwrap_or(false))
+    }
+
     /// Whether host calls can run here (inside a plugin call that has a host).
     pub fn available() -> bool {
         HOST.with(|slot| slot.get().is_some())
@@ -1003,6 +1104,14 @@ mod tests {
                     "parameters": {"columns": {"id": "id"}}, "temporary": false,
                 })),
                 "get_sync_time" => HostReply::json(json!("2024-01-01T00:00:00+00:00")),
+                "mint_token" => HostReply::json(json!({
+                    "id": "00000000-0000-4000-8000-000000000001", "label": call.arg("label"),
+                    "scopes": call.arg("scopes"),
+                    "expiration": (!call.arg("expiration").is_null()).then_some("2030-03-17T17:46:40Z"),
+                    "secret": "synthetic-secret", "api_key": "mrsm-key:synthetic",
+                })),
+                "revoke_token" => HostReply::json(json!([true, call.arg("id")])),
+                "draining" => HostReply::json(json!(true)),
                 other => return Err(crate::Error::Unsupported(other.into())),
             })
         }
@@ -1142,6 +1251,80 @@ mod tests {
                 pipe.get_sync_time_with(Some(&json!({"id": 1})), true)
                     .is_err()
             );
+        });
+    }
+
+    #[test]
+    fn token_and_drain_calls_round_trip_and_hide_the_secret() {
+        let host = Recorder::default();
+        let request = request();
+        with_host(&host, &request, || {
+            let minted = crate::host::mint_token(
+                "device-17",
+                &["devices:ingest"],
+                Some(Bound::Int(1_900_000_000)),
+            )
+            .unwrap();
+            assert_eq!(minted.label, "device-17");
+            assert_eq!(minted.scopes, ["devices:ingest"]);
+            assert_eq!(minted.api_key, "mrsm-key:synthetic");
+            assert_eq!(minted.expiration.as_deref(), Some("2030-03-17T17:46:40Z"));
+            let debug = format!("{minted:?}");
+            assert!(!debug.contains("synthetic"), "{debug}");
+            let never = crate::host::mint_token("device-18", &["devices:ingest"], None).unwrap();
+            assert_eq!(never.expiration, None);
+            let revoked = crate::host::revoke_token(&minted.id).unwrap();
+            assert!(revoked.success);
+            assert_eq!(revoked.message, minted.id);
+            assert!(crate::host::draining().unwrap());
+        });
+        let calls = host.calls.lock().unwrap();
+        let names: Vec<&str> = calls.iter().map(|c| c.method.as_str()).collect();
+        assert_eq!(
+            names,
+            ["mint_token", "mint_token", "revoke_token", "draining"]
+        );
+        assert_eq!(calls[0].arg("expiration"), &json!(1_900_000_000));
+        assert_eq!(calls[1].arg("expiration"), &Value::Null);
+        assert!(calls.iter().all(|c| c.plugin == "test" && c.pipe.is_none()));
+        // Outside a plugin call they explain why they cannot run.
+        let error = crate::host::draining().unwrap_err().to_string();
+        assert!(error.contains("host calls are unavailable"), "{error}");
+    }
+
+    #[test]
+    fn older_hosts_name_the_release_with_the_token_and_drain_calls() {
+        struct Old;
+        impl HostServices for Old {
+            fn call(&self, _: &Request, method: &str, _: Option<Frame>) -> Result<Value> {
+                Err(crate::Error::Unsupported(format!(
+                    "unsupported Pipe host operation: {method}"
+                )))
+            }
+        }
+        let request = request();
+        with_host(&Old, &request, || {
+            for (name, error) in [
+                (
+                    "mint_token",
+                    crate::host::mint_token("d", &["devices:ingest"], None).unwrap_err(),
+                ),
+                (
+                    "revoke_token",
+                    crate::host::revoke_token("00000000-0000-4000-8000-000000000001").unwrap_err(),
+                ),
+                ("draining", crate::host::draining().unwrap_err()),
+            ] {
+                let error = error.to_string();
+                assert!(error.contains(&format!("`host::{name}()`")), "{error}");
+                assert!(
+                    error.contains("upgrade Meerschaum to 5.0.0rc34 or later"),
+                    "{error}"
+                );
+            }
+            // The earlier calls keep naming the release that brought them.
+            let error = crate::host::plugin_config().unwrap_err().to_string();
+            assert!(error.contains("5.0.0rc15"), "{error}");
         });
     }
 
