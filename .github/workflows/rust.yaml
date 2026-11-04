@@ -109,7 +109,7 @@ jobs:
   clippy:
     needs: [ changes, fmt ]
     if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -128,7 +128,7 @@ jobs:
   test:
     needs: [ changes, fmt ]
     if: ${{ !cancelled() && needs.changes.outputs.rust_test == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64]
     concurrency:
       group: mrsm-rust-test
       cancel-in-progress: false
@@ -176,7 +176,7 @@ jobs:
   frontcrate:
     needs: [ changes, fmt ]
     if: ${{ !cancelled() && needs.changes.outputs.frontcrate == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -201,7 +201,7 @@ jobs:
   package:
     needs: [ changes, fmt ]
     if: ${{ !cancelled() && needs.changes.outputs.package == 'true' && needs.fmt.result != 'failure' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -223,7 +223,7 @@ jobs:
   parity:
     needs: [ changes ]
     if: ${{ !cancelled() && needs.changes.outputs.parity == 'true' && (inputs.full || vars.MRSM_SKIP_PARITY != 'true') && (inputs.full || github.event_name != 'workflow_dispatch' || inputs.parity) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64]
     concurrency:
       group: mrsm-rust-parity
       cancel-in-progress: false

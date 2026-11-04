@@ -388,7 +388,7 @@ def test_pytest_builds_once_and_consumes_verified_complete_artifacts(pytest_work
     inputs = _triggers(pytest_workflow)['workflow_dispatch']['inputs']
     assert inputs['profile']['default'] == 'ci' and inputs['profile']['options'] == ['ci', 'release']
     assert inputs['shards']['default'] == 'all'
-    assert tests['runs-on'] == 'self-hosted'
+    assert tests['runs-on'] == ['self-hosted', 'Linux', 'X64']
     called = _triggers(pytest_workflow)['workflow_call']['inputs']
     assert called['profile']['default'] == 'ci' and called['full']['default'] is True
 
@@ -471,6 +471,23 @@ def test_console_is_required_for_full_release_and_nightly_only(
     assert actual == ('1' if enabled and shard == 'core' else '0')
 
 
+def _runner_labels(job):
+    runners = job.get('runs-on', [])
+    return [runners] if isinstance(runners, str) else runners
+
+
+def test_linux_self_hosted_jobs_never_land_on_another_self_hosted_platform(rust, pytest_workflow):
+    """A bare `self-hosted` also matches the self-hosted Mac: Linux jobs name Linux and X64."""
+    checked = 0
+    for workflow in (rust, pytest_workflow):
+        for name, job in workflow['jobs'].items():
+            labels = _runner_labels(job)
+            if 'self-hosted' in labels:
+                checked += 1
+                assert {'Linux', 'X64'} <= set(labels), (name, labels)
+    assert checked >= 7
+
+
 def test_fork_prs_cannot_run_any_self_hosted_job(rust, pytest_workflow):
     for workflow in (rust, pytest_workflow):
         assert 'pull_request_target' not in _triggers(workflow)
@@ -535,7 +552,7 @@ def test_rust_jobs_follow_the_changes_job(rust):
         'wheels.yaml owns shipping binaries; Rust validation must not duplicate their build'
     )
     for name, job in jobs.items():
-        if job['runs-on'] == 'self-hosted':
+        if 'self-hosted' in _runner_labels(job):
             assert 'head.repo.full_name == github.repository' in job['if'], name
             ### The workspace's target/ is the build cache: checkout never wipes it.
             clean = _step(job, 'Clean the workspace')['run']
