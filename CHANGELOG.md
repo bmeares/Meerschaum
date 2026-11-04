@@ -121,6 +121,7 @@ See [Stack upgrades](https://meerschaum.io/reference/stack/upgrades/) and [sync 
 
 A plugin can be one `.rs` file, or a crate using the native SDK. Applications can embed the Pipe and engine APIs without compiling the CLI. The [developer guides](https://meerschaum.io/docs/) cover both Python and Rust.
 
+- Raw bytes a native plugin syncs keep their exact bytes in a `bytes` column (they were stored as the base64 reading of their Python repr).
 - A native plugin's routes mint and revoke API tokens with the plugin's own scopes for their caller (`host::mint_token`, `host::revoke_token`), so a device can be provisioned and rotate its own token, and a long poll ends as soon as the server drains (`host::draining()`). See [Tokens and draining](https://meerschaum.io/reference/plugins/rust-plugins/routes-and-mcp/#tokens-and-draining).
 
 #### Before upgrading

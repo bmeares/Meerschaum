@@ -1228,7 +1228,7 @@ pub(crate) fn days_since_epoch(d: &NaiveDate) -> i32 {
 
 /// Convert an object column into the closest native Polars column for export:
 /// JSON → JSON text, UUID → string, numerics → `Decimal(p, s)` when representable (else plain
-/// strings), geometry → WKB, homogeneous scalars → their native type, mixed → `str()` of each.
+/// strings), raw bytes → binary, geometry → WKB, homogeneous scalars → their native type, mixed → `str()` of each.
 pub fn object_values_to_series(name: &str, values: &[Value]) -> Series {
     if let Some(s) = infer_native_series(name, values) {
         return s;
@@ -1246,6 +1246,16 @@ pub fn object_values_to_series(name: &str, values: &[Value]) -> Series {
             }),
         )
         .into_series(),
+        // Raw bytes export as Arrow binary (as `pl.from_pandas` of a `bytes` object column), never
+        // as `str(b'...')`: a `bytes` dtype would read that text as base64.
+        Some(Value::Bytes(_))
+            if values
+                .iter()
+                .all(|v| v.is_na() || matches!(v, Value::Bytes(_))) =>
+        {
+            values_to_series(name, values, &DataType::Binary)
+                .unwrap_or_else(|| Series::full_null(pname, values.len(), &DataType::Binary))
+        }
         Some(Value::Geometry(_)) => BinaryChunked::from_iter_options(
             pname,
             values.iter().map(|v| match v {
@@ -1419,5 +1429,37 @@ mod wide_integer_tests {
             )
             .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod bytes_export_tests {
+    use super::*;
+
+    /// A native plugin's frame of raw bytes crosses the C ABI through Polars: the bytes arrive
+    /// unchanged and a `bytes` dtype keeps them (it read `str(b'...')` as base64 before).
+    #[test]
+    fn object_bytes_export_as_binary_and_keep_their_bytes_under_a_bytes_dtype() {
+        let body = b"MMBT\x00\x01\xff\x00 raw\n".to_vec();
+        let frame = Frame::from_object_columns(vec![(
+            "batch".into(),
+            vec![Value::Bytes(body.clone()), Value::Null],
+        )])
+        .unwrap();
+        let df = frame.to_polars().unwrap();
+        assert_eq!(df.column("batch").unwrap().dtype(), &DataType::Binary);
+        let crossed = Frame::from_polars(&df);
+        let dtypes = IndexMap::from([("batch".to_string(), "bytes".to_string())]);
+        let enforced =
+            crate::enforce::enforce_dtypes(&crossed, &dtypes, &Default::default()).unwrap();
+        let values = enforced.data("batch").unwrap().values();
+        assert!(
+            matches!(&values[0], Value::Bytes(b) if *b == body),
+            "{values:?}"
+        );
+        assert!(values[1].is_na());
+        // Mixed with other kinds, each value is still its `str()`.
+        let mixed = object_values_to_series("m", &[Value::Bytes(b"a".to_vec()), Value::Int(1)]);
+        assert_eq!(mixed.dtype(), &DataType::String);
     }
 }
