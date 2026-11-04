@@ -729,17 +729,37 @@ pub fn parse_schedule_jittered(
     now: Fire,
     spec: Option<JitterSpec<'_>>,
 ) -> Result<Trigger, ScheduleError> {
-    let (base, suffix) = split_jitter(schedule)?;
+    let (base, offset_us) = jitter_offset_us(schedule, spec)?;
     let trigger = parse_schedule_unjittered(&base, now)?;
-    let seconds = suffix.or(spec.map(|s| s.default_seconds)).unwrap_or(0.0);
-    let offset = crate::startup::fixed_offset(spec.map_or(base.as_str(), |s| s.seed), seconds);
-    if offset.is_zero() {
+    if offset_us == 0 {
         return Ok(trigger);
     }
-    Ok(Trigger::Jittered(
-        Box::new(trigger),
-        offset.as_micros() as i64,
-    ))
+    Ok(Trigger::Jittered(Box::new(trigger), offset_us))
+}
+
+/// A schedule without its `jitter` suffix, and the fixed offset of its fire times in
+/// microseconds (see [`parse_schedule_jittered`]).
+fn jitter_offset_us(
+    schedule: &str,
+    spec: Option<JitterSpec<'_>>,
+) -> Result<(String, i64), ScheduleError> {
+    let (base, suffix) = split_jitter(schedule)?;
+    let seconds = suffix.or(spec.map(|s| s.default_seconds)).unwrap_or(0.0);
+    let offset = crate::startup::fixed_offset(spec.map_or(base.as_str(), |s| s.seed), seconds);
+    Ok((base, offset.as_micros() as i64))
+}
+
+/// [`parse_schedule_jittered`] for a job that resumes `fire`, a fire time an earlier process
+/// drew from this schedule: the trigger is anchored there, so `next_after(fire)` keeps the
+/// cadence of that fire (`daily` stays 24 hours after it) instead of starting over from the
+/// restart. Cron fields and an explicit `starting` time do not depend on the anchor.
+pub fn parse_schedule_resumed(
+    schedule: &str,
+    fire: Fire,
+    spec: Option<JitterSpec<'_>>,
+) -> Result<Trigger, ScheduleError> {
+    let (_, offset_us) = jitter_offset_us(schedule, spec)?;
+    parse_schedule_jittered(schedule, add_us(fire, -offset_us), spec)
 }
 
 /// The longest gap between a schedule's next few fire times, in seconds (`every 10 minutes`:
@@ -1148,5 +1168,28 @@ mod tests {
             e.py_message(),
             "\n\x1b[1;31m 🛑 Unknown string format: Tomorrow\x1b[0m"
         );
+    }
+
+    #[test]
+    fn a_resumed_fire_keeps_its_cadence() {
+        let spec = JitterSpec {
+            default_seconds: 30.0,
+            seed: "prune",
+        };
+        // A `daily` job drew 08:46 in an earlier process and restarts at 05:21 the next day.
+        let mut before = parse_schedule_jittered("daily", now(), Some(spec)).unwrap();
+        let resumed = before.next_after(now()).unwrap();
+        let restart = resumed - Duration::hours(3);
+        let mut restarted = parse_schedule_jittered("daily", restart, Some(spec)).unwrap();
+        assert_ne!(
+            restarted.next_after(resumed),
+            Some(resumed + Duration::days(1))
+        );
+        let mut t = parse_schedule_resumed("daily", resumed, Some(spec)).unwrap();
+        assert_eq!(t.next_after(resumed), Some(resumed + Duration::days(1)));
+        // Cron fields do not depend on the anchor.
+        let mut cron = parse_schedule_resumed("30 3 * * *", resumed, Some(spec)).unwrap();
+        let mut fresh = parse_schedule_jittered("30 3 * * *", restart, Some(spec)).unwrap();
+        assert_eq!(cron.next_after(resumed), fresh.next_after(resumed));
     }
 }

@@ -132,16 +132,18 @@ fn run_once_without_reset(root: &std::path::Path) -> usize {
 
 /// A job restarted between two fires resumes the recorded next fire and runs it once: the fire
 /// after it is the schedule's next one, not the occurrence the restarted trigger began with
-/// (RC32 found a nightly backup that ran twice in a row after an upgrade restart).
+/// (RC32 found a nightly backup that ran twice in a row after an upgrade restart), one interval
+/// after the resumed fire (RC33 found a `daily` job whose next run was counted from the restart).
 #[test]
 fn a_resumed_fire_runs_once_and_the_next_one_follows_it() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    use chrono::{TimeDelta, Utc};
+    use chrono::{SubsecRound, TimeDelta, Utc};
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(root.path().join("plugins")).unwrap();
     let schedule = "every 1 hour";
     let scheduler = RootScheduler::for_root(root.path());
-    let now = Utc::now().fixed_offset();
+    // Schedule state keeps microseconds.
+    let now = Utc::now().fixed_offset().trunc_subsecs(6);
     // The previous process fired an hour ago and recorded the next fire, two seconds from now.
     let resumed = now + TimeDelta::seconds(2);
     scheduler
@@ -189,8 +191,9 @@ fn a_resumed_fire_runs_once_and_the_next_one_follows_it() {
     );
     let state = scheduler.state("resumable").unwrap();
     let next = state.next_fire.expect("the next fire is recorded");
-    assert!(
-        next > resumed + TimeDelta::minutes(30),
-        "the fire after a resumed one is the schedule's next ({next}), not one already due"
+    assert_eq!(
+        next,
+        resumed + TimeDelta::hours(1),
+        "the fire after a resumed one keeps its cadence, not the restart's"
     );
 }

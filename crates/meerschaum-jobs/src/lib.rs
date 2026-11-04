@@ -74,7 +74,9 @@ pub use laps::{LapPacer, LapPause, LoopControl, LoopRunner, SleepFrom};
 pub use remote::{RemoteJobs, RemoteJobsResolver};
 pub use rotating::RotatingFile;
 pub use runner::{FakeSystemctl, ProcessRunner, SystemRunner};
-pub use schedule::{JitterSpec, Trigger, parse_schedule, parse_schedule_jittered};
+pub use schedule::{
+    JitterSpec, Trigger, parse_schedule, parse_schedule_jittered, parse_schedule_resumed,
+};
 pub use scheduler::{RootScheduler, ScheduleState};
 pub use startup::{StartKind, StartupConfig, StartupPolicy};
 pub use summary::{JobSummary, get_job_summaries};

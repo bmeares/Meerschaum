@@ -1708,6 +1708,14 @@ pub fn run_schedule_jittered(
             }),
         _ => None,
     };
+    if let Some(resumed) = pending {
+        // Keep the cadence of the resumed fire: an interval (`daily`) drawn from this process's
+        // start would put the fire after it one restart-to-fire gap early.
+        match meerschaum_jobs::parse_schedule_resumed(schedule, resumed, Some(spec)) {
+            Ok(t) => trigger = t,
+            Err(e) => return SuccessTuple::fail(e.py_message()),
+        }
+    }
     let mut finished = false;
     // Job health: each scheduled run is a lap, expected every period of the schedule (the gap
     // to the next fire, measured as the schedule runs; see `meerschaum_jobs::health`).
@@ -1740,9 +1748,9 @@ pub fn run_schedule_jittered(
         heartbeat.lap_finished(result.success, &result.message);
         meerschaum_jobs::startup::signal_first_lap_done();
         if !finished && pending.is_none() {
-            // The fire after the one just served. A resumed fire (a restart between two fires)
-            // was never drawn from `trigger`, which began at this process's start: its `next()`
-            // would return that same occurrence again, already due, and run the job twice.
+            // The fire after the one just served. A resumed fire (a restart between two fires) is
+            // `trigger`'s first occurrence: its `next()` would return it again, already due, and
+            // run the job twice.
             pending = trigger.next_after(next);
             finished = pending.is_none();
         }
