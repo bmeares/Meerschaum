@@ -478,19 +478,113 @@ fn extra_client_dirs(rt: &Runtime<'_>) -> Vec<std::path::PathBuf> {
     dirs
 }
 
+/// The interpreter (with its arguments) and the top-level module of a Python console script:
+/// `#!/usr/bin/python3` (or `#!/usr/bin/env python3`) and the first `from pkg... import` /
+/// `import pkg` of a script `pip` writes. `None` for anything that is not a Python script.
+fn python_script(path: &std::path::Path) -> Option<(Vec<String>, String)> {
+    use std::io::{BufRead, BufReader, Read};
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; 2];
+    file.read_exact(&mut head).ok()?;
+    if &head != b"#!" {
+        return None;
+    }
+    let mut lines = BufReader::new(file).lines().map_while(Result::ok).take(40);
+    let shebang: Vec<String> = lines
+        .next()?
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let mut interpreter = shebang;
+    if interpreter.first().is_some_and(|p| {
+        std::path::Path::new(p)
+            .file_name()
+            .is_some_and(|n| n == "env")
+    }) {
+        interpreter.remove(0);
+        if interpreter.first().is_some_and(|a| a == "-S") {
+            interpreter.remove(0);
+        }
+    }
+    let program = std::path::Path::new(interpreter.first()?)
+        .file_name()?
+        .to_string_lossy()
+        .into_owned();
+    if !program.starts_with("python") {
+        return None;
+    }
+    let module = lines.find_map(|line| {
+        let line = line.trim();
+        let rest = line
+            .strip_prefix("from ")
+            .or_else(|| line.strip_prefix("import "))?;
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        (!name.is_empty() && !matches!(name.as_str(), "re" | "sys" | "os" | "__future__"))
+            .then_some(name)
+    })?;
+    Some((interpreter, module))
+}
+
+/// Why a found client cannot run, if it cannot: a Python console script whose interpreter is gone
+/// or cannot import the package it runs (a script left by an older Python, or a package that was
+/// removed). A client that is not a Python script is taken as it is.
+fn broken_client(client: &Client, script: &std::path::Path) -> Option<String> {
+    let (mut interpreter, module) = python_script(script)?;
+    // A script run by a virtual environment's interpreter (`site-packages/bin`) uses that one.
+    if !client.prefix.is_empty() {
+        interpreter = vec![client.program.clone()];
+    }
+    let mut command = std::process::Command::new(&interpreter[0]);
+    command
+        .args(&interpreter[1..])
+        .args(["-c", &format!("import {module}")])
+        .envs(client.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let python = interpreter.join(" ");
+    match command.status() {
+        Ok(status) if status.success() => None,
+        Ok(_) => Some(format!("its Python ({python}) cannot import `{module}`")),
+        Err(_) => Some(format!("its Python ({python}) is not installed")),
+    }
+}
+
 /// `which(program)` over `PATH`, [`extra_client_dirs`], and the root's virtual environments: a
 /// venv's own `bin`, and the scripts `mrsm install packages` writes beside its packages
-/// (`site-packages/bin`, run with the venv's interpreter and those packages on its path).
+/// (`site-packages/bin`, run with the venv's interpreter and those packages on its path). A Python
+/// client that cannot run ([`broken_client`]: e.g. a `pgcli` script in `~/.local/bin` left by an
+/// older Python) is skipped with a warning, and the search goes on.
 fn find_client(rt: &mut Runtime<'_>, program: &str, paths: &Paths) -> Option<Client> {
-    let path_var = (rt.env)("PATH");
-    if let Some(found) = super::pip::which(program, path_var.as_deref()) {
-        return Some(Client::program(&found));
-    }
-    let extra = std::env::join_paths(extra_client_dirs(rt))
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned());
-    if let Some(found) = super::pip::which(program, extra.as_deref()) {
-        return Some(Client::program(&found));
+    let mut dirs: Vec<std::path::PathBuf> = (rt.env)("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    dirs.extend(extra_client_dirs(rt));
+    let mut seen = std::collections::HashSet::new();
+    let mut usable = |rt: &mut Runtime<'_>, client: Client, script: &std::path::Path| {
+        if !seen.insert(script.to_path_buf()) {
+            return None;
+        }
+        match broken_client(&client, script) {
+            None => Some(client),
+            Some(reason) => {
+                warn(
+                    rt,
+                    &format!("Skipping {program} at {}: {reason}.", script.display()),
+                );
+                None
+            }
+        }
+    };
+    for dir in &dirs {
+        if let Some(found) = super::pip::which(program, dir.to_str())
+            && let Some(client) = usable(rt, Client::program(&found), &found)
+        {
+            return Some(client);
+        }
     }
     // `MRSM_VENVS_DIR`, else `<root>/venvs` (`VIRTENV_RESOURCES_PATH`).
     let venvs = paths
@@ -503,8 +597,10 @@ fn find_client(rt: &mut Runtime<'_>, program: &str, paths: &Paths) -> Option<Cli
     for entry in entries {
         let venv = entry.path();
         let bin = venv.join(if cfg!(windows) { "Scripts" } else { "bin" });
-        if let Some(found) = super::pip::which(program, bin.to_str()) {
-            return Some(Client::program(&found));
+        if let Some(found) = super::pip::which(program, bin.to_str())
+            && let Some(client) = usable(rt, Client::program(&found), &found)
+        {
+            return Some(client);
         }
         let python = bin.join(if cfg!(windows) {
             "python.exe"
@@ -523,11 +619,14 @@ fn find_client(rt: &mut Runtime<'_>, program: &str, paths: &Paths) -> Option<Cli
             let pythonpath = std::env::join_paths(pythonpath)
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|_| site.display().to_string());
-            return Some(Client {
+            let client = Client {
                 program: python.display().to_string(),
                 prefix: vec![script.display().to_string()],
                 env: vec![("PYTHONPATH".into(), pythonpath)],
-            });
+            };
+            if let Some(client) = usable(rt, client, &script) {
+                return Some(client);
+            }
         }
     }
     None

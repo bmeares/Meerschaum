@@ -2137,6 +2137,55 @@ fn sql_offers_to_install_a_client_in_a_terminal() {
     assert!(shown.contains("mrsm install packages pgcli"), "{shown}");
 }
 
+/// A Python client script whose interpreter cannot import its package (a `pgcli` left in
+/// `~/.local/bin` by an older Python: `ModuleNotFoundError: No module named 'pgcli'` in a web
+/// terminal) is skipped with a warning, and the next client is used.
+#[test]
+fn sql_skips_a_python_client_that_cannot_import_its_package() {
+    use std::os::unix::fs::PermissionsExt;
+    let python = ["/usr/bin/python3", "/usr/local/bin/python3", "/bin/python3"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file())
+        .expect("a python3 interpreter");
+    let stale = tempfile::tempdir().unwrap();
+    let plain = tempfile::tempdir().unwrap();
+    let script = stale.path().join("pgcli");
+    std::fs::write(
+        &script,
+        format!(
+            "#!{python}\n# -*- coding: utf-8 -*-\nimport re\nimport sys\n\
+             from _mrsm_missing_pgcli.main import cli\nsys.exit(cli())\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let psql = plain.path().join("psql");
+    std::fs::write(&psql, "#!/bin/sh\nexit 7\n").unwrap();
+    std::fs::set_permissions(&psql, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", stale.path().display(), plain.path().display());
+    let home = Home::new()
+        .with_env("PATH", path)
+        .with_env("MRSM_SQL_PG", "postgresql://alice@127.0.0.1:1/db");
+    let result = home.run(&["sql", "pg"]);
+    assert_eq!(result.code, 1, "{}", result.text);
+    assert!(
+        result.text.contains("SQL client exited with status 7"),
+        "the plain client after the broken one runs: {}",
+        result.text
+    );
+    assert!(
+        result.text.contains("Skipping pgcli at")
+            && result.text.contains("cannot import `_mrsm_missing_pgcli`"),
+        "{}",
+        result.text
+    );
+    assert!(
+        !result.text.contains("ModuleNotFoundError"),
+        "{}",
+        result.text
+    );
+}
+
 #[test]
 fn sql_propagates_interactive_client_failure() {
     use std::os::unix::fs::PermissionsExt;
