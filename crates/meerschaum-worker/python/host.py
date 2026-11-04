@@ -60,14 +60,23 @@ def captured(handler):
 def plugin_action(conn, call_id, args, frames):
     from meerschaum import Pipe
     from meerschaum.core.Pipe._sync import InferFetch
+    import meerschaum.jobs as jobs
     original = Pipe.sync
+    original_reporter = getattr(jobs, '_lap_reporter', None)
     def sync(pipe, df=InferFetch, **kwargs):
         return _ops._sync_callback(conn, pipe, df, kwargs)
+    # `mrsm.jobs.report_lap()` in an action that loops by itself records the job's laps in the
+    # host, which writes the job's heartbeat.
+    def report_lap(lap):
+        value, _ = conn.callback('lap', {'kwargs': lap})
+        return value
     Pipe.sync = sync
+    jobs._lap_reporter = report_lap
     try:
         return _ops.op_action(conn, call_id, args, frames)
     finally:
         Pipe.sync = original
+        jobs._lap_reporter = original_reporter
 
 
 def complete(conn, call_id, args, frames):

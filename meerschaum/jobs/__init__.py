@@ -44,9 +44,68 @@ __all__ = (
     'ownership_properties',
     'get_team_jobs',
     'move_team_jobs',
+    'report_lap',
 )
 
 executor_types: List[str] = ['api', 'local']
+
+
+#: Set by the worker while it runs a plugin action for the Rust host (`report_lap`).
+_lap_reporter = None
+
+
+def report_lap(
+    success: bool = True,
+    message: str = '',
+    next_in: Optional[float] = None,
+) -> SuccessTuple:
+    """
+    Record a lap of a plugin action that repeats its work by itself (its function takes `loop`,
+    so `--loop` is left to it): the job's health then shows how its laps go, and the Overview's
+    Next runs when the next one is due.
+
+    Call it once at the end of each iteration. Outside a job (a foreground run, a script) it does
+    nothing. An action without a `loop` parameter does not need it: with `--loop` or `-s`, the
+    host runs it in laps and records them itself.
+
+    Parameters
+    ----------
+    success: bool, default True
+        Whether this lap succeeded (a failed lap counts toward `consecutive_failures`).
+
+    message: str, default ''
+        What the lap did, shown with the job's health.
+
+    next_in: Optional[float], default None
+        Seconds until the next lap begins (the action's own `min_seconds`). It sets the cadence
+        the job is expected at (stalled after three times it) and `job.health['next_run']`.
+
+    Returns
+    -------
+    A `SuccessTuple`: whether the lap was recorded.
+
+    Examples
+    --------
+    >>> import time
+    >>> import meerschaum as mrsm
+    >>> def heartbeat_ack(loop: bool = False, min_seconds: float = 20, **kwargs):
+    ...     while True:
+    ...         success, msg = ack_once()
+    ...         mrsm.jobs.report_lap(success, msg, next_in=min_seconds)
+    ...         if not loop:
+    ...             return success, msg
+    ...         time.sleep(min_seconds)
+    """
+    reporter = _lap_reporter
+    if reporter is None:
+        return True, "Not running in a job's plugin action: the lap was not recorded."
+    lap = {'success': bool(success), 'message': str(message or '')}
+    if next_in is not None:
+        lap['next_in'] = float(next_in)
+    value = reporter(lap)
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return bool(value[0]), str(value[1])
+    return False, f"Unexpected answer from the host: {value!r}"
 
 
 def _rows_to_jobs(rows) -> Dict[str, Job]:

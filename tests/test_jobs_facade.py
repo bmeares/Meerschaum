@@ -211,6 +211,24 @@ def test_job_health_says_when_a_waiting_loop_runs_next(local_jobs):
     assert _wait_for(lambda: job.health.get('next_run') is None), job.health
 
 
+def test_an_action_that_loops_by_itself_reports_its_laps(local_jobs):
+    """`mrsm.jobs.report_lap()` in a plugin action that takes `loop` (the host leaves `--loop` to it)."""
+    from datetime import datetime, timedelta, timezone
+    import meerschaum as mrsm
+    ### Outside a job's plugin action it records nothing.
+    assert mrsm.jobs.report_lap(True, 'not a job')[0]
+    job = local_jobs(['w33', 'lapper', '--loop', '--min-seconds', '120'])
+    assert job.start()[0]
+    assert _wait_for(lambda: job.health.get('state') == 'healthy', timeout=90), (job.health, job.get_logs())
+    health = job.health
+    assert health['message'].startswith('last good run'), health
+    assert health['expected_interval_seconds'] == 120, health
+    due = datetime.fromisoformat(health['next_run'])
+    now = datetime.now(timezone.utc)
+    assert now < due <= now + timedelta(seconds=121), (now, due)
+    assert job.stop()[0]
+
+
 def test_a_job_that_does_not_lap_has_unknown_health(local_jobs):
     job = local_jobs(['sh', 'sleep', '30'])
     assert job.start()[0]

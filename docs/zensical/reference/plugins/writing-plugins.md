@@ -851,6 +851,28 @@ You can see the available command line options with the command `mrsm help` (or 
     | `repository`                | `-r`, `--repository`, `--repo`              | `Optional[str] = None`               | `'api:mrsm'`                          | The connector keys of the corresponding [Meerschaum repository](/reference/connectors/#instances-and-repositories). If `repository` is `None` (default), the configured repository will be used (`'api:mrsm'` by default). When actions are launched from within the Meerschaum shell, the current repository is passed. |
 
 
+### Report the laps of an action that loops by itself
+
+When your action leaves `--loop` to Meerschaum (it takes no `loop` parameter), each run is a lap, and the job's health (`job.health`) and the web console's **Next runs** cover it without any code of yours. An action that names a `loop` parameter repeats by itself, so Meerschaum cannot see its laps. Report them with `#!python mrsm.jobs.report_lap()` at the end of each iteration:
+
+```python
+import time
+import meerschaum as mrsm
+from meerschaum.plugins import make_action
+
+@make_action
+def poll(loop: bool = False, min_seconds: float = 20, **kwargs):
+    state = load_state()  # Kept across iterations: the reason to loop here.
+    while True:
+        success, msg = poll_once(state)
+        mrsm.jobs.report_lap(success, msg, next_in=min_seconds)
+        if not loop:
+            return success, msg
+        time.sleep(min_seconds)
+```
+
+`next_in` is when the next lap begins: the job is expected at that cadence (stalled after three times it without a lap) and `job.health['next_run']` shows it. Outside a job, `report_lap()` does nothing.
+
 ### Custom Command Line Options
 
 In case the built-in command line options are not sufficient, you can add arguments with `#!python add_plugin_argument()`. This function takes the same arguments as the `#!python parser.add_argument()` function from [`argparse`](https://docs.python.org/3/library/argparse.html) and will include your plugin's arguments in the `--help` text.

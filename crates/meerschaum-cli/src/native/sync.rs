@@ -1415,16 +1415,59 @@ pub(crate) fn callbacks(
     Ok(std::sync::Arc::new(ActionCallbacks {
         session,
         config: std::sync::Arc::new(config),
+        laps: std::sync::Mutex::new(None),
     }))
 }
 
 struct ActionCallbacks {
     session: Session,
     config: std::sync::Arc<meerschaum_core::config::Config>,
+    /// The job's heartbeat, begun at the first `mrsm.jobs.report_lap()` of an action that loops
+    /// by itself (the host does not run such an action in laps).
+    laps: std::sync::Mutex<Option<meerschaum_jobs::health::Heartbeat>>,
 }
+
+impl ActionCallbacks {
+    /// `mrsm.jobs.report_lap(success, message, next_in)`: a lap of the action ended, and the next
+    /// one is due in `next_in` seconds.
+    fn lap(&self, kwargs: &meerschaum_core::Map) -> SuccessTuple {
+        use meerschaum_core::Value;
+        let success = kwargs
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let message = kwargs
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let next_in = kwargs
+            .get("next_in")
+            .and_then(Value::as_f64)
+            .filter(|seconds| seconds.is_finite() && *seconds >= 0.0);
+        let mut laps = self.laps.lock().unwrap_or_else(|e| e.into_inner());
+        let heartbeat = laps.get_or_insert_with(|| super::jobs_laps::heartbeat(next_in, "run"));
+        if !heartbeat.is_active() {
+            return SuccessTuple::ok("Not running as a job: the lap was not recorded.");
+        }
+        heartbeat.lap_finished(success, &message);
+        if let Some(seconds) = next_in {
+            heartbeat.set_interval(Some(seconds));
+            heartbeat.waiting(std::time::Duration::from_secs_f64(seconds));
+        }
+        heartbeat.flush();
+        // A job's startup slot (D23) is held until its first lap is done.
+        meerschaum_jobs::startup::signal_first_lap_done();
+        SuccessTuple::ok("Recorded the lap.")
+    }
+}
+
 #[meerschaum_connector::async_trait]
 impl meerschaum_worker::callback::CallbackHandler for ActionCallbacks {
     async fn handle(&self, request: meerschaum_worker::callback::CallbackRequest) -> SuccessTuple {
+        if request.op == "lap" {
+            return self.lap(&request.kwargs);
+        }
         let Some(pipe) = request.pipe.clone() else {
             return SuccessTuple::fail("Missing pipe in callback.");
         };
