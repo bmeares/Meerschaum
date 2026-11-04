@@ -108,6 +108,7 @@ Self-registration closes after the first administrator unless configured otherwi
 - List a Pipeline's scheduled jobs without querying every job's status.
 - Drain the API on shutdown: it stops accepting connections, finishes requests in flight within `api.shutdown.grace_seconds` (8 by default, an upper bound), and ends streams at once. `GET /healthcheck/ready` returns 503 while it starts or drains, and while the Python API host it needs is not serving (no timeout makes it 200); a 503 names its `reason`.
 - Report a job killed by a signal as failed and name the signal, instead of showing a stale or successful result.
+- Run a scheduled job once at its first fire after a restart between two fires, instead of twice in a row.
 - Ask a console tab opened before an upgrade to reload when it requests a callback the server no longer has, instead of answering every poll with an error.
 - Report an error raised inside an MCP tool as that error and where it was raised, not as invalid arguments.
 - Stop the Python API host when its server is killed, and let the next API take over and stop a killed API's web terminal tmux server.

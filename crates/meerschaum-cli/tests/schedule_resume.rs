@@ -18,6 +18,9 @@ fn no_env(_: &str) -> Option<String> {
     None
 }
 
+/// The tests share the process's stop flag: they take turns.
+static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Run the schedule once (the action raises the stop flag) in a runtime rooted at `root`.
 fn run_once(root: &std::path::Path, env: fn(&str) -> Option<String>, schedule: &str) -> usize {
     let mut out = Vec::new();
@@ -47,6 +50,7 @@ fn run_once(root: &std::path::Path, env: fn(&str) -> Option<String>, schedule: &
 
 #[test]
 fn schedules_resume_per_root() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     let a = tempfile::tempdir().unwrap();
     let b = tempfile::tempdir().unwrap();
     for dir in [&a, &b] {
@@ -124,4 +128,69 @@ fn run_once_without_reset(root: &std::path::Path) -> usize {
     });
     stop_requested_flag().store(false, Ordering::SeqCst);
     runs
+}
+
+/// A job restarted between two fires resumes the recorded next fire and runs it once: the fire
+/// after it is the schedule's next one, not the occurrence the restarted trigger began with
+/// (RC32 found a nightly backup that ran twice in a row after an upgrade restart).
+#[test]
+fn a_resumed_fire_runs_once_and_the_next_one_follows_it() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    use chrono::{TimeDelta, Utc};
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("plugins")).unwrap();
+    let schedule = "every 1 hour";
+    let scheduler = RootScheduler::for_root(root.path());
+    let now = Utc::now().fixed_offset();
+    // The previous process fired an hour ago and recorded the next fire, two seconds from now.
+    let resumed = now + TimeDelta::seconds(2);
+    scheduler
+        .record_fire(
+            "resumable",
+            schedule,
+            now - TimeDelta::hours(1),
+            Some(resumed),
+        )
+        .unwrap();
+
+    let mut out = Vec::new();
+    let mut rt = Runtime::new(DateContext::system(), 80, &mut out, job_env);
+    let mut opts = ConfigOptions::with_env(vec![
+        (
+            "MRSM_ROOT_DIR".into(),
+            root.path().to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_PLUGINS_DIR".into(),
+            root.path().join("plugins").to_string_lossy().into_owned(),
+        ),
+    ]);
+    opts.allow_writes = true;
+    opts.home = root.path().to_path_buf();
+    rt.config = Some(Config::new(opts).unwrap());
+    stop_requested_flag().store(false, Ordering::SeqCst);
+    let stopper = std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(6));
+        stop_requested_flag().store(true, Ordering::SeqCst);
+    });
+    let mut fires = Vec::new();
+    let result = run_schedule(&mut rt, schedule, |_| {
+        fires.push(Utc::now());
+        SuccessTuple::success()
+    });
+    stopper.join().unwrap();
+    stop_requested_flag().store(false, Ordering::SeqCst);
+    assert!(result.success, "{result:?}");
+    assert_eq!(
+        fires.len(),
+        1,
+        "the resumed fire ran {} times: {fires:?}",
+        fires.len()
+    );
+    let state = scheduler.state("resumable").unwrap();
+    let next = state.next_fire.expect("the next fire is recorded");
+    assert!(
+        next > resumed + TimeDelta::minutes(30),
+        "the fire after a resumed one is the schedule's next ({next}), not one already due"
+    );
 }

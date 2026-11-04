@@ -1740,7 +1740,11 @@ pub fn run_schedule_jittered(
         heartbeat.lap_finished(result.success, &result.message);
         meerschaum_jobs::startup::signal_first_lap_done();
         if !finished && pending.is_none() {
-            pending = trigger.next();
+            // The fire after the one just served. A resumed fire (a restart between two fires)
+            // was never drawn from `trigger`, which began at this process's start: its `next()`
+            // would return that same occurrence again, already due, and run the job twice.
+            pending = trigger.next_after(next);
+            finished = pending.is_none();
         }
         if let (Some(scheduler), Some(job)) = (&scheduler, &job) {
             let fired = chrono::Utc::now().fixed_offset();
