@@ -1,0 +1,2127 @@
+{
+  "uid": "mrsm-engine",
+  "title": "Engine",
+  "description": "What the Syncing Engine records: runs and their nodes, failures and retries, pipe freshness, lag behind parents and the dirty-range backlog. Time filters apply to run start times; freshness and backlog show the current state. Data visibility follows the selected PostgreSQL data source permissions. No raw sync messages or SQL are read by these panels.",
+  "tags": [
+    "meerschaum",
+    "engine"
+  ],
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": true,
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "grafana-postgresql-datasource",
+        "regex": "/^Meerschaum Main$/",
+        "refresh": 1,
+        "current": {
+          "selected": true,
+          "text": "Meerschaum Main",
+          "value": "meerschaum-main"
+        },
+        "options": []
+      },
+      {
+        "current": {
+          "text": "__MRSM_DEFAULT_INSTANCE__",
+          "value": "__MRSM_DEFAULT_INSTANCE__"
+        },
+        "hide": 2,
+        "name": "default_instance",
+        "label": "Default instance",
+        "query": "__MRSM_DEFAULT_INSTANCE__",
+        "skipUrlSync": true,
+        "type": "constant",
+        "options": [
+          {
+            "selected": true,
+            "text": "__MRSM_DEFAULT_INSTANCE__",
+            "value": "__MRSM_DEFAULT_INSTANCE__"
+          }
+        ]
+      },
+      {
+        "name": "schema",
+        "label": "Internal schema",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT table_schema AS __text, table_schema AS __value FROM information_schema.tables WHERE (table_name='mrsm_engine_metrics' OR starts_with(table_name, 'mrsm_engine_metrics_')) AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = (quote_ident(table_schema) || '.' || quote_ident(table_name))::regclass) GROUP BY table_schema ORDER BY CASE WHEN table_schema='_mrsm_internal' THEN 0 ELSE 1 END, table_schema",
+        "query": "SELECT table_schema AS __text, table_schema AS __value FROM information_schema.tables WHERE (table_name='mrsm_engine_metrics' OR starts_with(table_name, 'mrsm_engine_metrics_')) AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = (quote_ident(table_schema) || '.' || quote_ident(table_name))::regclass) GROUP BY table_schema ORDER BY CASE WHEN table_schema='_mrsm_internal' THEN 0 ELSE 1 END, table_schema",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "_mrsm_internal",
+          "value": "_mrsm_internal"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "metrics_table",
+        "label": "Instance schema",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT CASE WHEN table_name='mrsm_engine_metrics' THEN 'Default instance' ELSE substr(table_name,length('mrsm_engine_metrics_')+1) END AS __text, table_name AS __value FROM information_schema.tables WHERE table_schema=${schema:sqlstring} AND (table_name='mrsm_engine_metrics' OR starts_with(table_name,'mrsm_engine_metrics_')) AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = (quote_ident(table_schema) || '.' || quote_ident(table_name))::regclass) ORDER BY table_name",
+        "query": "SELECT CASE WHEN table_name='mrsm_engine_metrics' THEN 'Default instance' ELSE substr(table_name,length('mrsm_engine_metrics_')+1) END AS __text, table_name AS __value FROM information_schema.tables WHERE table_schema=${schema:sqlstring} AND (table_name='mrsm_engine_metrics' OR starts_with(table_name,'mrsm_engine_metrics_')) AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = (quote_ident(table_schema) || '.' || quote_ident(table_name))::regclass) ORDER BY table_name",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "Default instance",
+          "value": "mrsm_engine_metrics"
+        },
+        "options": []
+      },
+      {
+        "name": "runs_table",
+        "label": "Runs table",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __value",
+        "query": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __value",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "mrsm_engine_runs",
+          "value": "mrsm_engine_runs"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "nodes_table",
+        "label": "Nodes table",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_nodes') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_nodes') AS __value",
+        "query": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_nodes') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_nodes') AS __value",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "mrsm_engine_nodes",
+          "value": "mrsm_engine_nodes"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "events_table",
+        "label": "Events table",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_events') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_events') AS __value",
+        "query": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_events') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_events') AS __value",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "mrsm_engine_events",
+          "value": "mrsm_engine_events"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "ledger_table",
+        "label": "Ledger table",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_ledger') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_ledger') AS __value",
+        "query": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_ledger') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_ledger') AS __value",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "mrsm_engine_ledger",
+          "value": "mrsm_engine_ledger"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "cursors_table",
+        "label": "Cursors table",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_cursors') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_cursors') AS __value",
+        "query": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_cursors') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_cursors') AS __value",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "mrsm_engine_cursors",
+          "value": "mrsm_engine_cursors"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "status_table",
+        "label": "Sync status table",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_sync_status') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_sync_status') AS __value",
+        "query": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_sync_status') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_sync_status') AS __value",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "mrsm_engine_sync_status",
+          "value": "mrsm_engine_sync_status"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "pipeline",
+        "label": "Pipeline",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT DISTINCT snapshot->>'name' AS __text, snapshot->>'name' AS __value FROM \"${schema:raw}\".\"${runs_table:raw}\" r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE $__timeFilter(r.started) AND snapshot->>'name' IS NOT NULL UNION SELECT '(No Pipeline)', '(No Pipeline)' ORDER BY 1",
+        "query": "SELECT DISTINCT snapshot->>'name' AS __text, snapshot->>'name' AS __value FROM \"${schema:raw}\".\"${runs_table:raw}\" r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE $__timeFilter(r.started) AND snapshot->>'name' IS NOT NULL UNION SELECT '(No Pipeline)', '(No Pipeline)' ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "'__all'",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "pipe",
+        "label": "Pipe",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT DISTINCT 'Pipe(''' || split_part(p.pipe_ref, '|', 2) || ''', ''' || split_part(p.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(p.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(p.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(p.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(p.pipe_ref, '|', 1) || '''' END || ')' AS __text, p.pipe_ref AS __value FROM (SELECT pipe_ref FROM \"${schema:raw}\".\"${status_table:raw}\" UNION SELECT pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" WHERE $__timeFilter(started)) p ORDER BY 1",
+        "query": "SELECT DISTINCT 'Pipe(''' || split_part(p.pipe_ref, '|', 2) || ''', ''' || split_part(p.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(p.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(p.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(p.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(p.pipe_ref, '|', 1) || '''' END || ')' AS __text, p.pipe_ref AS __value FROM (SELECT pipe_ref FROM \"${schema:raw}\".\"${status_table:raw}\" UNION SELECT pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" WHERE $__timeFilter(started)) p ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "'__all'",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Runs",
+      "collapsed": false,
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Runs",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n)\nSELECT count(*) AS \"Runs\" FROM selected_runs"
+        }
+      ],
+      "id": 2,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failed runs",
+      "description": "Runs in which a node failed or a parent failure blocked its children.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n)\nSELECT count(*) FILTER (WHERE success IS FALSE) AS \"Failed\" FROM selected_runs"
+        }
+      ],
+      "id": 3,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Unfinished runs",
+      "description": "Runs still in progress, or interrupted before they recorded an end (resume them with --resume).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n)\nSELECT count(*) FILTER (WHERE finished IS NULL) AS \"Unfinished\" FROM selected_runs"
+        }
+      ],
+      "id": 4,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "P95 run duration",
+      "description": "Wall-clock time of finished runs.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n)\nSELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY wall_seconds) FILTER (WHERE finished IS NOT NULL) AS \"P95\" FROM selected_runs"
+        }
+      ],
+      "id": 5,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failed nodes",
+      "description": "Nodes that failed after their retries.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT count(*) FILTER (WHERE status = 'failed') AS \"Failed\" FROM nodes"
+        }
+      ],
+      "id": 6,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Retried nodes",
+      "description": "Nodes that needed more than one attempt (whether or not a retry succeeded).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT count(*) FILTER (WHERE attempts > 1) AS \"Retried\" FROM nodes"
+        }
+      ],
+      "id": 7,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Runs by outcome",
+      "description": "Runs by start time.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n)\nSELECT $__timeGroupAlias(started, '$__interval'), count(*) FILTER (WHERE success) AS \"Succeeded\", count(*) FILTER (WHERE success IS FALSE) AS \"Failed\", count(*) FILTER (WHERE finished IS NULL) AS \"Unfinished\" FROM selected_runs GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "id": 8,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Run duration",
+      "description": "Wall-clock time of finished runs, by start time.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n)\nSELECT $__timeGroupAlias(started, '$__interval'), avg(wall_seconds) AS \"Average\", percentile_cont(0.95) WITHIN GROUP (ORDER BY wall_seconds) AS \"P95\", max(wall_seconds) AS \"Maximum\" FROM selected_runs WHERE finished IS NOT NULL GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "id": 9,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Node outcomes",
+      "description": "Final status of every node: succeeded, skipped (nothing to do), failed, upstream_failed (a parent failed), rebuild_pending, locked, observed (stream source) or pending (never started).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT $__timeGroupAlias(started, '$__interval'), status AS metric, count(*) AS value FROM nodes GROUP BY 1,2 ORDER BY 1"
+        }
+      ],
+      "id": 10,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failures and retries",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT $__timeGroupAlias(started, '$__interval'), count(*) FILTER (WHERE status = 'failed') AS \"Failed\", count(*) FILTER (WHERE status = 'upstream_failed') AS \"Upstream failed\", count(*) FILTER (WHERE attempts > 1) AS \"Retried\", sum(greatest(attempts-1,0)) AS \"Retry attempts\" FROM nodes GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "id": 11,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Planned actions",
+      "description": "What the planner decided per node: incremental (sync the tail), backfill (re-sync dirty ranges), rebuild, root (no parents in the run), skip, observe, upstream_failed, locked.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT $__timeGroupAlias(started, '$__interval'), action AS metric, count(*) AS value FROM nodes GROUP BY 1,2 ORDER BY 1"
+        }
+      ],
+      "id": 12,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Node start delay",
+      "description": "When nodes started against the critical-path schedule (positive: later than planned, from waiting for workers, leases or slower parents). The plan uses earlier durations, or a default for a new node.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT $__timeGroupAlias(started, '$__interval'), avg(start_offset_seconds - planned_start_seconds) AS \"Average start vs plan\", percentile_cont(0.95) WITHIN GROUP (ORDER BY start_offset_seconds - planned_start_seconds) AS \"P95 start vs plan\", max(start_offset_seconds) AS \"Latest start after run start\" FROM nodes WHERE actual_started IS NOT NULL GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "id": 13,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 23,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent runs",
+      "description": "One row per run, newest first. Holder is the process or job that ran it.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Wall seconds"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n)\nSELECT r.run_id AS \"Run\", array_to_string(r.pipeline_names, ', ') AS \"Pipelines\", r.started AS \"Started\", r.finished AS \"Finished\", r.success AS \"Succeeded\", r.wall_seconds AS \"Wall seconds\", r.num_nodes AS \"Nodes\", n.succeeded AS \"Synced\", n.skipped AS \"Skipped\", n.failed AS \"Failed\", n.upstream_failed AS \"Upstream failed\", n.retried AS \"Retried\", n.rows AS \"Rows affected\", r.workers AS \"Workers\", r.resumed_from AS \"Resumed from\", r.holder AS \"Holder\"\nFROM selected_runs r LEFT JOIN LATERAL (SELECT count(*) FILTER (WHERE status = 'succeeded') AS succeeded, count(*) FILTER (WHERE status = 'skipped') AS skipped, count(*) FILTER (WHERE status = 'failed') AS failed, count(*) FILTER (WHERE status = 'upstream_failed') AS upstream_failed, count(*) FILTER (WHERE attempts > 1) AS retried, sum(inserted + updated + upserted + deleted) AS rows FROM \"${schema:raw}\".\"${nodes_table:raw}\" x WHERE x.run_id = r.run_id AND $__timeFilter(x.started)) n ON true ORDER BY r.started DESC LIMIT 100"
+        }
+      ],
+      "id": 14,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 9
+      }
+    },
+    {
+      "type": "row",
+      "title": "Freshness",
+      "collapsed": false,
+      "id": 15,
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Pipes failing now",
+      "description": "Pipes whose latest sync failed (any sync path, not only engine runs).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n)\nSELECT count(*) FILTER (WHERE s.success IS FALSE) AS \"Failing\" FROM \"${schema:raw}\".\"${status_table:raw}\" s WHERE ('__all' IN (${pipe:sqlstring}) OR s.pipe_ref IN (${pipe:sqlstring})) AND ('__all' IN (${pipeline:sqlstring}) OR s.pipe_ref IN (SELECT pipe_ref FROM pipeline_pipes))"
+        }
+      ],
+      "id": 16,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Never synced successfully",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n)\nSELECT count(*) FILTER (WHERE s.last_success IS NULL) AS \"Never succeeded\" FROM \"${schema:raw}\".\"${status_table:raw}\" s WHERE ('__all' IN (${pipe:sqlstring}) OR s.pipe_ref IN (${pipe:sqlstring})) AND ('__all' IN (${pipeline:sqlstring}) OR s.pipe_ref IN (SELECT pipe_ref FROM pipeline_pipes))"
+        }
+      ],
+      "id": 17,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Longest since a successful sync",
+      "description": "The stalest pipe that has synced successfully at least once.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n)\nSELECT max(extract(epoch FROM (now() - s.last_success))) AS \"Seconds\" FROM \"${schema:raw}\".\"${status_table:raw}\" s WHERE ('__all' IN (${pipe:sqlstring}) OR s.pipe_ref IN (${pipe:sqlstring})) AND ('__all' IN (${pipeline:sqlstring}) OR s.pipe_ref IN (SELECT pipe_ref FROM pipeline_pipes))"
+        }
+      ],
+      "id": 18,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Children behind their parents",
+      "description": "Parent-to-child edges with changes the child has not consumed yet.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n), ledger AS (\n  SELECT l.pipe_ref, l.seq, l.created,\n    CASE WHEN l.begin->>'datetime' IS NOT NULL THEN (l.begin->>'datetime')::timestamptz END AS begin_ts,\n    CASE WHEN l.\"end\"->>'datetime' IS NOT NULL THEN (l.\"end\"->>'datetime')::timestamptz END AS end_ts,\n    COALESCE(l.begin->>'datetime', l.begin->>'int') AS begin_text, COALESCE(l.\"end\"->>'datetime', l.\"end\"->>'int') AS end_text\n  FROM \"${schema:raw}\".\"${ledger_table:raw}\" l\n), edges AS (\n  SELECT c.parent_ref, c.child_ref, c.role, c.seq AS consumed_seq,\n    COALESCE(c.parent_watermark_at_cursor->>'datetime', c.parent_watermark_at_cursor->>'int') AS watermark_text,\n    CASE WHEN c.parent_watermark_at_cursor->>'datetime' IS NOT NULL THEN (c.parent_watermark_at_cursor->>'datetime')::timestamptz END AS watermark_ts\n  FROM \"${schema:raw}\".\"${cursors_table:raw}\" c\n  UNION ALL\n  SELECT DISTINCT l.pipe_ref, NULL, NULL, 0, NULL, NULL::timestamptz FROM ledger l\n  WHERE NOT EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${cursors_table:raw}\" c WHERE c.parent_ref = l.pipe_ref)\n), backlog AS (\n  SELECT e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts,\n    (SELECT max(l.seq) FROM ledger l WHERE l.pipe_ref = e.parent_ref) AS latest_seq,\n    count(l.seq) AS pending, min(l.created) AS oldest_pending, min(l.begin_ts) AS pending_begin, max(l.end_ts) AS pending_end,\n    min(l.begin_text) FILTER (WHERE l.begin_ts IS NULL) AS pending_begin_int, max(l.end_text) FILTER (WHERE l.end_ts IS NULL) AS pending_end_int\n  FROM edges e LEFT JOIN ledger l ON l.pipe_ref = e.parent_ref AND l.seq > e.consumed_seq\n  WHERE (('__all' IN (${pipe:sqlstring}) OR e.parent_ref IN (${pipe:sqlstring})) OR ('__all' IN (${pipe:sqlstring}) OR e.child_ref IN (${pipe:sqlstring})))\n    AND (('__all' IN (${pipeline:sqlstring}) OR e.parent_ref IN (SELECT pipe_ref FROM pipeline_pipes)) OR ('__all' IN (${pipeline:sqlstring}) OR e.child_ref IN (SELECT pipe_ref FROM pipeline_pipes)))\n  GROUP BY e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts\n)\nSELECT count(*) FILTER (WHERE pending > 0 AND child_ref IS NOT NULL) AS \"Edges\" FROM backlog"
+        }
+      ],
+      "id": 19,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 42,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "table",
+      "title": "Pipe freshness",
+      "description": "The latest sync of every pipe on this instance, from any sync path (engine runs, jobs, pipe.sync(), streams). Not limited by the time range.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Since success"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n)\nSELECT 'Pipe(''' || split_part(s.pipe_ref, '|', 2) || ''', ''' || split_part(s.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(s.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(s.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(s.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(s.pipe_ref, '|', 1) || '''' END || ')' AS \"Pipe\", s.success AS \"Latest succeeded\", s.last_success AS \"Last success\", extract(epoch FROM (now() - s.last_success)) AS \"Since success\", s.last_failure AS \"Last failure\", s.consecutive_failures AS \"Consecutive failures\", s.last_attempt AS \"Last attempt\", s.duration_seconds AS \"Last duration\", s.rows_inserted + s.rows_updated + s.rows_upserted AS \"Last rows\", s.source AS \"Source\", s.job AS \"Job\" FROM \"${schema:raw}\".\"${status_table:raw}\" s WHERE ('__all' IN (${pipe:sqlstring}) OR s.pipe_ref IN (${pipe:sqlstring})) AND ('__all' IN (${pipeline:sqlstring}) OR s.pipe_ref IN (SELECT pipe_ref FROM pipeline_pipes)) ORDER BY s.consecutive_failures DESC, s.last_success ASC NULLS FIRST LIMIT 500"
+        }
+      ],
+      "id": 20,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 24,
+        "h": 9
+      }
+    },
+    {
+      "type": "table",
+      "title": "Data watermarks",
+      "description": "The newest datetime (or integer) value of each pipe, as of its last engine sync that moved it in the time range. Data age is how far that value is behind now.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Data age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n)\nSELECT DISTINCT ON (ev.pipe_ref) 'Pipe(''' || split_part(ev.pipe_ref, '|', 2) || ''', ''' || split_part(ev.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(ev.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(ev.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(ev.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(ev.pipe_ref, '|', 1) || '''' END || ')' AS \"Pipe\", ev.payload->>'to' AS \"Watermark\", CASE WHEN ev.payload->>'to' ~ '^[0-9]{4}-' THEN extract(epoch FROM (now() - (ev.payload->>'to')::timestamptz)) END AS \"Data age\", ev.payload->>'from' AS \"Previous watermark\", ev.ts AS \"Moved at\"\nFROM \"${schema:raw}\".\"${events_table:raw}\" ev WHERE $__timeFilter(ev.ts) AND ev.event = 'watermark_advanced' AND ev.pipe_ref IS NOT NULL AND ('__all' IN (${pipe:sqlstring}) OR ev.pipe_ref IN (${pipe:sqlstring})) AND ('__all' IN (${pipeline:sqlstring}) OR ev.pipe_ref IN (SELECT pipe_ref FROM pipeline_pipes)) ORDER BY ev.pipe_ref, ev.ts DESC"
+        }
+      ],
+      "id": 21,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "table",
+      "title": "Lag behind parents",
+      "description": "Each edge's cursor: the parent's watermark when the child last consumed its changes, and how far the parent's unconsumed changes reach beyond it. Changes are numbered per parent.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Data lag"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n), ledger AS (\n  SELECT l.pipe_ref, l.seq, l.created,\n    CASE WHEN l.begin->>'datetime' IS NOT NULL THEN (l.begin->>'datetime')::timestamptz END AS begin_ts,\n    CASE WHEN l.\"end\"->>'datetime' IS NOT NULL THEN (l.\"end\"->>'datetime')::timestamptz END AS end_ts,\n    COALESCE(l.begin->>'datetime', l.begin->>'int') AS begin_text, COALESCE(l.\"end\"->>'datetime', l.\"end\"->>'int') AS end_text\n  FROM \"${schema:raw}\".\"${ledger_table:raw}\" l\n), edges AS (\n  SELECT c.parent_ref, c.child_ref, c.role, c.seq AS consumed_seq,\n    COALESCE(c.parent_watermark_at_cursor->>'datetime', c.parent_watermark_at_cursor->>'int') AS watermark_text,\n    CASE WHEN c.parent_watermark_at_cursor->>'datetime' IS NOT NULL THEN (c.parent_watermark_at_cursor->>'datetime')::timestamptz END AS watermark_ts\n  FROM \"${schema:raw}\".\"${cursors_table:raw}\" c\n  UNION ALL\n  SELECT DISTINCT l.pipe_ref, NULL, NULL, 0, NULL, NULL::timestamptz FROM ledger l\n  WHERE NOT EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${cursors_table:raw}\" c WHERE c.parent_ref = l.pipe_ref)\n), backlog AS (\n  SELECT e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts,\n    (SELECT max(l.seq) FROM ledger l WHERE l.pipe_ref = e.parent_ref) AS latest_seq,\n    count(l.seq) AS pending, min(l.created) AS oldest_pending, min(l.begin_ts) AS pending_begin, max(l.end_ts) AS pending_end,\n    min(l.begin_text) FILTER (WHERE l.begin_ts IS NULL) AS pending_begin_int, max(l.end_text) FILTER (WHERE l.end_ts IS NULL) AS pending_end_int\n  FROM edges e LEFT JOIN ledger l ON l.pipe_ref = e.parent_ref AND l.seq > e.consumed_seq\n  WHERE (('__all' IN (${pipe:sqlstring}) OR e.parent_ref IN (${pipe:sqlstring})) OR ('__all' IN (${pipe:sqlstring}) OR e.child_ref IN (${pipe:sqlstring})))\n    AND (('__all' IN (${pipeline:sqlstring}) OR e.parent_ref IN (SELECT pipe_ref FROM pipeline_pipes)) OR ('__all' IN (${pipeline:sqlstring}) OR e.child_ref IN (SELECT pipe_ref FROM pipeline_pipes)))\n  GROUP BY e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts\n)\nSELECT 'Pipe(''' || split_part(parent_ref, '|', 2) || ''', ''' || split_part(parent_ref, '|', 3) || '''' || CASE WHEN regexp_replace(parent_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(parent_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(parent_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(parent_ref, '|', 1) || '''' END || ')' AS \"Parent\", COALESCE('Pipe(''' || split_part(child_ref, '|', 2) || ''', ''' || split_part(child_ref, '|', 3) || '''' || CASE WHEN regexp_replace(child_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(child_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(child_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(child_ref, '|', 1) || '''' END || ')', '(no child has synced yet)') AS \"Child\", role AS \"Role\", watermark_text AS \"Parent watermark when consumed\", COALESCE(pending_end::text, pending_end_int) AS \"Parent changed through\", CASE WHEN pending = 0 THEN 0 WHEN watermark_ts IS NOT NULL THEN GREATEST(extract(epoch FROM (pending_end - watermark_ts)), 0) END AS \"Data lag\", pending AS \"Unconsumed changes\", consumed_seq AS \"Consumed through\", latest_seq AS \"Latest change\" FROM backlog ORDER BY pending DESC, oldest_pending ASC NULLS LAST LIMIT 500"
+        }
+      ],
+      "id": 22,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 55,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "row",
+      "title": "Dirty-range backlog",
+      "collapsed": false,
+      "id": 23,
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Pending dirty ranges",
+      "description": "Ledger entries (changed intervals of a parent) that a child has not consumed yet. Each child counts its parents' entries separately.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n), ledger AS (\n  SELECT l.pipe_ref, l.seq, l.created,\n    CASE WHEN l.begin->>'datetime' IS NOT NULL THEN (l.begin->>'datetime')::timestamptz END AS begin_ts,\n    CASE WHEN l.\"end\"->>'datetime' IS NOT NULL THEN (l.\"end\"->>'datetime')::timestamptz END AS end_ts,\n    COALESCE(l.begin->>'datetime', l.begin->>'int') AS begin_text, COALESCE(l.\"end\"->>'datetime', l.\"end\"->>'int') AS end_text\n  FROM \"${schema:raw}\".\"${ledger_table:raw}\" l\n), edges AS (\n  SELECT c.parent_ref, c.child_ref, c.role, c.seq AS consumed_seq,\n    COALESCE(c.parent_watermark_at_cursor->>'datetime', c.parent_watermark_at_cursor->>'int') AS watermark_text,\n    CASE WHEN c.parent_watermark_at_cursor->>'datetime' IS NOT NULL THEN (c.parent_watermark_at_cursor->>'datetime')::timestamptz END AS watermark_ts\n  FROM \"${schema:raw}\".\"${cursors_table:raw}\" c\n  UNION ALL\n  SELECT DISTINCT l.pipe_ref, NULL, NULL, 0, NULL, NULL::timestamptz FROM ledger l\n  WHERE NOT EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${cursors_table:raw}\" c WHERE c.parent_ref = l.pipe_ref)\n), backlog AS (\n  SELECT e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts,\n    (SELECT max(l.seq) FROM ledger l WHERE l.pipe_ref = e.parent_ref) AS latest_seq,\n    count(l.seq) AS pending, min(l.created) AS oldest_pending, min(l.begin_ts) AS pending_begin, max(l.end_ts) AS pending_end,\n    min(l.begin_text) FILTER (WHERE l.begin_ts IS NULL) AS pending_begin_int, max(l.end_text) FILTER (WHERE l.end_ts IS NULL) AS pending_end_int\n  FROM edges e LEFT JOIN ledger l ON l.pipe_ref = e.parent_ref AND l.seq > e.consumed_seq\n  WHERE (('__all' IN (${pipe:sqlstring}) OR e.parent_ref IN (${pipe:sqlstring})) OR ('__all' IN (${pipe:sqlstring}) OR e.child_ref IN (${pipe:sqlstring})))\n    AND (('__all' IN (${pipeline:sqlstring}) OR e.parent_ref IN (SELECT pipe_ref FROM pipeline_pipes)) OR ('__all' IN (${pipeline:sqlstring}) OR e.child_ref IN (SELECT pipe_ref FROM pipeline_pipes)))\n  GROUP BY e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts\n)\nSELECT COALESCE(sum(pending), 0) AS \"Pending\" FROM backlog"
+        }
+      ],
+      "id": 24,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 8,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Pipes with a backlog",
+      "description": "Children with unconsumed parent changes (and parents no child has consumed from yet).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n), ledger AS (\n  SELECT l.pipe_ref, l.seq, l.created,\n    CASE WHEN l.begin->>'datetime' IS NOT NULL THEN (l.begin->>'datetime')::timestamptz END AS begin_ts,\n    CASE WHEN l.\"end\"->>'datetime' IS NOT NULL THEN (l.\"end\"->>'datetime')::timestamptz END AS end_ts,\n    COALESCE(l.begin->>'datetime', l.begin->>'int') AS begin_text, COALESCE(l.\"end\"->>'datetime', l.\"end\"->>'int') AS end_text\n  FROM \"${schema:raw}\".\"${ledger_table:raw}\" l\n), edges AS (\n  SELECT c.parent_ref, c.child_ref, c.role, c.seq AS consumed_seq,\n    COALESCE(c.parent_watermark_at_cursor->>'datetime', c.parent_watermark_at_cursor->>'int') AS watermark_text,\n    CASE WHEN c.parent_watermark_at_cursor->>'datetime' IS NOT NULL THEN (c.parent_watermark_at_cursor->>'datetime')::timestamptz END AS watermark_ts\n  FROM \"${schema:raw}\".\"${cursors_table:raw}\" c\n  UNION ALL\n  SELECT DISTINCT l.pipe_ref, NULL, NULL, 0, NULL, NULL::timestamptz FROM ledger l\n  WHERE NOT EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${cursors_table:raw}\" c WHERE c.parent_ref = l.pipe_ref)\n), backlog AS (\n  SELECT e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts,\n    (SELECT max(l.seq) FROM ledger l WHERE l.pipe_ref = e.parent_ref) AS latest_seq,\n    count(l.seq) AS pending, min(l.created) AS oldest_pending, min(l.begin_ts) AS pending_begin, max(l.end_ts) AS pending_end,\n    min(l.begin_text) FILTER (WHERE l.begin_ts IS NULL) AS pending_begin_int, max(l.end_text) FILTER (WHERE l.end_ts IS NULL) AS pending_end_int\n  FROM edges e LEFT JOIN ledger l ON l.pipe_ref = e.parent_ref AND l.seq > e.consumed_seq\n  WHERE (('__all' IN (${pipe:sqlstring}) OR e.parent_ref IN (${pipe:sqlstring})) OR ('__all' IN (${pipe:sqlstring}) OR e.child_ref IN (${pipe:sqlstring})))\n    AND (('__all' IN (${pipeline:sqlstring}) OR e.parent_ref IN (SELECT pipe_ref FROM pipeline_pipes)) OR ('__all' IN (${pipeline:sqlstring}) OR e.child_ref IN (SELECT pipe_ref FROM pipeline_pipes)))\n  GROUP BY e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts\n)\nSELECT count(DISTINCT COALESCE(child_ref, parent_ref)) FILTER (WHERE pending > 0) AS \"Pipes\" FROM backlog"
+        }
+      ],
+      "id": 25,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 65,
+        "w": 8,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Oldest pending change",
+      "description": "How long the oldest unconsumed change has waited.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n), ledger AS (\n  SELECT l.pipe_ref, l.seq, l.created,\n    CASE WHEN l.begin->>'datetime' IS NOT NULL THEN (l.begin->>'datetime')::timestamptz END AS begin_ts,\n    CASE WHEN l.\"end\"->>'datetime' IS NOT NULL THEN (l.\"end\"->>'datetime')::timestamptz END AS end_ts,\n    COALESCE(l.begin->>'datetime', l.begin->>'int') AS begin_text, COALESCE(l.\"end\"->>'datetime', l.\"end\"->>'int') AS end_text\n  FROM \"${schema:raw}\".\"${ledger_table:raw}\" l\n), edges AS (\n  SELECT c.parent_ref, c.child_ref, c.role, c.seq AS consumed_seq,\n    COALESCE(c.parent_watermark_at_cursor->>'datetime', c.parent_watermark_at_cursor->>'int') AS watermark_text,\n    CASE WHEN c.parent_watermark_at_cursor->>'datetime' IS NOT NULL THEN (c.parent_watermark_at_cursor->>'datetime')::timestamptz END AS watermark_ts\n  FROM \"${schema:raw}\".\"${cursors_table:raw}\" c\n  UNION ALL\n  SELECT DISTINCT l.pipe_ref, NULL, NULL, 0, NULL, NULL::timestamptz FROM ledger l\n  WHERE NOT EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${cursors_table:raw}\" c WHERE c.parent_ref = l.pipe_ref)\n), backlog AS (\n  SELECT e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts,\n    (SELECT max(l.seq) FROM ledger l WHERE l.pipe_ref = e.parent_ref) AS latest_seq,\n    count(l.seq) AS pending, min(l.created) AS oldest_pending, min(l.begin_ts) AS pending_begin, max(l.end_ts) AS pending_end,\n    min(l.begin_text) FILTER (WHERE l.begin_ts IS NULL) AS pending_begin_int, max(l.end_text) FILTER (WHERE l.end_ts IS NULL) AS pending_end_int\n  FROM edges e LEFT JOIN ledger l ON l.pipe_ref = e.parent_ref AND l.seq > e.consumed_seq\n  WHERE (('__all' IN (${pipe:sqlstring}) OR e.parent_ref IN (${pipe:sqlstring})) OR ('__all' IN (${pipe:sqlstring}) OR e.child_ref IN (${pipe:sqlstring})))\n    AND (('__all' IN (${pipeline:sqlstring}) OR e.parent_ref IN (SELECT pipe_ref FROM pipeline_pipes)) OR ('__all' IN (${pipeline:sqlstring}) OR e.child_ref IN (SELECT pipe_ref FROM pipeline_pipes)))\n  GROUP BY e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts\n)\nSELECT max(extract(epoch FROM (now() - oldest_pending))) AS \"Waiting\" FROM backlog WHERE pending > 0"
+        }
+      ],
+      "id": 26,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 65,
+        "w": 8,
+        "h": 4
+      }
+    },
+    {
+      "type": "table",
+      "title": "Backlog by child",
+      "description": "The work waiting for each child: its parents' changed intervals since the child last synced. The next engine run backfills them. A parent whose changes no child has consumed yet is listed under (no child has synced yet).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Waiting"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Dirty span"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n), ledger AS (\n  SELECT l.pipe_ref, l.seq, l.created,\n    CASE WHEN l.begin->>'datetime' IS NOT NULL THEN (l.begin->>'datetime')::timestamptz END AS begin_ts,\n    CASE WHEN l.\"end\"->>'datetime' IS NOT NULL THEN (l.\"end\"->>'datetime')::timestamptz END AS end_ts,\n    COALESCE(l.begin->>'datetime', l.begin->>'int') AS begin_text, COALESCE(l.\"end\"->>'datetime', l.\"end\"->>'int') AS end_text\n  FROM \"${schema:raw}\".\"${ledger_table:raw}\" l\n), edges AS (\n  SELECT c.parent_ref, c.child_ref, c.role, c.seq AS consumed_seq,\n    COALESCE(c.parent_watermark_at_cursor->>'datetime', c.parent_watermark_at_cursor->>'int') AS watermark_text,\n    CASE WHEN c.parent_watermark_at_cursor->>'datetime' IS NOT NULL THEN (c.parent_watermark_at_cursor->>'datetime')::timestamptz END AS watermark_ts\n  FROM \"${schema:raw}\".\"${cursors_table:raw}\" c\n  UNION ALL\n  SELECT DISTINCT l.pipe_ref, NULL, NULL, 0, NULL, NULL::timestamptz FROM ledger l\n  WHERE NOT EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${cursors_table:raw}\" c WHERE c.parent_ref = l.pipe_ref)\n), backlog AS (\n  SELECT e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts,\n    (SELECT max(l.seq) FROM ledger l WHERE l.pipe_ref = e.parent_ref) AS latest_seq,\n    count(l.seq) AS pending, min(l.created) AS oldest_pending, min(l.begin_ts) AS pending_begin, max(l.end_ts) AS pending_end,\n    min(l.begin_text) FILTER (WHERE l.begin_ts IS NULL) AS pending_begin_int, max(l.end_text) FILTER (WHERE l.end_ts IS NULL) AS pending_end_int\n  FROM edges e LEFT JOIN ledger l ON l.pipe_ref = e.parent_ref AND l.seq > e.consumed_seq\n  WHERE (('__all' IN (${pipe:sqlstring}) OR e.parent_ref IN (${pipe:sqlstring})) OR ('__all' IN (${pipe:sqlstring}) OR e.child_ref IN (${pipe:sqlstring})))\n    AND (('__all' IN (${pipeline:sqlstring}) OR e.parent_ref IN (SELECT pipe_ref FROM pipeline_pipes)) OR ('__all' IN (${pipeline:sqlstring}) OR e.child_ref IN (SELECT pipe_ref FROM pipeline_pipes)))\n  GROUP BY e.parent_ref, e.child_ref, e.role, e.consumed_seq, e.watermark_text, e.watermark_ts\n)\nSELECT COALESCE('Pipe(''' || split_part(child_ref, '|', 2) || ''', ''' || split_part(child_ref, '|', 3) || '''' || CASE WHEN regexp_replace(child_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(child_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(child_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(child_ref, '|', 1) || '''' END || ')', '(no child has synced yet)') AS \"Child\", string_agg(DISTINCT 'Pipe(''' || split_part(parent_ref, '|', 2) || ''', ''' || split_part(parent_ref, '|', 3) || '''' || CASE WHEN regexp_replace(parent_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(parent_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(parent_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(parent_ref, '|', 1) || '''' END || ')', ', ') AS \"Parents behind\", sum(pending) AS \"Pending ranges\", min(oldest_pending) AS \"Oldest pending\", extract(epoch FROM (now() - min(oldest_pending))) AS \"Waiting\", COALESCE(min(pending_begin)::text, min(pending_begin_int)) AS \"Dirty from\", COALESCE(max(pending_end)::text, max(pending_end_int)) AS \"Dirty through\", extract(epoch FROM (max(pending_end) - min(pending_begin))) AS \"Dirty span\"\nFROM backlog WHERE pending > 0 GROUP BY child_ref ORDER BY min(oldest_pending) ASC LIMIT 500"
+        }
+      ],
+      "id": 27,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 24,
+        "h": 9
+      }
+    },
+    {
+      "type": "row",
+      "title": "Nodes",
+      "collapsed": true,
+      "id": 28,
+      "gridPos": {
+        "x": 0,
+        "y": 78,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "type": "table",
+          "title": "Failed and retried nodes",
+          "description": "Nodes that failed, were blocked by a failed parent, wait for a confirmed rebuild, never started, or needed retries. Open the run in the console for its errors.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "noValue": "\u2014"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Seconds"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-postgresql-datasource",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT started AS \"Run started\", run_id AS \"Run\", pipe_label AS \"Pipe\", action AS \"Action\", status AS \"Status\", attempts AS \"Attempts\", num_chunks AS \"Chunks\", COALESCE(duration_seconds, extract(epoch FROM (finished - actual_started))) AS \"Seconds\", reason AS \"Planner reason\" FROM nodes WHERE status IN ('failed', 'upstream_failed', 'rebuild_pending', 'pending') OR attempts > 1 ORDER BY started DESC, pipe_label LIMIT 200"
+            }
+          ],
+          "id": 29,
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 79,
+            "w": 24,
+            "h": 9
+          }
+        },
+        {
+          "type": "table",
+          "title": "Node timing",
+          "description": "Per pipe across runs: sync time, how late it started against the critical-path plan, its slack (how much it could slip without delaying the run) and how often it was on the critical path.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "noValue": "\u2014"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Average seconds"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "P95 seconds"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Average start vs plan"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Average slack"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-postgresql-datasource",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), nodes AS (\n  SELECT n.*, sr.pipeline_names, 'Pipe(''' || split_part(n.pipe_ref, '|', 2) || ''', ''' || split_part(n.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(n.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(n.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(n.pipe_ref, '|', 1) || '''' END || ')' AS pipe_label,\n    extract(epoch FROM (n.actual_started - n.started)) AS start_offset_seconds\n  FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started) AND ('__all' IN (${pipe:sqlstring}) OR n.pipe_ref IN (${pipe:sqlstring}))\n)\nSELECT pipe_label AS \"Pipe\", count(*) AS \"Runs\", count(*) FILTER (WHERE status = 'succeeded') AS \"Synced\", avg(duration_seconds) AS \"Average seconds\", percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_seconds) AS \"P95 seconds\", avg(start_offset_seconds - planned_start_seconds) AS \"Average start vs plan\", avg(slack_seconds) AS \"Average slack\", 100.0 * count(*) FILTER (WHERE slack_seconds <= 0.001) / NULLIF(count(slack_seconds), 0) AS \"On critical path %\", sum(num_chunks) AS \"Chunks\", sum(inserted + updated + upserted + deleted) AS \"Rows affected\" FROM nodes GROUP BY pipe_ref, pipe_label ORDER BY avg(duration_seconds) DESC NULLS LAST LIMIT 200"
+            }
+          ],
+          "id": 30,
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 88,
+            "w": 24,
+            "h": 9
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Streams",
+      "collapsed": true,
+      "id": 31,
+      "gridPos": {
+        "x": 0,
+        "y": 97,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Stream flush rows",
+          "description": "Rows handed to each micro-batch flush of a stream source (--listen).",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-postgresql-datasource",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n)\nSELECT $__timeGroupAlias(ev.ts, '$__interval'), 'Pipe(''' || split_part(ev.pipe_ref, '|', 2) || ''', ''' || split_part(ev.pipe_ref, '|', 3) || '''' || CASE WHEN regexp_replace(ev.pipe_ref, '^([^|]*\\|){3}', '') IN ('', 'None') THEN '' ELSE ', ''' || regexp_replace(ev.pipe_ref, '^([^|]*\\|){3}', '') || '''' END || CASE WHEN split_part(ev.pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(ev.pipe_ref, '|', 1) || '''' END || ')' AS metric, sum((ev.payload->>'rows')::bigint) AS value FROM \"${schema:raw}\".\"${events_table:raw}\" ev WHERE $__timeFilter(ev.ts) AND ev.pipe_ref IS NOT NULL AND ('__all' IN (${pipe:sqlstring}) OR ev.pipe_ref IN (${pipe:sqlstring})) AND ('__all' IN (${pipeline:sqlstring}) OR ev.pipe_ref IN (SELECT pipe_ref FROM pipeline_pipes)) AND ev.event = 'stream_flushed' GROUP BY 1,2 ORDER BY 1"
+            }
+          ],
+          "id": 32,
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 98,
+            "w": 12,
+            "h": 9
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Stream flushes and restarts",
+          "description": "Needs system.engine.events = all (the default) for flushes.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 1,
+                "fillOpacity": 80,
+                "showPoints": "never",
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-postgresql-datasource",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "WITH runs AS (\n  SELECT r.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL) ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names, extract(epoch FROM (COALESCE(r.finished, now()) - r.started)) AS wall_seconds\n  FROM \"${schema:raw}\".\"${runs_table:raw}\" r\n  WHERE $__timeFilter(r.started)\n), selected_runs AS (\n  SELECT * FROM runs WHERE ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${pipe:sqlstring}) OR EXISTS (SELECT 1 FROM \"${schema:raw}\".\"${nodes_table:raw}\" n\n      WHERE n.run_id = runs.run_id AND $__timeFilter(n.started) AND n.pipe_ref IN (${pipe:sqlstring})))\n), pipeline_pipes AS (\n  SELECT DISTINCT n.pipe_ref FROM \"${schema:raw}\".\"${nodes_table:raw}\" n JOIN selected_runs sr ON sr.run_id = n.run_id\n  WHERE $__timeFilter(n.started)\n)\nSELECT $__timeGroupAlias(ev.ts, '$__interval'), count(*) FILTER (WHERE ev.event = 'stream_flushed') AS \"Flushes\", count(*) FILTER (WHERE ev.event = 'stream_flushed' AND ev.payload->>'success' = 'false') AS \"Failed flushes\", count(*) FILTER (WHERE ev.event = 'stream_restarted') AS \"Restarts\", count(*) FILTER (WHERE ev.event = 'children_triggered') AS \"Child runs triggered\" FROM \"${schema:raw}\".\"${events_table:raw}\" ev WHERE $__timeFilter(ev.ts) AND ev.pipe_ref IS NOT NULL AND ('__all' IN (${pipe:sqlstring}) OR ev.pipe_ref IN (${pipe:sqlstring})) AND ('__all' IN (${pipeline:sqlstring}) OR ev.pipe_ref IN (SELECT pipe_ref FROM pipeline_pipes)) AND ev.event IN ('stream_flushed', 'stream_restarted', 'children_triggered') GROUP BY 1 ORDER BY 1"
+            }
+          ],
+          "id": 33,
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 98,
+            "w": 12,
+            "h": 9
+          }
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Meerschaum dashboards",
+      "tags": [
+        "meerschaum"
+      ],
+      "asDropdown": true,
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
+  "annotations": {
+    "list": []
+  }
+}

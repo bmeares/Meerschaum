@@ -1,0 +1,878 @@
+{
+  "uid": "mrsm-performance",
+  "title": "Meerschaum Performance",
+  "description": "Native Meerschaum sync telemetry and recorded Pipeline runs. Time filters apply to completed syncs. Data visibility follows the selected PostgreSQL data source permissions. No raw sync messages or SQL are stored in these metrics.",
+  "tags": [
+    "meerschaum",
+    "performance"
+  ],
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": true,
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "grafana-postgresql-datasource",
+        "regex": "/^Meerschaum Main$/",
+        "refresh": 1,
+        "current": {
+          "selected": true,
+          "text": "Meerschaum Main",
+          "value": "meerschaum-main"
+        },
+        "options": []
+      },
+      {
+        "name": "schema",
+        "label": "Internal schema",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT table_schema AS __text, table_schema AS __value FROM information_schema.tables WHERE table_name='mrsm_engine_metrics' OR starts_with(table_name, 'mrsm_engine_metrics_') GROUP BY table_schema ORDER BY CASE WHEN table_schema='_mrsm_internal' THEN 0 ELSE 1 END, table_schema",
+        "query": "SELECT table_schema AS __text, table_schema AS __value FROM information_schema.tables WHERE table_name='mrsm_engine_metrics' OR starts_with(table_name, 'mrsm_engine_metrics_') GROUP BY table_schema ORDER BY CASE WHEN table_schema='_mrsm_internal' THEN 0 ELSE 1 END, table_schema",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "_mrsm_internal",
+          "value": "_mrsm_internal"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "metrics_table",
+        "label": "Instance schema",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT CASE WHEN table_name='mrsm_engine_metrics' THEN 'Default instance' ELSE substr(table_name,length('mrsm_engine_metrics_')+1) END AS __text, table_name AS __value FROM information_schema.tables WHERE table_schema=${schema:sqlstring} AND (table_name='mrsm_engine_metrics' OR starts_with(table_name,'mrsm_engine_metrics_')) ORDER BY table_name",
+        "query": "SELECT CASE WHEN table_name='mrsm_engine_metrics' THEN 'Default instance' ELSE substr(table_name,length('mrsm_engine_metrics_')+1) END AS __text, table_name AS __value FROM information_schema.tables WHERE table_schema=${schema:sqlstring} AND (table_name='mrsm_engine_metrics' OR starts_with(table_name,'mrsm_engine_metrics_')) ORDER BY table_name",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "Default instance",
+          "value": "mrsm_engine_metrics"
+        },
+        "options": []
+      },
+      {
+        "name": "runs_table",
+        "label": "Runs table",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __value",
+        "query": "SELECT regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __text, regexp_replace(${metrics_table:sqlstring}, '^mrsm_engine_metrics', 'mrsm_engine_runs') AS __value",
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "allValue": null,
+        "current": {
+          "text": "mrsm_engine_runs",
+          "value": "mrsm_engine_runs"
+        },
+        "options": [],
+        "hide": 2
+      },
+      {
+        "name": "pipeline",
+        "label": "Pipeline",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT DISTINCT snapshot->>'name' AS __text, snapshot->>'name' AS __value FROM \"${schema:raw}\".\"${runs_table:raw}\" r JOIN \"${schema:raw}\".\"${metrics_table:raw}\" m ON m.run_id=r.run_id CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE $__timeFilter(m.ts) AND snapshot->>'name' IS NOT NULL UNION SELECT '(No Pipeline)', '(No Pipeline)' ORDER BY 1",
+        "query": "SELECT DISTINCT snapshot->>'name' AS __text, snapshot->>'name' AS __value FROM \"${schema:raw}\".\"${runs_table:raw}\" r JOIN \"${schema:raw}\".\"${metrics_table:raw}\" m ON m.run_id=r.run_id CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE $__timeFilter(m.ts) AND snapshot->>'name' IS NOT NULL UNION SELECT '(No Pipeline)', '(No Pipeline)' ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "'__all'",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "pipe",
+        "label": "Pipe",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "${datasource}"
+        },
+        "definition": "SELECT DISTINCT connector_keys || ' / ' || metric_key || ' / ' || COALESCE(location_key, 'None') AS __text, pipe_ref AS __value FROM \"${schema:raw}\".\"${metrics_table:raw}\" WHERE $__timeFilter(ts) ORDER BY 1",
+        "query": "SELECT DISTINCT connector_keys || ' / ' || metric_key || ' / ' || COALESCE(location_key, 'None') AS __text, pipe_ref AS __value FROM \"${schema:raw}\".\"${metrics_table:raw}\" WHERE $__timeFilter(ts) ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "'__all'",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "result",
+        "label": "Result",
+        "type": "custom",
+        "query": "Success : true, Failure : false",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "'__all'",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [
+          {
+            "text": "Success",
+            "value": "true",
+            "selected": false
+          },
+          {
+            "text": "Failure",
+            "value": "false",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Completed syncs",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT count(*) AS \"Syncs\" FROM selected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "id": 1,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failed syncs",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT count(*) FILTER (WHERE NOT success) AS \"Failures\" FROM selected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "id": 2,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "P95 sync duration",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_seconds) AS \"P95\" FROM selected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "id": 3,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Rows affected",
+      "description": "Inserted + updated + upserted + deleted rows. Replacements count both deletion and writing; unchanged fetched or checked rows are excluded.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT COALESCE(sum(COALESCE(rows,0)),0) AS \"Rows\" FROM selected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No history",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "id": 4,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Sync outcomes",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT $__timeGroupAlias(ts, '$__interval'), count(*) FILTER (WHERE success) AS \"Successful\", count(*) FILTER (WHERE NOT success) AS \"Failed\" FROM selected GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 5,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Sync duration",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT $__timeGroupAlias(ts, '$__interval'), avg(duration_seconds) AS \"Average\", percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_seconds) AS \"P95\", max(duration_seconds) AS \"Maximum\" FROM selected GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 6,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rows affected over time",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT $__timeGroupAlias(ts, '$__interval'), sum(inserted) AS \"Inserted\", sum(updated) AS \"Updated\", sum(upserted) AS \"Upserted\", sum(deleted) AS \"Deleted\" FROM selected GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 7,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Retries and chunks",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT $__timeGroupAlias(ts, '$__interval'), sum(greatest(attempts-1,0)) AS \"Retries\", sum(chunks) AS \"Chunks\" FROM selected GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 8,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Write rate",
+      "description": "Rows affected divided by total measured sync duration. Concurrent sync durations are summed.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT $__timeGroupAlias(ts, '$__interval'), sum(COALESCE(rows,0)) / NULLIF(sum(duration_seconds),0) AS \"Rows affected/s\" FROM selected GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:rows/s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 9,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failure rate",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT $__timeGroupAlias(ts, '$__interval'), 100.0*count(*) FILTER (WHERE NOT success)/NULLIF(count(*),0) AS \"Failure rate\" FROM selected GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 10,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "table",
+      "title": "Slowest pipes",
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT pipe_ref AS \"Pipe\", count(*) AS \"Syncs\", round(avg(duration_seconds)::numeric,3) AS \"Average seconds\", round(max(duration_seconds)::numeric,3) AS \"Maximum seconds\", count(*) FILTER (WHERE NOT success) AS \"Failures\", sum(COALESCE(rows,0)) AS \"Rows affected\", sum(greatest(attempts-1,0)) AS \"Retries\" FROM selected GROUP BY pipe_ref ORDER BY avg(duration_seconds) DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "id": 11,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 9
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent failures",
+      "description": "Telemetry records outcomes and timing; open the corresponding run or job in the console for logs.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH events AS (\n  SELECT m.*, CASE WHEN cardinality(ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)) > 0 THEN ARRAY(SELECT DISTINCT snapshot->>'name' FROM jsonb_array_elements(COALESCE(NULLIF(r.selection, '')::jsonb->'pipeline_definitions', '[]'::jsonb)) snapshot WHERE snapshot->>'name' IS NOT NULL)\n    ELSE ARRAY['(No Pipeline)']::text[] END AS pipeline_names\n  FROM \"${schema:raw}\".\"${metrics_table:raw}\" m LEFT JOIN \"${schema:raw}\".\"${runs_table:raw}\" r ON r.run_id = m.run_id\n  WHERE $__timeFilter(m.ts)\n), selected AS (\n  SELECT * FROM events WHERE ('__all' IN (${pipe:sqlstring}) OR pipe_ref IN (${pipe:sqlstring}))\n    AND ('__all' IN (${pipeline:sqlstring}) OR pipeline_names && ARRAY[${pipeline:sqlstring}]::text[])\n    AND ('__all' IN (${result:sqlstring}) OR success::text IN (${result:sqlstring}))\n)\nSELECT ts AS \"Completed\", pipe_ref AS \"Pipe\", run_id AS \"Run\", duration_seconds AS \"Seconds\", attempts AS \"Attempts\", chunks AS \"Chunks\", source AS \"Source\" FROM selected WHERE NOT success ORDER BY ts DESC LIMIT 100"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "id": 12,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 9
+      }
+    }
+  ],
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Meerschaum dashboards",
+      "tags": [
+        "meerschaum"
+      ],
+      "asDropdown": true,
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
+  "annotations": {
+    "list": []
+  }
+}

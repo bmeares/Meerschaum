@@ -4,6 +4,8 @@
 //! The first time the `stack` key is loaded (and whenever the stack actions ask), the Docker
 //! Compose file and the two Grafana files are rewritten from the config, keeping the comment
 //! header of the file already on disk, and the PostgreSQL extensions script is created once.
+//! The built-in Grafana dashboards are installed next to the provider file, and the ones an
+//! earlier release shipped are removed when Meerschaum still manages them.
 
 use std::path::Path;
 
@@ -32,18 +34,75 @@ pub const GRAFANA_DEFAULT_INSTANCE: &str = "__MRSM_DEFAULT_INSTANCE__";
 /// Managed Grafana resources shipped in both the standalone CLI and the Python extension.
 pub const GRAFANA_DASHBOARDS: &[(&str, &str)] = &[
     (
+        "meerschaum-syncs.json",
+        include_str!("grafana/meerschaum-syncs.json"),
+    ),
+    (
+        "meerschaum-engine.json",
+        include_str!("grafana/meerschaum-engine.json"),
+    ),
+];
+
+/// Built-in dashboards an earlier release wrote and this one no longer ships (5.0.0rc16 through
+/// 5.0.0rc34 wrote "Meerschaum Performance", "Pipe Performance" and "Pipeline Performance"; the
+/// Syncs dashboard replaces them): `(file name, UID, SHA-256 of every version Meerschaum wrote)`.
+/// A version that fills in the default instance is hashed with the placeholder restored
+/// ([`managed_dashboard_hash`]). A file matching none of them is the user's and is kept.
+pub const RETIRED_GRAFANA_DASHBOARDS: &[(&str, &str, &[&str])] = &[
+    (
         "meerschaum-performance.json",
-        include_str!("grafana/meerschaum-performance.json"),
+        "mrsm-performance",
+        &[
+            "c4ffaa1b88d6134c1586482efd41bd6723881dea4248c3c7cf470370414606b3",
+            "cc9124a8c2202c06ae13d64811aca72a156fb4f9a69164b0caf24cbb414febb5",
+        ],
     ),
     (
         "meerschaum-pipes.json",
-        include_str!("grafana/meerschaum-pipes.json"),
+        "mrsm-pipe-performance",
+        &[
+            "f8367dc580e2d7911be790bc02a2e4a1860d2aa9976fb393c511ace1a1c414cc",
+            "331adb9a244cf0b25848a584a90cc36ea780ac879baacc9161bcdc06153ef4c9",
+        ],
     ),
     (
         "meerschaum-pipelines.json",
-        include_str!("grafana/meerschaum-pipelines.json"),
+        "mrsm-pipeline-performance",
+        &[
+            "b3f9aad150598de76f025c81ceab0ea146d1620ecca8c5b8a9947e209e1b2c0f",
+            "76edfcdfbfa921e86d62861d8312d93968a9ed2eb9e98c95bacb94c1304c254e",
+        ],
     ),
 ];
+
+/// The SHA-256 (lowercase hex) of a dashboard file as Meerschaum's template had it: a filled-in
+/// default instance (the `default_instance` variable's value, written as a whole JSON string) is
+/// put back to [`GRAFANA_DEFAULT_INSTANCE`] first. A file that does not parse is hashed as it is.
+pub fn managed_dashboard_hash(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let filled = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|dashboard| {
+            dashboard["templating"]["list"]
+                .as_array()?
+                .iter()
+                .find(|variable| variable["name"] == "default_instance")?["query"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .filter(|instance| !instance.is_empty() && instance != GRAFANA_DEFAULT_INSTANCE);
+    let template = match filled {
+        Some(instance) => text.replace(
+            &serde_json::Value::String(instance).to_string(),
+            &format!("\"{GRAFANA_DEFAULT_INSTANCE}\""),
+        ),
+        None => text.to_string(),
+    };
+    Sha256::digest(template.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 impl ConfigState {
     /// `_read_yaml_config(path)`: the leading comment / blank-line header of a YAML file. A file
@@ -153,8 +212,9 @@ impl ConfigState {
             .unwrap_or(instance)
     }
 
-    /// Install/update built-in dashboard files in the existing provisioner's mounted folder.
-    /// Other files are untouched; a filename collision with a different dashboard UID is kept.
+    /// Install/update built-in dashboard files in the existing provisioner's mounted folder and
+    /// remove the retired built-ins Meerschaum still manages. Other files are untouched; a
+    /// filename collision with a different dashboard UID is kept.
     pub fn write_grafana_dashboards(&mut self) -> Result<(), String> {
         let provider = self.paths().path("GRAFANA_DASHBOARD_PATH");
         let directory = provider
@@ -199,7 +259,58 @@ impl ConfigState {
             super::write_file_atomically(&path, source.as_bytes())
                 .map_err(|error| error.to_string())?;
         }
+        self.remove_retired_grafana_dashboards(directory);
         Ok(())
+    }
+
+    /// Remove the dashboards an earlier release installed ([`RETIRED_GRAFANA_DASHBOARDS`]) when
+    /// the file is exactly what Meerschaum wrote; Grafana's provisioner then drops them. A
+    /// symlink, an unreadable file, another UID or a customized copy is kept with a warning.
+    fn remove_retired_grafana_dashboards(&mut self, directory: &Path) {
+        for (name, uid, hashes) in RETIRED_GRAFANA_DASHBOARDS {
+            let path = directory.join(name);
+            if path.is_symlink() {
+                self.warn(format!(
+                    "Keeping retired Grafana dashboard '{}': it is a symlink.",
+                    path.display()
+                ));
+                continue;
+            }
+            let existing = match std::fs::read_to_string(&path) {
+                Ok(existing) => existing,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    self.warn(format!(
+                        "Keeping unreadable Grafana dashboard '{}': {error}.",
+                        path.display()
+                    ));
+                    continue;
+                }
+            };
+            if hashes.contains(&managed_dashboard_hash(&existing).as_str()) {
+                if let Err(error) = std::fs::remove_file(&path) {
+                    self.warn(format!(
+                        "Could not remove the retired Grafana dashboard '{}': {error}.",
+                        path.display()
+                    ));
+                }
+                continue;
+            }
+            let same_uid = serde_json::from_str::<serde_json::Value>(&existing)
+                .is_ok_and(|dashboard| dashboard["uid"] == *uid);
+            self.warn(if same_uid {
+                format!(
+                    "Keeping customized Grafana dashboard '{}': Meerschaum no longer ships it \
+                     (see the Syncs and Engine dashboards); delete it when you no longer need it.",
+                    path.display()
+                )
+            } else {
+                format!(
+                    "Keeping customized Grafana dashboard '{}': its UID differs from the retired built-in.",
+                    path.display()
+                )
+            });
+        }
     }
 
     /// `sync_files(keys)`: only the `stack` key has derivative files. Does nothing when writes

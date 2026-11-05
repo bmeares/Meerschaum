@@ -88,6 +88,55 @@ def test_backups_and_symlinks_cannot_escape_the_reviewed_boundary(directories, t
     assert outside.read_bytes() == old[name]
 
 
+def test_retired_built_ins_the_artifact_recognizes_are_backed_up_and_removed(directories):
+    destination, resources, old, backups = directories
+    retired = {name: json.dumps({'uid': uid, 'title': 'retired'}).encode() for name, uid in provision.RETIRED.items()}
+    for name, data in retired.items():
+        (destination / name).write_bytes(data)
+    removable, kept = sorted(provision.RETIRED)[:2], sorted(provision.RETIRED)[2]
+    assert provision.retired_candidates(destination) == {name: data.decode() for name, data in retired.items()}
+    entries = provision.plan(destination, resources, set(removable))
+    assert {entry['name'] for entry in entries if entry['after'] is None} == set(removable)
+    backup = provision.install(destination, entries, backups)
+    for name in removable:
+        assert not (destination / name).exists()
+        assert (backup / name).read_bytes() == retired[name]
+    assert (destination / kept).read_bytes() == retired[kept]
+    assert (destination / 'user-dashboard.json').read_text() == '{"uid":"user"}'
+
+
+def test_a_failed_install_restores_removed_retired_dashboards(directories, monkeypatch):
+    destination, resources, old, backups = directories
+    name = next(iter(provision.RETIRED))
+    (destination / name).write_text('{"uid":"retired"}')
+    entries = provision.plan(destination, resources, {name})
+    write = provision.atomic_write
+    calls = 0
+
+    def fail_last(*args):
+        nonlocal calls
+        calls += 1
+        if calls == len(provision.MANAGED):
+            raise OSError('simulated rename failure')
+        return write(*args)
+
+    monkeypatch.setattr(provision, 'atomic_write', fail_last)
+    # Removals run after the managed writes; fail the last managed write before any removal,
+    # then make sure a removal that already happened is restored on a later failure.
+    with pytest.raises(OSError, match='simulated'):
+        provision.install(destination, entries, backups)
+    assert (destination / name).read_text() == '{"uid":"retired"}'
+    assert {n: (destination / n).read_bytes() for n in old} == old
+    monkeypatch.setattr(provision, 'atomic_write', write)
+    entries = provision.plan(destination, resources, {name})
+    entries.append({'name': 'missing.json', 'uid': 'x', 'changed': True, 'before': b'x', 'after': b'y',
+                    'mode': 0o644})
+    with pytest.raises(RuntimeError, match='changed after preflight'):
+        provision.install(destination, entries, backups)
+    assert (destination / name).read_text() == '{"uid":"retired"}'
+    assert {n: (destination / n).read_bytes() for n in old} == old
+
+
 def test_native_emitter_gets_only_its_scratch_root_and_installed_import_path(tmp_path, monkeypatch):
     expected = {name: json.dumps({'uid': uid}) for name, uid in provision.MANAGED.items()}
     captured = {}
@@ -104,8 +153,9 @@ def test_native_emitter_gets_only_its_scratch_root_and_installed_import_path(tmp
     monkeypatch.setenv('PYTHONNOUSERSITE', '1')
     monkeypatch.setenv('TMUX', '/user/tmux')
     monkeypatch.setattr(provision.subprocess, 'run', emit)
-    resources = provision.installed_resources('/installed/python', '5.0.0rc16', tmp_path)
+    resources, removable = provision.installed_resources('/installed/python', '5.0.0rc16', tmp_path)
     assert set(resources) == set(provision.MANAGED)
+    assert removable == set()
     env = captured['env']
     assert Path(env['MRSM_ROOT_DIR']).parent == tmp_path
     assert not {'MRSM_SQL_PRIVATE', 'PYTHONPATH', 'PYTHONHOME', 'PYTHONNOUSERSITE', 'TMUX', 'TMUX_PANE'} & env.keys()

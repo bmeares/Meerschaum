@@ -2,7 +2,8 @@
 """Review or install only the built-in Grafana JSON from an installed Meerschaum artifact.
 
 Compose, provider and datasource configuration on the destination host are never regenerated.
-The default is a read-only plan; --install backs up and atomically replaces the managed JSON.
+The default is a read-only plan; --install backs up and atomically replaces the managed JSON,
+and removes the retired built-ins the installed artifact recognizes as unmodified.
 """
 
 import argparse
@@ -18,6 +19,12 @@ import tempfile
 import uuid
 
 MANAGED = {
+    'meerschaum-syncs.json': 'mrsm-syncs',
+    'meerschaum-engine.json': 'mrsm-engine',
+}
+# Built-ins earlier releases shipped. The installed artifact decides whether a copy is still
+# exactly what Meerschaum wrote (customized copies are kept).
+RETIRED = {
     'meerschaum-performance.json': 'mrsm-performance',
     'meerschaum-pipes.json': 'mrsm-pipe-performance',
     'meerschaum-pipelines.json': 'mrsm-pipeline-performance',
@@ -40,8 +47,26 @@ def validate_artifact_provenance(package_file, extension_file, distribution_root
             raise ValueError(f'The {label} must be inside the installed distribution: {path}')
 
 
-def installed_resources(python, expected_version, scratch_parent):
-    """Emit resources in a child with no live configuration or source-tree import path."""
+def retired_candidates(destination):
+    """The destination's retired built-ins that could be removed (regular files only)."""
+    candidates = {}
+    for name in RETIRED:
+        target = destination / name
+        if target.is_file() and not target.is_symlink():
+            try:
+                candidates[name] = target.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+    return candidates
+
+
+def installed_resources(python, expected_version, scratch_parent, retired=None):
+    """Emit resources in a child with no live configuration or source-tree import path.
+
+    `retired` maps retired file names to the destination's text; the artifact's own upgrade
+    (`sync_files`) runs over copies of them in the scratch root, and the names it removed come back
+    as the second value.
+    """
     scratch_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='grafana-artifact-', dir=scratch_parent) as name:
         root = Path(name)
@@ -68,13 +93,20 @@ validate_artifact_provenance(mrsm.__file__, _core.EXTENSION_PATH,
     [metadata.version('meerschaum'), mrsm.__version__, _core.__version__], sys.argv[1],
     editable=bool(origin.get('dir_info', {}).get('editable')),
     installed_wheel=distribution.read_text('WHEEL') is not None)
-_core.sync_files(['stack'])
 from meerschaum.config import paths
 directory = paths.GRAFANA_DASHBOARD_PATH.parent
+directory.mkdir(parents=True, exist_ok=True)
+retired = json.loads(sys.argv[3])
+for name, text in retired.items():
+    (directory / name).write_text(text)
+_core.sync_files(['stack'])
 names = json.loads(sys.argv[2])
 print('RESOURCES=' + json.dumps({name: (directory / name).read_text() for name in names}))
+print('REMOVED=' + json.dumps(sorted(name for name in retired if not (directory / name).exists())))
 '''
-        result = subprocess.run([python, '-c', code, expected_version, json.dumps(list(MANAGED))],
+        retired = {name: text for name, text in (retired or {}).items() if name in RETIRED}
+        result = subprocess.run([python, '-c', code, expected_version, json.dumps(list(MANAGED)),
+                                 json.dumps(retired)],
                                 cwd=root, env=env, capture_output=True, text=True, timeout=90)
         if result.returncode:
             raise RuntimeError('Installed artifact resource emission failed:\n' + result.stderr[-3000:])
@@ -82,15 +114,21 @@ print('RESOURCES=' + json.dumps({name: (directory / name).read_text() for name i
         if line is None:
             raise RuntimeError('Installed artifact did not emit dashboard resources')
         resources = json.loads(line)
-        return {name: text.encode('utf-8') for name, text in resources.items()}
+        removed = next((line[8:] for line in result.stdout.splitlines() if line.startswith('REMOVED=')), '[]')
+        removable = set(json.loads(removed)) & set(retired)
+        return {name: text.encode('utf-8') for name, text in resources.items()}, removable
 
 
-def plan(destination, resources):
-    """Preflight every UID before any destination or backup mutation."""
+def plan(destination, resources, removable=frozenset()):
+    """Preflight every UID before any destination or backup mutation.
+
+    `removable` names the retired built-ins the installed artifact recognized as unmodified; they
+    are removed (with a backup). Other retired files are kept.
+    """
     if not destination.is_dir():
         raise ValueError(f'The existing mounted dashboard directory is required: {destination}')
     if set(resources) != set(MANAGED):
-        raise ValueError('The installed artifact must supply exactly the three managed dashboards')
+        raise ValueError('The installed artifact must supply exactly the managed dashboards')
     result = []
     for name, uid in MANAGED.items():
         data = resources[name]
@@ -112,6 +150,15 @@ def plan(destination, resources):
         result.append({'name': name, 'uid': uid, 'changed': previous != data,
                        'before': previous, 'after': data,
                        'mode': target.stat().st_mode & 0o777 if previous is not None else 0o644})
+    for name in sorted(set(removable) & set(RETIRED)):
+        target = destination / name
+        if target.is_symlink() or not target.is_file():
+            continue
+        if target.stat().st_uid != os.getuid():
+            raise ValueError(f'Refusing to remove a dashboard owned by another user: {target}')
+        result.append({'name': name, 'uid': RETIRED[name], 'changed': True,
+                       'before': target.read_bytes(), 'after': None,
+                       'mode': target.stat().st_mode & 0o777})
     return result
 
 
@@ -152,7 +199,10 @@ def install(destination, entries, backup_parent):
             target = destination / entry['name']
             if target.is_symlink() or (target.read_bytes() if target.exists() else None) != entry['before']:
                 raise RuntimeError(f'Dashboard changed after preflight: {target}')
-            atomic_write(target, entry['after'], entry['mode'])
+            if entry['after'] is None:
+                target.unlink()
+            else:
+                atomic_write(target, entry['after'], entry['mode'])
             written.append(entry)
     except BaseException:
         for entry in reversed(written):
@@ -175,9 +225,12 @@ def main():
     parser.add_argument('--install', action='store_true')
     args = parser.parse_args()
     try:
-        resources = installed_resources(args.python, args.expected_version, args.scratch_parent)
         destination = args.destination.expanduser().resolve()
-        entries = plan(destination, resources)
+        resources, removable = installed_resources(
+            args.python, args.expected_version, args.scratch_parent,
+            retired_candidates(destination) if destination.is_dir() else {},
+        )
+        entries = plan(destination, resources, removable)
         backup = None
         if args.install:
             if args.backup_dir is None:
@@ -188,7 +241,11 @@ def main():
                           'dashboards': [{'name': entry['name'], 'uid': entry['uid'],
                                           'changed': entry['changed'],
                                           'sha256': hashlib.sha256(entry['after']).hexdigest()}
-                                         for entry in entries]}, indent=2))
+                                         for entry in entries if entry['after'] is not None],
+                          'removed': [entry['name'] for entry in entries if entry['after'] is None],
+                          'kept_retired': sorted(set(RETIRED) & {path.name for path in destination.iterdir()}
+                                                 - {entry['name'] for entry in entries})},
+                         indent=2))
         return 0
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
         print(f'provision_grafana.py: {error}', file=sys.stderr)

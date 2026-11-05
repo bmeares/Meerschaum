@@ -138,15 +138,24 @@ mrsm stack up -d db grafana
 
     Open a web browser and navigate to [http://localhost:3000](http://localhost:3000) where you can log into Grafana with username `admin`, password `admin`.
 
-### Built-in performance dashboards
+### Built-in dashboards
 
-The Stack provisions three dashboards in Grafana's **Meerschaum Dashboards** folder:
+The Stack provisions two dashboards in Grafana's **Meerschaum Dashboards** folder. Both read the instance's internal `mrsm_engine_*` tables and filter by Pipe and Pipeline.
 
-- **Meerschaum Performance**, the overall duration, failure, and write-rate picture.
-- **Pipe Performance**, focus on one Pipe and its recent syncs.
-- **Pipeline Performance**, compare Pipeline runs and follow their results.
+- **Syncs**: every completed sync.
+    - **Overview**: totals, outcomes, duration and P95, write rate (**rows affected/s**), failure rate, retries and chunks, the slowest Pipes and recent failures.
+    - **Pipes**: duration, write rate, failures and rows affected per Pipe, a Pipe summary and the sync history.
+    - **Pipelines**: duration, rows affected, retries and failures per Pipeline, a Pipeline summary and recorded run durations.
+- **Engine**: what the [Syncing Engine](../pipelines/state.md) records.
+    - **Runs**: runs by outcome, run duration, node outcomes and planned actions, failures and retries, node start delay against the plan, and the recent runs.
+    - **Freshness**: each Pipe's latest sync and time since its last success, data watermarks, and each child's lag behind its parents.
+    - **Dirty-range backlog**: the parents' changed ranges each child has not synced yet, and how long they have waited.
+    - **Nodes** and **Streams**: failed and retried nodes, per-Pipe timing and critical-path share, and stream flushes.
 
-Use them to find slow Pipes, inspect recent failures, and follow P95 duration, retries, chunks, and **rows affected/s**. Replacements count deleted plus new rows; unchanged syncs affect zero rows.
+Rows affected count inserted, updated, upserted and deleted rows. Replacements count deleted plus new rows; unchanged syncs affect zero rows.
+
+!!! note "Upgrading from 5.0.0rc34 or earlier"
+    The **Meerschaum Performance**, **Pipe Performance** and **Pipeline Performance** dashboards are replaced by **Syncs**. The next `mrsm stack` command removes their files when they are exactly as Meerschaum wrote them, and Grafana drops them. A customized copy, a symlink or another dashboard under the same file name is kept, with a warning; delete it when you no longer need it.
 
 Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](../api-instance/sync-metrics.md) for capture and history limits.
 

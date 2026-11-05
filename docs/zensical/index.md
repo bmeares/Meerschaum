@@ -97,7 +97,7 @@ Start with the [Python](docs/python/index.md) or [Rust](docs/rust/index.md) guid
 
 ### Run and observe
 
-Give work a [schedule](reference/background-jobs/schedules.md), manage it in the [console](reference/api-instance/web-console.md), and chart sync metrics in [Grafana](reference/stack/index.md#built-in-performance-dashboards). Teams, permissions, and locks control shared access.
+Give work a [schedule](reference/background-jobs/schedules.md), manage it in the [console](reference/api-instance/web-console.md), and chart sync metrics in [Grafana](reference/stack/index.md#built-in-dashboards). Teams, permissions, and locks control shared access.
 
 [Explore the console →](get-started/start-api.md)
 
