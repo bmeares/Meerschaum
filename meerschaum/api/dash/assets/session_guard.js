@@ -4,6 +4,9 @@
  * instead of leaving the page waiting for an update that never comes. Nothing happens while the
  * login or registration form is shown, and a burst of redirects stops after a few in a row.
  * A `409` with `X-Mrsm-Reload` (a page loaded from an older console) reloads the page.
+ * A `503` with `Retry-After` (the host could not read the session store, so the callback did not
+ * run) is sent again after that delay, a few times, instead of leaving the callback's outputs
+ * unrendered: the renderer never repeats a failed callback by itself.
  */
 (function () {
   if (window.__mrsmSessionGuard || !window.fetch) { return; }
@@ -64,8 +67,42 @@
     window.location.reload();
   }
 
-  window.fetch = function (input, init) {
+  /* The host answers a callback it could not authorize because the session store was busy (the
+   * instance locked or timing out) with `503` and `Retry-After`, before running it
+   * (`meerschaum/api/host/_callbacks.py`): sending the same request again is safe. */
+  var RETRY_LIMIT = 6;
+  var RETRY_MAX_MS = 2000;
+
+  function aborted(init) {
+    return !!(init && init.signal && init.signal.aborted);
+  }
+
+  function retryable(response, input, init) {
+    return response.status === 503
+      && response.headers.get('Retry-After') !== null
+      && typeof input === 'string'
+      && input.indexOf('_dash-update-component') !== -1
+      && !aborted(init);
+  }
+
+  function retryDelay(response) {
+    var seconds = parseFloat(response.headers.get('Retry-After'));
+    var ms = Math.min((seconds >= 0 ? seconds : 1) * 1000, RETRY_MAX_MS);
+    return ms * (0.75 + Math.random() * 0.5);
+  }
+
+  function send(input, init, attempt) {
     return originalFetch(input, init).then(function (response) {
+      var retry = false;
+      try { retry = attempt < RETRY_LIMIT && retryable(response, input, init); } catch (e) { retry = false; }
+      if (!retry) { return response; }
+      return new Promise(function (resolve) { setTimeout(resolve, retryDelay(response)); })
+        .then(function () { return aborted(init) ? response : send(input, init, attempt + 1); });
+    });
+  }
+
+  window.fetch = function (input, init) {
+    return send(input, init, 0).then(function (response) {
       try { reloadStalePage(response, input); } catch (e) { /* never break the response */ }
       try {
         var loginPath = response.headers.get('X-Mrsm-Login');
