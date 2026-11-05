@@ -61,6 +61,8 @@ jobs:
         echo "$dir" >> "$GITHUB_PATH"
         "$dir/python" --version
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      # A persistent self-hosted runner keeps its own build cache; this action's cleanup deleted its rustup.
+      if: ${{ runner.environment == 'github-hosted' }}
       with:
         shared-key: wheel-${{ inputs.target }}-release${{ inputs.experimental && '-cp314t' || '' }}
         save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}

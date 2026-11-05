@@ -89,7 +89,9 @@ def test_platform_smokes_depend_only_on_their_own_build():
     assert platform['jobs']['smoke']['strategy']['matrix']['python'] == ['3.11', '3.14']
     for name in ['smoke', 'smoke-musl', 'smoke-freethreaded']:
         assert platform['jobs'][name]['needs'] == 'build'
-        assert platform['jobs'][name]['runs-on'] == '${{ inputs.smoke-os }}'
+        # A JSON label list (the self-hosted Mac, chosen by wheels.yaml) or a hosted runner name.
+        assert platform['jobs'][name]['runs-on'] == (
+            "${{ startsWith(inputs.smoke-os, '[') && fromJSON(inputs.smoke-os) || inputs.smoke-os }}")
     assert 'alpine:3.22 sh /smoke.sh' in platform['jobs']['smoke-musl']['steps'][-1]['run']
 
 
