@@ -1400,6 +1400,8 @@ impl SqlConnector {
             .expect("state")
             .internal_pipe_states
             .remove(&target_name);
+        // Ask the database itself: another process may have dropped the table already.
+        self.forget_catalog_table(&sp.target);
         let mut success = true;
         if self.table_exists(&sp.target, schema.as_deref()).await {
             let if_exists = if self.flavor.drop_if_exists() {

@@ -379,8 +379,51 @@ fn type_rows(docs: &[IndexMap<String, KValue>]) -> Vec<ColumnTypeRow> {
 }
 
 impl SqlConnector {
-    /// `get_table_cols_types(table, self, schema=schema)`: `{column: DB TYPE}`.
+    /// `get_table_cols_types(table, self, schema=schema)`: `{column: DB TYPE}`. Kept for
+    /// `settings.catalog_cache_seconds` (see `instance/catalog.rs`).
     pub async fn get_table_cols_types(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+    ) -> IndexMap<String, String> {
+        self.cached_cols_types(
+            table,
+            schema,
+            false,
+            self.read_table_cols_types(table, schema),
+        )
+        .await
+    }
+
+    /// The columns types of `table` from the catalog cache, else `read` (kept when not empty).
+    async fn cached_cols_types<F>(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+        reflected: bool,
+        read: F,
+    ) -> IndexMap<String, String>
+    where
+        F: std::future::Future<Output = IndexMap<String, String>>,
+    {
+        let ttl = self.catalog_ttl();
+        let generation = {
+            let cache = self.catalog();
+            if let Some(hit) = ttl.and_then(|ttl| cache.cols_types(table, schema, reflected, ttl)) {
+                return hit;
+            }
+            cache.generation()
+        };
+        let cols_types = read.await;
+        if ttl.is_some() {
+            self.catalog()
+                .put_cols_types(table, schema, reflected, &cols_types, generation);
+        }
+        cols_types
+    }
+
+    /// [`get_table_cols_types`](Self::get_table_cols_types) from the database.
+    async fn read_table_cols_types(
         &self,
         table: &str,
         schema: Option<&str>,
@@ -441,8 +484,31 @@ impl SqlConnector {
         cols_types_from_rows(&rows, self.flavor, schema, None, &geometry)
     }
 
-    /// `get_table_cols_indices(table, self, schema=schema)`: `{column: [{name, type}]}`.
+    /// `get_table_cols_indices(table, self, schema=schema)`: `{column: [{name, type}]}`. Kept for
+    /// `settings.catalog_cache_seconds` (see `instance/catalog.rs`).
     pub async fn get_table_cols_indices(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+    ) -> IndexMap<String, Vec<IndexDoc>> {
+        let ttl = self.catalog_ttl();
+        let generation = {
+            let cache = self.catalog();
+            if let Some(hit) = ttl.and_then(|ttl| cache.indices(table, schema, ttl)) {
+                return hit;
+            }
+            cache.generation()
+        };
+        let indices = self.read_table_cols_indices(table, schema).await;
+        if ttl.is_some() {
+            self.catalog()
+                .put_indices(table, schema, &indices, generation);
+        }
+        indices
+    }
+
+    /// [`get_table_cols_indices`](Self::get_table_cols_indices) from the database.
+    async fn read_table_cols_indices(
         &self,
         table: &str,
         schema: Option<&str>,
@@ -496,6 +562,16 @@ impl SqlConnector {
     /// The SQLAlchemy reflection path of `get_pipe_columns_types` (Oracle, MySQL, MariaDB,
     /// SQLite, GeoPackage): `{column: str(column.type)}` in ordinal order.
     pub async fn get_reflected_columns_types(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+    ) -> IndexMap<String, String> {
+        let read = Box::pin(self.read_reflected_columns_types(table, schema));
+        self.cached_cols_types(table, schema, true, read).await
+    }
+
+    /// [`get_reflected_columns_types`](Self::get_reflected_columns_types) from the database.
+    async fn read_reflected_columns_types(
         &self,
         table: &str,
         schema: Option<&str>,

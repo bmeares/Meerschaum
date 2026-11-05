@@ -198,6 +198,8 @@ impl ConnectorRegistry for PythonRegistry {
         if self.manifest.has_sync_hooks() {
             Some(Arc::new(PythonHooks {
                 pool: self.pool.clone(),
+                pre: !self.manifest.pre_sync_hooks.is_empty(),
+                post: !self.manifest.post_sync_hooks.is_empty(),
                 callbacks: self.callbacks(),
                 native: self.native.hooks(),
                 reporter: self
@@ -392,6 +394,10 @@ fn callback_args(kw: &Map) -> SyncArgs {
 
 struct PythonHooks {
     pool: WorkerPool,
+    /// Whether any plugin declares a `@pre_sync_hook` / `@post_sync_hook` (the manifest): a
+    /// phase without one costs no worker round trip.
+    pre: bool,
+    post: bool,
     callbacks: Arc<dyn CallbackHandler>,
     native: Option<Arc<dyn SyncHooks>>,
     reporter: Option<HookReporter>,
@@ -441,13 +447,17 @@ impl SyncHooks for PythonHooks {
         if let Some(h) = &self.native {
             h.pre_sync(pipe, args).await;
         }
-        self.run(pipe, args, HookPhase::Pre, None).await;
+        if self.pre {
+            self.run(pipe, args, HookPhase::Pre, None).await;
+        }
     }
     async fn post_sync(&self, pipe: &Pipe, args: &SyncArgs, result: &SyncResult) {
         if let Some(h) = &self.native {
             h.post_sync(pipe, args, result).await;
         }
-        self.run(pipe, args, HookPhase::Post, Some(result)).await;
+        if self.post {
+            self.run(pipe, args, HookPhase::Post, Some(result)).await;
+        }
     }
 }
 

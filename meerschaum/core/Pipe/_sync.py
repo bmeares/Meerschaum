@@ -1150,12 +1150,12 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
     engine_pool_size = None
     current_num_connections = threading.active_count()
     if self.instance_connector.type == 'sql':
-        try:
-            engine = self.instance_connector.engine
-        except AttributeError:
-            ### The base wheel has no SQLAlchemy engine (the `sql` extra): the Rust driver owns
-            ### the pool, sized by the flavor's `pool_size`.
-            engine = None
+        ### The Rust driver owns the pool, sized by the flavor's `pool_size`. An SQLAlchemy engine
+        ### (the `sql` extra) is consulted only when the caller already created one: building it
+        ### here imported (and auto-installed) SQLAlchemy and the flavor's drivers on the first
+        ### sync of every plugin pipe on a SQL instance.
+        engine = self.instance_connector.__dict__.get('_engine', None)
+        if engine is None:
             try:
                 engine_pool_size = int(
                     self.instance_connector._sys_config.get('create_engine', {}).get('pool_size')

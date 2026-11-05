@@ -1774,7 +1774,11 @@ impl PluginHost {
                 if let Err(refused) = meerschaum_connector::check_protected(&*sql, "execute SQL") {
                     return Ok(json(tuple_json(&SuccessTuple::fail(refused))));
                 }
-                Ok(json(tuple_json(&match sql.driver().exec(query).await {
+                // The connector's catalog cache hears of the statement (it may change a table).
+                sql.note_raw_statement(query, false);
+                let result = sql.driver().exec(query).await;
+                sql.note_raw_statement(query, result.is_err());
+                Ok(json(tuple_json(&match result {
                     Ok(rows) => SuccessTuple::ok(format!("Executed the statement ({rows} rows).")),
                     Err(error) => SuccessTuple::fail(format!(
                         "Failed to execute the statement on '{keys}':\n{error}"

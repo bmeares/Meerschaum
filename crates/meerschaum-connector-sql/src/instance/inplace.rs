@@ -51,12 +51,21 @@ pub trait InplaceObserver: Send + Sync {
         let _ = (begin, end);
         self.before_merge(delta).await
     }
+
+    /// The pipe's dtypes as this sync reads its table (handed over before the first
+    /// [`before_merge`](Self::before_merge) / [`before_replace`](Self::before_replace), and
+    /// again after the sync altered the table), so an observer that types the staged rows needs
+    /// no catalog read of its own. The default ignores them.
+    fn pipe_dtypes(&self, dtypes: &meerschaum_kernel::enforce::PipeDtypesContext) {
+        let _ = dtypes;
+    }
 }
 
 /// `session_execute(session, query, with_results=True)`: run one statement in the transaction,
 /// rolling it back on failure. Returns the rows affected (`-1` for `CREATE TABLE ... AS` on SQLite,
 /// as `sqlite3` reports it).
 async fn session_execute(
+    conn: &SqlConnector,
     tx: &mut Option<SqlTransaction>,
     query: &str,
     flavor: Flavor,
@@ -64,7 +73,12 @@ async fn session_execute(
     let Some(t) = tx.as_mut() else {
         return Err("Failed to execute queries.\nThe session was rolled back.".into());
     };
-    match t.exec(query).await {
+    let result = t.exec(query).await;
+    conn.note_catalog_statement(query);
+    if result.is_err() {
+        conn.forget_catalog_failed(query);
+    }
+    match result {
         Ok(n) => {
             let ctas = query
                 .trim_start()
@@ -226,6 +240,65 @@ impl SqlConnector {
         {
             return refused;
         }
+        self.sync_pipe_inplace_forgetting(
+            pipe,
+            params,
+            begin,
+            end,
+            check_existing,
+            replace,
+            observer,
+        )
+        .await
+    }
+
+    /// [`sync_pipe_inplace_unlocked`](Self::sync_pipe_inplace_unlocked), forgetting what the
+    /// catalog said about the pipe's table when the sync fails (the table may have changed
+    /// elsewhere: the next sync asks again).
+    #[allow(clippy::too_many_arguments)]
+    async fn sync_pipe_inplace_forgetting(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        begin: Bound,
+        end: Bound,
+        check_existing: bool,
+        replace: bool,
+        observer: Option<&dyn InplaceObserver>,
+    ) -> SuccessTuple {
+        // Boxed: the in-place sync's future is large and deeply nested (callers' layouts stay
+        // within the compiler's query depth).
+        let result = Box::pin(self.sync_pipe_inplace_unlocked(
+            pipe,
+            params,
+            begin,
+            end,
+            check_existing,
+            replace,
+            observer,
+        ))
+        .await;
+        if !result.success
+            && let Ok(sp) = self.sql_pipe(pipe)
+        {
+            self.forget_catalog_table(&sp.target);
+        }
+        result
+    }
+
+    /// [`sync_pipe_inplace_with`](Self::sync_pipe_inplace_with) after the protection and lock
+    /// checks.
+    #[allow(clippy::too_many_arguments)]
+    async fn sync_pipe_inplace_unlocked(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        begin: Bound,
+        end: Bound,
+        check_existing: bool,
+        replace: bool,
+        observer: Option<&dyn InplaceObserver>,
+    ) -> SuccessTuple {
         let flavor = self.flavor;
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
@@ -233,6 +306,9 @@ impl SqlConnector {
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
         let state = self.pipe_state(&sp).await;
+        if let Some(o) = observer {
+            o.pipe_dtypes(&self.dtypes_ctx(&sp, &state));
+        }
         let internal_schema = self.internal_schema().map(str::to_string);
         let isch = internal_schema.as_deref();
         let target = sp.target.clone();
@@ -488,13 +564,13 @@ impl SqlConnector {
             };
             for query in &create {
                 self.log(query);
-                if let Err(e) = session_execute(&mut tx, query, flavor).await {
+                if let Err(e) = session_execute(self, &mut tx, query, flavor).await {
                     clean_up(false).await;
                     return SuccessTuple::fail(e);
                 }
             }
             self.log(&insert);
-            let inserted = match session_execute(&mut tx, &insert, flavor).await {
+            let inserted = match session_execute(self, &mut tx, &insert, flavor).await {
                 Ok(n) => n,
                 Err(e) => {
                     clean_up(false).await;
@@ -709,13 +785,46 @@ impl SqlConnector {
             Err(e) => fail!(e),
         };
         self.log(&create_new_query);
-        let new_count = match session_execute(&mut tx, &create_new_query, flavor).await {
+        let new_count = match session_execute(self, &mut tx, &create_new_query, flavor).await {
             Ok(n) => n,
             Err(e) => fail!(e),
         };
-        let mut new_cols_types = if !is_static || (upsert && observer.is_some()) {
+        let mut new_cols_types = if !is_static {
             self.tx_table_cols_types(&mut tx, &temp_tables[new_root], isch)
                 .await
+        } else if upsert && observer.is_some() {
+            // An observed UPSERT compares the staged values with the stored ones by their actual
+            // types. A static pipe's definition stages the same columns every sync: they are
+            // read once per `settings.catalog_cache_seconds` (a changed definition is another
+            // entry; a failed sync forgets them with the table).
+            let schema = self.get_pipe_schema(&sp);
+            let digest = parameters_digest(pipe);
+            let ttl = self.catalog_ttl();
+            let (cached, generation) = {
+                let cache = self.catalog();
+                (
+                    ttl.and_then(|ttl| cache.staged(&target, schema.as_deref(), digest, ttl)),
+                    cache.generation(),
+                )
+            };
+            match cached {
+                Some(cols_types) => cols_types,
+                None => {
+                    let cols_types = self
+                        .tx_table_cols_types(&mut tx, &temp_tables[new_root], isch)
+                        .await;
+                    if ttl.is_some() {
+                        self.catalog().put_staged(
+                            &target,
+                            schema.as_deref(),
+                            digest,
+                            &cols_types,
+                            generation,
+                        );
+                    }
+                    cols_types
+                }
+            }
         } else {
             state.cols_types.clone()
         };
@@ -727,7 +836,7 @@ impl SqlConnector {
                 flavor,
             ) {
                 self.log(&query);
-                if let Err(e) = session_execute(&mut tx, &query, flavor).await {
+                if let Err(e) = session_execute(self, &mut tx, &query, flavor).await {
                     fail!(e);
                 }
             }
@@ -798,17 +907,25 @@ impl SqlConnector {
             fail!(e.to_string());
         }
         let pipe_schema = self.get_pipe_schema(&sp);
-        let table_cols_types = self
-            .get_table_cols_types(&target, pipe_schema.as_deref())
-            .await;
+        // PARITY: a static pipe's table is never changed by a sync (v4's
+        // `get_add_columns_queries` / `get_alter_columns_queries` return `[]` for it,
+        // `_pipes.py:3509` / `3626`), so its columns are not read again. Otherwise the table is
+        // read once, and again only after a column was added.
+        let mut table_cols_types = if is_static {
+            state.cols_types.clone()
+        } else {
+            self.get_table_cols_types(&target, pipe_schema.as_deref())
+                .await
+        };
         let add_cols_queries = self.add_columns_queries_for(&sp, &new_cols, &table_cols_types);
+        let mut state = state;
         if !add_cols_queries.is_empty() {
             let _ = self.exec_queries(&add_cols_queries, false, true).await;
+            table_cols_types = self
+                .get_table_cols_types(&target, pipe_schema.as_deref())
+                .await;
+            state = self.pipe_state(&sp).await;
         }
-        let table_cols_types = self
-            .get_table_cols_types(&target, pipe_schema.as_deref())
-            .await;
-        let state = self.pipe_state(&sp).await;
         // PostgreSQL can store integer, floating and decimal SQL expressions in an existing
         // unbounded NUMERIC column. A CASE expression may promote NUMERIC to DOUBLE PRECISION;
         // that does not require rewriting the destination as TEXT (and Timescale cannot do
@@ -845,10 +962,12 @@ impl SqlConnector {
                 .unwrap_or_else(|_| "000".into()),
         };
         let (alter_cols_queries, new_dtypes) = self.alter_columns_queries_for(&sp, &input);
-        if !alter_cols_queries.is_empty() {
+        let altered = !alter_cols_queries.is_empty();
+        if altered {
             let _ = self.exec_queries(&alter_cols_queries, false, true).await;
         }
         let mut updated = pipe.clone();
+        let new_dtypes_set = new_dtypes.is_some() || !add_cols_queries.is_empty();
         if let Some(explicit) = new_dtypes {
             updated.set_dtypes(
                 explicit
@@ -864,7 +983,21 @@ impl SqlConnector {
             Ok(sp) => sp,
             Err(e) => fail!(e.to_string()),
         };
-        let state = self.pipe_state(&sp).await;
+        // The table is read again only after it was altered; new explicit dtypes only change
+        // how its columns are typed.
+        let state = if altered {
+            self.pipe_state(&sp).await
+        } else {
+            super::data::PipeState {
+                exists: state.exists,
+                dtypes: super::data::pipe_dtypes(&sp, &state.cols_types, true),
+                explicit_dtypes: super::data::pipe_dtypes(&sp, &state.cols_types, false),
+                cols_types: state.cols_types,
+            }
+        };
+        if let Some(o) = observer.filter(|_| altered || new_dtypes_set) {
+            o.pipe_dtypes(&self.dtypes_ctx(&sp, &state));
+        }
         if sqlite {
             tx = match self.driver().begin_write().await {
                 Ok(t) => Some(t),
@@ -932,7 +1065,7 @@ impl SqlConnector {
                 .any(|c| sql_item_name(c, flavor, None) == dt)
             {
                 self.log(&repair);
-                if let Err(e) = session_execute(&mut tx, &repair, flavor).await {
+                if let Err(e) = session_execute(self, &mut tx, &repair, flavor).await {
                     fail!(e);
                 }
             }
@@ -962,7 +1095,7 @@ impl SqlConnector {
             );
             let delete = format!("DELETE FROM {pipe_name}\n{window_where}");
             self.log(&delete);
-            let deleted = match session_execute(&mut tx, &delete, flavor).await {
+            let deleted = match session_execute(self, &mut tx, &delete, flavor).await {
                 Ok(n) => n,
                 Err(e) => fail!(e),
             };
@@ -971,7 +1104,7 @@ impl SqlConnector {
                 names[new_root], aliases["new"]
             );
             self.log(&insert);
-            let inserted = match session_execute(&mut tx, &insert, flavor).await {
+            let inserted = match session_execute(self, &mut tx, &insert, flavor).await {
                 Ok(n) => n,
                 Err(e) => fail!(e),
             };
@@ -1015,7 +1148,7 @@ impl SqlConnector {
                 names["new"], aliases["new"]
             );
             self.log(&insert_query);
-            if let Err(e) = session_execute(&mut tx, &insert_query, flavor).await {
+            if let Err(e) = session_execute(self, &mut tx, &insert_query, flavor).await {
                 fail!(e);
             }
         }
@@ -1029,7 +1162,8 @@ impl SqlConnector {
             return SuccessTuple::ok(format!("Inserted {new_count}, updated 0 rows."));
         }
 
-        let target_cols_types = self.columns_types(&sp).await;
+        // The table's columns as `state` read them (after any DDL above).
+        let target_cols_types = state.cols_types.clone();
         let prune_upsert_history = upsert
             && observer.is_some()
             && !sp.null_indices()
@@ -1163,7 +1297,7 @@ impl SqlConnector {
                 Err(e) => fail!(e),
             };
             self.log(&create_backtrack_query);
-            if let Err(e) = session_execute(&mut tx, &create_backtrack_query, flavor).await {
+            if let Err(e) = session_execute(self, &mut tx, &create_backtrack_query, flavor).await {
                 fail!(e);
             }
         }
@@ -1299,7 +1433,7 @@ impl SqlConnector {
                 Err(e) => fail!(e),
             };
             self.log(&create_delta_query);
-            if let Err(e) = session_execute(&mut tx, &create_delta_query, flavor).await {
+            if let Err(e) = session_execute(self, &mut tx, &create_delta_query, flavor).await {
                 fail!(e);
             }
         }
@@ -1355,7 +1489,7 @@ impl SqlConnector {
                 Err(e) => fail!(e),
             };
             self.log(&create_joined_query);
-            if let Err(e) = session_execute(&mut tx, &create_joined_query, flavor).await {
+            if let Err(e) = session_execute(self, &mut tx, &create_joined_query, flavor).await {
                 fail!(e);
             }
         }
@@ -1388,7 +1522,7 @@ impl SqlConnector {
                 Err(e) => fail!(e),
             };
             self.log(&create_unseen_query);
-            if let Err(e) = session_execute(&mut tx, &create_unseen_query, flavor).await {
+            if let Err(e) = session_execute(self, &mut tx, &create_unseen_query, flavor).await {
                 fail!(e);
             }
         }
@@ -1407,7 +1541,7 @@ impl SqlConnector {
                 Err(e) => fail!(e),
             };
             self.log(&create_update_query);
-            if let Err(e) = session_execute(&mut tx, &create_update_query, flavor).await {
+            if let Err(e) = session_execute(self, &mut tx, &create_update_query, flavor).await {
                 fail!(e);
             }
         }
@@ -1467,7 +1601,7 @@ impl SqlConnector {
                 names["unseen"]
             );
             self.log(&apply_unseen_query);
-            unseen_count = match session_execute(&mut tx, &apply_unseen_query, flavor).await {
+            unseen_count = match session_execute(self, &mut tx, &apply_unseen_query, flavor).await {
                 Ok(n) => n,
                 Err(e) => fail!(e),
             };
@@ -1475,7 +1609,7 @@ impl SqlConnector {
         let mut update_count = 0;
         for (i, query) in apply_update_queries.iter().enumerate() {
             self.log(query);
-            match session_execute(&mut tx, query, flavor).await {
+            match session_execute(self, &mut tx, query, flavor).await {
                 // PARITY: only the first statement's rowcount is reported (`_pipes.py:2905`).
                 Ok(n) if i == 0 => update_count = n,
                 Ok(_) => {}
@@ -1548,6 +1682,16 @@ fn upsert_comparable_value(
     } else {
         format!("CAST({expression} AS {})", target.replace('_', " "))
     }
+}
+
+/// A digest of the pipe's parameters (its definition, columns and dtypes among them).
+fn parameters_digest(pipe: &Pipe) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    Value::Map(pipe.parameters().clone())
+        .json_dumps()
+        .hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Whether a SQLite column has no declared type (a computed column of `CREATE TABLE ... AS`).

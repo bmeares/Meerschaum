@@ -1174,6 +1174,8 @@ impl SqlChunks {
 pub struct SqlTx {
     inner: Mutex<Option<SqlTransaction>>,
     flavor: Flavor,
+    /// The connector whose catalog cache hears of the transaction's statements.
+    conn: Option<Arc<RsSqlConnector>>,
 }
 
 impl SqlTx {
@@ -1181,6 +1183,20 @@ impl SqlTx {
         Self {
             inner: Mutex::new(Some(tx)),
             flavor,
+            conn: None,
+        }
+    }
+
+    /// The transaction's statements are reported to `conn`'s catalog cache
+    /// ([`RsSqlConnector::note_raw_statement`]).
+    pub fn with_connector(mut self, conn: Arc<RsSqlConnector>) -> Self {
+        self.conn = Some(conn);
+        self
+    }
+
+    fn note(&self, sql: &str, failed: bool) {
+        if let Some(conn) = &self.conn {
+            conn.note_raw_statement(sql, failed);
         }
     }
 
@@ -1225,11 +1241,13 @@ impl SqlTx {
         let ctx = PyCtx::scalars(py)?;
         let params = params_from_py(&ctx, params)?;
         let mut tx = self.take()?;
-        let (res, tx) = block_on(py, async move {
+        self.note(&sql, false);
+        let (res, tx, sql) = block_on(py, async move {
             let res = tx.raw_query(&sql, &params).await;
-            (res, tx)
+            (res, tx, sql)
         });
         self.put(tx);
+        self.note(&sql, res.is_err());
         SqlFrame::new(res.map_err(|e| sql_err(e, self.flavor))?, self.flavor)
     }
 
@@ -1244,11 +1262,13 @@ impl SqlTx {
         let ctx = PyCtx::scalars(py)?;
         let params = params_from_py(&ctx, params)?;
         let mut tx = self.take()?;
-        let (res, tx) = block_on(py, async move {
+        self.note(&sql, false);
+        let (res, tx, sql) = block_on(py, async move {
             let res = tx.raw_execute(&sql, &params).await;
-            (res, tx)
+            (res, tx, sql)
         });
         self.put(tx);
+        self.note(&sql, res.is_err());
         res.map_err(|e| sql_err(e, self.flavor))
     }
 
@@ -1285,8 +1305,12 @@ pub fn sql_query(
     let chunksize = chunksize
         .filter(|c| *c > 0)
         .unwrap_or(meerschaum_connector_sql::driver::raw::RAW_CHUNKSIZE);
+    // A row-returning statement may change the schema too (`SELECT create_hypertable(...)`).
+    conn.note_raw_statement(&sql, false);
     let chunks = block_on(py, async move {
-        conn.driver().raw_query(&sql, &params, chunksize).await
+        let chunks = conn.driver().raw_query(&sql, &params, chunksize).await;
+        conn.note_raw_statement(&sql, chunks.is_err());
+        chunks
     })
     .map_err(|e| sql_err(e, flavor))?;
     Ok(SqlChunks::new(chunks, flavor))
@@ -1302,10 +1326,12 @@ pub fn sql_execute(
     let ctx = PyCtx::scalars(py)?;
     let params = params_from_py(&ctx, params)?;
     let flavor = conn.flavor();
-    block_on(
-        py,
-        async move { conn.driver().raw_execute(&sql, &params).await },
-    )
+    conn.note_raw_statement(&sql, false);
+    block_on(py, async move {
+        let res = conn.driver().raw_execute(&sql, &params).await;
+        conn.note_raw_statement(&sql, res.is_err());
+        res
+    })
     .map_err(|e| sql_err(e, flavor))
 }
 
@@ -1322,8 +1348,11 @@ pub fn sql_execute_many(
         .map(|item| params_from_py(&ctx, Some(&item?)))
         .collect::<PyResult<Vec<_>>>()?;
     let flavor = conn.flavor();
+    conn.note_raw_statement(&sql, false);
     block_on(py, async move {
-        conn.driver().raw_execute_many(&sql, &sets).await
+        let res = conn.driver().raw_execute_many(&sql, &sets).await;
+        conn.note_raw_statement(&sql, res.is_err());
+        res
     })
     .map_err(|e| sql_err(e, flavor))
 }
@@ -1336,6 +1365,7 @@ pub fn sql_begin(
     write: bool,
 ) -> PyResult<SqlTx> {
     let flavor = conn.flavor();
+    let catalog = conn.clone();
     let tx = block_on(py, async move {
         if read_only {
             conn.driver().begin_read_only().await
@@ -1346,7 +1376,7 @@ pub fn sql_begin(
         }
     })
     .map_err(|e| sql_err(e, flavor))?;
-    Ok(SqlTx::new(tx, flavor))
+    Ok(SqlTx::new(tx, flavor).with_connector(catalog))
 }
 
 /// `SqlConnector.sql_to_sql(df, name, schema, if_exists, column_types, index_columns,

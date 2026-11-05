@@ -311,7 +311,8 @@ impl meerschaum_engine::PluginSync for Inplace {
         struct Ledger<'a> {
             pipe: &'a meerschaum_core::Pipe,
             observer: &'a dyn meerschaum_engine::sync::DeltaObserver,
-            dtypes: Option<meerschaum_kernel::enforce::PipeDtypesContext>,
+            /// The pipe's dtypes as the in-place sync read its table (`pipe_dtypes`).
+            dtypes: std::sync::Mutex<Option<meerschaum_kernel::enforce::PipeDtypesContext>>,
         }
         impl Ledger<'_> {
             /// The staged rows come back with the database's types (SQLite returns
@@ -321,13 +322,16 @@ impl meerschaum_engine::PluginSync for Inplace {
                 &self,
                 delta: &meerschaum_kernel::Frame,
             ) -> Option<meerschaum_kernel::Frame> {
-                self.dtypes.as_ref().and_then(|ctx| {
-                    meerschaum_kernel::enforce::pipe_enforce_dtypes(
-                        meerschaum_kernel::enforce::PipeInput::Frame(delta.clone()),
-                        ctx,
-                    )
-                    .ok()
-                })
+                let ctx = self
+                    .dtypes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()?;
+                meerschaum_kernel::enforce::pipe_enforce_dtypes(
+                    meerschaum_kernel::enforce::PipeInput::Frame(delta.clone()),
+                    &ctx,
+                )
+                .ok()
             }
         }
         #[meerschaum_connector::async_trait]
@@ -351,14 +355,12 @@ impl meerschaum_engine::PluginSync for Inplace {
                     .before_replace(self.pipe, enforced.as_ref().unwrap_or(delta), begin, end)
                     .await
             }
+
+            // The in-place sync reads the table's state anyway: no catalog read of our own.
+            fn pipe_dtypes(&self, dtypes: &meerschaum_kernel::enforce::PipeDtypesContext) {
+                *self.dtypes.lock().unwrap_or_else(|e| e.into_inner()) = Some(dtypes.clone());
+            }
         }
-        let dtypes = meerschaum_connector::pipe_ops::dtypes_context(
-            self.0.as_ref(),
-            pipe,
-            pipe.parameters(),
-        )
-        .await
-        .ok();
         let begin = match &args.begin {
             SyncBegin::Default => Bound::Default,
             SyncBegin::At(b) => metadef_bound(Some(b)),
@@ -367,7 +369,7 @@ impl meerschaum_engine::PluginSync for Inplace {
         let ledger = Ledger {
             pipe,
             observer,
-            dtypes,
+            dtypes: std::sync::Mutex::new(None),
         };
         // `replace` (rc15): the window is replaced instead of diffed.
         let result = self
@@ -852,6 +854,167 @@ mod tests {
         assert!(second.success, "{}", second.message);
         assert_eq!(rows(&raw).await, Some(3), "{}", second.message);
         assert_eq!(rows(&child).await, Some(3), "{}", second.message);
+    }
+
+    /// A lock set during a lap refuses the lap's later syncs: the in-place sync reads the
+    /// pipe's registered locks itself, not only the parameters the run read when it began.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_lock_set_mid_lap_refuses_the_laps_later_syncs() {
+        use meerschaum_engine::{Depth, Engine, EngineConfig, PipeRef, RunOptions, Selection};
+        let root = tempfile::tempdir().unwrap();
+        let uri = format!("sqlite:///{}", root.path().join("w9lock.db").display());
+        let keys = "sql:w9lock";
+        let sql = Arc::new(
+            meerschaum_connector_sql::SqlConnector::from_uri("w9lock", &uri)
+                .await
+                .unwrap(),
+        );
+        let queries = [
+            "CREATE TABLE w9_lock_src (ts TIMESTAMP, id INTEGER, v INTEGER)".to_string(),
+            "INSERT INTO w9_lock_src VALUES ('2024-01-01 00:00:00', 1, 1)".to_string(),
+        ];
+        assert!(
+            sql.exec_queries(&queries, true, true)
+                .await
+                .iter()
+                .all(Option::is_some)
+        );
+        let params = |definition: &str, locks: &[&str]| {
+            Value::from_json_str(
+                &serde_json::json!({
+                    "fetch": {"definition": definition},
+                    "columns": {"datetime": "ts", "id": "id"},
+                    "locks": locks,
+                })
+                .to_string(),
+            )
+            .unwrap()
+            .to_map()
+        };
+        let child_definition =
+            "SELECT ts, id, v FROM {{ Pipe('sql:w9lock', 'w9_first', instance='sql:w9lock') }}";
+        let first = Pipe::builder(keys, "w9_first")
+            .instance(keys)
+            .parameters(params("SELECT * FROM w9_lock_src", &[]))
+            .build()
+            .unwrap();
+        let second = Pipe::builder(keys, "w9_second")
+            .instance(keys)
+            .parameters(params(child_definition, &[]))
+            .build()
+            .unwrap();
+        for p in [&first, &second] {
+            assert!(sql.register_pipe(p).await.success);
+        }
+
+        /// The in-place sync, locking `w9_second` (as an operator would, from another
+        /// process) right after `w9_first` synced.
+        struct LockAfterFirst {
+            inner: Inplace,
+            sql: Arc<meerschaum_connector_sql::SqlConnector>,
+            locked: Pipe,
+        }
+        #[async_trait]
+        impl PluginSync for LockAfterFirst {
+            async fn sync(
+                &self,
+                pipe: &Pipe,
+                args: &meerschaum_engine::SyncArgs,
+            ) -> meerschaum_core::success::SyncResult {
+                self.inner.sync(pipe, args).await
+            }
+            async fn sync_native(
+                &self,
+                pipe: &Pipe,
+                args: &meerschaum_engine::SyncArgs,
+                env: &SyncEnv<'_>,
+                observer: Option<&dyn DeltaObserver>,
+            ) -> meerschaum_core::success::SyncResult {
+                let result = self.inner.sync_native(pipe, args, env, observer).await;
+                if pipe.metric_key() == "w9_first" {
+                    let edited = self.sql.edit_pipe(&self.locked, false).await;
+                    assert!(edited.success, "{}", edited.message);
+                }
+                result
+            }
+        }
+        let locked = Pipe::builder(keys, "w9_second")
+            .instance(keys)
+            .parameters(params(child_definition, &["sync"]))
+            .build()
+            .unwrap();
+        let table_ref = sql.clone();
+        let registry = Arc::new(
+            StaticRegistry::new()
+                .with_instance(keys, sql.clone())
+                .with_source(keys, sql.clone())
+                .with_plugin_sync(
+                    keys,
+                    Arc::new(LockAfterFirst {
+                        inner: Inplace(sql.clone()),
+                        sql: sql.clone(),
+                        locked,
+                    }),
+                )
+                .with_table_reference(move |pipe| {
+                    let sp = table_ref.sql_pipe(pipe).map_err(|e| e.to_string())?;
+                    Ok(table_ref.pipe_table_name(&sp))
+                }),
+        );
+        let engine = Engine::new(
+            registry,
+            EngineConfig {
+                home_instance: keys.into(),
+                lease_dir: root.path().join("leases"),
+                lease_poll: std::time::Duration::from_millis(50),
+                ..EngineConfig::default()
+            },
+        );
+        // One lap of a Pipeline of both: the parent syncs first, then its child.
+        let run = engine
+            .run(RunOptions {
+                selection: Some(
+                    Selection::refs([PipeRef::new(keys, keys, "w9_second", None)])
+                        .with_parents(Some(Depth::All)),
+                ),
+                ..Default::default()
+            })
+            .await;
+        let outcome = |metric: &str| {
+            run.outcomes
+                .iter()
+                .find(|o| o.pipe_ref.parts().metric_key == metric)
+                .map(|o| o.result.clone())
+        };
+        let first_result = outcome("w9_first").expect("the first pipe ran");
+        assert!(first_result.success, "{}", first_result.message);
+        assert_eq!(
+            sql.get_pipe_rowcount(&first, &DataQuery::default())
+                .await
+                .unwrap(),
+            Some(1)
+        );
+        // The lock set after the lap began refused the second pipe's sync in the same lap.
+        let second_node = run
+            .record
+            .as_ref()
+            .and_then(|r| {
+                r.nodes
+                    .iter()
+                    .find(|n| n.pipe_ref.parts().metric_key == "w9_second")
+            })
+            .expect("the second pipe is in the run");
+        assert_eq!(
+            second_node.status,
+            meerschaum_engine::NodeStatus::Locked,
+            "{second_node:?}"
+        );
+        assert!(run.success, "a lock is not a failure: {}", run.message);
+        assert!(
+            !sql.pipe_exists(&second).await.unwrap(),
+            "the locked pipe was synced: {:?}",
+            run.outcomes
+        );
     }
 
     /// SQLite returns timestamps as text: the in-place sync's staged rows are dtype-enforced

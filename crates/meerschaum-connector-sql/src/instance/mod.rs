@@ -11,6 +11,7 @@
 //! The `_mrsm_internal` schema and the `mrsm_pipes` / `mrsm_users` / `mrsm_plugins` /
 //! `mrsm_temp_tables` tables keep v4's names and column layout, so a v4.1 instance is read as is.
 
+mod catalog;
 pub mod data;
 pub mod env_provider;
 pub mod fetch;
@@ -92,6 +93,10 @@ pub struct InstanceSettings {
     pub backtrack_minutes: i64,
     /// The pipe defaults (`verify:chunk_minutes`, the default instance, autotime column).
     pub pipe_defaults: PipeDefaults,
+    /// `pipes:dtypes:columns_types_cache_seconds` (default 60): how long the connector keeps
+    /// what the catalog said about a table (existence, columns types, indices; see
+    /// `instance/catalog.rs`). `0` asks every time.
+    pub catalog_cache_seconds: f64,
 }
 
 impl InstanceSettings {
@@ -114,6 +119,7 @@ impl InstanceSettings {
             filter_params_index_limit: 250,
             backtrack_minutes: crate::pipe::DEFAULT_BACKTRACK_MINUTES,
             pipe_defaults: PipeDefaults::default(),
+            catalog_cache_seconds: 60.0,
         }
     }
 
@@ -177,6 +183,9 @@ impl InstanceSettings {
             backtrack_minutes: int(&["pipes", "parameters", "fetch", "backtrack_minutes"])
                 .unwrap_or(d.backtrack_minutes),
             pipe_defaults: PipeDefaults::from_config(config),
+            catalog_cache_seconds: get(&["pipes", "dtypes", "columns_types_cache_seconds"])
+                .and_then(|v| v.as_f64())
+                .unwrap_or(d.catalog_cache_seconds),
         }
     }
 }
@@ -216,6 +225,8 @@ pub struct SqlConnector {
     /// The configuration the instance methods read.
     pub settings: InstanceSettings,
     state: Mutex<State>,
+    /// What the catalog said about tables, for `settings.catalog_cache_seconds`.
+    catalog: Mutex<catalog::CatalogCache>,
     /// Connectors for `{{ Pipe(..., instance='sql:other') }}` references to other instances.
     provider: Mutex<Option<Arc<dyn InstanceProvider>>>,
 }
@@ -301,6 +312,7 @@ impl SqlConnector {
             internal_schema,
             settings,
             state: Mutex::new(State::default()),
+            catalog: Mutex::new(catalog::CatalogCache::default()),
             provider: Mutex::new(None),
         })
     }
@@ -365,6 +377,7 @@ impl SqlConnector {
             internal_schema,
             settings,
             state: Mutex::new(State::default()),
+            catalog: Mutex::new(catalog::CatalogCache::default()),
             provider: Mutex::new(None),
         }
     }
@@ -663,6 +676,8 @@ impl SqlConnector {
         if let Some(log) = self.state.lock().expect("state").query_log.as_mut() {
             log.push(sql.to_string());
         }
+        // Every statement passes here first: a DDL forgets the catalog answers about its tables.
+        self.note_catalog_statement(sql);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -672,9 +687,12 @@ impl SqlConnector {
     /// `self.exec(query, silent=True)`: the rows affected, or `None` on failure.
     pub async fn exec(&self, sql: &str) -> Option<u64> {
         self.log(sql);
-        match self.driver.exec(sql).await {
+        let result = self.driver.exec(sql).await;
+        self.note_catalog_statement(sql);
+        match result {
             Ok(n) => Some(n),
             Err(e) => {
+                self.forget_catalog_failed(sql);
                 tracing::debug!("Failed to execute query:\n{sql}\n{e}");
                 None
             }
@@ -684,9 +702,12 @@ impl SqlConnector {
     /// `self.exec(query)` with bound parameters.
     pub async fn exec_params(&self, sql: &str, params: &[SqlParam]) -> Option<u64> {
         self.log(sql);
-        match self.driver.exec_with(sql, params).await {
+        let result = self.driver.exec_with(sql, params).await;
+        self.note_catalog_statement(sql);
+        match result {
             Ok(n) => Some(n),
             Err(e) => {
+                self.forget_catalog_failed(sql);
                 tracing::warn!("Failed to execute query:\n{sql}\n{e}");
                 None
             }
@@ -706,13 +727,26 @@ impl SqlConnector {
         if queries.is_empty() {
             return Vec::new();
         }
-        match self
+        let result = self
             .driver
             .exec_queries(queries, break_on_error, rollback)
-            .await
-        {
-            Ok(r) => r,
+            .await;
+        for q in queries {
+            self.note_catalog_statement(q);
+        }
+        match result {
+            Ok(r) => {
+                for (q, res) in queries.iter().zip(&r) {
+                    if res.is_none() {
+                        self.forget_catalog_failed(q);
+                    }
+                }
+                r
+            }
             Err(e) => {
+                for q in queries {
+                    self.forget_catalog_failed(q);
+                }
                 tracing::warn!("Failed to execute queries:\n{e}");
                 vec![None]
             }
@@ -738,6 +772,7 @@ impl SqlConnector {
         match self.driver.value(sql).await {
             Ok(v) => v.filter(|v| !v.is_null()),
             Err(e) => {
+                self.forget_catalog_failed(sql);
                 tracing::debug!("Failed to fetch value:\n{sql}\n{e}");
                 None
             }
@@ -762,13 +797,21 @@ impl SqlConnector {
     /// `self.read(query)` as a kernel frame.
     pub async fn read(&self, sql: &str) -> Result<Frame> {
         self.log(sql);
-        self.driver.read_frame(sql).await
+        let result = self.driver.read_frame(sql).await;
+        if result.is_err() {
+            self.forget_catalog_failed(sql);
+        }
+        result
     }
 
     /// `self.read(query)` with bound parameters.
     pub async fn read_params(&self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
         self.log(sql);
-        self.driver.read_frame_with(sql, params).await
+        let result = self.driver.read_frame_with(sql, params).await;
+        if result.is_err() {
+            self.forget_catalog_failed(sql);
+        }
+        result
     }
 
     /// [`read`](SqlConnector::read) for a catalog query (explicit result columns, text that
@@ -815,20 +858,34 @@ impl SqlConnector {
             .filter(|v| !v.is_null()))
     }
 
-    /// `table_exists(table, self, schema)` (`utils/sql.py`).
+    /// `table_exists(table, self, schema)` (`utils/sql.py`). A table seen within
+    /// `settings.catalog_cache_seconds` is not asked about again (see `instance/catalog.rs`).
     pub async fn table_exists(&self, table: &str, schema: Option<&str>) -> bool {
         let schema = if self.flavor.no_schema() {
             None
         } else {
             schema
         };
+        let ttl = self.catalog_ttl();
+        let generation = {
+            let cache = self.catalog();
+            if ttl.is_some_and(|ttl| cache.exists(table, schema, ttl)) {
+                return true;
+            }
+            cache.generation()
+        };
         let query = get_table_exists_query(table, self.flavor, schema);
-        self.value_catalog(&query).await.is_some()
+        let exists = self.value_catalog(&query).await.is_some();
+        if exists && ttl.is_some() {
+            self.catalog().put_exists(table, schema, generation);
+        }
+        exists
     }
 
     /// [`table_exists`](SqlConnector::table_exists) that reports a failed query (an unreachable
     /// database, a permission error) as an error instead of "no table": the reads `Pipe`
-    /// methods make (`get_data`, `get_rowcount`, `get_sync_time`) raise database errors.
+    /// methods make (`get_data`, `get_rowcount`, `get_sync_time`) raise database errors. Shares
+    /// `table_exists`' cache of tables seen.
     pub async fn table_exists_checked(
         &self,
         table: &str,
@@ -839,14 +896,28 @@ impl SqlConnector {
         } else {
             schema
         };
+        // A table seen within `settings.catalog_cache_seconds` is not asked about again (only
+        // positive answers are kept; see `instance/catalog.rs`).
+        let ttl = self.catalog_ttl();
+        let generation = {
+            let cache = self.catalog();
+            if ttl.is_some_and(|ttl| cache.exists(table, schema, ttl)) {
+                return Ok(true);
+            }
+            cache.generation()
+        };
         let query = get_table_exists_query(table, self.flavor, schema);
         self.log(&query);
-        Ok(self
+        let exists = self
             .driver
             .value_catalog(&query)
             .await
             .map_err(be)?
-            .is_some_and(|v| !v.is_null()))
+            .is_some_and(|v| !v.is_null());
+        if exists && ttl.is_some() {
+            self.catalog().put_exists(table, schema, generation);
+        }
+        Ok(exists)
     }
 
     /// [`value`](SqlConnector::value) that returns the database error instead of `None`.

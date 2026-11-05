@@ -99,3 +99,29 @@ def test_sync_sqlite_engines_do_not_request_async_driver(flavor, monkeypatch):
     finally:
         engine.dispose()
     assert requested == ['sqlalchemy', 'sqlalchemy.pool']
+
+
+def test_num_workers_builds_no_engine(tmp_path, monkeypatch):
+    """
+    `Pipe.get_num_workers()` (every Python plugin fetch asks it) sizes the workers from the Rust
+    pool: it never builds an SQLAlchemy engine, which imported (and auto-installed) SQLAlchemy
+    and the flavor's drivers on a fresh root.
+    """
+    import meerschaum as mrsm
+    from meerschaum.utils import packages
+    requested = []
+    original = packages.attempt_import
+
+    def attempt(*names, **kwargs):
+        requested.extend(names)
+        return original(*names, **kwargs)
+
+    monkeypatch.setattr(packages, 'attempt_import', attempt)
+    conn = mrsm.get_connector(
+        'sql', 'num_workers_' + tmp_path.name[-8:].replace('-', '_'),
+        flavor='sqlite', database=str(tmp_path / 'w.db'),
+    )
+    pipe = mrsm.Pipe('a', 'b', instance=conn)
+    assert pipe.get_num_workers(workers=4) >= 1
+    assert '_engine' not in conn.__dict__
+    assert not any(str(name).startswith('sqlalchemy') for name in requested), requested

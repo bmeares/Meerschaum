@@ -487,6 +487,8 @@ impl SqlConnector {
                     .expect("state")
                     .internal_pipe_states
                     .remove(&self.pipe_table_name(&sp));
+                // The table may have changed elsewhere: the next sync asks the catalog again.
+                self.forget_catalog_table(&sp.target);
             }
             result.duration = Some(start.elapsed());
             result
@@ -532,8 +534,8 @@ impl SqlConnector {
         // A sync that does not finish leaves no columns types behind.
         let synced_key = synced_columns_key(pipe);
         self.forget_synced_columns(&synced_key);
-        let cached = internal.cached_state.clone().or_else(|| {
-            if cache_internal {
+        let mut cached = internal.cached_state.clone().or_else(|| {
+            if internal_table {
                 self.state
                     .lock()
                     .expect("state")
@@ -544,6 +546,33 @@ impl SqlConnector {
                 None
             }
         });
+        // A non-static internal table (engine nodes and cursors: newer releases add progress
+        // and dependency columns) is ready as this process left it only while the rows fit its
+        // layout: rows that need a column added or altered take the cold path below (the lock
+        // and a fresh look at the table) instead.
+        if internal_table
+            && !sp0.is_static()
+            && internal.cached_state.is_none()
+            && let Some(ready) = &cached
+        {
+            let incoming_types = Self::df_cols_types_refined(&df);
+            let alter = AlterColumnsInput {
+                df_cols_types: df.dtypes(),
+                numeric_cols: get_numeric_cols(&df),
+                db_cols_types: ready.cols_types.clone(),
+                pipe_dtypes: ready.dtypes.clone(),
+                explicit_dtypes: ready.explicit_dtypes.clone(),
+                new_special_cols: internal.new_special_cols.clone().unwrap_or_default(),
+                session_id: String::new(),
+            };
+            if !self
+                .add_columns_queries_for(&sp0, &incoming_types, &ready.cols_types)
+                .is_empty()
+                || !self.alter_columns_queries_for(&sp0, &alter).0.is_empty()
+            {
+                cached = None;
+            }
+        }
         // Table existence alone does not mean an upsert is ready: another process may
         // still be creating its unique constraint. Inspect metadata only after taking
         // the database lock, and retain it through index creation and the first write.
@@ -908,7 +937,9 @@ impl SqlConnector {
             // `ALTER COLUMN` it ran; inserts and updates do not change it).
             self.record_synced_columns(&synced_key, &state.cols_types);
         }
-        if cache_internal || precise_history {
+        // Internal tables (static or not) are ready for this process once a write succeeded:
+        // later writes skip the initialization lock and the catalog.
+        if internal_table || precise_history {
             if is_new {
                 state = self.pipe_state(&sp).await;
             }
@@ -1406,6 +1437,39 @@ impl SqlConnector {
         if join_cols.is_empty() {
             return None;
         }
+        // Kept for `settings.catalog_cache_seconds` (see `instance/catalog.rs`).
+        let schema = self.get_pipe_schema(sp);
+        let ttl = self.catalog_ttl();
+        let generation = {
+            let cache = self.catalog();
+            if let Some(hit) =
+                ttl.and_then(|ttl| cache.conflict(&sp.target, schema.as_deref(), join_cols, ttl))
+            {
+                return Some(hit);
+            }
+            cache.generation()
+        };
+        let target = self.read_upsert_conflict_target(sp, join_cols).await;
+        if let Some(found) = &target
+            && ttl.is_some()
+        {
+            self.catalog().put_conflict(
+                &sp.target,
+                schema.as_deref(),
+                join_cols,
+                found,
+                generation,
+            );
+        }
+        target
+    }
+
+    /// [`upsert_conflict_target`](Self::upsert_conflict_target) from the database.
+    async fn read_upsert_conflict_target(
+        &self,
+        sp: &SqlPipe,
+        join_cols: &[String],
+    ) -> Option<(String, bool)> {
         let flavor = self.flavor;
         let table = truncate_item_name(&sp.target, flavor);
         // (index name, key expressions in order)

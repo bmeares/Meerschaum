@@ -171,6 +171,11 @@ fn settings_from_py(py: Python<'_>, flavor: Flavor) -> InstanceSettings {
     if let Some(v) = py_config(py, &["pipes", "cache", "enabled"]) {
         s.pipe_defaults.cache_enabled = v.truthy();
     }
+    if let Some(secs) =
+        py_config(py, &["pipes", "dtypes", "columns_types_cache_seconds"]).and_then(|v| v.as_f64())
+    {
+        s.catalog_cache_seconds = secs;
+    }
     s
 }
 
