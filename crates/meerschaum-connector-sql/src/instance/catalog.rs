@@ -60,6 +60,19 @@ fn fresh(at: Instant, ttl: Duration) -> bool {
     at.elapsed() < ttl
 }
 
+/// A cached answer was used instead of a catalog query: with debug output on, say so, so a
+/// `debug=True` call still shows what it did.
+fn served(what: &str, table: &str, schema: Option<&str>, at: Instant) {
+    meerschaum_core::dprint!(
+        "Using the catalog cache for the {what} of {} ({:.2} seconds old).",
+        match schema {
+            Some(schema) => format!("{schema}.{table}"),
+            None => table.to_string(),
+        },
+        at.elapsed().as_secs_f64()
+    );
+}
+
 fn bounded<K, V>(map: &mut HashMap<K, V>) -> &mut HashMap<K, V> {
     if map.len() >= MAX_ENTRIES {
         map.clear();
@@ -75,9 +88,14 @@ impl CatalogCache {
     }
 
     pub(crate) fn exists(&self, table: &str, schema: Option<&str>, ttl: Duration) -> bool {
-        self.exists
+        let hit = self
+            .exists
             .get(&key(table, schema))
-            .is_some_and(|at| fresh(*at, ttl))
+            .filter(|at| fresh(**at, ttl));
+        if let Some(at) = hit {
+            served("existence", table, schema, *at);
+        }
+        hit.is_some()
     }
 
     pub(crate) fn put_exists(&mut self, table: &str, schema: Option<&str>, generation: u64) {
@@ -98,9 +116,11 @@ impl CatalogCache {
         } else {
             &self.cols_types
         };
-        map.get(&key(table, schema))
-            .filter(|(at, _)| fresh(*at, ttl))
-            .map(|(_, v)| v.clone())
+        let (at, cols_types) = map
+            .get(&key(table, schema))
+            .filter(|(at, _)| fresh(*at, ttl))?;
+        served("columns types", table, schema, *at);
+        Some(cols_types.clone())
     }
 
     pub(crate) fn put_cols_types(
@@ -130,10 +150,12 @@ impl CatalogCache {
         schema: Option<&str>,
         ttl: Duration,
     ) -> Option<IndexMap<String, Vec<IndexDoc>>> {
-        self.indices
+        let (at, indices) = self
+            .indices
             .get(&key(table, schema))
-            .filter(|(at, _)| fresh(*at, ttl))
-            .map(|(_, v)| v.clone())
+            .filter(|(at, _)| fresh(*at, ttl))?;
+        served("indices", table, schema, *at);
+        Some(indices.clone())
     }
 
     pub(crate) fn put_indices(
@@ -156,10 +178,12 @@ impl CatalogCache {
         join_cols: &[String],
         ttl: Duration,
     ) -> Option<(String, bool)> {
-        self.conflict
+        let (at, target) = self
+            .conflict
             .get(&(key(table, schema), join_cols.to_vec()))
-            .filter(|(at, _)| fresh(*at, ttl))
-            .map(|(_, v)| v.clone())
+            .filter(|(at, _)| fresh(*at, ttl))?;
+        served("upsert conflict target", table, schema, *at);
+        Some(target.clone())
     }
 
     pub(crate) fn put_conflict(
@@ -189,10 +213,12 @@ impl CatalogCache {
         parameters: u64,
         ttl: Duration,
     ) -> Option<IndexMap<String, String>> {
-        self.staged
+        let (at, cols_types) = self
+            .staged
             .get(&(key(table, schema), parameters))
-            .filter(|(at, _)| fresh(*at, ttl))
-            .map(|(_, v)| v.clone())
+            .filter(|(at, _)| fresh(*at, ttl))?;
+        served("staged columns types", table, schema, *at);
+        Some(cols_types.clone())
     }
 
     pub(crate) fn put_staged(

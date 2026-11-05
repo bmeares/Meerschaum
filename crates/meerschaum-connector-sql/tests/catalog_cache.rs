@@ -87,18 +87,27 @@ async fn columns(c: &Ctx, pipe: &meerschaum_core::Pipe) -> Vec<String> {
     cols
 }
 
-/// Catalog statements in a query log: column, table and index lookups.
-fn catalog_reads(log: &[String]) -> Vec<String> {
+/// Catalog statements in a query log about `pipe`'s own table: column, table and index lookups.
+/// Lookups of the sync's temporary tables are not counted (flavors without `DROP TABLE IF
+/// EXISTS`, such as DuckDB, ask whether each one exists before dropping it, as v4 does).
+fn catalog_reads(c: &Ctx, pipe: &meerschaum_core::Pipe, log: &[String]) -> Vec<String> {
+    let target = c.conn.sql_pipe(pipe).unwrap().target.to_lowercase();
+    let names = [
+        format!("'{target}'"),
+        format!("\"{target}\""),
+        format!("`{target}`"),
+    ];
     log.iter()
         .filter(|q| {
             let q = q.to_lowercase();
-            q.contains("information_schema.columns")
+            (q.contains("information_schema.columns")
                 || q.contains("information_schema.tables")
                 || q.contains("pragma_table_info")
                 || q.contains("sqlite_master")
                 || q.contains("pg_catalog.pg_index")
                 || q.contains("all_tab_columns")
-                || q.contains("sys.columns")
+                || q.contains("sys.columns"))
+                && names.iter().any(|n| q.contains(n.as_str()))
         })
         .cloned()
         .collect()
@@ -117,7 +126,7 @@ flavor_tests!(
         // Warm: the static sync asks the catalog nothing (SQLite stages through its own path).
         c.conn.enable_query_log();
         ok(sync_inplace(&c, &pipe).await);
-        let reads = catalog_reads(&c.conn.take_query_log());
+        let reads = catalog_reads(&c, &pipe, &c.conn.take_query_log());
         if !matches!(c.flavor, "sqlite" | "geopackage" | "mssql" | "oracle") {
             assert!(reads.is_empty(), "{reads:#?}");
         }
@@ -132,7 +141,7 @@ flavor_tests!(
         ok(c.conn
             .sync_pipe_inplace_observed(&pipe, None, Bound::Default, Bound::None, true, &Noop)
             .await);
-        let reads = catalog_reads(&c.conn.take_query_log());
+        let reads = catalog_reads(&c, &pipe, &c.conn.take_query_log());
         if !matches!(c.flavor, "sqlite" | "geopackage" | "mssql" | "oracle") {
             assert!(reads.is_empty(), "{reads:#?}");
         }
@@ -235,7 +244,7 @@ flavor_tests!(warm_internal_writes_skip_the_catalog, |c: Ctx| async move {
     c.conn.enable_query_log();
     ok(c.sync_with(&pipe, vec![row(3, false)], opts.clone()).await);
     let log = c.conn.take_query_log();
-    let reads = catalog_reads(&log);
+    let reads = catalog_reads(&c, &pipe, &log);
     assert!(reads.is_empty(), "{log:#?}");
     // A new column takes the cold path: the table is extended.
     ok(c.sync_with(&pipe, vec![row(4, true)], opts.clone()).await);
