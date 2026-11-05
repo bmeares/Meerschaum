@@ -97,7 +97,9 @@ def test_every_wheel_is_smoke_tested_where_it_runs(wheels, wheel_platform):
         'ubuntu-latest', 'ubuntu-24.04-arm', 'macos-latest', 'macos-15-intel', 'windows-latest',
     }
     assert jobs['smoke']['strategy']['matrix']['python'] == ['3.11', '3.14']
-    assert jobs['smoke']['runs-on'] == '${{ inputs.smoke-os }}'
+    # A JSON label list (the self-hosted Mac, chosen by wheels.yaml) or a hosted runner name.
+    assert jobs['smoke']['runs-on'] == (
+        "${{ startsWith(inputs.smoke-os, '[') && fromJSON(inputs.smoke-os) || inputs.smoke-os }}")
     musl = jobs['smoke-musl']
     assert musl['needs'] == 'build'
     runs = {(entry['smoke_os'], entry['wheel_arch']) for entry in standard if entry.get('musl')}

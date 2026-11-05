@@ -36,8 +36,19 @@ jobs:
         persist-credentials: false
         ref: ${{ github.sha }}
     - uses: actions/setup-python@v5
+      # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
+      if: ${{ runner.environment == 'github-hosted' }}
       with:
         python-version: '3.13'
+    - name: Use the self-hosted runner's Python 3.13
+      if: ${{ runner.environment != 'github-hosted' }}
+      shell: bash
+      run: |
+        want="3.13"
+        dir=$(ls -d "$RUNNER_TOOL_CACHE"/Python/"$want".*/*/bin 2>/dev/null | sort -V | tail -1)
+        test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/python" --version
     - name: Cargo version, pyproject pins and extras agree
       run: python scripts/check_packaging.py
     - name: Select release platforms
@@ -51,11 +62,11 @@ jobs:
       matrix: ${{ fromJSON(needs.metadata.outputs.wheels) }}
     uses: ./.github/workflows/wheel-platform.yaml
     with:
-      os: ${{ matrix.os }}
+      os: ${{ (matrix.os == 'macos-latest' && github.event_name != 'pull_request' && vars.MACOS_RUNNER == 'self-hosted') && '["self-hosted","macOS","ARM64","mrsm-mac"]' || matrix.os }}
       manylinux: ${{ matrix.manylinux }}
       target: ${{ matrix.target }}
       artifact: ${{ matrix.artifact || format('wheels-{0}', matrix.os) }}
-      smoke-os: ${{ matrix.smoke_os || matrix.os }}
+      smoke-os: ${{ (matrix.os == 'macos-latest' && github.event_name != 'pull_request' && vars.MACOS_RUNNER == 'self-hosted') && '["self-hosted","macOS","ARM64","mrsm-mac"]' || matrix.smoke_os || matrix.os }}
       wheel-arch: ${{ matrix.wheel_arch || '' }}
       musl: ${{ matrix.musl == true }}
       experimental: false
@@ -68,11 +79,11 @@ jobs:
       matrix: ${{ fromJSON(needs.metadata.outputs.experimental_wheels) }}
     uses: ./.github/workflows/wheel-platform.yaml
     with:
-      os: ${{ matrix.os }}
+      os: ${{ (matrix.os == 'macos-latest' && github.event_name != 'pull_request' && vars.MACOS_RUNNER == 'self-hosted') && '["self-hosted","macOS","ARM64","mrsm-mac"]' || matrix.os }}
       manylinux: ${{ matrix.manylinux }}
       target: ${{ matrix.target }}
       artifact: ${{ matrix.artifact || format('wheels-{0}', matrix.os) }}
-      smoke-os: ${{ matrix.smoke_os || matrix.os }}
+      smoke-os: ${{ (matrix.os == 'macos-latest' && github.event_name != 'pull_request' && vars.MACOS_RUNNER == 'self-hosted') && '["self-hosted","macOS","ARM64","mrsm-mac"]' || matrix.smoke_os || matrix.os }}
       wheel-arch: ${{ matrix.wheel_arch || '' }}
       musl: ${{ matrix.musl == true }}
       experimental: true
@@ -100,7 +111,7 @@ jobs:
   binaries:
     name: binary (${{ matrix.target }})
     needs: metadata
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event_name != 'pull_request' && vars.MACOS_RUNNER == 'self-hosted') && fromJSON('["self-hosted","macOS","ARM64","mrsm-mac"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.metadata.outputs.binaries) }}
@@ -115,8 +126,19 @@ jobs:
         persist-credentials: false
         ref: ${{ github.sha }}
     - uses: actions/setup-python@v5
+      # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
+      if: ${{ runner.environment == 'github-hosted' }}
       with:
         python-version: '3.13'
+    - name: Use the self-hosted runner's Python 3.13
+      if: ${{ runner.environment != 'github-hosted' }}
+      shell: bash
+      run: |
+        want="3.13"
+        dir=$(ls -d "$RUNNER_TOOL_CACHE"/Python/"$want".*/*/bin 2>/dev/null | sort -V | tail -1)
+        test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/python" --version
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       with:
         shared-key: binary-${{ matrix.target }}-release

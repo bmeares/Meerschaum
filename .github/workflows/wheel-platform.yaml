@@ -37,7 +37,7 @@ defaults:
 jobs:
   build:
     name: build (${{ inputs.target }}${{ inputs.experimental && ', cp314t, experimental' || '' }})
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ startsWith(inputs.os, '[') && fromJSON(inputs.os) || inputs.os }}
     continue-on-error: ${{ inputs.experimental }}
     outputs:
       candidate: ${{ steps.candidate.outcome == 'success' }}
@@ -47,8 +47,19 @@ jobs:
         persist-credentials: false
         ref: ${{ github.sha }}
     - uses: actions/setup-python@v5
+      # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
+      if: ${{ runner.environment == 'github-hosted' }}
       with:
         python-version: '3.13'
+    - name: Use the self-hosted runner's Python 3.13
+      if: ${{ runner.environment != 'github-hosted' }}
+      shell: bash
+      run: |
+        want="3.13"
+        dir=$(ls -d "$RUNNER_TOOL_CACHE"/Python/"$want".*/*/bin 2>/dev/null | sort -V | tail -1)
+        test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/python" --version
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       with:
         shared-key: wheel-${{ inputs.target }}-release${{ inputs.experimental && '-cp314t' || '' }}
@@ -138,7 +149,7 @@ jobs:
     name: smoke (py${{ matrix.python }})
     needs: build
     if: ${{ !cancelled() && !inputs.musl && !inputs.experimental && needs.build.outputs.candidate == 'true' }}
-    runs-on: ${{ inputs.smoke-os }}
+    runs-on: ${{ startsWith(inputs.smoke-os, '[') && fromJSON(inputs.smoke-os) || inputs.smoke-os }}
     strategy:
       fail-fast: false
       matrix:
@@ -160,8 +171,19 @@ jobs:
         sparse-checkout-cone-mode: false
         ref: ${{ github.sha }}
     - uses: actions/setup-python@v5
+      # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
+      if: ${{ runner.environment == 'github-hosted' }}
       with:
         python-version: ${{ matrix.python }}
+    - name: Use the self-hosted runner's Python ${{ matrix.python }}
+      if: ${{ runner.environment != 'github-hosted' }}
+      shell: bash
+      run: |
+        want="${{ matrix.python }}"
+        dir=$(ls -d "$RUNNER_TOOL_CACHE"/Python/"$want".*/*/bin 2>/dev/null | sort -V | tail -1)
+        test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/python" --version
     - uses: actions/download-artifact@v4
       with:
         name: wheel-candidate-${{ inputs.artifact }}
@@ -278,7 +300,7 @@ jobs:
     name: smoke (musllinux ${{ inputs.wheel-arch }}, Alpine)
     needs: build
     if: ${{ !cancelled() && inputs.musl && needs.build.outputs.candidate == 'true' }}
-    runs-on: ${{ inputs.smoke-os }}
+    runs-on: ${{ startsWith(inputs.smoke-os, '[') && fromJSON(inputs.smoke-os) || inputs.smoke-os }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -295,8 +317,19 @@ jobs:
         sparse-checkout-cone-mode: false
         ref: ${{ github.sha }}
     - uses: actions/setup-python@v5
+      # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
+      if: ${{ runner.environment == 'github-hosted' }}
       with:
         python-version: '3.13'
+    - name: Use the self-hosted runner's Python 3.13
+      if: ${{ runner.environment != 'github-hosted' }}
+      shell: bash
+      run: |
+        want="3.13"
+        dir=$(ls -d "$RUNNER_TOOL_CACHE"/Python/"$want".*/*/bin 2>/dev/null | sort -V | tail -1)
+        test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/python" --version
     - uses: actions/download-artifact@v4
       with:
         name: wheel-candidate-${{ inputs.artifact }}
@@ -317,7 +350,7 @@ jobs:
     name: smoke (free-threaded, py3.14t)
     needs: build
     if: ${{ !cancelled() && inputs.experimental && needs.build.outputs.candidate == 'true' }}
-    runs-on: ${{ inputs.smoke-os }}
+    runs-on: ${{ startsWith(inputs.smoke-os, '[') && fromJSON(inputs.smoke-os) || inputs.smoke-os }}
     continue-on-error: true
     outputs:
       verified: ${{ steps.smoke.outcome == 'success' }}
@@ -379,8 +412,19 @@ jobs:
         persist-credentials: false
         ref: ${{ github.sha }}
     - uses: actions/setup-python@v5
+      # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
+      if: ${{ runner.environment == 'github-hosted' }}
       with:
         python-version: '3.13'
+    - name: Use the self-hosted runner's Python 3.13
+      if: ${{ runner.environment != 'github-hosted' }}
+      shell: bash
+      run: |
+        want="3.13"
+        dir=$(ls -d "$RUNNER_TOOL_CACHE"/Python/"$want".*/*/bin 2>/dev/null | sort -V | tail -1)
+        test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/python" --version
     - uses: actions/download-artifact@v4
       with:
         name: wheel-candidate-${{ inputs.artifact }}
