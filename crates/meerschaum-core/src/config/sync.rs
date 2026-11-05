@@ -26,6 +26,9 @@ const COMPOSE_REPLACEMENTS: &[(&str, &str)] = &[("$", "$$"), ("<DOLLAR>", "$")];
 /// extension only when the server offers it and preloads `pg_stat_statements`.
 pub const CREATE_EXTENSIONS_TEXT: &str = include_str!("create-extensions.sql");
 
+/// Filled with the configured default instance when a built-in dashboard is written.
+pub const GRAFANA_DEFAULT_INSTANCE: &str = "__MRSM_DEFAULT_INSTANCE__";
+
 /// Managed Grafana resources shipped in both the standalone CLI and the Python extension.
 pub const GRAFANA_DASHBOARDS: &[(&str, &str)] = &[
     (
@@ -127,6 +130,29 @@ impl ConfigState {
         std::fs::write(&path, CREATE_EXTENSIONS_TEXT).map_err(|e| e.to_string())
     }
 
+    /// The configured default instance (`meerschaum:instance`), as the built-in dashboards
+    /// compare it with each pipe's instance.
+    fn grafana_default_instance(&mut self) -> String {
+        let keys = ["meerschaum".to_string(), "instance".to_string()];
+        let (valid, value) = self.get_config_lossless(
+            &keys,
+            GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        );
+        let instance = valid
+            .then(|| crate::pyfmt::py_str(&value.to_value()))
+            .filter(|instance| !instance.is_empty() && instance != "None")
+            .unwrap_or_else(|| "sql:main".to_string());
+        // A JSON string body: the keys are plain connector keys, but escape defensively.
+        serde_json::to_string(&instance)
+            .map(|quoted| quoted[1..quoted.len() - 1].to_string())
+            .unwrap_or(instance)
+    }
+
     /// Install/update built-in dashboard files in the existing provisioner's mounted folder.
     /// Other files are untouched; a filename collision with a different dashboard UID is kept.
     pub fn write_grafana_dashboards(&mut self) -> Result<(), String> {
@@ -135,7 +161,11 @@ impl ConfigState {
             .parent()
             .ok_or("Grafana dashboard directory is missing")?;
         std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
-        for (name, source) in GRAFANA_DASHBOARDS {
+        // Pipes are labeled as `Pipe(...)`, which omits the configured default instance.
+        let default_instance = self.grafana_default_instance();
+        for (name, template) in GRAFANA_DASHBOARDS {
+            let filled = template.replace(GRAFANA_DEFAULT_INSTANCE, &default_instance);
+            let source: &str = &filled;
             let path = directory.join(name);
             if path.is_symlink() {
                 self.warn(format!(
@@ -146,7 +176,7 @@ impl ConfigState {
             }
             match std::fs::read_to_string(&path) {
                 Ok(existing) => {
-                    if existing == *source {
+                    if existing == source {
                         continue;
                     }
                     let old = serde_json::from_str::<serde_json::Value>(&existing);

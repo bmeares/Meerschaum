@@ -3,8 +3,13 @@
 
 use meerschaum_core::config::paths::posix;
 use meerschaum_core::config::sync::CREATE_EXTENSIONS_TEXT;
-use meerschaum_core::config::sync::GRAFANA_DASHBOARDS;
+use meerschaum_core::config::sync::{GRAFANA_DASHBOARDS, GRAFANA_DEFAULT_INSTANCE};
 use meerschaum_core::config::{Config, ConfigOptions};
+
+/// A built-in dashboard as written for the default instance `sql:main`.
+fn written(source: &str) -> String {
+    source.replace(GRAFANA_DEFAULT_INSTANCE, "sql:main")
+}
 
 fn registry(root: &std::path::Path, allow_writes: bool) -> Config {
     let env = vec![("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned())];
@@ -25,7 +30,7 @@ fn built_in_grafana_dashboards_upgrade_in_the_existing_folder_and_keep_user_file
     for (name, source) in GRAFANA_DASHBOARDS {
         assert_eq!(
             std::fs::read_to_string(directory.join(name)).unwrap(),
-            *source
+            written(source)
         );
         let dashboard: serde_json::Value = serde_json::from_str(source).unwrap();
         assert!(dashboard["uid"].as_str().unwrap().starts_with("mrsm-"));
@@ -44,7 +49,7 @@ fn built_in_grafana_dashboards_upgrade_in_the_existing_folder_and_keep_user_file
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(directory.join(managed_name)).unwrap(),
-        source
+        written(source)
     );
     assert_eq!(
         std::fs::read_to_string(custom).unwrap(),
@@ -86,8 +91,44 @@ fn unreadable_and_symlink_dashboard_collisions_are_preserved() {
     assert!(linked.is_symlink());
     assert_eq!(
         std::fs::read_to_string(directory.join(GRAFANA_DASHBOARDS[2].0)).unwrap(),
-        GRAFANA_DASHBOARDS[2].1
+        written(GRAFANA_DASHBOARDS[2].1)
     );
+}
+
+#[test]
+fn built_in_dashboards_omit_the_configured_default_instance_from_pipe_labels() {
+    let root = tempfile::tempdir().unwrap();
+    let env = vec![
+        (
+            "MRSM_ROOT_DIR".into(),
+            root.path().to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_CONFIG".into(),
+            r#"{"meerschaum": {"instance": "sql:other"}}"#.into(),
+        ),
+    ];
+    let mut opts = ConfigOptions::with_env(env);
+    opts.allow_writes = true;
+    let config = Config::new(opts).unwrap();
+    config
+        .with_state(|state| state.sync_files(&["stack"]))
+        .unwrap();
+    let directory = config.paths().path("GRAFANA_DASHBOARD_PATH");
+    let directory = directory.parent().unwrap();
+    for (name, source) in GRAFANA_DASHBOARDS {
+        let text = std::fs::read_to_string(directory.join(name)).unwrap();
+        assert!(!text.contains(GRAFANA_DEFAULT_INSTANCE), "{name}");
+        assert_eq!(text, source.replace(GRAFANA_DEFAULT_INSTANCE, "sql:other"));
+        let dashboard: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let default = dashboard["templating"]["list"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|variable| variable["name"] == "default_instance")
+            .unwrap();
+        assert_eq!(default["query"], "sql:other");
+    }
 }
 
 #[test]

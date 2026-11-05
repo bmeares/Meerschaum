@@ -40,6 +40,25 @@
         "options": []
       },
       {
+        "current": {
+          "text": "__MRSM_DEFAULT_INSTANCE__",
+          "value": "__MRSM_DEFAULT_INSTANCE__"
+        },
+        "hide": 2,
+        "name": "default_instance",
+        "label": "Default instance",
+        "query": "__MRSM_DEFAULT_INSTANCE__",
+        "skipUrlSync": true,
+        "type": "constant",
+        "options": [
+          {
+            "selected": true,
+            "text": "__MRSM_DEFAULT_INSTANCE__",
+            "value": "__MRSM_DEFAULT_INSTANCE__"
+          }
+        ]
+      },
+      {
         "name": "schema",
         "label": "Internal schema",
         "type": "query",
@@ -134,8 +153,8 @@
           "type": "grafana-postgresql-datasource",
           "uid": "${datasource}"
         },
-        "definition": "SELECT DISTINCT connector_keys || ' / ' || metric_key || ' / ' || COALESCE(location_key, 'None') AS __text, pipe_ref AS __value FROM \"${schema:raw}\".\"${metrics_table:raw}\" WHERE $__timeFilter(ts) ORDER BY 1",
-        "query": "SELECT DISTINCT connector_keys || ' / ' || metric_key || ' / ' || COALESCE(location_key, 'None') AS __text, pipe_ref AS __value FROM \"${schema:raw}\".\"${metrics_table:raw}\" WHERE $__timeFilter(ts) ORDER BY 1",
+        "definition": "SELECT DISTINCT 'Pipe(''' || connector_keys || ''', ''' || metric_key || '''' || CASE WHEN location_key IS NULL OR location_key = 'None' THEN '' ELSE ', ''' || location_key || '''' END || CASE WHEN split_part(pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(pipe_ref, '|', 1) || '''' END || ')' AS __text, pipe_ref AS __value FROM \"${schema:raw}\".\"${metrics_table:raw}\" WHERE $__timeFilter(ts) ORDER BY 1",
+        "query": "SELECT DISTINCT 'Pipe(''' || connector_keys || ''', ''' || metric_key || '''' || CASE WHEN location_key IS NULL OR location_key = 'None' THEN '' ELSE ', ''' || location_key || '''' END || CASE WHEN split_part(pipe_ref, '|', 1) = ${default_instance:sqlstring} THEN '' ELSE ', instance=''' || split_part(pipe_ref, '|', 1) || '''' END || ')' AS __text, pipe_ref AS __value FROM \"${schema:raw}\".\"${metrics_table:raw}\" WHERE $__timeFilter(ts) ORDER BY 1",
         "refresh": 2,
         "sort": 1,
         "multi": true,
@@ -674,7 +693,7 @@
             },
             "inspect": false
           },
-          "noValue": "\u2014"
+          "noValue": "—"
         },
         "overrides": []
       },
@@ -723,7 +742,7 @@
             },
             "inspect": false
           },
-          "noValue": "\u2014"
+          "noValue": "—"
         },
         "overrides": []
       },

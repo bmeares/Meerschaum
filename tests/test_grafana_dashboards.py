@@ -46,6 +46,28 @@ def test_dashboards_keep_filters_units_and_empty_history_safe(resource):
     assert any(panel['fieldConfig']['defaults'].get('unit') == 's' for panel in dashboard['panels'])
 
 
+@pytest.mark.parametrize('resource', DASHBOARDS, ids=lambda path: path.stem)
+def test_dashboards_label_pipes_as_pipe_calls_without_the_default_instance(resource):
+    """Pipes read `Pipe('ck', 'mk'[, 'lk'][, instance='ik'])`, as `str(pipe)` writes them."""
+    dashboard = json.loads(resource.read_text())
+    variables = {variable['name']: variable for variable in dashboard['templating']['list']}
+    default = variables['default_instance']
+    # Filled with the configured default instance when Meerschaum writes the dashboard.
+    assert default['type'] == 'constant' and default['hide'] == 2
+    assert default['query'] == '__MRSM_DEFAULT_INSTANCE__'
+    names = [variable['name'] for variable in dashboard['templating']['list']]
+    assert names.index('default_instance') < names.index('pipe')
+    assert "'Pipe(''' || connector_keys" in variables['pipe']['query']
+    assert '${default_instance:sqlstring}' in variables['pipe']['query']
+    assert "' / '" not in variables['pipe']['query']
+    for panel in dashboard['panels']:
+        for target in panel['targets']:
+            sql = target['rawSql']
+            assert not re.search(r'pipe_ref AS (metric|"Pipe")', sql), panel['title']
+            if 'pipe_label' in sql:
+                assert "'Pipe(''' || m.connector_keys" in sql and '${default_instance:sqlstring}' in sql
+
+
 def test_native_stack_sync_preserves_undecodable_and_linked_dashboard_collisions(tmp_path):
     import os
     import subprocess
