@@ -20,6 +20,12 @@ packages (the CI virtual environment), otherwise a cached virtual environment bu
 (override the directory with `MRSM_TEST_CONSOLE_VENV_DIR`; the first run needs a package index).
 It is never a developer's `test_root/venvs` or user site, so a Playwright-only `python3` works.
 
+On Linux, Chromium runs in a network namespace of its own (`browser_isolation`, which needs
+`pasta`), so Docker networks other jobs create and remove never abort its requests; CI requires
+it, `MRSM_TEST_CONSOLE_NETNS=0` turns it off. A failing test leaves its tabs' screenshots, DOM,
+console and network timelines and the servers' logs under `MRSM_TEST_CONSOLE_DIAG_DIR` (default
+`~/.cache/mrsm-console-tests/diagnostics`; CI uploads them as `console-diagnostics-<attempt>`).
+
 It is opt-in: set `MRSM_TEST_CONSOLE=1`, otherwise every test here is skipped (the default
 sqlite pytest run starts no servers). Run it with the repo on the path:
 
@@ -30,6 +36,7 @@ sqlite pytest run starts no servers). Run it with the repo on the path:
 from __future__ import annotations
 
 import os
+import re
 import sys
 import json
 import venv
@@ -42,8 +49,10 @@ import random
 import pathlib
 import tempfile
 import subprocess
+import collections
 import urllib.request
 import urllib.error
+from datetime import datetime, timezone
 
 import pytest
 
@@ -71,6 +80,115 @@ def pytest_configure(config):
         'markers',
         f"console: browser tests against a real `mrsm start api` (set {ENABLE_ENV}=1)",
     )
+
+
+#: Where a failing console test leaves its evidence (CI uploads it).
+DIAG_ENV = 'MRSM_TEST_CONSOLE_DIAG_DIR'
+#: The tabs opened and the servers running in this process, for a failing test's evidence.
+_live_tabs: list = []
+_live_servers: list = []
+#: Tabs captured while their context closed during a failing test (see `_console_diagnostics`).
+_captured: list[dict] = []
+
+
+def diagnostics_dir() -> pathlib.Path:
+    return pathlib.Path(
+        os.environ.get(DIAG_ENV)
+        or (pathlib.Path.home() / '.cache' / 'mrsm-console-tests' / 'diagnostics')
+    )
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec='milliseconds')
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    setattr(item, f'_console_report_{report.when}', report)
+
+
+def _failed(item) -> bool:
+    return any(
+        getattr(getattr(item, f'_console_report_{when}', None), 'failed', False)
+        for when in ('setup', 'call')
+    )
+
+
+@pytest.fixture(autouse=True)
+def _console_diagnostics(request, monkeypatch):
+    """
+    When a console test fails, write what it saw under `diagnostics_dir()/<test>/`: each open tab's
+    screenshot, URL, DOM, console messages, failed and still-pending requests and the timeline of
+    its Dash callbacks, plus the full log of every server running in this process (the Rust API
+    server and the Python API host write to the same file). A test that closes its own browser
+    context in a `finally` is captured just before that close, while the page still shows the
+    failure.
+    """
+    if os.environ.get(ENABLE_ENV, '').lower() in ('', '0', 'false'):
+        yield
+        return
+    item = request.node
+    _live_tabs.clear()
+    _captured.clear()
+    try:
+        from playwright.sync_api import BrowserContext
+    except ImportError:
+        BrowserContext = None
+    if BrowserContext is not None:
+        original_close = BrowserContext.close
+
+        def close(context, *args, **kwargs):
+            ### A failure propagating through the test's `finally`, or a failed call before the
+            ### `context` fixture's teardown.
+            if sys.exc_info()[0] is not None or _failed(item):
+                for tab in list(_live_tabs):
+                    if tab.page.context is context or tab.page.context == context:
+                        _captured.append(tab.snapshot())
+                        _live_tabs.remove(tab)
+            return original_close(context, *args, **kwargs)
+
+        monkeypatch.setattr(BrowserContext, 'close', close)
+    yield
+    if not _failed(item):
+        return
+    for tab in list(_live_tabs):
+        _captured.append(tab.snapshot())
+    _live_tabs.clear()
+    name = re.sub(r'[^A-Za-z0-9_.-]+', '_', item.nodeid)[-150:]
+    dest = diagnostics_dir() / name
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        for index, snap in enumerate(_captured):
+            png = snap.pop('screenshot', None)
+            html = snap.pop('html', None)
+            if png:
+                (dest / f'tab{index}.png').write_bytes(png)
+            if html:
+                (dest / f'tab{index}.html').write_text(html, encoding='utf-8', errors='replace')
+            (dest / f'tab{index}.json').write_text(
+                json.dumps(snap, indent=2, default=str), encoding='utf-8'
+            )
+        for server in list(_live_servers):
+            try:
+                data = server.log_path.read_bytes()[-4_000_000:]
+            except OSError:
+                continue
+            (dest / f'server-{server.name}-{server.port}.log').write_bytes(data)
+        (dest / 'failure.txt').write_text(
+            f"{item.nodeid}\nwritten {_now()}\n\n"
+            + '\n\n'.join(
+                str(getattr(getattr(item, f'_console_report_{when}', None), 'longrepr', '') or '')
+                for when in ('setup', 'call')
+            ),
+            encoding='utf-8',
+        )
+        sys.stderr.write(f"\nConsole diagnostics for {item.nodeid}: {dest}\n")
+    except OSError as e:
+        sys.stderr.write(f"\nCould not write console diagnostics to {dest}: {e}\n")
+    finally:
+        _captured.clear()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -341,6 +459,7 @@ assert success, msg
     def start(self) -> None:
         self.prepare()
         binary = mrsm_binary()
+        _live_servers.append(self)
         with open(self.log_path, 'wb') as log:
             self.proc = subprocess.Popen(
                 [
@@ -349,7 +468,10 @@ assert success, msg
                     *([] if self.webterm else ['--no-webterm']),
                     *self.args,
                 ],
-                env=self.env, cwd=str(self.root), stdout=log, stderr=subprocess.STDOUT,
+                ### The proxy's warnings (a host that did not answer, a refused connection) are
+                ### only printed with `RUST_LOG`: keep them, timestamped, for a failing test.
+                env={'RUST_LOG': 'meerschaum_server=warn,meerschaum_web=warn', **self.env},
+                cwd=str(self.root), stdout=log, stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
         deadline = time.time() + 180
@@ -386,6 +508,8 @@ assert success, msg
             return probe.connect_ex(('127.0.0.1', port)) == 0
 
     def stop(self) -> None:
+        if self in _live_servers:
+            _live_servers.remove(self)
         if self.proc is not None and self.proc.poll() is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)
@@ -429,12 +553,84 @@ def playwright_instance():
         yield p
 
 
+#: The host ports the browser reaches test servers on (`PORT_RANGE` and the plugin SDK test's).
+BROWSER_PORTS = f"{PORT_RANGE[0]}-19999"
+#: `0` launches Chromium in the host's network namespace (see `browser_isolation`).
+NETNS_ENV = 'MRSM_TEST_CONSOLE_NETNS'
+NETNS_WRAPPER = REPO / 'tests' / 'console' / 'chromium_netns.sh'
+_isolation: dict = {}
+
+
+def _headless_shell(playwright_instance) -> pathlib.Path | None:
+    """The headless shell `launch(headless=True)` runs, installed beside Playwright's Chromium."""
+    try:
+        chromium = pathlib.Path(playwright_instance.chromium.executable_path)
+        ### `.../ms-playwright/chromium-<revision>/chrome-linux64/chrome`
+        revision = chromium.parents[1].name.split('-', 1)[1]
+    except Exception:
+        return None
+    shell = (
+        chromium.parents[2] / f'chromium_headless_shell-{revision}'
+        / 'chrome-headless-shell-linux64' / 'chrome-headless-shell'
+    )
+    return shell if shell.exists() else None
+
+
+def browser_isolation(playwright_instance) -> dict | None:
+    """
+    The `launch()` arguments that run Chromium in a network namespace of its own
+    (`chromium_netns.sh`), or `None` with the reason in `_isolation['reason']`.
+
+    Chromium fails every request waiting for a connection with `ERR_NETWORK_CHANGED` when the
+    host's network interfaces change, and Docker networks of the database lanes come and go on the
+    same CI runners: a Dash page's callbacks beyond the six connections per host were dropped
+    mid-test and their outputs never rendered (the console suite's intermittent 60 s timeouts).
+    In its own namespace (loopback ports forwarded to the host's by pasta) it never sees them.
+    Linux only; needs `unshare`, `nsenter`, `setpriv`, `pasta` and unprivileged user namespaces.
+    """
+    if 'result' in _isolation:
+        return _isolation['result']
+    reason = None
+    shell = None
+    if os.environ.get(NETNS_ENV, '').lower() in ('0', 'false', 'no'):
+        reason = f"{NETNS_ENV}=0"
+    elif not sys.platform.startswith('linux'):
+        reason = f"not on Linux ({sys.platform})"
+    elif missing := [tool for tool in ('unshare', 'nsenter', 'setpriv', 'pasta') if not shutil.which(tool)]:
+        reason = f"missing {', '.join(missing)}"
+    elif (shell := _headless_shell(playwright_instance)) is None:
+        reason = "Playwright's headless shell was not found"
+    elif subprocess.run(
+        ['unshare', '--user', '--map-current-user', '--net', 'true'], capture_output=True,
+    ).returncode != 0:
+        reason = "unprivileged user and network namespaces are not available"
+    _isolation['reason'] = reason
+    _isolation['result'] = None if reason else {
+        'executable_path': str(NETNS_WRAPPER),
+        'env': {
+            **os.environ,
+            'MRSM_TEST_CHROMIUM': str(shell),
+            'MRSM_TEST_CHROMIUM_PORTS': BROWSER_PORTS,
+        },
+    }
+    return _isolation['result']
+
+
 @pytest.fixture(scope='module')
 def browser(playwright_instance):
+    from tests._binary import in_ci, skip_or_fail
+    isolation = browser_isolation(playwright_instance)
+    if isolation is None and in_ci() and sys.platform.startswith('linux') and (
+        os.environ.get(NETNS_ENV, '').lower() not in ('0', 'false', 'no')
+    ):
+        pytest.fail(
+            "The console suite's browser must not see the runner's Docker networks change "
+            f"(see `browser_isolation`): {_isolation['reason']}. Set {NETNS_ENV}=0 to run it "
+            "in the host's network namespace anyway."
+        )
     try:
-        browser = playwright_instance.chromium.launch(headless=True)
+        browser = playwright_instance.chromium.launch(headless=True, **(isolation or {}))
     except Exception as e:
-        from tests._binary import skip_or_fail
         skip_or_fail(f"Chromium is not available to the required console suite: {e}")
     yield browser
     browser.close()
@@ -575,13 +771,51 @@ class Tab:
         self.network_changed = False
         self.network_changed_ever = False
         self.interrupted_components: set[str] = set()
+        ### Evidence for a failing test (`snapshot`, `_console_diagnostics`).
+        self.console_log: collections.deque = collections.deque(maxlen=500)
+        self.failed_requests: collections.deque = collections.deque(maxlen=200)
+        self.callbacks: collections.deque = collections.deque(maxlen=300)
+        self.pending: dict = {}
         page.on('console', self._on_console)
         page.on('pageerror', self._on_pageerror)
         page.on('response', self._on_response)
+        page.on('request', self._on_request)
+        page.on('requestfinished', self._on_requestfinished)
         page.on('requestfailed', self._on_requestfailed)
+        _live_tabs.append(self)
+
+    @staticmethod
+    def _callback_outputs(request) -> str:
+        """The outputs a `/_dash-update-component` request is for (its `output` field)."""
+        try:
+            return str((json.loads(request.post_data or '{}') or {}).get('output', ''))[:300]
+        except Exception:
+            return ''
+
+    def _on_request(self, request):
+        self.pending[id(request)] = {
+            'started': _now(), 't0': time.monotonic(), 'method': request.method, 'url': request.url,
+            'outputs': self._callback_outputs(request) if '_dash-update-component' in request.url else '',
+        }
+
+    def _finish(self, request, outcome: str):
+        entry = self.pending.pop(id(request), None)
+        if entry is None:
+            return None
+        entry['seconds'] = round(time.monotonic() - entry.pop('t0'), 3)
+        entry['outcome'] = outcome
+        if '_dash-update-component' in entry['url'] or outcome != 'ok':
+            self.callbacks.append(entry)
+        return entry
+
+    def _on_requestfinished(self, request):
+        self._finish(request, 'ok')
 
     def _on_requestfailed(self, request):
-        if 'ERR_NETWORK_CHANGED' in str(request.failure):
+        failure = str(getattr(request, 'failure', ''))
+        entry = self._finish(request, failure) if hasattr(request, 'method') else None
+        self.failed_requests.append(entry or {'at': _now(), 'url': request.url, 'outcome': failure})
+        if 'ERR_NETWORK_CHANGED' in failure:
             self.network_changed = True
             self.network_changed_ever = True
             self.interrupted_components.update(
@@ -600,6 +834,7 @@ class Tab:
         self.errors.append(f"pageerror: {getattr(error, 'stack', None) or error}")
 
     def _on_console(self, message):
+        self.console_log.append({'at': _now(), 'type': message.type, 'text': message.text[:2000]})
         ### A script that never loaded (see `goto`) leaves its globals undefined.
         unloaded = self._unloaded_script_error(message.text)
         if message.type == 'error' and not unloaded and not any(
@@ -620,12 +855,42 @@ class Tab:
             ### a page itself triggers is an error.
             self.errors.append(f"{response.status} {response.url}")
 
+    def snapshot(self) -> dict:
+        """What this tab shows and saw (see `_console_diagnostics`); never raises."""
+        now = time.monotonic()
+        snap = {
+            'captured': _now(),
+            'errors': list(self.errors),
+            'network_changed_ever': self.network_changed_ever,
+            'pending_requests': [
+                {**{k: v for k, v in entry.items() if k != 't0'}, 'seconds': round(now - entry['t0'], 3)}
+                for entry in self.pending.values()
+            ],
+            'failed_requests': list(self.failed_requests),
+            'callbacks': list(self.callbacks),
+            'console': list(self.console_log),
+        }
+        try:
+            snap['url'] = self.page.url
+        except Exception as e:
+            snap['url'] = f'unavailable: {e}'
+        for key, call in (
+            ('screenshot', lambda: self.page.screenshot(timeout=10000)),
+            ('html', lambda: self.page.content()),
+        ):
+            try:
+                snap[key] = call()
+            except Exception as e:
+                snap[key + '_error'] = str(e)
+        return snap
+
     def goto(self, path: str, selector: str | None = None) -> None:
         """
         Open a console path and wait for the Dash app to render (a selector, else the navbar).
-        Chromium aborts every request of a page when the machine's network interfaces change
-        (`ERR_NETWORK_CHANGED`: a container bridge coming up is enough), which leaves a Dash page
-        without its scripts: that, and only that, is retried.
+        Chromium fails the requests of a page still waiting for a connection when the machine's
+        network interfaces change (`ERR_NETWORK_CHANGED`: a container bridge coming up is enough),
+        which leaves a Dash page without its scripts: that, and only that, is retried. A browser
+        in its own network namespace (`browser_isolation`) never sees such a change.
         """
         selector = selector or '#logo-img, #username-input'
         for attempt in range(3):

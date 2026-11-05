@@ -145,6 +145,8 @@ jobs:
       MRSM_NO_AUTO_INSTALL: '1'
       MRSM_NO_UPDATE_CHECK: '1'
       MRSM_TEST_CONSOLE: ${{ matrix.shard == 'core' && (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
+      # A failing console test leaves its tabs (screenshot, DOM, console, network) and server logs here.
+      MRSM_TEST_CONSOLE_DIAG_DIR: ${{ github.workspace }}/.ci-artifacts/console-diagnostics
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
@@ -180,6 +182,14 @@ jobs:
       - name: Clean up only this shard's owned services after failure or cancellation
         if: ${{ always() }}
         run: python scripts/ci/services.py cleanup --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}"
+      - name: Preserve failing console tests' screenshots, network timelines and server logs
+        if: ${{ failure() && matrix.shard == 'core' && env.MRSM_TEST_CONSOLE == '1' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-diagnostics-${{ github.run_attempt }}
+          path: ${{ env.MRSM_TEST_CONSOLE_DIAG_DIR }}
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Preserve shard ownership and collection evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
