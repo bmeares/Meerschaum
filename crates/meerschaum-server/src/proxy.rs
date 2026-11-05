@@ -367,7 +367,12 @@ impl HostProxy {
         if !self.is_active() {
             return ConsoleStatus::Unavailable("no API host is running".into());
         }
-        let status = self.ask_console(secret).await;
+        // A host that does not answer yet (still starting, or restarting) is asked again by the
+        // next request: only an answer is remembered. Remembering the failed query kept `/dash`
+        // on the pointer page for the life of a host that took long to start.
+        let Some(status) = self.ask_console(secret).await else {
+            return ConsoleStatus::Unavailable("the API host is not answering yet".into());
+        };
         if let ConsoleStatus::Unavailable(reason) = &status
             && !self.warned.swap(true, Ordering::SeqCst)
         {
@@ -387,20 +392,23 @@ impl HostProxy {
         }
     }
 
-    async fn ask_console(&self, secret: &[u8]) -> ConsoleStatus {
-        if let Some(document) = self.internal_get(STATUS_PATH, secret).await
-            && let Some(status) = ConsoleStatus::from_document(&document)
-        {
-            return status;
+    /// The host's answer, or `None` when it gave none (not listening yet, or an error status).
+    async fn ask_console(&self, secret: &[u8]) -> Option<ConsoleStatus> {
+        let status = self.internal_get(STATUS_PATH, secret).await;
+        if let Some(console) = status.as_ref().and_then(ConsoleStatus::from_document) {
+            return Some(console);
         }
-        if let Some(document) = self.registry(secret).await
-            && let Some(status) = ConsoleStatus::from_document(&document)
-        {
-            return status;
+        let registry = self.registry(secret).await;
+        if let Some(console) = registry.as_ref().and_then(ConsoleStatus::from_document) {
+            return Some(console);
         }
-        ConsoleStatus::Unavailable(
-            "the API host did not report a console (is the meerschaum package up to date?)".into(),
-        )
+        // It answered without a `console` object: an older host.
+        (status.is_some() || registry.is_some()).then(|| {
+            ConsoleStatus::Unavailable(
+                "the API host did not report a console (is the meerschaum package up to date?)"
+                    .into(),
+            )
+        })
     }
 
     /// `GET path` on the host with the internal token; the JSON body of a success.

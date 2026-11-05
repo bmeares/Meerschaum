@@ -103,6 +103,11 @@ small{{opacity:.7}}</style></head><body>\
     )
 }
 
+/// `/dash` while the API host is starting: it reloads until the console answers.
+const STARTING_PAGE: &str = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+<meta http-equiv=\"refresh\" content=\"5\"><title>Meerschaum</title></head>\
+<body><p>The web console is starting.</p></body></html>";
+
 /// Serve a console path: proxy to the API host when it mounted the Dash console, else the
 /// pointer page (`200` for `/dash` and `/dash/`, `404` below them). Everything about the
 /// request reaches the host unchanged, so the Dash app sees the paths it was mounted at.
@@ -119,6 +124,27 @@ pub async fn console_entry(state: AppState, req: Request) -> Response {
     };
     match (status, &state.host) {
         (ConsoleStatus::Mounted, Some(host)) => host.forward(req).await,
+        // The host has not answered yet (it is starting): nothing was remembered, so a retry
+        // asks it again.
+        (ConsoleStatus::Unavailable(_), Some(host))
+            if host.is_active() && matches!(host.console_status(), ConsoleStatus::Unknown) =>
+        {
+            let mut resp = (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::response::Html(STARTING_PAGE),
+            )
+                .into_response();
+            let headers = resp.headers_mut();
+            headers.insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_static("5"),
+            );
+            headers.insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
+            );
+            resp
+        }
         (status, _) => {
             let reason = match status {
                 ConsoleStatus::Unavailable(reason) => reason,

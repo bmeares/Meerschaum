@@ -252,6 +252,39 @@ async fn the_registry_console_object_is_the_fallback_signal() {
     ));
 }
 
+/// A host that is not answering yet (still starting) is asked again on the next request: the
+/// failed query is not remembered, so a slow start does not leave `/dash` on the pointer page.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_console_host_that_answers_late_is_asked_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("host.sock");
+    let (app, state, _root) = app_with(Some(HostProxy::new(&socket)), |_| {});
+
+    // Nothing listens yet: a short "starting" page, retried, and nothing remembered.
+    for path in ["/dash", "/dash/_dash-layout"] {
+        let r = send(&app, req("GET", path, None, None)).await;
+        assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+        assert!(r.text().contains("starting"), "{}", r.text());
+        assert!(!r.text().contains("pip install"), "{}", r.text());
+    }
+    assert!(matches!(
+        state.host.as_ref().unwrap().console_status(),
+        ConsoleStatus::Unknown
+    ));
+
+    // The host comes up with the console mounted: the next request reaches it.
+    let seen = Arc::new(Seen::default());
+    let _host = serve_unix(&socket, host_app(Some(mounted()), None, seen.clone())).await;
+    let r = send(&app, req("GET", "/dash/pipes", None, None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert!(matches!(
+        state.host.as_ref().unwrap().console_status(),
+        ConsoleStatus::Mounted
+    ));
+    assert_eq!(seen.status_calls.load(Ordering::SeqCst), 1);
+}
+
 /// `/static` is the host's when a host runs (it mounts the console's files there); else the
 /// server serves `api:static_path` itself.
 #[cfg(unix)]
