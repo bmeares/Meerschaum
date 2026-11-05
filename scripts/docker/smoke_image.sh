@@ -51,12 +51,23 @@ cleanup() {
 trap cleanup EXIT
 
 failures=0
+### Seconds to wait for a server in an image: an image of another architecture runs under
+### emulation (arm64 under QEMU on the x86_64 builders), where the API host and its console take
+### minutes to start (about 3 for the console), not seconds.
+smoke_wait() {
+  local arch host
+  arch="$(docker image inspect -f '{{.Architecture}}' "$1" 2>/dev/null || true)"
+  case "$(uname -m)" in x86_64) host=amd64 ;; aarch64|arm64) host=arm64 ;; *) host="$(uname -m)" ;; esac
+  if [ -n "$arch" ] && [ "$arch" != "$host" ]; then echo 600; else echo 90; fi
+}
+
 check() {
   ### check <label> <image> <command...>: run a command in a throwaway container.
   local label="$1" image="$2"; shift 2
   local name="$prefix-$RANDOM$RANDOM" out
   names+=("$name")
-  if out="$(docker run --rm --name "$name" --network none --entrypoint "$1" "$image" "${@:2}" 2>&1)"; then
+  if out="$(docker run --rm --name "$name" --network none -e MRSM_SMOKE_WAIT="$(smoke_wait "$image")" \
+      --entrypoint "$1" "$image" "${@:2}" 2>&1)"; then
     echo "  ok:   $label: $(printf '%s' "$out" | head -n 1)"
   else
     echo "  FAIL: $label"
@@ -90,7 +101,7 @@ if [ "${1:-}" = https ]; then
 fi
 mrsm start api --production --port "$port" -i sql:smoke --no-webterm "${tls_args[@]}" >"$root/api.log" 2>&1 &
 api=$!
-for _ in $(seq 1 90); do
+for _ in $(seq 1 "${MRSM_SMOKE_WAIT:-90}"); do
   if curl --fail --silent "http://localhost:$port/healthcheck" 2>/dev/null; then
     if ! curl --fail --silent --insecure "$console/dash/_dash-layout" >"$root/layout.json" 2>/dev/null; then
       sleep 1
