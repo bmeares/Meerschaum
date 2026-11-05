@@ -41,7 +41,20 @@
 #performance-history-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 #performance-history-page-size { width: 5rem; }
 .performance-page:not(:has(.tab-pane.active #performance-history)) #performance-history-controls { display: none; }
+/* The Engine section: the Syncing Engine's runs, freshness, backlog and nodes. */
+.performance-engine { margin-top: 40px; padding-top: 24px; border-top: 1px solid #ffffff18; }
+.performance-page #performance-engine-heading { font-size: 1.35rem; margin: 0 0 16px; }
+.performance-engine-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.performance-engine-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.performance-chart h3 { font-size: 1rem; margin: 0 8px 10px; }
+#performance-engine-tabs { margin-top: 24px; }
+#performance-engine .tab-content { padding-top: 12px; }
+#performance-engine .performance-table td.performance-engine-reason,
+#performance-engine .performance-table td.performance-engine-parents { white-space: normal; min-width: 14rem; max-width: 28rem; }
+.performance-engine-parents div + div { margin-top: 2px; }
+.performance-engine-none { padding: 12px 0; }
 @media (max-width: 1100px) { .performance-charts { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .performance-engine-charts { grid-template-columns: 1fr; } }
 @media (max-width: 767.98px) {
     .performance-page { padding: 12px 16px 24px; }
     .performance-filters { grid-template-columns: minmax(0, 1fr); gap: 12px; }
@@ -71,4 +84,13 @@
     .performance-row-name a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 0; }
     #performance-history .performance-table td:nth-child(2) { grid-column: 1 / -1; order: -1; font-weight: 600; }
     #performance-history .performance-table td:first-child { grid-column: 1 / -1; font-size: 0.85rem; }
+    .performance-engine { margin-top: 32px; padding-top: 16px; }
+    .performance-engine-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #performance-engine .performance-table td.performance-row-name { grid-column: 1 / -1; order: -1; font-weight: 600; }
+    #performance-engine .performance-table td.performance-engine-reason,
+    #performance-engine .performance-table td.performance-engine-parents { grid-column: 1 / -1; min-width: 0; max-width: none; }
+    #performance-engine .performance-table td.performance-row-name a { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 0; }
+    #performance-engine .performance-table td.performance-row-name::before { display: none; }
+    #performance-engine .nav-tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+    #performance-engine .nav-tabs .nav-link { min-height: 44px; padding: 8px 12px; white-space: nowrap; }
 }

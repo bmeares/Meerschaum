@@ -192,10 +192,14 @@ fn bound_field(request: &Json, key: &str) -> PyResult<Option<Bound>> {
 /// The run history's `since`: an ISO 8601 timestamp (UTC when naive). `''` and `null` are no
 /// filter.
 fn since_field(request: &Json) -> PyResult<Option<DateTime<Utc>>> {
+    time_field(request, "since")
+}
+
+fn time_field(request: &Json, key: &str) -> PyResult<Option<DateTime<Utc>>> {
     let invalid = |text: &dyn std::fmt::Display| {
-        value_err(format!("`since` must be an ISO 8601 datetime, got {text}."))
+        value_err(format!("`{key}` must be an ISO 8601 datetime, got {text}."))
     };
-    match request.get("since") {
+    match request.get(key) {
         None | Some(Json::Null) => Ok(None),
         Some(Json::String(s)) if s.trim().is_empty() => Ok(None),
         Some(Json::String(s)) => {
@@ -719,6 +723,59 @@ pub fn engine_run_activity(py: Python<'_>, request: &str) -> PyResult<String> {
         .detach(|| session.block_on(reader.run_activity(since, bucket_seconds, limit)))
         .map_err(|e| runtime_err(e.to_string()))?;
     to_json_string(&activity)
+}
+
+/// `engine_health(request) -> json`: the engine's health on the instance for the window from
+/// `since` (required) to `until` (default now) in `buckets` chart buckets (default 48): runs by
+/// outcome and duration, every recorded pipe's freshness and lag behind its parents, the
+/// dirty-range backlog, and failed or retried nodes (`EngineHealth`). `pipe_ref` and `pipeline`
+/// narrow it; `visible_refs` (a list) limits it to the pipes a viewer may read; at most `limit`
+/// runs, nodes and ledger entries are read (default 20000).
+#[pyfunction]
+pub fn engine_health(py: Python<'_>, request: &str) -> PyResult<String> {
+    let request = parse_request(request)?;
+    let since = since_field(&request)?.ok_or_else(|| value_err("`since` is required."))?;
+    let until = time_field(&request, "until")?.unwrap_or_else(Utc::now);
+    if until <= since {
+        return Err(value_err("`until` must be after `since`."));
+    }
+    let count = |key: &str, default: u64, max: u64| -> PyResult<usize> {
+        match request.get(key) {
+            None | Some(Json::Null) => Ok(default as usize),
+            Some(value) => value
+                .as_u64()
+                .filter(|n| (1..=max).contains(n))
+                .map(|n| n as usize)
+                .ok_or_else(|| value_err(format!("`{key}` must be an integer from 1 to {max}."))),
+        }
+    };
+    let visible = match request.get("visible_refs") {
+        None | Some(Json::Null) => None,
+        Some(Json::Array(refs)) => Some(
+            refs.iter()
+                .map(|r| {
+                    r.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| value_err("`visible_refs` must be a list of strings."))
+                })
+                .collect::<PyResult<std::collections::BTreeSet<_>>>()?,
+        ),
+        Some(_) => return Err(value_err("`visible_refs` must be a list of strings.")),
+    };
+    let query = meerschaum_engine::HealthQuery {
+        since,
+        until,
+        buckets: count("buckets", 48, 500)?,
+        pipe: str_field(&request, "pipe_ref").map(str::to_owned),
+        pipeline: str_field(&request, "pipeline").map(str::to_owned),
+        visible,
+        limit: count("limit", 20_000, 200_000)?,
+    };
+    let (session, reader) = reader(py, &request)?;
+    let health = py
+        .detach(|| session.block_on(reader.health(&query)))
+        .map_err(|e| runtime_err(e.to_string()))?;
+    to_json_string(&health)
 }
 
 /// Private host authorization evidence; stored node identities never leave this call.

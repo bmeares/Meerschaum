@@ -83,8 +83,10 @@ pub use native::{FaultInjector, NativeConfig, NativeExecutor, NodeSyncOptions};
 pub use node::{PipeRecord, PipeRef};
 pub use plan::{Action, Begin, Bounds, Plan, PlanOptions, PlannedNode, Span, expected, plan};
 pub use read::{
-    ActivityBucket, ActivityRun, DirtyRange, EdgeView, EngineReader, GanttBar, NameActivity,
-    NodeView, PipelineView, RunActivity, RunDetail, RunFilter, RunStatus, RunSummary,
+    ActivityBucket, ActivityRun, BacklogHealth, ChildBacklog, DirtyRange, EdgeView, EngineHealth,
+    EngineReader, FreshnessHealth, GanttBar, HealthQuery, HealthRun, NameActivity, NodeIssue,
+    NodeView, PipeFreshness, PipelineView, RunActivity, RunBucket, RunDetail, RunFilter, RunHealth,
+    RunStatus, RunSummary,
 };
 pub use registry::{
     ConnectorRegister, ConnectorRegisterHook, ConnectorRegistry, PluginSync, StaticRegistry,

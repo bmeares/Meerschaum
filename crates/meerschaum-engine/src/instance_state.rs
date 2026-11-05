@@ -403,6 +403,31 @@ pub struct ActivityRow {
     pub success: Option<bool>,
 }
 
+/// A node row as [`InstanceState::window_nodes`] reads it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowNode {
+    /// The run.
+    pub run_id: String,
+    /// The node.
+    pub pipe_ref: PipeRef,
+    /// When the run started (the rows' datetime axis).
+    pub run_started: DateTime<Utc>,
+    /// The planned action.
+    pub action: Action,
+    /// The outcome.
+    pub status: NodeStatus,
+    /// Why the planner chose the action.
+    pub reason: String,
+    /// Sync attempts (more than one: retried).
+    pub attempts: u32,
+    /// Chunks synced.
+    pub num_chunks: usize,
+    /// When the node finished.
+    pub finished: Option<DateTime<Utc>>,
+    /// How long the node's sync took.
+    pub duration_seconds: Option<f64>,
+}
+
 /// Serializes sequence allocation for one `(instance, pipe_ref)` in this process.
 type SeqLock = Arc<tokio::sync::Mutex<()>>;
 
@@ -751,6 +776,171 @@ impl InstanceState {
         };
         runs.sort_by(|a, b| b.started.cmp(&a.started).then(b.run_id.cmp(&a.run_id)));
         Ok(runs)
+    }
+
+    /// At most `limit` rows of `kind` on `instance`, newest first on the pipe's datetime axis
+    /// (`begin` inclusive when given), with only `columns` when given.
+    async fn newest_docs(
+        &self,
+        instance: &str,
+        kind: EnginePipe,
+        begin: Option<DateTime<Utc>>,
+        columns: Option<&[&str]>,
+        limit: usize,
+    ) -> Result<Vec<Doc>, StateError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn(instance)?;
+        let pipe = engine_pipe_on(conn.as_ref(), instance, kind)
+            .await
+            .map_err(|error| unreachable(instance, error))?;
+        let query = DataQuery {
+            select_columns: columns.map(|columns| columns.iter().map(|c| c.to_string()).collect()),
+            limit: i64::try_from(limit).ok(),
+            order: Some("desc".into()),
+            begin: begin.map(|time| DateBound::utc(time.with_nanosecond(0).unwrap_or(time))),
+            ..Default::default()
+        };
+        match conn.get_pipe_data(&pipe, &query).await {
+            Ok(Some(frame)) => Ok(frame_to_docs(&frame)),
+            Ok(None) => Ok(Vec::new()),
+            Err(ConnectorError::NotImplemented(message)) => {
+                Err(StateError::ReadOnly { instance: message })
+            }
+            Err(error) => Err(unreachable(instance, error)),
+        }
+    }
+
+    /// The runs started at or after `since`, newest first, at most `limit`: when each started
+    /// and ended, how many nodes it planned and, with `selection`, its selection (the saved
+    /// Pipelines it ran). Targets and messages are not read.
+    pub async fn window_runs(
+        &self,
+        since: DateTime<Utc>,
+        limit: usize,
+        selection: bool,
+    ) -> Result<Vec<RunRow>, StateError> {
+        let mut columns = vec!["run_id", "started", "finished", "success", "num_nodes"];
+        if selection {
+            columns.push("selection");
+        }
+        let mut runs: Vec<RunRow> = self
+            .newest_docs(
+                &self.home,
+                EnginePipe::Runs,
+                Some(since),
+                Some(&columns),
+                limit,
+            )
+            .await?
+            .iter()
+            .filter_map(run_from_doc)
+            .filter(|run| run.started >= since)
+            .collect();
+        runs.sort_by(|a, b| b.started.cmp(&a.started).then(b.run_id.cmp(&a.run_id)));
+        runs.truncate(limit);
+        Ok(runs)
+    }
+
+    /// The node rows of the runs started at or after `since`, newest run first, at most
+    /// `limit`, with what a health view shows of them (no bounds, counts or messages).
+    pub async fn window_nodes(
+        &self,
+        since: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<WindowNode>, StateError> {
+        let columns = [
+            "run_id",
+            "pipe_ref",
+            "action",
+            "status",
+            "reason",
+            "attempts",
+            "num_chunks",
+            "started",
+            "finished",
+            "duration_seconds",
+        ];
+        let mut rows: Vec<WindowNode> = self
+            .newest_docs(
+                &self.home,
+                EnginePipe::Nodes,
+                Some(since),
+                Some(&columns),
+                limit,
+            )
+            .await?
+            .iter()
+            .filter_map(|doc| {
+                Some(WindowNode {
+                    run_id: doc_str(doc, "run_id")?,
+                    pipe_ref: PipeRef::from_string(doc_str(doc, "pipe_ref")?),
+                    run_started: doc_dt(doc, "started")?,
+                    action: parse_enum(doc_str(doc, "action")).unwrap_or(Action::Skip),
+                    status: parse_enum(doc_str(doc, "status")).unwrap_or(NodeStatus::Pending),
+                    reason: doc_str(doc, "reason").unwrap_or_default(),
+                    attempts: doc_int(doc, "attempts").unwrap_or(0).max(0) as u32,
+                    num_chunks: doc_int(doc, "num_chunks").unwrap_or(0).max(0) as usize,
+                    finished: doc_dt(doc, "finished"),
+                    duration_seconds: doc_float(doc, "duration_seconds"),
+                })
+            })
+            .filter(|row| row.run_started >= since)
+            .collect();
+        rows.sort_by(|a, b| {
+            b.run_started
+                .cmp(&a.run_started)
+                .then_with(|| a.run_id.cmp(&b.run_id))
+                .then_with(|| a.pipe_ref.cmp(&b.pipe_ref))
+        });
+        rows.truncate(limit);
+        Ok(rows)
+    }
+
+    /// Every edge cursor stored on `instance`.
+    pub async fn all_cursors(&self, instance: &str) -> Result<Vec<EdgeCursor>, StateError> {
+        let docs = self
+            .read_rows(instance, EnginePipe::Cursors, Map::new(), None)
+            .await?;
+        Ok(docs
+            .iter()
+            .filter_map(|doc| {
+                Some(EdgeCursor {
+                    parent_ref: PipeRef::from_string(doc_str(doc, "parent_ref")?),
+                    child_ref: PipeRef::from_string(doc_str(doc, "child_ref")?),
+                    seq: doc_int(doc, "seq")?,
+                    parent_watermark_at_cursor: doc_bound(doc, "parent_watermark_at_cursor"),
+                    role: doc_str(doc, "role")
+                        .and_then(|role| EdgeRole::parse(&role))
+                        .unwrap_or(EdgeRole::Data),
+                })
+            })
+            .collect())
+    }
+
+    /// The newest `limit` ledger entries stored on `instance` (every parent), oldest first.
+    pub async fn newest_ledger(
+        &self,
+        instance: &str,
+        limit: usize,
+    ) -> Result<Vec<LedgerEntry>, StateError> {
+        let mut entries: Vec<LedgerEntry> = self
+            .newest_docs(instance, EnginePipe::Ledger, None, None, limit)
+            .await?
+            .iter()
+            .filter_map(|doc| {
+                Some(LedgerEntry {
+                    pipe_ref: PipeRef::from_string(doc_str(doc, "pipe_ref")?),
+                    seq: doc_int(doc, "seq")?,
+                    begin: doc_bound(doc, "begin"),
+                    end: doc_bound(doc, "end"),
+                    created: doc_dt(doc, "created").unwrap_or_else(crate::state::epoch),
+                })
+            })
+            .collect();
+        entries.sort_by(|a, b| a.pipe_ref.cmp(&b.pipe_ref).then(a.seq.cmp(&b.seq)));
+        Ok(entries)
     }
 
     /// Read nodes for a set of runs, in bounded IN batches (including SQLite/Oracle limits).

@@ -46,6 +46,15 @@ The tiles refresh every 30 seconds. On an instance without pipes, the Pipes tile
 
 Open **Performance** (`/dash/performance`) to compare duration, write rate, and failures. Choose a time window and filter by Pipe or Pipeline. Charts show the trend; tables show each Pipe or Pipeline and recent syncs.
 
+The **Engine** section below shows the Syncing Engine's view of the same selection, like the Stack's Grafana **Engine** dashboard:
+
+- **Runs**: runs, failed and unfinished runs, and the 95th-percentile run duration in the window; charts of runs by outcome and of run duration; the latest runs, each linked to its run on its saved Pipeline's page.
+- **Freshness**: pipes whose latest sync failed, pipes never synced successfully, the longest time since a successful sync, and children behind their parents. The table ranks pipes by failures in a row, then by time since their last success, with how far each is behind its parents and how many parent changes it has not consumed.
+- **Backlog**: the dirty ranges each child has not consumed: from which parents, how many, the oldest, and how long it has waited.
+- **Nodes**: failed, unrun and retried nodes in the window, newest first, with the planner's reason.
+
+A viewer sees only the pipes they may read: runs that include one of them, their statuses, edges between two of them, and their nodes. An instance without engine history shows **No engine history**.
+
 **Rows affected/s** counts inserted, updated, upserted, and deleted rows. Replacements count both deletion and new rows; an unchanged sync affects zero rows. See [Sync metrics](sync-metrics.md) for Python access, retention, and capture limits.
 
 ## Terminal

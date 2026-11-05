@@ -63,6 +63,10 @@ def rc28_server():
         server.stop()
 
 
+#: Scroll to the bottom at once, not with the page's smooth scrolling.
+SCROLL_TO_BOTTOM = "window.scrollTo({top: document.documentElement.scrollHeight, behavior: 'instant'})"
+
+
 def _syncs(page) -> str:
     return page.evaluate("""() => {
         const label = [...document.querySelectorAll('#performance-page .performance-stat dt')]
@@ -100,7 +104,9 @@ def test_performance_refresh_keeps_scroll_tab_and_components(rc28_server, browse
         page.wait_for_function(
             "parseInt(document.querySelector('#performance-pipes .page-item.active')?.textContent) === 2"
         )
-        page.evaluate('window.scrollTo(0, document.documentElement.scrollHeight)')
+        ### `instant`: Bootstrap scrolls the page smoothly (`scroll-behavior: smooth`), and a
+        ### position read during that animation is short of where the page comes to rest.
+        page.evaluate(SCROLL_TO_BOTTOM)
         before = page.evaluate('Math.round(window.scrollY)')
         assert before > 150, before
         ### A refresh updates the mounted components: nothing below the filters is rebuilt.
@@ -166,7 +172,7 @@ def test_performance_refresh_keeps_scroll_tab_and_components(rc28_server, browse
             "document.querySelector('#performance-history-range')?.textContent.startsWith('26')"
         )
         page.wait_for_function("!document.getElementById('performance-refresh').disabled")
-        page.evaluate('window.scrollTo(0, document.documentElement.scrollHeight)')
+        page.evaluate(SCROLL_TO_BOTTOM)
         before = page.evaluate('Math.round(window.scrollY)')
         assert before > 150, before
         page.evaluate('window.rc28Shortest = document.documentElement.scrollHeight')

@@ -964,6 +964,37 @@ def get_run_activity(
     return _call('engine_run_activity', request)
 
 
+def get_engine_health(
+    instance: Any = None,
+    since: Any = None,
+    until: Any = None,
+    buckets: int = 48,
+    pipe_ref: Optional[str] = None,
+    pipeline: Optional[str] = None,
+    visible_refs: Optional[List[str]] = None,
+    limit: int = 20_000,
+) -> Dict[str, Any]:
+    """
+    The engine's health on an instance (`{runs, freshness, backlog, nodes, truncated}`): the runs
+    started since `since` by outcome and duration in `buckets` buckets up to `until` (now), every
+    recorded pipe's sync status with its lag behind its parents, the children's unconsumed
+    dirty ranges, and the window's failed, unrun and retried nodes. `pipe_ref` and `pipeline`
+    narrow it like the Performance page's filters; `visible_refs` (fresh, from the host) limits
+    it to the pipes a viewer may read, `None` to every pipe. Planner reasons are returned as
+    stored: callers anonymize them for restricted viewers.
+    """
+    instance = instance if instance is not None else get_instance()
+    request = _request(instance)
+    request['since'] = since.isoformat() if isinstance(since, datetime) else since
+    request['until'] = until.isoformat() if isinstance(until, datetime) else until
+    request['buckets'] = int(buckets)
+    request['pipe_ref'] = pipe_ref or None
+    request['pipeline'] = pipeline or None
+    request['visible_refs'] = list(visible_refs) if visible_refs is not None else None
+    request['limit'] = int(limit)
+    return _call('engine_health', request)
+
+
 def get_run_detail(instance: Any, run_id: str, viewer: Any = None) -> Optional[Dict[str, Any]]:
     """
     One run with its nodes and the planned-versus-actual bars (`None` for an unknown run, or one

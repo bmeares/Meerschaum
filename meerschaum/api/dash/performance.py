@@ -88,6 +88,9 @@ def metrics(instance_keys: Optional[str], session: Any, window='24h', pipe=None,
         visible_pipelines=(sorted(names) if names is not None else None),
     )
     return {**result, '_instance': str(instance), '_pipe_filter': pipe, '_pipeline_filter': pipeline,
+            # Host-only: the same fresh ceiling for the Engine section (`engine_health()`).
+            '_visible_refs': (sorted(refs) if refs is not None else None), '_viewer': who,
+            '_pipeline_names': sorted(available_names),
             '_pipe_options': ([{'label': engine.ref_label(ref), 'value': ref}
                                for ref in sorted(available_refs)] if with_options else []),
             '_pipeline_options': ([{'label': name, 'value': name}
@@ -483,6 +486,337 @@ def build_body(data: Dict[str, Any], instance: str, window: str, history_page=1,
             ], id='performance-detail-tabs', active_tab='performance-pipes-tab',
                 persistence=True, persistence_type='memory'),
             live('notes', parts['notes'])]
+
+
+#: The Engine section's window: the same as the sync measurements'.
+ENGINE_BUCKETS = 48
+#: The most runs, nodes and ledger entries the Engine section reads, each.
+ENGINE_LIMIT = 20_000
+#: The most rows each Engine table shows (the Pipe filter narrows to one pipe).
+ENGINE_ROWS = 10
+#: Node statuses in the Nodes table, in plain words.
+NODE_STATUS_LABELS = {
+    'failed': 'Failed', 'upstream_failed': 'Parent failed', 'rebuild_pending': 'Rebuild needs approval',
+    'pending': 'Not run', 'succeeded': 'Succeeded', 'skipped': 'Skipped', 'locked': 'Locked',
+    'observed': 'Observed',
+}
+
+
+def engine_health(data: Dict[str, Any], window='24h') -> Dict[str, Any]:
+    """
+    The Engine section's data for the selection `metrics()` just authorized: the same instance,
+    window, Pipe and Pipeline filters and the same fresh visibility ceiling, read natively
+    (`EngineReader::health`). Planner reasons naming a Pipe the viewer may not see are
+    anonymized here.
+    """
+    from meerschaum.api.dash import engine
+    instance = engine.get_instance(data.get('_instance'), strict=True)
+    end = datetime.now(timezone.utc)
+    health = engine.get_engine_health(
+        instance, since=end - timedelta(hours=WINDOW_HOURS[window]), until=end,
+        buckets=ENGINE_BUCKETS, pipe_ref=data.get('_pipe_filter'),
+        pipeline=data.get('_pipeline_filter'), visible_refs=data.get('_visible_refs'),
+        limit=ENGINE_LIMIT,
+    )
+    viewer = data.get('_viewer')
+    if data.get('_visible_refs') is not None and health.get('nodes'):
+        anonymizer = engine.Anonymizer(viewer, instance, refs=[])
+        for node in health['nodes']:
+            node['reason'] = anonymizer.text(node.get('reason'))
+    return {**health, '_instance': str(instance), '_window': window,
+            '_pipe_filter': data.get('_pipe_filter'), '_pipeline_filter': data.get('_pipeline_filter'),
+            '_pipelines': set(data.get('_pipeline_names') or ())}
+
+
+def elapsed(value: Any) -> str:
+    """Seconds as the largest whole unit that reads naturally: `45 s`, `12 min`, `3.2 h`, `4.1 d`."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 'n/a'
+    if not math.isfinite(seconds) or seconds < 0:
+        return 'n/a'
+    if seconds < 60:
+        return f'{seconds:,.0f} s'
+    if seconds < 3600:
+        return f'{seconds / 60:,.0f} min'
+    if seconds < 86400:
+        return f'{seconds / 3600:,.1f} h'
+    return f'{seconds / 86400:,.1f} d'
+
+
+def _ago(value: Any, now: Optional[datetime] = None) -> str:
+    if not value:
+        return 'Never'
+    try:
+        when = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except ValueError:
+        return 'n/a'
+    when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+    return elapsed(((now or datetime.now(timezone.utc)) - when).total_seconds()) + ' ago'
+
+
+def _engine_empty(health: Dict[str, Any]) -> bool:
+    return not ((health.get('runs') or {}).get('runs') or (health.get('freshness') or {}).get('pipes')
+                or (health.get('backlog') or {}).get('children') or health.get('nodes'))
+
+
+def engine_shape(health: Optional[Dict[str, Any]]) -> Optional[List[Any]]:
+    """What `build_engine()` lays out for this data (`body_shape()`'s counterpart)."""
+    if health is None:
+        return None
+    scope = '|'.join(str(health.get(key)) for key in ('_instance', '_window', '_pipe_filter', '_pipeline_filter'))
+    return [scope, 'empty' if _engine_empty(health) else 'body']
+
+
+def _pipe_cell(reference: Any, label='Pipe') -> Any:
+    from dash import html, dcc
+    keys = pipe_keys(reference)
+    title = pipe_title(reference)
+    if keys is None:
+        return html.Td(title, className='performance-row-name', **{'data-label': label})
+    from meerschaum.api.dash.engine import pipe_href
+    return html.Td(dcc.Link(title, href=pipe_href(str(reference)), className='console-name-link'),
+                   className='performance-row-name', **{'data-label': label})
+
+
+def _run_link(run_id: str, started: Any, name: Optional[str], health: Dict[str, Any]) -> Any:
+    """A run's start, linked to the run on its saved Pipeline's page when the viewer may see it."""
+    from dash import dcc
+    text = timestamp(started)
+    if not name or name not in health.get('_pipelines', ()):
+        return text
+    return dcc.Link(text, href='/dash/pipelines/' + quote(str(name), safe='') + '?' + urlencode(
+        {'run_id': run_id, 'instance': health.get('_instance')}), className='console-name-link')
+
+
+def _engine_table(headers, rows, total, nouns, section):
+    """A table of at most `ENGINE_ROWS` rows under its count; `nouns`: `(singular, plural)`."""
+    from dash import html
+    noun = nouns[0] if total == 1 else nouns[1]
+    if not rows:
+        return html.P('No ' + nouns[1] + '.', className='text-muted performance-engine-none')
+    return [
+        html.P(f'{len(rows)} of {number(total)} {noun}' if total > len(rows) else f'{number(total)} {noun}',
+               className='text-muted small', id=f'performance-engine-{section}-range'),
+        _table(headers, rows),
+    ]
+
+
+def build_engine_stats(health: Dict[str, Any]):
+    from dash import html
+    runs = health.get('runs') or {}
+    fresh = health.get('freshness') or {}
+    return html.Dl([
+        _stat('Runs', number(runs.get('runs', 0))),
+        _stat('Failed runs', number(runs.get('failed', 0))),
+        _stat('Unfinished runs', number(runs.get('unfinished', 0))),
+        _stat('P95 run duration', duration(runs.get('p95_seconds'))),
+        _stat('Pipes failing', number(fresh.get('failing', 0))),
+        _stat('Never synced', number(fresh.get('never_succeeded', 0))),
+        _stat('Longest since success', elapsed(fresh.get('longest_since_success_seconds'))),
+        _stat('Children behind', number(fresh.get('behind', 0))),
+    ], className='performance-stats performance-engine-stats')
+
+
+def build_freshness(health: Dict[str, Any]):
+    from dash import html
+    pipes = (health.get('freshness') or {}).get('pipes') or []
+    now = datetime.now(timezone.utc)
+    rows = []
+    for item in pipes[:ENGINE_ROWS]:
+        lag, pending = item.get('lag_seconds'), item.get('pending') or 0
+        rows.append(html.Tr([
+            _pipe_cell(item.get('pipe_ref')),
+            html.Td('Succeeded' if item.get('success') else 'Failed',
+                    className='text-success' if item.get('success') else 'text-danger',
+                    **{'data-label': 'Latest sync'}),
+            html.Td(_ago(item.get('last_success'), now), title=timestamp(item.get('last_success')),
+                    **{'data-label': 'Last success'}),
+            html.Td(number(item.get('consecutive_failures') or 0),
+                    className='text-danger' if item.get('consecutive_failures') else None,
+                    **{'data-label': 'Failures in a row'}),
+            html.Td('Caught up' if lag == 0 and not pending else elapsed(lag) if lag is not None else '—',
+                    **{'data-label': 'Behind parents'}),
+            html.Td(number(pending), **{'data-label': 'Pending ranges'}),
+        ]))
+    return _engine_table(['Pipe', 'Latest sync', 'Last success', 'Failures in a row', 'Behind parents',
+                          'Pending ranges'], rows, len(pipes), ('Pipe', 'Pipes'), 'freshness')
+
+
+def build_backlog(health: Dict[str, Any]):
+    from dash import html
+    from meerschaum.api.dash.engine import bound_label
+    children = (health.get('backlog') or {}).get('children') or []
+    rows = []
+    for item in children[:ENGINE_ROWS]:
+        child = item.get('child_ref')
+        begin, end = item.get('dirty_begin'), item.get('dirty_end')
+        rows.append(html.Tr([
+            _pipe_cell(child, 'Child') if child else html.Td(
+                'No child yet', className='performance-row-name text-muted', **{'data-label': 'Child'}),
+            html.Td([html.Div(pipe_title(parent)) for parent in item.get('parents') or []],
+                    className='performance-engine-parents', **{'data-label': 'Parents'}),
+            html.Td(number(item.get('pending') or 0), **{'data-label': 'Pending ranges'}),
+            html.Td(timestamp(item.get('oldest_pending')), **{'data-label': 'Oldest pending'}),
+            html.Td(elapsed(item.get('waited_seconds')), **{'data-label': 'Waited'}),
+            html.Td((bound_label(begin) if begin is not None else '…') + ' → '
+                    + (bound_label(end) if end is not None else '…'), **{'data-label': 'Dirty range'}),
+        ]))
+    return _engine_table(['Child', 'Parents', 'Pending ranges', 'Oldest pending', 'Waited', 'Dirty range'],
+                         rows, len(children), ('child with a backlog', 'children with a backlog'), 'backlog')
+
+
+def build_nodes(health: Dict[str, Any]):
+    from dash import html
+    from meerschaum.api.dash.engine import action_label
+    nodes = health.get('nodes') or []
+    rows = []
+    for item in nodes[:ENGINE_ROWS]:
+        status = str(item.get('status') or '')
+        bad = status in ('failed', 'upstream_failed')
+        rows.append(html.Tr([
+            _pipe_cell(item.get('pipe_ref')),
+            html.Td(_run_link(item.get('run_id'), item.get('run_started'),
+                              _run_name(item.get('run_id')), health), **{'data-label': 'Run started'}),
+            html.Td(action_label(str(item.get('action') or '')), **{'data-label': 'Action'}),
+            html.Td(NODE_STATUS_LABELS.get(status, status.replace('_', ' ').capitalize()),
+                    className='text-danger' if bad else None, **{'data-label': 'Status'}),
+            html.Td(number(item.get('attempts') or 0), **{'data-label': 'Attempts'}),
+            html.Td(duration(item.get('duration_seconds')), **{'data-label': 'Duration'}),
+            html.Td(item.get('reason') or '—', className='performance-engine-reason',
+                    **{'data-label': 'Planner reason'}),
+        ]))
+    return _engine_table(['Pipe', 'Run started', 'Action', 'Status', 'Attempts', 'Duration', 'Planner reason'],
+                         rows, len(nodes), ('failed or retried node', 'failed or retried nodes'), 'nodes')
+
+
+def _run_name(run_id: Any) -> Optional[str]:
+    """The run name of an engine run ID (`name-YYYY-MM-DDTHH-MM-SS.ffffffZ-xxxxxxxx`)."""
+    import re
+    match = re.fullmatch(r'(.+)-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{6}Z-[0-9a-fA-F]{8}', str(run_id or ''))
+    return match.group(1) if match else None
+
+
+def build_recent_runs(health: Dict[str, Any]):
+    from dash import html
+    runs = (health.get('runs') or {}).get('recent') or []
+    rows = []
+    for item in runs:
+        status = item.get('status')
+        name = item.get('name')
+        rows.append(html.Tr([
+            html.Td(_run_link(item.get('run_id'), item.get('started'), name, health),
+                    className='performance-row-name', **{'data-label': 'Started'}),
+            html.Td(name if name in health.get('_pipelines', ()) else '—', **{'data-label': 'Pipeline'}),
+            html.Td({'succeeded': 'Succeeded', 'failed': 'Failed'}.get(status, 'Running'),
+                    className={'succeeded': 'text-success', 'failed': 'text-danger'}.get(status),
+                    **{'data-label': 'Result'}),
+            html.Td(duration(item.get('duration_seconds')), **{'data-label': 'Duration'}),
+            html.Td(number(item.get('num_nodes') or 0), **{'data-label': 'Pipes'}),
+        ]))
+    return _engine_table(['Started', 'Pipeline', 'Result', 'Duration', 'Pipes'], rows,
+                         (health.get('runs') or {}).get('runs', 0), ('run', 'runs'), 'runs')
+
+
+def engine_figures(health: Dict[str, Any], revision=None) -> Dict[str, Any]:
+    """The Engine charts' figures by key (`engine-runs`, `engine-duration`)."""
+    import plotly.graph_objects as go
+    runs = health.get('runs') or {}
+    buckets = runs.get('buckets') or []
+    width = float(runs.get('bucket_seconds') or 1)
+    x = [datetime.fromisoformat(str(item['start']).replace('Z', '+00:00')) + timedelta(seconds=width / 2)
+         for item in buckets]
+    span = ([buckets[0]['start'], (datetime.fromisoformat(str(buckets[-1]['start']).replace('Z', '+00:00'))
+                                   + timedelta(seconds=width)).isoformat()] if buckets else None)
+    layout = {
+        'template': 'plotly_dark', 'paper_bgcolor': 'rgba(0,0,0,0)',
+        'plot_bgcolor': 'rgba(0,0,0,0)', 'height': 280,
+        'margin': {'l': 54, 'r': 18, 't': 32, 'b': 50},
+        'xaxis': {'type': 'date', 'title': {'text': 'Time (UTC)'}, 'gridcolor': 'rgba(255,255,255,0.07)',
+                  **({'range': span} if span else {})},
+        'yaxis': {'rangemode': 'tozero', 'gridcolor': 'rgba(255,255,255,0.07)'},
+        'legend': {'orientation': 'h', 'y': 1.15}, 'hovermode': 'x unified',
+        'hoverlabel': {'bgcolor': '#24282d', 'bordercolor': '#5a6169', 'font': {'color': '#e5edf3'}},
+        'uirevision': revision,
+    }
+    most = max((item.get('succeeded', 0) + item.get('failed', 0) + item.get('unfinished', 0)
+                for item in buckets), default=0)
+    outcomes = go.Figure({'data': [
+        {'type': 'bar', 'x': x, 'y': [item.get(key, 0) for item in buckets], 'name': title,
+         'marker': {'color': color}, 'width': width * 1000 * 0.85}
+        for key, title, color in (('succeeded', 'Succeeded', '#6bc98d'), ('failed', 'Failed', '#ec7a7a'),
+                                  ('unfinished', 'Unfinished', '#e0a526'))],
+        'layout': {**layout, 'barmode': 'stack',
+                   'yaxis': {**layout['yaxis'], 'title': {'text': 'Runs'}, 'tickformat': ',d', 'nticks': 5,
+                             **({'dtick': 1} if most <= 8 else {})}}})
+    durations = go.Figure({'data': [
+        {'type': 'scatter', 'mode': 'lines+markers', 'x': x, 'y': [item.get(key) for item in buckets],
+         'name': title, 'line': {'color': color, **({'dash': 'dot'} if key == 'max_seconds' else {})},
+         'connectgaps': False}
+        for key, title, color in (('average_seconds', 'Average', '#85caff'), ('p95_seconds', 'P95', '#c39bf0'),
+                                  ('max_seconds', 'Maximum', '#9aa5b1'))],
+        'layout': {**layout, 'yaxis': {**layout['yaxis'], 'title': {'text': 'Seconds / run'}}}})
+    return {'engine-runs': outcomes, 'engine-duration': durations}
+
+
+#: The Engine charts: `(key, title)`, as `CHARTS`.
+ENGINE_CHARTS = (('engine-runs', 'Runs by outcome'), ('engine-duration', 'Run duration'))
+
+
+def engine_live_parts(health: Dict[str, Any]) -> Dict[str, Any]:
+    """The children of each `live()` part of `build_engine()`."""
+    return {
+        'engine-stats': build_engine_stats(health),
+        'engine-freshness': build_freshness(health),
+        'engine-backlog': build_backlog(health),
+        'engine-nodes': build_nodes(health),
+        'engine-recent': build_recent_runs(health),
+        'engine-note': _engine_note(health),
+    }
+
+
+def _engine_note(health: Dict[str, Any]):
+    from dash import html
+    return (html.P(f'Engine totals cover the newest {number(ENGINE_LIMIT)} runs and nodes.',
+                   className='text-muted small') if health.get('truncated') else None)
+
+
+def build_engine(health: Optional[Dict[str, Any]], problem: Optional[str] = None):
+    """The Engine section: the Syncing Engine's runs, freshness, backlog and failed nodes."""
+    from dash import html, dcc
+    import dash_bootstrap_components as dbc
+    heading = html.H2('Engine', id='performance-engine-heading')
+    if problem or health is None:
+        return [heading, dbc.Alert(problem or 'Engine health could not be loaded. Try Refresh.', color='warning')]
+    if _engine_empty(health):
+        return [heading, html.Div(html.H3('No engine history'), className='console-empty',
+                                  id='performance-engine-empty')]
+    parts = engine_live_parts(health)
+    figures = engine_figures(health, engine_shape(health)[0])
+    return [
+        heading,
+        live('engine-stats', parts['engine-stats']),
+        html.Div([
+            html.Section([html.H3(title), dcc.Graph(
+                id={'type': 'performance-graph', 'chart': key}, figure=figures[key], responsive=True,
+                style={'height': '280px'}, config={'displayModeBar': False, 'scrollZoom': False})],
+                id='performance-' + key, className='performance-chart')
+            for key, title in ENGINE_CHARTS
+        ], className='performance-charts performance-engine-charts'),
+        dbc.Tabs([
+            dbc.Tab(live('engine-freshness', parts['engine-freshness']), label='Freshness',
+                    tab_id='performance-engine-freshness-tab'),
+            dbc.Tab(live('engine-backlog', parts['engine-backlog']), label='Backlog',
+                    tab_id='performance-engine-backlog-tab'),
+            dbc.Tab(live('engine-nodes', parts['engine-nodes']), label='Nodes',
+                    tab_id='performance-engine-nodes-tab'),
+            dbc.Tab(live('engine-recent', parts['engine-recent']), label='Runs',
+                    tab_id='performance-engine-runs-tab'),
+        ], id='performance-engine-tabs', active_tab='performance-engine-freshness-tab',
+            persistence=True, persistence_type='memory'),
+        live('engine-note', parts['engine-note']),
+    ]
 
 
 def build_overview_card():

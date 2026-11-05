@@ -48,6 +48,8 @@ def _mounted():
     Output('performance-pipe', 'value'),
     Output('performance-pipeline', 'value'),
     Output('performance-shape', 'data'),
+    Output('performance-engine', 'children'),
+    Output('performance-engine-shape', 'data'),
     Output({'type': 'performance-live', 'part': ALL}, 'children'),
     Output({'type': 'performance-graph', 'chart': ALL}, 'figure'),
     Output({'type': 'performance-group-data', 'group': ALL}, 'data'),
@@ -63,6 +65,7 @@ def _mounted():
     Input('performance-history-page-size', 'value'),
     State('session-store', 'data'),
     State('performance-shape', 'data'),
+    State('performance-engine-shape', 'data'),
     running=[
         (Output('performance-interval', 'disabled'), True, False),
         (Output('performance-refresh', 'disabled'), True, False),
@@ -71,7 +74,7 @@ def _mounted():
     ],
 )
 def render_performance(path, search, window, pipe, pipeline, refresh, interval, page, instance, page_size,
-                       session, shape=None):
+                       session, shape=None, engine_shape=None):
     """
     Read the metrics afresh for every tick, Refresh, page or selection. When the page already shows
     this selection with the same sections (`performance.body_shape()`), only the mounted parts
@@ -103,27 +106,58 @@ def render_performance(path, search, window, pipe, pipeline, refresh, interval, 
         controls = (performance.filter_options(data.get('_pipe_options'), pipe),
                     performance.filter_options(data.get('_pipeline_options'), pipeline, 'Pipeline'),
                     pages, page, pages <= 1, *selection, layout)
+        engine = _engine(data, window or '24h', engine_shape)
         if shape != layout:
-            return (performance.build_body(data, shown, window or '24h', page, page_size),
-                    *controls, *unchanged)
+            body = performance.build_body(data, shown, window or '24h', page, page_size)
+            live, figures, stores = {}, {}, {}
+        else:
+            body = dash.no_update
+            live = performance.live_parts(data, page, page_size)
+            figures = performance.chart_figures(data, performance._scope(data, shown, window or '24h'))
+            stores = performance.group_stores(data, shown, window or '24h')
+        engine_body, engine_layout, engine_live, engine_figures = engine
         parts, charts, groups = mounted
-        live = performance.live_parts(data, page, page_size)
-        figures = performance.chart_figures(data, performance._scope(data, shown, window or '24h'))
-        stores = performance.group_stores(data, shown, window or '24h')
-        return (dash.no_update, *controls,
-                [live.get(part, dash.no_update) for part in parts],
-                [figures.get(chart, dash.no_update) for chart in charts],
+        return (body, *controls, engine_body, engine_layout,
+                [_pick(part, live, engine_live) for part in parts],
+                [_pick(chart, figures, engine_figures) for chart in charts],
                 [stores.get(group, dash.no_update) for group in groups])
     except PermissionError:
         return (dbc.Alert('Performance is not available for this selection.', color='secondary'),
                 performance.filter_options(value=pipe),
                 performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection,
-                None, *unchanged)
+                None, None, None, *unchanged)
     except Exception:
         return (dbc.Alert('Performance could not be loaded. Try Refresh.', color='warning'),
                 performance.filter_options(value=pipe),
                 performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection,
-                None, *unchanged)
+                None, None, None, *unchanged)
+
+
+def _pick(key, body, engine):
+    """A mounted part's or graph's update: the Engine section's `engine-*`, else the body's."""
+    return (engine if str(key).startswith('engine-') else body).get(key, dash.no_update)
+
+
+def _engine(data, window, mounted_shape):
+    """
+    The Engine section for the selection `data` authorized: `(children, shape, live parts,
+    figures)`. With the same shape as the section shown, only its mounted parts change
+    (`children` is `no_update`); otherwise it is rebuilt. A failed read shows its own alert and
+    never hides the sync measurements.
+    """
+    try:
+        health = performance.engine_health(data, window)
+    except PermissionError:
+        raise
+    except Exception:
+        return performance.build_engine(None), None, {}, {}
+    layout = performance.engine_shape(health)
+    if layout != mounted_shape:
+        return performance.build_engine(health), layout, {}, {}
+    if layout[1] != 'body':
+        return dash.no_update, layout, {}, {}
+    return (dash.no_update, layout, performance.engine_live_parts(health),
+            performance.engine_figures(health, layout[0]))
 
 
 dash_app.clientside_callback(

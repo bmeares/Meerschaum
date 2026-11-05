@@ -18,7 +18,7 @@ use crate::engine::{EngineConfig, fetch_records};
 use crate::events::EventRow;
 use crate::graph::{Graph, GraphOptions, GraphWarning};
 use crate::instance_state::{InstanceState, run_from_doc};
-use crate::ledger::{dirty_intervals, map_to_child};
+use crate::ledger::{EdgeCursor, LedgerEntry, dirty_intervals, map_to_child};
 use crate::node::PipeRef;
 use crate::plan::Action;
 use crate::registry::ConnectorRegistry;
@@ -258,6 +258,599 @@ pub struct RunActivity {
     pub truncated: bool,
 }
 
+/// What [`EngineReader::health`] reads: a window of runs and nodes, narrowed like the
+/// console's Performance page (one Pipe, one saved Pipeline, the pipes a viewer may read).
+#[derive(Debug, Clone)]
+pub struct HealthQuery {
+    /// Runs and nodes started at or after this time.
+    pub since: DateTime<Utc>,
+    /// The end of the window (the charts' last bucket ends here); normally now.
+    pub until: DateTime<Utc>,
+    /// How many buckets the run charts have (at least one).
+    pub buckets: usize,
+    /// Only this pipe (`pipe_ref`): its runs, status, edges and nodes.
+    pub pipe: Option<String>,
+    /// Only the runs of this saved Pipeline (by the names in their selections) and their pipes.
+    pub pipeline: Option<String>,
+    /// Only these pipes (`pipe_ref`s); `None` is every pipe. A run counts when one of its nodes
+    /// is visible; an edge, when both its ends are.
+    pub visible: Option<std::collections::BTreeSet<String>>,
+    /// The most runs, nodes and ledger entries read, each (the newest).
+    pub limit: usize,
+}
+
+impl HealthQuery {
+    /// The last day, 48 buckets, every pipe, at most 20,000 rows of each kind.
+    pub fn last_day() -> HealthQuery {
+        let until = Utc::now();
+        HealthQuery {
+            since: until - ChronoDuration::hours(24),
+            until,
+            buckets: 48,
+            pipe: None,
+            pipeline: None,
+            visible: None,
+            limit: 20_000,
+        }
+    }
+
+    fn sees(&self, pipe_ref: &str) -> bool {
+        self.visible
+            .as_ref()
+            .is_none_or(|visible| visible.contains(pipe_ref))
+    }
+}
+
+/// The runs of one chart bucket ([`RunHealth::buckets`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunBucket {
+    /// When the bucket begins.
+    pub start: DateTime<Utc>,
+    /// Runs that finished successfully.
+    pub succeeded: u64,
+    /// Runs that finished with a failure.
+    pub failed: u64,
+    /// Runs not finished yet.
+    pub unfinished: u64,
+    /// The average wall-clock seconds of the finished runs.
+    pub average_seconds: Option<f64>,
+    /// Their 95th percentile (linear interpolation, like `percentile_cont(0.95)`).
+    pub p95_seconds: Option<f64>,
+    /// The slowest.
+    pub max_seconds: Option<f64>,
+}
+
+/// A run in [`RunHealth::recent`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HealthRun {
+    /// The run ID.
+    pub run_id: String,
+    /// The run name ([`crate::runs::run_name`]).
+    pub name: Option<String>,
+    /// When it started.
+    pub started: DateTime<Utc>,
+    /// When it finished.
+    pub finished: Option<DateTime<Utc>>,
+    /// Its status.
+    pub status: RunStatus,
+    /// Wall-clock seconds (to now while running).
+    pub duration_seconds: f64,
+    /// Planned nodes.
+    pub num_nodes: usize,
+}
+
+/// The window's runs ([`EngineHealth::runs`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunHealth {
+    /// Runs started in the window.
+    pub runs: u64,
+    /// Of those, finished with a failure.
+    pub failed: u64,
+    /// Of those, not finished.
+    pub unfinished: u64,
+    /// The 95th percentile of the finished runs' wall-clock seconds.
+    pub p95_seconds: Option<f64>,
+    /// The length of a bucket.
+    pub bucket_seconds: i64,
+    /// Every bucket of the window, oldest first.
+    pub buckets: Vec<RunBucket>,
+    /// The newest runs (at most ten).
+    pub recent: Vec<HealthRun>,
+}
+
+/// One pipe's freshness ([`FreshnessHealth::pipes`]): its recorded sync status and how far it
+/// is behind its parents.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PipeFreshness {
+    /// The pipe.
+    pub pipe_ref: String,
+    /// Whether its latest sync succeeded.
+    pub success: bool,
+    /// When its latest sync ended.
+    pub last_attempt: Option<DateTime<Utc>>,
+    /// When its latest successful sync ended.
+    pub last_success: Option<DateTime<Utc>>,
+    /// When its latest failed sync ended.
+    pub last_failure: Option<DateTime<Utc>>,
+    /// Failed syncs since the last success.
+    pub consecutive_failures: u64,
+    /// How long the latest sync took.
+    pub duration_seconds: Option<f64>,
+    /// What ran the latest sync (`cli`, `job`, `engine`, `api`, `python`).
+    pub source: String,
+    /// The job it ran in.
+    pub job: Option<String>,
+    /// Seconds of parent data it has not consumed: the newest pending parent change's end
+    /// minus the parent's watermark when the child last consumed (the most over its parents;
+    /// zero when caught up; `None` without a datetime axis or a cursor).
+    pub lag_seconds: Option<f64>,
+    /// Unconsumed parent changes (ledger entries), over its parents.
+    pub pending: u64,
+}
+
+/// [`EngineHealth::freshness`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct FreshnessHealth {
+    /// Pipes whose latest sync failed.
+    pub failing: u64,
+    /// Pipes without a successful sync.
+    pub never_succeeded: u64,
+    /// The longest time since a pipe's last successful sync.
+    pub longest_since_success_seconds: Option<f64>,
+    /// Edges whose child has not consumed its parent's changes.
+    pub behind: u64,
+    /// The pipes, failing longest first, then longest since a success (at most 500).
+    pub pipes: Vec<PipeFreshness>,
+}
+
+/// One child's dirty-range backlog ([`BacklogHealth::children`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChildBacklog {
+    /// The child (`None`: parents whose children have never consumed a change).
+    pub child_ref: Option<PipeRef>,
+    /// The parents with changes it has not consumed.
+    pub parents: Vec<PipeRef>,
+    /// Unconsumed changes.
+    pub pending: u64,
+    /// When the oldest was recorded.
+    pub oldest_pending: Option<DateTime<Utc>>,
+    /// Seconds since then.
+    pub waited_seconds: Option<f64>,
+    /// The earliest dirty bound.
+    pub dirty_begin: Option<Bound>,
+    /// The latest dirty bound.
+    pub dirty_end: Option<Bound>,
+}
+
+/// [`EngineHealth::backlog`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct BacklogHealth {
+    /// Unconsumed changes over every edge.
+    pub pending: u64,
+    /// The longest a change has waited.
+    pub longest_wait_seconds: Option<f64>,
+    /// Per child, longest waiting first (at most 500).
+    pub children: Vec<ChildBacklog>,
+}
+
+/// A node that failed, did not run, or was retried ([`EngineHealth::nodes`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeIssue {
+    /// The run.
+    pub run_id: String,
+    /// When the run started.
+    pub run_started: DateTime<Utc>,
+    /// The node.
+    pub pipe_ref: PipeRef,
+    /// The planned action.
+    pub action: Action,
+    /// The outcome.
+    pub status: NodeStatus,
+    /// Sync attempts.
+    pub attempts: u32,
+    /// Chunks synced.
+    pub num_chunks: usize,
+    /// How long its sync took.
+    pub duration_seconds: Option<f64>,
+    /// Why the planner chose the action.
+    pub reason: String,
+}
+
+/// The engine's health on an instance ([`EngineReader::health`]): what the Grafana "Engine"
+/// dashboard shows, for the console.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct EngineHealth {
+    /// The window's runs.
+    pub runs: RunHealth,
+    /// Every recorded pipe's sync status and lag.
+    pub freshness: FreshnessHealth,
+    /// Dirty ranges children have not consumed.
+    pub backlog: BacklogHealth,
+    /// The window's failed, unrun and retried nodes, newest run first (at most 200).
+    pub nodes: Vec<NodeIssue>,
+    /// Whether a read stopped at [`HealthQuery::limit`].
+    pub truncated: bool,
+}
+
+/// `percentile_cont(p)` of `values` (sorted in place).
+fn percentile(values: &mut [f64], p: f64) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let position = p.clamp(0.0, 1.0) * (values.len() - 1) as f64;
+    let (low, high) = (position.floor() as usize, position.ceil() as usize);
+    Some(values[low] + (values[high] - values[low]) * (position - low as f64))
+}
+
+fn seconds_between(from: DateTime<Utc>, to: DateTime<Utc>) -> f64 {
+    (to - from).num_milliseconds() as f64 / 1000.0
+}
+
+/// An order on bounds of either kind (timestamps by microsecond).
+fn bound_key(bound: &Bound) -> (u8, i64) {
+    match bound {
+        Bound::Int(value) => (0, *value),
+        Bound::Datetime(time) => (1, time.timestamp_micros()),
+    }
+}
+
+/// The edges' backlog: `(parent, child, pending, oldest, dirty begin, dirty end, lag)` per edge
+/// (a parent without any cursor is one edge without a child, as in the Grafana dashboard).
+type EdgeBacklog = (
+    PipeRef,
+    Option<PipeRef>,
+    u64,
+    Option<DateTime<Utc>>,
+    Option<Bound>,
+    Option<Bound>,
+    Option<f64>,
+);
+
+fn edge_backlog(cursors: &[EdgeCursor], ledger: &[LedgerEntry]) -> Vec<EdgeBacklog> {
+    let mut by_parent: BTreeMap<&PipeRef, Vec<&LedgerEntry>> = BTreeMap::new();
+    for entry in ledger {
+        by_parent.entry(&entry.pipe_ref).or_default().push(entry);
+    }
+    let consumed = |parent: &PipeRef, child: Option<&PipeRef>, seq: i64, watermark| {
+        let pending: Vec<&&LedgerEntry> = by_parent
+            .get(parent)
+            .map(|entries| entries.iter().filter(|e| e.seq > seq).collect())
+            .unwrap_or_default();
+        let begin = pending.iter().filter_map(|e| e.begin).min_by_key(bound_key);
+        let end = pending.iter().filter_map(|e| e.end).max_by_key(bound_key);
+        let lag = if pending.is_empty() {
+            Some(0.0)
+        } else {
+            match (end, watermark) {
+                (Some(Bound::Datetime(end)), Some(Bound::Datetime(mark))) => {
+                    Some(seconds_between(mark, end).max(0.0))
+                }
+                _ => None,
+            }
+        };
+        (
+            parent.clone(),
+            child.cloned(),
+            pending.len() as u64,
+            pending.iter().map(|e| e.created).min(),
+            begin,
+            end,
+            lag,
+        )
+    };
+    let mut out: Vec<EdgeBacklog> = cursors
+        .iter()
+        .map(|c| {
+            consumed(
+                &c.parent_ref,
+                Some(&c.child_ref),
+                c.seq,
+                c.parent_watermark_at_cursor,
+            )
+        })
+        .collect();
+    let with_cursor: std::collections::BTreeSet<&PipeRef> =
+        cursors.iter().map(|c| &c.parent_ref).collect();
+    for parent in by_parent.keys() {
+        if !with_cursor.contains(parent) {
+            out.push(consumed(parent, None, 0, None));
+        }
+    }
+    out
+}
+
+/// [`EngineReader::health`] over rows already read.
+pub fn aggregate_health(
+    query: &HealthQuery,
+    now: DateTime<Utc>,
+    runs: &[RunRow],
+    nodes: &[crate::instance_state::WindowNode],
+    statuses: &[meerschaum_connector::sync_status::SyncStatus],
+    cursors: &[EdgeCursor],
+    ledger: &[LedgerEntry],
+) -> EngineHealth {
+    use std::collections::BTreeSet;
+    let mut nodes_of: HashMap<&str, Vec<&crate::instance_state::WindowNode>> = HashMap::new();
+    for node in nodes {
+        nodes_of.entry(&node.run_id).or_default().push(node);
+    }
+    let filtered = query.pipe.is_some() || query.pipeline.is_some() || query.visible.is_some();
+    let included: Vec<&RunRow> = runs
+        .iter()
+        .filter(|run| {
+            let members = nodes_of.get(run.run_id.as_str());
+            let any = |test: &dyn Fn(&str) -> bool| {
+                members.is_some_and(|nodes| nodes.iter().any(|n| test(n.pipe_ref.as_str())))
+            };
+            !filtered
+                || (query
+                    .pipeline
+                    .as_ref()
+                    .is_none_or(|name| run.belongs_to_pipeline(name))
+                    && query
+                        .pipe
+                        .as_ref()
+                        .is_none_or(|pipe| any(&|r| r == pipe.as_str()))
+                    && (query.visible.is_none() || any(&|r| query.sees(r))))
+        })
+        .collect();
+    let run_ids: BTreeSet<&str> = included.iter().map(|run| run.run_id.as_str()).collect();
+    let unfinished_runs: BTreeSet<&str> = included
+        .iter()
+        .filter(|run| run.finished.is_none())
+        .map(|run| run.run_id.as_str())
+        .collect();
+    // The pipes of the selected Pipeline: the nodes of its runs in the window.
+    let members: Option<BTreeSet<&str>> = query.pipeline.as_ref().map(|_| {
+        nodes
+            .iter()
+            .filter(|n| run_ids.contains(n.run_id.as_str()))
+            .map(|n| n.pipe_ref.as_str())
+            .collect()
+    });
+    let selected = |pipe_ref: &str| {
+        query.sees(pipe_ref)
+            && query.pipe.as_ref().is_none_or(|pipe| pipe == pipe_ref)
+            && members
+                .as_ref()
+                .is_none_or(|members| members.contains(pipe_ref))
+    };
+
+    // Runs.
+    let span = (query.until - query.since).num_seconds().max(1);
+    let count = query.buckets.max(1) as i64;
+    let bucket_seconds = (span.unsigned_abs().div_ceil(count.unsigned_abs()) as i64).max(1);
+    let mut buckets: Vec<(RunBucket, Vec<f64>)> = (0..count)
+        .map(|i| {
+            (
+                RunBucket {
+                    start: query.since + ChronoDuration::seconds(i * bucket_seconds),
+                    succeeded: 0,
+                    failed: 0,
+                    unfinished: 0,
+                    average_seconds: None,
+                    p95_seconds: None,
+                    max_seconds: None,
+                },
+                Vec::new(),
+            )
+        })
+        .collect();
+    let mut health = RunHealth {
+        bucket_seconds,
+        ..Default::default()
+    };
+    let mut finished_seconds = Vec::new();
+    for run in &included {
+        let status = RunStatus::of(run);
+        let seconds = seconds_between(run.started, run.finished.unwrap_or(now)).max(0.0);
+        health.runs += 1;
+        let index = ((run.started - query.since).num_seconds() / bucket_seconds).clamp(0, count - 1)
+            as usize;
+        let (bucket, durations) = &mut buckets[index];
+        match status {
+            RunStatus::Running => {
+                health.unfinished += 1;
+                bucket.unfinished += 1;
+            }
+            RunStatus::Failed => {
+                health.failed += 1;
+                bucket.failed += 1;
+            }
+            RunStatus::Succeeded => bucket.succeeded += 1,
+        }
+        if status != RunStatus::Running {
+            finished_seconds.push(seconds);
+            durations.push(seconds);
+        }
+        if health.recent.len() < 10 {
+            health.recent.push(HealthRun {
+                run_id: run.run_id.clone(),
+                name: crate::runs::run_name(&run.run_id).map(str::to_owned),
+                started: run.started,
+                finished: run.finished,
+                status,
+                duration_seconds: seconds,
+                num_nodes: run.num_nodes,
+            });
+        }
+    }
+    health.p95_seconds = percentile(&mut finished_seconds, 0.95);
+    health.buckets = buckets
+        .into_iter()
+        .map(|(mut bucket, mut durations)| {
+            if !durations.is_empty() {
+                bucket.average_seconds =
+                    Some(durations.iter().sum::<f64>() / durations.len() as f64);
+                bucket.max_seconds = durations.iter().copied().reduce(f64::max);
+                bucket.p95_seconds = percentile(&mut durations, 0.95);
+            }
+            bucket
+        })
+        .collect();
+
+    // Backlog: an edge counts when both its ends are selected (or, without a child, its parent).
+    let edges: Vec<EdgeBacklog> = edge_backlog(cursors, ledger)
+        .into_iter()
+        .filter(|(parent, child, ..)| {
+            let (parent, child) = (parent.as_str(), child.as_ref().map(PipeRef::as_str));
+            query.sees(parent)
+                && child.is_none_or(|child| query.sees(child))
+                && (selected(parent) || child.is_some_and(selected))
+        })
+        .collect();
+    let mut backlog = BacklogHealth::default();
+    let mut children: BTreeMap<Option<PipeRef>, ChildBacklog> = BTreeMap::new();
+    let mut lag: HashMap<&str, (u64, Option<f64>)> = HashMap::new();
+    let mut behind = 0;
+    for (parent, child, pending, oldest, begin, end, edge_lag) in &edges {
+        if let Some(child) = child {
+            let entry = lag.entry(child.as_str()).or_insert((0, None));
+            entry.0 += pending;
+            entry.1 = match (entry.1, edge_lag) {
+                (Some(a), Some(b)) => Some(a.max(*b)),
+                (a, b) => a.or(*b),
+            };
+            if *pending > 0 {
+                behind += 1;
+            }
+        }
+        if *pending == 0 {
+            continue;
+        }
+        backlog.pending += pending;
+        let row = children.entry(child.clone()).or_insert(ChildBacklog {
+            child_ref: child.clone(),
+            parents: Vec::new(),
+            pending: 0,
+            oldest_pending: None,
+            waited_seconds: None,
+            dirty_begin: None,
+            dirty_end: None,
+        });
+        if !row.parents.contains(parent) {
+            row.parents.push(parent.clone());
+        }
+        row.pending += pending;
+        row.oldest_pending = match (row.oldest_pending, *oldest) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        row.dirty_begin = [row.dirty_begin, *begin]
+            .into_iter()
+            .flatten()
+            .min_by_key(bound_key);
+        row.dirty_end = [row.dirty_end, *end]
+            .into_iter()
+            .flatten()
+            .max_by_key(bound_key);
+    }
+    let mut children: Vec<ChildBacklog> = children
+        .into_values()
+        .map(|mut row| {
+            row.parents.sort();
+            row.waited_seconds = row
+                .oldest_pending
+                .map(|oldest| seconds_between(oldest, now).max(0.0));
+            row
+        })
+        .collect();
+    children.sort_by(|a, b| {
+        a.oldest_pending
+            .cmp(&b.oldest_pending)
+            .then_with(|| a.child_ref.cmp(&b.child_ref))
+    });
+    children.truncate(500);
+    backlog.longest_wait_seconds = children
+        .iter()
+        .filter_map(|row| row.waited_seconds)
+        .reduce(f64::max);
+    backlog.children = children;
+
+    // Freshness.
+    let mut freshness = FreshnessHealth {
+        behind,
+        ..Default::default()
+    };
+    for status in statuses {
+        if status.connector_keys == meerschaum_connector::policy::INTERNAL_CONNECTOR_KEYS
+            || !selected(&status.pipe_ref)
+        {
+            continue;
+        }
+        if !status.success && status.last_attempt.is_some() {
+            freshness.failing += 1;
+        }
+        match status.last_success {
+            None => freshness.never_succeeded += 1,
+            Some(success) => {
+                let since = seconds_between(success, now).max(0.0);
+                freshness.longest_since_success_seconds = Some(
+                    freshness
+                        .longest_since_success_seconds
+                        .map_or(since, |longest| longest.max(since)),
+                );
+            }
+        }
+        let (pending, lag_seconds) = lag
+            .get(status.pipe_ref.as_str())
+            .copied()
+            .unwrap_or((0, None));
+        freshness.pipes.push(PipeFreshness {
+            pipe_ref: status.pipe_ref.clone(),
+            success: status.success,
+            last_attempt: status.last_attempt,
+            last_success: status.last_success,
+            last_failure: status.last_failure,
+            consecutive_failures: status.consecutive_failures,
+            duration_seconds: status.duration_seconds,
+            source: status.source.clone(),
+            job: status.job.clone(),
+            lag_seconds,
+            pending,
+        });
+    }
+    freshness.pipes.sort_by(|a, b| {
+        b.consecutive_failures
+            .cmp(&a.consecutive_failures)
+            .then_with(|| a.last_success.cmp(&b.last_success))
+            .then_with(|| a.pipe_ref.cmp(&b.pipe_ref))
+    });
+    freshness.pipes.truncate(500);
+
+    // Nodes: failed, not run (in a finished run) or retried.
+    let issues: Vec<NodeIssue> = nodes
+        .iter()
+        .filter(|n| run_ids.contains(n.run_id.as_str()) && selected(n.pipe_ref.as_str()))
+        .filter(|n| match n.status {
+            NodeStatus::Failed | NodeStatus::UpstreamFailed | NodeStatus::RebuildPending => true,
+            NodeStatus::Pending => !unfinished_runs.contains(n.run_id.as_str()),
+            _ => n.attempts > 1,
+        })
+        .take(200)
+        .map(|n| NodeIssue {
+            run_id: n.run_id.clone(),
+            run_started: n.run_started,
+            pipe_ref: n.pipe_ref.clone(),
+            action: n.action,
+            status: n.status,
+            attempts: n.attempts,
+            num_chunks: n.num_chunks,
+            duration_seconds: n.duration_seconds,
+            reason: n.reason.clone(),
+        })
+        .collect();
+
+    EngineHealth {
+        runs: health,
+        freshness,
+        backlog,
+        nodes: issues,
+        truncated: false,
+    }
+}
+
 /// Read-only access to engine state for the console.
 pub struct EngineReader {
     registry: Arc<dyn ConnectorRegistry>,
@@ -481,6 +1074,50 @@ impl EngineReader {
     ) -> Result<RunActivity, StateError> {
         let rows = self.state.run_activity_rows(since, limit).await?;
         Ok(aggregate_activity(&rows, bucket_seconds, limit))
+    }
+
+    /// The engine's health for the console's Performance page (the Grafana "Engine"
+    /// dashboard's panels): the window's runs by outcome and duration, every recorded pipe's
+    /// sync status with its lag behind its parents, the children's unconsumed dirty ranges, and
+    /// the window's failed, unrun and retried nodes. Runs, nodes, statuses, cursors and ledger
+    /// are read from the home instance in one bounded read each; an instance without engine
+    /// state reads as empty.
+    pub async fn health(&self, query: &HealthQuery) -> Result<EngineHealth, StateError> {
+        let home = &self.config.home_instance;
+        let limit = query.limit.max(1);
+        let runs = self
+            .state
+            .window_runs(query.since, limit, query.pipeline.is_some())
+            .await?;
+        let nodes = self.state.window_nodes(query.since, limit).await?;
+        let conn = self
+            .registry
+            .instance(home)
+            .map_err(|message| StateError::Unreachable {
+                instance: home.clone(),
+                message,
+            })?;
+        let statuses =
+            conn.get_sync_statuses(home)
+                .await
+                .map_err(|error| StateError::Unreachable {
+                    instance: home.clone(),
+                    message: error.to_string(),
+                })?;
+        let cursors = self.state.all_cursors(home).await?;
+        let ledger = self.state.newest_ledger(home, limit).await?;
+        let truncated = runs.len() >= limit || nodes.len() >= limit || ledger.len() >= limit;
+        let mut health = aggregate_health(
+            query,
+            Utc::now(),
+            &runs,
+            &nodes,
+            &statuses,
+            &cursors,
+            &ledger,
+        );
+        health.truncated = truncated;
+        Ok(health)
     }
 
     /// Run history, newest first, using indexed pages and bulk node reads.

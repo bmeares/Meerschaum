@@ -890,3 +890,195 @@ async fn run_activity_counts_a_window_by_hour_name_and_status_without_selections
     assert_eq!(short.runs, 50);
     assert!(short.oldest.unwrap() >= hour);
 }
+
+/// The Performance page's Engine section (`EngineReader::health`): runs by outcome, freshness
+/// with lag behind parents, the dirty-range backlog, and failed nodes, over real runs of a
+/// chain, a failing pipe and a lagging child; narrowed by pipe, Pipeline and visibility.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn health_reads_runs_freshness_backlog_and_failed_nodes() {
+    use meerschaum_engine::{HealthQuery, NodeStatus};
+    let fx: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/v4_sync/v4_sync.json")).unwrap();
+    let env = env("health").await;
+    let reader = EngineReader::new(env.registry.clone(), env.config());
+
+    // An instance without engine state reads as empty.
+    let empty = reader.health(&HealthQuery::last_day()).await.unwrap();
+    assert_eq!(empty.runs.runs, 0);
+    assert_eq!(empty.runs.buckets.len(), 48);
+    assert!(empty.runs.p95_seconds.is_none());
+    assert!(empty.freshness.pipes.is_empty() && empty.backlog.children.is_empty());
+    assert!(empty.nodes.is_empty() && !empty.truncated);
+
+    env.exec(fx["create"].as_str().unwrap()).await;
+    for p in fx["pipes"].as_array().unwrap().iter().take(3) {
+        env.register(p["metric"].as_str().unwrap(), &p["parameters"])
+            .await;
+    }
+    env.register(
+        "broken",
+        &serde_json::json!({"fetch": {"definition": "SELECT * FROM missing_source"}}),
+    )
+    .await;
+    for stmt in fx["phases"][0]["statements"].as_array().unwrap() {
+        env.exec(stmt.as_str().unwrap()).await;
+    }
+    let engine = env.engine();
+    let chain = engine
+        .run(RunOptions {
+            run_id: Some(meerschaum_engine::runs::new_named_run_id("health-demo")),
+            selection: Some(
+                Selection::refs([env.pipe_ref("c_hourly")]).with_parents(Some(Depth::All)),
+            ),
+            ..Default::default()
+        })
+        .await;
+    assert!(chain.success, "{}", chain.message);
+    let broken = engine
+        .run(RunOptions {
+            selection: Some(Selection::refs([env.pipe_ref("broken")])),
+            ..Default::default()
+        })
+        .await;
+    assert!(!broken.success);
+    // New source rows synced only into a_raw: b_clean is now behind its parent.
+    for stmt in fx["phases"][1]["statements"].as_array().unwrap() {
+        env.exec(stmt.as_str().unwrap()).await;
+    }
+    let raw = engine
+        .run(RunOptions {
+            selection: Some(Selection::refs([env.pipe_ref("a_raw")])),
+            ..Default::default()
+        })
+        .await;
+    assert!(raw.success, "{}", raw.message);
+
+    let (a, b, broken_ref) = (
+        env.pipe_ref("a_raw"),
+        env.pipe_ref("b_clean"),
+        env.pipe_ref("broken"),
+    );
+    let health = reader.health(&HealthQuery::last_day()).await.unwrap();
+    let runs = &health.runs;
+    assert_eq!(
+        (runs.runs, runs.failed, runs.unfinished),
+        (3, 1, 0),
+        "{runs:#?}"
+    );
+    assert!(runs.p95_seconds.is_some_and(|p| p >= 0.0));
+    let bucketed: u64 = runs
+        .buckets
+        .iter()
+        .map(|b| b.succeeded + b.failed + b.unfinished)
+        .sum();
+    assert_eq!(bucketed, 3);
+    assert_eq!(runs.bucket_seconds, 1800);
+    assert!(runs.buckets.iter().any(|b| b.max_seconds.is_some()));
+    assert_eq!(runs.recent.len(), 3);
+    assert_eq!(runs.recent[0].run_id, raw.run_id().unwrap());
+    assert_eq!(runs.recent[2].name.as_deref(), Some("health-demo"));
+    assert_eq!(runs.recent[1].status, RunStatus::Failed);
+
+    let freshness = &health.freshness;
+    assert_eq!(freshness.failing, 1, "{freshness:#?}");
+    assert_eq!(freshness.never_succeeded, 1);
+    assert!(freshness.longest_since_success_seconds.is_some());
+    assert_eq!(freshness.behind, 1, "{freshness:#?}");
+    assert_eq!(freshness.pipes.len(), 4);
+    assert_eq!(freshness.pipes[0].pipe_ref, broken_ref.as_str());
+    assert_eq!(freshness.pipes[0].consecutive_failures, 1);
+    assert!(freshness.pipes[0].last_success.is_none());
+    let child = freshness
+        .pipes
+        .iter()
+        .find(|p| p.pipe_ref == b.as_str())
+        .unwrap();
+    assert!(child.pending > 0 && child.success, "{child:?}");
+    assert!(child.lag_seconds.is_some_and(|lag| lag > 0.0), "{child:?}");
+    let caught_up = freshness
+        .pipes
+        .iter()
+        .find(|p| p.pipe_ref == env.pipe_ref("c_hourly").as_str())
+        .unwrap();
+    assert_eq!((caught_up.pending, caught_up.lag_seconds), (0, Some(0.0)));
+
+    let backlog = &health.backlog;
+    assert_eq!(backlog.children.len(), 1, "{backlog:#?}");
+    let row = &backlog.children[0];
+    assert_eq!(row.child_ref.as_ref(), Some(&b));
+    assert_eq!(row.parents, vec![a.clone()]);
+    assert_eq!(backlog.pending, row.pending);
+    assert!(row.pending > 0 && row.oldest_pending.is_some() && row.waited_seconds.is_some());
+    assert!(row.dirty_begin.is_some() && row.dirty_end.is_some());
+
+    assert_eq!(health.nodes.len(), 1, "{:#?}", health.nodes);
+    let failed = &health.nodes[0];
+    assert_eq!(failed.pipe_ref, broken_ref);
+    assert_eq!(failed.status, NodeStatus::Failed);
+    assert_eq!(failed.run_id, broken.run_id().unwrap());
+    assert!(!failed.reason.is_empty());
+    let wire = serde_json::to_value(&health).unwrap();
+    assert!(wire["runs"]["buckets"][0]["start"].is_string());
+
+    // One pipe.
+    let one = reader
+        .health(&HealthQuery {
+            pipe: Some(broken_ref.to_string()),
+            ..HealthQuery::last_day()
+        })
+        .await
+        .unwrap();
+    assert_eq!((one.runs.runs, one.runs.failed), (1, 1));
+    assert_eq!(one.freshness.pipes.len(), 1);
+    assert_eq!(one.freshness.behind, 0);
+    assert!(one.backlog.children.is_empty());
+    assert_eq!(one.nodes.len(), 1);
+
+    // One saved Pipeline: its runs and their pipes.
+    let named = reader
+        .health(&HealthQuery {
+            pipeline: Some("health-demo".into()),
+            ..HealthQuery::last_day()
+        })
+        .await
+        .unwrap();
+    assert_eq!(named.runs.runs, 1);
+    assert_eq!(named.freshness.pipes.len(), 3);
+    assert_eq!(named.backlog.children.len(), 1);
+    assert!(named.nodes.is_empty());
+
+    // A viewer who may read only a_raw: its runs, its status, no edge to a hidden child.
+    let viewer = reader
+        .health(&HealthQuery {
+            visible: Some([a.to_string()].into_iter().collect()),
+            ..HealthQuery::last_day()
+        })
+        .await
+        .unwrap();
+    assert_eq!((viewer.runs.runs, viewer.runs.failed), (2, 0));
+    assert_eq!(viewer.freshness.pipes.len(), 1);
+    assert_eq!(viewer.freshness.pipes[0].pipe_ref, a.as_str());
+    assert_eq!((viewer.freshness.failing, viewer.freshness.behind), (0, 0));
+    assert!(viewer.backlog.children.is_empty() && viewer.backlog.pending == 0);
+    assert!(viewer.nodes.is_empty());
+    let nobody = reader
+        .health(&HealthQuery {
+            visible: Some(Default::default()),
+            ..HealthQuery::last_day()
+        })
+        .await
+        .unwrap();
+    assert_eq!(nobody.runs.runs, 0);
+    assert!(nobody.freshness.pipes.is_empty() && nobody.nodes.is_empty());
+
+    // A read cut short by its limit says so.
+    let short = reader
+        .health(&HealthQuery {
+            limit: 2,
+            ..HealthQuery::last_day()
+        })
+        .await
+        .unwrap();
+    assert!(short.truncated);
+    assert_eq!(short.runs.runs, 2);
+}

@@ -21,6 +21,8 @@ def route(pathname=None, href=None):
         dcc.Interval(id='performance-interval', interval=30000, n_intervals=0),
         ### What `performance-body` lays out now (`performance.body_shape()`); None: nothing yet.
         dcc.Store(id='performance-shape'),
+        ### What `performance-engine` lays out now (`performance.engine_shape()`).
+        dcc.Store(id='performance-engine-shape'),
         html.Main([
             html.Div([html.H1('Performance'), dbc.Button(
                 'Refresh', id='performance-refresh', size='sm', color='secondary'),
@@ -53,5 +55,8 @@ def route(pathname=None, href=None):
                 first_last=True, previous_next=True, fully_expanded=False, size='sm')],
                 id='performance-history-controls', hidden=True,
                 **{'aria-label': 'Sync history pages'}),
+            html.Section([html.H2('Engine', id='performance-engine-heading')],
+                         id='performance-engine', className='performance-section performance-engine',
+                         **{'aria-labelledby': 'performance-engine-heading'}),
         ], id='performance-page', className='console-page performance-page'),
     ]
