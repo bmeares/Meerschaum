@@ -58,7 +58,7 @@ ecdsa==0.19.2
 fastapi==0.138.0
 fastapi-login==1.10.3
 greenlet==3.5.6
-pyasn1==0.6.4
+pyasn1==0.6.5
 pydantic==2.13.4
 pydantic-core==2.46.4
 pyjwt==2.13.0
