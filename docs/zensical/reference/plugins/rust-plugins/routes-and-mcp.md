@@ -112,7 +112,7 @@ The rest of the plugin's routes are still served.
 | `query`, `query_params` | The raw query string, and every decoded value of each key in order (`{"q": ["a", "b"]}`). `request.query_param("q")` returns the first. |
 | `headers` | Lowercase names to every value. `authorization` is removed (the server already authenticated the caller), and so is the console's session cookie (`mrsm-session-id`) from `cookie`; other cookies are kept. `request.header("X-Name")` is case-insensitive and `request.cookie("theme")` reads one cookie. |
 | `body` | The body as bytes (up to 64 MiB: a larger body is a `413`, one that cannot be read a `400`). `request.text()` and `request.json::<T>()` decode it. |
-| `principal` | `None` when anonymous, else `{"kind": "user", "username", "user_id", "user_type"}` or `{"kind": "token", "token_id", "label", "user_id"}`. No secrets. |
+| `principal` | `None` when anonymous, else `{"kind": "user", "username", "user_id", "user_type"}` or `{"kind": "token", "token_id", "label", "user_id", "expiration"}` (`expiration` is ISO 8601 UTC, `null` when the token never expires). No secrets. |
 | `scopes` | The caller's granted scopes (`["*"]` under `--no-auth`). `request.has_scope("x")`. |
 
 ### The response

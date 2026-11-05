@@ -156,6 +156,9 @@ async fn routes_carry_the_full_request_and_response() {
     assert_eq!(r.status.as_u16(), 299);
     assert_eq!(r.json()["path_params"], json!({"rest": "a/b/c"}));
     assert_eq!(r.json()["method"], "PROPFIND");
+    // A signed-in user's type reaches the plugin (requests authenticate without it).
+    assert_eq!(r.json()["principal"]["kind"], "user");
+    assert_eq!(r.json()["principal"]["user_type"], "admin");
 
     // A method no route declares is a 405 naming the allowed ones; HEAD falls back to GET.
     let r = send(&app, req("DELETE", "/demo/items/1", Some(&admin), None)).await;
@@ -211,7 +214,8 @@ async fn routes_carry_the_full_request_and_response() {
             Some(&admin),
             Some((
                 "application/json",
-                br#"{"label": "native", "scopes": ["pipes:read"]}"#.to_vec(),
+                br#"{"label": "native", "scopes": ["pipes:read"], "expiration": "2031-02-03T00:00:00"}"#
+                    .to_vec(),
             )),
         ),
     )
@@ -224,6 +228,12 @@ async fn routes_carry_the_full_request_and_response() {
     assert_eq!(body["principal"]["kind"], "token");
     assert_eq!(body["principal"]["label"], "native");
     assert!(body["principal"]["token_id"].is_string());
+    // So does when the token expires (`None`: never).
+    let expiration = body["principal"]["expiration"].as_str().unwrap();
+    assert!(
+        expiration.starts_with("2031-02-03T00:00:00"),
+        "{expiration}"
+    );
     assert_eq!(body["scopes"], json!(["pipes:read"]));
     let r = send(&app, req("PUT", "/demo/items/9", Some(&key), None)).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);

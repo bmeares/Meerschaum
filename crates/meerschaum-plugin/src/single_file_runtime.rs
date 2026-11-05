@@ -1103,6 +1103,8 @@ pub mod api {
         pub user_type: Option<String>,
         pub token_id: Option<String>,
         pub label: Option<String>,
+        /// When a token principal expires (ISO 8601, UTC); `None` never expires.
+        pub expiration: Option<String>,
     }
     impl Principal {
         pub(crate) fn from_json(value: &Value) -> Option<Self> {
@@ -1114,6 +1116,7 @@ pub mod api {
                 user_type: text("user_type"),
                 token_id: text("token_id"),
                 label: text("label"),
+                expiration: text("expiration"),
             })
         }
         pub fn is_user(&self) -> bool {
@@ -1130,6 +1133,7 @@ pub mod api {
                 ("user_type", &self.user_type),
                 ("token_id", &self.token_id),
                 ("label", &self.label),
+                ("expiration", &self.expiration),
             ] {
                 if let Some(item) = item {
                     value[key] = json!(item);

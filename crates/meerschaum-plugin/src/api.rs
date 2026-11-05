@@ -129,6 +129,9 @@ pub struct Principal {
     /// The token label of a token principal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// When a token principal expires (ISO 8601, UTC), or `None` when it never does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiration: Option<String>,
 }
 
 impl Principal {

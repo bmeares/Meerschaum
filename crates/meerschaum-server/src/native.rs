@@ -143,7 +143,8 @@ pub trait NativeRouteHandler: Send + Sync + 'static {
 }
 
 /// The principal as passed to plugins: `{"kind": "user", "username", "user_id", "user_type"}`
-/// or `{"kind": "token", "token_id", "label", "user_id"}`; `Null` without one. No secrets.
+/// or `{"kind": "token", "token_id", "label", "user_id", "expiration"}`; `Null` without one.
+/// No secrets.
 pub fn principal_json(principal: Option<&Principal>) -> serde_json::Value {
     use serde_json::json;
     let id = |v: &Option<meerschaum_core::Value>| {
@@ -164,7 +165,20 @@ pub fn principal_json(principal: Option<&Principal>) -> serde_json::Value {
             "token_id": t.id.map(|i| i.to_string()),
             "label": t.label,
             "user_id": id(&t.user_id),
+            "expiration": t.expiration.as_ref().map(crate::json::pydantic_datetime),
         }),
+    }
+}
+
+/// A user principal with its `user_type` read from the instance, for plugin routes (an
+/// unreadable type stays unknown).
+async fn with_user_type(state: &AppState, principal: Option<Principal>) -> Option<Principal> {
+    match principal {
+        Some(Principal::User(mut user)) if user.user_type.is_none() => {
+            user.user_type = state.instance().get_user_type(&user).await.ok().flatten();
+            Some(Principal::User(user))
+        }
+        other => other,
     }
 }
 
@@ -674,6 +688,8 @@ async fn serve(
         Ok(auth) => auth,
         Err(error) => return error.into_response(),
     };
+    // Requests authenticate without the user's type (a query each); a plugin route reads it.
+    let principal = with_user_type(&state, principal).await;
     let head = parts.method == Method::HEAD;
     // Admitted before the body is read: a request waiting for (or refused) a slot buffers nothing.
     let admission = match handler.admit(route).await {
