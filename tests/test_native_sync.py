@@ -928,6 +928,51 @@ def test_a_sql_source_with_a_definition_syncs_natively(instance, native_calls, t
     assert len(actual[0][1]['docs']) == 10
 
 
+def test_a_streamed_sql_fetch_syncs_like_one_transaction(instance, native_calls, tmp_path):
+    """
+    A SQL source in its own database streams its rows chunk by chunk: the chunked sync writes
+    exactly the rows and types the same fetch synced in one transaction (`chunksize=None`)
+    writes, with v4's chunk envelope.
+    """
+    source_conn = mrsm.get_connector(
+        'sql', 'w15l_source_' + uuid.uuid4().hex[:6],
+        flavor='sqlite',
+        database=str(tmp_path / 'w15l_stream_source.db'),
+    )
+    source = mrsm.Pipe('w15l', 'stream_source', instance=source_conn, columns=COLUMNS)
+    assert source.sync(_rows(10))[0]
+    from meerschaum.utils.sql import sql_item_name
+    table = sql_item_name(source.target, source_conn.flavor, None)
+    params = {
+        'columns': COLUMNS,
+        'dtypes': {'val': 'float', 'name': 'str'},
+        'parameters': {'fetch': {'definition': f'SELECT * FROM {table}'}},
+    }
+    streamed = _source_pipe(instance, str(source_conn), 'w15l_streamed', **copy.deepcopy(params))
+    whole = _source_pipe(instance, str(source_conn), 'w15l_whole', **copy.deepcopy(params))
+    handled_before = native_calls.handled
+    success, message = streamed.sync(chunksize=3, debug=False)
+    assert success, message
+    assert message.startswith('Synced 4 chunks to '), message
+    assert '(4 succeeded, 0 failed)' in message
+    assert 'Synced a chunk (1 row)' in message
+    success, message = whole.sync(chunksize=None, debug=False)
+    assert success, message
+    assert native_calls.handled - handled_before == 2, native_calls.declined
+    assert _docs(streamed) == _docs(whole)
+    assert len(_docs(streamed)) == 10
+    streamed_state, whole_state = _snapshot(streamed), _snapshot(whole)
+    for key in ('columns_types', 'dtypes', 'columns'):
+        assert streamed_state[key] == whole_state[key], key
+
+    ### Overlapping rows within the backtrack window update in place.
+    assert source.sync(_rows(4, offset=8, extra={'name': 'changed'}))[0]
+    success, message = streamed.sync(chunksize=3, debug=False)
+    assert success, message
+    assert len(_docs(streamed)) == 12
+    assert sum(doc['name'] == 'changed' for doc in _docs(streamed)) == 4
+
+
 def test_plugin_keyword_arguments_reach_the_plugin(instance, native_calls):
     pipe = _source_pipe(instance, 'plugin:w15l_plugsync', 'w15l_kwargs')
     assert pipe.sync(flag=11)[0]

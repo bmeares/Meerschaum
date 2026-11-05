@@ -814,6 +814,27 @@ impl SqlDriver {
         on_pool!(self.pool, p, B => backend::read_stream::<B>(p, sql, chunksize, persistent).await)
     }
 
+    /// Execute a query and stream its rows in the batches a collected read
+    /// ([`read_frame`](SqlDriver::read_frame)) builds: [`DEFAULT_CHUNKSIZE`] rows, typed from
+    /// the first batch, so the batches equal the collected read's. A pooled connection lost
+    /// before the first batch is retried once, as a collected read is.
+    ///
+    /// Unconstrained Oracle `NUMBER` columns are exact decimal text here (see the native
+    /// driver's `read_stream`); a caller that needs the collected read's typing reads it whole.
+    pub async fn read_stream_batches(&self, sql: &str) -> Result<RecordBatchStream> {
+        match self
+            .read_stream_as(sql, DEFAULT_CHUNKSIZE, false, false)
+            .await
+        {
+            Err(e) if self.retry_after(&e) => {
+                self.evict_dead_connections().await;
+                self.read_stream_as(sql, DEFAULT_CHUNKSIZE, false, false)
+                    .await
+            }
+            other => other,
+        }
+    }
+
     /// Execute a query and collect all rows (in batches of [`DEFAULT_CHUNKSIZE`]).
     pub async fn read(&self, sql: &str) -> Result<Vec<RecordBatch>> {
         Ok(self.read_collected(sql, false).await?.1)

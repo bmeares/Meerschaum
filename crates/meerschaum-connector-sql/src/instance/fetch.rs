@@ -1,10 +1,16 @@
 //! The source side of `sql:` pipes (`meerschaum/connectors/sql/_fetch.py`): `fetch` executes the
 //! metadefinition built by [`crate::queries::metadef::get_pipe_metadef`] on this connector.
 
+use arrow::array::RecordBatch;
 use indexmap::IndexMap;
-use meerschaum_connector::{ConnectorResult, DateBound, InstanceConnector};
+use meerschaum_connector::{
+    ChunkStream, ConnectorResult, DateBound, FetchedKind, InstanceConnector,
+};
 use meerschaum_core::{Pipe, Value};
 use meerschaum_kernel::Frame;
+use meerschaum_kernel::enforce::PipeInput;
+
+use crate::flavor::Flavor;
 
 use crate::queries::metadef::{
     Bound, MetadefArgs, ParentSpec, get_pipe_metadef_for_execution as get_pipe_metadef,
@@ -152,20 +158,185 @@ impl SqlConnector {
         get_pipe_metadef_for_sync(self.flavor, &m).map_err(be)
     }
 
-    /// `fetch(pipe, begin, end, check_existing)`: execute the pipe's SQL definition on this
-    /// (source) connector and return the rows.
-    pub async fn fetch(&self, pipe: &Pipe, args: &FetchArgs) -> ConnectorResult<Option<Frame>> {
+    /// The query a fetch runs: cross-pipe templates resolved, the parent found, the sync
+    /// metadefinition built.
+    async fn fetch_query(&self, pipe: &Pipe, args: &FetchArgs) -> ConnectorResult<String> {
         // Resolve cross-pipe templates (`{{ Pipe() }}` in the SQL definition) first.
         let pipe = self.prepare_pipe(pipe).await;
         let mut args = args.clone();
         if args.parent.is_none() {
             args.parent = self.resolve_fetch_parent(&pipe).await?;
         }
-        let Some(meta_def) = self.get_pipe_metadef_for_sync(&pipe, &args)? else {
-            return Err(be(format!(
+        self.get_pipe_metadef_for_sync(&pipe, &args)?.ok_or_else(|| {
+            be(format!(
                 "Could not determine a SQL definition for {pipe}.\n    Set the key `query` in `pipe.parameters` to a valid SQL query."
-            )));
-        };
+            ))
+        })
+    }
+
+    /// `fetch(pipe, begin, end, check_existing)`: execute the pipe's SQL definition on this
+    /// (source) connector and return the rows.
+    pub async fn fetch(&self, pipe: &Pipe, args: &FetchArgs) -> ConnectorResult<Option<Frame>> {
+        let meta_def = self.fetch_query(pipe, args).await?;
         Ok(Some(self.read(&meta_def).await.map_err(be)?))
+    }
+
+    /// Whether [`fetch_stream`](SqlConnector::fetch_stream) streams on this flavor. Oracle reads
+    /// whole: an unconstrained `NUMBER` is typed from every value of a collected read, which a
+    /// stream (one schema, fixed by its first batch) cannot do.
+    pub fn streams_fetch(&self) -> bool {
+        self.flavor != Flavor::Oracle
+    }
+
+    /// [`fetch`](SqlConnector::fetch) as a stream of frames of `chunksize` rows: the rows of the
+    /// collected read, in the same order and with the same types, read while the caller syncs
+    /// the earlier chunks. `None` where the flavor cannot stream
+    /// ([`streams_fetch`](SqlConnector::streams_fetch)).
+    pub async fn fetch_stream(
+        &self,
+        pipe: &Pipe,
+        args: &FetchArgs,
+        chunksize: usize,
+    ) -> ConnectorResult<Option<FetchStream>> {
+        if !self.streams_fetch() {
+            return Ok(None);
+        }
+        let meta_def = self.fetch_query(pipe, args).await?;
+        self.log(&meta_def);
+        let batches = self
+            .driver
+            .read_stream_batches(&meta_def)
+            .await
+            .map_err(be)?;
+        Ok(Some(FetchStream::new(batches, chunksize)))
+    }
+
+    /// The storage a reader held open on this connector would lock against writers
+    /// ([`Connector::exclusive_storage`](meerschaum_connector::Connector::exclusive_storage)):
+    /// the file of an SQLite, GeoPackage or DuckDB database (an in-memory database is this
+    /// connector's own), the database of an MSSQL server (locking reads by default), or this
+    /// connector's own pool when it has a single connection.
+    pub fn exclusive_storage(&self) -> Option<String> {
+        let spec = &self.spec;
+        match self.flavor {
+            Flavor::Sqlite | Flavor::Geopackage | Flavor::Duckdb => {
+                if spec.is_memory() {
+                    return Some(format!("memory:{}", self.label));
+                }
+                let database = spec.database.clone()?;
+                let path = std::fs::canonicalize(&database)
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or(database);
+                Some(format!("file:{path}"))
+            }
+            Flavor::Mssql => Some(format!(
+                "mssql://{}:{}/{}",
+                spec.host.as_deref().unwrap_or("localhost").to_lowercase(),
+                spec.port.unwrap_or(1433),
+                spec.database.as_deref().unwrap_or_default()
+            )),
+            // One pooled connection: a read held open leaves none for this connector's writes.
+            _ if spec.max_connections() <= 1 => Some(format!("pool:{}", self.keys())),
+            _ => None,
+        }
+    }
+}
+
+/// The fetched rows of [`SqlConnector::fetch_stream`]: the driver's batches re-cut into frames
+/// of exactly `chunksize` rows (the last one shorter), so the chunks are the row ranges a
+/// collected read split by `chunksize` gives. An empty result is one empty frame with the
+/// result's columns.
+pub struct FetchStream {
+    batches: crate::driver::RecordBatchStream,
+    chunksize: usize,
+    pending: std::collections::VecDeque<RecordBatch>,
+    pending_rows: usize,
+    emitted: bool,
+    done: bool,
+}
+
+impl FetchStream {
+    /// Re-cut `batches` into chunks of `chunksize` rows.
+    pub fn new(batches: crate::driver::RecordBatchStream, chunksize: usize) -> Self {
+        FetchStream {
+            batches,
+            chunksize: chunksize.max(1),
+            pending: Default::default(),
+            pending_rows: 0,
+            emitted: false,
+            done: false,
+        }
+    }
+
+    /// The next chunk, or `None` after the last one. A read that fails mid-stream is `Err`.
+    pub async fn next_frame(&mut self) -> crate::error::Result<Option<Frame>> {
+        use futures_util::StreamExt;
+        loop {
+            if self.pending_rows >= self.chunksize {
+                return self.emit(self.chunksize).map(Some);
+            }
+            if self.done {
+                if self.pending_rows > 0 {
+                    return self.emit(self.pending_rows).map(Some);
+                }
+                if !self.emitted {
+                    self.emitted = true;
+                    let empty = RecordBatch::new_empty(self.batches.schema());
+                    return crate::driver::batches_to_frame(&[empty]).map(Some);
+                }
+                return Ok(None);
+            }
+            match self.batches.next().await {
+                Some(Ok(batch)) => {
+                    if batch.num_rows() > 0 {
+                        self.pending_rows += batch.num_rows();
+                        self.pending.push_back(batch);
+                    }
+                }
+                Some(Err(e)) => {
+                    self.done = true;
+                    self.pending.clear();
+                    self.pending_rows = 0;
+                    self.emitted = true;
+                    return Err(e);
+                }
+                None => self.done = true,
+            }
+        }
+    }
+
+    /// Take the first `n` pending rows as one frame.
+    fn emit(&mut self, n: usize) -> crate::error::Result<Frame> {
+        let mut parts = Vec::new();
+        let mut needed = n;
+        while needed > 0 {
+            let batch = self
+                .pending
+                .pop_front()
+                .expect("pending rows cover the chunk");
+            let rows = batch.num_rows();
+            if rows <= needed {
+                needed -= rows;
+                parts.push(batch);
+            } else {
+                parts.push(batch.slice(0, needed));
+                self.pending.push_front(batch.slice(needed, rows - needed));
+                needed = 0;
+            }
+        }
+        self.pending_rows -= n;
+        self.emitted = true;
+        crate::driver::batches_to_frame(&parts)
+    }
+}
+
+#[meerschaum_connector::async_trait]
+impl ChunkStream for FetchStream {
+    async fn next_chunk(&mut self) -> ConnectorResult<Option<PipeInput>> {
+        Ok(self.next_frame().await.map_err(be)?.map(PipeInput::Frame))
+    }
+
+    async fn finish(&mut self) -> ConnectorResult<FetchedKind> {
+        Ok(FetchedKind::Data { generator: true })
     }
 }

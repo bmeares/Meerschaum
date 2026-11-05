@@ -8,7 +8,7 @@
 
 use indexmap::IndexMap;
 use meerschaum_connector::{
-    ColumnIndexInfo, Connector, ConnectorError, ConnectorResult, DataQuery, DateBound,
+    ChunkStream, ColumnIndexInfo, Connector, ConnectorError, ConnectorResult, DataQuery, DateBound,
     InstanceConnector, PipeId, PipesKeys, PipesKeysQuery, PluginRecord, SyncOptions, async_trait,
     pipe_ops,
 };
@@ -76,16 +76,41 @@ impl Connector for SqlConnector {
 
     async fn fetch(&self, pipe: &Pipe, query: &DataQuery) -> ConnectorResult<Option<Frame>> {
         self.require_schema().await?;
-        let args = FetchArgs {
-            begin: metadef_bound(query.begin.as_ref()),
-            end: metadef_bound(query.end.as_ref()),
-            params: query
-                .params
-                .as_ref()
-                .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
-            ..Default::default()
-        };
+        let args = fetch_args(query);
         SqlConnector::fetch(self, pipe, &args).await
+    }
+
+    async fn fetch_stream(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        chunksize: usize,
+    ) -> ConnectorResult<Option<Box<dyn ChunkStream>>> {
+        if !self.streams_fetch() {
+            return Ok(None);
+        }
+        self.require_schema().await?;
+        let args = fetch_args(query);
+        Ok(SqlConnector::fetch_stream(self, pipe, &args, chunksize)
+            .await?
+            .map(|stream| Box::new(stream) as Box<dyn ChunkStream>))
+    }
+
+    fn exclusive_storage(&self) -> Option<String> {
+        SqlConnector::exclusive_storage(self)
+    }
+}
+
+/// The fetch arguments of a connector query (an absent `begin` is unbounded; module docs).
+fn fetch_args(query: &DataQuery) -> FetchArgs {
+    FetchArgs {
+        begin: metadef_bound(query.begin.as_ref()),
+        end: metadef_bound(query.end.as_ref()),
+        params: query
+            .params
+            .as_ref()
+            .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+        ..Default::default()
     }
 }
 

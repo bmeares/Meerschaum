@@ -445,6 +445,33 @@ pub trait Connector: Send + Sync {
         let _ = (pipe, query, sync_chunks);
         Ok(None)
     }
+
+    /// [`Connector::fetch`] as a stream of frames of `chunksize` rows each (the last one may be
+    /// shorter; an empty result is one empty frame), read from the source while the earlier
+    /// chunks sync, so a large fetch never sits in memory whole. `Ok(None)`: this source (or
+    /// this pipe on it) cannot stream, and the caller reads [`Connector::fetch`] instead. The
+    /// default returns `Ok(None)`.
+    ///
+    /// A stream holds one of the source's connections (and, on embedded databases, a read
+    /// lock) until it ends or is dropped; see [`Connector::exclusive_storage`].
+    async fn fetch_stream(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        chunksize: usize,
+    ) -> ConnectorResult<Option<Box<dyn ChunkStream>>> {
+        let _ = (pipe, query, chunksize);
+        Ok(None)
+    }
+
+    /// The storage this connector shares with any other connector returning the same value,
+    /// where a reader held open blocks a writer (an SQLite or DuckDB file, an MSSQL database
+    /// under locking reads). A sync never streams a fetch from such a source into an instance
+    /// with the same storage: the open read would block the chunks' writes. The default is
+    /// `None` (no such storage: MVCC databases, remote APIs).
+    fn exclusive_storage(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A lazily produced sequence of fetched chunks (a Python generator, consumed as the source

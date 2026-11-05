@@ -1,5 +1,5 @@
 //! The native `Pipe.sync()` flow (`meerschaum/core/Pipe/_sync.py`, `_fetch.py`), written
-//! against the [`InstanceConnector`] / [`Connector`](meerschaum_connector::Connector) traits so that SQL, Valkey, API and the
+//! against the [`InstanceConnector`] / [`Connector`] traits so that SQL, Valkey, API and the
 //! Python adapter's connectors all run through it.
 //!
 //! The observable flow is v4's:
@@ -23,8 +23,8 @@ use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use meerschaum_connector::pipe_ops::{self, columns_map};
 use meerschaum_connector::{
-    ChunkedFetch, ConnectorError, DataQuery, DateBound, FetchedKind, InstanceConnector,
-    SyncOptions, async_trait,
+    ChunkStream, ChunkedFetch, Connector, ConnectorError, DataQuery, DateBound, FetchedKind,
+    InstanceConnector, SyncOptions, async_trait,
 };
 use meerschaum_core::pipe::{ChunkInterval, PipeDefaults};
 use meerschaum_core::success::SyncResult;
@@ -792,35 +792,65 @@ async fn sync_inner(
                 Ok(Some(chunked)) => {
                     return sync_chunked_source(env, &pipe, chunked, args, observer).await;
                 }
-                Ok(None) => match source.fetch(&pipe, &query).await {
-                    Ok(Some(df)) if replace => {
-                        fetched_window = Some((query.begin.clone(), query.end.clone()));
-                        PipeInput::Frame(df)
-                    }
-                    Ok(Some(df))
-                        if source.connector_type() == "sql" && args.chunksize.is_some() =>
+                Ok(None) => {
+                    // `chunksize` (`None`: one transaction): the rows of a SQL fetch sync in
+                    // chunks of this many rows, streamed from the source where it can.
+                    let chunk_size = args.chunksize.map(|n| {
+                        if n > 0 {
+                            n as usize
+                        } else {
+                            env.registry.fetch_chunksize(pipe.connector_keys())
+                        }
+                        .max(1)
+                    });
+                    if let Some(size) = chunk_size.filter(|_| !replace)
+                        && !shares_exclusive_storage(source.as_ref(), instance)
                     {
-                        let size = args
-                            .chunksize
-                            .filter(|n| *n > 0)
-                            .map(|n| n as usize)
-                            .unwrap_or_else(|| env.registry.fetch_chunksize(pipe.connector_keys()));
-                        return sync_fetched_chunks(env, &pipe, df, args, observer, size.max(1))
+                        match source.fetch_stream(&pipe, &query, size).await {
+                            Ok(Some(chunks)) => {
+                                meerschaum_core::dprint!(
+                                    "Streaming the fetch of {pipe} from {} in chunks of {size} rows.",
+                                    source.connector_keys()
+                                );
+                                return sync_fetched_chunks(env, &pipe, chunks, args, observer)
+                                    .await;
+                            }
+                            Ok(None) => {}
+                            Err(e) => return fetch_failed(&pipe, &source.connector_keys(), &e),
+                        }
+                    }
+                    match source.fetch(&pipe, &query).await {
+                        Ok(Some(df)) if replace => {
+                            fetched_window = Some((query.begin.clone(), query.end.clone()));
+                            PipeInput::Frame(df)
+                        }
+                        Ok(Some(df))
+                            if source.connector_type() == "sql" && chunk_size.is_some() =>
+                        {
+                            let chunks = FrameChunks::new(df, chunk_size.unwrap_or(1));
+                            return sync_fetched_chunks(
+                                env,
+                                &pipe,
+                                Box::new(chunks),
+                                args,
+                                observer,
+                            )
                             .await;
+                        }
+                        Ok(Some(df)) => {
+                            meerschaum_core::dprint!(
+                                "Fetched {} rows for {pipe} in {:?}.",
+                                df.height(),
+                                fetch_started.elapsed()
+                            );
+                            PipeInput::Frame(df)
+                        }
+                        Ok(None) => return fail(format!("No data were fetched for {pipe}.")),
+                        Err(e) => {
+                            return fetch_failed(&pipe, &source.connector_keys(), &e);
+                        }
                     }
-                    Ok(Some(df)) => {
-                        meerschaum_core::dprint!(
-                            "Fetched {} rows for {pipe} in {:?}.",
-                            df.height(),
-                            fetch_started.elapsed()
-                        );
-                        PipeInput::Frame(df)
-                    }
-                    Ok(None) => return fail(format!("No data were fetched for {pipe}.")),
-                    Err(e) => {
-                        return fetch_failed(&pipe, &source.connector_keys(), &e);
-                    }
-                },
+                }
                 Err(e) => {
                     return fetch_failed(&pipe, &source.connector_keys(), &e);
                 }
@@ -1220,19 +1250,91 @@ pub fn date_bound_to_bound(b: &DateBound) -> Option<meerschaum_core::success::Bo
     }
 }
 
-/// SQL `fetch` yields chunks in v4, including one empty chunk for an empty result.
+/// Whether a fetch from `source` would hold a read open on the storage the sync writes to
+/// ([`Connector::exclusive_storage`]): such a fetch is read whole instead of streamed.
+fn shares_exclusive_storage(source: &dyn Connector, instance: &dyn InstanceConnector) -> bool {
+    source
+        .exclusive_storage()
+        .is_some_and(|storage| instance.exclusive_storage().as_ref() == Some(&storage))
+}
+
+/// The rows of one fetched frame in chunks of `size` rows, for a source that cannot stream: an
+/// empty frame is one empty chunk.
+struct FrameChunks {
+    df: Frame,
+    size: usize,
+    start: usize,
+    done: bool,
+}
+
+impl FrameChunks {
+    fn new(df: Frame, size: usize) -> Self {
+        FrameChunks {
+            df,
+            size: size.max(1),
+            start: 0,
+            done: false,
+        }
+    }
+}
+
+#[async_trait]
+impl ChunkStream for FrameChunks {
+    async fn next_chunk(&mut self) -> Result<Option<PipeInput>, ConnectorError> {
+        if self.done {
+            return Ok(None);
+        }
+        let height = self.df.height();
+        let end = (self.start + self.size).min(height);
+        let chunk = self.df.take(&(self.start..end).collect::<Vec<_>>());
+        self.start = end;
+        self.done = self.start >= height;
+        Ok(Some(PipeInput::Frame(chunk)))
+    }
+
+    async fn finish(&mut self) -> Result<FetchedKind, ConnectorError> {
+        Ok(FetchedKind::Data { generator: true })
+    }
+}
+
+/// SQL `fetch` yields chunks in v4, including one empty chunk for an empty result. Each chunk
+/// is synced as it arrives ([`Connector::fetch_stream`], or the chunks of a frame read whole),
+/// so a streamed fetch holds a few chunks in memory, never the whole result. A read that fails
+/// after the first chunk keeps the chunks synced so far and fails the sync with the error.
 async fn sync_fetched_chunks(
     env: &SyncEnv<'_>,
     pipe: &Pipe,
-    df: Frame,
+    mut chunks: Box<dyn ChunkStream>,
     args: &SyncArgs,
     observer: Option<&dyn DeltaObserver>,
-    size: usize,
 ) -> SyncResult {
     let mut results = Vec::new();
     let mut aggregate = SyncResult::new(true, String::new());
-    for start in (0..df.height().max(1)).step_by(size) {
-        let chunk = df.take(&(start..(start + size).min(df.height())).collect::<Vec<_>>());
+    loop {
+        let input = match chunks.next_chunk().await {
+            Ok(Some(input)) => input,
+            Ok(None) => break,
+            Err(e) if results.is_empty() => {
+                return fetch_failed(pipe, pipe.connector_keys(), &e);
+            }
+            Err(e) => {
+                let detail = format!(
+                    "Failed to fetch data from {}:\n    {e}",
+                    pipe.connector_keys()
+                );
+                tracing::warn!("{detail}");
+                aggregate.success = false;
+                results.push((false, detail));
+                break;
+            }
+        };
+        let chunk = match input {
+            PipeInput::Frame(frame) => frame,
+            other => match input_frame(&other) {
+                Some(frame) => frame,
+                None => return fail(format!("Failed to read a fetched chunk of {pipe}.")),
+            },
+        };
         let label = fetched_chunk_label(&chunk, pipe.column("datetime").as_deref());
         let rows = chunk.height();
         meerschaum_core::dprint!(
