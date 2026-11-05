@@ -108,7 +108,7 @@ Start with the [Python](docs/python/index.md) or [Rust](docs/rust/index.md) guid
 
 ### Run and observe
 
-Give work a [schedule](reference/background-jobs/schedules.md), manage it in the [console](reference/api-instance/web-console.md), and chart sync metrics in [Grafana](reference/stack/index.md#built-in-performance-dashboards). Teams, permissions, and locks control shared access.
+Give work a [schedule](reference/background-jobs/schedules.md), manage it in the [console](reference/api-instance/web-console.md), and chart sync metrics in [Grafana](reference/stack/index.md#built-in-dashboards). Teams, permissions, and locks control shared access.
 
 [Explore the console →](get-started/start-api.md)
 
@@ -3752,6 +3752,8 @@ The engine adds **no database files** to your root directory. Everything it reme
 
 The first use creates the tables it needs. Graphs, watermarks and duration estimates are never persisted: the graph is rebuilt per run from one batch `fetch_pipes_keys`, and a pipe's watermark is just its `get_sync_time()`.
 
+On a PostgreSQL instance, the Stack's [**Engine** Grafana dashboard](/reference/stack/#built-in-dashboards) charts these tables: runs and nodes, Pipe freshness, each child's lag behind its parents and the ledger's backlog.
+
 !!! info "API instances"
 
     Engine state travels over the dedicated `/engine` route family: the engine reads and writes its state tables through `/engine/pipes/{metric}/read`, `/write`, `/clear` and `/exists` (reads need the `pipes:read` scope, writes `pipes:write`), and leases go through `/engine/leases`; `/engine/ledger`, `/engine/cursors`, `/engine/state`, `/engine/runs` and `/engine/events` expose the same rows by shape (reading needs `pipes:read`, writing `pipes:write`), `GET /engine/runs` filters runs by Pipeline, pipe, status and start time and `GET /engine/runs/{run_id}` returns one run with its pipes ([over HTTP](/reference/api-instance/routes/#runs)), and `GET /engine/runs/{run_id}/events/stream` follows a run's events live as Server-Sent Events ([Following a run over HTTP](/reference/pipelines/visualization/#following-a-run-over-http)). Every `/engine/*` route answers `{"success": ..., "message": ..., ...}` with real status codes: a store the server cannot read is an error (`500`), never an empty history. The server keeps all of it on its own instance (in `_mrsm_internal` on a PostgreSQL or MSSQL instance), so it survives a server restart. The generic pipe routes refuse the `mrsm` connector keys. On a read-only instance the engine runs degraded: watermarks only, no ledger-driven backfill, no persisted history, with a warning.
@@ -6251,15 +6253,24 @@ mrsm stack up -d db grafana
 
     Open a web browser and navigate to [http://localhost:3000](http://localhost:3000) where you can log into Grafana with username `admin`, password `admin`.
 
-### Built-in performance dashboards
+### Built-in dashboards
 
-The Stack provisions three dashboards in Grafana's **Meerschaum Dashboards** folder:
+The Stack provisions two dashboards in Grafana's **Meerschaum Dashboards** folder. Both read the instance's internal `mrsm_engine_*` tables and filter by Pipe and Pipeline.
 
-- **Meerschaum Performance**, the overall duration, failure, and write-rate picture.
-- **Pipe Performance**, focus on one Pipe and its recent syncs.
-- **Pipeline Performance**, compare Pipeline runs and follow their results.
+- **Syncs**: every completed sync.
+    - **Overview**: totals, outcomes, duration and P95, write rate (**rows affected/s**), failure rate, retries and chunks, the slowest Pipes and recent failures.
+    - **Pipes**: duration, write rate, failures and rows affected per Pipe, a Pipe summary and the sync history.
+    - **Pipelines**: duration, rows affected, retries and failures per Pipeline, a Pipeline summary and recorded run durations.
+- **Engine**: what the [Syncing Engine](../pipelines/state.md) records.
+    - **Runs**: runs by outcome, run duration, node outcomes and planned actions, failures and retries, node start delay against the plan, and the recent runs.
+    - **Freshness**: each Pipe's latest sync and time since its last success, data watermarks, and each child's lag behind its parents.
+    - **Dirty-range backlog**: the parents' changed ranges each child has not synced yet, and how long they have waited.
+    - **Nodes** and **Streams**: failed and retried nodes, per-Pipe timing and critical-path share, and stream flushes.
 
-Use them to find slow Pipes, inspect recent failures, and follow P95 duration, retries, chunks, and **rows affected/s**. Replacements count deleted plus new rows; unchanged syncs affect zero rows.
+Rows affected count inserted, updated, upserted and deleted rows. Replacements count deleted plus new rows; unchanged syncs affect zero rows.
+
+!!! note "Upgrading from 5.0.0rc34 or earlier"
+    The **Meerschaum Performance**, **Pipe Performance** and **Pipeline Performance** dashboards are replaced by **Syncs**. The next `mrsm stack` command removes their files when they are exactly as Meerschaum wrote them, and Grafana drops them. A customized copy, a symlink or another dashboard under the same file name is kept, with a warning; delete it when you no longer need it.
 
 Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](../api-instance/sync-metrics.md) for capture and history limits.
 
@@ -6931,7 +6942,20 @@ api:
 
 The default stays under Docker's stop timeout (10 seconds, then `SIGKILL`). If you raise `grace_seconds`, also raise the time your supervisor waits: `stop_grace_period` in Docker Compose, `docker stop --time`, or `terminationGracePeriodSeconds` in Kubernetes. `mrsm stop job` waits for an API job's grace period plus 2 seconds before it signals again. With the local executor, an explicit `--timeout` wins.
 
-Behind a load balancer, probe `GET /healthcheck/ready`. It answers `503` with `"The server is shutting down."` once the server drains, and `"The server is starting."` until the web console's host is up. `GET /healthcheck` is unchanged, so uptime monitors keep matching it. A proxy that retries the next upstream on a refused connection or a `503` (NGINX's `proxy_next_upstream error http_503`) moves clients to another server during a restart.
+Behind a load balancer, probe `GET /healthcheck/ready`. It answers `200` only once the server can serve everything it mounts, including the Python API host that serves Python plugins and the web console. Otherwise it answers `503` with a `reason`:
+
+| `reason` | `message` | When |
+|---|---|---|
+| `starting` | `"The server is starting."` | The server has started but its API host has not answered yet. |
+| `host_unavailable` | `"The API host (Python plugins and the web console) is not serving."` | The API host is needed but not serving: it refused to start, crashed and is restarting, or stopped answering its health checks. No timeout turns this into a `200`; probing it starts a stopped host again. |
+| `draining` | `"The server is shutting down."` | The server got `SIGTERM` or `SIGINT` and is finishing requests in progress. |
+| `instance_unavailable` | `"Failed to connect to instance connector."` | The instance does not answer. |
+
+```json
+{"success": false, "message": "The server is shutting down.", "reason": "draining"}
+```
+
+A server whose plugins need no API host (only Rust plugins, or `--no-dash` without Python plugins) does not wait for one. `GET /healthcheck` is unchanged, so uptime monitors keep matching it. A proxy that retries the next upstream on a refused connection or a `503` (NGINX's `proxy_next_upstream error http_503`) moves clients to another server during a restart.
 
 ### Docker
 
@@ -7586,9 +7610,9 @@ The console answers only signed-in visitors: a page shows the login form until y
 `/dash` is the Overview of the selected instance, with a tile for each part of it:
 
 - **Pipes**: how many are registered and when the latest one synced; how many synced, are failing (their last sync failed) or have no recorded sync, each count opening the Pipes page filtered to them; the connectors with the most pipes; and the latest syncs, failures first;
-- **Pipelines**: how many are saved and how many ran in the last 24 hours; how many are running, succeeded, failed or have not run, by each one's last run; their runs over the last 24 hours, hour by hour; and the last success and failure, each opening its Pipeline on that run;
-- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state, and how many run on a schedule;
-- **Recent runs**: the latest runs of the Syncing Engine, failures first. A job that syncs the same pipes again and again takes one row (`×12`).
+- **Pipelines**: how many are saved and how many runs they had in the last 24 hours; how many are running, succeeded, failed or have no recent run (none in the last 24 hours or among the latest runs), by each one's last run; every one of their runs over the last 24 hours, hour by hour (hover a bar for its counts); and the last success and failure, each opening its Pipeline on that run;
+- **Jobs**: the jobs running, stalled (no successful sync for three times their interval), failing and stopped, each opening the Jobs page filtered to that state, and how many run on a schedule. **Next runs** lists the jobs waiting for their next lap (`--loop --min-seconds`, a `-s` schedule, a cooldown after a failure), soonest first, each opening its job; hover the time for the exact one (`job.health['next_run']`);
+- **Recent runs**: the latest runs of the Syncing Engine, failures first, with each Pipeline's or pipe's full name (long names wrap). A job that syncs the same pipes again and again takes one row (`×12`).
 - **Performance**: sync counts, failures, average duration, and rows affected/s over the last 24 hours.
 
 The tiles refresh every 30 seconds. On an instance without pipes, the Pipes tile shows **New pipe** and **Open terminal** instead of its numbers; the other tiles stay.
@@ -7596,6 +7620,15 @@ The tiles refresh every 30 seconds. On an instance without pipes, the Pipes tile
 ## Performance
 
 Open **Performance** (`/dash/performance`) to compare duration, write rate, and failures. Choose a time window and filter by Pipe or Pipeline. Charts show the trend; tables show each Pipe or Pipeline and recent syncs.
+
+The **Engine** section below shows the Syncing Engine's view of the same selection, like the Stack's Grafana **Engine** dashboard:
+
+- **Runs**: runs, failed and unfinished runs, and the 95th-percentile run duration in the window; charts of runs by outcome and of run duration; the latest runs, each linked to its run on its saved Pipeline's page.
+- **Freshness**: pipes whose latest sync failed, pipes never synced successfully, the longest time since a successful sync, and children behind their parents. The table ranks pipes by failures in a row, then by time since their last success, with how far each is behind its parents and how many parent changes it has not consumed.
+- **Backlog**: the dirty ranges each child has not consumed: from which parents, how many, the oldest, and how long it has waited.
+- **Nodes**: failed, unrun and retried nodes in the window, newest first, with the planner's reason.
+
+A viewer sees only the pipes they may read: runs that include one of them, their statuses, edges between two of them, and their nodes. An instance without engine history shows **No engine history**.
 
 **Rows affected/s** counts inserted, updated, upserted, and deleted rows. Replacements count both deletion and new rows; an unchanged sync affects zero rows. See [Sync metrics](sync-metrics.md) for Python access, retention, and capture limits.
 
@@ -7898,7 +7931,7 @@ Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC dateti
 ??? info "Storage"
     SQL instances keep measurements in the internal `mrsm_engine_metrics` table, with time, Pipe, run, and registration indexes. TimescaleDB uses 30-day chunks on a microsecond time axis. Upgrading an RC installation corrects undersized intervals for future chunks; retained history stays intact.
 
-The [Stack](../stack/index.md) dashboards show the same affected-row, duration, and failure measurements.
+The Stack's [**Syncs** dashboard](../stack/index.md#built-in-dashboards) shows the same affected-row, duration, and failure measurements, and its **Engine** dashboard shows engine runs, Pipe freshness and the dirty-range backlog.
 
 Grafana reads directly with the database credentials configured for its data source. Its visibility follows those database permissions; the console and HTTP API apply their Pipe and team access rules.
 
@@ -11175,6 +11208,28 @@ You can see the available command line options with the command `mrsm help` (or 
     | `repository`                | `-r`, `--repository`, `--repo`              | `Optional[str] = None`               | `'api:mrsm'`                          | The connector keys of the corresponding [Meerschaum repository](/reference/connectors/#instances-and-repositories). If `repository` is `None` (default), the configured repository will be used (`'api:mrsm'` by default). When actions are launched from within the Meerschaum shell, the current repository is passed. |
 
 
+### Report the laps of an action that loops by itself
+
+When your action leaves `--loop` to Meerschaum (it takes no `loop` parameter), each run is a lap, and the job's health (`job.health`) and the web console's **Next runs** cover it without any code of yours. An action that names a `loop` parameter repeats by itself, so Meerschaum cannot see its laps. Report them with `#!python mrsm.jobs.report_lap()` at the end of each iteration:
+
+```python
+import time
+import meerschaum as mrsm
+from meerschaum.plugins import make_action
+
+@make_action
+def poll(loop: bool = False, min_seconds: float = 20, **kwargs):
+    state = load_state()  # Kept across iterations: the reason to loop here.
+    while True:
+        success, msg = poll_once(state)
+        mrsm.jobs.report_lap(success, msg, next_in=min_seconds)
+        if not loop:
+            return success, msg
+        time.sleep(min_seconds)
+```
+
+`next_in` is when the next lap begins: the job is expected at that cadence (stalled after three times it without a lap) and `job.health['next_run']` shows it. Outside a job, `report_lap()` does nothing.
+
 ### Custom Command Line Options
 
 In case the built-in command line options are not sufficient, you can add arguments with `#!python add_plugin_argument()`. This function takes the same arguments as the `#!python parser.add_argument()` function from [`argparse`](https://docs.python.org/3/library/argparse.html) and will include your plugin's arguments in the `--help` text.
@@ -12888,6 +12943,9 @@ fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
 | `host::plugin_config()` | `Value` (`null` when unset) | `get_plugin_config()` |
 | `host::write_plugin_config(&json!({...}))` | `SuccessTuple` | `write_plugin_config({...})` |
 | `host::config(&["meerschaum", "instance"])` | `Value` | `get_config('meerschaum', 'instance')` |
+| `host::mint_token(label, &["devices:ingest"], expiration)` | `MintedToken` | `POST /tokens/register` for the caller, with the plugin's own scopes ([routes only](routes-and-mcp.md#tokens-and-draining)) |
+| `host::revoke_token(id)` | `SuccessTuple` | `DELETE /tokens/{id}` of a token the plugin may revoke |
+| `host::draining()` | `bool` | whether the API server is shutting down (`false` outside a request) |
 
 "Rows" are `Vec<Value>` JSON objects in a single-file plugin (datetimes as ISO strings) and an
 Arrow-backed `Frame` in a Cargo plugin (`frame.to_rows()` gives the JSON objects). `begin` and
@@ -12943,6 +13001,8 @@ the core API would require:
 | `exec_sql` | `actions:execute`, and a caller who may run actions (below) |
 | `config` | every scope (`*`: an administrator, or `--no-auth`) |
 | `plugin_config`, `write_plugin_config` | none: the plugin's own settings |
+| `mint_token`, `revoke_token` | a signed-in caller holding each scope minted; only the plugin's own custom scopes ([rules](routes-and-mcp.md#tokens-and-draining)) |
+| `draining` | none |
 
 - **Pipes** are reached only on the instances the server allows (`api:permissions:instances`),
   and never Meerschaum's internal `mrsm` pipes. The caller must be able to see the pipe, and
@@ -12987,8 +13047,9 @@ the core API would require:
   of the local user.
 
 A host older than these calls answers each new one with an error such as "This Meerschaum
-cannot run `pipe.get_data()` for plugins: upgrade Meerschaum to 5.0.0rc15 or later."; the
-original `pipe.get_sync_time()` and `pipe.sync(data)` still work there.
+cannot run `pipe.get_data()` for plugins: upgrade Meerschaum to 5.0.0rc15 or later." (5.0.0rc34
+for `mint_token`, `revoke_token` and `draining`); the original `pipe.get_sync_time()` and
+`pipe.sync(data)` still work there.
 
 An integer-axis sync plugin can be just:
 
@@ -13504,7 +13565,7 @@ The rest of the plugin's routes are still served.
 | `query`, `query_params` | The raw query string, and every decoded value of each key in order (`{"q": ["a", "b"]}`). `request.query_param("q")` returns the first. |
 | `headers` | Lowercase names to every value. `authorization` is removed (the server already authenticated the caller), and so is the console's session cookie (`mrsm-session-id`) from `cookie`; other cookies are kept. `request.header("X-Name")` is case-insensitive and `request.cookie("theme")` reads one cookie. |
 | `body` | The body as bytes (up to 64 MiB: a larger body is a `413`, one that cannot be read a `400`). `request.text()` and `request.json::<T>()` decode it. |
-| `principal` | `None` when anonymous, else `{"kind": "user", "username", "user_id", "user_type"}` or `{"kind": "token", "token_id", "label", "user_id"}`. No secrets. |
+| `principal` | `None` when anonymous, else `{"kind": "user", "username", "user_id", "user_type"}` or `{"kind": "token", "token_id", "label", "user_id", "expiration"}` (`expiration` is ISO 8601 UTC, `null` when the token never expires). No secrets. |
 | `scopes` | The caller's granted scopes (`["*"]` under `--no-auth`). `request.has_scope("x")`. |
 
 ### The response
@@ -13557,6 +13618,64 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
 - **Fixed at startup.** Routes and MCP entries are read from the manifests when `mrsm start api`
   (or `mrsm start mcp`) starts. Installing, updating or removing a native plugin takes effect
   after a restart; unlike Python plugins, the running server does not pick it up.
+
+## 🔑 Tokens and draining
+
+A plugin that serves devices can issue their tokens itself. `host::mint_token(label, scopes,
+expiration)` registers an API token for the request's caller and returns it once, secret and API
+key included (`MintedToken`: `id`, `label`, `scopes`, `expiration`, `secret`, `api_key`;
+`token.to_json()` in a single-file plugin). `host::revoke_token(id)` deletes one. Together they
+provision and rotate per-device credentials:
+
+```rust
+/// An administrator provisions a device (a token with only `devices:ingest`).
+#[api_route(POST, "/devices/{id}/provision", scopes = ["devices:admin"])]
+fn provision(request: &RouteRequest) -> Result<Value> {
+    let device = request.path_param("id").unwrap_or_default();
+    Ok(host::mint_token(device, &["devices:ingest"], None)?.to_json())
+}
+
+/// The device's heartbeat, sent with its token: hand back a successor, revoke the old one.
+#[api_route(POST, "/devices/heartbeat", scopes = ["devices:ingest"])]
+fn heartbeat(request: &RouteRequest) -> Result<Value> {
+    let caller = request.principal.clone().unwrap_or_default();
+    let next = host::mint_token(caller.label.as_deref().unwrap_or_default(), &["devices:ingest"], None)?;
+    host::revoke_token(caller.token_id.as_deref().unwrap_or_default())?;
+    Ok(next.to_json())
+}
+```
+
+- **Only in an API request** (a route, console page or MCP entry), for a signed-in caller. The
+  token belongs to the caller's user, or, when the caller is a token (the heartbeat above), to
+  that token's owner. Anonymous callers and servers started with `--no-auth` cannot mint.
+- **Only the plugin's own scopes.** Each scope must be a custom scope that the plugin's own
+  routes or MCP entries declare (`devices:ingest` above), never `*`, a core scope (`pipes:read`,
+  or any `pipes:`, `users:`, `jobs:` ... scope) or another plugin's scope, and the caller must
+  hold it. Expiration is a `Bound` (an ISO timestamp, or Unix seconds as `Bound::Int`); `None`
+  never expires.
+- **Revocation** deletes a token of the caller's user that carries nothing but the plugin's own
+  scopes. Any other id (another user's token, one with a core scope, one that does not exist) is
+  refused with the same error. Every request reads its token from the instance, so the next
+  request with a revoked token is refused (`401`), and so are the remaining host calls of a
+  request still running with it.
+
+`host::draining()` is `true` once the server has begun to shut down. A handler that holds a long
+poll checks it in its loop and returns early, instead of being cut off at the end of
+`api.shutdown.grace_seconds`:
+
+```rust
+#[api_route(GET, "/devices/commands", scopes = ["devices:ingest"])]
+fn commands(_request: &RouteRequest) -> Result<Value> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(25);
+    while !host::draining()? && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(json!({"commands": []}))
+}
+```
+
+Outside an API request `draining()` is `false`. These three calls need Meerschaum 5.0.0rc34 or
+later; an older server answers them with an error asking for the upgrade.
 
 ## 🤖 MCP tools, resources and prompts
 
@@ -16279,7 +16398,7 @@ Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
 
-## 5.0.0 (Unreleased)
+## 5.0.0
 
 The data engine, database connectors, CLI, HTTP API, jobs, and Compose now run in Rust. Keep your Pipe definitions, configuration, Python plugins, and existing data. Start with the [migration guide](../reference/migrating-to-v5.md).
 
@@ -16308,7 +16427,7 @@ See [Pipelines in Compose](../reference/pipelines/compose.md).
 
 ### A fuller web console
 
-Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. The Overview summarizes Pipes by sync status, connector and latest sync, and Pipelines by last-run status with a 24-hour run chart, beside Jobs and Recent runs. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
+Overview, Pipes, Pipelines, Runs, and Jobs put current work and history in one place. The Overview summarizes Pipes by sync status, connector and latest sync, Pipelines by last-run status with a 24-hour chart of every run, and Jobs by state with the next runs of the jobs waiting for their next lap, beside Recent runs, which shows each Pipeline's whole name. Performance charts show sync duration, failures, and rows affected. Inspect plugin source without running it, and manage roles, teams, access, and locks.
 
 Performance totals and charts cover the selected SQL history window; recent records are paged
 separately. Search and rank results, with cards on phones. Refreshes keep charts visible,
@@ -16368,6 +16487,8 @@ Self-registration closes after the first administrator unless configured otherwi
 - Save run events before marking completion, keeping `mrsm watch run` output complete.
 - Keep private history private when a Pipe or Pipeline is deleted, recreated, or its access changes.
 - Bound SQL parent reads before window functions, keeping incremental syncs fast.
+- Sync small SQL Pipes faster than 4.1: a SQL connector keeps what the database catalog said about a table for `pipes:dtypes:columns_types_cache_seconds` (60 by default) and forgets it when it changes the table or a statement on it fails, a static Pipe's in-place sync reads no columns, Pipeline bookkeeping takes the initialization lock only on its first write, and a sync skips the Python worker when no plugin has a pre-sync hook. On PostgreSQL a small in-place sync takes about 25 ms instead of 90 (4.1: 50), and a five-Pipe lap 230 ms instead of 950 (4.1: 275).
+- The first sync of a plugin Pipe on a SQL instance no longer installs SQLAlchemy and the database's Python drivers into the root's virtual environment.
 - Use 30-day TimescaleDB metrics partitions and correct undersized RC partitions.
 - Initialize internal tables and indexes safely when workers start together.
 - Keep redirects fast on consoles with many plugin pages.
@@ -16380,18 +16501,28 @@ Self-registration closes after the first administrator unless configured otherwi
 - Keep long-running jobs' memory bounded: Python workers are replaced after a call or memory limit and stop when idle, and jobs return freed memory between laps.
 - Reduce memory use when syncing and reading JSON columns through pandas.
 - Return freed memory after each fetched chunk and sync: a 1,000,000-row SQLite fetch sync peaks at about 300 MiB instead of 460.
+- Stream SQL fetches into the sync chunk by chunk instead of reading the whole result first: a 2,000,000-row fetch sync peaks at about 240 MiB on SQLite (was 300) and 170 MiB on PostgreSQL (was 260), and finishes sooner.
 - List a Pipeline's scheduled jobs without querying every job's status.
-- Drain the API on shutdown: it stops accepting connections, finishes requests in flight within `api.shutdown.grace_seconds` (8 by default, an upper bound), and ends streams at once. `GET /healthcheck/ready` returns 503 while it starts or drains.
+- Drain the API on shutdown: it stops accepting connections, finishes requests in flight within `api.shutdown.grace_seconds` (8 by default, an upper bound), and ends streams at once. `GET /healthcheck/ready` returns 503 while it starts or drains, and while the Python API host it needs is not serving (no timeout makes it 200); a 503 names its `reason`.
 - Report a job killed by a signal as failed and name the signal, instead of showing a stale or successful result.
+- Run a scheduled job once at its first fire after a restart between two fires, instead of twice in a row, and keep an interval such as `daily` counted from that fire, not from the restart.
+- A plugin action that loops by itself reports its laps with `mrsm.jobs.report_lap(success, message, next_in=...)`, so its job shows health and its next run.
+- Ask a console tab opened before an upgrade to reload when it requests a callback the server no longer has, instead of answering every poll with an error.
 - Report an error raised inside an MCP tool as that error and where it was raised, not as invalid arguments.
 - Stop the Python API host when its server is killed, and let the next API take over and stop a killed API's web terminal tmux server.
-- Find `sql` clients outside a service's reduced `PATH` (`~/.cargo/bin`, `~/.local/bin`, Meerschaum's virtual environments), and offer to install the flavor's Python client when none is found.
+- Find `sql` clients outside a service's reduced `PATH` (`~/.cargo/bin`, `~/.local/bin`, Meerschaum's virtual environments), and offer to install the flavor's Python client when none is found; a Python client whose interpreter cannot import it (a script left by an older Python) is skipped with a warning.
+- The Stack provisions two Grafana dashboards: **Syncs** replaces the three performance dashboards (overview, Pipes and Pipelines rows), and **Engine** charts runs, failed and retried nodes, Pipe freshness, lag behind parents and the dirty-range backlog. Unmodified copies of the old dashboards are removed; customized ones are kept.
+- The console's Performance page has an **Engine** section, like the Grafana **Engine** dashboard: runs by outcome and duration, Pipe freshness with lag behind parents, the dirty-range backlog by child, and failed or retried nodes with the planner's reason, for the pipes the viewer may read.
 
 See [Stack upgrades](../reference/stack/upgrades.md) and [sync metrics](../reference/api-instance/sync-metrics.md).
 
 ### Rust plugins and applications
 
 A plugin can be one `.rs` file, or a crate using the native SDK. Applications can embed the Pipe and engine APIs without compiling the CLI. The [developer guides](../docs/index.md) cover both Python and Rust.
+
+- A native route's caller carries its token's `expiration` and a signed-in user's `user_type`, so a plugin can rotate tokens before they expire and check administrators.
+- Raw bytes a native plugin syncs keep their exact bytes in a `bytes` column (they were stored as the base64 reading of their Python repr).
+- A native plugin's routes mint and revoke API tokens with the plugin's own scopes for their caller (`host::mint_token`, `host::revoke_token`), so a device can be provisioned and rotate its own token, and a long poll ends as soon as the server drains (`host::draining()`). See [Tokens and draining](../reference/plugins/rust-plugins/routes-and-mcp.md#tokens-and-draining).
 
 ### Before upgrading
 
