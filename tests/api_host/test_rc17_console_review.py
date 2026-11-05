@@ -135,7 +135,8 @@ with patch.object(performance,'metrics',side_effect=read):
         'inputs':[{**value,'value':values[value['id']+'.'+value['property']]}
                   for value in registered['inputs']],
         'state':[{'id':'session-store','property':'data','value':session},
-                 {'id':'performance-shape','property':'data','value':None}],
+                 {'id':'performance-shape','property':'data','value':None},
+                 {'id':'performance-engine-shape','property':'data','value':None}],
         'changedPropIds':['performance-history-page.active_page'],
     })
     assert response.status_code == 200, response.get_data(as_text=True)
@@ -147,6 +148,8 @@ with patch.object(performance,'metrics',side_effect=read):
     assert rendered['performance-pipe']['options'] == [{'label':'Readings','value':ref}]
     # RC28: the next tick of the same selection updates the mounted parts; the body stays.
     shape = rendered['performance-shape']['data']
+    engine_shape = rendered['performance-engine-shape']['data']
+    assert 'Engine' in str(rendered['performance-engine']['children'])
     mounted = iter([[{'id':{'type':'performance-live','part':part},'property':'children'}
                      for part in ('stats','coverage','history','notes')],
                     [{'id':{'type':'performance-graph','chart':'results'},'property':'figure'}], []])
@@ -158,12 +161,14 @@ with patch.object(performance,'metrics',side_effect=read):
         'inputs':[{**value,'value':values[value['id']+'.'+value['property']]}
                   for value in registered['inputs']],
         'state':[{'id':'session-store','property':'data','value':session},
-                 {'id':'performance-shape','property':'data','value':shape}],
+                 {'id':'performance-shape','property':'data','value':shape},
+                 {'id':'performance-engine-shape','property':'data','value':engine_shape}],
         'changedPropIds':['performance-interval.n_intervals'],
     })
     assert response.status_code == 200, response.get_data(as_text=True)
     refreshed = response.get_json()['response']
     assert 'performance-body' not in refreshed, list(refreshed)
+    assert 'performance-engine' not in refreshed, list(refreshed)
     history_part = json.dumps({'part':'history','type':'performance-live'},separators=(',',':'))
     assert '51–100 of 103 recent syncs' in str(refreshed[history_part]['children'])
     assert 'figure' in refreshed[json.dumps({'chart':'results','type':'performance-graph'},separators=(',',':'))]

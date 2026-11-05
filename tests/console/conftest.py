@@ -639,6 +639,23 @@ class Tab:
                     raise
         return
 
+    def goto_until(self, path: str, selector: str, condition: str, timeout: int = 60000) -> None:
+        """
+        Open a console path (`goto`) and wait until the JavaScript `condition` holds. A page whose
+        callbacks Chromium aborted after it loaded (`ERR_NETWORK_CHANGED`: another job bringing
+        a container network up or down) never renders what they would have drawn: that page is
+        loaded again (twice at most); any other wait that runs out fails as before.
+        """
+        for attempt in range(3):
+            ### `goto` clears `network_changed` before it loads the page.
+            self.goto(path, selector)
+            try:
+                self.page.wait_for_function(condition, timeout=timeout)
+                return
+            except Exception:
+                if not self.network_changed or attempt == 2:
+                    raise
+
     def login(
         self,
         username: str = USERNAME,

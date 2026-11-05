@@ -53,9 +53,8 @@ assert mrsm.Pipeline('alpha', instance=conn).sync().success
 
 
 def open_canvas(tab):
-    tab.goto('/dash/pipelines/alpha', '#pipelines-page')
-    tab.page.wait_for_function("document.getElementById('pipeline-canvas-world')?.dataset.mounted === 'true'",
-                               timeout=60000)
+    tab.goto_until('/dash/pipelines/alpha', '#pipelines-page',
+                   "document.getElementById('pipeline-canvas-world')?.dataset.mounted === 'true'")
 
 
 @pytest.mark.parametrize('width', [375, 768, 1440, 1920, 2560])
