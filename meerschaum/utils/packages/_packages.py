@@ -268,7 +268,7 @@ _extras_packages: Dict[str, Dict[str, str]] = {
         'uvicorn'                    : 'uvicorn>=0.35.0',
         'a2wsgi'                     : 'a2wsgi>=1.10.0',
         'multipart'                  : 'python-multipart>=0.0.20',
-        'jwt'                        : 'PyJWT>=2.8.0',
+        'jwt'                        : 'PyJWT>=2.15.0',
         'websockets'                 : 'websockets>=15.0.1',
     },
     'dash': {

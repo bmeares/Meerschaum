@@ -4,6 +4,13 @@
 
 ## Meerschaum 5
 
+### 5.0.1
+
+- An API server restarts its root's stopped `--restart` jobs again, as in 4.x: jobs a container restart, a recreated container or a reboot stopped come back once the API starts, every second while it runs. Jobs stopped by hand stay stopped.
+- Jobs created by Meerschaum 4 keep their commands. 4.x saved the command of a job created through the API or in a container only in its `pickle.pkl`; 5.0.0 showed such a job with no command and could not restart it. The command is now read from that file as data (nothing in it is executed), also for jobs 5.0.0 already started without one.
+- TLS connections no longer trust certificates from the distrusted emSign intermediates (`rustls-webpki` 0.103.16, `webpki-roots` 1.0.11), and the bundled `zstd` (0.13.4) and `ctutils` (0.4.8) fix memory-safety and constant-time issues.
+- The `api`, `dash` and `full` extras require `PyJWT>=2.15.0`.
+
 ### 5.0.0
 
 The data engine, database connectors, CLI, HTTP API, jobs, and Compose now run in Rust. Keep your Pipe definitions, configuration, Python plugins, and existing data. Start with the [migration guide](https://meerschaum.io/reference/migrating-to-v5/).

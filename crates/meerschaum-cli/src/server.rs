@@ -307,9 +307,21 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             native::warn(rt, &hint);
         }
     }
-    let jobs = Arc::new(crate::jobs_backend::LocalJobsBackend::new(
-        crate::native::jobs::jobs_context(rt),
-    ));
+    let jobs_context = crate::native::jobs::jobs_context(rt);
+    // PARITY: v4's API startup ran `start_check_jobs_thread()`: while the server runs, it
+    // restarts the root's stopped `--restart` jobs that were not stopped by hand (a container or
+    // machine restart), every `check_restart_seconds`. Stops with this function.
+    let _restart_monitor = if stdio {
+        None
+    } else {
+        meerschaum_jobs::monitor::spawn(
+            jobs_context.clone(),
+            meerschaum_jobs::monitor::default_interval(),
+        )
+        .map_err(|error| native::warn(rt, &format!("Cannot monitor job restarts: {error}")))
+        .ok()
+    };
+    let jobs = Arc::new(crate::jobs_backend::LocalJobsBackend::new(jobs_context));
     // Engine state (`/engine/*`, §5.8 R2) persists on the server's own instance, so an API
     // instance's ledger, cursors, runs and leases survive a restart.
     let engine_store = Arc::new(meerschaum_server::engine_store::InstanceEngine::new(
@@ -960,7 +972,7 @@ mod tests {
         };
         assert_eq!(
             console_dependencies(&probe(&["dash", "jwt"])),
-            vec!["dash>=4.1.0", "PyJWT>=2.8.0"]
+            vec!["dash>=4.1.0", "PyJWT>=2.15.0"]
         );
         assert!(console_dependencies(&probe(&["meerschaum", "dash"])).is_empty());
         assert!(console_dependencies(&probe(&["no Python interpreter"])).is_empty());

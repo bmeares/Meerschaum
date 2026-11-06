@@ -58,7 +58,7 @@ impl Plugin for NativeApi {
         ];
         json!({
             "schema_version": meerschaum_plugin::MANIFEST_SCHEMA_VERSION,
-            "meerschaum_version": "5.0.0", "python_version": "", "fingerprint": null,
+            "meerschaum_version": "5.0.1", "python_version": "", "fingerprint": null,
             "plugins": {"native_api": {
                 "name": "native_api", "version": "1.0.0",
                 "api_routes": routes.iter().map(RouteSpec::to_json).collect::<Vec<_>>(),

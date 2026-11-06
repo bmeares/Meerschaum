@@ -29,7 +29,7 @@ mrsm sync pipes -i api:prod
 
 ## Local daemons
 
-Job metadata lives in `$MRSM_ROOT_DIR/jobs/<name>/`; logs live in `$MRSM_ROOT_DIR/logs/`. `start`, `stop`, `pause`, and `delete jobs` manage the daemon. A local job does not restart itself after a host reboot; use systemd or another supervisor for that.
+Job metadata lives in `$MRSM_ROOT_DIR/jobs/<name>/`; logs live in `$MRSM_ROOT_DIR/logs/`. `start`, `stop`, `pause`, and `delete jobs` manage the daemon. A local job does not restart itself after a host reboot. While an API server runs on the root (`mrsm start api`, or a Docker container), it restarts stopped `--restart` jobs every second, so the jobs inside a container come back with it; jobs stopped by hand stay stopped. Otherwise use systemd or another supervisor.
 
 ## Systemd services
 

@@ -504,7 +504,7 @@ pub const ALL_PACKAGES: Group = &[
     ("httpcore", "httpcore>=1.0.9"),
     ("valkey", "valkey>=6.1.0"),
     ("jose", "python-jose>=3.5.0"),
-    ("jwt", "PyJWT>=2.8.0"),
+    ("jwt", "PyJWT>=2.15.0"),
 ];
 
 /// `packages[group]`.

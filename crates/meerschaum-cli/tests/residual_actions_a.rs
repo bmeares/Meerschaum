@@ -1725,7 +1725,11 @@ fn a_pipeline_with_a_timeout_runs_in_a_child_and_is_killed_when_late() {
         "30",
     ]);
     assert_eq!(fine.code, 0, "{}", fine.text);
-    assert!(fine.text.contains("5.0.0"), "{}", fine.text);
+    assert!(
+        fine.text.contains(env!("CARGO_PKG_VERSION")),
+        "{}",
+        fine.text
+    );
     assert!(!fine.text.contains("MRSM_RESULT"), "{}", fine.text);
 
     let failed = home.run(&["os", "false", ":", "--timeout-seconds", "30"]);

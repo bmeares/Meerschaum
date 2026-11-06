@@ -178,8 +178,9 @@ impl Daemon {
     /// `Daemon(daemon_id=...)` for an existing daemon (its `properties.json` must exist).
     ///
     /// Python reads the sysargs from `pickle.pkl`; Rust reads `target.args[0]` from the properties
-    /// (written by Rust) or splits the `label` (Python never persists `target`, see
-    /// [`Daemon::setup`]).
+    /// (written by Rust), then a v4 job's `pickle.pkl` (read as data, see [`crate::v4_pickle`]),
+    /// then splits the `label` (Python never persists `target`, see [`Daemon::setup`]; jobs v4
+    /// created through the API or a container have an empty label).
     pub fn open(daemon_id: &str, ctx: &JobsContext) -> Result<Daemon, DaemonError> {
         let paths = DaemonPaths::new(&ctx.paths, daemon_id);
         let Some(props) = properties::read_properties(&paths.properties) else {
@@ -190,9 +191,12 @@ impl Daemon {
             .and_then(Value::as_str)
             .unwrap_or(daemon_id)
             .to_string();
-        let from_target = sysargs_from_properties(&props);
+        // An empty persisted command (5.0.0 wrote one when it started a v4 job whose command it
+        // could not read) is no command: fall through to the pickle and the label.
+        let from_target = sysargs_from_properties(&props).filter(|args| !args.is_empty());
         let has_target = from_target.is_some();
         let target_args = from_target
+            .or_else(|| crate::v4_pickle::sysargs_from_file(&paths.pickle))
             .or_else(|| crate::shlex::split(&label).ok())
             .unwrap_or_default();
         Ok(Daemon {

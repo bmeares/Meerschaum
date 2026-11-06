@@ -4,7 +4,7 @@ Starting many jobs together can overload a host. Meerschaum spreads bulk starts 
 
 | Start | Delay and load check | Startup slot |
 |---|---|---|
-| `compose up`, `restart jobs`, multiple jobs, systemd restarts | Yes | Yes |
+| `compose up`, `restart jobs`, multiple jobs, systemd restarts, an API server restarting jobs | Yes | Yes |
 | `start job NAME` | No | Yes |
 | Any start with `--no-stagger` | No | No |
 

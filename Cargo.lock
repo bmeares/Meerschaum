@@ -1329,9 +1329,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.3"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
+checksum = "261af4dc7a06ea8a527a8717d8cbba3417530d6ea14e1edb3de6b67806be474f"
 dependencies = [
  "cmov",
 ]
@@ -2872,7 +2872,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "meerschaum-cli",
  "meerschaum-connector",
@@ -2888,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-cli"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2943,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-compose"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "glob",
  "indexmap",
@@ -2959,7 +2959,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2978,7 +2978,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-api"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "aws-lc-sys",
  "base64 0.23.1",
@@ -3004,7 +3004,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-sql"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3041,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-valkey"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "chrono",
  "fred",
@@ -3059,7 +3059,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-core"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "blake2",
  "chrono",
@@ -3089,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-engine"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "chrono",
  "fs4",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-jobs"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "chrono",
  "getrandom 0.4.3",
@@ -3130,7 +3130,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-kernel"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "arrow",
  "base64 0.23.1",
@@ -3150,7 +3150,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-plugin"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "arrow",
  "base64 0.23.1",
@@ -3176,7 +3176,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-py"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3213,7 +3213,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-server"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "async-trait",
  "aws-lc-sys",
@@ -3256,7 +3256,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-web"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -3284,7 +3284,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-worker"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "arrow",
  "chrono",
@@ -5519,9 +5519,9 @@ checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -6397,7 +6397,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
@@ -7381,18 +7381,18 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
 dependencies = [
  "rustls-pki-types",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -7933,18 +7933,18 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+checksum = "cdb02c3132d251ab1606e9fc913a7da6c6ed08cc263df15edf082e1dc497d157"
 dependencies = [
  "zstd-safe",
 ]
 
 [[package]]
 name = "zstd-safe"
-version = "7.3.0"
+version = "7.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
+checksum = "1c8ea04668f5de8d8d51051714ba560c9536519cadcdb8829bba4fe2ad159b03"
 dependencies = [
  "zstd-sys",
 ]

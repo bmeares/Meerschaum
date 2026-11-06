@@ -9917,7 +9917,7 @@ mrsm sync pipes -i api:prod
 
 ## Local daemons
 
-Job metadata lives in `$MRSM_ROOT_DIR/jobs/<name>/`; logs live in `$MRSM_ROOT_DIR/logs/`. `start`, `stop`, `pause`, and `delete jobs` manage the daemon. A local job does not restart itself after a host reboot; use systemd or another supervisor for that.
+Job metadata lives in `$MRSM_ROOT_DIR/jobs/<name>/`; logs live in `$MRSM_ROOT_DIR/logs/`. `start`, `stop`, `pause`, and `delete jobs` manage the daemon. A local job does not restart itself after a host reboot. While an API server runs on the root (`mrsm start api`, or a Docker container), it restarts stopped `--restart` jobs every second, so the jobs inside a container come back with it; jobs stopped by hand stay stopped. Otherwise use systemd or another supervisor.
 
 ## Systemd services
 
@@ -10067,7 +10067,7 @@ Starting many jobs together can overload a host. Meerschaum spreads bulk starts 
 
 | Start | Delay and load check | Startup slot |
 |---|---|---|
-| `compose up`, `restart jobs`, multiple jobs, systemd restarts | Yes | Yes |
+| `compose up`, `restart jobs`, multiple jobs, systemd restarts, an API server restarting jobs | Yes | Yes |
 | `start job NAME` | No | Yes |
 | Any start with `--no-stagger` | No | No |
 
@@ -15021,7 +15021,7 @@ Meerschaum v5 runs its core, CLI, jobs, Compose, HTTP API, and MCP server in Rus
 3. Install the optional packages your plugins and DataFrame code use.
 4. Review [permissions](#teams-access-and-permissions), especially accounts that run remote actions.
 5. Test one source sync, one transformation, and your scheduled jobs on a copy of the root.
-6. Check saved Job commands with `mrsm show jobs`. Re-enter a blank command with `mrsm edit jobs NAME` before restarting it.
+6. Check saved Job commands with `mrsm show jobs`. Jobs keep the commands 4.x saved (from 5.0.1); re-enter a command that is still blank with `mrsm edit jobs NAME` before restarting it.
 7. Upgrade the owning installation and restart running services. For Docker, replace the image.
 
 ```bash
@@ -16397,6 +16397,13 @@ Read the [migration guide](../reference/migrating-to-v5.md) before upgrading an 
 Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
+
+## 5.0.1
+
+- An API server restarts its root's stopped `--restart` jobs again, as in 4.x: jobs a container restart, a recreated container or a reboot stopped come back once the API starts, every second while it runs. Jobs stopped by hand stay stopped.
+- Jobs created by Meerschaum 4 keep their commands. 4.x saved the command of a job created through the API or in a container only in its `pickle.pkl`; 5.0.0 showed such a job with no command and could not restart it. The command is now read from that file as data (nothing in it is executed), also for jobs 5.0.0 already started without one.
+- TLS connections no longer trust certificates from the distrusted emSign intermediates (`rustls-webpki` 0.103.16, `webpki-roots` 1.0.11), and the bundled `zstd` (0.13.4) and `ctutils` (0.4.8) fix memory-safety and constant-time issues.
+- The `api`, `dash` and `full` extras require `PyJWT>=2.15.0`.
 
 ## 5.0.0
 

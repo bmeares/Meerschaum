@@ -47,6 +47,7 @@ pub mod executor;
 pub mod health;
 pub mod job;
 pub mod laps;
+pub mod monitor;
 pub mod names;
 pub mod ownership;
 pub mod process;
@@ -64,6 +65,7 @@ pub mod summary;
 pub mod supervisor;
 pub mod systemd;
 pub mod systemd_job;
+pub mod v4_pickle;
 
 pub use config::{JobPaths, JobsConfig, Seconds};
 pub use daemon::{Daemon, JobsContext, Status};

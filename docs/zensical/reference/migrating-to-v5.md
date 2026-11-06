@@ -9,7 +9,7 @@ Meerschaum v5 runs its core, CLI, jobs, Compose, HTTP API, and MCP server in Rus
 3. Install the optional packages your plugins and DataFrame code use.
 4. Review [permissions](#teams-access-and-permissions), especially accounts that run remote actions.
 5. Test one source sync, one transformation, and your scheduled jobs on a copy of the root.
-6. Check saved Job commands with `mrsm show jobs`. Re-enter a blank command with `mrsm edit jobs NAME` before restarting it.
+6. Check saved Job commands with `mrsm show jobs`. Jobs keep the commands 4.x saved (from 5.0.1); re-enter a command that is still blank with `mrsm edit jobs NAME` before restarting it.
 7. Upgrade the owning installation and restart running services. For Docker, replace the image.
 
 ```bash
