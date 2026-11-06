@@ -304,16 +304,27 @@ def test_the_instance_selector_types_only_at_an_idle_prompt(job_server, context)
     _focus(frame)
     page.keyboard.type('echo pending')
     frame.wait_for_function("document.querySelector('.xterm-rows').innerText.includes('echo pending')")
+    ran = len(_history(job_server))
     _select_instance(page, 'sql:w7console')
     time.sleep(2)
     assert 'instance sql:w7console' not in _screen(frame), _screen(frame)
     assert 'echo pending' in _screen(frame)
+    assert _history(job_server)[ran:] == [], (_history(job_server), _screen(frame))
     _focus(frame)
     page.keyboard.press('Control+u')
     _wait_idle(frame)
     _select_instance(page, 'sql:w7console')
+    ### The shell ran exactly the selector's line. It clears the screen before running a line, and
+    ### the typed line and that clear can reach the terminal in one write (tmux redraws only the
+    ### result), so the typed text is not always drawn: wait for the history and the answer.
+    expected = ['instance sql:w7console']
+    deadline = time.time() + 20
+    while time.time() < deadline and _history(job_server)[ran:] != expected:
+        time.sleep(0.25)
+    assert _history(job_server)[ran:] == expected, (_history(job_server), _screen(frame))
     frame.wait_for_function(
-        "() => document.querySelector('.xterm-rows').innerText.includes('instance sql:w7console')",
+        "() => document.querySelector('.xterm-rows').innerText"
+        ".includes('Default instance for the current shell: sql:w7console')",
         timeout=20000,
     )
     _wait_idle(frame, timeout=60.0)
