@@ -187,6 +187,38 @@ def wait_for(predicate, timeout=60.0, interval=0.05):
     raise TimeoutError("Timed out while waiting for a job.")
 
 
+def scope_detached_scan(Daemon):
+    """
+    Limit v4.1.4's detached-daemon scan to this generator's root.
+
+    Without a PID file, `Daemon.pid` falls back to `_find_detached_pids()`, which matches every
+    process on the host whose command line carries `daemon_id='<name>'`, whatever its root
+    (v4.1.6 matches only its own root, as `meerschaum-jobs` does). Once a scenario's daemon has
+    exited and `Daemon.status` has removed its PID file, a job of the same name elsewhere on the
+    host (a Rust supervisor from a concurrent `cargo test -p meerschaum-jobs`, which names its
+    jobs `with-env`, `failed`, `stopped`, ...) made the next `status` read `running` (the
+    fixture recorded `result` as "... is running."), and `kill()` signalled that process.
+    Keep only the processes started with this generator's `MRSM_ROOT_DIR`, which is all the
+    scan finds on an otherwise idle host.
+    """
+    from meerschaum.utils.packages import attempt_import
+    psutil = attempt_import('psutil')
+    find_detached_pids = Daemon._find_detached_pids
+    own_root = os.environ['MRSM_ROOT_DIR']
+
+    def _find_own_detached_pids(self):
+        pids = []
+        for pid in find_detached_pids(self):
+            try:
+                if psutil.Process(pid).environ().get('MRSM_ROOT_DIR') == own_root:
+                    pids.append(pid)
+            except Exception:
+                continue
+        return pids
+
+    Daemon._find_detached_pids = _find_own_detached_pids
+
+
 def child(tmp, out_path, source):
     tmp = pathlib.Path(tmp)
     root = tmp / 'root'
@@ -202,8 +234,9 @@ def child(tmp, out_path, source):
 
     from meerschaum.jobs import Job
     from meerschaum.utils.daemon import Daemon
+    scope_detached_scan(Daemon)
 
-    results = {'scenarios': {}, 'rotating': [], 'interceptor': [], 'systemd': [], 'names': {}}
+    results ={'scenarios': {}, 'rotating': [], 'interceptor': [], 'systemd': [], 'names': {}}
     jobs = []
 
     def record(name, job, files=None):
