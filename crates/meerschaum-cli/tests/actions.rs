@@ -351,10 +351,23 @@ fn show_plugins_scans_the_plugins_directories() {
     );
     // Startup discovers plugin metadata. Reuse the reference interpreter's environment
     // rather than asking Python to create dependency environments for these empty modules.
+    // Only when the worker runs the same Python: it recreates an environment built for another
+    // interpreter in place, which through these symlinks would rewrite `.venv-ref` itself.
     #[cfg(unix)]
     {
         let reference = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.venv-ref");
-        if reference.exists() {
+        let minor = |python: &Path| {
+            std::process::Command::new(python)
+                .args(["-I", "-c", "import sys; print(sys.version_info[:2])"])
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|output| output.stdout)
+        };
+        let reference_minor = minor(&reference.join("bin").join("python"));
+        if reference_minor.is_some()
+            && reference_minor == minor(&meerschaum_worker::worker::default_python())
+        {
             let venvs = tmp.path().join("venvs");
             std::fs::create_dir_all(&venvs).unwrap();
             for name in ["mrsm", "pkg", "single", "not_a_plugin"] {

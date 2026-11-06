@@ -23,6 +23,20 @@ pub fn python() -> PathBuf {
     meerschaum_worker::worker::default_python()
 }
 
+/// `major.minor` of an interpreter, or `None` when it cannot run.
+fn python_minor(python: &Path) -> Option<String> {
+    Command::new(python)
+        .args([
+            "-I",
+            "-c",
+            "import sys; print('%d.%d' % sys.version_info[:2])",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Whether Python with `pyarrow` and `pandas` is available (tests skip otherwise).
 pub fn python_available() -> bool {
     static OK: OnceLock<bool> = OnceLock::new();
@@ -186,7 +200,7 @@ impl TestEnv {
         let guard = "import meerschaum as _reference\n\
             assert _reference.__version__ == '4.1.4', \
             f'Expected released Meerschaum 4.1.4, imported {_reference.__version__} from {_reference.__file__}'\n";
-        let mut cmd = Command::new(python);
+        let mut cmd = Command::new(&python);
         cmd.args(["-s", "-E", "-c", &format!("{guard}{code}")])
             .current_dir(self.root.path())
             .env_remove("PYTHONPATH")
@@ -197,6 +211,24 @@ impl TestEnv {
             if key != "PYTHONPATH" {
                 cmd.env(key, value);
             }
+        }
+        // v4 and the worker share this root, and so its plugin environments, only when they run
+        // the same Python: v4 imports a plugin only from `venvs/<plugin>/lib/python3.X/site-packages`
+        // for its own 3.X (otherwise it reports the plugin's connector as invalid). Give it
+        // separate, empty plugin environments; its packages come from the reference venv itself.
+        if let Some(reference_minor) = python_minor(&python)
+            .filter(|minor| Some(minor) != python_minor(&self::python()).as_ref())
+        {
+            let venvs = self.root.path().join("venvs_reference");
+            let site = format!("lib/python{}/site-packages", reference_minor);
+            for entry in std::fs::read_dir(self.plugins.path()).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let name = name.strip_suffix(".py").unwrap_or(&name);
+                if !name.starts_with(['.', '_']) {
+                    std::fs::create_dir_all(venvs.join(name).join(&site)).unwrap();
+                }
+            }
+            cmd.env("MRSM_VENVS_DIR", venvs);
         }
         cmd
     }
