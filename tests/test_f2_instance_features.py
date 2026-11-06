@@ -20,6 +20,8 @@ import pytest
 import meerschaum as mrsm
 from meerschaum.connectors import allow_protected
 
+from tests._ports import service_port
+
 
 def _label(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
@@ -351,12 +353,12 @@ def test_protected_sqlite_reads_give_back_writable_connections(tmp_path):
 def test_protected_from_valkey_and_api_uris():
     """`?protected=true` on any connector URI marks it (`MRSM_VALKEY_<LABEL>`, `MRSM_API_<LABEL>`)."""
     valkey = mrsm.get_connector(
-        'valkey', _label('f2_vk'), uri='redis://localhost:6399/13?protected=true',
+        'valkey', _label('f2_vk'), uri=f'redis://localhost:{service_port("valkey")}/13?protected=true',
     )
     assert valkey.protected is True
     assert valkey._rust_client().uri.endswith('?protected=true')
     assert mrsm.get_connector(
-        'valkey', _label('f2_vk'), uri='redis://localhost:6399/13?protected=false',
+        'valkey', _label('f2_vk'), uri=f'redis://localhost:{service_port("valkey")}/13?protected=false',
     ).protected is False
     pipe = mrsm.Pipe('f2', 'valkey_uri', instance=valkey)
     success, msg = pipe.register()

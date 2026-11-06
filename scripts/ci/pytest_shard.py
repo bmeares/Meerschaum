@@ -29,6 +29,7 @@ LIVE_MODULES = {
 LIVE_TESTS = {
     'tests/test_access.py::test_valkey_teams_locks_and_users': 'mssql-valkey',
     'tests/test_utils_cache.py::test_valkey_backend_is_shared': 'mssql-valkey',
+    'tests/test_f2_instance_features.py::test_protected_from_valkey_and_api_uris': 'mssql-valkey',
     'tests/test_native_sync.py::test_a_valkey_instance_syncs_natively': 'mssql-valkey',
     'tests/test_native_sync.py::test_postgres_numeric_special_values_read_back_like_v4': 'postgres',
     'tests/test_pipe_methods_native.py::test_remote_sync_time_of_a_valkey_source': 'mssql-valkey',
