@@ -25,7 +25,7 @@ fn cargo_upgrade_uses_the_receipted_prefix_without_a_python_host() {
 set -eu
 printf '%s\n' "$@" > "$MRSM_TEST_INSTALL_ARGS"
 /bin/mv "$MRSM_TEST_INSTALL_PREFIX/bin/mrsm" "$MRSM_TEST_INSTALL_PREFIX/bin/old-mrsm"
-printf '#!/bin/sh\nprintf "Meerschaum v5.0.1\\n"\n' > "$MRSM_TEST_INSTALL_PREFIX/bin/mrsm"
+printf '#!/bin/sh\nprintf "Meerschaum v99.0.0\\n"\n' > "$MRSM_TEST_INSTALL_PREFIX/bin/mrsm"
 /bin/chmod +x "$MRSM_TEST_INSTALL_PREFIX/bin/mrsm"
 "#,
         )
@@ -38,7 +38,7 @@ printf '#!/bin/sh\nprintf "Meerschaum v5.0.1\\n"\n' > "$MRSM_TEST_INSTALL_PREFIX
         if shell {
             command.arg("--shell");
         } else {
-            command.args(["upgrade", "mrsm", "-y", "-A", "--version", "5.0.1"]);
+            command.args(["upgrade", "mrsm", "-y", "-A", "--version", "99.0.0"]);
         }
         command
             .env_clear()
@@ -55,7 +55,7 @@ printf '#!/bin/sh\nprintf "Meerschaum v5.0.1\\n"\n' > "$MRSM_TEST_INSTALL_PREFIX
                 .stdin
                 .as_mut()
                 .unwrap()
-                .write_all(b"upgrade mrsm -y -A --version 5.0.1\nEOF\n")
+                .write_all(b"upgrade mrsm -y -A --version 99.0.0\nEOF\n")
                 .unwrap();
         }
         drop(child.stdin.take());
@@ -66,7 +66,7 @@ printf '#!/bin/sh\nprintf "Meerschaum v5.0.1\\n"\n' > "$MRSM_TEST_INSTALL_PREFIX
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(output.status.success(), "{text}");
-        assert!(text.contains("Installed Meerschaum 5.0.1"), "{text}");
+        assert!(text.contains("Installed Meerschaum 99.0.0"), "{text}");
         let args = std::fs::read_to_string(receipt).unwrap();
         assert_eq!(
             args.lines().collect::<Vec<_>>(),
@@ -77,7 +77,7 @@ printf '#!/bin/sh\nprintf "Meerschaum v5.0.1\\n"\n' > "$MRSM_TEST_INSTALL_PREFIX
                 "--root",
                 prefix.to_str().unwrap(),
                 "--version",
-                "5.0.1",
+                "99.0.0",
                 "meerschaum"
             ]
         );
@@ -86,7 +86,7 @@ printf '#!/bin/sh\nprintf "Meerschaum v5.0.1\\n"\n' > "$MRSM_TEST_INSTALL_PREFIX
             assert!(
                 String::from_utf8_lossy(&output.stdout)
                     .trim_end()
-                    .ends_with("Meerschaum v5.0.1"),
+                    .ends_with("Meerschaum v99.0.0"),
                 "{text}"
             );
         }
