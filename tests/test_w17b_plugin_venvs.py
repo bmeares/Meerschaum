@@ -164,7 +164,13 @@ def _venv_with(root: pathlib.Path, venv: str, wheels: pathlib.Path, *requirement
             capture_output=True, text=True, timeout=300, check=True,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
-        message = f"Could not build the throwaway virtual environment '{venv}': {e}"
+        output = (getattr(e, 'stderr', None) or '') + (getattr(e, 'stdout', None) or '')
+        if isinstance(output, bytes):
+            output = output.decode(errors='replace')
+        message = (
+            f"Could not build the throwaway virtual environment '{venv}': {e}"
+            + (f"\n{output.strip()[-4000:]}" if output.strip() else '')
+        )
         if in_ci():
             pytest.fail(message)
         pytest.skip(message)
