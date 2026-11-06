@@ -46,6 +46,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 
@@ -201,11 +202,24 @@ STEPS = [
 
 REPO = str(HERE.parents[3])
 HOME = os.path.expanduser('~')
+# The reference interpreter's standard library may be a system Python (`/usr/lib64/python3.x`)
+# or a uv-managed one under the home directory, depending on the runner.
+STDLIB_DIRS = sorted(
+    {
+        spelling
+        for key in ('stdlib', 'platstdlib')
+        for spelling in (sysconfig.get_paths()[key], os.path.realpath(sysconfig.get_paths()[key]))
+    },
+    key=len,
+    reverse=True,
+)
 
 
 def normalize(text: str, root: str) -> str:
     text = text.replace(root, '<ROOT>')
     ### Python tracebacks (stderr) name the reference interpreter's paths.
+    for stdlib in STDLIB_DIRS:
+        text = text.replace(stdlib + '/', '<STDLIB>/')
     text = text.replace(REPO, '<REPO>')
     # A reference package may be reached through lib64 or the pinned mrsm-venv symlink.
     # Keep the recorded path spellings independent of which alias Python imported through.
