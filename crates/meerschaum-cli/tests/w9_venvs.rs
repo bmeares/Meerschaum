@@ -6,7 +6,8 @@
 //! `record_request` (the code `attempt_import` calls), and runs the `mrsm` binary against it.
 //! Nothing outside the temporary root is written: the root, its empty plugins directory and the
 //! worker environment are explicit, `venvs/mrsm` is a symlink to the reference environment
-//! (`.venv-ref`) that is only read, and every run prunes the named throwaway environment only.
+//! (`.venv-ref`, only when it runs the same Python as `python3`) that is only read, and every run
+//! prunes the named throwaway environment only.
 //!
 //! The tests skip (with a message) when `uv`, `python3`, the `uv` Python package or the reference
 //! environment is missing, and on non-Unix platforms.
@@ -72,6 +73,8 @@ struct Fixture {
     root: PathBuf,
     python: PathBuf,
     reference: PathBuf,
+    /// Whether `venvs/mrsm` links the reference (both run the same Python).
+    linked: bool,
 }
 
 impl Fixture {
@@ -159,16 +162,37 @@ impl Fixture {
     }
 }
 
-/// The names (not the contents) of the reference environment's top level, and whether it grew
-/// a requests ledger: the one thing a worker could write there.
-fn reference_snapshot(reference: &Path) -> (Vec<String>, bool) {
+/// The names (not the contents) of the reference environment's top level, its `pyvenv.cfg`
+/// (which changes if the environment is recreated), and whether it grew a requests ledger: the one
+/// thing a worker could write there.
+fn reference_snapshot(reference: &Path) -> (Vec<String>, String, bool) {
     let mut names: Vec<String> = std::fs::read_dir(reference)
         .unwrap()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    (names, reference.join(".mrsm_requests.json").exists())
+    (
+        names,
+        std::fs::read_to_string(reference.join("pyvenv.cfg")).unwrap_or_default(),
+        reference.join(".mrsm_requests.json").exists(),
+    )
+}
+
+/// `major.minor` of an interpreter, or `None` when it cannot run.
+fn python_minor(python: &Path) -> Option<String> {
+    let output = Command::new(python)
+        .args([
+            "-I",
+            "-c",
+            "import sys; print('%d.%d' % sys.version_info[:2])",
+        ])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn skip(reason: &str) -> Option<Fixture> {
@@ -194,13 +218,20 @@ fn fixture() -> Option<Fixture> {
     std::fs::create_dir_all(root.join("venvs")).unwrap();
     // The worker imports Meerschaum from this repository, whose own dependencies live in the
     // `mrsm` environment; point it at the reference environment (read only) instead of letting
-    // the first import install them from the network.
-    std::os::unix::fs::symlink(&reference, root.join("venvs").join("mrsm")).unwrap();
+    // the first import install them from the network. Only when both run the same Python: the
+    // worker recreates an `mrsm` environment built for another interpreter, which through the
+    // symlink would wipe `.venv-ref` for every later test on the runner.
+    let reference_minor = python_minor(&reference.join("bin").join("python"));
+    let linked = reference_minor.is_some() && reference_minor == python_minor(&python);
+    if linked {
+        std::os::unix::fs::symlink(&reference, root.join("venvs").join("mrsm")).unwrap();
+    }
     let fixture = Fixture {
         _tmp: tmp,
         root,
         python,
         reference,
+        linked,
     };
 
     // The worker's `uninstall packages` uses the `uv` Python package for `uv pip`.
@@ -356,16 +387,18 @@ fn prune_venvs_uninstalls_unrequested_packages_and_keeps_the_rest() {
 
     // Nothing outside the temporary root changed: the reference environment is only read.
     assert_eq!(reference_snapshot(&fixture.reference), before);
-    assert!(
-        fixture
-            .root
-            .join("venvs")
-            .join("mrsm")
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink()
-    );
+    if fixture.linked {
+        assert!(
+            fixture
+                .root
+                .join("venvs")
+                .join("mrsm")
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
 }
 
 #[test]
