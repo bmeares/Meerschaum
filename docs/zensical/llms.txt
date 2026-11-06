@@ -91,7 +91,7 @@
 
 ## Changelog
 - [Changelog](https://meerschaum.io/changelog/): Meerschaum 5 brings a Rust core, dependency-aware Pipelines, and a new web console.
-- [v5](https://meerschaum.io/changelog/v5/): - An API server restarts its root's stopped --restart jobs again, as in 4.x: jobs a container restart, a recreated container or a reboot stopped come back once the API starts, every second while it ru
+- [v5](https://meerschaum.io/changelog/v5/): - The console's Performance page keeps the window and page you chose when a Refresh (or the 30-second update) answers after you changed them; a late reply used to bring back the previous selection.
 - [v4](https://meerschaum.io/changelog/v4/): Historical release notes for the 4.x series.
 - [v3](https://meerschaum.io/changelog/v3/): Historical release notes for the 3.x series.
 - [v2](https://meerschaum.io/changelog/v2/): Historical release notes for the 2.x series.

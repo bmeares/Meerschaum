@@ -236,7 +236,7 @@ def child(tmp, out_path, source):
     from meerschaum.utils.daemon import Daemon
     scope_detached_scan(Daemon)
 
-    results ={'scenarios': {}, 'rotating': [], 'interceptor': [], 'systemd': [], 'names': {}}
+    results = {'scenarios': {}, 'rotating': [], 'interceptor': [], 'systemd': [], 'names': {}}
     jobs = []
 
     def record(name, job, files=None):

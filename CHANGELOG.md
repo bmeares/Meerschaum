@@ -4,6 +4,10 @@
 
 ## Meerschaum 5
 
+### Unreleased
+
+- The console's Performance page keeps the window and page you chose when a Refresh (or the 30-second update) answers after you changed them; a late reply used to bring back the previous selection.
+
 ### 5.0.1
 
 - An API server restarts its root's stopped `--restart` jobs again, as in 4.x: jobs a container restart, a recreated container or a reboot stopped come back once the API starts, every second while it runs. Jobs stopped by hand stay stopped.
