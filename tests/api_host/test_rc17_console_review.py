@@ -126,11 +126,12 @@ with patch.object(performance,'metrics',side_effect=read):
     }
     endpoint = next(str(rule) for rule in dash_app.server.url_map.iter_rules()
                     if str(rule).endswith('/_dash-update-component'))
+    ### No wildcard outputs: the renderer discards a superseded run's reply only for callbacks
+    ### whose outputs each resolve to one component (a late Refresh restored the old window).
+    assert not any(isinstance(value.component_id, dict) for value in registered['output'])
     response = dash_app.server.test_client().post(endpoint,json={
         'output':output,
-        ### A wildcard output lists the matching components (none on a page still loading).
-        'outputs':[[] if isinstance(value.component_id, dict) else
-                   {'id':value.component_id,'property':value.component_property}
+        'outputs':[{'id':value.component_id,'property':value.component_property}
                    for value in registered['output']],
         'inputs':[{**value,'value':values[value['id']+'.'+value['property']]}
                   for value in registered['inputs']],
@@ -150,13 +151,9 @@ with patch.object(performance,'metrics',side_effect=read):
     shape = rendered['performance-shape']['data']
     engine_shape = rendered['performance-engine-shape']['data']
     assert 'Engine' in str(rendered['performance-engine']['children'])
-    mounted = iter([[{'id':{'type':'performance-live','part':part},'property':'children'}
-                     for part in ('stats','coverage','history','notes')],
-                    [{'id':{'type':'performance-graph','chart':'results'},'property':'figure'}], []])
     response = dash_app.server.test_client().post(endpoint,json={
         'output':output,
-        'outputs':[next(mounted) if isinstance(value.component_id, dict) else
-                   {'id':value.component_id,'property':value.component_property}
+        'outputs':[{'id':value.component_id,'property':value.component_property}
                    for value in registered['output']],
         'inputs':[{**value,'value':values[value['id']+'.'+value['property']]}
                   for value in registered['inputs']],
@@ -169,9 +166,9 @@ with patch.object(performance,'metrics',side_effect=read):
     refreshed = response.get_json()['response']
     assert 'performance-body' not in refreshed, list(refreshed)
     assert 'performance-engine' not in refreshed, list(refreshed)
-    history_part = json.dumps({'part':'history','type':'performance-live'},separators=(',',':'))
-    assert '51–100 of 103 recent syncs' in str(refreshed[history_part]['children'])
-    assert 'figure' in refreshed[json.dumps({'chart':'results','type':'performance-graph'},separators=(',',':'))]
+    live = refreshed['performance-live-data']['data']
+    assert '51–100 of 103 recent syncs' in str(live['parts']['history'])
+    assert 'data' in live['charts']['results'] and 'layout' in live['charts']['results']
     with patch.object(callbacks.dash,'ctx',SimpleNamespace(triggered_id='performance-location')):
         query_result = callbacks.render_performance('/dash/performance',query,'24h',None,None,0,0,3,str(c),50,session)
     assert query_result[6:10] == (str(c),'7d',ref,None) and query_result[4] == 1

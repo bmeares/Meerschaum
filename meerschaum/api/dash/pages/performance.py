@@ -23,6 +23,8 @@ def route(pathname=None, href=None):
         dcc.Store(id='performance-shape'),
         ### What `performance-engine` lays out now (`performance.engine_shape()`).
         dcc.Store(id='performance-engine-shape'),
+        ### A refresh's update of the mounted parts, graphs and breakdowns, by key.
+        dcc.Store(id='performance-live-data'),
         html.Main([
             html.Div([html.H1('Performance'), dbc.Button(
                 'Refresh', id='performance-refresh', size='sm', color='secondary'),

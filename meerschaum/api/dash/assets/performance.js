@@ -4,6 +4,20 @@
     window.dash_clientside = window.dash_clientside || {};
     const state = {};
     window.dash_clientside.mrsmPerformance = {
+        /* A refresh's update (`performance-live-data`): each mounted part, graph and breakdown
+         * store takes its value by key; one the update does not name stays as it is. */
+        live: function (data) {
+            const noUpdate = window.dash_clientside.no_update;
+            const outputs = window.dash_clientside.callback_context.outputs_list || [];
+            const kinds = [['parts', 'part'], ['charts', 'chart'], ['groups', 'group']];
+            return kinds.map(([kind, key], index) => {
+                const values = (data && data[kind]) || {};
+                return (outputs[index] || []).map(output => {
+                    const name = output.id[key];
+                    return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : noUpdate;
+                });
+            });
+        },
         groups: function (data, search, sort, requestedPage) {
             if (!data) return [[], 1, 1, ''];
             const component = (type, props, namespace) => ({

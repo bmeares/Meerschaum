@@ -22,18 +22,22 @@ def follow_performance_location(search, path):
     return instance, selected['window'], selected['pipe'], selected['pipeline']
 
 
-#: The mounted parts a refresh updates in place: `(output index from the end, id key)`.
-IN_PLACE = ((-3, 'part'), (-2, 'chart'), (-1, 'group'))
-
-
-def _mounted():
-    """The ids of the `live()` parts, graphs and breakdown stores on the page now."""
-    try:
-        outputs = dash.ctx.outputs_list
-        return [[item['id'][key] for item in outputs[index]] if isinstance(outputs[index], list) else []
-                for index, key in IN_PLACE]
-    except Exception:
-        return [[] for _ in IN_PLACE]
+def _live_update(live, figures, stores, engine_live, engine_figures):
+    """
+    The in-place update for `performance-live-data`: the children of the `live()` parts, the
+    charts' figures and the breakdowns' rows by key (the Engine section's `engine-*` keys from its
+    own read). `assets/performance.js` (`mrsmPerformance.live`) sets them on the mounted
+    components; a key it does not hold leaves that component as it is.
+    """
+    def _merge(body, engine):
+        merged = {key: value for key, value in body.items() if not str(key).startswith('engine-')}
+        merged.update({key: value for key, value in engine.items() if str(key).startswith('engine-')})
+        return merged
+    return {
+        'parts': _merge(live, engine_live),
+        'charts': _merge(figures, engine_figures),
+        'groups': dict(stores),
+    }
 
 
 @dash_app.callback(
@@ -50,9 +54,11 @@ def _mounted():
     Output('performance-shape', 'data'),
     Output('performance-engine', 'children'),
     Output('performance-engine-shape', 'data'),
-    Output({'type': 'performance-live', 'part': ALL}, 'children'),
-    Output({'type': 'performance-graph', 'chart': ALL}, 'figure'),
-    Output({'type': 'performance-group-data', 'group': ALL}, 'data'),
+    ### Never a wildcard output here: the renderer discards the reply of a run that a newer run
+    ### superseded (a Refresh or a tick, then a new window) only when every output resolves to
+    ### one component, so a late reply used to restore the old window and page. The mounted parts
+    ### are set in the browser from this store instead (`mrsmPerformance.live`).
+    Output('performance-live-data', 'data'),
     Input('performance-location', 'pathname'),
     Input('performance-location', 'search'),
     Input('performance-window', 'value'),
@@ -93,8 +99,6 @@ def render_performance(path, search, window, pipe, pipeline, refresh, interval, 
     # Values and options share one response / callback owner, so a query cannot clear its
     # Dropdown before the authorized options arrive (nor race another writer of options).
     selection = (instance, window or '24h', pipe, pipeline)
-    mounted = _mounted()
-    unchanged = [[dash.no_update] * len(ids) for ids in mounted]
     try:
         data = performance.metrics(instance, session, window or '24h', pipe, pipeline)
         if trigger in ('performance-window', 'performance-pipe', 'performance-pipeline',
@@ -116,26 +120,18 @@ def render_performance(path, search, window, pipe, pipeline, refresh, interval, 
             figures = performance.chart_figures(data, performance._scope(data, shown, window or '24h'))
             stores = performance.group_stores(data, shown, window or '24h')
         engine_body, engine_layout, engine_live, engine_figures = engine
-        parts, charts, groups = mounted
         return (body, *controls, engine_body, engine_layout,
-                [_pick(part, live, engine_live) for part in parts],
-                [_pick(chart, figures, engine_figures) for chart in charts],
-                [stores.get(group, dash.no_update) for group in groups])
+                _live_update(live, figures, stores, engine_live, engine_figures))
     except PermissionError:
         return (dbc.Alert('Performance is not available for this selection.', color='secondary'),
                 performance.filter_options(value=pipe),
                 performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection,
-                None, None, None, *unchanged)
+                None, None, None, dash.no_update)
     except Exception:
         return (dbc.Alert('Performance could not be loaded. Try Refresh.', color='warning'),
                 performance.filter_options(value=pipe),
                 performance.filter_options(value=pipeline, kind='Pipeline'), 1, 1, True, *selection,
-                None, None, None, *unchanged)
-
-
-def _pick(key, body, engine):
-    """A mounted part's or graph's update: the Engine section's `engine-*`, else the body's."""
-    return (engine if str(key).startswith('engine-') else body).get(key, dash.no_update)
+                None, None, None, dash.no_update)
 
 
 def _engine(data, window, mounted_shape):
@@ -158,6 +154,16 @@ def _engine(data, window, mounted_shape):
         return dash.no_update, layout, {}, {}
     return (dash.no_update, layout, performance.engine_live_parts(health),
             performance.engine_figures(health, layout[0]))
+
+
+dash_app.clientside_callback(
+    ClientsideFunction(namespace='mrsmPerformance', function_name='live'),
+    Output({'type': 'performance-live', 'part': ALL}, 'children'),
+    Output({'type': 'performance-graph', 'chart': ALL}, 'figure'),
+    Output({'type': 'performance-group-data', 'group': ALL}, 'data'),
+    Input('performance-live-data', 'data'),
+    prevent_initial_call=True,
+)
 
 
 dash_app.clientside_callback(

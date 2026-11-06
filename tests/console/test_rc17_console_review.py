@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+import time
 from urllib.parse import urlencode
 
 import pytest
@@ -110,6 +112,64 @@ else: raise AssertionError('History did not reach the expected65 outcomes.')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
         assert not tab.errors, tab.errors
         page.screenshot(path=str(artifacts() / 'performance-history-375.png'), full_page=True)
+    finally:
+        context.close()
+
+
+def test_a_late_refresh_never_restores_the_previous_window_and_page(inspection_server, browser):
+    """
+    A Refresh still running when the window changes answers last: its reply (the old window, the
+    second page) must be discarded, not applied over the new selection. The Refresh's request is
+    held in the browser until the window's reply has arrived, which is what a slow host did.
+    """
+    setup = inspection_server.python('''
+import meerschaum as mrsm
+c=mrsm.get_connector('sql:w7console')
+p=mrsm.Pipe('review','late_refresh',instance=c,columns={'primary':'id'})
+assert p.register()[0]
+for index in range(25):
+    assert p.sync([{'id':index,'value':index}])[0]
+''')
+    assert setup.returncode == 0, setup.stdout[-2000:] + setup.stderr[-4000:]
+    context = browser.new_context(viewport={'width': 375, 'height': 844}, has_touch=True)
+    try:
+        tab = Tab(context.new_page(), inspection_server.base_url)
+        tab.login('rc16-ops', INSPECTION_PASSWORD, path='/dash')
+        page = tab.page
+        held = []
+
+        def hold_the_refresh(route):
+            changed = (json.loads(route.request.post_data or '{}') or {}).get('changedPropIds') or []
+            if 'performance-refresh.n_clicks' in changed:
+                held.append(route)
+                return
+            route.continue_()
+
+        page.route('**/_dash-update-component*', hold_the_refresh)
+        tab.goto('/dash/performance?' + urlencode({'pipe': 'sql:w7console|review|late_refresh|None'}),
+                 '#performance-page')
+        page.get_by_role('tab', name='Recent syncs', exact=True).click()
+        page.get_by_text('1–10 of 25 recent syncs', exact=True).wait_for()
+        page.locator('#performance-history-page .page-item:nth-last-child(2) .page-link').click()
+        page.get_by_text('11–20 of 25 recent syncs', exact=True).wait_for()
+        page.click('#performance-refresh')
+        deadline = time.monotonic() + 30
+        while not held and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert len(held) == 1, held
+        page.select_option('#performance-window', '7d')
+        page.get_by_text('1–10 of 25 recent syncs', exact=True).wait_for()
+        ### Now the Refresh is answered (computed for the old window and page), after the window.
+        with page.expect_response(
+            lambda response: 'performance-refresh.n_clicks' in (response.request.post_data or '')
+        ):
+            for route in held:
+                route.fulfill(response=route.fetch())
+        page.wait_for_timeout(1000)
+        assert page.input_value('#performance-window') == '7d'
+        assert page.inner_text('#performance-history-range') == '1–10 of 25 recent syncs'
+        assert page.locator('#performance-history tbody tr').count() == 10
+        assert not tab.errors, tab.errors
     finally:
         context.close()
 
