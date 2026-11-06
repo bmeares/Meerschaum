@@ -1,6 +1,6 @@
 {
  "generator": "crates/meerschaum-cli/tests/fixtures/gen_args.py",
- "python_version": "3.14.8",
+ "python_version": "3.14.10",
  "meerschaum_version": "4.1.4",
  "now": "2026-10-12T15:04:05.123456+00:00",
  "dateutil_default": "2026-10-12T00:00:00",

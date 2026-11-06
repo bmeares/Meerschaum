@@ -9,7 +9,9 @@
 #
 # Environment:
 #   MRSM_REF_VERSION   reference version             (default 4.1.4)
-#   MRSM_REF_PYTHON    Python for the venv (uv spec) (default 3.14; uv downloads it if missing)
+#   MRSM_REF_PYTHON    Python for the venv (uv spec) (default 3.14.10; always a uv-managed build, which uv
+#                      downloads if missing. An exact patch release: the fixtures record the interpreter
+#                      version, and a system Python can be replaced under the venv by an OS upgrade)
 #   MRSM_REF_EXTRAS    comma-separated meerschaum extras to preinstall (default "core,formatting", the v4 runtime
 #                      deps; set to "" for none, or e.g. "core,sql". Anything missing is installed by
 #                      v4 on demand into $MRSM_ROOT_DIR/venvs, unpinned)
@@ -19,7 +21,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV="$REPO/.venv-ref"
 VERSION="${MRSM_REF_VERSION:-4.1.4}"
-PY_SPEC="${MRSM_REF_PYTHON:-3.14}"
+PY_SPEC="${MRSM_REF_PYTHON:-3.14.10}"
 EXTRAS="${MRSM_REF_EXTRAS-core,formatting}"
 REQUIREMENTS="${MRSM_REF_REQUIREMENTS:-$REPO/scripts/parity/requirements.txt}"
 
@@ -46,23 +48,30 @@ installed_version() {
   (cd / && "$ref_py" -I -c 'from importlib.metadata import version; print(version("meerschaum"))' 2>/dev/null) || true
 }
 
+# The interpreter the venv actually runs: its link can outlive the Python it was built on (a distro
+# upgrade replaces /usr/bin/python3; uv moves its minor-version links), so it is part of the stamp.
+interpreter() {
+  (cd / && "$ref_py" -I -c 'import platform, sys; print(platform.python_version(), sys.base_prefix)' 2>/dev/null) || true
+}
+
 stamp="$VENV/.mrsm-ref-stamp"
 SORTED_GLOB="$REPO/scripts/parity/_mrsm_parity_sorted_glob.py"
 REFERENCE_GUARD="$REPO/scripts/parity/_mrsm_parity_reference.py"
-want_stamp="$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")|$(cksum < "$SORTED_GLOB")|$(cksum < "$REFERENCE_GUARD")"
+environment() { echo "$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")|$(interpreter)"; }
+want_stamp="$(environment)|$(cksum < "$SORTED_GLOB")|$(cksum < "$REFERENCE_GUARD")"
 if [ -z "$force" ] && [ -x "$ref_py" ] && [ "$(installed_version)" = "$VERSION" ] \
   && [ "$(cat "$stamp" 2>/dev/null)" = "$want_stamp" ]; then
   echo "Reference venv ready: $VENV (meerschaum $VERSION)"
   exit 0
 fi
 
-old_environment="$(cut -d '|' -f 1-4 "$stamp" 2>/dev/null || true)"
-want_environment="$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")"
+old_environment="$(cut -d '|' -f 1-5 "$stamp" 2>/dev/null || true)"
+want_environment="$(environment)"
 if [ -n "$force" ] || [ ! -x "$ref_py" ] || [ "$(installed_version)" != "$VERSION" ] \
   || { [ -n "$old_environment" ] && [ "$old_environment" != "$want_environment" ]; }; then
   rm -rf "$VENV"
   # --seed: v4 bootstraps its own venvs with `python -m pip`, which a bare uv venv lacks.
-  uv venv --seed --python "$PY_SPEC" "$VENV"
+  uv venv --seed --managed-python --python "$PY_SPEC" "$VENV"
 fi
 ref_py="$VENV/bin/python"
 [ -x "$ref_py" ] || ref_py="$VENV/Scripts/python.exe"
@@ -83,5 +92,5 @@ if [ "$got" != "$VERSION" ]; then
   echo "setup_reference.sh: expected meerschaum $VERSION in $VENV, got '${got:-nothing}'" >&2
   exit 1
 fi
-echo "$want_stamp" > "$stamp"
+echo "$(environment)|$(cksum < "$SORTED_GLOB")|$(cksum < "$REFERENCE_GUARD")" > "$stamp"
 (cd / && "$ref_py" -I -c 'import importlib.util, sys; from importlib.metadata import version; print("Reference venv ready:", sys.prefix, "meerschaum", version("meerschaum"), importlib.util.find_spec("meerschaum").origin)')

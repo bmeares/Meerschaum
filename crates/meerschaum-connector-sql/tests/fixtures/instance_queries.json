@@ -1,6 +1,6 @@
 {
  "meta": {
-  "python": "3.14.8",
+  "python": "3.14.10",
   "meerschaum": "4.1.4",
   "generator": "crates/meerschaum-connector-sql/tests/fixtures/gen_instance_queries.py",
   "num_cases": 2742
