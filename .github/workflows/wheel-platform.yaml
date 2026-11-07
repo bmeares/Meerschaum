@@ -65,7 +65,7 @@ jobs:
       if: ${{ runner.environment == 'github-hosted' }}
       with:
         shared-key: wheel-${{ inputs.target }}-release${{ inputs.experimental && '-cp314t' || '' }}
-        save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Record the host build compiler
       if: ${{ runner.os != 'Linux' }}
       run: |

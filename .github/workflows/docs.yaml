@@ -4,7 +4,7 @@ on:
   workflow_call:
   workflow_dispatch:
   push:
-    branches: [main, v5]
+    branches: [main]
   pull_request:
 
 permissions:

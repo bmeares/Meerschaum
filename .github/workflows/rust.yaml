@@ -5,7 +5,7 @@ name: rust
 
 on:
   push:
-    branches: [ main, v5 ]
+    branches: [ main ]
   pull_request:
   workflow_call:
     inputs:
@@ -277,13 +277,13 @@ jobs:
       - name: Toolchain
         run: scripts/rust/ci.sh setup
       # Hosted runners are ephemeral, so this cache lives in GitHub's cache storage, not on the
-      # self-hosted disk. Restored on every run, saved from `v5` only (a PR cache cannot be shared).
+      # self-hosted disk. Restored on every run, saved from `main` only (a PR cache cannot be shared).
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         # A persistent self-hosted runner keeps its own build cache; this action's cleanup deleted its rustup.
         if: ${{ runner.environment == 'github-hosted' }}
         with:
           shared-key: check-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo check --workspace
         run: scripts/rust/ci.sh check
 
@@ -326,7 +326,7 @@ jobs:
         if: ${{ runner.environment == 'github-hosted' }}
         with:
           shared-key: duckdb-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: DuckDB loader (download, verify, load, query)
         run: scripts/rust/ci.sh duckdb-platform
 

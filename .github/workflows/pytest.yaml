@@ -35,7 +35,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [main, staging, v5]
+    branches: [main, staging]
   pull_request:
     branches: [dev, main, staging]
   schedule:

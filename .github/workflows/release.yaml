@@ -17,7 +17,7 @@ on:
   push:
     # Register this new entrypoint on the v5 train before it reaches the default
     # branch. A definition-only push runs metadata checks, never release builds.
-    branches: [main, v5]
+    branches: [main]
     tags: ['v5*']
     paths: ['.github/workflows/release.yaml']
 

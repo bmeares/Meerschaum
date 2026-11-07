@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code working on **Meerschaum 5** (the `v5` branch). The design is
+Guidance for Claude Code working on **Meerschaum 5** (the `main` branch; the separate `v5` branch is retired). The design is
 `docs/design/v5.0.0.md` (read §4, §5, §6.1, §7, §8, §9, §11, §12, §14 and decisions D12/D14/D16/D20
 before changing architecture); build, CI and Docker are in `docs/design/v5-build.md`; crate conventions
 and layering are in `crates/README.md`; the user-facing story is `docs/zensical/reference/migrating-to-v5.md`.

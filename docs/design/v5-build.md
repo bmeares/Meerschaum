@@ -109,7 +109,7 @@ run the Rust suite without contacting an ambient Valkey service.
 ### Release candidate workflow
 
 ```bash
-git push origin v5 && gh workflow run release.yaml --ref v5   # dispatch at once (push/PR checks then wait for it)
+git push origin main && gh workflow run release.yaml --ref main   # dispatch at once (push/PR checks then wait for it)
 gh run list --workflow release.yaml --limit 3 --json databaseId,headSha,status,conclusion
 ```
 
@@ -124,7 +124,7 @@ The final gate verifies required platforms and seals every artifact digest in
 `release-candidate-manifest`. It never publishes. To verify the candidate again without building:
 
 ```bash
-gh workflow run release.yaml --ref v5 -f candidate_run_id=RUN_ID
+gh workflow run release.yaml --ref main -f candidate_run_id=RUN_ID
 ```
 
 A future `v5*` tag must match the source version and point to an exact commit with a successful,
@@ -408,8 +408,8 @@ procedure and the order of the 15 crates are in `.agents/skills/release/SKILL.md
 `[workspace.package]` and the lockstep `=` pins, `Cargo.lock`, `meerschaum/config/_version.py`, literals),
 `scripts/check_packaging.py`, `scripts/rust/ci.sh package` and `publish-dry-run`, dispatch `release.yaml` on the exact release commit, wait for its complete sealed candidate, download that run's verified wheels and sdist (`gh run download`), `twine check`, then the
 steps that need explicit authorization: PyPI `twine upload`, `cargo publish --workspace --exclude meerschaum-py`,
-the annotated tag (`v5.0.0rc1`) and a GitHub pre-release, and (separately) Docker. Release candidates are cut from the
-`v5` branch (no PR to `main`); `main` is merged at 5.0.0 final. The PyPI classifier is `Development Status ::
+the annotated tag (`v5.0.0rc1`) and a GitHub pre-release, and (separately) Docker. Releases are cut from
+`main` (the separate `v5` branch was retired after 5.0.1). The PyPI classifier is `Development Status ::
 4 - Beta` for a pre-release and `5 - Production/Stable` for 5.0.0 final. A pre-release gets only version-qualified
 Docker tags. The wheels uploaded are the CI artifacts of the release commit, never a local `python -m build` wheel
 (`linux_x86_64`, which PyPI rejects). The sdist needs a Rust toolchain and network access to crates.io and GitHub

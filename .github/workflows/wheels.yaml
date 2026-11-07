@@ -144,7 +144,7 @@ jobs:
       if: ${{ runner.environment == 'github-hosted' }}
       with:
         shared-key: binary-${{ matrix.target }}-release
-        save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v5' }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Versions (PEP 440 for the file name, Cargo for `mrsm --version`)
       run: |
         echo "VERSION=$(python scripts/check_packaging.py --version)" >> "$GITHUB_ENV"

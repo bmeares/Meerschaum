@@ -1,9 +1,9 @@
 ---
 name: release
-description: Meerschaum release process. Two sections - 5.x (the Rust/maturin train cut from the v5 branch - version bump across Cargo and Python, CI wheels for the exact commit, sdist, PyPI, crates.io workspace publish, Docker, tag and GitHub pre-release) and v4.x (dev to main PR, build.sh, twine). Use when cutting or staging a Meerschaum release or preparing a release commit.
+description: Meerschaum release process. Two sections - 5.x (the Rust/maturin train cut from main - version bump across Cargo and Python, CI wheels for the exact commit, sdist, PyPI, crates.io workspace publish, Docker, tag and GitHub pre-release) and v4.x (dev to main PR, build.sh, twine). Use when cutting or staging a Meerschaum release or preparing a release commit.
 ---
 
-# Meerschaum 5.x release process (the `v5` branch; rc and final)
+# Meerschaum 5.x release process (cut from `main`)
 
 **Nothing in this section publishes by itself, and nothing may be published without the user's explicit
 authorization for that exact step** (PyPI, crates.io, DockerHub, a pushed git tag, a GitHub release). Steps
@@ -27,7 +27,7 @@ maintainer to add a missing one.
 | `MRSM_DOCS_DIR` | 5.8, v4 §7 | the Meerschaum checkout on that host (absolute, or relative to the login directory) |
 | `MRSM_RUNNER_DIR` | v4 §4 | the directory of the self-hosted GitHub Actions runner |
 
-State at the end of an rc: one commit on `v5` (no PR to `main`; `main` is merged only for 5.0.0 final)
+State at the end of an rc: one commit on `main`
 carrying the bumped versions; that commit's CI green; a fresh artifact directory holding the wheels built by CI for that
 commit plus the sdist; the packages on PyPI and crates.io; the annotated tag `v5.0.0rc1` and a GitHub
 pre-release. Tag spelling: `v<PEP 440 version>`, i.e. `v5.0.0rc1`, `v5.0.0` (the `v5*` tag trigger of
@@ -60,7 +60,7 @@ persistent BuildKit cache. `buildx.sh --merge` joins the selected platforms (5.7
 
 ## 5.1 Prepare the release commit
 
-All on the `v5` branch; do not commit or tag as an agent unless the maintainer says so.
+All on `main`; do not commit or tag as an agent unless the maintainer says so.
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH" CARGO_INCREMENTAL=0
@@ -115,7 +115,7 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
    and mutates the shared `target/` and `$CARGO_HOME`: run it yourself when nothing else is building (tens
    of minutes), after `package`. It is the only check that the published crates compile against the
    released sqlx, so do it before step 5.5.
-5. Commit on `v5` (`🦀 v5.0.0rc1: ...`), push the branch: **[needs explicit user authorization to push]**.
+5. Commit on `main` (`🦀 v5.0.0rc1: ...`), push the branch: **[needs explicit user authorization to push]**.
 
 ## 5.2 CI on the release commit
 
@@ -123,7 +123,7 @@ Dispatch the single release candidate workflow on the exact branch commit:
 
 ```bash
 SHA=$(git rev-parse HEAD)
-git push origin v5 && gh workflow run release.yaml --ref v5   # dispatch immediately after the push
+git push origin main && gh workflow run release.yaml --ref main   # dispatch immediately after the push
 # Optional: add -f experimental=true for the separately gated Linux cp314t wheel.
 gh run list --workflow release.yaml --limit 3 --json databaseId,status,conclusion,headSha
 ```
@@ -156,7 +156,7 @@ Individual workflow dispatches are useful for diagnosis but do not replace the s
 To rehearse artifact verification without building or tagging:
 
 ```bash
-gh workflow run release.yaml --ref v5 -f candidate_run_id=RUN_ID
+gh workflow run release.yaml --ref main -f candidate_run_id=RUN_ID
 ```
 
 A pushed `v5*` tag only verifies the successful unexpired candidate for that exact commit and
@@ -299,9 +299,9 @@ passed every full gate before Docker consumes its sealed wheel and CLI. Local
 
 ```bash
 # No registry credentials are used by the candidate build.
-gh workflow run docker-build.yaml --ref v5 -f candidate_run_id=SDK_RUN_ID -f size_gate=enforce
+gh workflow run docker-build.yaml --ref main -f candidate_run_id=SDK_RUN_ID -f size_gate=enforce
 # After the Docker candidate passes, and publication is authorized:
-gh workflow run docker-build.yaml --ref v5 -f publish=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID -f size_gate=enforce
+gh workflow run docker-build.yaml --ref main -f publish=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID -f size_gate=enforce
 ```
 
 Dispatch the Docker candidate as soon as the SDK candidate succeeds (about 9 minutes on
@@ -366,7 +366,7 @@ in the release commit (5.1), not after the tag.
 
 # Meerschaum 4.x release process (legacy: v4.x releases from `dev` to `main`)
 
-**This section is for 4.x releases only.** 5.x uses the section above (the `v5` branch, CI-built wheels,
+**This section is for 4.x releases only.** 5.x uses the section above (cut from `main`, CI-built wheels,
 crates.io): do not use `scripts/build.sh` + `twine upload dist/*` for 5.x (it builds one local
 `linux_x86_64` wheel that PyPI rejects).
 
