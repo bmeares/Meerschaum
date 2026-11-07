@@ -6,8 +6,8 @@
 //! implementation's `get_data`, and the geometries, CRS and column dtypes must match.
 //!
 //! The v4 half needs the Python reference environment (`MRSM_TEST_PYTHON`, default
-//! `~/.config/meerschaum/venvs/mrsm/bin/python`, with geopandas and pyogrio) and skips without
-//! it. `MRSM_TEST_KEEP=1` keeps the files.
+//! `.venv-ref/bin/python` from `scripts/parity/setup_reference.sh`, which pins geopandas and
+//! pyogrio) and skips without it. `MRSM_TEST_KEEP=1` keeps the files.
 
 mod common;
 
@@ -314,8 +314,9 @@ fn python() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("MRSM_TEST_PYTHON") {
         return Some(PathBuf::from(p));
     }
-    let home = std::env::var("HOME").ok()?;
-    let p = Path::new(&home).join(".config/meerschaum/venvs/mrsm/bin/python");
+    // Never the home root's `mrsm` venv: its interpreter follows the system Python, so an OS
+    // upgrade leaves it on a new minor version without the geometry stack.
+    let p = repo_root().join(".venv-ref/bin/python");
     p.exists().then_some(p)
 }
 
