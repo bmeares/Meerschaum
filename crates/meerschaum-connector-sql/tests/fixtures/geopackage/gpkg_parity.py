@@ -100,7 +100,6 @@ def do_read(db_path, scenario_path):
 
 def do_ogr(db_path, scenario_path):
     import geopandas as gpd
-    import meerschaum as mrsm
     tmp_dir = tempfile.mkdtemp()
     try:
         copy = f"{tmp_dir}/copy.gpkg"
@@ -109,9 +108,12 @@ def do_ogr(db_path, scenario_path):
         con.execute("UPDATE gpkg_ogr_contents SET feature_count = NULL")
         con.commit()
         con.close()
+        # Resolve targets against this GeoPackage: a bare `mrsm.Pipe(...)` would look its id up
+        # on the default instance (`sql:main`) and need a reachable PostgreSQL.
+        conn = get_conn(copy)
         out = {}
         for spec in load(scenario_path)['pipes']:
-            target = mrsm.Pipe(spec['connector_keys'], spec['metric_key'], spec['location_key']).target
+            target = get_pipe(conn, spec).target
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 gdf = gpd.read_file(copy, layer=target)
