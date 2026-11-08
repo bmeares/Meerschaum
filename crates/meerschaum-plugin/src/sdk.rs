@@ -1,7 +1,7 @@
 //! Safe, synchronous author SDK. The host serializes calls into each loaded plugin.
 use crate::{Frame, Result, abi::*, error};
 use arrow::{
-    ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream},
+    ffi_stream::{FFI_ArrowArrayStream, RecordBatchStreamReader},
     record_batch::{RecordBatch, RecordBatchIterator, RecordBatchReader},
 };
 use indexmap::IndexMap;
@@ -155,7 +155,7 @@ pub(crate) fn frame(stream: FFI_ArrowArrayStream) -> Result<Option<Frame>> {
     if stream.release().is_none() {
         return Ok(None);
     }
-    let reader = ArrowArrayStreamReader::try_new(stream).map_err(error)?;
+    let reader = RecordBatchStreamReader::try_new(stream).map_err(error)?;
     let schema = reader.schema();
     let mut batches = reader
         .collect::<std::result::Result<Vec<_>, _>>()

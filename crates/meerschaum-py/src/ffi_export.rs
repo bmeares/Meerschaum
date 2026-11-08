@@ -123,7 +123,7 @@ mod tests {
     use super::*;
     use arrow::array::{Int32Array, Int64Array, StringArray};
     use arrow::datatypes::Field;
-    use arrow::ffi_stream::ArrowArrayStreamReader;
+    use arrow::ffi_stream::RecordBatchStreamReader;
     use std::collections::HashMap;
 
     fn schema() -> SchemaRef {
@@ -153,7 +153,7 @@ mod tests {
         reader: Box<dyn RecordBatchReader + Send>,
     ) -> (SchemaRef, Vec<Result<RecordBatch, ArrowError>>) {
         let stream = FFI_ArrowArrayStream::new(reader);
-        let reader = ArrowArrayStreamReader::try_new(stream).unwrap();
+        let reader = RecordBatchStreamReader::try_new(stream).unwrap();
         let schema = reader.schema();
         (schema, reader.collect())
     }
