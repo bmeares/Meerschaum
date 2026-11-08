@@ -66,11 +66,18 @@ def _activate_plugin_venv(function: Any, debug: bool = False) -> None:
         pass
 
 
+#: The Dash callback functions each plugin registered while the console started, by plugin name.
+plugin_callbacks: Dict[str, List[Any]] = {}
+
+
 def init_dash_plugins(debug: bool = False):
     """
     Fire the initial callbacks for Dash plugins.
     """
+    from meerschaum.plugins import _callback_registrations, _new_callback_functions
+    from meerschaum.api.host._app import plugin_name_of
     for _module_name, _functions in list(_dash_plugins.items()):
+        before = _callback_registrations(dash_app)
         for _function in list(_functions):
             _activate_plugin_venv(_function, debug=debug)
             try:
@@ -82,6 +89,42 @@ def init_dash_plugins(debug: bool = False):
                     + traceback.format_exc(),
                     stack=False,
                 )
+        plugin_callbacks.setdefault(plugin_name_of(_module_name), []).extend(
+            _new_callback_functions(before, _callback_registrations(dash_app))
+        )
+
+
+def warn_private_callbacks_on_public_pages() -> List[str]:
+    """
+    Warn about each public Dash page (`@web_page(login_required=False)`) whose plugin registered
+    callbacks but made none of them public: anonymous visitors would see the page, but its
+    callbacks answer only signed-in users. Page-contract pages run no Dash callbacks and are
+    skipped, as is a console without the session guard. Return the warned paths.
+    """
+    from meerschaum.plugins import _get_parent_plugin, _is_public_callback
+    from meerschaum.api.host._callbacks import callbacks_require_session
+    if not callbacks_require_session():
+        return []
+    warned = []
+    for page_group, pages_dicts in list(_plugin_endpoints_to_pages.items()):
+        for endpoint, page_dict in list(pages_dicts.items()):
+            path = console_path(endpoint)
+            if page_dict.get('login_required', True) or path in contract_pages:
+                continue
+            plugin = _get_parent_plugin(function=page_dict['function']) or page_group
+            functions = plugin_callbacks.get(plugin, [])
+            if not functions or any(_is_public_callback(func) for func in functions):
+                continue
+            warned.append(path)
+            warn(
+                f"The page '{path}' of plugin '{plugin}' is public (login_required=False), "
+                + f"but none of the plugin's {len(functions)} Dash callback(s) are: "
+                + "visitors without a console session get no updates from them. "
+                + "Register them in a `@dash_plugin(public=True)` function or with "
+                + "`@web_callback(..., public=True)`.",
+                stack=False,
+            )
+    return warned
 
 
 def console_path(endpoint: str) -> str:
@@ -257,6 +300,10 @@ def register_plugins(debug: bool = False) -> None:
     """
     init_dash_plugins(debug=debug)
     add_plugin_pages(debug=debug)
+    try:
+        warn_private_callbacks_on_public_pages()
+    except Exception:
+        warn(f"Could not check the plugins' public pages:\n{traceback.format_exc()}", stack=False)
     try:
         add_plugin_assets()
     except Exception:
