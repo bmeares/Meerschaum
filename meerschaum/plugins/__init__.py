@@ -711,22 +711,27 @@ def _registering_public_callbacks(dash_app: Any):
     try:
         yield
     finally:
-        after = _callback_registrations(dash_app)
-        functions = []
-        for key in ('blueprint', 'global_blueprint'):
-            known = {id(item) for item in before[key]}
-            functions.extend(
-                getattr(item, 'f', None) for item in after[key] if id(item) not in known
-            )
-        for key in ('map', 'global_map'):
-            functions.extend(
-                (spec or {}).get('callback', None)
-                for callback_id, spec in after[key].items()
-                if callback_id not in before[key]
-            )
-        for func in functions:
-            if callable(func):
-                _mark_public_callback(func)
+        for func in _new_callback_functions(before, _callback_registrations(dash_app)):
+            _mark_public_callback(func)
+
+
+def _new_callback_functions(before: Dict[str, Any], after: Dict[str, Any]) -> List[Any]:
+    """
+    Return the callback functions registered between two `_callback_registrations()` snapshots.
+    """
+    functions = []
+    for key in ('blueprint', 'global_blueprint'):
+        known = {id(item) for item in before[key]}
+        functions.extend(
+            getattr(item, 'f', None) for item in after[key] if id(item) not in known
+        )
+    for key in ('map', 'global_map'):
+        functions.extend(
+            (spec or {}).get('callback', None)
+            for callback_id, spec in after[key].items()
+            if callback_id not in before[key]
+        )
+    return [func for func in functions if callable(func)]
 
 
 _dash_plugins = {}
