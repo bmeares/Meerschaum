@@ -61,7 +61,7 @@ jobs:
       full: ${{ steps.changes.outputs.full }}
       reused: ${{ steps.reuse.outputs.reused }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}' }
       - id: reuse
         # A candidate already running at this commit is waited for on this hosted runner instead of
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Toolchain
         run: scripts/rust/ci.sh setup
@@ -112,7 +112,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
@@ -134,7 +134,7 @@ jobs:
       cancel-in-progress: false
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
@@ -163,7 +163,7 @@ jobs:
         run: python3 scripts/ci/native_backends.py --cleanup --root "$RUNNER_TEMP/mrsm-native-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
       - name: Retain native backend results
         if: ${{ always() && needs.changes.outputs.full == 'true' && steps.native_backend_checks.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-backend-results-${{ github.run_attempt }}
           path: ${{ runner.temp }}/mrsm-native-${{ github.run_id }}-${{ github.run_attempt }}
@@ -179,7 +179,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
@@ -204,7 +204,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
@@ -229,7 +229,7 @@ jobs:
       cancel-in-progress: false
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
@@ -239,7 +239,7 @@ jobs:
         run: scripts/rust/ci.sh parity
       - name: Retain detailed reference-generator output
         if: ${{ always() && env.MRSM_PARITY_LOGS_DIR != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: parity-generator-logs-${{ github.run_attempt }}
           path: ${{ env.MRSM_PARITY_LOGS_DIR }}
@@ -267,9 +267,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { persist-credentials: false, ref: '${{ github.sha }}' }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         # The self-hosted Mac keeps Python 3.13 on its runner PATH (setup-python cannot install there).
         if: ${{ runner.environment == 'github-hosted' }}
         with:
@@ -278,7 +278,7 @@ jobs:
         run: scripts/rust/ci.sh setup
       # Hosted runners are ephemeral, so this cache lives in GitHub's cache storage, not on the
       # self-hosted disk. Restored on every run, saved from `main` only (a PR cache cannot be shared).
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         # A persistent self-hosted runner keeps its own build cache; this action's cleanup deleted its rustup.
         if: ${{ runner.environment == 'github-hosted' }}
         with:
@@ -312,16 +312,16 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { persist-credentials: false, ref: '${{ github.sha }}' }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         # The self-hosted Mac keeps Python 3.13 on its runner PATH (setup-python cannot install there).
         if: ${{ runner.environment == 'github-hosted' }}
         with:
           python-version: '3.13'
       - name: Toolchain
         run: scripts/rust/ci.sh setup
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         # A persistent self-hosted runner keeps its own build cache; this action's cleanup deleted its rustup.
         if: ${{ runner.environment == 'github-hosted' }}
         with:

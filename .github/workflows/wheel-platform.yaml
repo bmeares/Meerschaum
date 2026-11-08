@@ -42,11 +42,11 @@ jobs:
     outputs:
       candidate: ${{ steps.candidate.outcome == 'success' }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         ref: ${{ github.sha }}
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -60,7 +60,7 @@ jobs:
         test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
         echo "$dir" >> "$GITHUB_PATH"
         "$dir/python" --version
-    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
       # A persistent self-hosted runner keeps its own build cache; this action's cleanup deleted its rustup.
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -139,7 +139,7 @@ jobs:
     - name: Record exact-commit wheel provenance
       run: |
         python scripts/ci/artifacts.py create --kind wheel --profile release --target "${{ inputs.target }}" --artifact-dir dist --output dist/provenance.json --toolchain-file wheel-toolchain.txt
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: wheel-candidate-${{ inputs.artifact }}
         path: dist/*
@@ -159,7 +159,7 @@ jobs:
         - '3.11'
         - '3.14'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         path: smoke-src
@@ -172,7 +172,7 @@ jobs:
           rust-toolchain.toml
         sparse-checkout-cone-mode: false
         ref: ${{ github.sha }}
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -186,7 +186,7 @@ jobs:
         test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
         echo "$dir" >> "$GITHUB_PATH"
         "$dir/python" --version
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: wheel-candidate-${{ inputs.artifact }}
         path: dist
@@ -304,7 +304,7 @@ jobs:
     if: ${{ !cancelled() && inputs.musl && needs.build.outputs.candidate == 'true' }}
     runs-on: ${{ startsWith(inputs.smoke-os, '[') && fromJSON(inputs.smoke-os) || inputs.smoke-os }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         path: smoke-src
@@ -318,7 +318,7 @@ jobs:
           rust-toolchain.toml
         sparse-checkout-cone-mode: false
         ref: ${{ github.sha }}
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -332,7 +332,7 @@ jobs:
         test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
         echo "$dir" >> "$GITHUB_PATH"
         "$dir/python" --version
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: wheel-candidate-${{ inputs.artifact }}
         path: dist
@@ -357,7 +357,7 @@ jobs:
     outputs:
       verified: ${{ steps.smoke.outcome == 'success' }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         ref: ${{ github.sha }}
@@ -369,10 +369,10 @@ jobs:
           Cargo.lock
           rust-toolchain.toml
         sparse-checkout-cone-mode: false
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       with:
         python-version: 3.14t
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: wheel-candidate-${{ inputs.artifact }}
         path: dist
@@ -409,11 +409,11 @@ jobs:
       == 'success') || (!inputs.experimental && !inputs.musl && needs.smoke.result == 'success')) }}
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         ref: ${{ github.sha }}
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -427,7 +427,7 @@ jobs:
         test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
         echo "$dir" >> "$GITHUB_PATH"
         "$dir/python" --version
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: wheel-candidate-${{ inputs.artifact }}
         path: dist
@@ -435,7 +435,7 @@ jobs:
       run: |
         python scripts/ci/artifacts.py verify --manifest "dist/provenance.json" --profile release --kind wheel --target "${{ inputs.target }}"
     - name: Upload only after matching platform smoke passes
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.artifact }}
         path: dist/*

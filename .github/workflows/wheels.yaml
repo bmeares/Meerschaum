@@ -31,11 +31,11 @@ jobs:
       experimental_wheels: ${{ steps.matrix.outputs.experimental_wheels }}
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         ref: ${{ github.sha }}
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -92,7 +92,7 @@ jobs:
     needs: metadata
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         ref: ${{ github.sha }}
@@ -103,7 +103,7 @@ jobs:
         args: --out dist
     - name: Record exact-commit source provenance
       run: python scripts/ci/artifacts.py create --kind sdist --profile release --target source --artifact-dir dist --output dist/provenance.json
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: sdist
         path: dist/*
@@ -121,11 +121,11 @@ jobs:
     env:
       EXT: ${{ matrix.ext }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         persist-credentials: false
         ref: ${{ github.sha }}
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       # The self-hosted Mac keeps its Pythons in its tool cache (setup-python cannot install there).
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -139,7 +139,7 @@ jobs:
         test -n "$dir" || { echo "No Python $want under $RUNNER_TOOL_CACHE/Python" >&2; exit 1; }
         echo "$dir" >> "$GITHUB_PATH"
         "$dir/python" --version
-    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
       # A persistent self-hosted runner keeps its own build cache; this action's cleanup deleted its rustup.
       if: ${{ runner.environment == 'github-hosted' }}
       with:
@@ -210,7 +210,7 @@ jobs:
     - name: Record exact-commit binary provenance
       run: |
         python scripts/ci/artifacts.py create --kind binary --profile release --target "${{ matrix.target }}" --artifact-dir out --output out/provenance.json --toolchain-file binary-toolchain.txt
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: mrsm-${{ env.VERSION }}-${{ matrix.target }}
         path: out/*
@@ -218,7 +218,7 @@ jobs:
     - name: Record the matching console fixture provenance
       if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
       run: python scripts/ci/console_fixture.py record --output console-native-fixture --profile release --toolchain-file binary-toolchain.txt
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
       with:
         name: console-native-fixture-release

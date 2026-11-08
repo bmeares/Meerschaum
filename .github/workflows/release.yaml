@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {persist-credentials: false, ref: '${{ github.sha }}'}
       - run: python scripts/check_packaging.py
 
@@ -81,13 +81,13 @@ jobs:
           results = {name: job['result'] for name, job in json.loads(os.environ['NEEDS']).items()}
           assert all(value == 'success' for value in results.values()), results
           PY
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {persist-credentials: false, ref: '${{ github.sha }}'}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: {pattern: 'wheels-*', path: release-artifacts}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: {pattern: 'mrsm-*', path: release-artifacts}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: {name: sdist, path: release-artifacts/sdist}
       - name: Record exact tested artifact bytes and configurations
         env:
@@ -95,7 +95,7 @@ jobs:
         run: |
           checks="$(python -c 'import json,os; print(json.dumps({k:v["result"] for k,v in json.loads(os.environ["NEEDS"]).items()}))')"
           python scripts/ci/release_gate.py create --artifacts release-artifacts --manifest release-candidate.json --checks-json "$checks"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-candidate-manifest
           path: release-candidate.json
@@ -114,7 +114,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {persist-credentials: false, ref: '${{ github.sha }}'}
       - name: The tag agrees with the candidate version
         if: ${{ github.ref_type == 'tag' }}
