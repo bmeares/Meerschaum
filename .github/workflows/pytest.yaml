@@ -63,7 +63,7 @@ jobs:
       binary_profile: ${{ steps.plan.outputs.binary_profile }}
       reused: ${{ steps.reuse.outputs.reused }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}'}
       - id: reuse
         # A candidate already running at this commit is waited for on this hosted runner instead of
@@ -108,7 +108,7 @@ jobs:
       CARGO_BUILD_JOBS: '16'
       MRSM_TEST_CONSOLE: ${{ (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
       - name: Clean the runner checkout, preserving build and dependency caches
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
@@ -118,11 +118,11 @@ jobs:
         run: scripts/rust/ci.sh disk-guard
       - name: Build wheel and CLI before starting any test services
         run: bash scripts/ci/build_pytest.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: pytest-wheel, path: '${{ env.CI_ARTIFACT_DIR }}/wheel/*', if-no-files-found: error, retention-days: 7}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: pytest-binary, path: '${{ env.CI_ARTIFACT_DIR }}/binary/*', if-no-files-found: error, retention-days: 7}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ env.MRSM_TEST_CONSOLE == '1' }}
         with: {name: console-native-fixture-debug, path: '${{ env.CI_ARTIFACT_DIR }}/console-native-fixture/**', if-no-files-found: error, retention-days: 7}
 
@@ -149,23 +149,23 @@ jobs:
       MRSM_TEST_CONSOLE_DIAG_DIR: ${{ github.workspace }}/.ci-artifacts/console-diagnostics
       PYTHONPATH: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
       - name: Clean the runner checkout, preserving build and dependency caches
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.changes.outputs.wheel_artifact }}
           path: ${{ env.PYTEST_ARTIFACT_DIR }}/wheel
           run-id: ${{ inputs.artifacts_run_id || github.run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.changes.outputs.binary_artifact }}
           path: ${{ env.PYTEST_ARTIFACT_DIR }}/binary
           run-id: ${{ inputs.artifacts_run_id || github.run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ matrix.shard == 'core' && env.MRSM_TEST_CONSOLE == '1' }}
         with:
           name: ${{ inputs.profile == 'release' && 'console-native-fixture-release' || 'console-native-fixture-debug' }}
@@ -184,7 +184,7 @@ jobs:
         run: python scripts/ci/services.py cleanup --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}"
       - name: Preserve failing console tests' screenshots, network timelines and server logs
         if: ${{ failure() && matrix.shard == 'core' && env.MRSM_TEST_CONSOLE == '1' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: console-diagnostics-${{ github.run_attempt }}
           path: ${{ env.MRSM_TEST_CONSOLE_DIAG_DIR }}
@@ -192,7 +192,7 @@ jobs:
           retention-days: 14
       - name: Preserve shard ownership and collection evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-evidence-${{ matrix.shard }}
           path: |

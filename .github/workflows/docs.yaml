@@ -21,7 +21,7 @@ jobs:
     outputs:
       docs: ${{ steps.changes.outputs.docs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {persist-credentials: false, ref: '${{ github.sha }}', fetch-depth: 1}
       - name: Check documentation inputs
         id: changes
@@ -50,9 +50,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {persist-credentials: false, ref: '${{ github.sha }}'}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           cache: pip
@@ -67,7 +67,7 @@ jobs:
       - name: Build the website with strict link and configuration checks
         working-directory: docs
         run: python -m zensical build --strict
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docs-preview
           path: docs/site
