@@ -15,6 +15,7 @@ GeoPandas frames are covered separately when those packages are installed.
 """
 
 from tests._ports import service_port
+from tests._schema import create_schema
 
 import copy
 import os
@@ -1314,7 +1315,7 @@ def test_numeric_values_read_back_like_v4(flavor, tmp_path, native_calls):
     """
     instance = _numeric_instance(flavor, tmp_path)
     if flavor == 'postgis':
-        instance.exec('CREATE SCHEMA IF NOT EXISTS "w15l_num"')
+        create_schema(instance, 'w15l_num')
     values = list(NUMERIC_VALUES) + ([FORTY_DIGITS] if flavor == 'postgis' else [])
     docs = [
         {'dt': START + timedelta(hours=i), 'id': i, 'n': value}
@@ -1430,7 +1431,7 @@ def test_in_memory_sqlite_is_one_database_for_pipes_and_sqlalchemy(native_calls)
 def test_postgres_numeric_special_values_read_back_like_v4(tmp_path):
     """`NaN` / `Infinity` / `-Infinity` read from a `NUMERIC` column are `Decimal` objects."""
     instance = _numeric_instance('postgis', tmp_path)
-    instance.exec('CREATE SCHEMA IF NOT EXISTS "w15l_num"')
+    create_schema(instance, 'w15l_num')
     def outcome():
         pipe = mrsm.Pipe(
             'w15l', 'numeric_special', instance=instance,
@@ -1490,7 +1491,7 @@ def test_nan_and_infinity_numerics_are_stored_like_v4(flavor, tmp_path, native_c
     from meerschaum.utils.sql import sql_item_name
     instance = _numeric_instance(flavor, tmp_path)
     if flavor == 'postgis':
-        instance.exec('CREATE SCHEMA IF NOT EXISTS "w15l_num"')
+        create_schema(instance, 'w15l_num')
     specials = [Decimal('NaN'), None]
     if flavor in ('sqlite', 'postgis'):
         specials += [Decimal('Infinity'), Decimal('-Infinity')]

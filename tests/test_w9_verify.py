@@ -12,6 +12,7 @@ in no config file): the Rust session must use them instead of reading the config
 """
 
 from tests._ports import service_port
+from tests._schema import create_schema
 
 import os
 import uuid
@@ -56,7 +57,7 @@ def _connector(flavor: str, label: str, tmp_path):
             host='localhost',
             schema=SCHEMA,
         )
-        conn.exec(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"')
+        create_schema(conn, SCHEMA)
         return conn
     raise ValueError(flavor)
 

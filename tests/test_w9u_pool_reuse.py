@@ -12,6 +12,7 @@ Schema `w9u`.
 """
 
 from tests._ports import service_port
+from tests._schema import create_schema
 
 import os
 import uuid
@@ -52,7 +53,7 @@ def test_repeated_reads_open_no_new_connections():
     observer = mrsm.get_connector(
         'sql', label + '_obs', uri=PG_BASE_URI, schema=SCHEMA,
     )
-    observer.exec(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"')
+    create_schema(observer, SCHEMA)
     pipe_keys = ('w9u', 'pool', label)
     pipe = mrsm.Pipe(*pipe_keys, instance=conn, columns={'datetime': 'ts', 'id': 'id'})
     pipe.delete()
