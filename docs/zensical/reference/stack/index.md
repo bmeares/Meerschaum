@@ -81,8 +81,8 @@ so a minimal Rust plugin can build offline. Additional plugin dependencies use n
 downloads. Native-only deployments never need a Python host. Mount `/home/meerschaum/.cargo`
 when you want dependency downloads to persist across `rust-full` or `full` containers.
 
-Pin a version with `{version}-{variant}`, for example `5.0.1-rust` or
-`5.0.1-full`. Releases publish `linux/amd64` and `linux/arm64` and update the floating tags;
+Pin a version with `{version}-{variant}`, for example `5.0.2-rust` or
+`5.0.2-full`. Releases publish `linux/amd64` and `linux/arm64` and update the floating tags;
 pre-releases publish only version-qualified tags, for `linux/amd64`.
 `{version}-api` continues to alias `{version}-full`.
 

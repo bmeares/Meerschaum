@@ -6196,8 +6196,8 @@ so a minimal Rust plugin can build offline. Additional plugin dependencies use n
 downloads. Native-only deployments never need a Python host. Mount `/home/meerschaum/.cargo`
 when you want dependency downloads to persist across `rust-full` or `full` containers.
 
-Pin a version with `{version}-{variant}`, for example `5.0.1-rust` or
-`5.0.1-full`. Releases publish `linux/amd64` and `linux/arm64` and update the floating tags;
+Pin a version with `{version}-{variant}`, for example `5.0.2-rust` or
+`5.0.2-full`. Releases publish `linux/amd64` and `linux/arm64` and update the floating tags;
 pre-releases publish only version-qualified tags, for `linux/amd64`.
 `{version}-api` continues to alias `{version}-full`.
 
@@ -15161,7 +15161,7 @@ report the appropriate rebuild or package-manager instructions.
 
 A stable install selects stable releases; an install of a pre-release keeps accepting
 pre-releases. Use `mrsm upgrade mrsm -A --pre` to opt into pre-releases from a stable install, or
-`mrsm upgrade mrsm -A --version 5.0.1` to select an exact release. An intentional
+`mrsm upgrade mrsm -A --version 5.0.2` to select an exact release. An intentional
 downgrade requires `--force`. Sub-arguments after `-A` that are not release options go to
 the selected installer; a downloaded binary has no installer arguments.
 
@@ -16398,7 +16398,7 @@ Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
 
-## Unreleased
+## 5.0.2
 
 - The console's Performance page keeps the window and page you chose when a Refresh (or the 30-second update) answers after you changed them; a late reply used to bring back the previous selection.
 - The first use of DuckDB retries its library download after a temporary failure (a 5xx, 408 or 429 status, or a dropped connection) twice, 3 and then 10 seconds later; a single server error from GitHub used to fail the install.

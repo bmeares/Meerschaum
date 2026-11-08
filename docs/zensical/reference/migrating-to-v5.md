@@ -149,7 +149,7 @@ report the appropriate rebuild or package-manager instructions.
 
 A stable install selects stable releases; an install of a pre-release keeps accepting
 pre-releases. Use `mrsm upgrade mrsm -A --pre` to opt into pre-releases from a stable install, or
-`mrsm upgrade mrsm -A --version 5.0.1` to select an exact release. An intentional
+`mrsm upgrade mrsm -A --version 5.0.2` to select an exact release. An intentional
 downgrade requires `--force`. Sub-arguments after `-A` that are not release options go to
 the selected installer; a downloaded binary has no installer arguments.
 
