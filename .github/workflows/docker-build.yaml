@@ -151,6 +151,10 @@ jobs:
       - name: Set up ARM64 emulation
         if: matrix.arch == 'arm64'
         uses: docker/setup-qemu-action@v4
+        # The action runs its binfmt image without `--platform`: under the job's default platform
+        # (linux/arm64) Docker would pull the arm64 image, which cannot run before QEMU is installed.
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/amd64
         with:
           platforms: arm64
 
