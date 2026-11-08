@@ -281,12 +281,7 @@ async fn download_and_extract(
         .connect_timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("Could not download {url}: {}", error_chain(&e)))?;
+    let resp = request_with_retries(&client, url).await?;
     reporter.progress(0, resp.content_length().unwrap_or(size_hint));
     let zip_path = scratch.join("download.zip");
     let mut f = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
@@ -318,6 +313,45 @@ async fn download_and_extract(
         ));
     }
     extract_library(&zip_path, lib_file, scratch, MAX_LIBRARY_BYTES)
+}
+
+/// Waits before each retry of a transient download failure (GitHub's release CDN answers an
+/// occasional 502/503/504).
+const RETRY_DELAYS: &[Duration] = if cfg!(test) {
+    &[Duration::from_millis(10), Duration::from_millis(10)]
+} else {
+    &[Duration::from_secs(3), Duration::from_secs(10)]
+};
+
+/// Send the GET, retrying a transient failure (a 5xx, 408 or 429 status, or a connect, timeout or
+/// transport error) up to `RETRY_DELAYS.len()` times. A redirect-policy error or another status
+/// fails at once.
+async fn request_with_retries(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<reqwest::Response, String> {
+    let mut delays = RETRY_DELAYS.iter();
+    loop {
+        let err = match client.get(url).send().await {
+            Ok(r) => match r.error_for_status() {
+                Ok(r) => return Ok(r),
+                Err(e) => e,
+            },
+            Err(e) => e,
+        };
+        let transient = match err.status() {
+            Some(s) => {
+                s.is_server_error()
+                    || s == reqwest::StatusCode::REQUEST_TIMEOUT
+                    || s == reqwest::StatusCode::TOO_MANY_REQUESTS
+            }
+            None => !err.is_redirect() && !err.is_builder(),
+        };
+        match delays.next() {
+            Some(delay) if transient => tokio::time::sleep(*delay).await,
+            _ => return Err(format!("Could not download {url}: {}", error_chain(&err))),
+        }
+    }
 }
 
 fn error_chain(e: &dyn std::error::Error) -> String {
@@ -559,6 +593,99 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("non-https"), "{err}");
         assert!(!cache_dir(root.path()).join("libduckdb.so").exists());
+    }
+
+    /// A server answering the first `failures` requests with `status` (no body), then `body`.
+    async fn fail_then_serve(failures: usize, status: &'static str, body: Vec<u8>) -> String {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = l.accept().await else {
+                    return;
+                };
+                let n = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let body = body.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = [0u8; 2048];
+                    let _ = s.read(&mut buf).await;
+                    let (status, body) = if n < failures {
+                        (status, Vec::new())
+                    } else {
+                        ("200 OK", body)
+                    };
+                    let head = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = s.write_all(head.as_bytes()).await;
+                    let _ = s.write_all(&body).await;
+                });
+            }
+        });
+        format!("http://{addr}/libduckdb-test.zip")
+    }
+
+    #[tokio::test]
+    async fn a_transient_server_error_is_retried() {
+        let body = zip_bytes();
+        let sha = hex::encode(Sha256::digest(&body));
+        let url = fail_then_serve(RETRY_DELAYS.len(), "504 Gateway Timeout", body).await;
+        let root = tempfile::tempdir().unwrap();
+        let path = install_from(
+            root.path(),
+            &url,
+            &sha,
+            100,
+            "libduckdb.so",
+            false,
+            &NullReporter,
+        )
+        .await
+        .unwrap();
+        assert!(path.is_file(), "{path:?}");
+    }
+
+    #[tokio::test]
+    async fn retries_are_bounded_and_a_client_error_is_not_retried() {
+        let body = zip_bytes();
+        let sha = hex::encode(Sha256::digest(&body));
+        let url = fail_then_serve(
+            RETRY_DELAYS.len() + 1,
+            "503 Service Unavailable",
+            body.clone(),
+        )
+        .await;
+        let root = tempfile::tempdir().unwrap();
+        let err = install_from(
+            root.path(),
+            &url,
+            &sha,
+            100,
+            "libduckdb.so",
+            false,
+            &NullReporter,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("503"), "{err}");
+
+        // A 404 would succeed on a second try here, so success would mean it was retried.
+        let url = fail_then_serve(1, "404 Not Found", body).await;
+        let err = install_from(
+            root.path(),
+            &url,
+            &sha,
+            100,
+            "libduckdb.so",
+            false,
+            &NullReporter,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("404"), "{err}");
     }
 
     #[tokio::test]
