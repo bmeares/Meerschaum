@@ -78,7 +78,7 @@ impl Setup {
 
     /// `src -> mid_a, mid_b -> leaf`, the first three taking `slow` recursions each.
     fn graph(name: &str, formatting: &str, slow: u64) -> Setup {
-        let setup = Setup::empty(name, formatting);
+        let setup = Setup::empty(name, formatting, false);
         let parent = |m: &str| format!(r#"{{"connector":"sql:lv","metric":"{m}"}}"#);
         setup.register(
             "src",
@@ -107,7 +107,7 @@ impl Setup {
 
     /// A fast chain `src -> chain` (a deterministic order for the pinned output).
     fn chain(name: &str, formatting: &str) -> Setup {
-        let setup = Setup::empty(name, formatting);
+        let setup = Setup::empty(name, formatting, true);
         setup.register("src", r#"{"sql":"SELECT 1 AS id","columns":{"id":"id"}}"#);
         setup.register(
             "chain",
@@ -119,7 +119,7 @@ impl Setup {
     /// The `talker` plugin with Python workers from `python`, and a slow SQL root to hang its
     /// pipes under.
     fn plugin(name: &str, python: &Path) -> Setup {
-        let mut setup = Setup::empty(name, r#"{"ansi":true,"unicode":true}"#);
+        let mut setup = Setup::empty(name, r#"{"ansi":true,"unicode":true}"#, false);
         let root = setup.base.join("root");
         std::fs::write(setup.base.join("plugins/talker.py"), TALKER).unwrap();
         // Share the interpreter's packages read-only: no venv is built during the test.
@@ -137,8 +137,8 @@ impl Setup {
         for (k, v) in setup.env.iter_mut() {
             if k == "MRSM_CONFIG" {
                 *v = v.replacen(
-                    r#""meerschaum":"#,
-                    r#""system":{"engine":{"python_workers":1}},"meerschaum":"#,
+                    r#""system":{"#,
+                    r#""system":{"engine":{"python_workers":1},"#,
                     1,
                 );
             }
@@ -182,7 +182,7 @@ impl Setup {
         );
     }
 
-    fn empty(name: &str, formatting: &str) -> Setup {
+    fn empty(name: &str, formatting: &str, inplace: bool) -> Setup {
         let base = PathBuf::from(std::env::var("HOME").expect("HOME"))
             .join(".cache")
             .join("mrsm-live-sync-tests")
@@ -207,8 +207,12 @@ impl Setup {
             ("MRSM_NO_UPDATE_CHECK".into(), "1".into()),
             (
                 "MRSM_CONFIG".into(),
+                // The recursive queries deliberately take seconds. Fetch their single row
+                // before writing it, so parallel nodes do not hold SQLite's write lock
+                // through the delay and exhaust another node's busy timeout under load.
+                // The fast chain keeps in-place sync for its pinned output transcripts.
                 format!(
-                    r#"{{"meerschaum":{{"instance":"sql:lv"}},"shell":{{"updates":{{"check_remote":false}}}},"formatting":{formatting}}}"#
+                    r#"{{"system":{{"experimental":{{"inplace_sync":{inplace}}}}},"meerschaum":{{"instance":"sql:lv"}},"shell":{{"updates":{{"check_remote":false}}}},"formatting":{formatting}}}"#
                 ),
             ),
             (

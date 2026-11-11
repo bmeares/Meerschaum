@@ -122,6 +122,9 @@ fn run_shell(job: &FakeJob, root: &Path, scrub: bool) -> Outcome {
     command.env("MRSM_PLUGINS_DIR", root.join("plugins"));
     command.env("MRSM_NO_UPDATE_CHECK", "1");
     command.env("MRSM_NO_AUTO_INSTALL", "1");
+    // Exercise job-context wrapping without the bulk startup gate's random jitter or
+    // host load / memory admission waits (which can outlast this fixture's deadline).
+    command.env(meerschaum_jobs::startup::KIND_ENV, "none");
     command.env("HOME", root);
     command.env("TERM", "xterm-256color");
     for (key, value) in job.vars() {

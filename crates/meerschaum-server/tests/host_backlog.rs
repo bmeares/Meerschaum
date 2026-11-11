@@ -64,7 +64,7 @@ async fn answer(mut stream: TcpStream, token: String) {
     let _ = stream.write_all(response.as_bytes()).await;
 }
 
-/// A host on TCP loopback with a listen backlog of one. It accepts and answers until `accepting`
+/// A host on TCP loopback with a small listen backlog. It accepts and answers until `accepting`
 /// is cleared (then it holds its port and accepts nothing), or never accepts at all.
 #[derive(Default)]
 struct Backlogged {
@@ -103,7 +103,11 @@ impl HostLauncher for Backlogged {
         };
         let socket = TcpSocket::new_v4()?;
         socket.bind(*addr)?;
-        let listener = socket.listen(1)?;
+        // Both ensure_started and the supervisor probe readiness concurrently. Their TCP
+        // connections must fit even before the accept task is scheduled; a backlog of one
+        // can drop a probe's SYN, whose retransmission outlasts ready_timeout. saturate()
+        // fills this queue explicitly when the test needs an unresponsive host.
+        let listener = socket.listen(8)?;
         *self.addr.lock().unwrap() = Some(*addr);
         if self.never {
             let held = saturate(*addr).await;
