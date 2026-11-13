@@ -914,3 +914,196 @@ fn a_token_jwt_keeps_no_more_than_its_token_holds_now() {
     );
     assert!(narrow_to_token_scopes(&["pipes:write"], &Vec::<String>::new()).is_empty());
 }
+
+fn team_with(name: &str, attributes: &str) -> Team {
+    let mut team = Team::new(name);
+    team.attributes = map(attributes);
+    team
+}
+
+fn walled(name: &str, records: &[Team]) -> Principal {
+    let own: Vec<(String, TeamRole)> = std::iter::once((EVERYONE.to_string(), TeamRole::Member))
+        .chain(records.iter().map(|t| (t.name.clone(), TeamRole::Member)))
+        .collect();
+    let primary = primary_team(None, &own);
+    let grants = TeamGrants::of(&own, records, Some(&primary));
+    Principal::new(name, false, Role::Editor.permissions(), own).with_grants(grants)
+}
+
+#[test]
+fn team_settings_are_read_from_attributes() {
+    let team = team_with(
+        "Wetlands",
+        r#"{"isolated": true, "instance": "sql:wetlands", "connectors": ["sql:wetlands", "plugin:noaa"],
+            "plugins": "noaa, usgs", "plugins_write": "yes"}"#,
+    );
+    assert!(team.is_isolated());
+    assert_eq!(team.default_instance().as_deref(), Some("sql:wetlands"));
+    assert_eq!(team.granted_connectors(), ["sql:wetlands", "plugin:noaa"]);
+    assert_eq!(team.granted_plugins(), ["noaa", "usgs"]);
+    assert!(team.may_write_plugins());
+    // The default instance is always granted; Everyone is never isolated.
+    let only_instance = team_with("Rivers", r#"{"instance": "sql:rivers"}"#);
+    assert_eq!(only_instance.granted_connectors(), ["sql:rivers"]);
+    assert!(!only_instance.is_isolated() && !only_instance.may_write_plugins());
+    assert!(!team_with(EVERYONE, r#"{"isolated": true}"#).is_isolated());
+    let mut edited = team.clone();
+    edited.set_names(TEAM_PLUGINS_ATTRIBUTE, &[]);
+    assert!(edited.granted_plugins().is_empty());
+    assert!(!edited.attributes.contains_key(TEAM_PLUGINS_ATTRIBUTE));
+}
+
+#[test]
+fn a_user_is_walled_off_only_when_all_their_teams_are_isolated() {
+    let wetlands = team_with(
+        "Wetlands",
+        r#"{"isolated": true, "instance": "sql:wetlands"}"#,
+    );
+    let open = team_with(
+        "Data",
+        r#"{"instance": "sql:data", "connectors": ["sql:shared"]}"#,
+    );
+    assert!(walled("ann", std::slice::from_ref(&wetlands)).is_isolated());
+    assert!(!walled("ann", &[]).is_isolated());
+    let mixed = walled("ann", &[wetlands.clone(), open.clone()]);
+    assert!(!mixed.is_isolated());
+    assert!(mixed.grants.connectors.contains("sql:shared"));
+    // The primary team's instance wins (the first team other than Everyone by default).
+    assert_eq!(mixed.grants.instance.as_deref(), Some("sql:wetlands"));
+    let own = teams(&[("Wetlands", TeamRole::Member), ("Data", TeamRole::Member)]);
+    assert_eq!(
+        TeamGrants::of(&own, &[wetlands.clone(), open], Some("data"))
+            .instance
+            .as_deref(),
+        Some("sql:data")
+    );
+    // Administrators are never walled off; teams the user is not in grant nothing.
+    let admin = Principal::admin("root").with_grants(TeamGrants {
+        isolated: true,
+        ..Default::default()
+    });
+    assert!(!admin.is_isolated());
+    assert_eq!(
+        TeamGrants::of(&teams(&[]), &[wetlands], None),
+        TeamGrants::default()
+    );
+}
+
+#[test]
+fn walled_off_principals_do_not_see_everyone() {
+    let wetlands = team_with(
+        "Wetlands",
+        r#"{"isolated": true, "instance": "sql:wetlands", "plugins": ["noaa"]}"#,
+    );
+    let ann = walled("ann", &[wetlands]);
+    let bob = user("bob", &["pipes:read"], &[]);
+    assert!(!ann.is_member(None) && !ann.is_member(Some(EVERYONE)));
+    assert!(ann.is_member(Some("wetlands")));
+    assert_eq!(ann.team_names(), ["Wetlands"]);
+    assert_eq!(bob.team_names(), [EVERYONE]);
+
+    // Pipes: legacy pipes (no access), Everyone's, and "everyone"-visible pipes of other teams.
+    let legacy = PipeAccess::default();
+    let public_other = PipeAccess::parse(&Value::Map(map(
+        r#"{"team": "Data", "visibility": "everyone"}"#,
+    )))
+    .unwrap();
+    let own = PipeAccess::parse(&Value::Map(map(r#"{"team": "Wetlands"}"#))).unwrap();
+    let own_public = PipeAccess::parse(&Value::Map(map(
+        r#"{"team": "Wetlands", "visibility": "everyone"}"#,
+    )))
+    .unwrap();
+    let mine_in_everyone = PipeAccess::parse(&Value::Map(map(r#"{"owner": "ann"}"#))).unwrap();
+    assert!(!can_see(&ann, &legacy) && !can_edit(&ann, &legacy));
+    assert!(!can_see(&ann, &public_other));
+    assert!(can_see(&ann, &own) && can_edit(&ann, &own) && can_see(&ann, &own_public));
+    assert!(can_see(&ann, &mine_in_everyone));
+    assert!(can_see(&bob, &legacy) && can_see(&bob, &public_other) && can_see(&bob, &own_public));
+    assert!(!can_see(&bob, &own));
+
+    // Jobs.
+    let everyone_job = crate::job_access::JobAccess::from_properties("sync", &Map::new());
+    assert!(!crate::job_access::can_see_job(&ann, &everyone_job));
+    assert!(crate::job_access::can_see_job(&bob, &everyone_job));
+
+    // Connectors: an unrestricted one needs a grant; a restricted one needs membership.
+    let wetlands_only = vec!["Wetlands".to_string()];
+    let data_only = vec!["Data".to_string()];
+    assert!(!can_use_connector(&ann, None));
+    assert!(can_use_connector(&bob, None));
+    assert!(can_use_connector_keys(&ann, "sql:wetlands", None));
+    assert!(!can_use_connector_keys(&ann, "sql:main", None));
+    assert!(can_use_connector_keys(&ann, "sql:w2", Some(&wetlands_only)));
+    assert!(!can_use_connector_keys(&ann, "sql:data", Some(&data_only)));
+    assert!(can_use_connector_keys(
+        &Principal::admin("root"),
+        "sql:data",
+        Some(&data_only)
+    ));
+
+    // A pipe's source connector: a granted plugin, a label of nothing, never the server's own.
+    assert!(can_name_connector(&ann, "plugin:noaa", None, false));
+    assert!(!can_name_connector(&ann, "plugin:usgs", None, false));
+    assert!(can_name_connector(&ann, "manual:gauge", None, false));
+    assert!(!can_name_connector(&ann, "sql:main", None, true));
+    assert!(can_name_connector(&ann, "sql:wetlands", None, true));
+    assert!(!can_name_connector(
+        &ann,
+        "sql:data",
+        Some(&data_only),
+        true
+    ));
+    assert!(can_name_connector(&bob, "plugin:usgs", None, false));
+    assert!(can_name_connector(&bob, "sql:main", None, true));
+
+    // Plugins, teams and users.
+    assert!(can_use_plugin(&ann, "noaa") && !can_use_plugin(&ann, "usgs"));
+    assert!(can_use_plugin(&bob, "usgs"));
+    assert!(!can_write_plugins(&ann) && !can_write_plugins(&bob));
+    assert!(can_write_plugins(&Principal::admin("root")));
+    assert!(can_see_team(&ann, "Wetlands") && !can_see_team(&ann, "Data"));
+    assert!(!can_see_team(&ann, EVERYONE) && can_see_team(&bob, "Data"));
+    let cal = teams(&[(EVERYONE, TeamRole::Member), ("Wetlands", TeamRole::Member)]);
+    let dee = teams(&[(EVERYONE, TeamRole::Member), ("Data", TeamRole::Member)]);
+    assert!(can_see_user(&ann, "cal", &cal) && can_see_user(&ann, "ann", &[]));
+    assert!(!can_see_user(&ann, "dee", &dee));
+    assert!(can_see_user(&bob, "dee", &dee));
+}
+
+#[test]
+fn a_team_may_let_its_members_write_plugins() {
+    let makers = team_with("Makers", r#"{"plugins_write": true}"#);
+    assert!(can_write_plugins(&walled("ann", &[makers])));
+}
+
+#[test]
+fn principals_without_grants_deserialize_as_before() {
+    let principal: Principal = serde_json::from_str(
+        r#"{"username": "ann", "is_admin": false, "permissions": [], "teams": []}"#,
+    )
+    .unwrap();
+    assert_eq!(principal.grants, TeamGrants::default());
+    assert!(principal.is_member(None));
+}
+
+#[test]
+fn walled_off_principals_never_run_actions_or_terminals() {
+    let wetlands = team_with("Wetlands", r#"{"isolated": true}"#);
+    let own = teams(&[("Wetlands", TeamRole::Manager)]);
+    let grants = TeamGrants::of(&own, &[wetlands], None);
+    let operator = Principal::new("ann", false, Role::Operator.permissions(), own.clone())
+        .with_grants(grants.clone());
+    for permission in ISOLATED_WITHHELD {
+        assert!(!operator.has(permission), "{permission}");
+    }
+    assert!(operator.has(Permission::PIPES_WRITE) && operator.has(Permission::JOBS_READ));
+    // `*` is every permission but those.
+    let star = Principal::new("ann", false, set(&["*"]), own.clone()).with_grants(grants.clone());
+    assert!(!star.has(Permission::WEBTERM_USE) && star.has(Permission::PIPES_DROP));
+    // Administrators and members of open teams keep them.
+    let admin = Principal::admin("root").with_grants(grants);
+    assert!(admin.has(Permission::ACTIONS_EXECUTE));
+    let open = Principal::new("bob", false, Role::Operator.permissions(), own)
+        .with_grants(TeamGrants::default());
+    assert!(open.has(Permission::ACTIONS_EXECUTE));
+}

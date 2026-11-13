@@ -22,6 +22,7 @@ from dash.exceptions import PreventUpdate
 from dash import no_update
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash import access
+from meerschaum.api.dash import team_setup
 from meerschaum.api.dash.users import (
     build_users_listing,
     build_user_detail,
@@ -721,19 +722,83 @@ def open_teams_dialog(new_clicks, action_clicks, *cancel_clicks_and_session):
     if action == 'members':
         if not may_manage_team(who, team):
             raise PreventUpdate
-        return _team_dialog('members', team, members_body=_members_body(team))
+        return _team_dialog('members', team, members_body=_members_body(team, who))
     if action == 'delete':
         return _team_dialog('delete', team, consequence=delete_consequence(team['name']))
     return _team_dialog('rename', team)
 
 
-def _members_body(team: Dict[str, Any]) -> Any:
+def _members_body(team: Dict[str, Any], who: Optional[Dict[str, Any]] = None) -> Any:
     from meerschaum.api import get_api_connector
     try:
         user_names = sorted(str(name) for name in (get_api_connector().get_users() or []))
     except Exception:
         user_names = []
+    ### A walled-off manager does not learn the other accounts: administrators add new members.
+    if who is not None and getattr(who.get('viewer'), 'is_isolated', False):
+        user_names = [name for name in user_names if name in team['members']]
     return build_team_members_editor(team, user_names)
+
+
+def _options(values: List[str], none_label: Optional[str] = None) -> List[Dict[str, str]]:
+    options = [{'label': none_label, 'value': ''}] if none_label else []
+    return options + [{'label': value, 'value': value} for value in values]
+
+
+@dash_app.callback(
+    Output('teams-new-base', 'options'),
+    Output('teams-new-base', 'value'),
+    Output('teams-new-instance', 'options'),
+    Output('teams-new-instance', 'value'),
+    Output('teams-new-connectors', 'options'),
+    Output('teams-new-connectors', 'value'),
+    Output('teams-new-plugins', 'options'),
+    Output('teams-new-plugins', 'value'),
+    Output('teams-new-storage', 'options'),
+    Output('teams-new-storage', 'value'),
+    Output('teams-new-isolated', 'value'),
+    Output('teams-new-plugins-write', 'value'),
+    Output('teams-new-database', 'value'),
+    Input('teams-new-modal', 'is_open'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def fill_new_team(is_open, session_store_data):
+    """When New team opens: the connectors and plugins to choose from, and a blank form."""
+    if not is_open or not viewer(session_store_data)['admin']:
+        raise PreventUpdate
+    bases = team_setup.database_bases()
+    storage = [
+        {'label': label, 'value': value, 'disabled': (value != 'instance' and not bases)}
+        for value, label in team_setup.STORAGE_CHOICES
+    ]
+    return (
+        _options(bases), (team_setup.default_base() or ''),
+        _options(team_setup.instance_choices(), 'None'), '',
+        _options(team_setup.connector_choices()), [],
+        _options(team_setup.plugin_choices()), [],
+        storage, ('database' if bases else 'instance'),
+        True, False, '',
+    )
+
+
+@dash_app.callback(
+    Output('teams-new-database-fields', 'hidden'),
+    Output('teams-new-instance-fields', 'hidden'),
+    Output('teams-new-database-label', 'children'),
+    Output('teams-new-database', 'placeholder'),
+    Input('teams-new-storage', 'value'),
+    Input('teams-new-name', 'value'),
+)
+def show_new_team_storage(storage, name):
+    """The fields of the chosen storage; the database (or schema) is named after the team."""
+    own = storage in ('database', 'schema')
+    return (
+        not own,
+        own,
+        ('Schema name' if storage == 'schema' else 'Database name'),
+        team_setup.slug(name),
+    )
 
 
 @dash_app.callback(
@@ -743,12 +808,23 @@ def _members_body(team: Dict[str, Any]) -> Any:
     Output('users-refresh', 'data', allow_duplicate=True),
     Input('teams-new-submit', 'n_clicks'),
     State('teams-new-name', 'value'),
+    State('teams-new-storage', 'value'),
+    State('teams-new-base', 'value'),
+    State('teams-new-database', 'value'),
+    State('teams-new-instance', 'value'),
+    State('teams-new-isolated', 'value'),
+    State('teams-new-connectors', 'value'),
+    State('teams-new-plugins', 'value'),
+    State('teams-new-plugins-write', 'value'),
     State('users-refresh', 'data'),
     State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def submit_new_team(n_clicks, name, refresh, session_store_data):
-    """Create a team (administrators)."""
+def submit_new_team(
+    n_clicks, name, storage, base, database_name, instance, isolated, connectors, plugins,
+    plugins_write, refresh, session_store_data,
+):
+    """Create a team with its storage and settings (administrators)."""
     if not n_clicks:
         raise PreventUpdate
     if not viewer(session_store_data)['admin']:
@@ -761,11 +837,128 @@ def submit_new_team(n_clicks, name, refresh, session_store_data):
     if not valid:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     name = str(name).strip()
-    success, message = access.create_team(name)
+    success, message = team_setup.create_team(
+        name,
+        isolated=bool(isolated),
+        storage=str(storage or 'instance'),
+        base=(base or None),
+        database_name=(database_name or None),
+        instance=(instance or None),
+        connectors=(connectors or []),
+        plugins=(plugins or []),
+        plugins_write=bool(plugins_write),
+    )
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     access.forget()
-    return False, [], alert_from_success_tuple((True, f"Created team '{name}'.")), (refresh or 0) + 1
+    return False, [], alert_from_success_tuple((True, message)), (refresh or 0) + 1
+
+
+@dash_app.callback(
+    Output('teams-settings-modal', 'is_open'),
+    Output('teams-settings-title', 'children'),
+    Output('teams-settings-target', 'data'),
+    Output('teams-settings-alert', 'children'),
+    Output('teams-settings-database', 'children'),
+    Output('teams-settings-instance', 'options'),
+    Output('teams-settings-instance', 'value'),
+    Output('teams-settings-isolated', 'value'),
+    Output('teams-settings-connectors', 'options'),
+    Output('teams-settings-connectors', 'value'),
+    Output('teams-settings-plugins', 'options'),
+    Output('teams-settings-plugins', 'value'),
+    Output('teams-settings-plugins-write', 'value'),
+    Input({'type': 'team-action', 'action': ALL, 'index': ALL}, 'n_clicks'),
+    Input('teams-settings-cancel', 'n_clicks'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def open_team_settings(action_clicks, cancel_clicks, session_store_data):
+    """A team's Settings (administrators): what it is isolated from and what it may use."""
+    ctx = dash.callback_context
+    if not ctx.triggered or not ctx.triggered[0]['value']:
+        raise PreventUpdate
+    trigger = ctx.triggered_id
+    keep = [no_update] * 11
+    if trigger == 'teams-settings-cancel':
+        return [False, no_update] + keep
+    if not isinstance(trigger, dict) or trigger.get('action') != 'settings':
+        raise PreventUpdate
+    if not viewer(session_store_data)['admin']:
+        raise PreventUpdate
+    team = _team_by_name(trigger.get('index'))
+    if team is None or team['builtin']:
+        raise PreventUpdate
+    settings = team_setup.team_settings(team.get('attributes'))
+    database = settings['database']
+    described = []
+    if database:
+        kind = str(database.get('kind', 'database'))
+        named = database.get('schema') if kind == 'schema' else database.get('database')
+        described = [
+            html.Span(f"{kind.capitalize()} "), html.B(str(named)),
+            html.Span(f" ({database.get('connector', '')})"),
+        ]
+    ### Options keep what is stored, even a connector or plugin that no longer exists.
+    instances = list(dict.fromkeys(
+        team_setup.instance_choices() + ([settings['instance']] if settings['instance'] else [])
+    ))
+    connectors = list(dict.fromkeys(team_setup.connector_choices() + settings['connectors']))
+    plugins = list(dict.fromkeys(team_setup.plugin_choices() + settings['plugins']))
+    return (
+        True,
+        ['Settings of ', html.B(team['name'])],
+        {'team': team['name']},
+        [],
+        described,
+        _options(instances, 'None'), (settings['instance'] or ''),
+        settings['isolated'],
+        _options(connectors), settings['connectors'],
+        _options(plugins), settings['plugins'],
+        settings['plugins_write'],
+    )
+
+
+@dash_app.callback(
+    Output('teams-settings-modal', 'is_open', allow_duplicate=True),
+    Output('teams-settings-alert', 'children', allow_duplicate=True),
+    Output('users-alert-div', 'children', allow_duplicate=True),
+    Output('users-refresh', 'data', allow_duplicate=True),
+    Input('teams-settings-submit', 'n_clicks'),
+    State('teams-settings-target', 'data'),
+    State('teams-settings-instance', 'value'),
+    State('teams-settings-isolated', 'value'),
+    State('teams-settings-connectors', 'value'),
+    State('teams-settings-plugins', 'value'),
+    State('teams-settings-plugins-write', 'value'),
+    State('users-refresh', 'data'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def submit_team_settings(
+    n_clicks, target, instance, isolated, connectors, plugins, plugins_write, refresh,
+    session_store_data,
+):
+    """Save a team's settings (administrators)."""
+    if not n_clicks or not target or not target.get('team'):
+        raise PreventUpdate
+    if not viewer(session_store_data)['admin']:
+        return no_update, alert_from_success_tuple((False, "Only administrators can change a team's settings.")), no_update, no_update
+    team = _team_by_name(target['team'])
+    if team is None or team['builtin']:
+        return no_update, alert_from_success_tuple((False, "This team no longer exists.")), no_update, no_update
+    success, message = team_setup.edit_team_settings(
+        team['name'],
+        isolated=bool(isolated),
+        instance=(instance or None),
+        connectors=(connectors or []),
+        plugins=(plugins or []),
+        plugins_write=bool(plugins_write),
+    )
+    if not success:
+        return no_update, alert_from_success_tuple((False, message)), no_update, no_update
+    access.forget()
+    return False, [], alert_from_success_tuple((True, message)), (refresh or 0) + 1
 
 
 @dash_app.callback(
@@ -799,6 +992,8 @@ def submit_rename_team(n_clicks, target, new_name, refresh, session_store_data):
     success, message = access.rename_team(team['name'], new_name)
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
+    ### The team's Grafana organization keeps its dashboards under the new name.
+    team_setup.rename_grafana_team(team['name'], new_name)
     access.forget()
     return (
         False, [],
@@ -906,7 +1101,7 @@ def edit_team_members(add_clicks, roles, remove_clicks, new_member, new_role, ta
     access.forget()
     updated = _team_by_name(team['name']) or team
     return (
-        _members_body(updated),
+        _members_body(updated, who),
         (alert_from_success_tuple((False, message)) if not success else []),
         (refresh or 0) + 1,
     )

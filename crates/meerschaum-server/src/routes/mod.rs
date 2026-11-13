@@ -106,12 +106,48 @@ pub struct Ctx {
     pub headers: HeaderMap,
     /// The query parameters.
     pub query: Query,
+    /// The default instance of the caller's team ([`Ctx::scope_instance`]), used when the
+    /// request names none.
+    team_instance: std::sync::OnceLock<String>,
 }
 
 impl Ctx {
-    /// `instance_keys` (`Optional[str] = None`).
+    /// `instance_keys` (`Optional[str] = None`): the request's, else the default instance of the
+    /// caller's team ([`Ctx::scope_instance`], applied when the request is read), else `None`
+    /// (the server's own).
     pub fn instance_keys(&self) -> Option<String> {
-        self.query.opt_str("instance_keys")
+        self.query
+            .opt_str("instance_keys")
+            .or_else(|| self.team_instance.get().cloned())
+    }
+
+    /// Apply the caller's teams to the request's instance: an instance the request names must be
+    /// the server's own or one the caller's teams may use (`403`), and a request that names none
+    /// uses the default instance of the caller's team, when it has one and the server serves it.
+    pub fn scope_instance(&self, caller: &crate::access::Access) -> Result<(), ApiError> {
+        if caller.no_auth || caller.is_admin() {
+            return Ok(());
+        }
+        match self.query.opt_str("instance_keys") {
+            Some(keys) => {
+                let own = keys == self.state.config.instance_keys
+                    || keys == self.state.instance().connector_keys();
+                if !own && !crate::access::guard::may_use_connector(&self.state, caller, &keys) {
+                    return Err(ApiError::new(
+                        403,
+                        format!("The instance '{keys}' is not available to your teams."),
+                    ));
+                }
+            }
+            None => {
+                if let Some(keys) = &caller.principal.grants.instance
+                    && self.state.get_api_connector(Some(keys)).is_ok()
+                {
+                    let _ = self.team_instance.set(keys.clone());
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -119,11 +155,19 @@ impl FromRequestParts<AppState> for Ctx {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
-        Ok(Ctx {
+        let ctx = Ctx {
             state: state.clone(),
             headers: parts.headers.clone(),
             query: Query::parse(parts.uri.query()),
-        })
+            team_instance: std::sync::OnceLock::new(),
+        };
+        // The request's instance follows the caller's teams (5.1), whatever order the handler
+        // reads it and authorizes in. A request without valid credentials is the handler's to
+        // refuse.
+        if let Some(caller) = crate::access::instance_scope(state, &ctx.headers).await {
+            ctx.scope_instance(&caller)?;
+        }
+        Ok(ctx)
     }
 }
 

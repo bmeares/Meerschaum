@@ -31,6 +31,7 @@ pub mod instance;
 pub mod pipe;
 pub mod queries;
 pub mod readonly;
+pub mod team_database;
 pub mod uri;
 pub mod where_clause;
 

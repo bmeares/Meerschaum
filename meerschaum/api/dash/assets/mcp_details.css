@@ -1,0 +1,43 @@
+/* The MCP client picker (Tokens page: "Connect an agent", and the token-created dialog). */
+.mcp-details { min-width: 0; }
+.mcp-details-registered { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.15); }
+/* As on the Performance page: the dark theme leaves a select's text dark. */
+.mcp-details .form-select, .mcp-details .form-select option { color: #fff; background-color: #303030; }
+.mcp-block { margin-top: 16px; min-width: 0; }
+.mcp-block-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.mcp-block-label { font-family: var(--bs-font-monospace); font-size: 0.85rem; color: #b8c7d6; overflow-wrap: anywhere; min-width: 0; }
+/* Code scrolls inside its own box, never the page. */
+.mcp-code {
+    margin: 0;
+    padding: 10px 12px;
+    max-width: 100%;
+    max-height: 45vh;
+    overflow: auto;
+    white-space: pre;
+    background: #17212b;
+    color: #dceaf6;
+    border-radius: 6px;
+    font-size: 0.8rem;
+}
+.mcp-url { min-height: 38px; }
+.mcp-copy {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    padding: 4px 12px;
+    border: 1px solid var(--bs-light);
+    border-radius: var(--bs-border-radius-sm);
+    color: var(--bs-light);
+    background: transparent;
+    font-size: 0.875rem;
+    cursor: pointer;
+    user-select: none;
+}
+.mcp-copy:hover, .mcp-copy:focus-visible { background: var(--bs-light); color: var(--bs-dark); }
+@media (max-width: 576px) {
+    .mcp-copy { min-height: 44px; min-width: 88px; }
+    .mcp-details .form-select { min-height: 44px; }
+    .mcp-url { min-height: 44px; display: flex; align-items: center; }
+}

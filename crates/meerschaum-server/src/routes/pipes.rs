@@ -313,7 +313,7 @@ async fn register_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiRe
             format!("{} already registered.", h.pipe),
         ));
     }
-    access::guard::check_connector_teams(&ctx.state, &access, &ck)?;
+    access::guard::check_source_connector(&ctx.state, &access, &ck)?;
     let mut pipe = h.pipe.clone();
     let requested = parameters
         .filter(|p| !p.is_empty())

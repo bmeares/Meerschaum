@@ -163,9 +163,14 @@ pub fn connector(
     instance_keys: Option<&str>,
 ) -> Result<Arc<dyn InstanceConnector>, ToolError> {
     if cx.caller.api {
+        // The caller's teams decide which instances they may name, and their default (5.1).
+        let keys = cx
+            .caller
+            .scope_instance(cx.state, instance_keys)
+            .map_err(ToolError::permission)?;
         return cx
             .state
-            .get_api_connector(instance_keys)
+            .get_api_connector(keys.as_deref())
             .map_err(|e| ToolError::permission(api_error_str(&e)));
     }
     let default = cx.state.config.instance_keys.as_str();
@@ -943,7 +948,7 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
         caller
             .require(&["pipes:register"], &[])
             .map_err(|e| ToolError::permission(e.detail_text()))?;
-        access::guard::check_connector_teams(cx.state, &caller, &ck)
+        access::guard::check_source_connector(cx.state, &caller, &ck)
             .map_err(|e| ToolError::permission(e.detail_text()))?;
     }
     let mut pipe = build_pipe(cx, &conn, &ck, &mk, lk.as_deref(), Some(parameters))?;

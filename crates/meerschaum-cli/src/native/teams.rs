@@ -67,7 +67,7 @@ pub fn is_everyone(name: &str) -> bool {
 }
 
 /// Members and managers as stored: every manager is a member; both sorted, each name once.
-fn normalized(mut team: TeamInfo) -> TeamInfo {
+pub(super) fn normalized(mut team: TeamInfo) -> TeamInfo {
     let clean = |names: &mut Vec<String>| {
         for name in names.iter_mut() {
             *name = name.trim().to_string();
@@ -125,7 +125,7 @@ pub async fn get_teams(inst: &Instance) -> Result<Vec<TeamInfo>, String> {
 }
 
 /// One team, by name.
-async fn get_team(inst: &Instance, name: &str) -> Result<Option<TeamInfo>, String> {
+pub(super) async fn get_team(inst: &Instance, name: &str) -> Result<Option<TeamInfo>, String> {
     inst.conn()
         .get_team(name)
         .await
@@ -133,7 +133,7 @@ async fn get_team(inst: &Instance, name: &str) -> Result<Option<TeamInfo>, Strin
         .map_err(|e| e.to_string())
 }
 
-async fn register_team(inst: &Instance, team: &TeamInfo) -> SuccessTuple {
+pub(super) async fn register_team(inst: &Instance, team: &TeamInfo) -> SuccessTuple {
     let mut core = to_core(team);
     inst.conn().register_team(&mut core).await
 }
@@ -155,7 +155,7 @@ async fn delete_team(inst: &Instance, name: &str) -> SuccessTuple {
 // ------------------------------------------------------------------------------------------
 
 /// A comma-separated list argument (`--members a,b`).
-fn list_arg(args: &ArgsMap, key: &str) -> Option<Vec<String>> {
+pub(super) fn list_arg(args: &ArgsMap, key: &str) -> Option<Vec<String>> {
     string(args, key).map(|text| {
         text.split(',')
             .map(|n| n.trim().to_string())
@@ -167,7 +167,7 @@ fn list_arg(args: &ArgsMap, key: &str) -> Option<Vec<String>> {
 /// The usernames among `names` that are not registered on the instance. When the users cannot
 /// be listed (an `api:` caller without `users:read`, such as a team's manager), the team store
 /// checks them itself.
-fn unregistered(
+pub(super) fn unregistered(
     rt: &mut Runtime<'_>,
     inst: &Instance,
     names: &[String],
@@ -191,7 +191,7 @@ fn unregistered(
     Ok(missing)
 }
 
-fn unregistered_failure(inst: &Instance, missing: &[String]) -> SuccessTuple {
+pub(super) fn unregistered_failure(inst: &Instance, missing: &[String]) -> SuccessTuple {
     SuccessTuple::fail(format!(
         "{} not registered on instance '{}': {}.",
         if missing.len() == 1 {

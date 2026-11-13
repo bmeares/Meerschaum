@@ -570,17 +570,24 @@ def connector_fields(typ: str, attributes: Dict[str, Any], flavor: Any = None) -
             'uri_alternative': typ in ('sql', 'api', 'valkey')}
 
 
-def connector_visible(attributes: Dict[str, Any], viewer: Any = None) -> bool:
+def connector_visible(
+    attributes: Dict[str, Any],
+    viewer: Any = None,
+    keys: Optional[str] = None,
+) -> bool:
     """Apply the connector's team allowlist from plain settings, without instantiating it."""
     if viewer is None or viewer.no_auth or viewer.is_admin:
         return True
     if not viewer.signed_in or not viewer.can('connectors:read'):
         return False
-    return _teams_allow(attributes, viewer)
+    return _teams_allow(attributes, viewer, keys=keys)
 
 
-def _teams_allow(attributes: Dict[str, Any], viewer: Any) -> bool:
-    """The API's pure connector-team rule, using only plain settings."""
+def _teams_allow(attributes: Dict[str, Any], viewer: Any, keys: Optional[str] = None) -> bool:
+    """
+    The API's pure connector rule, using only plain settings: the connector's `teams`, the
+    grants of the viewer's teams (`keys`), and no unrestricted connector for a walled-off viewer.
+    """
     if viewer.no_auth or viewer.is_admin:
         return True
     teams = attributes.get('teams')
@@ -588,7 +595,7 @@ def _teams_allow(attributes: Dict[str, Any], viewer: Any) -> bool:
         return False
     from meerschaum.api.dash import access
     principal = viewer.principal or access._principal(viewer)
-    return access.core().can_use_connector(principal, teams)
+    return access.core().can_use_connector(principal, teams, keys)
 
 
 def connector_team_allows(keys: str, viewer: Any) -> bool:
@@ -604,7 +611,7 @@ def connector_team_allows(keys: str, viewer: Any) -> bool:
     runtime = vars(conn) if conn is not None else {}
     if not isinstance(configured, dict) and 'teams' in runtime:
         attributes['teams'] = runtime['teams']
-    return _teams_allow(attributes, viewer)
+    return _teams_allow(attributes, viewer, keys=str(keys))
 
 
 def _env_patches() -> List[Tuple[str, Dict[str, Any]]]:
@@ -739,7 +746,7 @@ def list_connectors(viewer: Any = None) -> List[Dict[str, Any]]:
             # A hidden configured key must not reappear through a cached runtime connector.
             seen.add(f"{typ}:{label}")
             combined = {**inherited, **attributes}
-            if not connector_visible(combined, viewer):
+            if not connector_visible(combined, viewer, keys=f"{typ}:{label}"):
                 continue
             source, detail = connector_source(typ, label, attributes, defaults, patches)
             rows.append(_row(typ, str(label), combined, source, detail))
@@ -751,6 +758,9 @@ def list_connectors(viewer: Any = None) -> List[Dict[str, Any]]:
             if keys in seen:
                 continue
             typ, label = keys.split(':', 1)
+            ### A walled-off viewer sees the plugins of their teams only.
+            if viewer is not None and not viewer.can_use_plugin(label):
+                continue
             rows.append(_row(typ, label, {}, 'Plugin', label))
             seen.add(keys)
     except Exception:
@@ -772,7 +782,7 @@ def list_connectors(viewer: Any = None) -> List[Dict[str, Any]]:
                     for key, value in getattr(conn, '__dict__', {}).items()
                     if not str(key).startswith('_') and key not in ('type', 'label')
                 }
-                if not connector_visible(attributes, viewer):
+                if not connector_visible(attributes, viewer, keys=keys):
                     continue
                 plugin = _type_plugin(typ)
                 rows.append(_row(typ, str(label), attributes, 'Plugin' if plugin else 'Runtime', plugin))

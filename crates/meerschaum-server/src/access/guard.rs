@@ -104,7 +104,8 @@ pub fn merge_edit(access: &Access, old: &Map, mut new: Map) -> Result<Map, ApiEr
 /// whose pipes may use the connector (`None`: every team).
 pub fn connector_teams(state: &AppState, connector_keys: &str) -> Option<Vec<String>> {
     let (typ, label) = connector_keys.split_once(':')?;
-    let attrs = state.config.connectors.get(typ)?.get(label)?;
+    let connectors = state.connectors();
+    let attrs = connectors.get(typ)?.get(label)?;
     match attrs.get("teams")? {
         Value::List(items) => Some(items.iter().map(Value::py_str).collect()),
         Value::Str(s) => Some(
@@ -121,8 +122,18 @@ pub fn connector_teams(state: &AppState, connector_keys: &str) -> Option<Vec<Str
 /// Whether `access` may use the connector `connector_keys` for pipes (or SQL reads): every
 /// connector without `teams`; else administrators and the members of a listed team.
 pub fn may_use_connector(state: &AppState, access: &Access, connector_keys: &str) -> bool {
-    meerschaum_core::access::can_use_connector(
-        &access.principal,
+    access.no_auth || principal_may_use_connector(state, &access.principal, connector_keys)
+}
+
+/// [`may_use_connector`] for a principal.
+pub fn principal_may_use_connector(
+    state: &AppState,
+    principal: &rules::Principal,
+    connector_keys: &str,
+) -> bool {
+    meerschaum_core::access::can_use_connector_keys(
+        principal,
+        connector_keys,
         connector_teams(state, connector_keys).as_deref(),
     )
 }
@@ -136,9 +147,49 @@ pub fn check_connector_teams(
     if may_use_connector(state, access, connector_keys) {
         return Ok(());
     }
-    Err(forbidden(format!(
-        "The connector '{connector_keys}' is reserved for other teams' pipes."
-    )))
+    // A connector with `teams` is reserved; one without is withheld from a walled-off caller.
+    Err(forbidden(
+        if connector_teams(state, connector_keys).is_some() {
+            format!("The connector '{connector_keys}' is reserved for other teams' pipes.")
+        } else {
+            format!("The connector '{connector_keys}' is not available to your teams.")
+        },
+    ))
+}
+
+/// Whether `access` may give a pipe the source connector `connector_keys`
+/// ([`rules::can_name_connector`]), as a `403`.
+pub fn check_source_connector(
+    state: &AppState,
+    access: &Access,
+    connector_keys: &str,
+) -> Result<(), ApiError> {
+    if access.no_auth || access.is_admin() {
+        return Ok(());
+    }
+    // A walled-off caller may use only what their teams hold or were granted; a label that
+    // names no connector of the server's (data pushed through the API) is anyone's.
+    let configured = connector_keys
+        .split_once(':')
+        .and_then(|(typ, label)| state.connectors().get(typ)?.get(label).cloned())
+        .is_some_and(|attrs| !attrs.is_null());
+    if !rules::can_name_connector(
+        &access.principal,
+        connector_keys,
+        connector_teams(state, connector_keys).as_deref(),
+        configured,
+    ) {
+        return Err(forbidden(
+            if connector_teams(state, connector_keys).is_some() {
+                format!("The connector '{connector_keys}' is reserved for other teams' pipes.")
+            } else if let Some(plugin) = connector_keys.strip_prefix("plugin:") {
+                format!("The plugin '{plugin}' is not available to your teams.")
+            } else {
+                format!("The connector '{connector_keys}' is not available to your teams.")
+            },
+        ));
+    }
+    Ok(())
 }
 
 /// A connector with `teams: [...]` is for those teams' pipes: a pipe of `connector_keys` that
@@ -154,10 +205,18 @@ pub fn check_pipe_connector(
     if access.no_auth || access.is_admin() {
         return Ok(());
     }
+    check_source_connector(state, access, connector_keys)?;
+    if access
+        .principal
+        .grants
+        .connectors
+        .contains(connector_keys.trim())
+    {
+        return Ok(());
+    }
     let Some(teams) = connector_teams(state, connector_keys) else {
         return Ok(());
     };
-    check_connector_teams(state, access, connector_keys)?;
     if teams.iter().any(|t| rules::same_team(Some(t), team)) {
         return Ok(());
     }

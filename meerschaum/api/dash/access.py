@@ -161,6 +161,34 @@ class Viewer:
     primary_team: Optional[str] = None
     no_auth: bool = False
     principal: Any = None
+    #: What the viewer's teams grant and withhold (`meerschaum.core.access.team_grants`).
+    grants: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_isolated(self) -> bool:
+        """Whether the viewer is walled off from Everyone (all of their teams are isolated)."""
+        if self.is_admin or self.no_auth:
+            return False
+        return bool((self.grants or {}).get('isolated', False))
+
+    @property
+    def default_instance(self) -> Optional[str]:
+        """The default instance of the viewer's team, if it has one."""
+        instance = (self.grants or {}).get('instance', None)
+        return str(instance) if instance else None
+
+    def can_use_plugin(self, name: str) -> bool:
+        """Whether the viewer may see and use the plugin `name`."""
+        if not self.is_isolated:
+            return True
+        return str(name) in set((self.grants or {}).get('plugins', None) or [])
+
+    @property
+    def can_write_plugins(self) -> bool:
+        """Whether the viewer may install, edit, upload and uninstall plugins."""
+        if self.is_admin or self.no_auth:
+            return True
+        return bool(self.signed_in and (self.grants or {}).get('plugins_write', False))
 
     def can(self, permission: str) -> bool:
         """Whether the viewer holds `permission` (administrators hold every permission)."""
@@ -177,7 +205,7 @@ class Viewer:
     def in_team(self, team: Optional[str]) -> bool:
         """Whether the viewer is in `team` (everyone is in Everyone)."""
         if not team or str(team) == EVERYONE:
-            return True
+            return (not self.is_isolated) or self.teams.get(EVERYONE) == 'manager'
         return str(team) in self.teams
 
     @property
@@ -197,6 +225,7 @@ class Viewer:
             'permissions': sorted(self.permissions),
             'teams': dict(self.teams),
             'primary_team': self.primary_team,
+            'grants': dict(self.grants or {}),
         }
 
 
@@ -373,6 +402,7 @@ def _principal(viewer: Viewer) -> Any:
         permissions=sorted(viewer.permissions),
         teams=[(team, role) for team, role in viewer.teams.items()
                if team != EVERYONE or role == 'manager'],
+        grants=dict(viewer.grants or {}),
     )
 
 
@@ -383,6 +413,7 @@ def make_viewer(
     permissions: Optional[Iterable[str]] = None,
     teams: Optional[Dict[str, str]] = None,
     primary_team: Optional[str] = None,
+    grants: Optional[Dict[str, Any]] = None,
 ) -> Viewer:
     """
     A signed-in viewer with the given rights, without reading the instance (tests, and code that
@@ -396,6 +427,8 @@ def make_viewer(
         names = frozenset(str(permission) for permission in permissions)
     else:
         names = frozenset(role_permissions(role or default_role()))
+    if not admin and (grants or {}).get('isolated', False):
+        names = names - frozenset(core().ISOLATED_WITHHELD)
     team_roles: Dict[str, str] = {EVERYONE: 'member'}
     for team, team_role in (teams or {}).items():
         name = EVERYONE if core().is_everyone(str(team)) else str(team)
@@ -410,15 +443,30 @@ def make_viewer(
         permissions=names,
         teams=team_roles,
         primary_team=primary_team,
+        grants=dict(grants or {}),
     )
     viewer.principal = _principal(viewer)
     return viewer
+
+
+def _team_grants(conn: Any, teams: Dict[str, str], primary: Optional[str]) -> Dict[str, Any]:
+    """The grants of a user's teams (`meerschaum.core.access.team_grants`)."""
+    pairs = [(team, role) for team, role in teams.items() if team != EVERYONE]
+    if not pairs:
+        return {}
+    return core().team_grants(pairs, conn.get_teams() or [], primary)
 
 
 def viewer_for(username: Optional[str]) -> Viewer:
     """The viewer for a username (its type, effective permissions and teams), read now."""
     from meerschaum.api import get_api_connector, no_auth
     from meerschaum.core import User
+    ### Connectors another process registered (a team's database) are picked up here: one `stat`.
+    try:
+        from meerschaum.api.dash.team_setup import refresh_connectors
+        refresh_connectors()
+    except Exception:
+        pass
     if no_auth:
         viewer = Viewer(username=username, signed_in=True, is_admin=True, no_auth=True,
                         permissions=frozenset(all_permissions()))
@@ -444,20 +492,30 @@ def viewer_for(username: Optional[str]) -> Viewer:
     user._attributes = attributes
     user.type = user_type
     is_admin = str(user_type or '').lower() == 'admin'
+    ### Fail closed: when the teams cannot be read the viewer is walled off (they see nothing of
+    ### Everyone's) instead of being treated as an ordinary member of Everyone.
     try:
         teams = _user_teams(conn, str(username))
+        primary = _primary_team(user, attributes, teams)
+        grants = {} if is_admin else _team_grants(conn, teams, primary)
     except Exception:
         teams = {EVERYONE: 'member'}
+        primary = EVERYONE
+        grants = {} if is_admin else {'isolated': True}
     permissions = frozenset(all_permissions()) if is_admin else _effective_permissions(
         user, user_type, attributes,
     )
+    if not is_admin and grants.get('isolated', False):
+        ### Actions and the terminal run with the server's credentials, outside the team's wall.
+        permissions = permissions - frozenset(core().ISOLATED_WITHHELD)
     viewer = Viewer(
         username=str(username),
         signed_in=True,
         is_admin=is_admin,
         permissions=permissions,
         teams=teams,
-        primary_team=_primary_team(user, attributes, teams),
+        primary_team=primary,
+        grants=grants,
     )
     viewer.principal = _principal(viewer)
     return viewer
@@ -1085,7 +1143,7 @@ def _role_name(role: Any) -> str:
 
 def team_info(team: Any) -> Dict[str, Any]:
     """
-    `{name, id, builtin, members: {username: 'member' | 'manager'}}` of a team (`mrsm.Team`):
+    `{name, id, builtin, members: {username: 'member' | 'manager'}, attributes}` of a team (`mrsm.Team`):
     its listed members (Everyone lists only the users with a role of their own there).
     """
     name = str(getattr(team, 'name', team))
@@ -1100,6 +1158,7 @@ def team_info(team: Any) -> Dict[str, Any]:
         'id': (str(getattr(team, 'id', None) or '') or None),
         'builtin': builtin,
         'members': members,
+        'attributes': dict(getattr(team, 'attributes', None) or {}),
     }
 
 

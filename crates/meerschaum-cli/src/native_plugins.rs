@@ -890,7 +890,21 @@ pub struct HostEnv {
     defaults: meerschaum_core::pipe::PipeDefaults,
     /// The instance of `host::pipe(...)` without `instance_keys` in a call without a Pipe.
     default_instance: String,
+    /// The `meerschaum:connectors` section as last read, and when the config file was checked.
+    connectors: Arc<std::sync::Mutex<LiveConnectors>>,
 }
+
+/// `meerschaum:connectors`, re-read when the config file changes (a connector another process
+/// registered: a team's database made from the console or `bootstrap team`).
+#[derive(Default)]
+struct LiveConnectors {
+    checked: Option<std::time::Instant>,
+    modified: Option<std::time::SystemTime>,
+    section: Option<Arc<Map>>,
+}
+
+/// How often the config file's modification time is looked at.
+const CONNECTORS_CHECK: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl HostEnv {
     /// Host calls over `session`'s connectors and `config`. `default_instance` defaults to
@@ -914,6 +928,7 @@ impl HostEnv {
             natives,
             defaults,
             default_instance,
+            connectors: Default::default(),
         }
     }
 
@@ -1165,9 +1180,51 @@ impl ConnectorRegistry for SessionRegistry {
     }
 }
 
+impl HostEnv {
+    /// The current `meerschaum:connectors` section (see [`LiveConnectors`]).
+    fn live_connectors(&self) -> Arc<Map> {
+        let mut live = self.connectors.lock().unwrap_or_else(|e| e.into_inner());
+        let due = live
+            .checked
+            .is_none_or(|at| at.elapsed() >= CONNECTORS_CHECK);
+        if due {
+            live.checked = Some(std::time::Instant::now());
+            let modified = self
+                .config
+                .connectors_file()
+                .and_then(|path| std::fs::metadata(path).ok())
+                .and_then(|meta| meta.modified().ok());
+            if live.section.is_none() || modified != live.modified {
+                if live.section.is_some() {
+                    self.config.refresh_connectors();
+                }
+                live.modified = modified;
+                live.section = None;
+            }
+        }
+        if let Some(section) = &live.section {
+            return section.clone();
+        }
+        let section = Arc::new(
+            self.config
+                .get(&["meerschaum", "connectors"])
+                .map(|v| v.to_map())
+                .unwrap_or_default(),
+        );
+        live.section = Some(section.clone());
+        section
+    }
+}
+
 impl meerschaum_server::backends::InstanceResolver for HostEnv {
     fn resolve(&self, keys: &str) -> Option<Arc<dyn InstanceConnector>> {
+        // A connector registered since the server started is in the files, not in memory yet.
+        self.live_connectors();
         self.connector(keys).ok().map(|instance| instance.conn())
+    }
+
+    fn connectors(&self) -> Option<Arc<Map>> {
+        Some(self.live_connectors())
     }
 }
 

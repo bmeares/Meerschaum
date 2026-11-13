@@ -53,6 +53,7 @@ pub mod session;
 pub mod show;
 pub mod subactions;
 pub mod sync;
+pub mod team_setup;
 pub mod teams;
 pub mod terminal;
 pub mod tokens;
@@ -96,6 +97,7 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_analyze_pipelines" => pipelines::run("analyze", args, rt),
         "_register_pipelines" => pipelines::run("register", args, rt),
         "_bootstrap_pipelines" => pipelines::run("bootstrap", args, rt),
+        "_bootstrap_teams" => team_setup::bootstrap_teams(args, rt),
         "_edit_pipelines" => pipelines::run("edit", args, rt),
         "_plan_pipelines" => pipelines::run("plan", args, rt),
         "_sync_pipelines" => pipelines::run("sync", args, rt),

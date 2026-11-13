@@ -29,6 +29,10 @@ axum = "0.8"
 async-trait = "0.1"
 percent-encoding = "2"
 futures-util = "0.3"
+# The Grafana integration: its HTTP API (organizations per team) and the signed-in reverse proxy.
+reqwest = { workspace = true }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 # The vendored console assets are embedded gzip-compressed (`build.rs`) and inflated for the
 # rare client that does not accept gzip.
 flate2 = "1"

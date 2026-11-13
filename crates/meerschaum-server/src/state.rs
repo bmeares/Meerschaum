@@ -248,6 +248,15 @@ impl AppState {
         }
     }
 
+    /// The `meerschaum:connectors` section: the resolver's current one (it follows the config
+    /// files), else the one the server started with.
+    pub fn connectors(&self) -> Arc<meerschaum_core::Map> {
+        self.0
+            .resolver
+            .connectors()
+            .unwrap_or_else(|| Arc::new(self.0.config.connectors.clone()))
+    }
+
     /// The server's own instance connector.
     pub fn instance(&self) -> Arc<dyn InstanceConnector> {
         self.0.instance.clone()

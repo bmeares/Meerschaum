@@ -128,6 +128,13 @@ pub struct Caller {
     /// Whether the request came over the API (`get_mcp_context()['api']`): tools then apply the
     /// server's instance and action permissions. `false` over stdio (full local trust).
     pub api: bool,
+    /// The caller is walled off (every team of theirs is isolated): the tools, resources and
+    /// prompts of plugins are hidden, since they are not attributed to a team's plugin.
+    pub plugins_hidden: bool,
+    /// The caller's rules principal over HTTP, when they are not an administrator: the instance
+    /// a tool names must be one their teams may use, and a tool that names none uses their
+    /// team's default instance ([`Caller::scope_instance`]).
+    pub team_principal: Option<meerschaum_core::access::Principal>,
 }
 
 impl Caller {
@@ -137,6 +144,8 @@ impl Caller {
             scopes: Scopes::List(vec!["*".into()]),
             principal: None,
             api: false,
+            plugins_hidden: false,
+            team_principal: None,
         }
     }
 
@@ -146,7 +155,45 @@ impl Caller {
             scopes,
             principal,
             api: true,
+            plugins_hidden: false,
+            team_principal: None,
         }
+    }
+
+    /// The instance a tool call uses: `requested` when the caller's teams may use it (`Err`
+    /// otherwise), else the default instance of the caller's team when the server serves it.
+    pub fn scope_instance(
+        &self,
+        state: &crate::state::AppState,
+        requested: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let Some(principal) = &self.team_principal else {
+            return Ok(requested.map(str::to_string));
+        };
+        match requested {
+            Some(keys) => {
+                let own =
+                    keys == state.config.instance_keys || keys == state.instance().connector_keys();
+                if !own
+                    && !crate::access::guard::principal_may_use_connector(state, principal, keys)
+                {
+                    return Err(format!(
+                        "The instance '{keys}' is not available to your teams."
+                    ));
+                }
+                Ok(Some(keys.to_string()))
+            }
+            None => Ok(principal
+                .grants
+                .instance
+                .clone()
+                .filter(|keys| state.get_api_connector(Some(keys)).is_ok())),
+        }
+    }
+
+    /// Whether the caller may see and call an entry implemented by `source`.
+    pub fn may_use(&self, source: registry::Source) -> bool {
+        !self.plugins_hidden || source == registry::Source::Builtin
     }
 
     /// The scopes as a list (for forwarding to the API host).

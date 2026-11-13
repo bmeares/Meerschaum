@@ -83,3 +83,31 @@
     .plugin-source-preview-editing .plugin-source-toolbar code { flex: 1 0 calc(100% - 3rem); }
     .plugin-source-plain-editor { height: 55vh; }
 }
+
+/* New plugin: Start from a template or Upload files (one segmented control), and the files. */
+.plugin-new-mode { display: flex; flex-wrap: nowrap; width: 100%; margin: 0 0 16px; }
+.plugin-new-mode .form-check { flex: 1 1 0; min-width: 0; margin: 0; padding: 0; min-height: 0; }
+.plugin-new-mode .btn {
+    display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+    min-height: 40px; padding: 6px 8px; border-radius: 0; line-height: 1.2;
+    color: #d4dde6; border-color: #53677a; background: transparent;
+}
+.plugin-new-mode .form-check + .form-check .btn { margin-left: -1px; }
+.plugin-new-mode .form-check:first-child .btn { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.plugin-new-mode .form-check:last-child .btn { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+.plugin-new-mode .btn:hover { background: #2f3a45; color: #fff; }
+.plugin-new-mode .btn.active, .plugin-new-mode .btn-check:checked + .btn { background: #3a6a96; border-color: #3a6a96; color: #fff; }
+.plugin-new-mode .btn-check:focus-visible + .btn { outline: 2px solid #85caff; outline-offset: 1px; }
+.plugin-upload { display: block; width: 100%; cursor: pointer; }
+.plugin-upload-zone {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    min-height: 72px; padding: 12px; border: 1px dashed #5b6875; border-radius: 6px;
+    background: #17212b; color: #dceaf6; text-align: center;
+}
+.plugin-upload:hover .plugin-upload-zone, .plugin-upload:focus-within .plugin-upload-zone,
+.plugin-upload-active .plugin-upload-zone { border-color: #85caff; background: #1d2a37; }
+.plugin-upload-zone i { color: #85caff; }
+.plugin-upload-chosen { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 767.98px) {
+    .plugin-new-mode .btn { min-height: 44px; font-size: 0.9rem; }
+}

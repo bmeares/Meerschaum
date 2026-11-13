@@ -74,7 +74,8 @@ def default_connector(connectors: List[str], instance_keys: Optional[str] = None
 def instance_options(current: Optional[str] = None) -> List[Dict[str, str]]:
     """The instance connectors to choose from (`current` first when it is not defined)."""
     from meerschaum.connectors import instance_types
-    labels = defined_connectors(*instance_types)
+    from meerschaum.api.dash.components import usable_instance_keys
+    labels = usable_instance_keys(list(defined_connectors(*instance_types)))
     if current and current not in labels:
         labels.insert(0, current)
     return [{'label': label, 'value': label} for label in labels]

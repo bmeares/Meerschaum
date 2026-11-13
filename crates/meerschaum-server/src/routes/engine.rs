@@ -399,7 +399,7 @@ async fn canonicalize_node_registrations(
         else {
             continue;
         };
-        access::guard::check_connector_teams(&ctx.state, &fresh, connector)?;
+        access::guard::check_source_connector(&ctx.state, &fresh, connector)?;
         let handle = registered
             .get(connector)
             .and_then(|metrics| metrics.get(metric))

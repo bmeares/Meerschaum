@@ -679,6 +679,13 @@ impl EngineBackend for MemoryEngine {
 pub trait InstanceResolver: Send + Sync {
     /// The connector for `keys`, or `None` (422 `Invalid instance keys.`).
     fn resolve(&self, keys: &str) -> Option<Arc<dyn InstanceConnector>>;
+
+    /// The current `meerschaum:connectors` section, when the resolver follows the config files
+    /// (connectors registered while the server runs, e.g. a new team's database). `None`: the
+    /// section the server started with.
+    fn connectors(&self) -> Option<Arc<meerschaum_core::Map>> {
+        None
+    }
 }
 
 /// Resolves nothing: only the server's own instance is served.

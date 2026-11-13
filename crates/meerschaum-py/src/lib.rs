@@ -59,6 +59,7 @@ pub mod sql_raw_api;
 pub mod static_config;
 pub mod status_api;
 pub mod sync_api;
+pub mod team_api;
 pub mod trace;
 pub mod valkey_api;
 pub mod verify_api;
@@ -153,6 +154,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<native_plugin_api::PyNativeConnector>()?;
     // `bootstrap plugins` for the console's New plugin (rc28)
     plugin_bootstrap_api::register(m)?;
+    team_api::register(m)?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
     // The native action dispatcher from Python (wave 16, P2)

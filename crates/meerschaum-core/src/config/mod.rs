@@ -585,6 +585,19 @@ impl Config {
         self.lock().search_and_substitute_lossless(config)
     }
 
+    /// Re-read `meerschaum:connectors` from the config files and patch it over the section in
+    /// memory: the connectors another process registered since this one read its config (a team's
+    /// database created from the console while the server runs). Connectors that exist only in
+    /// memory (environment connectors, patches) are kept. `true` when the section changed.
+    pub fn refresh_connectors(&self) -> bool {
+        self.with_state(|s| s.refresh_connectors())
+    }
+
+    /// The file `meerschaum` is read from (to notice that another process wrote it).
+    pub fn connectors_file(&self) -> Option<PathBuf> {
+        self.with_state(|s| s.get_keyfile_path("meerschaum", false, None))
+    }
+
     /// `write_config(config_dict, directory)`.
     pub fn write_config(&self, config: Option<&Map>, directory: Option<&Path>) -> bool {
         self.lock().write_config(config, directory)
@@ -1277,6 +1290,36 @@ impl ConfigState {
         }
 
         Ok((config, filekeys))
+    }
+
+    /// See [`Config::refresh_connectors`].
+    pub fn refresh_connectors(&mut self) -> bool {
+        let key = "meerschaum".to_string();
+        let Ok((fresh, _)) =
+            self.read_config_lossless(None, Some(std::slice::from_ref(&key)), false, true, false)
+        else {
+            return false;
+        };
+        let Some(fresh) = fresh
+            .get(&key)
+            .and_then(|section| section.get("connectors"))
+            .cloned()
+        else {
+            return false;
+        };
+        let Some(section) = self.config.get_mut(&key).and_then(|m| m.as_map_mut()) else {
+            return false;
+        };
+        let existing = section
+            .get("connectors")
+            .cloned()
+            .unwrap_or_else(ConfigValue::new_map);
+        let merged = apply_patch(&existing, &fresh);
+        if merged == existing {
+            return false;
+        }
+        section.insert("connectors".to_string(), merged);
+        true
     }
 
     /// Port of `get_keyfile_path`.

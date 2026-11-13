@@ -43,7 +43,7 @@ for name, role in (('rc28-operator', 'operator'), ('rc28-viewer', 'viewer')):
 ''' % {'password': PASSWORD}
 
 #: What New plugin and editing refuse a non-administrator.
-REFUSAL = 'Only administrators can create and edit plugins.'
+REFUSAL = 'Only administrators and team plugin managers can create and edit plugins.'
 
 
 def screenshot(page, name: str) -> None:
@@ -419,7 +419,7 @@ def test_non_administrators_cannot_create_or_edit_plugins(plugins_server, browse
         assert page.locator('.plugin-new-button').count() == 0
         screenshot(page, f'plugins-{username}-{width}')
         tab.goto('/dash/plugins/installed/rc28_conflict', '#plugins-content-div')
-        page.get_by_text('Installed source is available to administrators.').wait_for()
+        page.get_by_text('Installed source is available to administrators').wait_for()
         assert page.locator('.plugin-source-edit').count() == 0
 
         session = {'session-id': _session_id(context)}

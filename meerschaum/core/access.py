@@ -68,6 +68,7 @@ __all__ = (
     'ROLES',
     'DEFAULT_ROLE',
     'EVERYONE',
+    'ISOLATED_WITHHELD',
     'TEAM_ROLES',
     'VISIBILITIES',
     'EDIT_MODES',
@@ -104,6 +105,11 @@ __all__ = (
     'can_manage_team',
     'can_administer_teams',
     'can_use_connector',
+    'can_use_plugin',
+    'can_write_plugins',
+    'can_see_team',
+    'can_see_user',
+    'team_grants',
     'check_access_change',
     'access_for_new_pipe',
     'primary_team',
@@ -172,6 +178,9 @@ LOCK_OPS: Tuple[str, ...] = (
     'edit', 'sync', 'replace', 'deduplicate', 'clear', 'drop', 'rebuild', 'schema', 'delete',
     'delete_and_drop',
 )
+#: The permissions a walled-off principal (every team of theirs is isolated) never holds: actions,
+#: the web terminal and instance chaining act with the server's own credentials.
+ISOLATED_WITHHELD: Tuple[str, ...] = ('actions:execute', 'webterm:use', 'instance:chain')
 ACCESS_KEY: str = 'access'
 LOCKS_KEY: str = 'locks'
 _ACCESS_FIELDS = {'owner', 'team', 'visibility', 'edit', 'edit_mode'}
@@ -201,16 +210,36 @@ class Principal:
     is_admin: bool = False
     permissions: List[str] = field(default_factory=list)
     teams: List[Tuple[str, str]] = field(default_factory=list)
+    #: What the user's teams grant and withhold (`team_grants()`): `isolated`, `connectors`,
+    #: `plugins`, `plugins_write`, `instance`. Empty: nothing extra, nothing withheld.
+    grants: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_isolated(self) -> bool:
+        """
+        Whether the principal is walled off: every team they are in (other than Everyone) is
+        isolated, so they are not a member of Everyone.
+        """
+        return (not self.is_admin) and bool((self.grants or {}).get('isolated', False))
 
     def has(self, permission: str) -> bool:
-        """Whether the principal holds `permission` (administrators hold all)."""
-        return self.is_admin or permission in self.permissions or '*' in self.permissions
+        """
+        Whether the principal holds `permission` (administrators hold all; a walled-off
+        principal never holds `ISOLATED_WITHHELD`).
+        """
+        if self.is_admin:
+            return True
+        if self.is_isolated and permission in ISOLATED_WITHHELD:
+            return False
+        return permission in self.permissions or '*' in self.permissions
 
     def team_role(self, team: Optional[str]) -> Optional[str]:
         """The principal's role in `team` (`None` is Everyone, where every user is a member)."""
         roles = [role for name, role in self.teams if same_team(name, team)]
         if 'manager' in roles:
             return 'manager'
+        if is_everyone(team) and self.is_isolated:
+            return None
         if roles or is_everyone(team):
             return 'member'
         return None
@@ -226,8 +255,10 @@ class Principal:
     @property
     def team_names(self) -> List[str]:
         """The names of the principal's teams (Everyone first)."""
-        out = [EVERYONE]
+        out = [EVERYONE] if self.is_member(EVERYONE) else []
         for name, _ in self.teams:
+            if is_everyone(name):
+                continue
             if not any(same_team(name, existing) for existing in out):
                 out.append(name)
         return out
@@ -239,6 +270,7 @@ class Principal:
             'is_admin': self.is_admin,
             'permissions': list(self.permissions),
             'teams': [tuple(t) for t in self.teams],
+            'grants': dict(self.grants or {}),
         }
 
 
@@ -527,9 +559,78 @@ def can_administer_teams(principal: Union[Principal, Dict[str, Any]]) -> bool:
     return bool(_core().access_can_administer_teams(_principal_arg(principal)))
 
 
-def can_use_connector(principal: Union[Principal, Dict[str, Any]], teams=None) -> bool:
-    """Apply the server's connector-team restriction (`None` allows every team)."""
-    return bool(_core().access_can_use_connector(_principal_arg(principal), teams))
+def can_use_connector(
+    principal: Union[Principal, Dict[str, Any]],
+    teams=None,
+    keys: Optional[str] = None,
+) -> bool:
+    """
+    Apply the server's connector restriction: `teams` is the connector's `teams` attribute
+    (`None`: unrestricted, which a walled-off principal may not use) and `keys` the connector's
+    keys (a connector granted to one of the principal's teams is allowed).
+    """
+    return bool(_core().access_can_use_connector(_principal_arg(principal), teams, keys))
+
+
+def can_use_plugin(principal: Union[Principal, Dict[str, Any]], name: str) -> bool:
+    """
+    Whether `principal` may see and use the plugin `name`: every plugin, unless they are walled
+    off, where it is the plugins their teams were granted or installed.
+    """
+    return bool(_core().access_can_use_plugin(_principal_arg(principal), str(name)))
+
+
+def can_write_plugins(principal: Union[Principal, Dict[str, Any]]) -> bool:
+    """
+    Whether `principal` may install, edit, upload and uninstall plugins on the server:
+    administrators, and the members of a team with `plugins_write`.
+    """
+    return bool(_core().access_can_write_plugins(_principal_arg(principal)))
+
+
+def can_see_team(principal: Union[Principal, Dict[str, Any]], team: str) -> bool:
+    """Whether `principal` may see `team` (a walled-off principal sees their own teams only)."""
+    return bool(_core().access_can_see_team(_principal_arg(principal), str(team)))
+
+
+def can_see_user(
+    principal: Union[Principal, Dict[str, Any]],
+    username: str,
+    user_teams=None,
+) -> bool:
+    """
+    Whether `principal` may see the account `username` (in `user_teams`): a walled-off principal
+    sees their own and those of the users sharing one of their teams.
+    """
+    return bool(_core().access_can_see_user(_principal_arg(principal), str(username), user_teams))
+
+
+def team_grants(user_teams, teams, primary: Optional[str] = None) -> Dict[str, Any]:
+    """
+    What the teams of a user grant and withhold.
+
+    Parameters
+    ----------
+    user_teams: List[Tuple[str, str]]
+        The user's teams as `(team, role)` pairs.
+
+    teams: List[Union[Team, Dict[str, Any]]]
+        The instance's team records (their `attributes` hold the settings: `isolated`,
+        `instance`, `connectors`, `plugins`, `plugins_write`).
+
+    primary: Optional[str], default None
+        The user's primary team (its default instance wins).
+
+    Returns
+    -------
+    A dictionary: `isolated` (every team of the user other than Everyone is isolated),
+    `connectors`, `plugins`, `plugins_write` and `instance`.
+    """
+    records = [
+        (team.to_dict() if hasattr(team, 'to_dict') else team)
+        for team in (teams or [])
+    ]
+    return dict(_core().access_team_grants(list(user_teams or []), records, primary))
 
 
 def check_access_change(
@@ -628,11 +729,21 @@ def get_principal(
             is_admin = (user.instance_connector.get_user_type(user, debug=debug) or '') == 'admin'
         except Exception:
             is_admin = False
+    teams = list(user.teams)
+    grants: Dict[str, Any] = {}
+    try:
+        records = user.instance_connector.get_teams(debug=debug)
+        attributes = user.instance_connector.get_user_attributes(user, debug=debug) or {}
+        grants = team_grants(teams, records, primary_team(attributes, teams))
+    except Exception:
+        ### Fail closed: a user whose teams cannot be read is walled off.
+        grants = {'isolated': not is_admin}
     return Principal(
         username=username,
         is_admin=is_admin,
         permissions=list(user.permissions),
-        teams=list(user.teams),
+        teams=teams,
+        grants=grants,
     )
 
 
