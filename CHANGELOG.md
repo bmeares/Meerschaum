@@ -4,6 +4,10 @@
 
 ## Meerschaum 5
 
+### 5.1.0
+
+- The new [`upsert_changed_only`](https://meerschaum.io/reference/pipes/parameters/#upsert_changed_only) parameter makes an `upsert` pipe on PostgreSQL, PostGIS, TimescaleDB, TimescaleDB-HA or Citus skip the update of rows whose values did not change, so a pipe that re-reads an overlapping window no longer rewrites identical rows (WAL, dead tuples, autovacuum). The sync message counts only the rows actually written.
+
 ### 5.0.2
 
 - The console's Performance page keeps the window and page you chose when a Refresh (or the 30-second update) answers after you changed them; a late reply used to bring back the previous selection.
