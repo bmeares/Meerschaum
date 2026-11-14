@@ -32,6 +32,10 @@ async fn check_repository(private: bool) {
         for token in [
             None,
             Some("Bearer None"),
+            // Only the exact legacy value is anonymous.
+            Some("bearer None"),
+            Some("Bearer none"),
+            Some("Bearer  None"),
             Some("Bearer invalid-token"),
             Some(admin.as_str()),
         ] {
@@ -46,8 +50,7 @@ async fn check_repository(private: bool) {
             assert_eq!(
                 result.status,
                 expected,
-                "{endpoint}, private={private}, anonymous={}: {}",
-                token.is_none(),
+                "{endpoint}, private={private}, token={token:?}: {}",
                 result.text()
             );
         }
