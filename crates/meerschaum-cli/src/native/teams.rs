@@ -645,15 +645,19 @@ pub fn edit_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             if jobs.is_some_and(|n| n > 0) {
                 retag_jobs(rt, &inst, &current.name, Some(&edited.name));
             }
-            // The team's Grafana organization follows (`api:grafana`). An `api:` instance's
-            // server does it itself.
+            // The team's Grafana organization (its saved id) follows (`api:grafana`). An `api:`
+            // instance's server does it itself.
             if inst.type_name() != "api" {
-                let settings = super::team_setup::grafana_settings(rt);
-                if let Err(e) = session.block_on(meerschaum_web::grafana::rename_team(
-                    settings.as_ref(),
-                    &current.name,
-                    &edited.name,
-                )) {
+                let org = meerschaum_web::grafana::team_org_id(&to_core(&current));
+                let renamed = match super::team_setup::grafana_settings(rt) {
+                    Ok(settings) => session.block_on(meerschaum_web::grafana::rename_team(
+                        settings.as_ref(),
+                        org,
+                        &edited.name,
+                    )),
+                    Err(e) => Err(e),
+                };
+                if let Err(e) = renamed {
                     warn(rt, &e);
                 }
             }
@@ -711,10 +715,10 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         )));
     }
     let session = session(rt);
-    let mut registered: Vec<String> = Vec::new();
+    let mut registered: Vec<TeamInfo> = Vec::new();
     for name in &names {
         match session.block_on(get_team(&inst, name)) {
-            Ok(Some(team)) => registered.push(team.name),
+            Ok(Some(team)) => registered.push(team),
             Ok(None) => info(rt, &format!("Team '{name}' does not exist. Skipping...")),
             Err(e) => {
                 return Ok(SuccessTuple::fail(format!(
@@ -730,7 +734,8 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         "Are you sure you want to delete these teams from Meerschaum instance '{}'?\nTheir pipes and jobs move to '{EVERYONE}'.\n",
         inst.keys()
     );
-    for name in &registered {
+    for team in &registered {
+        let name = &team.name;
         let (pipes, jobs) = team_counts(rt, &inst, name);
         question.push_str(&format!(" - {name} ({})\n", counts_text(pipes, jobs)));
     }
@@ -741,7 +746,8 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let mut succeeded = 0usize;
     let mut failed = 0usize;
-    for name in &registered {
+    for team in &registered {
+        let name = &team.name;
         info(
             rt,
             &format!(
@@ -753,6 +759,22 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         print_tuple(rt, &res, TupleArgs::default());
         if res.success {
             retag_jobs(rt, &inst, name, None);
+            // The team's Grafana organization is retired (`api:grafana`). An `api:` instance's
+            // server does it itself.
+            if inst.type_name() != "api" {
+                let org = meerschaum_web::grafana::team_org_id(&to_core(team));
+                let retired = match super::team_setup::grafana_settings(rt) {
+                    Ok(settings) => session.block_on(meerschaum_web::grafana::retire_team(
+                        settings.as_ref(),
+                        name,
+                        org,
+                    )),
+                    Err(e) => Err(e),
+                };
+                if let Err(e) = retired {
+                    warn(rt, &e);
+                }
+            }
             succeeded += 1;
         } else {
             failed += 1;

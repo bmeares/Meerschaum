@@ -182,8 +182,9 @@ pub fn grafana_datasource(
     }
 }
 
-/// `api:grafana` when the integration is enabled (no warning when the section is absent).
-pub(crate) fn grafana_settings(rt: &mut Runtime<'_>) -> Option<GrafanaSettings> {
+/// `api:grafana` when the integration is enabled (no warning when the section is absent);
+/// `Err` when it is enabled but unusable (e.g. Grafana's default password).
+pub(crate) fn grafana_settings(rt: &mut Runtime<'_>) -> Result<Option<GrafanaSettings>, String> {
     let (valid, section) = rt.config().get_with(
         &["api", "grafana"],
         meerschaum_core::config::GetOptions {
@@ -194,9 +195,11 @@ pub(crate) fn grafana_settings(rt: &mut Runtime<'_>) -> Option<GrafanaSettings> 
         },
     );
     if !valid {
-        return None;
+        return Ok(None);
     }
-    GrafanaSettings::from_section(&section.to_map())
+    let password_file =
+        grafana::admin_password_path(&rt.config().paths().path("API_CONFIG_RESOURCES_PATH"));
+    GrafanaSettings::from_section(&section.to_map(), &password_file)
 }
 
 fn sql_connectors(rt: &mut Runtime<'_>) -> Vec<String> {
@@ -445,21 +448,39 @@ pub fn bootstrap_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             .map(|(keys, base, made)| (keys.as_str(), base.as_str(), made)),
     );
 
-    if let Some(settings) = grafana_settings(rt) {
-        let datasource = provisioned
-            .as_ref()
-            .map(|(_, _, made)| grafana_datasource(&settings, &name, made));
-        match session.block_on(grafana::ensure_team(&settings, &name, datasource.as_ref())) {
-            Ok((org, _)) => {
-                let mut record = Map::new();
-                record.insert("org_id".into(), Value::Int(org));
-                attributes.insert(TEAM_GRAFANA_ATTRIBUTE.into(), Value::Map(record));
+    match grafana_settings(rt) {
+        Ok(Some(settings)) => {
+            let datasource = provisioned
+                .as_ref()
+                .map(|(_, _, made)| grafana_datasource(&settings, &name, made));
+            // The organizations other teams already have (never adopted for this one).
+            let recorded = match session.block_on(inst.conn().get_teams()) {
+                Ok(records) => grafana::recorded_orgs(&records),
+                Err(e) => return fail(format!("Failed to read the instance's teams: {e}")),
+            };
+            match session.block_on(grafana::ensure_team(
+                &settings,
+                &name,
+                datasource.as_ref(),
+                &recorded,
+            )) {
+                Ok((org, _)) => {
+                    let mut record = Map::new();
+                    record.insert("org_id".into(), Value::Int(org));
+                    attributes.insert(TEAM_GRAFANA_ATTRIBUTE.into(), Value::Map(record));
+                }
+                Err(e) => warn(
+                    rt,
+                    &format!(
+                        "{e}\nThe team has no Grafana organization: its members are not added to \
+                         it in Grafana. Once the cause is fixed, an administrator gives it one by \
+                         saving the team's settings in the console."
+                    ),
+                ),
             }
-            Err(e) => warn(
-                rt,
-                &format!("{e}\nThe team's organization is made when a member opens Grafana."),
-            ),
         }
+        Ok(None) => {}
+        Err(e) => warn(rt, &format!("The team has no Grafana organization: {e}")),
     }
 
     let team = super::teams::normalized(TeamInfo {
@@ -584,18 +605,26 @@ mod tests {
 
     #[test]
     fn the_grafana_data_source_uses_the_read_only_role() {
-        let settings = GrafanaSettings::from_section(&params(
-            r#"{"enabled": true, "url": "http://grafana:3000"}"#,
-        ))
+        let dir = tempfile::tempdir().unwrap();
+        let file = grafana::admin_password_path(dir.path());
+        let settings = GrafanaSettings::from_section(
+            &params(r#"{"enabled": true, "url": "http://grafana:3000"}"#),
+            &file,
+        )
+        .unwrap()
         .unwrap();
         let source = grafana_datasource(&settings, "Wetlands", &made());
         assert_eq!(source.url, "db:5432");
         assert_eq!(source.user, "mrsm_wetlands_ro");
         assert_eq!(source.password, "ro-pw");
         assert!(source.timescaledb);
-        let settings = GrafanaSettings::from_section(&params(
-            r#"{"enabled": true, "url": "http://grafana:3000", "database_url": "pg.internal:6432"}"#,
-        ))
+        let settings = GrafanaSettings::from_section(
+            &params(
+                r#"{"enabled": true, "url": "http://grafana:3000", "database_url": "pg.internal:6432"}"#,
+            ),
+            &file,
+        )
+        .unwrap()
         .unwrap();
         assert_eq!(
             grafana_datasource(&settings, "Wetlands", &made()).url,

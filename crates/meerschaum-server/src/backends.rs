@@ -689,11 +689,21 @@ pub trait InstanceResolver: Send + Sync {
 }
 
 /// What follows a change of teams outside the instance (5.1: a team's Grafana organization).
+/// Best effort: a failure is reported in the answer's `notes`, never undone.
 #[async_trait]
 pub trait TeamEvents: Send + Sync {
-    /// The team `old` was renamed to `new` (`POST /teams/{name}/rename`). Best effort: a failure
-    /// is reported in the answer's `notes`, never undone.
-    async fn renamed(&self, _old: &str, _new: &str) -> Result<(), String> {
+    /// The team `old` was renamed (`POST /teams/{name}/rename`); `team` is its record under the
+    /// new name (its attributes name what it owns outside the instance).
+    async fn renamed(
+        &self,
+        _team: &meerschaum_core::access::Team,
+        _old: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The team `team` (its record before deletion) was deleted (`DELETE /teams/{name}/delete`).
+    async fn deleted(&self, _team: &meerschaum_core::access::Team) -> Result<(), String> {
         Ok(())
     }
 }

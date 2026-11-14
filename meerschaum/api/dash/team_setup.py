@@ -358,6 +358,7 @@ def create_team(
                 keys,
                 name=database_name,
                 grafana=(grafana_config() if grafana_enabled() else None),
+                grafana_recorded=(recorded_grafana_orgs(conn) if grafana_enabled() else None),
             )
         except Exception as e:
             return False, f"Failed to create the team's {storage}: {e}"
@@ -376,7 +377,11 @@ def create_team(
             notes.append(str(made['grafana_error']))
     elif grafana_enabled():
         try:
-            success, message, grafana_org = _core().grafana_ensure_team(grafana_config(), name)
+            success, message, grafana_org = _core().grafana_ensure_team(
+                grafana_config(),
+                name,
+                recorded_grafana_orgs(conn),
+            )
             if not success:
                 notes.append(message)
         except Exception as e:
@@ -472,15 +477,96 @@ def edit_team_settings(
     return True, f"Saved the settings of team '{name}'."
 
 
-def rename_grafana_team(old: str, new: str) -> Optional[str]:
+def grafana_org_id(attributes: Optional[Dict[str, Any]]) -> Optional[int]:
+    """The Grafana organization id saved in a team's attributes (`grafana: {org_id}`)."""
+    record = (attributes or {}).get('grafana', None)
+    if not isinstance(record, dict):
+        return None
+    try:
+        org_id = int(record.get('org_id', None))
+    except (TypeError, ValueError):
+        return None
+    return org_id if org_id > 0 else None
+
+
+def recorded_grafana_orgs(conn: Any = None) -> List[Tuple[str, int]]:
+    """`[(team, org_id)]`: the Grafana organizations saved for the instance's teams."""
+    conn = conn if conn is not None else _api_connector()
+    out = []
+    for team in (conn.get_teams() or []):
+        name = str(getattr(team, 'name', None) or (team.get('name') if isinstance(team, dict) else ''))
+        attributes = getattr(team, 'attributes', None)
+        if attributes is None and isinstance(team, dict):
+            attributes = team.get('attributes', None)
+        org_id = grafana_org_id(dict(attributes or {}))
+        if name and org_id is not None:
+            out.append((name, org_id))
+    return out
+
+
+def ensure_grafana_team(name: str, conn: Any = None) -> Optional[str]:
     """
-    Rename a renamed team's Grafana organization (best effort).
-    Returns why it could not be renamed, or `None`.
+    Give an existing team without one its Grafana organization (administrators, checked by the
+    caller): an organization of its name is adopted unless another team has it.
+    Returns why it could not be done, or `None`.
+    """
+    if not grafana_enabled():
+        return None
+    conn = conn if conn is not None else _api_connector()
+    existing = get_team_attributes(name, conn)
+    if existing is None or grafana_org_id(existing) is not None:
+        return None
+    try:
+        success, message, org_id = _core().grafana_ensure_team(
+            grafana_config(),
+            str(name),
+            recorded_grafana_orgs(conn),
+        )
+    except Exception as e:
+        success, message, org_id = False, str(e), None
+    if not success or org_id is None:
+        return message
+    try:
+        team = mrsm.Team(str(name), instance=conn)
+        attributes = team.attributes
+        attributes['grafana'] = {'org_id': int(org_id)}
+        success, message = team.edit()
+    except Exception as e:
+        success, message = False, str(e)
+    return None if success else message
+
+
+def rename_grafana_team(new: str, attributes: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Rename the Grafana organization (its saved id, from the team's `attributes`) of a team
+    renamed to `new` (best effort). Returns why it could not be renamed, or `None`.
     """
     if not grafana_enabled():
         return None
     try:
-        success, message = _core().grafana_rename_team(grafana_config(), str(old), str(new))
+        success, message = _core().grafana_rename_team(
+            grafana_config(),
+            grafana_org_id(attributes),
+            str(new),
+        )
+    except Exception as e:
+        success, message = False, str(e)
+    return None if success else message
+
+
+def retire_grafana_team(name: str, attributes: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Retire the Grafana organization (its saved id) of the deleted team `name` (best effort): its
+    dashboards stay, its members and data sources go. Returns why it could not, or `None`.
+    """
+    if not grafana_enabled():
+        return None
+    try:
+        success, message = _core().grafana_retire_team(
+            grafana_config(),
+            str(name),
+            grafana_org_id(attributes),
+        )
     except Exception as e:
         success, message = False, str(e)
     return None if success else message

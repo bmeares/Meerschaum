@@ -9,7 +9,7 @@
 //! | `POST /teams/{name}/register` | `users:write` | administrators | A new team (`members`, `managers`, `attributes`) |
 //! | `PATCH /teams/{name}/edit` | `users:write` | administrators; the team's managers for members | Change members (`members`, `add_members`, `remove_members`), `managers`, `attributes` |
 //! | `POST /teams/{name}/rename` | `users:write` | administrators | Rename (`{"name": new}`): in its pipes, saved Pipelines, primary teams and jobs too |
-//! | `DELETE /teams/{name}/delete` | `users:write` | administrators | Delete: its pipes, saved Pipelines and jobs move to Everyone |
+//! | `DELETE /teams/{name}/delete` | `users:write` | administrators | Delete: its pipes, saved Pipelines and jobs move to Everyone (its Grafana organization is retired) |
 //!
 //! A team is `{"id", "name", "members": {username: "member" | "manager"}, "managers": [...],
 //! "attributes": {...}}` (managers are members too). The built-in team Everyone has every user
@@ -355,9 +355,9 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         return Err(ApiError::new(400, res.message));
     }
     let jobs = ctx.state.jobs.retag_team(&team.name, Some(&new_name)).await;
-    // The team's Grafana organization follows (best effort).
-    let followed = ctx.state.team_events.renamed(&team.name, &new_name).await;
     let renamed = team_or_404(&ctx.state, &new_name).await?;
+    // The team's Grafana organization follows (best effort).
+    let followed = ctx.state.team_events.renamed(&renamed, &team.name).await;
     let mut fields = JsonMap::new();
     fields.insert("team".into(), team_json(&renamed));
     fields.insert("jobs".into(), json!(jobs));
@@ -383,7 +383,14 @@ async fn remove(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         return Err(ApiError::new(400, res.message));
     }
     let jobs = ctx.state.jobs.retag_team(&team.name, None).await;
-    Ok(envelope::ok_with(res.message, "jobs", json!(jobs)))
+    // The team's Grafana organization is retired (best effort).
+    let followed = ctx.state.team_events.deleted(&team).await;
+    let mut fields = JsonMap::new();
+    fields.insert("jobs".into(), json!(jobs));
+    if let Err(note) = followed {
+        fields.insert("notes".into(), json!([note]));
+    }
+    Ok(envelope::ok(res.message, fields))
 }
 
 /// A user's teams as JSON (`[{"name", "role"}]`, Everyone first).

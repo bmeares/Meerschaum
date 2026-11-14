@@ -416,6 +416,9 @@ pub struct ServerConfig {
     pub grafana: Map,
     /// `API_SECRET_KEY_PATH`.
     pub secret_key_path: PathBuf,
+    /// Where the generated password of Grafana's administrator is kept (`api:grafana` without
+    /// `admin_password`): `.grafana_admin_password` beside the secret key.
+    pub grafana_password_path: PathBuf,
     /// `PLUGINS_ARCHIVES_RESOURCES_PATH`.
     pub plugins_archives_path: PathBuf,
     /// `API_STATIC_PATH` (the Python package's static files), if known.
@@ -666,6 +669,10 @@ const UVICORN_DEFAULTS: &[(&str, &str)] = &[
     ("proxy_headers", "True"),
 ];
 
+/// The file (in `API_CONFIG_RESOURCES_PATH`) of the generated password of Grafana's
+/// administrator (`meerschaum_web::grafana::ADMIN_PASSWORD_FILENAME`).
+pub const GRAFANA_PASSWORD_FILENAME: &str = ".grafana_admin_password";
+
 impl ServerConfig {
     /// Resolve the configuration from the config registry and the `start api` flags.
     pub fn from_config(config: &Config, flags: &ServerFlags) -> ServerConfig {
@@ -678,6 +685,9 @@ impl ServerConfig {
         let mut sc = ServerConfig::from_map(&cfg, flags);
         if let Some(p) = path_of(config, "API_SECRET_KEY_PATH") {
             sc.secret_key_path = p;
+        }
+        if let Some(p) = path_of(config, "API_CONFIG_RESOURCES_PATH") {
+            sc.grafana_password_path = p.join(GRAFANA_PASSWORD_FILENAME);
         }
         if let Some(p) = path_of(config, "PLUGINS_ARCHIVES_RESOURCES_PATH") {
             sc.plugins_archives_path = p;
@@ -946,6 +956,7 @@ impl ServerConfig {
                 _ => Map::new(),
             },
             secret_key_path: PathBuf::from("api/.api_secret_key"),
+            grafana_password_path: PathBuf::from("api").join(GRAFANA_PASSWORD_FILENAME),
             plugins_archives_path: PathBuf::from("plugins/.archives"),
             static_path: None,
             root_dir: PathBuf::from("."),
@@ -985,6 +996,9 @@ impl ServerConfig {
         );
         let paths = meerschaum_core::config::paths::Paths::for_root(root);
         sc.secret_key_path = paths.path("API_SECRET_KEY_PATH");
+        sc.grafana_password_path = paths
+            .path("API_CONFIG_RESOURCES_PATH")
+            .join(GRAFANA_PASSWORD_FILENAME);
         sc.plugins_archives_path = paths.path("PLUGINS_ARCHIVES_RESOURCES_PATH");
         sc.webterm_resources_path = paths.path("WEBTERM_INTERNAL_RESOURCES_PATH");
         sc.root_dir = root.to_path_buf();

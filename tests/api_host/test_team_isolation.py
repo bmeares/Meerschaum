@@ -197,7 +197,8 @@ class FakeCore:
         return str(name).lower().replace('-', '_')
     def team_database_valid_name(self, name):
         return (name.isidentifier(), 'bad name')
-    def team_database_create(self, base, base_attributes, team, kind, keys, name=None, grafana=None):
+    def team_database_create(self, base, base_attributes, team, kind, keys, name=None, grafana=None,
+                             grafana_recorded=None):
         calls.append([base, sorted(base_attributes), team, kind, keys, name, grafana])
         return True, 'ok', {
             'attributes': {'flavor': 'postgresql', 'host': 'db', 'port': 5432,
@@ -209,7 +210,7 @@ class FakeCore:
             'grafana': None,
             'grafana_error': None,
         }
-    def grafana_ensure_team(self, section, team):
+    def grafana_ensure_team(self, section, team, recorded=None):
         return True, 'ok', None
 team_setup._core = lambda: FakeCore()
 get_config('meerschaum', 'connectors').setdefault('sql', {})['pgbase'] = {
@@ -308,3 +309,65 @@ print('JSON:' + json.dumps(out, default=str))
     assert after['database'] == wet['database']
     assert 'administrators' in out['settings_refused']
     assert out['refreshed'] is True and out['elsewhere'] is True
+
+
+def test_grafana_follows_console_renames_and_deletions_by_saved_id(sandbox):
+    """
+    Renaming or deleting a team in the console renames or retires its Grafana organization by
+    the id saved in its attributes, and a Grafana failure is a warning, not a success.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, SEED + '''
+from meerschaum.api.dash.callbacks import users as callbacks
+admin = sign_in('gf-admin', user_type='admin')
+calls = []
+class FakeCore:
+    def grafana_rename_team(self, section, org_id, new):
+        calls.append(['rename', org_id, new])
+        return False, 'Grafana: renaming an organization failed: 409'
+    def grafana_retire_team(self, section, team, org_id):
+        calls.append(['retire', team, org_id])
+        return True, 'Success'
+    def grafana_ensure_team(self, section, team, recorded=None):
+        calls.append(['ensure', team, [list(r) for r in (recorded or [])]])
+        return True, 'Success', 41
+team_setup._core = lambda: FakeCore()
+team_setup.grafana_enabled = lambda: True
+team_setup.grafana_config = lambda: {'enabled': True}
+team('gf-data', grafana={'org_id': 7})
+team('gf-other', grafana={'org_id': 8})
+team('gf-plain')
+out = {}
+
+trigger('teams-rename-submit.n_clicks')
+renamed = callbacks.submit_rename_team(
+    1, {'action': 'rename', 'team': 'gf-data'}, 'gf-analytics', 0, admin,
+)
+out['rename_alert'] = renamed[2].to_plotly_json()['props']
+out['renamed_exists'] = mrsm.Team('gf-analytics', instance=conn).exists()
+
+trigger('teams-delete-submit.n_clicks')
+deleted = callbacks.submit_delete_team(
+    1, {'action': 'delete', 'team': 'gf-analytics'}, 'gf-analytics', 0, admin,
+)
+out['delete_alert'] = deleted[2].to_plotly_json()['props']
+
+### A team without an organization gets one when an administrator saves its settings.
+trigger('teams-settings-submit.n_clicks')
+saved = callbacks.submit_team_settings(
+    1, {'team': 'gf-plain'}, None, False, [], [], False, 0, admin,
+)
+out['plain'] = team_setup.get_team_attributes('gf-plain')
+out['calls'] = calls
+print('JSON:' + json.dumps(out, default=str))
+'''))
+    assert out['renamed_exists'] is True
+    assert out['calls'][0] == ['rename', 7, 'gf-analytics']
+    assert out['rename_alert']['color'] == 'warning', out['rename_alert']
+    assert '409' in json.dumps(out['rename_alert']['children'])
+    assert out['calls'][1] == ['retire', 'gf-analytics', 7]
+    assert out['delete_alert']['color'] == 'success', out['delete_alert']
+    ensure = out['calls'][2]
+    assert ensure[0] == 'ensure' and ensure[1] == 'gf-plain'
+    assert ['gf-other', 8] in ensure[2]
+    assert out['plain']['grafana'] == {'org_id': 41}

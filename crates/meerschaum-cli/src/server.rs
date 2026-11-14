@@ -336,7 +336,13 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         session.native_plugins(rt.config())?,
         Some(instance.keys()),
     );
-    let grafana_teams = meerschaum_web::grafana::GrafanaTeams::from_section(&config.grafana);
+    let grafana_teams = meerschaum_web::grafana::GrafanaTeams::from_section(
+        &config.grafana,
+        &config.grafana_password_path,
+    );
+    if let Some(e) = grafana_teams.error() {
+        native::warn(rt, &format!("The Grafana integration is inactive: {e}"));
+    }
     let state = AppState::builder(config, instance.conn())
         .resolver(Arc::new(plugin_host.clone()))
         .team_events(Arc::new(grafana_teams))

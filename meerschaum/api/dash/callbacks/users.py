@@ -618,6 +618,20 @@ def submit_delete_user(n_clicks, target, typed_name, refresh, session_store_data
 # The teams' dialogs
 # ------------------------------------------------------------------------------------------------
 
+def _done_alert(message: str, note: Optional[str] = None) -> Any:
+    """A success alert, or a warning that names what did not follow (e.g. Grafana)."""
+    if not note:
+        return alert_from_success_tuple((True, message))
+    return dbc.Alert(
+        [html.Div(message), html.Div(str(note))],
+        id='success-alert',
+        dismissable=True,
+        fade=True,
+        is_open=True,
+        color='warning',
+    )
+
+
 def _team_by_name(name: Optional[str]) -> Optional[Dict[str, Any]]:
     if not name:
         return None
@@ -957,8 +971,10 @@ def submit_team_settings(
     )
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
+    ### A team set up before Grafana was enabled gets its organization here.
+    grafana_note = team_setup.ensure_grafana_team(team['name'])
     access.forget()
-    return False, [], alert_from_success_tuple((True, message)), (refresh or 0) + 1
+    return False, [], _done_alert(message, grafana_note), (refresh or 0) + 1
 
 
 @dash_app.callback(
@@ -989,18 +1005,17 @@ def submit_rename_team(n_clicks, target, new_name, refresh, session_store_data):
     valid, message = validate_team_name(new_name, others)
     if not valid:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
+    attributes = team_setup.get_team_attributes(team['name'])
     success, message = access.rename_team(team['name'], new_name)
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
-    ### The team's Grafana organization keeps its dashboards under the new name.
-    grafana_note = team_setup.rename_grafana_team(team['name'], new_name)
+    ### The team's Grafana organization (its saved id) keeps its dashboards under the new name.
+    grafana_note = team_setup.rename_grafana_team(new_name, attributes)
     access.forget()
     message = f"Renamed team '{team['name']}' to '{new_name}'."
-    if grafana_note:
-        message += f" {grafana_note}"
     return (
         False, [],
-        alert_from_success_tuple((True, message)),
+        _done_alert(message, grafana_note),
         (refresh or 0) + 1,
     )
 
@@ -1038,11 +1053,18 @@ def submit_delete_team(n_clicks, target, typed_name, refresh, session_store_data
         return no_update, alert_from_success_tuple((False, "This team cannot be deleted.")), no_update, no_update
     if (typed_name or '').strip() != team['name']:
         return no_update, alert_from_success_tuple((False, "Type the team's name to delete it.")), no_update, no_update
+    attributes = team_setup.get_team_attributes(team['name'])
     success, message = access.delete_team(team['name'])
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
+    ### The team's Grafana organization is retired (its dashboards stay).
+    grafana_note = team_setup.retire_grafana_team(team['name'], attributes)
     access.forget()
-    return False, [], alert_from_success_tuple((True, f"Deleted team '{team['name']}'.")), (refresh or 0) + 1
+    return (
+        False, [],
+        _done_alert(f"Deleted team '{team['name']}'.", grafana_note),
+        (refresh or 0) + 1,
+    )
 
 
 @dash_app.callback(
