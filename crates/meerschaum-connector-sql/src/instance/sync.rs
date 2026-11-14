@@ -869,10 +869,12 @@ impl SqlConnector {
             }
         }
 
+        let mut update_count = update_df.as_ref().map_or(0, |u| u.height()) as u64;
         if let Some(update) = update_df.as_ref().filter(|u| u.height() > 0) {
-            let (ok, m) = self
+            let (ok, m, written) = self
                 .apply_update(&sp, &state, update, upsert, autoincrement)
                 .await?;
+            update_count = written;
             if !ok {
                 success = false;
                 msg = format!("{msg}\n{m}").trim_start().to_string();
@@ -888,7 +890,6 @@ impl SqlConnector {
             return Ok(SyncResult::new(false, msg));
         }
         let unseen_count = unseen_df.height() as u64;
-        let update_count = update_df.as_ref().map_or(0, |u| u.height()) as u64;
         if replace {
             if !internal.skip_temporary_tables_check && !cache_internal {
                 let (ok, m) = self.drop_old_temporary_tables(false).await;
@@ -1611,16 +1612,18 @@ impl SqlConnector {
         update_df: &Frame,
         upsert: bool,
         autoincrement: bool,
-    ) -> ConnectorResult<(bool, String)> {
+    ) -> ConnectorResult<(bool, String, u64)> {
         let flavor = self.flavor;
         let pipe = sp.pipe();
+        let input_count = update_df.height() as u64;
         if upsert
             && !autoincrement
+            && !(sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres)
             && pipe.connector_keys() == "mrsm"
             && (update_df.height() <= 64 || flavor == Flavor::Duckdb)
         {
             if let Some(result) = self.upsert_small_internal(sp, state, update_df).await? {
-                return Ok(result);
+                return Ok((result.0, result.1, input_count));
             }
             if flavor == Flavor::Duckdb {
                 // v4 skips DuckDB indices and has no staged upsert template. Do not silently
@@ -1798,7 +1801,7 @@ impl SqlConnector {
             )
             .await;
         if !temp_result.success {
-            return Ok((false, temp_result.message));
+            return Ok((false, temp_result.message, 0));
         }
 
         let schema = self.get_pipe_schema(sp);
@@ -1860,17 +1863,26 @@ impl SqlConnector {
             }
         }
         let update_queries = get_update_queries(&args);
+        let count_all =
+            upsert && sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres;
         let update_start = std::time::Instant::now();
-        let update_success = self.exec_queries_all(&update_queries, true, true).await;
+        let results = self.exec_queries(&update_queries, true, true).await;
+        let update_success =
+            results.len() == update_queries.len() && results.iter().all(Option::is_some);
         crate::facade::trace("sql: execute update", update_start);
         let _ = self
             .log_temporary_tables_creation(&[temp_target], true, !pipe.temporary)
             .await;
         if !update_success {
             tracing::warn!("Failed to apply update to {pipe}.");
-            return Ok((false, format!("Failed to apply update to {pipe}.")));
+            return Ok((false, format!("Failed to apply update to {pipe}."), 0));
         }
-        Ok((true, String::new()))
+        let written = if count_all {
+            results.into_iter().flatten().sum()
+        } else {
+            input_count
+        };
+        Ok((true, String::new(), written))
     }
 
     /// `create_pipe_table_from_df(pipe, df)`: create the target table from the pipe's dtypes

@@ -17,7 +17,9 @@ use crate::queries::table::{
     get_create_schema_if_not_exists_queries, get_create_table_queries, get_table_cols_types_query,
 };
 use crate::queries::templates::has_update_query;
-use crate::queries::update::{UpdateQueriesArgs, get_null_replacement, get_update_queries};
+use crate::queries::update::{
+    UpdateQueriesArgs, changed_only_comparable, get_null_replacement, get_update_queries,
+};
 use meerschaum_connector::DataQuery;
 
 use super::data::{DataQueryOptions, fmt_thousands};
@@ -1345,12 +1347,21 @@ impl SqlConnector {
             "\n    {}",
             new_cols
                 .keys()
-                .map(|col| format!(
-                    "COALESCE({a_new}.{}, {}) AS {}",
-                    q(col),
-                    get_null_replacement(&get_col_typ(col, &new_cols_types), Some(flavor)),
-                    q(col)
-                ))
+                .map(|col| {
+                    if upsert
+                        && sp.upsert_changed_only()
+                        && flavor.driver_family() == DriverFamily::Postgres
+                    {
+                        format!("{a_new}.{} AS {}", q(col), q(col))
+                    } else {
+                        format!(
+                            "COALESCE({a_new}.{}, {}) AS {}",
+                            q(col),
+                            get_null_replacement(&get_col_typ(col, &new_cols_types), Some(flavor)),
+                            q(col)
+                        )
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(",\n    ")
         );
@@ -1382,14 +1393,24 @@ impl SqlConnector {
                     let new = format!("{a_new}.{}", q(c));
                     let old = format!("{a_bt}.{}", q(c));
                     let target_type = get_col_typ(c, &backtrack_cols_types);
-                    let new_value = upsert_comparable_value(
+                    let mut new_value = upsert_comparable_value(
                         &new,
                         &get_col_typ(c, &new_cols_types),
                         &target_type,
                         flavor,
                     );
-                    let old_value =
+                    let mut old_value =
                         upsert_comparable_value(&old, &target_type, &target_type, flavor);
+                    if sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres
+                    {
+                        let assigned = if sp.enforce() {
+                            format!("CAST({new} AS {target_type})")
+                        } else {
+                            new.clone()
+                        };
+                        new_value = changed_only_comparable(&assigned, &target_type);
+                        old_value = changed_only_comparable(&old, &target_type);
+                    }
                     return format!(
                         "({new_value} = {old_value} OR ({new} IS NULL AND {old} IS NULL))"
                     );
@@ -1608,10 +1629,13 @@ impl SqlConnector {
             };
         }
         let mut update_count = 0;
+        let count_all =
+            upsert && sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres;
         for (i, query) in apply_update_queries.iter().enumerate() {
             self.log(query);
             match session_execute(self, &mut tx, query, flavor).await {
                 // PARITY: only the first statement's rowcount is reported (`_pipes.py:2905`).
+                Ok(n) if count_all => update_count += n,
                 Ok(n) if i == 0 => update_count = n,
                 Ok(_) => {}
                 Err(e) => fail!(e),

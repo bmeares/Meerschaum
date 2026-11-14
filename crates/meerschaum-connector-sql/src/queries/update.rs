@@ -72,10 +72,15 @@ pub fn get_null_replacement(typ: &str, flavor: Option<Flavor>) -> String {
 }
 
 /// `expression` (a value of PostgreSQL type `db_type`) in a form `IS DISTINCT FROM` compares
-/// exactly: `json` as `jsonb` (no equality operator; `jsonb` ignores key order and whitespace),
-/// PostGIS types as their EWKB bytes (`=` may compare bounding boxes), and any type not known to
-/// have a value equality as text.
-fn changed_only_comparable(expression: &str, db_type: &str) -> String {
+/// so that "not distinct" means the stored value and the assigned one are interchangeable.
+///
+/// A type keeps its own equality only where equal values are interchangeable (numbers compare by
+/// value: `1.50` and `1.5`, `-0.0` and `0.0` are unchanged). PostGIS types compare their EWKB
+/// bytes, SRID included (`=` compares bounding boxes). Every other type compares its text: `json`
+/// (it has no equality; a `jsonb` cast would hide key order and formatting and can fail on
+/// input `json` accepts, such as `\u0000`), `interval` (`'1 day' = '24 hours'`), `xml`, geometric
+/// types, extension types.
+pub(crate) fn changed_only_comparable(expression: &str, db_type: &str) -> String {
     let upper = db_type.trim().to_uppercase();
     let (element, array) = match upper.strip_suffix("[]") {
         Some(element) => (element, true),
@@ -85,9 +90,6 @@ fn changed_only_comparable(expression: &str, db_type: &str) -> String {
         },
     };
     let element = element.split('(').next().unwrap_or_default().trim();
-    if !array && element == "JSON" {
-        return format!("CAST({expression} AS JSONB)");
-    }
     if !array && matches!(element, "GEOMETRY" | "GEOGRAPHY") {
         return format!("CAST({expression} AS BYTEA)");
     }
@@ -128,7 +130,6 @@ fn changed_only_comparable(expression: &str, db_type: &str) -> String {
             | "TIMESTAMPTZ"
             | "TIMESTAMP WITHOUT TIME ZONE"
             | "TIMESTAMP WITH TIME ZONE"
-            | "INTERVAL"
             | "INET"
             | "CIDR"
             | "MACADDR"
@@ -229,6 +230,26 @@ impl<'a> UpdateQueriesArgs<'a> {
             changed_only: false,
         }
     }
+}
+
+/// Whether `get_update_queries(args)` renders the `upsert_changed_only` guard: an upsert with
+/// `changed_only` on the PostgreSQL family that has value columns to compare (an upsert of key
+/// columns only is `DO NOTHING`). The statements' summed row counts are then the rows written.
+pub fn changed_only_applies(args: &UpdateQueriesArgs<'_>) -> bool {
+    args.upsert
+        && args.changed_only
+        && matches!(
+            args.flavor,
+            Flavor::Postgresql
+                | Flavor::Postgis
+                | Flavor::Timescaledb
+                | Flavor::TimescaledbHa
+                | Flavor::Citus
+        )
+        && args
+            .target_cols_types
+            .keys()
+            .any(|c| args.patch_cols_types.contains_key(c) && !args.join_cols.contains(c))
 }
 
 /// `get_update_queries(...)`: the `MERGE` / `UPDATE` / upsert queries applying `patch` to `target`.
@@ -363,19 +384,7 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
             .collect();
         format!("SET {}", parts.join(",\n"))
     };
-    let changed_only = args.upsert
-        && args.changed_only
-        && !value_cols.is_empty()
-        && matches!(
-            flavor,
-            Some(
-                Flavor::Postgresql
-                    | Flavor::Postgis
-                    | Flavor::Timescaledb
-                    | Flavor::TimescaledbHa
-                    | Flavor::Citus
-            )
-        );
+    let changed_only = changed_only_applies(args);
     // `(f.a, f.b) IS DISTINCT FROM (<new a>, <new b>)`: whether a stored row `f` would change.
     let distinct_subquery = |r_prefix: &str| -> String {
         let (old, new): (Vec<String>, Vec<String>) = value_cols
@@ -387,11 +396,7 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
                 )
             })
             .unzip();
-        format!(
-            "({}) IS DISTINCT FROM ({})",
-            old.join(", "),
-            new.join(", ")
-        )
+        format!("({}) IS DISTINCT FROM ({})", old.join(", "), new.join(", "))
     };
 
     let and_subquery = |l_prefix: &str, r_prefix: &str| -> String {
@@ -837,9 +842,9 @@ mod tests {
                      \"geom\" = CAST(EXCLUDED.\"geom\" AS GEOMETRY(Point,4326)),\n\
                      \"tags\" = CAST(EXCLUDED.\"tags\" AS TEXT[]),\n\
                      \"vec\" = CAST(EXCLUDED.\"vec\" AS VECTOR(3))\n\
-                     WHERE (f.\"v\", CAST(f.\"doc\" AS JSONB), CAST(f.\"geom\" AS BYTEA), f.\"tags\", CAST(f.\"vec\" AS TEXT)) \
+                     WHERE (f.\"v\", CAST(f.\"doc\" AS TEXT), CAST(f.\"geom\" AS BYTEA), f.\"tags\", CAST(f.\"vec\" AS TEXT)) \
                      IS DISTINCT FROM (CAST(EXCLUDED.\"v\" AS DOUBLE PRECISION), \
-                     CAST(CAST(EXCLUDED.\"doc\" AS JSON) AS JSONB), \
+                     CAST(CAST(EXCLUDED.\"doc\" AS JSON) AS TEXT), \
                      CAST(CAST(EXCLUDED.\"geom\" AS GEOMETRY(Point,4326)) AS BYTEA), \
                      CAST(EXCLUDED.\"tags\" AS TEXT[]), \
                      CAST(CAST(EXCLUDED.\"vec\" AS VECTOR(3)) AS TEXT))"
@@ -877,7 +882,10 @@ mod tests {
         args.target_cols_types.retain(|c, _| c == "ts" || c == "id");
         args.patch_cols_types = args.target_cols_types.clone();
         let qs = get_update_queries(&args);
-        assert!(qs[0].ends_with("ON CONFLICT (\"ts\", \"id\") DO NOTHING"), "{qs:?}");
+        assert!(
+            qs[0].ends_with("ON CONFLICT (\"ts\", \"id\") DO NOTHING"),
+            "{qs:?}"
+        );
         assert!(!qs[0].contains("AS f"), "{qs:?}");
     }
 
@@ -905,7 +913,9 @@ mod tests {
         args.cast_columns = false;
         let qs = get_update_queries(&args);
         assert!(
-            qs[0].ends_with("SET \"v\" = EXCLUDED.\"v\"\nWHERE (f.\"v\") IS DISTINCT FROM (EXCLUDED.\"v\")"),
+            qs[0].ends_with(
+                "SET \"v\" = EXCLUDED.\"v\"\nWHERE (f.\"v\") IS DISTINCT FROM (EXCLUDED.\"v\")"
+            ),
             "{qs:?}"
         );
     }
@@ -958,10 +968,23 @@ mod tests {
         ] {
             assert_eq!(c(t), "x", "{t}");
         }
-        assert_eq!(c("json"), "CAST(x AS JSONB)");
         assert_eq!(c("geometry"), "CAST(x AS BYTEA)");
         assert_eq!(c("GEOGRAPHY(Point,4326)"), "CAST(x AS BYTEA)");
-        for t in ["JSON[]", "_json", "GEOMETRY[]", "XML", "POINT", "ARRAY", "USER-DEFINED", ""] {
+        for t in [
+            "JSON",
+            "json",
+            "JSON[]",
+            "_json",
+            "INTERVAL",
+            "interval day to second",
+            "INTERVAL[]",
+            "GEOMETRY[]",
+            "XML",
+            "POINT",
+            "ARRAY",
+            "USER-DEFINED",
+            "",
+        ] {
             assert_eq!(c(t), "CAST(x AS TEXT)", "{t}");
         }
     }
