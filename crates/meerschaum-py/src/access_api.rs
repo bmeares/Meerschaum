@@ -17,7 +17,8 @@
 
 use meerschaum_connector::InstanceConnector;
 use meerschaum_core::access::{
-    self, EditMode, LockOp, Locks, PipeAccess, Principal, Role, Team, TeamRole, Visibility,
+    self, EditMode, LockOp, Locks, PipeAccess, Principal, Role, Team, TeamGrants, TeamRole,
+    Visibility,
 };
 use meerschaum_core::users::User;
 use meerschaum_core::{Map, Value};
@@ -116,7 +117,47 @@ fn principal_of(obj: &Bound<'_, PyAny>) -> PyResult<Principal> {
         .into_iter()
         .collect();
     let teams = teams_of(field(obj, "teams")?.as_ref())?;
-    Ok(Principal::new(&username, is_admin, permissions, teams))
+    let grants = match field(obj, "grants")?.filter(|g| !g.is_none()) {
+        Some(grants) => grants_of(&grants)?,
+        None => TeamGrants::default(),
+    };
+    Ok(Principal::new(&username, is_admin, permissions, teams).with_grants(grants))
+}
+
+/// A principal's team grants: `{"isolated", "connectors", "plugins", "plugins_write",
+/// "instance"}` (a dict or an object; every key is optional).
+fn grants_of(obj: &Bound<'_, PyAny>) -> PyResult<TeamGrants> {
+    let flag = |name: &str| -> PyResult<bool> {
+        Ok(match field(obj, name)? {
+            Some(v) => v.is_truthy()?,
+            None => false,
+        })
+    };
+    Ok(TeamGrants {
+        isolated: flag("isolated")?,
+        connectors: strings(field(obj, "connectors")?.filter(|v| !v.is_none()).as_ref())?
+            .into_iter()
+            .collect(),
+        plugins: strings(field(obj, "plugins")?.filter(|v| !v.is_none()).as_ref())?
+            .into_iter()
+            .collect(),
+        plugins_write: flag("plugins_write")?,
+        instance: field(obj, "instance")?
+            .filter(|v| !v.is_none())
+            .map(|v| v.str().map(|s| s.to_string()))
+            .transpose()?
+            .filter(|s| !s.trim().is_empty()),
+    })
+}
+
+fn grants_to_py<'py>(py: Python<'py>, grants: &TeamGrants) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item("isolated", grants.isolated)?;
+    out.set_item("connectors", grants.connectors.iter().collect::<Vec<_>>())?;
+    out.set_item("plugins", grants.plugins.iter().collect::<Vec<_>>())?;
+    out.set_item("plugins_write", grants.plugins_write)?;
+    out.set_item("instance", grants.instance.clone())?;
+    Ok(out)
 }
 
 fn access_of(obj: Option<&Bound<'_, PyAny>>) -> PyResult<PipeAccess> {
@@ -555,21 +596,112 @@ pub fn access_can_administer_teams(principal: &Bound<'_, PyAny>) -> PyResult<boo
     Ok(access::can_administer_teams(&principal_of(principal)?))
 }
 
-/// Shared connector-team restriction for trusted console callers.
+/// Shared connector-team restriction for trusted console callers (`keys`: the connector's keys,
+/// for the grants of the principal's teams).
 #[pyfunction]
-#[pyo3(signature = (principal, teams=None))]
+#[pyo3(signature = (principal, teams=None, keys=None))]
 pub fn access_can_use_connector(
     principal: &Bound<'_, PyAny>,
     teams: Option<&Bound<'_, PyAny>>,
+    keys: Option<&str>,
 ) -> PyResult<bool> {
     let teams = teams
         .filter(|teams| !teams.is_none())
         .map(|teams| strings(Some(teams)))
         .transpose()?;
-    Ok(access::can_use_connector(
+    let principal = principal_of(principal)?;
+    Ok(match keys {
+        Some(keys) => access::can_use_connector_keys(&principal, keys, teams.as_deref()),
+        None => access::can_use_connector(&principal, teams.as_deref()),
+    })
+}
+
+/// `_core.access_team_grants(user_teams, teams, primary=None)`: what the teams of a user grant
+/// and withhold (`teams`: the instance's team records).
+#[pyfunction]
+#[pyo3(signature = (user_teams, teams, primary=None))]
+pub fn access_team_grants<'py>(
+    py: Python<'py>,
+    user_teams: &Bound<'py, PyAny>,
+    teams: &Bound<'py, PyAny>,
+    primary: Option<&str>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let user_teams = teams_of(Some(user_teams).filter(|t| !t.is_none()))?;
+    let mut records = Vec::new();
+    for item in teams.try_iter()? {
+        records.push(team_of(&item?)?);
+    }
+    grants_to_py(py, &TeamGrants::of(&user_teams, &records, primary))
+}
+
+/// `_core.access_isolated_withheld()`: the permissions a walled-off principal never holds.
+#[pyfunction]
+pub fn access_isolated_withheld() -> Vec<&'static str> {
+    access::ISOLATED_WITHHELD.to_vec()
+}
+
+/// `_core.access_can_name_connector(principal, keys, teams=None, configured=True)`: whether the
+/// principal may give a pipe the source connector `keys`.
+#[pyfunction]
+#[pyo3(signature = (principal, keys, teams=None, configured=true))]
+pub fn access_can_name_connector(
+    principal: &Bound<'_, PyAny>,
+    keys: &str,
+    teams: Option<&Bound<'_, PyAny>>,
+    configured: bool,
+) -> PyResult<bool> {
+    let teams = teams
+        .filter(|teams| !teams.is_none())
+        .map(|teams| strings(Some(teams)))
+        .transpose()?;
+    Ok(access::can_name_connector(
         &principal_of(principal)?,
+        keys,
         teams.as_deref(),
+        configured,
     ))
+}
+
+/// `_core.access_can_use_plugin(principal, name)`.
+#[pyfunction]
+pub fn access_can_use_plugin(principal: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
+    Ok(access::can_use_plugin(&principal_of(principal)?, name))
+}
+
+/// `_core.access_can_write_plugins(principal)`.
+#[pyfunction]
+pub fn access_can_write_plugins(principal: &Bound<'_, PyAny>) -> PyResult<bool> {
+    Ok(access::can_write_plugins(&principal_of(principal)?))
+}
+
+/// `_core.access_can_see_team(principal, team)`.
+#[pyfunction]
+pub fn access_can_see_team(principal: &Bound<'_, PyAny>, team: &str) -> PyResult<bool> {
+    Ok(access::can_see_team(&principal_of(principal)?, team))
+}
+
+/// `_core.access_can_see_user(viewer, target_username, target_user_teams)`.
+#[pyfunction]
+#[pyo3(signature = (viewer, target_username, target_user_teams=None))]
+pub fn access_can_see_user(
+    viewer: &Bound<'_, PyAny>,
+    target_username: &str,
+    target_user_teams: Option<&Bound<'_, PyAny>>,
+) -> PyResult<bool> {
+    let teams = teams_of(target_user_teams.filter(|t| !t.is_none()))?;
+    Ok(access::can_see_user(
+        &principal_of(viewer)?,
+        target_username,
+        &teams,
+    ))
+}
+
+/// `_core.access_is_member(principal, team=None)`: whether the principal is in `team` (`None`:
+/// Everyone, which a walled-off principal is not in).
+#[pyfunction]
+#[pyo3(signature = (principal, team=None))]
+pub fn access_is_member(principal: &Bound<'_, PyAny>, team: Option<&str>) -> PyResult<bool> {
+    Ok(principal_of(principal)?.is_member(team))
 }
 
 /// `_core.access_check_access_change(principal, old, new)`: `None` when allowed, else why not.
@@ -1047,6 +1179,14 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_can_manage_team, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_administer_teams, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_use_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(access_team_grants, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_name_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(access_isolated_withheld, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_use_plugin, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_write_plugins, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_see_team, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_see_user, m)?)?;
+    m.add_function(wrap_pyfunction!(access_is_member, m)?)?;
     m.add_function(wrap_pyfunction!(access_check_access_change, m)?)?;
     m.add_function(wrap_pyfunction!(access_for_new_pipe, m)?)?;
     m.add_function(wrap_pyfunction!(access_primary_team, m)?)?;

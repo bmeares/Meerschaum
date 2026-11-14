@@ -679,7 +679,30 @@ impl EngineBackend for MemoryEngine {
 pub trait InstanceResolver: Send + Sync {
     /// The connector for `keys`, or `None` (422 `Invalid instance keys.`).
     fn resolve(&self, keys: &str) -> Option<Arc<dyn InstanceConnector>>;
+
+    /// The current `meerschaum:connectors` section, when the resolver follows the config files
+    /// (connectors registered while the server runs, e.g. a new team's database). `None`: the
+    /// section the server started with.
+    fn connectors(&self) -> Option<Arc<meerschaum_core::Map>> {
+        None
+    }
 }
+
+/// What follows a change of teams outside the instance (5.1: a team's Grafana organization).
+#[async_trait]
+pub trait TeamEvents: Send + Sync {
+    /// The team `old` was renamed to `new` (`POST /teams/{name}/rename`). Best effort: a failure
+    /// is reported in the answer's `notes`, never undone.
+    async fn renamed(&self, _old: &str, _new: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Nothing follows.
+#[derive(Debug, Default, Clone)]
+pub struct NoTeamEvents;
+
+impl TeamEvents for NoTeamEvents {}
 
 /// Resolves nothing: only the server's own instance is served.
 #[derive(Debug, Default, Clone)]

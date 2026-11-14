@@ -187,7 +187,7 @@ async fn post_outcomes(ctx: Ctx, body: Body) -> ApiResult {
             format!("{pipe} is an internal pipe and has no sync status."),
         ));
     }
-    access::guard::check_connector_teams(&ctx.state, &caller, pipe.connector_keys())?;
+    access::guard::check_source_connector(&ctx.state, &caller, pipe.connector_keys())?;
     let mut filter = RefFilter::new(&ctx.state, &caller, &conn.connector_keys());
     match filter.editable(&pipe.pipe_ref()).await {
         (true, _) => {}

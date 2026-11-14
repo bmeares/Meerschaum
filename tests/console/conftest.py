@@ -176,6 +176,11 @@ def _console_diagnostics(request, monkeypatch):
             except OSError:
                 continue
             (dest / f'server-{server.name}-{server.port}.log').write_bytes(data)
+            for log_file in (server.root / 'logs').glob('*.log*'):
+                if log_file.is_file() and not log_file.name.startswith('.'):
+                    (dest / f'job-{server.name}-{log_file.name}').write_bytes(
+                        log_file.read_bytes()[-4_000_000:]
+                    )
         (dest / 'failure.txt').write_text(
             f"{item.nodeid}\nwritten {_now()}\n\n"
             + '\n\n'.join(

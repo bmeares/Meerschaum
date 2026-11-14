@@ -71,6 +71,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
             ("connectors", "_bootstrap_connectors"),
             ("plugins", "_bootstrap_plugins"),
             ("jobs", "_bootstrap_jobs"),
+            ("teams", "_bootstrap_teams"),
         ],
     ),
     (

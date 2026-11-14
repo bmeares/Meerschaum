@@ -403,11 +403,11 @@ def call(fn, *args):
 
 ### Teams: an administrator creates one; a manager may not; a manager fills their own team.
 trigger('teams-new-submit.n_clicks')
-out['create_admin'] = call(cu.submit_new_team, 1, 'ac-crew', 0, SESSIONS['admin'])[0]
-out['create_manager'] = str(call(cu.submit_new_team, 1, 'ac-crew2', 0, SESSIONS['manager'])[1])
+out['create_admin'] = call(cu.submit_new_team, 1, 'ac-crew', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['admin'])[0]
+out['create_manager'] = str(call(cu.submit_new_team, 1, 'ac-crew2', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['manager'])[1])
 out['teams'] = access.team_names(conn)
 trigger('teams-new-submit.n_clicks')
-out['create_everyone'] = str(call(cu.submit_new_team, 1, 'everyone', 0, SESSIONS['admin'])[1])
+out['create_everyone'] = str(call(cu.submit_new_team, 1, 'everyone', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['admin'])[1])
 ### Members: the manager of `data` adds a member there, not to `ac-crew`.
 import dash
 from types import SimpleNamespace

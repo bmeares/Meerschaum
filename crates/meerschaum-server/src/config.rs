@@ -412,6 +412,8 @@ pub struct ServerConfig {
     pub pipe_defaults: meerschaum_core::pipe::PipeDefaults,
     /// `meerschaum:connectors` (for `/connectors`).
     pub connectors: Map,
+    /// `api:grafana` (the Grafana the console signs its users in to; empty when unset).
+    pub grafana: Map,
     /// `API_SECRET_KEY_PATH`.
     pub secret_key_path: PathBuf,
     /// `PLUGINS_ARCHIVES_RESOURCES_PATH`.
@@ -939,6 +941,10 @@ impl ServerConfig {
             ),
             pipe_defaults: meerschaum_core::pipe::PipeDefaults::default(),
             connectors,
+            grafana: match get(cfg, &["api", "grafana"]) {
+                Some(Value::Map(m)) => m.clone(),
+                _ => Map::new(),
+            },
             secret_key_path: PathBuf::from("api/.api_secret_key"),
             plugins_archives_path: PathBuf::from("plugins/.archives"),
             static_path: None,

@@ -53,6 +53,7 @@ nav = [
       "reference/api-instance/index.md",
       {"Security and Tokens" = "reference/api-instance/tokens.md"},
       {"Permissions and Rate Limits" = "reference/api-instance/permissions.md"},
+      {"Teams on One Instance" = "reference/api-instance/teams.md"},
       {"Pipelines, Access and Actions over HTTP" = "reference/api-instance/routes.md"},
       {"NGINX" = "reference/api-instance/nginx.md"},
       {"Web Console" = "reference/api-instance/web-console.md"},

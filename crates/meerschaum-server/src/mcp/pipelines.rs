@@ -384,7 +384,7 @@ pub async fn list_connectors(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolE
     // A connector reserved for other teams is not listed (rc15).
     let caller = caller_access(cx).await?;
     let mut connectors = Vec::new();
-    for (typ, labels) in &cx.state.config.connectors {
+    for (typ, labels) in cx.state.connectors().iter() {
         if wanted.as_ref().is_some_and(|w| w != typ) {
             continue;
         }

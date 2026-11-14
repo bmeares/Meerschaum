@@ -7156,6 +7156,9 @@ There are two ways to use a token to authenticate with the API:
       -H "Authorization: $API_KEY"
     ```
 
+!!! tip "Connecting an AI agent"
+    The API Key is also the bearer credential of the [MCP server](../mcp/index.md) at `/mcp`. The web console's Tokens page has a **Connect an agent** button with ready-to-paste configuration for Claude Code, Claude Desktop, Codex, OpenCode and other MCP clients.
+
 ---
 
 ## 🎯 Scopes
@@ -7268,6 +7271,8 @@ Pipes without access settings belong to Everyone and remain shared. A pipe's `ac
 
 The HTTP API, MCP and console enforce these rights and filter hidden members from Pipelines, runs, events, lineage and searches. Jobs started through them belong to their creator and primary team; local jobs belong to Everyone. Email addresses are visible to their owners, administrators, and managers of a team the user belongs to. Local SQL / Valkey credentials are the trust boundary: direct CLI and Python access with them sees everything. Pipe locks apply everywhere, including local access, and no force flag bypasses them.
 
+A team can be **isolated** from Everyone and given a database, connectors and plugins of its own: see [Teams on One Instance](/reference/api-instance/teams/).
+
 A connector's `teams: [Data, Operations]` attribute restricts who may use it through the API. Setting SQL definitions requires `pipes:define_sql`; the server refuses internal tables and the tables of pipes the caller cannot see, before and after templates resolve. These SQL checks are best effort. True isolation needs separate connectors and database users with appropriate database permissions.
 
 ## Who may run actions
@@ -7332,6 +7337,139 @@ api:
 - Responses, downloads, event streams and websockets are never limited. The engine routes (64 MiB) and plugin archive uploads (128 MiB) keep their own limits.
 - A forwarded request whose API host does not start answering within `api:host:response_seconds` gets `504`; once the answer starts, it is never timed (`null` waits forever).
 - The server asks the API host every 30 seconds whether it answers. After three checks in a row without an answer (10 seconds each), the host process is stopped (SIGTERM, then SIGKILL after a grace period) and started again, with a restart delay that doubles up to a minute.
+
+
+---
+
+# Teams on One Instance
+
+Source: https://meerschaum.io/reference/api-instance/teams/
+
+# 👥 Teams on One Instance
+
+Several teams can share one Meerschaum API instance: each signs in to the same web console, HTTP API and MCP server, and sees its own pipes, jobs, connectors and plugins. An **isolated** team is walled off from everything that belongs to Everyone, and a team may get a database of its own on your existing database server.
+
+[Roles and teams](/reference/api-instance/permissions/#roles-and-teams) describes roles, members and managers. This page covers what an administrator sets when creating a team.
+
+## Create a team
+
+In the console, open **Users & Teams**, then **New team**. From a shell on the server:
+
+```bash
+mrsm bootstrap teams wetlands
+```
+
+Both ask the same questions:
+
+| Setting | What it does |
+|---|---|
+| **Hide Everyone's pipes, jobs, connectors and plugins** | Makes the team isolated (see below). |
+| **Storage** | **New database** or **New schema** on the server of an existing PostgreSQL-family connector (`sql:main` by default), or an **Existing instance** as the team's default instance. |
+| **Connectors** | Other connectors the team may use. |
+| **Plugins** | The installed plugins the team may use. |
+| **Members install, edit and upload plugins** | Lets the team's members add plugins of their own. |
+
+Answer up front with `--params` to skip the questions:
+
+```bash
+mrsm bootstrap teams wetlands \
+  --members ann,cal --managers ann \
+  --params '{"isolated": true, "database": "database", "base": "sql:main", "plugins": ["noaa"]}' \
+  --yes
+```
+
+`database` is `database`, `schema` or `none`; `name` and `label` override the database (or schema) name and the connector label, which default to the team's name in lowercase with underscores.
+
+Change a team's settings later with its **Settings** in the console. They are stored in the team's `attributes` (`isolated`, `instance`, `connectors`, `plugins`, `plugins_write`), which `PATCH /teams/{name}/edit` also accepts from an administrator.
+
+## Isolated teams
+
+A user is walled off when every team they are in (other than Everyone) is isolated. A user who is also in an open team keeps that team's ordinary view. Administrators are never walled off.
+
+A walled-off user:
+
+- sees only their teams' pipes, saved Pipelines, runs and jobs. Pipes without access settings (they belong to Everyone), pipes shared with "everyone" by other teams and local jobs are hidden;
+- may use only the connectors reserved for their teams (`teams: [wetlands]`) and those their teams were granted. Unrestricted connectors, the server's own instance included, are not offered;
+- sees only the plugins their teams were granted or installed, in the console and in the plugin repository routes;
+- may register pipes whose connector is one of theirs, a granted data plugin (`plugin:<name>`), or a plain label that names no connector of the server's (data pushed through the API, such as `manual:gauge`);
+- sees only their own teams and the accounts of users who share one;
+- never holds `actions:execute`, `webterm:use` or `instance:chain`, whatever their role. Actions and the terminal run on the server with its own credentials, which reach every team's data. They still sync and verify the pipes they may edit;
+- gets no plugin tools, resources or prompts over MCP (they are not attributed to a team's plugin).
+
+When a request names no instance, the console, the pipe routes and the MCP tools use the default instance of the caller's team.
+
+!!! note "Serve the API privately"
+    Without `--private`, `/users` and `/plugins` answer callers who send no credentials, as they always have. The legacy SDK's `Bearer None` header also means anonymous. Start the server with `mrsm start api --private` so those listings need a valid login and follow these rules.
+
+## A database for each team
+
+**New database** and **New schema** need a PostgreSQL-family connector (`postgresql`, `timescaledb`, `timescaledb-ha`, `postgis`, `citus`) whose user may create roles and databases. Meerschaum then creates:
+
+- a login role `mrsm_<team>` with a generated password. It owns the team's database (or schema) and is not a superuser;
+- a read-only login role `mrsm_<team>_ro` for dashboards, which may only `SELECT` what the team's role creates;
+- the database (TimescaleDB and PostGIS are installed in it when the base server has them), which nobody else may connect to, or the schema, which becomes the roles' `search_path`;
+- a connector `sql:<team>` in your configuration, reserved for the team, which becomes the team's default instance. The team's pipes are registered there.
+
+It also takes `CONNECT` on the base database away from `PUBLIC`, so a team's role cannot open it. Every login role that could connect before keeps an explicit grant.
+
+A database is the stronger wall: the roles of one team cannot connect to the database of another. A schema shares the base database: its role cannot read other tables, but it can see their names.
+
+The server follows the configuration file, so the new connector works without a restart. Deleting a team keeps its database, roles and connector; drop them yourself when you no longer need the data.
+
+`api:permissions:instances:allow_multiple_instances` must stay `true` (the default) for teams to use their own instance.
+
+## Plugins
+
+Plugins run in the server's process with its credentials. Granting a plugin lets a team use it; **Members install, edit and upload plugins** lets them add code that runs on the server, so turn it on only for teams you trust with the server.
+
+With it on, a team's members can install a plugin from the repository, create one from a template, or **upload** files they have locally (a `.py` or `.rs` file, several files, or a `.zip` / `.tar.gz` archive) from **Plugins → New plugin**. What they add belongs to their team: they may edit, update, publish and uninstall those plugins, and nobody else's.
+
+## Agents and MCP
+
+Every user can connect an AI agent to the instance: **Tokens → Connect an agent** shows ready-to-paste configuration for Claude Code, Claude Desktop, Codex, OpenCode and other MCP clients. **New agent token** creates a read-only token and fills its API key into the snippets. See [MCP](/reference/mcp/).
+
+A token acts as its owner, so an agent of a walled-off user sees what that user sees.
+
+## Grafana
+
+Meerschaum can sign the console's users in to Grafana and keep one Grafana organization per team. Grafana's data sources are separated per organization, so a team's dashboards can only query the team's own database, through its read-only role.
+
+```yaml
+### `mrsm edit config api`
+api:
+  grafana:
+    enabled: true
+    ### Grafana's server administrator (for its HTTP API). Change the password.
+    admin_user: admin
+    admin_password: <password>
+    ### The address users reach Grafana at.
+    root_url: https://your-api-host/grafana/
+```
+
+Then run `mrsm stack up -d grafana`. With `enabled`, the stack's `grafana` service is started with what the sign-in needs: it is served under `/grafana`, and it accepts the signed-in user only from the API server (the auth-proxy header, from Docker's own networks). Settings your stack config already has are kept.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `url` | `http://grafana:3000` | How the API server reaches Grafana. |
+| `admin_user`, `admin_password` | `admin`, `admin` | Grafana's server administrator. A Grafana that already has data keeps the password it has; change it in Grafana too. |
+| `root_url` | Grafana's own guess | The public address of `/grafana/`. |
+| `proxy_whitelist` | `172.16.0.0/12` | Who may name the signed-in user to Grafana: the API server's address, or Docker's networks. |
+| `database_url` | the connector's host and port | How Grafana reaches the teams' database server (`host:port`). |
+
+!!! warning "Who may name the user"
+    Grafana trusts the user named by an address in `proxy_whitelist`. The default covers Docker's networks, which on the Docker host includes local connections to Grafana's published port: narrow it to the API container's address, or stop publishing Grafana's own port, when other people have a login on that host. A Grafana you run yourself needs the same settings (`GF_AUTH_PROXY_*`, `GF_SERVER_ROOT_URL`, `GF_SERVER_SERVE_FROM_SUB_PATH`).
+
+Grafana's own address changes to `http://localhost:3000/grafana/`.
+
+Users then open **Grafana** from the console's user menu (`https://your-api-host/grafana/`):
+
+- each team is an organization named after it. A team with a database of its own gets a data source there for that database;
+- members are Editors, the team's managers are organization Admins, and Meerschaum administrators are Grafana administrators;
+- members of isolated teams are removed from Grafana's main organization, so they see only their teams' dashboards;
+- renaming a team renames its organization;
+- memberships are checked when a user opens Grafana (at most once a minute), and a signed-out or deleted user has no access. If Grafana's API cannot be reached, the request is refused instead of using memberships that may be stale.
+
+The built-in **Syncs** and **Engine** dashboards stay in the main organization.
 
 
 ---
@@ -7996,14 +8134,14 @@ mrsm start api
 mrsm register token --label agent --scopes pipes:read
 ```
 
-Then point the client at `/mcp` with the token as a bearer credential:
+Then point the client at `/mcp` with the token's **API Key** as a bearer credential. The API key is the value shown as "API Key" when the token is created (in the web console and in the output of `register token`): `mrsm-key:` followed by the base64 encoding of `<client-id>:<client-secret>`.
 
 ```json
 {
   "mcpServers": {
     "meerschaum": {
       "url": "https://your-api-host/mcp",
-      "headers": {"Authorization": "Bearer mrsm-key:<client-id>:<client-secret>"}
+      "headers": {"Authorization": "Bearer mrsm-key:YTg1ZTI3NDEtZ..."}
     }
   }
 }
@@ -8012,8 +8150,99 @@ Then point the client at `/mcp` with the token as a bearer credential:
 To see exactly what a token can reach, `GET /mcp` with it:
 
 ```bash
-curl -H "Authorization: Bearer mrsm-key:..." https://your-api-host/mcp
+curl -H "Authorization: Bearer mrsm-key:YTg1ZTI3NDEtZ..." https://your-api-host/mcp
 ```
+
+### Connect from the web console
+
+The [web console](../api-instance/web-console.md)'s **Tokens** page has a **Connect an agent** button: pick your client and copy its configuration, with this server's MCP URL already filled in. **New agent token** there starts a token named `agent` with read-only scopes (`pipes:read`, `sql:read`, `connectors:read`, `jobs:read`, `logs:read`, out of those you hold), and the dialog shown once the token is created offers the same configurations with the new API key inlined. The button is hidden when the server does not serve `/mcp`.
+
+### Client configurations
+
+These are the snippets the console generates. Where a client can read the key from the environment, the key stays out of the configuration file:
+
+```bash
+export MRSM_API_KEY="mrsm-key:YTg1ZTI3NDEtZ..."
+```
+
+=== "Claude Code"
+
+    ```bash
+    claude mcp add --transport http meerschaum https://your-api-host/mcp \
+      --header "Authorization: Bearer mrsm-key:YTg1ZTI3NDEtZ..."
+    ```
+
+    Or, to share the server with a project, a `.mcp.json` which reads `MRSM_API_KEY`:
+
+    ```json
+    {
+      "mcpServers": {
+        "meerschaum": {
+          "type": "http",
+          "url": "https://your-api-host/mcp",
+          "headers": {
+            "Authorization": "Bearer ${MRSM_API_KEY}"
+          }
+        }
+      }
+    }
+    ```
+
+=== "Claude Desktop"
+
+    `claude_desktop_config.json` starts local servers only, so bridge to the remote one with [`mcp-remote`](https://github.com/geelen/mcp-remote) (needs Node.js; add `"--allow-http"` to `args` for a plain `http://` server):
+
+    ```json
+    {
+      "mcpServers": {
+        "meerschaum": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "mcp-remote",
+            "https://your-api-host/mcp",
+            "--header",
+            "Authorization:${AUTH_HEADER}"
+          ],
+          "env": {
+            "AUTH_HEADER": "Bearer mrsm-key:YTg1ZTI3NDEtZ..."
+          }
+        }
+      }
+    }
+    ```
+
+=== "Codex"
+
+    In `~/.codex/config.toml` (the token is read from `MRSM_API_KEY`):
+
+    ```toml
+    [mcp_servers.meerschaum]
+    url = "https://your-api-host/mcp"
+    bearer_token_env_var = "MRSM_API_KEY"
+    ```
+
+=== "OpenCode"
+
+    In `opencode.json` (the header reads `MRSM_API_KEY`; OpenCode 1.x puts the server directly under `mcp`):
+
+    ```json
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "mcp": {
+        "servers": {
+          "meerschaum": {
+            "type": "remote",
+            "url": "https://your-api-host/mcp",
+            "oauth": false,
+            "headers": {
+              "Authorization": "Bearer {env:MRSM_API_KEY}"
+            }
+          }
+        }
+      }
+    }
+    ```
 
 ## What the agent gets
 
@@ -9088,7 +9317,7 @@ usage: mrsm [actions] {options}
 Create and Build Pipes with Meerschaum.
 
 Create:
-  bootstrap    Create pipes, connectors, jobs, Pipelines or plugins step by step.
+  bootstrap    Create pipes, connectors, jobs, Pipelines, plugins or teams step by step.
   register     Register pipes, connectors, Pipelines, plugins, tokens or users.
   copy         Copy connectors, pipes or Pipelines.
 
@@ -16397,6 +16626,19 @@ Read the [migration guide](../reference/migrating-to-v5.md) before upgrading an 
 Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
+
+## 5.1.0
+
+Several teams can now share one instance, each behind its own wall. See [Teams on One Instance](../reference/api-instance/teams.md).
+
+- **Isolated teams.** A team created with "Hide Everyone's pipes, jobs, connectors and plugins" sees only what belongs to it or was granted to it, in the console, the HTTP API and MCP. Its members never hold `actions:execute`, `webterm:use` or `instance:chain`. A user in both an isolated and an open team keeps the open team's view.
+- **A database per team.** **New team** in the console and the new `bootstrap teams` action can create a database or a schema for the team on an existing PostgreSQL-family connector, with a role for the team, a read-only role for dashboards and a connector reserved for the team, which becomes its default instance. The server picks up the new connector without a restart.
+- **Team settings.** New team and a team's **Settings** choose its default instance, the connectors and plugins it may use, and whether its members may install plugins.
+- **Team plugins.** A team allowed to install plugins can install from the repository, create a plugin, or upload files and archives from **Plugins → New plugin**; its members manage their team's plugins only.
+- **Connect an agent.** The Tokens page shows ready-to-paste MCP configuration for Claude Code, Claude Desktop, Codex, OpenCode and other clients, with the API key of a new token filled in.
+- **Grafana.** With `api:grafana:enabled`, the server signs console users in to Grafana at `/grafana`, keeps one organization per team with a data source for the team's database, and removes members of isolated teams from the main organization. The stack's `grafana` service gets the settings it needs when the stack is next started.
+- The teams table's row menu is no longer clipped when the table is short.
+- The MCP docs show the bearer token in the form the server accepts (the **API Key** of a token).
 
 ## 5.0.2
 

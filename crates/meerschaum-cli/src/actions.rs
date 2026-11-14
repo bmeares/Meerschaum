@@ -88,6 +88,8 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("register", "teams"),
     ("edit", "teams"),
     ("delete", "teams"),
+    // 5.1: a team with its own database, grants and Grafana organization.
+    ("bootstrap", "teams"),
     ("lock", "pipes"),
     ("unlock", "pipes"),
 ];
@@ -211,6 +213,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("pipes", "_bootstrap_pipes"),
             sub("pipelines", "_bootstrap_pipelines"),
             sub("plugins", "_bootstrap_plugins"),
+            sub("teams", "_bootstrap_teams"),
         ],
     ),
     action(

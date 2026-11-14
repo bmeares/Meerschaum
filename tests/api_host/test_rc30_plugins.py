@@ -67,7 +67,7 @@ print('JSON:' + json.dumps({
 }))
 '''))
     for key in ('anonymous', 'viewer', 'login'):
-        assert out[key] == [False, 'Only administrators can publish installed plugins.']
+        assert out[key] == [False, 'Only administrators and team plugin managers can publish installed plugins.']
     assert out['unknown'] == [False, 'Select a configured API repository.']
     assert out['traversal'] == [False, 'This plugin is not installed.']
     assert out['repositories'] == []

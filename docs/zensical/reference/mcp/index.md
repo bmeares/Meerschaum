@@ -50,14 +50,14 @@ mrsm start api
 mrsm register token --label agent --scopes pipes:read
 ```
 
-Then point the client at `/mcp` with the token as a bearer credential:
+Then point the client at `/mcp` with the token's **API Key** as a bearer credential. The API key is the value shown as "API Key" when the token is created (in the web console and in the output of `register token`): `mrsm-key:` followed by the base64 encoding of `<client-id>:<client-secret>`.
 
 ```json
 {
   "mcpServers": {
     "meerschaum": {
       "url": "https://your-api-host/mcp",
-      "headers": {"Authorization": "Bearer mrsm-key:<client-id>:<client-secret>"}
+      "headers": {"Authorization": "Bearer mrsm-key:YTg1ZTI3NDEtZ..."}
     }
   }
 }
@@ -66,8 +66,99 @@ Then point the client at `/mcp` with the token as a bearer credential:
 To see exactly what a token can reach, `GET /mcp` with it:
 
 ```bash
-curl -H "Authorization: Bearer mrsm-key:..." https://your-api-host/mcp
+curl -H "Authorization: Bearer mrsm-key:YTg1ZTI3NDEtZ..." https://your-api-host/mcp
 ```
+
+### Connect from the web console
+
+The [web console](../api-instance/web-console.md)'s **Tokens** page has a **Connect an agent** button: pick your client and copy its configuration, with this server's MCP URL already filled in. **New agent token** there starts a token named `agent` with read-only scopes (`pipes:read`, `sql:read`, `connectors:read`, `jobs:read`, `logs:read`, out of those you hold), and the dialog shown once the token is created offers the same configurations with the new API key inlined. The button is hidden when the server does not serve `/mcp`.
+
+### Client configurations
+
+These are the snippets the console generates. Where a client can read the key from the environment, the key stays out of the configuration file:
+
+```bash
+export MRSM_API_KEY="mrsm-key:YTg1ZTI3NDEtZ..."
+```
+
+=== "Claude Code"
+
+    ```bash
+    claude mcp add --transport http meerschaum https://your-api-host/mcp \
+      --header "Authorization: Bearer mrsm-key:YTg1ZTI3NDEtZ..."
+    ```
+
+    Or, to share the server with a project, a `.mcp.json` which reads `MRSM_API_KEY`:
+
+    ```json
+    {
+      "mcpServers": {
+        "meerschaum": {
+          "type": "http",
+          "url": "https://your-api-host/mcp",
+          "headers": {
+            "Authorization": "Bearer ${MRSM_API_KEY}"
+          }
+        }
+      }
+    }
+    ```
+
+=== "Claude Desktop"
+
+    `claude_desktop_config.json` starts local servers only, so bridge to the remote one with [`mcp-remote`](https://github.com/geelen/mcp-remote) (needs Node.js; add `"--allow-http"` to `args` for a plain `http://` server):
+
+    ```json
+    {
+      "mcpServers": {
+        "meerschaum": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "mcp-remote",
+            "https://your-api-host/mcp",
+            "--header",
+            "Authorization:${AUTH_HEADER}"
+          ],
+          "env": {
+            "AUTH_HEADER": "Bearer mrsm-key:YTg1ZTI3NDEtZ..."
+          }
+        }
+      }
+    }
+    ```
+
+=== "Codex"
+
+    In `~/.codex/config.toml` (the token is read from `MRSM_API_KEY`):
+
+    ```toml
+    [mcp_servers.meerschaum]
+    url = "https://your-api-host/mcp"
+    bearer_token_env_var = "MRSM_API_KEY"
+    ```
+
+=== "OpenCode"
+
+    In `opencode.json` (the header reads `MRSM_API_KEY`; OpenCode 1.x puts the server directly under `mcp`):
+
+    ```json
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "mcp": {
+        "servers": {
+          "meerschaum": {
+            "type": "remote",
+            "url": "https://your-api-host/mcp",
+            "oauth": false,
+            "headers": {
+              "Authorization": "Bearer {env:MRSM_API_KEY}"
+            }
+          }
+        }
+      }
+    }
+    ```
 
 ## What the agent gets
 

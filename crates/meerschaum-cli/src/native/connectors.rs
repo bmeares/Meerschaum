@@ -300,7 +300,7 @@ pub fn connect_instance(rt: &mut Runtime<'_>, keys: &str) -> Option<super::Insta
 }
 
 /// The `meerschaum` config section (`get_config('meerschaum')`).
-fn meerschaum_section(rt: &mut Runtime<'_>) -> Map {
+pub(super) fn meerschaum_section(rt: &mut Runtime<'_>) -> Map {
     rt.config()
         .get(&["meerschaum"])
         .map(|v| v.to_map())
@@ -405,7 +405,7 @@ pub fn register_connector_keys(
 }
 
 /// `write_config({'meerschaum': mrsm_config})` (and refresh the in-memory section).
-fn write_meerschaum(rt: &mut Runtime<'_>, section: Map) -> bool {
+pub(super) fn write_meerschaum(rt: &mut Runtime<'_>, section: Map) -> bool {
     let mut config = Map::new();
     config.insert("meerschaum".into(), Value::Map(section));
     let ok = rt.config().write_config(Some(&config), None);

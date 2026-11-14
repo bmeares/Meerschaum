@@ -22,6 +22,9 @@ pub fn docstring(function: &str) -> Option<&'static str> {
         "_bootstrap_pipelines" => {
             "Create a registered Pipeline with guided member selection (asks for the NAME when it is not given). Members use instance|connector|metric|location references. Tags require a separate analyze pipelines approval."
         }
+        "_bootstrap_teams" => {
+            "Create a team step by step: whether it is isolated from Everyone, a database or schema of its own on an existing PostgreSQL-family connector (with a connector reserved for the team), the connectors and plugins it may use, and whether its members may install plugins. Answers may be given in --params (isolated, database, base, name, label, instance, connectors, plugins, plugins_write) with --members and --managers."
+        }
         "_edit_pipelines" => {
             "Edit a Pipeline definition in the editor, or use --params JSON including its expected revision. Membership edits never tag or delete Pipes."
         }
@@ -1595,14 +1598,14 @@ Attach to a running job and answer its prompts, or follow its logs.
         }
         "bootstrap" => {
             r##"
-Create pipes, connectors, jobs, Pipelines or plugins step by step.
+Create pipes, connectors, jobs, Pipelines, plugins or teams step by step.
 
 Example:
     `bootstrap pipes`
 
 
     Options:
-        `bootstrap [connectors, jobs, pipes, plugins]`"##
+        `bootstrap [connectors, jobs, pipes, plugins, teams]`"##
         }
         "clear" => {
             r##"

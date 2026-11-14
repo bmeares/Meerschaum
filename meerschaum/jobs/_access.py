@@ -28,7 +28,7 @@ from meerschaum.jobs import _native
 EVERYONE: str = 'Everyone'
 
 #: `(username, is_admin, [(team, 'member' | 'manager'), ...])`: who is asking.
-_ViewerParts = Tuple[Optional[str], bool, List[Tuple[str, str]]]
+_ViewerParts = Tuple[Optional[str], bool, List[Tuple[str, str]], bool]
 
 
 def _role_name(role: Any) -> str:
@@ -78,15 +78,16 @@ def _user_parts(user: Any, instance: Any = None) -> _ViewerParts:
     username = getattr(user, 'username', user)
     username = str(username) if username else None
     if not username:
-        return None, False, []
+        return None, False, [], False
     try:
         principal = get_principal(user, instance=instance)
     except Exception:
-        return username, False, []
+        return username, False, [], False
     return (
         principal.username or username,
         bool(principal.is_admin),
         _team_pairs(principal.teams),
+        bool(principal.is_isolated),
     )
 
 
@@ -97,7 +98,7 @@ def _viewer_parts(principal_or_user: Any, instance: Any = None) -> _ViewerParts:
     `is_admin` or `admin`, `teams`), a `meerschaum.core.User` or a username.
     """
     if principal_or_user is None:
-        return None, False, []
+        return None, False, [], False
     from meerschaum.core import User
     if isinstance(principal_or_user, (str, User)):
         return _user_parts(principal_or_user, instance=instance)
@@ -107,17 +108,20 @@ def _viewer_parts(principal_or_user: Any, instance: Any = None) -> _ViewerParts:
         def get(key: str, default: Any = None) -> Any:
             return getattr(principal_or_user, key, default)
     if get('no_auth', False):
-        return (get('username', None) or None), True, _team_pairs(get('teams', None))
+        return (get('username', None) or None), True, _team_pairs(get('teams', None)), False
     ### A console viewer who is not signed in is anonymous.
     if get('signed_in', True) is False:
-        return None, False, []
+        return None, False, [], False
     teams = get('teams', None)
     if callable(teams):
         teams = teams()
+    grants = get('grants', None)
+    isolated = bool(grants.get('isolated', False)) if isinstance(grants, dict) else False
     return (
         (str(get('username', '') or '') or None),
         bool(get('is_admin', get('admin', False))),
         _team_pairs(teams),
+        isolated,
     )
 
 
@@ -152,7 +156,7 @@ def job_access(job: Any) -> Dict[str, Any]:
 
 
 def _can_see(parts: _ViewerParts, job: Any) -> bool:
-    username, is_admin, teams = parts
+    username, is_admin, teams, isolated = parts
     if is_admin:
         return True
     return bool(_native.core().jobs_can_see(
@@ -161,6 +165,7 @@ def _can_see(parts: _ViewerParts, job: Any) -> bool:
         username=username,
         is_admin=False,
         teams=teams,
+        isolated=isolated,
     ))
 
 

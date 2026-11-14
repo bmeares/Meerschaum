@@ -873,6 +873,178 @@ impl Team {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Team settings and grants (5.1)
+// ---------------------------------------------------------------------------------------------
+
+/// `attributes['isolated']`: the team's members do not see what belongs to Everyone.
+pub const TEAM_ISOLATED_ATTRIBUTE: &str = "isolated";
+/// `attributes['instance']`: the team's default instance connector keys.
+pub const TEAM_INSTANCE_ATTRIBUTE: &str = "instance";
+/// `attributes['connectors']`: the connector keys granted to the team.
+pub const TEAM_CONNECTORS_ATTRIBUTE: &str = "connectors";
+/// `attributes['plugins']`: the names of the plugins granted to (or installed by) the team.
+pub const TEAM_PLUGINS_ATTRIBUTE: &str = "plugins";
+/// `attributes['plugins_write']`: the team's members may install, edit and upload plugins.
+pub const TEAM_PLUGINS_WRITE_ATTRIBUTE: &str = "plugins_write";
+/// `attributes['database']`: the database (or schema) provisioned for the team.
+pub const TEAM_DATABASE_ATTRIBUTE: &str = "database";
+/// `attributes['grafana']`: the team's Grafana organization.
+pub const TEAM_GRAFANA_ATTRIBUTE: &str = "grafana";
+
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Str(s)) => matches!(
+            s.trim().to_lowercase().as_str(),
+            "true" | "yes" | "1" | "on"
+        ),
+        Some(Value::Int(i)) => *i != 0,
+        _ => false,
+    }
+}
+
+fn name_list(value: Option<&Value>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |text: &str| {
+        let text = text.trim();
+        if !text.is_empty() && !out.iter().any(|o| o == text) {
+            out.push(text.to_string());
+        }
+    };
+    match value {
+        Some(Value::List(items)) => {
+            for item in items {
+                if !item.is_null() {
+                    push(&item.py_str());
+                }
+            }
+        }
+        Some(Value::Str(text)) => text.split(',').for_each(&mut push),
+        _ => {}
+    }
+    out
+}
+
+impl Team {
+    /// Whether the team is isolated (`attributes['isolated']`): its members do not see the
+    /// pipes, jobs, connectors and plugins of Everyone. The built-in team is never isolated.
+    pub fn is_isolated(&self) -> bool {
+        !self.is_everyone() && truthy(self.attributes.get(TEAM_ISOLATED_ATTRIBUTE))
+    }
+
+    /// The team's default instance connector keys (`attributes['instance']`).
+    pub fn default_instance(&self) -> Option<String> {
+        self.attributes
+            .get(TEAM_INSTANCE_ATTRIBUTE)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|keys| !keys.is_empty())
+            .map(str::to_string)
+    }
+
+    /// The connector keys granted to the team (`attributes['connectors']`, and its default
+    /// instance).
+    pub fn granted_connectors(&self) -> Vec<String> {
+        let mut out = name_list(self.attributes.get(TEAM_CONNECTORS_ATTRIBUTE));
+        if let Some(instance) = self.default_instance()
+            && !out.contains(&instance)
+        {
+            out.insert(0, instance);
+        }
+        out
+    }
+
+    /// The plugins granted to (or installed by) the team (`attributes['plugins']`).
+    pub fn granted_plugins(&self) -> Vec<String> {
+        name_list(self.attributes.get(TEAM_PLUGINS_ATTRIBUTE))
+    }
+
+    /// Whether the team's members may install, edit and upload plugins
+    /// (`attributes['plugins_write']`).
+    pub fn may_write_plugins(&self) -> bool {
+        truthy(self.attributes.get(TEAM_PLUGINS_WRITE_ATTRIBUTE))
+    }
+
+    /// Replace the list attribute `key` (`connectors`, `plugins`) with `names` (an empty list
+    /// removes the key).
+    pub fn set_names(&mut self, key: &str, names: &[String]) {
+        let names = name_list(Some(&Value::List(
+            names.iter().map(|n| Value::Str(n.clone())).collect(),
+        )));
+        if names.is_empty() {
+            self.attributes.shift_remove(key);
+        } else {
+            self.attributes.insert(
+                key.to_string(),
+                Value::List(names.into_iter().map(Value::Str).collect()),
+            );
+        }
+    }
+}
+
+/// The permissions a walled-off principal never holds, whatever their role: running arbitrary
+/// actions, the web terminal and chaining instances all act with the server's own credentials,
+/// outside the team's wall. Syncing and verifying the pipes they may edit needs none of them.
+pub const ISOLATED_WITHHELD: [&str; 3] = [
+    Permission::ACTIONS_EXECUTE,
+    Permission::WEBTERM_USE,
+    Permission::INSTANCE_CHAIN,
+];
+
+/// What a principal's teams grant and withhold: computed from the attributes of the teams the
+/// user is in ([`TeamGrants::of`]). The default grants nothing extra and withholds nothing, which
+/// is how every user behaved before 5.1.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TeamGrants {
+    /// The principal is walled off: they are in at least one team other than Everyone and every
+    /// such team is isolated. They are then not a member of Everyone: they see only what belongs
+    /// to their teams and what their teams were granted.
+    #[serde(default)]
+    pub isolated: bool,
+    /// The connector keys their teams were granted.
+    #[serde(default)]
+    pub connectors: BTreeSet<String>,
+    /// The plugins their teams were granted (or installed).
+    #[serde(default)]
+    pub plugins: BTreeSet<String>,
+    /// One of their teams lets its members install, edit and upload plugins.
+    #[serde(default)]
+    pub plugins_write: bool,
+    /// The default instance of their primary team (else of the first of their teams with one).
+    #[serde(default)]
+    pub instance: Option<String>,
+}
+
+impl TeamGrants {
+    /// The grants of a user in `user_teams` (their teams with roles), given the instance's
+    /// `teams` records; `primary` is the user's primary team ([`primary_team`]).
+    pub fn of(user_teams: &[(String, TeamRole)], teams: &[Team], primary: Option<&str>) -> Self {
+        let mut grants = TeamGrants::default();
+        let own: Vec<&Team> = teams
+            .iter()
+            .filter(|team| !team.is_everyone())
+            .filter(|team| {
+                user_teams
+                    .iter()
+                    .any(|(name, _)| same_team(Some(name), Some(&team.name)))
+            })
+            .collect();
+        grants.isolated = !own.is_empty() && own.iter().all(|team| team.is_isolated());
+        for team in &own {
+            grants.connectors.extend(team.granted_connectors());
+            grants.plugins.extend(team.granted_plugins());
+            grants.plugins_write |= team.may_write_plugins();
+        }
+        grants.instance = own
+            .iter()
+            .find(|team| same_team(Some(&team.name), primary))
+            .and_then(|team| team.default_instance())
+            .or_else(|| own.iter().find_map(|team| team.default_instance()));
+        grants
+    }
+}
+
 /// Team members as a JSON-like map `{username: role}`.
 pub fn members_value(members: &IndexMap<String, TeamRole>) -> Value {
     Value::Map(
@@ -1742,6 +1914,9 @@ pub struct Principal {
     pub permissions: Permissions,
     /// The user's teams with their roles ([`EVERYONE`] included).
     pub teams: Vec<(String, TeamRole)>,
+    /// What those teams grant and withhold ([`TeamGrants`]; the default changes nothing).
+    #[serde(default)]
+    pub grants: TeamGrants,
 }
 
 impl Principal {
@@ -1761,7 +1936,31 @@ impl Principal {
                 permissions
             },
             teams,
+            grants: TeamGrants::default(),
         }
+    }
+
+    /// The same principal with `grants` (an administrator is never walled off). A walled-off
+    /// principal loses [`ISOLATED_WITHHELD`]: actions and the terminal run on the server with its
+    /// own credentials, which reach every team's data.
+    pub fn with_grants(mut self, grants: TeamGrants) -> Principal {
+        self.grants = grants;
+        if self.is_admin {
+            self.grants.isolated = false;
+        } else if self.grants.isolated {
+            if self.permissions.contains(ALL_SCOPE) {
+                self.permissions = all_permissions();
+            }
+            for permission in ISOLATED_WITHHELD {
+                self.permissions.remove(permission);
+            }
+        }
+        self
+    }
+
+    /// Whether the principal is walled off from Everyone ([`TeamGrants::isolated`]).
+    pub fn is_isolated(&self) -> bool {
+        !self.is_admin && self.grants.isolated
     }
 
     /// An administrator (every permission).
@@ -1789,6 +1988,10 @@ impl Principal {
             .filter(|(name, _)| same_team(Some(name), team))
             .map(|(_, role)| *role)
             .max();
+        // A walled-off principal is not in Everyone (a manager appointed there still is).
+        if is_everyone(team) && self.is_isolated() {
+            return listed.filter(|role| *role == TeamRole::Manager);
+        }
         match listed {
             Some(role) => Some(role),
             None if is_everyone(team) => Some(TeamRole::Member),
@@ -1796,7 +1999,8 @@ impl Principal {
         }
     }
 
-    /// Whether the principal is in `team` (any role; every user is in Everyone).
+    /// Whether the principal is in `team` (any role; every user is in Everyone, unless they are
+    /// walled off: [`Principal::is_isolated`]).
     pub fn is_member(&self, team: Option<&str>) -> bool {
         self.team_role(team).is_some()
     }
@@ -1808,8 +2012,14 @@ impl Principal {
 
     /// The names of the teams the principal is in (Everyone first).
     pub fn team_names(&self) -> Vec<String> {
-        let mut out = vec![EVERYONE.to_string()];
+        let mut out = Vec::new();
+        if self.is_member(Some(EVERYONE)) {
+            out.push(EVERYONE.to_string());
+        }
         for (name, _) in &self.teams {
+            if is_everyone(Some(name)) {
+                continue;
+            }
             if !out.iter().any(|n| same_team(Some(n), Some(name))) {
                 out.push(name.clone());
             }
@@ -1826,7 +2036,10 @@ pub fn can_see(principal: &Principal, access: &PipeAccess) -> bool {
         return true;
     }
     match access.visibility {
-        Visibility::Everyone => true,
+        // "Everyone" is every member of the team Everyone: not a walled-off principal.
+        Visibility::Everyone => {
+            !principal.is_isolated() || principal.is_member(access.team.as_deref())
+        }
         Visibility::Team => principal.is_member(access.team.as_deref()),
         Visibility::Private => principal.is_manager(access.team.as_deref()),
     }
@@ -1892,11 +2105,82 @@ pub fn can_administer_teams(principal: &Principal) -> bool {
     principal.is_admin
 }
 
-/// Whether a principal may use a connector restricted to these teams (`None`: unrestricted).
+/// Whether a principal may use a connector restricted to these teams (`None`: unrestricted,
+/// which a walled-off principal may not use).
 pub fn can_use_connector(principal: &Principal, teams: Option<&[String]>) -> bool {
-    teams.is_none_or(|teams| {
-        principal.is_admin || teams.iter().any(|team| principal.is_member(Some(team)))
-    })
+    match teams {
+        _ if principal.is_admin => true,
+        Some(teams) => teams.iter().any(|team| principal.is_member(Some(team))),
+        None => !principal.is_isolated(),
+    }
+}
+
+/// [`can_use_connector`] for the connector `connector_keys`: also when one of the principal's
+/// teams was granted it ([`TeamGrants::connectors`]).
+pub fn can_use_connector_keys(
+    principal: &Principal,
+    connector_keys: &str,
+    teams: Option<&[String]>,
+) -> bool {
+    principal.grants.connectors.contains(connector_keys.trim())
+        || can_use_connector(principal, teams)
+}
+
+/// Whether a principal may give a pipe the source connector `connector_keys`. A pipe's connector
+/// keys may be a mere label (data pushed through the API under `plugin:gauge` or `manual:x`):
+/// a data plugin (`plugin:<name>`) needs the plugin ([`can_use_plugin`]), a connector the
+/// server has (`configured`) follows [`can_use_connector_keys`], and a label that names nothing
+/// of the server's is anyone's to use.
+pub fn can_name_connector(
+    principal: &Principal,
+    connector_keys: &str,
+    teams: Option<&[String]>,
+    configured: bool,
+) -> bool {
+    let keys = connector_keys.trim();
+    if principal.is_admin || principal.grants.connectors.contains(keys) {
+        return true;
+    }
+    if let Some(plugin) = keys.strip_prefix("plugin:") {
+        return can_use_plugin(principal, plugin)
+            && teams.is_none_or(|teams| can_use_connector(principal, Some(teams)));
+    }
+    if !configured && teams.is_none() {
+        return true;
+    }
+    can_use_connector(principal, teams)
+}
+
+/// Whether a principal may see and use the plugin `name`: every plugin, unless they are walled
+/// off, where it is the plugins their teams were granted or installed.
+pub fn can_use_plugin(principal: &Principal, name: &str) -> bool {
+    !principal.is_isolated() || principal.grants.plugins.contains(name.trim())
+}
+
+/// Whether a principal may install, edit, upload and uninstall plugins on the server:
+/// administrators, and the members of a team with `plugins_write`.
+pub fn can_write_plugins(principal: &Principal) -> bool {
+    principal.is_admin || principal.grants.plugins_write
+}
+
+/// Whether `viewer` may see that `team` exists and who is in it: every team, unless they are
+/// walled off, where it is their own teams.
+pub fn can_see_team(viewer: &Principal, team: &str) -> bool {
+    !viewer.is_isolated() || viewer.is_member(Some(team))
+}
+
+/// Whether `viewer` may see the account of a user in `target_user_teams`: every account, unless
+/// they are walled off, where it is their own and those of the users sharing one of their teams.
+pub fn can_see_user(
+    viewer: &Principal,
+    target_username: &str,
+    target_user_teams: &[(String, TeamRole)],
+) -> bool {
+    !viewer.is_isolated()
+        || viewer.username == target_username
+        || target_user_teams
+            .iter()
+            .any(|(team, _)| !is_everyone(Some(team)) && viewer.is_member(Some(team)))
 }
 
 /// The access of a pipe `principal` registers through the API or the console: `requested`

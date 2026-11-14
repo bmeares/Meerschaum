@@ -85,6 +85,8 @@ Pipes without access settings belong to Everyone and remain shared. A pipe's `ac
 
 The HTTP API, MCP and console enforce these rights and filter hidden members from Pipelines, runs, events, lineage and searches. Jobs started through them belong to their creator and primary team; local jobs belong to Everyone. Email addresses are visible to their owners, administrators, and managers of a team the user belongs to. Local SQL / Valkey credentials are the trust boundary: direct CLI and Python access with them sees everything. Pipe locks apply everywhere, including local access, and no force flag bypasses them.
 
+A team can be **isolated** from Everyone and given a database, connectors and plugins of its own: see [Teams on One Instance](/reference/api-instance/teams/).
+
 A connector's `teams: [Data, Operations]` attribute restricts who may use it through the API. Setting SQL definitions requires `pipes:define_sql`; the server refuses internal tables and the tables of pipes the caller cannot see, before and after templates resolve. These SQL checks are best effort. True isolation needs separate connectors and database users with appropriate database permissions.
 
 ## Who may run actions

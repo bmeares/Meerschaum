@@ -1672,32 +1672,39 @@ fn viewer_principal(
     username: Option<&str>,
     is_admin: bool,
     teams: Vec<(String, String)>,
+    isolated: bool,
 ) -> meerschaum_core::access::Principal {
-    use meerschaum_core::access::{EVERYONE, Principal, TeamRole};
+    use meerschaum_core::access::{EVERYONE, Principal, TeamGrants, TeamRole};
     let mut all = vec![(EVERYONE.to_string(), TeamRole::Member)];
     for (team, role) in teams {
         all.push((team, TeamRole::parse(&role).unwrap_or(TeamRole::Member)));
     }
-    Principal::new(username.unwrap_or(""), is_admin, Default::default(), all)
+    Principal::new(username.unwrap_or(""), is_admin, Default::default(), all).with_grants(
+        TeamGrants {
+            isolated,
+            ..Default::default()
+        },
+    )
 }
 
 /// Whether the person `username` (an administrator or not, in `teams`) may see the job `name`
 /// whose properties are `properties` (`meerschaum.jobs.filter_visible_jobs`).
 #[pyfunction]
-#[pyo3(signature = (name, properties, username=None, is_admin=false, teams=None))]
+#[pyo3(signature = (name, properties, username=None, is_admin=false, teams=None, isolated=false))]
 fn jobs_can_see(
     name: &str,
     properties: &Bound<'_, PyAny>,
     username: Option<&str>,
     is_admin: bool,
     teams: Option<Vec<(String, String)>>,
+    isolated: bool,
 ) -> PyResult<bool> {
     let props = if properties.is_none() {
         Map::new()
     } else {
         py_to_core(properties)?.to_map()
     };
-    let principal = viewer_principal(username, is_admin, teams.unwrap_or_default());
+    let principal = viewer_principal(username, is_admin, teams.unwrap_or_default(), isolated);
     Ok(meerschaum_core::job_access::can_see_job_properties(
         &principal, name, &props,
     ))

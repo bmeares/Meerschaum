@@ -384,12 +384,30 @@ def build_logo_row():
     )
 
 
+def usable_instance_keys(keys: List[str]) -> List[str]:
+    """
+    The instance connectors among `keys` the current viewer may use: those of their teams and
+    those their teams were granted (every unrestricted one, unless they are walled off).
+    Outside a request nothing is filtered (the router fills the selector per request).
+    """
+    try:
+        from meerschaum.api.dash import access
+        from meerschaum.api.dash.connector_listing import connector_team_allows
+        if not access._in_request():
+            return list(keys)
+        viewer = access.current_viewer()
+        return [key for key in keys if connector_team_allows(key, viewer)]
+    except Exception:
+        return []
+
+
 def _instance_options(selected: Optional[str] = None) -> List[Dict[str, str]]:
     from meerschaum.api.dash.connector_listing import is_internal_connector
     labels = [
         keys for keys in get_connector_labels(*instance_types)
         if not is_internal_connector(*keys.split(':', 1))
     ]
+    labels = usable_instance_keys(labels)
     if selected and selected not in labels:
         labels = [selected] + labels
     return [
@@ -487,6 +505,19 @@ def _build_user_menu(state: Dict[str, Any], paths: Optional[Dict[str, Any]], act
             active=(section == active),
             id=f'console-nav-{section}',
         ))
+    ### Grafana, signed in with this session (`api:grafana`): a page of its own, not a console route.
+    try:
+        from meerschaum.api.dash.team_setup import grafana_enabled
+        if grafana_enabled():
+            items.append(dbc.DropdownMenuItem(
+                'Grafana',
+                href='/grafana/',
+                external_link=True,
+                target='_blank',
+                id='console-nav-grafana',
+            ))
+    except Exception:
+        pass
     if not no_auth:
         if items:
             items.append(dbc.DropdownMenuItem(divider=True))

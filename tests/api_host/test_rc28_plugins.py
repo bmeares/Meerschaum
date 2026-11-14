@@ -144,7 +144,7 @@ print('JSON:' + json.dumps({
     served = _json(_run(root, plugins, code))
     assert served['admin'] is None
     for who in ('operator', 'viewer', 'anonymous'):
-        assert served[who] == 'Only administrators can create and edit plugins.', who
+        assert served[who] == 'Only administrators and team plugin managers can create and edit plugins.', who
     assert served['create_as_operator'][0] is False
     assert not list(plugins.iterdir())
 
@@ -235,7 +235,7 @@ print('JSON:' + json.dumps(out))
         assert out['changed'] == [False, changed_message]
         assert out['kept'] == 'VALUE = 4\n'
         assert out['single'] == [True, 'Saved rc28_single.py.']
-        assert out['operator'] == [False, 'Only administrators can create and edit plugins.']
+        assert out['operator'] == [False, 'Only administrators and team plugin managers can create and edit plugins.']
         for key in ('traversal', 'absolute', 'link', 'link_dir', 'unlisted', 'linked_plugin',
                     'too_big', 'nul', 'no_digest'):
             assert out[key][0] is False, (key, out[key])
@@ -345,7 +345,7 @@ out = {
 }
 print('JSON:' + json.dumps(out))
 '''))
-    refusal = 'Only administrators can create and edit plugins.'
+    refusal = 'Only administrators and team plugin managers can create and edit plugins.'
     status, body = out['operator_edit']
     assert status == 200 and 'plugin-source-context' not in body['response']
     assert refusal in json.dumps(body['response']['plugin-source-alert'])

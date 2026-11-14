@@ -21,6 +21,7 @@
 #![deny(unsafe_code)]
 mod assets;
 mod engine_auth;
+pub mod grafana;
 pub mod native_pages;
 pub mod sessions;
 mod stream;
@@ -74,6 +75,8 @@ pub(crate) struct WebState {
     pub config: WebConfig,
     /// The open job-log streams.
     pub streams: Arc<stream::StreamSlots>,
+    /// The Grafana proxy (`api:grafana`), when enabled.
+    pub grafana: Option<Arc<grafana::GrafanaProxy>>,
 }
 
 /// The API and the web routes in one router.
@@ -100,6 +103,11 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
         server,
         config: config.clone(),
         streams: Arc::new(stream::StreamSlots::default()),
+        grafana: None,
+    };
+    let state = WebState {
+        grafana: grafana::GrafanaProxy::from_state(&state.server),
+        ..state
     };
     let mut router = Router::new();
     // The job-log stream follows the `jobs` route group, like `/logs/{name}`.
@@ -109,6 +117,7 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
         state.server.mark_log_stream_served();
     }
     router = native_pages::routes(router, &config.pages)?;
+    router = grafana::routes(router, &state);
     let mut router = router.with_state(state);
     // The terminal's own routes (`/webterm/{session_id}`, `/websocket/{session_id}`) and its
     // assets, independent of the `dash` route group (as in v4).

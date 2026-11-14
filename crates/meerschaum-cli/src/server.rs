@@ -336,8 +336,10 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         session.native_plugins(rt.config())?,
         Some(instance.keys()),
     );
+    let grafana_teams = meerschaum_web::grafana::GrafanaTeams::from_section(&config.grafana);
     let state = AppState::builder(config, instance.conn())
         .resolver(Arc::new(plugin_host.clone()))
+        .team_events(Arc::new(grafana_teams))
         .actions(backend.clone())
         .jobs(jobs)
         .engine(engine_store)

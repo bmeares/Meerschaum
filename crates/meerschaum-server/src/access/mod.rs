@@ -70,6 +70,8 @@ struct Identity {
     user_type: Option<String>,
     attributes: Option<Map>,
     teams: Vec<(String, TeamRole)>,
+    /// The records of the teams the user is in (their attributes carry the team's grants).
+    records: Vec<rules::Team>,
 }
 
 /// The caches behind [`resolve`] and [`pipe_index`] (one per server state).
@@ -77,12 +79,20 @@ struct Identity {
 pub struct AccessCache {
     identities: Mutex<HashMap<String, (Instant, Identity)>>,
     indexes: Mutex<HashMap<String, (Instant, Arc<PipeIndex>)>>,
+    /// The access last resolved for a credential, by the SHA-256 of its `Authorization` header:
+    /// what a request's instance is scoped with before its handler authorizes it
+    /// ([`instance_scope`]). Never an authorization by itself.
+    scopes: Mutex<HashMap<[u8; 32], (Instant, Access)>>,
 }
 
 impl AccessCache {
     /// Forget every cached identity (a user, role or team changed).
     pub fn forget_identities(&self) {
         self.identities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.scopes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clear();
@@ -328,14 +338,25 @@ async fn user_identity(
         .get_user_attributes(&user)
         .await
         .map_err(identity_unavailable)?;
-    let teams = user_teams(&conn, username)
-        .await
-        .map_err(identity_unavailable)?;
+    // One read of the teams: the user's roles in them, and the records of their own teams.
+    let all_teams = conn.get_teams().await.map_err(identity_unavailable)?;
+    let mut teams: Vec<(String, TeamRole)> = all_teams
+        .iter()
+        .filter_map(|t| t.role_of(username).map(|role| (t.name.clone(), role)))
+        .collect();
+    if !teams.iter().any(|(t, _)| rules::is_everyone(Some(t))) {
+        teams.insert(0, (EVERYONE.to_string(), TeamRole::Member));
+    }
+    let records = all_teams
+        .into_iter()
+        .filter(|t| !t.is_everyone() && t.role_of(username).is_some())
+        .collect();
     let identity = Identity {
         username: username.to_string(),
         user_type,
         attributes,
         teams,
+        records,
     };
     store_identity(state, key, identity.clone());
     Ok(identity)
@@ -420,7 +441,7 @@ async fn access_of_with(
         AuthPrincipal::User(user) => Some(user_identity(state, &user.username, fresh).await?),
         AuthPrincipal::Token(token) => token_identity(state, token, fresh).await?,
     };
-    let (username, is_admin, permissions, teams, attributes) = match identity {
+    let (username, is_admin, permissions, teams, attributes, records) = match identity {
         Some(identity) => {
             let effective = user_permissions(
                 identity.user_type.as_deref(),
@@ -433,6 +454,7 @@ async fn access_of_with(
                 intersect(&effective, granted),
                 identity.teams,
                 identity.attributes,
+                identity.records,
             )
         }
         // An unowned token (made locally): its own scopes (`*` kept: every scope, a plugin's
@@ -449,10 +471,12 @@ async fn access_of_with(
                 permissions,
                 vec![(EVERYONE.to_string(), TeamRole::Member)],
                 None,
+                Vec::new(),
             )
         }
     };
     let primary_team = rules::primary_team(attributes.as_ref(), &teams);
+    let grants = rules::TeamGrants::of(&teams, &records, Some(&primary_team));
     Ok(Access {
         auth: Some(principal),
         principal: rules::Principal {
@@ -460,7 +484,9 @@ async fn access_of_with(
             is_admin,
             permissions,
             teams,
-        },
+            grants: rules::TeamGrants::default(),
+        }
+        .with_grants(grants),
         primary_team,
         attributes,
         no_auth: false,
@@ -475,7 +501,51 @@ pub async fn resolve(state: &AppState, headers: &HeaderMap) -> Result<Access, Ap
     }
     let principal = auth::load_user_or_token(state, headers).await?;
     let granted = auth::granted_scopes(state, headers, &principal).await?;
-    access_of(state, principal, &granted).await
+    let access = access_of(state, principal, &granted).await?;
+    if let Some(key) = scope_key(headers) {
+        let mut scopes = state
+            .access_cache()
+            .scopes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if scopes.len() > 4096 {
+            scopes.retain(|_, (at, _)| at.elapsed() < IDENTITY_TTL);
+        }
+        scopes.insert(key, (Instant::now(), access.clone()));
+    }
+    Ok(access)
+}
+
+fn scope_key(headers: &HeaderMap) -> Option<[u8; 32]> {
+    use sha2::Digest;
+    let value = headers.get(axum::http::header::AUTHORIZATION)?;
+    Some(sha2::Sha256::digest(value.as_bytes()).into())
+}
+
+/// Whose teams decide the instance of a request, before its handler authorizes it: the access
+/// resolved for the request's credential at most [`IDENTITY_TTL`] ago, else resolved now (once
+/// per credential and window, so a handler's own check is not doubled on every request). `None`
+/// without credentials, with invalid ones (the handler answers that) and under `--no-auth`.
+///
+/// This only chooses and refuses instances ([`crate::routes::Ctx::instance_keys`]); every
+/// handler still authorizes the request itself.
+pub async fn instance_scope(state: &AppState, headers: &HeaderMap) -> Option<Access> {
+    if state.config.no_auth {
+        return None;
+    }
+    let key = scope_key(headers)?;
+    let cached = state
+        .access_cache()
+        .scopes
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .filter(|(at, _)| at.elapsed() < IDENTITY_TTL)
+        .map(|(_, access)| access.clone());
+    match cached {
+        Some(access) => Some(access),
+        None => resolve(state, headers).await.ok(),
+    }
 }
 
 /// Resolve the access of a request and require `scopes` (see [`Access::require`]).
@@ -516,8 +586,8 @@ pub async fn require_with_aliases(
     Ok(access)
 }
 
-/// The access of a request with credentials, or `None` without (an anonymous caller of a route
-/// that serves one); invalid credentials are refused like on any route.
+/// Resolve supplied credentials; the legacy SDK's `Bearer None` means anonymous.
+/// All other invalid credentials are refused, including on public routes.
 pub async fn resolve_optional(
     state: &AppState,
     headers: &HeaderMap,
@@ -525,7 +595,10 @@ pub async fn resolve_optional(
     if state.config.no_auth {
         return Ok(Some(Access::everything()));
     }
-    if !headers.contains_key(axum::http::header::AUTHORIZATION) {
+    if headers
+        .get(axum::http::header::AUTHORIZATION)
+        .is_none_or(|value| value.as_bytes() == b"Bearer None")
+    {
         return Ok(None);
     }
     resolve(state, headers).await.map(Some)

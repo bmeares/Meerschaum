@@ -4,7 +4,7 @@
 //!
 //! | Route | Scopes | Who | What it does |
 //! |---|---|---|---|
-//! | `GET /teams` | `users:read` | anyone | Every team (`teams`): Everyone first, then by name |
+//! | `GET /teams` | `users:read` | anyone | Every team (`teams`): Everyone first, then by name (a walled-off caller: their own teams) |
 //! | `GET /teams/{name}` | `users:read` | anyone | One team (`team`); `?counts=true` adds its `pipes` and `jobs` counts |
 //! | `POST /teams/{name}/register` | `users:write` | administrators | A new team (`members`, `managers`, `attributes`) |
 //! | `PATCH /teams/{name}/edit` | `users:write` | administrators; the team's managers for members | Change members (`members`, `add_members`, `remove_members`), `managers`, `attributes` |
@@ -15,7 +15,9 @@
 //! "attributes": {...}}` (managers are members too). The built-in team Everyone has every user
 //! as a member; its record lists only the users with a role of their own (its managers); it
 //! cannot be registered, renamed or deleted. A team's managers add and remove its members but
-//! neither choose its managers nor change its attributes.
+//! neither choose its managers nor change its attributes. A team's `attributes` hold its settings
+//! (`isolated`, `instance`, `connectors`, `plugins`, `plugins_write`, `database`, `grafana`): its
+//! members and administrators read them; nobody else does.
 
 use axum::Router;
 use axum::body::Body;
@@ -130,6 +132,17 @@ fn require_admin(caller: &Access, what: &str) -> Result<(), ApiError> {
     ))
 }
 
+/// A team as `caller` may read it: its settings (`attributes`: the database, connectors and
+/// plugins it was given) are for its members and administrators.
+fn visible_team(caller: &Access, mut team: Team) -> Team {
+    let privileged = caller.no_auth || caller.is_admin();
+    let member = !team.is_everyone() && caller.in_team(Some(&team.name));
+    if !(privileged || member) {
+        team.attributes = Map::new();
+    }
+    team
+}
+
 /// After a change of teams: who is in which team is read again.
 fn forget(state: &AppState) {
     state.access_cache().forget_identities();
@@ -137,13 +150,19 @@ fn forget(state: &AppState) {
 }
 
 async fn list(ctx: Ctx) -> ApiResult {
-    access::require(&ctx.state, &ctx.headers, &["users:read"]).await?;
-    let teams = ctx
+    let caller = access::require(&ctx.state, &ctx.headers, &["users:read"]).await?;
+    let mut teams = ctx
         .state
         .instance()
         .get_teams()
         .await
         .map_err(|e| failed("get_teams", e))?;
+    // A walled-off caller sees their own teams only.
+    teams.retain(|team| rules::can_see_team(&caller.principal, &team.name));
+    let teams: Vec<Team> = teams
+        .into_iter()
+        .map(|team| visible_team(&caller, team))
+        .collect();
     let n = teams.len();
     Ok(envelope::ok_with(
         format!("Found {n} team{}.", if n == 1 { "" } else { "s" }),
@@ -155,6 +174,10 @@ async fn list(ctx: Ctx) -> ApiResult {
 async fn detail(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["users:read"]).await?;
     let team = team_or_404(&ctx.state, &name).await?;
+    if !rules::can_see_team(&caller.principal, &team.name) {
+        return Err(ApiError::new(404, format!("Team '{name}' does not exist.")));
+    }
+    let team = visible_team(&caller, team);
     let mut fields = JsonMap::new();
     fields.insert("team".into(), team_json(&team));
     if ctx.query.bool("counts", false)? {
@@ -332,10 +355,15 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         return Err(ApiError::new(400, res.message));
     }
     let jobs = ctx.state.jobs.retag_team(&team.name, Some(&new_name)).await;
+    // The team's Grafana organization follows (best effort).
+    let followed = ctx.state.team_events.renamed(&team.name, &new_name).await;
     let renamed = team_or_404(&ctx.state, &new_name).await?;
     let mut fields = JsonMap::new();
     fields.insert("team".into(), team_json(&renamed));
     fields.insert("jobs".into(), json!(jobs));
+    if let Err(note) = followed {
+        fields.insert("notes".into(), json!([note]));
+    }
     Ok(envelope::ok(res.message, fields))
 }
 

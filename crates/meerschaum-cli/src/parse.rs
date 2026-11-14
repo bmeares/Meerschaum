@@ -497,7 +497,7 @@ pub enum AccessCommand {
     PipesAccess,
     /// `lock pipes` / `unlock pipes`: `--locks`.
     Locks,
-    /// `register teams` / `edit teams`: `--members`, `--managers`.
+    /// `register teams` / `edit teams` / `bootstrap teams`: `--members`, `--managers`.
     Teams,
 }
 
@@ -517,7 +517,9 @@ pub fn access_command(sysargs: &[String]) -> Option<AccessCommand> {
                 return Some(AccessCommand::PipesAccess);
             }
             ("lock" | "unlock", "pipe" | "pipes") => return Some(AccessCommand::Locks),
-            ("register" | "edit", "team" | "teams") => return Some(AccessCommand::Teams),
+            ("register" | "edit" | "bootstrap", "team" | "teams") => {
+                return Some(AccessCommand::Teams);
+            }
             _ => {}
         }
     }

@@ -283,3 +283,18 @@ body.plugin-source-noscroll { overflow: hidden; }
     .connector-info-modal .modal-footer .btn { min-height: 44px; }
     .connector-info-modal .modal-header .btn-close { min-width: 44px; min-height: 44px; padding: 0; }
 }
+
+/* A row menu opened inside a scrolling table is not clipped by it: the wrapper scrolls only for
+   width, and a short table (one or two teams) left no room below the row for its menu. */
+.console-table-scroll:has(.dropdown-menu.show) { overflow: visible; }
+
+/* Team settings (New team, Settings). */
+.team-setting-switch { margin: .5rem 0; }
+.team-storage-choices .form-check { margin-bottom: .25rem; }
+.team-setting-dropdown { width: 100%; }
+.team-settings-database:not(:empty) { margin-bottom: .75rem; }
+.team-instance-badge { font-family: var(--bs-font-monospace); font-weight: 500; }
+@media (max-width: 575.98px) {
+  .team-setting-switch { min-height: 44px; display: flex; align-items: center; }
+  .team-setting-switch .form-check-input { margin-right: .5rem; }
+}

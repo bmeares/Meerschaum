@@ -46,7 +46,18 @@ async fn caller(state: &AppState, headers: &HeaderMap) -> Result<Caller, Box<Res
     let (principal, scopes) = current_scopes(state, headers)
         .await
         .map_err(|e| Box::new(e.into_response()))?;
-    Ok(Caller::api(scopes, principal))
+    let mut caller = Caller::api(scopes, principal);
+    // A walled-off caller (the identity is cached) sees no plugin entries.
+    if !state.config.no_auth {
+        let access = crate::access::resolve(state, headers)
+            .await
+            .map_err(|e| Box::new(e.into_response()))?;
+        caller.plugins_hidden = access.principal.is_isolated();
+        if !access.is_admin() {
+            caller.team_principal = Some(access.principal);
+        }
+    }
+    Ok(caller)
 }
 
 async fn post_mcp(
