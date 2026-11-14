@@ -86,7 +86,9 @@ def dprint(
     premsg = ""
 
     if now:
-        premsg = now.isoformat().split('T', maxsplit=1)[-1][:-3] + (' | ' if package else ':')
+        ### `timespec` keeps the fraction on a whole second (`isoformat()` omits it then).
+        clock = now.isoformat(timespec='milliseconds').split('T', maxsplit=1)[-1]
+        premsg = clock + (' | ' if package else ':')
     if package:
         premsg = premsg + parent_package + (
             (':' + str(parent_lineno)) if parent_lineno is not None else ''
