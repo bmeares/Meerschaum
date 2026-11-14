@@ -355,10 +355,15 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         return Err(ApiError::new(400, res.message));
     }
     let jobs = ctx.state.jobs.retag_team(&team.name, Some(&new_name)).await;
+    // The team's Grafana organization follows (best effort).
+    let followed = ctx.state.team_events.renamed(&team.name, &new_name).await;
     let renamed = team_or_404(&ctx.state, &new_name).await?;
     let mut fields = JsonMap::new();
     fields.insert("team".into(), team_json(&renamed));
     fields.insert("jobs".into(), json!(jobs));
+    if let Err(note) = followed {
+        fields.insert("notes".into(), json!([note]));
+    }
     Ok(envelope::ok(res.message, fields))
 }
 

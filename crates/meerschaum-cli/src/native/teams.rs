@@ -645,6 +645,18 @@ pub fn edit_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             if jobs.is_some_and(|n| n > 0) {
                 retag_jobs(rt, &inst, &current.name, Some(&edited.name));
             }
+            // The team's Grafana organization follows (`api:grafana`). An `api:` instance's
+            // server does it itself.
+            if inst.type_name() != "api" {
+                let settings = super::team_setup::grafana_settings(rt);
+                if let Err(e) = session.block_on(meerschaum_web::grafana::rename_team(
+                    settings.as_ref(),
+                    &current.name,
+                    &edited.name,
+                )) {
+                    warn(rt, &e);
+                }
+            }
             team_name = edited.name.clone();
         }
         let after = TeamInfo {

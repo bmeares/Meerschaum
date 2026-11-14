@@ -39,6 +39,7 @@
 - [🌐 API Instance](https://meerschaum.io/reference/api-instance/): The Meerschaum API instance (and Web Console) lets you manage pipes, jobs, and connectors over the Internet. Start the API server with the stack or via start api; see Deployment below for ways to run
 - [Security and Tokens](https://meerschaum.io/reference/api-instance/tokens/): Meerschaum tokens are long-lived API keys that grant programmatic access to a Meerschaum instance. They are a secure way to authenticate for services like IoT devices or CI/CD pipelines without using
 - [Permissions and Rate Limits](https://meerschaum.io/reference/api-instance/permissions/): An API server decides three things about every request: whether the route is served at all (route groups), who may call it (authentication and scopes), and how often (rate limits). All of it lives und
+- [Teams on One Instance](https://meerschaum.io/reference/api-instance/teams/): Several teams can share one Meerschaum API instance: each signs in to the same web console, HTTP API and MCP server, and sees its own pipes, jobs, connectors and plugins. An isolated team is walled of
 - [Pipelines, Access and Actions over HTTP](https://meerschaum.io/reference/api-instance/routes/): Besides the existing pipe, user, token, plugin and job routes, an API server has routes for saved Pipelines, their runs, teams and pipe access and the console's background actions. Existing route bodi
 - [NGINX](https://meerschaum.io/reference/api-instance/nginx/): Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (certbot), especially when several sites share port 443. (The API server can also serve HTTPS by itself: see TLS / SSL
 - [Web Console](https://meerschaum.io/reference/api-instance/web-console/): The Meerschaum Web Console provides a graphical interface for managing your Meerschaum instance, served by the API instance. To access it, start the API (mrsm start api) and navigate to your host URL
@@ -91,7 +92,7 @@
 
 ## Changelog
 - [Changelog](https://meerschaum.io/changelog/): Meerschaum 5 brings a Rust core, dependency-aware Pipelines, and a new web console.
-- [v5](https://meerschaum.io/changelog/v5/): - The console's Performance page keeps the window and page you chose when a Refresh (or the 30-second update) answers after you changed them; a late reply used to bring back the previous selection.
+- [v5](https://meerschaum.io/changelog/v5/): Several teams can now share one instance, each behind its own wall. See Teams on One Instance.
 - [v4](https://meerschaum.io/changelog/v4/): Historical release notes for the 4.x series.
 - [v3](https://meerschaum.io/changelog/v3/): Historical release notes for the 3.x series.
 - [v2](https://meerschaum.io/changelog/v2/): Historical release notes for the 2.x series.

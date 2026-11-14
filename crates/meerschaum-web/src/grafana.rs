@@ -5,7 +5,7 @@
 //!   team is an organization named after it ([`GrafanaClient::ensure_org`]). A team with a
 //!   database of its own gets a data source there that reads it with the team's read-only role
 //!   ([`GrafanaClient::ensure_datasource`]).
-//! - **Sign-in.** `/grafana/*` ([`routes`]) forwards to Grafana with the session's username in
+//! - **Sign-in.** `/grafana/*` (`routes`) forwards to Grafana with the session's username in
 //!   the auth-proxy header (`X-WEBAUTH-USER`). Grafana must trust only this server for that
 //!   header (`GF_AUTH_PROXY_WHITELIST`) and be served under the same sub-path
 //!   (`GF_SERVER_SERVE_FROM_SUB_PATH`). Before forwarding, the user's organizations are made to
@@ -60,8 +60,8 @@ pub struct GrafanaSettings {
 }
 
 impl GrafanaSettings {
-    /// The settings of an enabled integration (`None` when `enabled` is not true or there is no
-    /// `url`).
+    /// The settings of an enabled integration (`None` when `enabled` is not true). `url` defaults
+    /// to the stack's Grafana (`http://grafana:3000`), the administrator to `admin` / `admin`.
     pub fn from_section(section: &Map) -> Option<GrafanaSettings> {
         if !section.get("enabled").is_some_and(Value::truthy) {
             return None;
@@ -74,7 +74,11 @@ impl GrafanaSettings {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
         };
-        let url = text("url")?.trim_end_matches('/').to_string();
+        // The stack's own Grafana by default.
+        let url = text("url")
+            .unwrap_or_else(|| "http://grafana:3000".into())
+            .trim_end_matches('/')
+            .to_string();
         Some(GrafanaSettings {
             url,
             admin_user: text("admin_user").unwrap_or_else(|| "admin".into()),
@@ -522,6 +526,41 @@ impl GrafanaClient {
     }
 }
 
+/// Keeps the teams' Grafana organizations in step with changes made through the API server
+/// (`meerschaum_server::backends::TeamEvents`); nothing when `api:grafana` is not enabled.
+#[derive(Debug, Clone)]
+pub struct GrafanaTeams(Option<GrafanaSettings>);
+
+impl GrafanaTeams {
+    /// For `api:grafana` (`section`).
+    pub fn from_section(section: &Map) -> GrafanaTeams {
+        GrafanaTeams(GrafanaSettings::from_section(section))
+    }
+}
+
+/// Rename the organization of a renamed team (`Ok(false)`: it had none, or Grafana is off).
+pub async fn rename_team(
+    settings: Option<&GrafanaSettings>,
+    old: &str,
+    new: &str,
+) -> Result<bool, String> {
+    match settings {
+        Some(settings) => {
+            GrafanaClient::new(settings.clone())?
+                .rename_org(old, new)
+                .await
+        }
+        None => Ok(false),
+    }
+}
+
+#[async_trait::async_trait]
+impl meerschaum_server::backends::TeamEvents for GrafanaTeams {
+    async fn renamed(&self, old: &str, new: &str) -> Result<(), String> {
+        rename_team(self.0.as_ref(), old, new).await.map(|_| ())
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The reverse proxy
 // ---------------------------------------------------------------------------------------------
@@ -624,7 +663,8 @@ struct GrafanaUserTeams {
 }
 
 /// Headers never forwarded to Grafana: hop-by-hop ones, and anything a browser could use to
-/// claim an identity (the auth-proxy headers) or Grafana's own credentials.
+/// claim an identity (the auth-proxy headers) or Grafana's own credentials. `Host` is kept:
+/// Grafana compares it with `Origin` before it accepts a change.
 fn forwarded_headers(headers: &HeaderMap, upgrade: bool) -> HeaderMap {
     const DROPPED: &[&str] = &[
         "connection",
@@ -635,7 +675,6 @@ fn forwarded_headers(headers: &HeaderMap, upgrade: bool) -> HeaderMap {
         "trailer",
         "transfer-encoding",
         "upgrade",
-        "host",
         "content-length",
         "authorization",
         "x-grafana-org-id",
@@ -802,8 +841,10 @@ mod tests {
             None
         );
         assert_eq!(
-            GrafanaSettings::from_section(&section(r#"{"enabled": true}"#)),
-            None
+            GrafanaSettings::from_section(&section(r#"{"enabled": true}"#))
+                .unwrap()
+                .url,
+            "http://grafana:3000"
         );
         let settings = GrafanaSettings::from_section(&section(
             r#"{"enabled": true, "url": "http://grafana:3000/", "admin_password": "s3"}"#,
@@ -822,6 +863,11 @@ mod tests {
         headers.insert("authorization", HeaderValue::from_static("Basic YWRtaW4="));
         headers.insert("x-grafana-org-id", HeaderValue::from_static("1"));
         headers.insert("accept", HeaderValue::from_static("text/html"));
+        headers.insert("host", HeaderValue::from_static("data.example.com"));
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://data.example.com"),
+        );
         headers.insert(
             "cookie",
             HeaderValue::from_static(
@@ -834,6 +880,8 @@ mod tests {
         assert!(out.get("authorization").is_none());
         assert!(out.get("x-grafana-org-id").is_none());
         assert_eq!(out.get("accept").unwrap(), "text/html");
+        assert_eq!(out.get("host").unwrap(), "data.example.com");
+        assert_eq!(out.get("origin").unwrap(), "https://data.example.com");
         assert_eq!(
             out.get("cookie").unwrap(),
             "grafana_session=abc; theme=dark"

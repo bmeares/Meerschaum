@@ -63,9 +63,9 @@ def grafana_config() -> Dict[str, Any]:
 
 
 def grafana_enabled() -> bool:
-    """Whether the console signs its users in to a Grafana (`api:grafana:enabled` and `url`)."""
+    """Whether the console signs its users in to a Grafana (`api:grafana:enabled`)."""
     section = grafana_config()
-    return bool(section.get('enabled', False) and section.get('url', None))
+    return bool(section.get('enabled', False))
 
 
 def _connectors_section() -> Dict[str, Any]:
@@ -472,11 +472,15 @@ def edit_team_settings(
     return True, f"Saved the settings of team '{name}'."
 
 
-def rename_grafana_team(old: str, new: str) -> None:
-    """Rename a renamed team's Grafana organization (best effort)."""
+def rename_grafana_team(old: str, new: str) -> Optional[str]:
+    """
+    Rename a renamed team's Grafana organization (best effort).
+    Returns why it could not be renamed, or `None`.
+    """
     if not grafana_enabled():
-        return
+        return None
     try:
-        _core().grafana_rename_team(grafana_config(), str(old), str(new))
-    except Exception:
-        pass
+        success, message = _core().grafana_rename_team(grafana_config(), str(old), str(new))
+    except Exception as e:
+        success, message = False, str(e)
+    return None if success else message

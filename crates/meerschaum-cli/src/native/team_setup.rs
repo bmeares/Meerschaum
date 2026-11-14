@@ -182,10 +182,21 @@ pub fn grafana_datasource(
     }
 }
 
-/// `api:grafana` when the integration is enabled.
-fn grafana_settings(rt: &mut Runtime<'_>) -> Option<GrafanaSettings> {
-    let section = rt.config().get(&["api", "grafana"])?.to_map();
-    GrafanaSettings::from_section(&section)
+/// `api:grafana` when the integration is enabled (no warning when the section is absent).
+pub(crate) fn grafana_settings(rt: &mut Runtime<'_>) -> Option<GrafanaSettings> {
+    let (valid, section) = rt.config().get_with(
+        &["api", "grafana"],
+        meerschaum_core::config::GetOptions {
+            patch: true,
+            substitute: true,
+            write_missing: false,
+            warn: false,
+        },
+    );
+    if !valid {
+        return None;
+    }
+    GrafanaSettings::from_section(&section.to_map())
 }
 
 fn sql_connectors(rt: &mut Runtime<'_>) -> Vec<String> {

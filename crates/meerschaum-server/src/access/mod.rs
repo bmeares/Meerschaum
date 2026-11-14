@@ -586,8 +586,8 @@ pub async fn require_with_aliases(
     Ok(access)
 }
 
-/// The access of a request with credentials, or `None` without (an anonymous caller of a route
-/// that serves one); invalid credentials are refused like on any route.
+/// Resolve supplied credentials; the legacy SDK's `Bearer None` means anonymous.
+/// All other invalid credentials are refused, including on public routes.
 pub async fn resolve_optional(
     state: &AppState,
     headers: &HeaderMap,
@@ -595,7 +595,10 @@ pub async fn resolve_optional(
     if state.config.no_auth {
         return Ok(Some(Access::everything()));
     }
-    if !headers.contains_key(axum::http::header::AUTHORIZATION) {
+    if headers
+        .get(axum::http::header::AUTHORIZATION)
+        .is_none_or(|value| value.as_bytes() == b"Bearer None")
+    {
         return Ok(None);
     }
     resolve(state, headers).await.map(Some)

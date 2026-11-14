@@ -435,11 +435,8 @@ def test_plugins_installed_tab_uninstall_and_install(pages_server, context):
     page.wait_for_selector('#w7_pyfig_card button.plugin-card-install', timeout=30000)
     assert page.inner_text('#w7_pyfig_card button.plugin-card-install') == 'Reinstall'
     page.click('#w7_pyfig_card button.plugin-card-install')
-    page.wait_for_function(
-        "document.querySelector('#plugins-run-alert') && "
-        "document.querySelector('#plugins-run-alert').innerText.startsWith('Reinstalled plugin')",
-        timeout=180000,
-    )
+    result = _plugin_run_result(page, 'Reinstalled plugin', 'Failed to reinstall plugin')
+    assert result.startswith("Reinstalled plugin 'w7_pyfig'."), result
     ### Its output is one click away.
     page.click('#plugins-run-alert button:text-is("View output")')
     page.wait_for_function(

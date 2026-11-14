@@ -835,6 +835,87 @@ pub(crate) fn stack_env_dict() -> Map {
     env
 }
 
+/// The settings Grafana needs for the API server to sign its users in (`api:grafana`, 5.1):
+/// served under `/grafana`, and the auth-proxy header accepted only from `proxy_whitelist`
+/// (Docker's own networks by default).
+pub fn grafana_sign_in_environment(grafana: &Map) -> Vec<(&'static str, String)> {
+    let text = |key: &str, default: &str| {
+        grafana
+            .get(key)
+            .filter(|v| !v.is_null())
+            .map(|v| v.py_str())
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| default.to_string())
+    };
+    vec![
+        (
+            "GF_SERVER_ROOT_URL",
+            text(
+                "root_url",
+                "%(protocol)s://%(domain)s:%(http_port)s/grafana/",
+            ),
+        ),
+        ("GF_SERVER_SERVE_FROM_SUB_PATH", "true".into()),
+        ("GF_AUTH_PROXY_ENABLED", "true".into()),
+        ("GF_AUTH_PROXY_HEADER_NAME", "X-WEBAUTH-USER".into()),
+        ("GF_AUTH_PROXY_HEADER_PROPERTY", "username".into()),
+        ("GF_AUTH_PROXY_AUTO_SIGN_UP", "true".into()),
+        (
+            "GF_AUTH_PROXY_WHITELIST",
+            text("proxy_whitelist", "172.16.0.0/12"),
+        ),
+        ("GF_SECURITY_ADMIN_USER", text("admin_user", "admin")),
+        (
+            "GF_SECURITY_ADMIN_PASSWORD",
+            text("admin_password", "admin"),
+        ),
+    ]
+}
+
+/// The compose file's config with [`grafana_sign_in_environment`] in the `grafana` service when
+/// `api:grafana:enabled` (variables the stack config already sets are kept). Other files and a
+/// stack without a `grafana` service are returned as they are.
+fn with_grafana_sign_in(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value) -> Value {
+    if keys != ["stack", "docker-compose.yaml"] {
+        return value;
+    }
+    let grafana = rt
+        .config()
+        .get_with(
+            &["api", "grafana"],
+            meerschaum_core::config::GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        )
+        .1
+        .to_map();
+    if !grafana.get("enabled").is_some_and(Value::truthy) {
+        return value;
+    }
+    let Some(Value::Map(service)) = value
+        .as_map_mut()
+        .and_then(|compose| compose.get_mut("services"))
+        .and_then(Value::as_map_mut)
+        .and_then(|services| services.get_mut("grafana"))
+    else {
+        return value;
+    };
+    let environment = service
+        .entry("environment".to_string())
+        .or_insert_with(|| Value::Map(Map::new()));
+    if let Value::Map(environment) = environment {
+        for (name, setting) in grafana_sign_in_environment(&grafana) {
+            environment
+                .entry(name.to_string())
+                .or_insert(Value::Str(setting));
+        }
+    }
+    value
+}
+
 /// `sync_yaml_configs(keys, sub_path, substitute=True, replace_tuples=...)`.
 fn sync_yaml_config(
     rt: &mut Runtime<'_>,
@@ -852,6 +933,7 @@ fn sync_yaml_config(
             warn: false,
         },
     );
+    let value = with_grafana_sign_in(rt, keys, value);
     let mut text = meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?;
     for (old, new) in replace {
         text = text.replace(old, new);
@@ -941,6 +1023,7 @@ pub fn write_stack(rt: &mut Runtime<'_>) -> Result<(), String> {
     ];
     for (path, keys, header) in files {
         let (_, value) = rt.config().get_with(&keys, opts);
+        let value = with_grafana_sign_in(rt, &keys, value);
         let mut text = header.unwrap_or_default().to_string();
         text.push_str(&meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?);
         if let Some(parent) = path.parent() {
@@ -1085,4 +1168,37 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         )
     };
     Ok(SuccessTuple { success, message })
+}
+
+#[cfg(test)]
+mod grafana_tests {
+    use super::*;
+
+    #[test]
+    fn the_sign_in_environment_follows_api_grafana() {
+        let defaults: std::collections::HashMap<_, _> = grafana_sign_in_environment(&Map::new())
+            .into_iter()
+            .collect();
+        assert_eq!(defaults["GF_AUTH_PROXY_ENABLED"], "true");
+        assert_eq!(defaults["GF_AUTH_PROXY_HEADER_NAME"], "X-WEBAUTH-USER");
+        assert_eq!(defaults["GF_SERVER_SERVE_FROM_SUB_PATH"], "true");
+        // Only Docker's own networks may name the user unless the administrator says otherwise.
+        assert_eq!(defaults["GF_AUTH_PROXY_WHITELIST"], "172.16.0.0/12");
+        assert!(defaults["GF_SERVER_ROOT_URL"].ends_with("/grafana/"));
+        let section = Value::from_json_str(
+            r#"{"root_url": "https://data.example.com/grafana/", "proxy_whitelist": "10.1.2.3",
+                "admin_user": "root", "admin_password": "s3cret"}"#,
+        )
+        .unwrap()
+        .to_map();
+        let set: std::collections::HashMap<_, _> =
+            grafana_sign_in_environment(&section).into_iter().collect();
+        assert_eq!(
+            set["GF_SERVER_ROOT_URL"],
+            "https://data.example.com/grafana/"
+        );
+        assert_eq!(set["GF_AUTH_PROXY_WHITELIST"], "10.1.2.3");
+        assert_eq!(set["GF_SECURITY_ADMIN_USER"], "root");
+        assert_eq!(set["GF_SECURITY_ADMIN_PASSWORD"], "s3cret");
+    }
 }

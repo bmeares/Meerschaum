@@ -52,7 +52,7 @@ A walled-off user:
 When a request names no instance, the console, the pipe routes and the MCP tools use the default instance of the caller's team.
 
 !!! note "Serve the API privately"
-    Without `--private`, `/users` and `/plugins` answer callers who send no credentials, as they always have. Start the server with `mrsm start api --private` so those listings need a login and follow these rules.
+    Without `--private`, `/users` and `/plugins` answer callers who send no credentials, as they always have. The legacy SDK's `Bearer None` header also means anonymous. Start the server with `mrsm start api --private` so those listings need a valid login and follow these rules.
 
 ## A database for each team
 
@@ -88,41 +88,38 @@ A token acts as its owner, so an agent of a walled-off user sees what that user 
 Meerschaum can sign the console's users in to Grafana and keep one Grafana organization per team. Grafana's data sources are separated per organization, so a team's dashboards can only query the team's own database, through its read-only role.
 
 ```yaml
+### `mrsm edit config api`
 api:
   grafana:
     enabled: true
-    ### How the API server reaches Grafana.
-    url: http://grafana:3000
-    ### Grafana's server administrator (for its HTTP API).
+    ### Grafana's server administrator (for its HTTP API). Change the password.
     admin_user: admin
     admin_password: <password>
-    ### Optional: how Grafana reaches the database server, when it differs from the connector's host and port.
-    # database_url: db:5432
+    ### The address users reach Grafana at.
+    root_url: https://your-api-host/grafana/
 ```
 
-Grafana must accept the signed-in user from the API server only, and be served under `/grafana`:
+Then run `mrsm stack up -d grafana`. With `enabled`, the stack's `grafana` service is started with what the sign-in needs: it is served under `/grafana`, and it accepts the signed-in user only from the API server (the auth-proxy header, from Docker's own networks). Settings your stack config already has are kept.
 
-```yaml
-### `mrsm edit config stack`, under services → grafana → environment
-GF_SERVER_ROOT_URL: https://your-api-host/grafana/
-GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
-GF_AUTH_PROXY_ENABLED: 'true'
-GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
-GF_AUTH_PROXY_HEADER_PROPERTY: username
-GF_AUTH_PROXY_AUTO_SIGN_UP: 'true'
-### Only the API server may name the user: its address or its Docker network.
-GF_AUTH_PROXY_WHITELIST: 172.18.0.0/16
-GF_SECURITY_ADMIN_PASSWORD: <password>
-```
+| Key | Default | Meaning |
+|---|---|---|
+| `url` | `http://grafana:3000` | How the API server reaches Grafana. |
+| `admin_user`, `admin_password` | `admin`, `admin` | Grafana's server administrator. A Grafana that already has data keeps the password it has; change it in Grafana too. |
+| `root_url` | Grafana's own guess | The public address of `/grafana/`. |
+| `proxy_whitelist` | `172.16.0.0/12` | Who may name the signed-in user to Grafana: the API server's address, or Docker's networks. |
+| `database_url` | the connector's host and port | How Grafana reaches the teams' database server (`host:port`). |
 
-!!! warning "Set the whitelist"
-    Without `GF_AUTH_PROXY_WHITELIST`, anyone who reaches Grafana directly can name any user in the header. List only the API server's address (or its Docker network), and do not publish Grafana's own port to networks you do not trust.
+!!! warning "Who may name the user"
+    Grafana trusts the user named by an address in `proxy_whitelist`. The default covers Docker's networks, which on the Docker host includes local connections to Grafana's published port: narrow it to the API container's address, or stop publishing Grafana's own port, when other people have a login on that host. A Grafana you run yourself needs the same settings (`GF_AUTH_PROXY_*`, `GF_SERVER_ROOT_URL`, `GF_SERVER_SERVE_FROM_SUB_PATH`).
+
+Grafana's own address changes to `http://localhost:3000/grafana/`.
 
 Users then open **Grafana** from the console's user menu (`https://your-api-host/grafana/`):
 
 - each team is an organization named after it. A team with a database of its own gets a data source there for that database;
 - members are Editors, the team's managers are organization Admins, and Meerschaum administrators are Grafana administrators;
 - members of isolated teams are removed from Grafana's main organization, so they see only their teams' dashboards;
+- renaming a team renames its organization;
 - memberships are checked when a user opens Grafana (at most once a minute), and a signed-out or deleted user has no access. If Grafana's API cannot be reached, the request is refused instead of using memberships that may be stale.
 
 The built-in **Syncs** and **Engine** dashboards stay in the main organization.

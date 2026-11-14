@@ -91,6 +91,8 @@ pub struct Inner {
     log_stream: std::sync::atomic::AtomicBool,
     /// Extra instances.
     pub resolver: Arc<dyn InstanceResolver>,
+    /// What follows a change of teams outside the instance.
+    pub team_events: Arc<dyn crate::backends::TeamEvents>,
     /// The extension-host proxy for unmatched routes.
     pub host: Option<Arc<HostProxy>>,
     /// Per-route-group rate limits.
@@ -124,6 +126,7 @@ pub struct AppStateBuilder {
     engine: Arc<dyn EngineBackend>,
     pipelines: Arc<dyn PipelinesBackend>,
     resolver: Arc<dyn InstanceResolver>,
+    team_events: Arc<dyn crate::backends::TeamEvents>,
     host: Option<Arc<HostProxy>>,
 }
 
@@ -156,6 +159,11 @@ impl AppStateBuilder {
     /// The resolver for extra instances.
     pub fn resolver(mut self, resolver: Arc<dyn InstanceResolver>) -> Self {
         self.resolver = resolver;
+        self
+    }
+    /// What follows a change of teams outside the instance.
+    pub fn team_events(mut self, events: Arc<dyn crate::backends::TeamEvents>) -> Self {
+        self.team_events = events;
         self
     }
     /// The extension-host proxy.
@@ -206,6 +214,7 @@ impl AppStateBuilder {
             engine_streams: Default::default(),
             log_stream: std::sync::atomic::AtomicBool::new(false),
             resolver: self.resolver,
+            team_events: self.team_events,
             host,
             rate_limiter,
             execution_maintenance: tokio::sync::Mutex::new(()),
@@ -244,6 +253,7 @@ impl AppState {
             engine: Arc::new(MemoryEngine::default()),
             pipelines: Arc::new(NoPipelines),
             resolver: Arc::new(NoInstances),
+            team_events: Arc::new(crate::backends::NoTeamEvents),
             host: None,
         }
     }

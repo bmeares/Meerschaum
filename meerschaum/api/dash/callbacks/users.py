@@ -993,11 +993,14 @@ def submit_rename_team(n_clicks, target, new_name, refresh, session_store_data):
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     ### The team's Grafana organization keeps its dashboards under the new name.
-    team_setup.rename_grafana_team(team['name'], new_name)
+    grafana_note = team_setup.rename_grafana_team(team['name'], new_name)
     access.forget()
+    message = f"Renamed team '{team['name']}' to '{new_name}'."
+    if grafana_note:
+        message += f" {grafana_note}"
     return (
         False, [],
-        alert_from_success_tuple((True, f"Renamed team '{team['name']}' to '{new_name}'.")),
+        alert_from_success_tuple((True, message)),
         (refresh or 0) + 1,
     )
 
