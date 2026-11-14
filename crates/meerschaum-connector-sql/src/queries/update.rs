@@ -6,7 +6,7 @@ use crate::dateadd::{DateArg, Number, dateadd_str};
 use crate::dtypes::{
     are_dtypes_equal, cast_dtype, get_pd_type_from_db_type, has_cast_dtypes, pd_to_db_entry,
 };
-use crate::flavor::Flavor;
+use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::sql_item_name_opt;
 use crate::queries::templates::update_queries;
 use meerschaum_core::pyfmt::{dedent_strip, py_format, py_isupper};
@@ -69,6 +69,15 @@ pub fn get_null_replacement(typ: &str, flavor: Option<Flavor>) -> String {
             ""
         }
     )
+}
+
+/// Whether `db_type` is one of the placeholders the PostgreSQL catalog
+/// (`information_schema.columns.data_type`) reports instead of a type name: `ARRAY` for every
+/// array and `USER-DEFINED` for extension, enum and composite types (`citext`, `hstore`,
+/// `vector`, ...). `CAST(x AS <placeholder>)` is a syntax error.
+pub(crate) fn is_catalog_placeholder_type(db_type: &str) -> bool {
+    let upper = db_type.trim().to_uppercase();
+    matches!(upper.as_str(), "ARRAY" | "USER-DEFINED")
 }
 
 /// `expression` (a value of PostgreSQL type `db_type`) in a form `IS DISTINCT FROM` compares
@@ -355,9 +364,13 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
             && get_pd_type_from_db_type(c_type, true)
                 .to_lowercase()
                 .contains("utc");
+        // The assignment itself coerces a value into a column whose catalog type has no name to
+        // cast to (an array, an extension or enum type).
         let skip_cast = !args.cast_columns
             || (flavor == Some(Flavor::Oracle)
-                && are_dtypes_equal(&get_pd_type_from_db_type(c_type, true), "bytes"));
+                && are_dtypes_equal(&get_pd_type_from_db_type(c_type, true), "bytes"))
+            || (flavor.is_some_and(|f| f.driver_family() == DriverFamily::Postgres)
+                && is_catalog_placeholder_type(c_type));
         if skip_cast || matches!(flavor, Some(Flavor::Sqlite | Flavor::Geopackage)) {
             return format!("{r_prefix}{}", q(c_name));
         }
@@ -797,6 +810,53 @@ mod tests {
             vec![
                 "INSERT INTO \"t\" (\"id\", \"v\")\nSELECT \"id\", \"v\"\nFROM \"p\"\nON CONFLICT (\"id\") DO UPDATE SET \"v\" = CAST(EXCLUDED.\"v\" AS TEXT)"
             ]
+        );
+    }
+
+    #[test]
+    fn upserts_assign_catalog_placeholder_types_uncast() {
+        let mut args = UpdateQueriesArgs::new("t", "p", vec!["id".into()], Flavor::Postgresql);
+        args.upsert = true;
+        args.target_cols_types = [
+            ("id", "BIGINT"),
+            ("arr", "ARRAY"),
+            ("m", "USER-DEFINED"),
+            ("v", "TEXT"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        for flavor in [
+            Flavor::Postgresql,
+            Flavor::Postgis,
+            Flavor::Timescaledb,
+            Flavor::TimescaledbHa,
+            Flavor::Citus,
+            Flavor::Cockroachdb,
+        ] {
+            args.flavor = flavor;
+            let qs = get_update_queries(&args);
+            assert!(
+                qs[0].ends_with(
+                    "DO UPDATE SET \"arr\" = EXCLUDED.\"arr\",\n\"m\" = EXCLUDED.\"m\",\n\"v\" = CAST(EXCLUDED.\"v\" AS TEXT)"
+                ),
+                "{flavor:?}: {qs:?}"
+            );
+            assert!(!qs[0].contains("AS ARRAY") && !qs[0].contains("AS USER-DEFINED"));
+        }
+        // The plain `UPDATE` too.
+        args.flavor = Flavor::Postgresql;
+        args.upsert = false;
+        let qs = get_update_queries(&args);
+        assert!(
+            qs.iter()
+                .all(|q| !q.contains("AS ARRAY") && !q.contains("AS USER-DEFINED")),
+            "{qs:?}"
+        );
+        assert!(
+            qs.iter().any(|q| q.contains("\"arr\" = p.\"arr\"")),
+            "{qs:?}"
         );
     }
 

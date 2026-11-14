@@ -385,7 +385,13 @@ impl InplaceObserver for Changes {
 }
 
 async fn inplace_sync(c: &Ctx, pipe: &meerschaum_core::Pipe) -> String {
-    if !pipe.upsert_changed_only() {
+    inplace_sync_with(c, pipe, pipe.upsert_changed_only()).await
+}
+
+/// An in-place sync; `observe` adds an observer, as a pipe with children has, which runs the
+/// query selecting the rows that change.
+async fn inplace_sync_with(c: &Ctx, pipe: &meerschaum_core::Pipe, observe: bool) -> String {
+    if !observe {
         return ok(c
             .conn
             .sync_pipe_inplace(pipe, None, Bound::None, Bound::None, true)
@@ -622,3 +628,156 @@ flavor_tests!(
         c.delete(&pipe).await;
     }
 );
+
+/// Run `sqls` in order, asserting that each succeeds.
+async fn exec_all(c: &Ctx, sqls: &[String]) {
+    for sql in sqls {
+        assert!(c.conn.exec(sql).await.is_some(), "{}: {sql}", c.flavor);
+    }
+}
+
+/// Whether the `citext` extension is installed (created when the role may).
+async fn citext(c: &Ctx) -> bool {
+    for _ in 0..3 {
+        if has_extension(c, "citext").await {
+            return true;
+        }
+        let _ = c.conn.exec("CREATE EXTENSION IF NOT EXISTS citext").await;
+    }
+    has_extension(c, "citext").await
+}
+
+/// An enum type of this test's own (`USER-DEFINED` in the catalog).
+async fn mood_type(c: &Ctx) -> String {
+    let name = format!("{}_mood", c.prefix);
+    exec_all(
+        c,
+        &[format!(
+            "CREATE TYPE \"{name}\" AS ENUM ('happy', 'sad', 'meh')"
+        )],
+    )
+    .await;
+    name
+}
+
+/// One string per row of `select` (`id` order): what the table holds.
+async fn stored(c: &Ctx, table: &str, select: &str) -> String {
+    let sql = format!("SELECT string_agg({select}, ';' ORDER BY id NULLS FIRST) FROM {table}");
+    match c.conn.value(&sql).await {
+        Some(SqlValue::Text(text)) => text,
+        other => panic!("{}: {sql}: {other:?}", c.flavor),
+    }
+}
+
+/// Apply `steps` (`UPDATE <source> SET ...` clauses) one in-place sync at a time and check the
+/// rows each one rewrites (with the guard off, every row of the window).
+async fn inplace_steps(
+    c: &Ctx,
+    pipe: &meerschaum_core::Pipe,
+    source: &str,
+    table: &str,
+    observe: bool,
+    steps: &[(&str, Vec<i64>)],
+) {
+    let changed_only = pipe.upsert_changed_only();
+    let mut last = versions(c, table).await;
+    let all: Vec<i64> = last.iter().map(|(id, _)| *id).collect();
+    for (update, expected) in steps {
+        if !update.is_empty() {
+            exec_all(c, &[format!("UPDATE \"{source}\" SET {update}")]).await;
+        }
+        let expected = if changed_only { expected } else { &all };
+        let message = inplace_sync_with(c, pipe, observe).await;
+        assert_eq!(message, upserted(expected.len()), "{}: {update}", c.flavor);
+        let now = versions(c, table).await;
+        assert_eq!(&rewritten(&last, &now), expected, "{}: {update}", c.flavor);
+        last = now;
+    }
+}
+
+/// Whether an in-place sync can read `USER-DEFINED` columns here. Without PostGIS, the geometry
+/// lookup that such a column triggers fails inside the sync's transaction and aborts it (with or
+/// without `upsert_changed_only`), so those columns are tested where PostGIS is installed.
+async fn user_defined_inplace(c: &Ctx) -> bool {
+    has_extension(c, "postgis").await
+}
+
+/// Array, enum and `citext` value columns upsert in place with `enforce` on: the catalog names
+/// their types `ARRAY` and `USER-DEFINED`, which are not types to cast to.
+async fn user_defined_values(c: Ctx, changed_only: bool) {
+    if !pg_family(&c) {
+        return;
+    }
+    let user_defined = user_defined_inplace(&c).await;
+    let ci_type = if citext(&c).await { "citext" } else { "text" };
+    let mood = mood_type(&c).await;
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!(
+                "CREATE TABLE \"{source}\" (ts timestamptz NOT NULL, id bigint NOT NULL, \
+                 arr text[], m \"{mood}\", ci {ci_type}, v integer)"
+            ),
+            format!(
+                "INSERT INTO \"{source}\" SELECT '2024-01-01 00:00:00+00', id, '{{a,b}}', 'happy', \
+                 'Abc', id FROM generate_series(1, 3) AS id"
+            ),
+        ],
+    )
+    .await;
+    let params = serde_json::json!({
+        "columns": {"datetime": "ts", "id": "id"},
+        "upsert": true,
+        "upsert_changed_only": changed_only,
+        "sql": format!(
+            "SELECT ts, id, arr, {} v FROM \"{source}\"",
+            if user_defined { "m, ci," } else { "" }
+        ),
+    })
+    .to_string();
+    let pipe = c.pipe(&c.conn.keys(), "udvalues", None, &params);
+    inplace_sync(&c, &pipe).await;
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    let mut steps = vec![
+        ("", vec![]),
+        ("arr = '{b,a}' WHERE id = 1", vec![1]),
+        ("v = v, arr = arr WHERE id = 1", vec![]),
+    ];
+    if user_defined {
+        steps.extend([
+            ("m = 'sad' WHERE id = 2", vec![2]),
+            ("ci = 'ABC' WHERE id = 3", vec![3]),
+            ("m = m, ci = ci WHERE id = 3", vec![]),
+        ]);
+    }
+    inplace_steps(&c, &pipe, &source, &table, changed_only, &steps).await;
+    if user_defined {
+        assert_eq!(
+            stored(&c, &table, "arr::text || '|' || m::text || '|' || ci::text").await,
+            "{b,a}|happy|Abc;{a,b}|sad|Abc;{a,b}|happy|ABC",
+            "{}",
+            c.flavor
+        );
+    } else {
+        assert_eq!(
+            stored(&c, &table, "arr::text").await,
+            "{b,a};{a,b};{a,b}",
+            "{}",
+            c.flavor
+        );
+    }
+    c.delete(&pipe).await;
+    exec_all(
+        &c,
+        &[
+            format!("DROP TABLE \"{source}\""),
+            format!("DROP TYPE \"{mood}\""),
+        ],
+    )
+    .await;
+}
+
+flavor_tests!(user_defined_values_upsert_in_place, |c: Ctx| async move {
+    user_defined_values(c, false).await;
+});
