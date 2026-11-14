@@ -150,14 +150,12 @@ flavor_tests!(frame_upserts_skip_unchanged_rows, |c: Ctx| async move {
     ok(c.sync(&pipe, base_rows()).await);
     // A second identical sync succeeds and reports only the rows written on PostgreSQL.
     let result = ok(c.sync_with(&pipe, base_rows(), no_diff()).await);
-    assert_eq!(
-        result.message,
-        upserted(if pg_family(&c) { 0 } else { 3 }),
-        "{}",
-        c.flavor
-    );
     if !pg_family(&c) {
-        // Other flavors ignore the parameter: an ordinary upsert.
+        // Other flavors keep their existing behavior, including backends without upserts.
+        let baseline = c.pipe("ucs", "frame_off", None, &frame_params(Some(false)));
+        ok(c.sync(&baseline, base_rows()).await);
+        let baseline_result = ok(c.sync_with(&baseline, base_rows(), no_diff()).await);
+        assert_eq!(result.message, baseline_result.message, "{}", c.flavor);
         let mut rows = base_rows();
         rows[1].insert("v".into(), fl(9.0));
         ok(c.sync_with(&pipe, rows, no_diff()).await);
@@ -168,8 +166,10 @@ flavor_tests!(frame_upserts_skip_unchanged_rows, |c: Ctx| async move {
             c.flavor
         );
         c.delete(&pipe).await;
+        c.delete(&baseline).await;
         return;
     }
+    assert_eq!(result.message, upserted(0), "{}", c.flavor);
     let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
     let mut last = versions(&c, &table).await;
     let ok_rows = ok(c.sync_with(&pipe, base_rows(), no_diff()).await);
