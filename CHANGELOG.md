@@ -4,6 +4,20 @@
 
 ## Meerschaum 5
 
+### 5.1.0
+
+Several teams can now share one instance, each behind its own wall. See [Teams on One Instance](https://meerschaum.io/reference/api-instance/teams/).
+
+- **Isolated teams.** A team created with "Hide Everyone's pipes, jobs, connectors and plugins" sees only what belongs to it or was granted to it, in the console, the HTTP API and MCP. Its members never hold `actions:execute`, `webterm:use` or `instance:chain`. A user in both an isolated and an open team keeps the open team's view.
+- **A database per team.** **New team** in the console and the new `bootstrap teams` action can create a database or a schema for the team on an existing PostgreSQL-family connector, with a role for the team, a read-only role for dashboards and a connector reserved for the team, which becomes its default instance. The server picks up the new connector without a restart.
+- **Team settings.** New team and a team's **Settings** choose its default instance, the connectors and plugins it may use, and whether its members may install plugins.
+- **Team plugins.** A team allowed to install plugins can install from the repository, create a plugin, or upload files and archives from **Plugins → New plugin**; its members manage their team's plugins only.
+- **Connect an agent.** The Tokens page shows ready-to-paste MCP configuration for Claude Code, Claude Desktop, Codex, OpenCode and other clients, with the API key of a new token filled in.
+- **Grafana.** With `api:grafana:enabled`, the server signs console users in to Grafana at `/grafana`, keeps one organization per team with a data source for the team's database, and removes members of isolated teams from the main organization. The stack's `grafana` service gets the settings it needs when the stack is next started.
+- The teams table's row menu is no longer clipped when the table is short.
+- The MCP docs show the bearer token in the form the server accepts (the **API Key** of a token).
+- The new [`upsert_changed_only`](https://meerschaum.io/reference/pipes/parameters/#upsert_changed_only) parameter makes an `upsert` pipe on PostgreSQL, PostGIS, TimescaleDB, TimescaleDB-HA or Citus skip the update of rows whose values did not change, so a pipe that re-reads an overlapping window no longer rewrites identical rows (WAL, dead tuples, autovacuum). The sync message counts only the rows actually written.
+
 ### 5.0.2
 
 - The console's Performance page keeps the window and page you chose when a Refresh (or the 30-second update) answers after you changed them; a late reply used to bring back the previous selection.
