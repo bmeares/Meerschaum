@@ -2379,7 +2379,7 @@ Set `upsert_changed_only` to `true` (default `false`) to make an [`upsert`](#ups
 
 An upsert normally rewrites every row whose key already exists, even when the incoming values are identical. With `upsert_changed_only`, the update runs only for rows whose value columns differ (`ON CONFLICT ... DO UPDATE ... WHERE (stored values) IS DISTINCT FROM (new values)`). New rows are inserted and changed rows updated as before.
 
-This matters for a pipe that re-reads an overlapping window on every sync, for example a SQL pipe with a large `fetch:backtrack_minutes` on a short schedule: rewriting the same rows each time produces WAL, dead tuples and autovacuum work without changing any data. It helps most for SQL pipes synced in place (the source is on the same instance). A sync of a DataFrame already drops identical rows before writing, unless `check_existing` is off.
+This matters for a pipe that re-reads an overlapping window on every sync, for example a SQL pipe with a large `fetch:backtrack_minutes` on a short schedule: rewriting the same rows each time produces WAL, dead tuples and autovacuum work without changing any data. A row the guard skips is still row-locked by the upsert, which writes a small WAL record and dirties the page, so the saving is in row versions, dead tuples and index churn, not in locks; concurrent writers on the same keys still wait as before. It helps most for SQL pipes synced in place (the source is on the same instance). A sync of a DataFrame already drops identical rows before writing, unless `check_existing` is off.
 
 === "Python"
 

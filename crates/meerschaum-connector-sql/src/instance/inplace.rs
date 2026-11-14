@@ -18,7 +18,8 @@ use crate::queries::table::{
 };
 use crate::queries::templates::has_update_query;
 use crate::queries::update::{
-    UpdateQueriesArgs, changed_only_comparable, get_null_replacement, get_update_queries,
+    UpdateQueriesArgs, changed_only_comparable, changed_only_new_value, get_null_replacement,
+    get_update_queries,
 };
 use meerschaum_connector::DataQuery;
 
@@ -1348,10 +1349,7 @@ impl SqlConnector {
             new_cols
                 .keys()
                 .map(|col| {
-                    if upsert
-                        && sp.upsert_changed_only()
-                        && flavor.driver_family() == DriverFamily::Postgres
-                    {
+                    if upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only() {
                         format!("{a_new}.{} AS {}", q(col), q(col))
                     } else {
                         format!(
@@ -1401,13 +1399,17 @@ impl SqlConnector {
                     );
                     let mut old_value =
                         upsert_comparable_value(&old, &target_type, &target_type, flavor);
-                    if sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres
+                    // Value columns compare as the guard does (key columns match as above);
+                    // the new value is converted to the stored type as its assignment does.
+                    if sp.upsert_changed_only()
+                        && flavor.supports_upsert_changed_only()
+                        && !on_cols.contains_key(c)
                     {
-                        let assigned = if sp.enforce() {
-                            format!("CAST({new} AS {target_type})")
-                        } else {
-                            new.clone()
-                        };
+                        let assigned = changed_only_new_value(
+                            &new,
+                            &get_col_typ(c, &new_cols_types),
+                            &target_type,
+                        );
                         new_value = changed_only_comparable(&assigned, &target_type);
                         old_value = changed_only_comparable(&old, &target_type);
                     }
@@ -1629,8 +1631,7 @@ impl SqlConnector {
             };
         }
         let mut update_count = 0;
-        let count_all =
-            upsert && sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres;
+        let count_all = upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only();
         for (i, query) in apply_update_queries.iter().enumerate() {
             self.log(query);
             match session_execute(self, &mut tx, query, flavor).await {

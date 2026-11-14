@@ -1618,7 +1618,7 @@ impl SqlConnector {
         let input_count = update_df.height() as u64;
         if upsert
             && !autoincrement
-            && !(sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres)
+            && !(sp.upsert_changed_only() && flavor.supports_upsert_changed_only())
             && pipe.connector_keys() == "mrsm"
             && (update_df.height() <= 64 || flavor == Flavor::Duckdb)
         {
@@ -1863,8 +1863,7 @@ impl SqlConnector {
             }
         }
         let update_queries = get_update_queries(&args);
-        let count_all =
-            upsert && sp.upsert_changed_only() && flavor.driver_family() == DriverFamily::Postgres;
+        let count_all = upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only();
         let update_start = std::time::Instant::now();
         let results = self.exec_queries(&update_queries, true, true).await;
         let update_success =
