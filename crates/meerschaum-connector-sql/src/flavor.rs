@@ -316,6 +316,16 @@ impl Flavor {
         )
     }
 
+    /// Whether upserts honor the `upsert_changed_only` pipe parameter (skip the update of rows
+    /// whose values would not change). CockroachDB, though in the PostgreSQL driver family, and
+    /// every other flavor upsert exactly as if the parameter were absent.
+    pub const fn supports_upsert_changed_only(self) -> bool {
+        matches!(
+            self,
+            Postgresql | Postgis | Timescaledb | TimescaledbHa | Citus
+        )
+    }
+
     /// `COMPRESSIBLE_FLAVORS` (`_compress.py:19`).
     pub const fn compressible(self) -> bool {
         matches!(self, Timescaledb | TimescaledbHa | Mysql | Mariadb | Mssql)
@@ -550,5 +560,26 @@ mod tests {
         assert!(!Flavor::Mssql.native_partition());
         assert!(Flavor::Mssql.partitionable());
         assert!(!Flavor::Timescaledb.partitionable());
+    }
+
+    #[test]
+    fn upsert_changed_only_flavors() {
+        let supported: Vec<Flavor> = Flavor::ALL
+            .into_iter()
+            .filter(|f| f.supports_upsert_changed_only())
+            .collect();
+        assert_eq!(
+            supported,
+            vec![
+                Flavor::Timescaledb,
+                Flavor::TimescaledbHa,
+                Flavor::Postgresql,
+                Flavor::Postgis,
+                Flavor::Citus,
+            ]
+        );
+        // CockroachDB shares the PostgreSQL driver but not the guard.
+        assert_eq!(Flavor::Cockroachdb.driver_family(), DriverFamily::Postgres);
+        assert!(!Flavor::Cockroachdb.supports_upsert_changed_only());
     }
 }

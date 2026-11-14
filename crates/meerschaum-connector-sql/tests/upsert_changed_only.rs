@@ -385,7 +385,13 @@ impl InplaceObserver for Changes {
 }
 
 async fn inplace_sync(c: &Ctx, pipe: &meerschaum_core::Pipe) -> String {
-    if !pipe.upsert_changed_only() {
+    inplace_sync_with(c, pipe, pipe.upsert_changed_only()).await
+}
+
+/// An in-place sync; `observe` adds an observer, as a pipe with children has, which runs the
+/// query selecting the rows that change.
+async fn inplace_sync_with(c: &Ctx, pipe: &meerschaum_core::Pipe, observe: bool) -> String {
+    if !observe {
         return ok(c
             .conn
             .sync_pipe_inplace(pipe, None, Bound::None, Bound::None, true)
@@ -416,15 +422,13 @@ flavor_tests!(inplace_upserts_skip_unchanged_rows, |c: Ctx| async move {
     }
     let postgis = has_extension(&c, "postgis").await;
     let source = special_source(&c, postgis).await;
-    // `arr` is left out: an upsert casts to the column's catalog type, `ARRAY` for every
-    // array (see `inplace_array_upserts_skip_unchanged_rows`).
     let geo_cols = if postgis { ", g, gg" } else { "" };
     let params = |changed_only: bool| {
         serde_json::json!({
             "columns": {"datetime": "ts", "id": "id"},
             "upsert": true,
             "upsert_changed_only": changed_only,
-            "sql": format!("SELECT ts, id, v, n, t, doc, jb, b, x, pt, iv{geo_cols} FROM \"{source}\""),
+            "sql": format!("SELECT ts, id, v, n, t, doc, jb, b, arr, x, pt, iv{geo_cols} FROM \"{source}\""),
         })
         .to_string()
     };
@@ -469,6 +473,8 @@ flavor_tests!(inplace_upserts_skip_unchanged_rows, |c: Ctx| async move {
         ),
         ("jsonb", r#"jb = '{"z": 0}' WHERE id = 5"#, vec![5]),
         ("bytea", "b = '\\x0001'::bytea WHERE id = 6", vec![6]),
+        ("array order", "arr = '{2,1}' WHERE id = 1", vec![1]),
+        ("same array", "arr = '{2,1}' WHERE id = 1", vec![]),
         (
             "xml (no equality)",
             "x = '<a>changed</a>' WHERE id = 2",
@@ -622,3 +628,726 @@ flavor_tests!(
         c.delete(&pipe).await;
     }
 );
+
+/// Run `sqls` in order, asserting that each succeeds.
+async fn exec_all(c: &Ctx, sqls: &[String]) {
+    for sql in sqls {
+        assert!(c.conn.exec(sql).await.is_some(), "{}: {sql}", c.flavor);
+    }
+}
+
+/// Whether the `citext` extension is installed (created when the role may).
+async fn citext(c: &Ctx) -> bool {
+    for _ in 0..3 {
+        if has_extension(c, "citext").await {
+            return true;
+        }
+        let _ = c.conn.exec("CREATE EXTENSION IF NOT EXISTS citext").await;
+    }
+    has_extension(c, "citext").await
+}
+
+/// An enum type of this test's own (`USER-DEFINED` in the catalog).
+async fn mood_type(c: &Ctx) -> String {
+    let name = format!("{}_mood", c.prefix);
+    exec_all(
+        c,
+        &[format!(
+            "CREATE TYPE \"{name}\" AS ENUM ('happy', 'sad', 'meh')"
+        )],
+    )
+    .await;
+    name
+}
+
+/// One string per row of `select` (`id` order): what the table holds.
+async fn stored(c: &Ctx, table: &str, select: &str) -> String {
+    let sql = format!("SELECT string_agg({select}, ';' ORDER BY id NULLS FIRST) FROM {table}");
+    match c.conn.value(&sql).await {
+        Some(SqlValue::Text(text)) => text,
+        other => panic!("{}: {sql}: {other:?}", c.flavor),
+    }
+}
+
+/// Apply `steps` (`UPDATE <source> SET ...` clauses) one in-place sync at a time and check the
+/// rows each one rewrites (with the guard off, every row of the window).
+async fn inplace_steps(
+    c: &Ctx,
+    pipe: &meerschaum_core::Pipe,
+    source: &str,
+    table: &str,
+    observe: bool,
+    steps: &[(&str, Vec<i64>)],
+) {
+    let changed_only = pipe.upsert_changed_only();
+    let mut last = versions(c, table).await;
+    let all: Vec<i64> = last.iter().map(|(id, _)| *id).collect();
+    for (update, expected) in steps {
+        if !update.is_empty() {
+            exec_all(c, &[format!("UPDATE \"{source}\" SET {update}")]).await;
+        }
+        let expected = if changed_only { expected } else { &all };
+        let message = inplace_sync_with(c, pipe, observe).await;
+        assert_eq!(message, upserted(expected.len()), "{}: {update}", c.flavor);
+        let now = versions(c, table).await;
+        assert_eq!(&rewritten(&last, &now), expected, "{}: {update}", c.flavor);
+        last = now;
+    }
+}
+
+/// Whether an in-place sync can read `USER-DEFINED` columns here. Without PostGIS, the geometry
+/// lookup that such a column triggers fails inside the sync's transaction and aborts it (with or
+/// without `upsert_changed_only`), so those columns are tested where PostGIS is installed.
+async fn user_defined_inplace(c: &Ctx) -> bool {
+    has_extension(c, "postgis").await
+}
+
+/// Array, enum and `citext` value columns upsert in place with `enforce` on: the catalog names
+/// their types `ARRAY` and `USER-DEFINED`, which are not types to cast to.
+async fn user_defined_values(c: Ctx, changed_only: bool) {
+    if !pg_family(&c) {
+        return;
+    }
+    let user_defined = user_defined_inplace(&c).await;
+    let ci_type = if citext(&c).await { "citext" } else { "text" };
+    let mood = mood_type(&c).await;
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!(
+                "CREATE TABLE \"{source}\" (ts timestamptz NOT NULL, id bigint NOT NULL, \
+                 arr text[], m \"{mood}\", ci {ci_type}, v integer)"
+            ),
+            format!(
+                "INSERT INTO \"{source}\" SELECT '2024-01-01 00:00:00+00', id, '{{a,b}}', 'happy', \
+                 'Abc', id FROM generate_series(1, 3) AS id"
+            ),
+        ],
+    )
+    .await;
+    let params = serde_json::json!({
+        "columns": {"datetime": "ts", "id": "id"},
+        "upsert": true,
+        "upsert_changed_only": changed_only,
+        "sql": format!(
+            "SELECT ts, id, arr, {} v FROM \"{source}\"",
+            if user_defined { "m, ci," } else { "" }
+        ),
+    })
+    .to_string();
+    let pipe = c.pipe(&c.conn.keys(), "udvalues", None, &params);
+    inplace_sync(&c, &pipe).await;
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    let mut steps = vec![
+        ("", vec![]),
+        ("arr = '{b,a}' WHERE id = 1", vec![1]),
+        ("v = v, arr = arr WHERE id = 1", vec![]),
+    ];
+    if user_defined {
+        steps.extend([
+            ("m = 'sad' WHERE id = 2", vec![2]),
+            ("ci = 'ABC' WHERE id = 3", vec![3]),
+            ("m = m, ci = ci WHERE id = 3", vec![]),
+        ]);
+    }
+    inplace_steps(&c, &pipe, &source, &table, changed_only, &steps).await;
+    if user_defined {
+        assert_eq!(
+            stored(&c, &table, "arr::text || '|' || m::text || '|' || ci::text").await,
+            "{b,a}|happy|Abc;{a,b}|sad|Abc;{a,b}|happy|ABC",
+            "{}",
+            c.flavor
+        );
+    } else {
+        assert_eq!(
+            stored(&c, &table, "arr::text").await,
+            "{b,a};{a,b};{a,b}",
+            "{}",
+            c.flavor
+        );
+    }
+    c.delete(&pipe).await;
+    // `CASCADE`: an observed sync leaves its staged tables for a later sync to drop.
+    exec_all(
+        &c,
+        &[
+            format!("DROP TABLE \"{source}\""),
+            format!("DROP TYPE \"{mood}\" CASCADE"),
+        ],
+    )
+    .await;
+}
+
+flavor_tests!(user_defined_values_upsert_in_place, |c: Ctx| async move {
+    user_defined_values(c, false).await;
+});
+
+flavor_tests!(
+    user_defined_values_upsert_in_place_changed_only,
+    |c: Ctx| async move {
+        user_defined_values(c, true).await;
+    }
+);
+
+/// `citext` and enum KEY columns: the guard compares them as the upsert's keys match, never by
+/// casting to their catalog type (`USER-DEFINED`).
+async fn user_defined_keys(c: Ctx, changed_only: bool) {
+    if !pg_family(&c) || !user_defined_inplace(&c).await {
+        return;
+    }
+    let ci_type = if citext(&c).await { "citext" } else { "text" };
+    let mood = mood_type(&c).await;
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!(
+                "CREATE TABLE \"{source}\" (ts timestamptz NOT NULL, k {ci_type} NOT NULL, \
+                 e \"{mood}\" NOT NULL, id bigint NOT NULL, v integer)"
+            ),
+            format!(
+                "INSERT INTO \"{source}\" VALUES \
+                 ('2024-01-01 00:00:00+00', 'K1', 'happy', 1, 10), \
+                 ('2024-01-01 00:00:00+00', 'K2', 'sad', 2, 20), \
+                 ('2024-01-01 00:00:00+00', 'K1', 'sad', 3, 30)"
+            ),
+        ],
+    )
+    .await;
+    let params = serde_json::json!({
+        "columns": {"datetime": "ts", "k": "k", "e": "e"},
+        "upsert": true,
+        "upsert_changed_only": changed_only,
+        "sql": format!("SELECT ts, k, e, id, v FROM \"{source}\""),
+    })
+    .to_string();
+    let pipe = c.pipe(&c.conn.keys(), "udkeys", None, &params);
+    inplace_sync(&c, &pipe).await;
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    inplace_steps(
+        &c,
+        &pipe,
+        &source,
+        &table,
+        changed_only,
+        &[
+            ("", vec![]),
+            ("v = v + 1 WHERE id = 2", vec![2]),
+            ("id = id WHERE e = 'sad'", vec![]),
+        ],
+    )
+    .await;
+    assert_eq!(
+        stored(&c, &table, "k::text || e::text || v::text").await,
+        "K1happy10;K2sad21;K1sad30"
+    );
+    c.delete(&pipe).await;
+    // `CASCADE`: an observed sync leaves its staged tables for a later sync to drop.
+    exec_all(
+        &c,
+        &[
+            format!("DROP TABLE \"{source}\""),
+            format!("DROP TYPE \"{mood}\" CASCADE"),
+        ],
+    )
+    .await;
+}
+
+flavor_tests!(user_defined_keys_upsert_in_place, |c: Ctx| async move {
+    user_defined_keys(c, true).await;
+});
+
+// Without the guard (and without an observer: the NULL stand-in literal of an observed upsert
+// is not a valid enum value).
+flavor_tests!(
+    user_defined_keys_upsert_in_place_by_default,
+    |c: Ctx| async move {
+        user_defined_keys(c, false).await;
+    }
+);
+
+/// `enforce: false` and a source column retyped after the first sync: integers staged into the
+/// table's text column. The write converts them on assignment; the guard compares them the same
+/// way (`integer = text` has no operator), in the `ON CONFLICT` statement and, for the row with
+/// a NULL key (the table's unique key treats NULLs as distinct), in the `UPDATE` that compares
+/// the staged values themselves.
+async fn retyped_inplace(c: Ctx, changed_only: bool) {
+    if !pg_family(&c) {
+        return;
+    }
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!("CREATE TABLE \"{source}\" (ts timestamptz NOT NULL, id bigint, v text)"),
+            format!(
+                "INSERT INTO \"{source}\" VALUES ('2024-01-01 00:00:00+00', 1, '1'), \
+                 ('2024-01-01 00:00:00+00', 2, '2'), ('2024-01-01 00:00:00+00', NULL, '3')"
+            ),
+        ],
+    )
+    .await;
+    let params = |null_indices: bool| {
+        serde_json::json!({
+            "columns": {"datetime": "ts", "id": "id"},
+            "upsert": true,
+            "upsert_changed_only": changed_only,
+            "null_indices": null_indices,
+            "enforce": false,
+            "dtypes": {"v": "str"},
+            "sql": format!("SELECT ts, id, v FROM \"{source}\""),
+        })
+        .to_string()
+    };
+    let legacy = c.pipe(&c.conn.keys(), "retyped", None, &params(false));
+    inplace_sync_with(&c, &legacy, false).await;
+    let pipe = c.pipe(&c.conn.keys(), "retyped", None, &params(true));
+    exec_all(
+        &c,
+        &[format!(
+            "ALTER TABLE \"{source}\" ALTER COLUMN v TYPE integer USING v::integer"
+        )],
+    )
+    .await;
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    let mut last = versions(&c, &table).await;
+    for (update, expected) in [
+        ("v = v", vec![]),
+        ("v = 5 WHERE id = 2", vec![2]),
+        ("v = 6 WHERE id IS NULL", vec![-1]),
+    ] {
+        exec_all(&c, &[format!("UPDATE \"{source}\" SET {update}")]).await;
+        let message = inplace_sync_with(&c, &pipe, true).await;
+        let now = versions(&c, &table).await;
+        if changed_only {
+            assert_eq!(message, upserted(expected.len()), "{}: {update}", c.flavor);
+            assert_eq!(rewritten(&last, &now), expected, "{}: {update}", c.flavor);
+        } else {
+            assert_eq!(
+                rewritten(&last, &now),
+                vec![-1, 1, 2],
+                "{}: {update}",
+                c.flavor
+            );
+        }
+        last = now;
+    }
+    // The table keeps its text column: the case under test.
+    assert_eq!(
+        stored(&c, &table, "pg_typeof(v)::text || v").await,
+        "text6;text1;text5"
+    );
+    c.delete(&pipe).await;
+    exec_all(&c, &[format!("DROP TABLE \"{source}\"")]).await;
+}
+
+flavor_tests!(retyped_enforce_off_upserts_in_place, |c: Ctx| async move {
+    retyped_inplace(c, true).await;
+});
+
+flavor_tests!(
+    retyped_enforce_off_upserts_in_place_by_default,
+    |c: Ctx| async move {
+        retyped_inplace(c, false).await;
+    }
+);
+
+/// A table whose unique key treats NULLs as distinct, synced in place: the rows with a NULL key
+/// take the `UPDATE` of their own, which skips unchanged rows too.
+async fn null_key_inplace(c: Ctx, changed_only: bool) {
+    if !pg_family(&c) {
+        return;
+    }
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!(
+                "CREATE TABLE \"{source}\" (ts timestamp NOT NULL, id bigint, v integer, \
+                 rid bigint NOT NULL)"
+            ),
+            format!(
+                "INSERT INTO \"{source}\" VALUES ('2024-01-01 00:00:00', 1, 1, 1), \
+                 ('2024-01-01 00:00:00', NULL, 2, 2)"
+            ),
+        ],
+    )
+    .await;
+    let params = |null_indices: bool| {
+        serde_json::json!({
+            "columns": {"datetime": "ts", "id": "id"},
+            "upsert": true,
+            "upsert_changed_only": changed_only,
+            "null_indices": null_indices,
+            "sql": format!("SELECT ts, id, v FROM \"{source}\""),
+        })
+        .to_string()
+    };
+    let legacy = c.pipe(&c.conn.keys(), "nullkey", None, &params(false));
+    inplace_sync_with(&c, &legacy, false).await;
+    let pipe = c.pipe(&c.conn.keys(), "nullkey", None, &params(true));
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    let mut last = versions(&c, &table).await;
+    assert_eq!(last.len(), 2, "{last:?}");
+    for (update, expected) in [
+        ("v = v", vec![]),
+        ("v = 3 WHERE id IS NULL", vec![-1]),
+        ("v = 4 WHERE id = 1", vec![1]),
+    ] {
+        exec_all(&c, &[format!("UPDATE \"{source}\" SET {update}")]).await;
+        let message = inplace_sync_with(&c, &pipe, true).await;
+        let now = versions(&c, &table).await;
+        if changed_only {
+            assert_eq!(message, upserted(expected.len()), "{}: {update}", c.flavor);
+            assert_eq!(rewritten(&last, &now), expected, "{}: {update}", c.flavor);
+        } else {
+            assert_eq!(
+                rewritten(&last, &now),
+                vec![-1, 1],
+                "{}: {update}",
+                c.flavor
+            );
+        }
+        last = now;
+    }
+    assert_eq!(stored(&c, &table, "v::text").await, "3;4");
+    c.delete(&pipe).await;
+    exec_all(&c, &[format!("DROP TABLE \"{source}\"")]).await;
+}
+
+flavor_tests!(null_key_upserts_in_place, |c: Ctx| async move {
+    null_key_inplace(c, true).await;
+});
+
+flavor_tests!(null_key_upserts_in_place_by_default, |c: Ctx| async move {
+    null_key_inplace(c, false).await;
+});
+
+/// `(ts, id, v)` rows for the frame path (`id` may be NULL).
+fn kv_rows(rows: &[(Option<i64>, KValue)]) -> Vec<Doc> {
+    rows.iter()
+        .map(|(id, v)| {
+            doc(vec![
+                ("ts", ndt(2024, 1, 1, 0, 0)),
+                ("id", id.map_or(KValue::Null, i)),
+                ("v", v.clone()),
+            ])
+        })
+        .collect()
+}
+
+/// The frame path with `enforce: false`: integers synced into a text column, a NULL key among
+/// them (the `UPDATE` compares the staged values, not `EXCLUDED`'s). The frame path stages the
+/// rows with the table's own column types, so the staged and stored types agree here.
+async fn retyped_frame(c: Ctx, changed_only: bool) {
+    if !pg_family(&c) {
+        return;
+    }
+    let legacy = c.pipe(
+        "ucs",
+        "retyped",
+        None,
+        r#"{"columns": {"datetime": "ts", "id": "id"}, "upsert": true, "null_indices": false,
+            "dtypes": {"v": "str"}}"#,
+    );
+    ok(
+        c.sync(&legacy, kv_rows(&[(Some(1), s("1")), (None, s("2"))]))
+            .await,
+    );
+    let pipe = c.pipe(
+        "ucs",
+        "retyped",
+        None,
+        &format!(
+            r#"{{"columns": {{"datetime": "ts", "id": "id"}}, "upsert": true, "enforce": false,
+                "upsert_changed_only": {changed_only}}}"#
+        ),
+    );
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    let mut last = versions(&c, &table).await;
+    for (rows, expected) in [
+        (vec![(Some(1), i(1)), (None, i(2))], vec![]),
+        (vec![(Some(1), i(1)), (None, i(3))], vec![-1]),
+        (vec![(Some(1), i(4)), (None, i(3))], vec![1]),
+    ] {
+        let result = ok(c.sync_with(&pipe, kv_rows(&rows), no_diff()).await);
+        let now = versions(&c, &table).await;
+        if changed_only {
+            assert_eq!(result.message, upserted(expected.len()), "{}", c.flavor);
+            assert_eq!(rewritten(&last, &now), expected, "{}", c.flavor);
+        } else {
+            assert_eq!(rewritten(&last, &now), vec![-1, 1], "{}", c.flavor);
+        }
+        last = now;
+    }
+    assert_eq!(
+        stored(&c, &table, "pg_typeof(v)::text || v").await,
+        "text3;text4"
+    );
+    c.delete(&pipe).await;
+}
+
+flavor_tests!(retyped_enforce_off_frame_upserts, |c: Ctx| async move {
+    retyped_frame(c, true).await;
+});
+
+flavor_tests!(
+    retyped_enforce_off_frame_upserts_by_default,
+    |c: Ctx| async move {
+        retyped_frame(c, false).await;
+    }
+);
+
+// PostGIS: a change of SRID alone (same coordinates) is a change, on both paths.
+flavor_tests!(srid_changes_are_changes, |c: Ctx| async move {
+    if !pg_family(&c) || !has_extension(&c, "postgis").await {
+        return;
+    }
+    let geo_row = |wkt: &str| {
+        vec![doc(vec![
+            ("ts", ndt(2024, 1, 1, 0, 0)),
+            ("id", i(1)),
+            ("g", s(wkt)),
+        ])]
+    };
+    let pipe = c.pipe(
+        "ucs",
+        "srid",
+        None,
+        // `static`: a frame whose SRID differs from the column's would otherwise retype the
+        // column (to text) before the upsert, guard or not.
+        r#"{"columns": {"datetime": "ts", "id": "id"}, "upsert": true, "static": true,
+            "upsert_changed_only": true, "dtypes": {"g": "geometry"}}"#,
+    );
+    ok(c.sync(&pipe, geo_row("SRID=4326;POINT (1 2)")).await);
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    assert_eq!(stored(&c, &table, "ST_SRID(g)::text").await, "4326");
+    let before = versions(&c, &table).await;
+    let result = ok(c
+        .sync_with(&pipe, geo_row("SRID=4326;POINT (1 2)"), no_diff())
+        .await);
+    assert_eq!(result.message, upserted(0), "{}", c.flavor);
+    let result = ok(c
+        .sync_with(&pipe, geo_row("SRID=3857;POINT (1 2)"), no_diff())
+        .await);
+    assert_eq!(result.message, upserted(1), "{}", c.flavor);
+    let after = versions(&c, &table).await;
+    assert_eq!(rewritten(&before, &after), vec![1], "{}", c.flavor);
+    assert_eq!(stored(&c, &table, "ST_SRID(g)::text").await, "3857");
+    c.delete(&pipe).await;
+
+    // In place.
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!("CREATE TABLE \"{source}\" (ts timestamptz NOT NULL, id bigint NOT NULL, g geometry)"),
+            format!(
+                "INSERT INTO \"{source}\" SELECT '2024-01-01 00:00:00+00', id, \
+                 'SRID=4326;POINT(1 2)' FROM generate_series(1, 2) AS id"
+            ),
+        ],
+    )
+    .await;
+    let params = serde_json::json!({
+        "columns": {"datetime": "ts", "id": "id"},
+        "upsert": true,
+        "upsert_changed_only": true,
+        "sql": format!("SELECT ts, id, g FROM \"{source}\""),
+    })
+    .to_string();
+    let pipe = c.pipe(&c.conn.keys(), "srid", None, &params);
+    inplace_sync(&c, &pipe).await;
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    inplace_steps(
+        &c,
+        &pipe,
+        &source,
+        &table,
+        true,
+        &[
+            ("", vec![]),
+            ("g = ST_SetSRID(g, 3857) WHERE id = 2", vec![2]),
+        ],
+    )
+    .await;
+    assert_eq!(stored(&c, &table, "ST_SRID(g)::text").await, "4326;3857");
+    c.delete(&pipe).await;
+    exec_all(&c, &[format!("DROP TABLE \"{source}\"")]).await;
+});
+
+/// Replace the table's unique keys with a unique index on key expressions (as a table made by
+/// a release whose NULL-safe key was `COALESCE(...)`), so that the upsert's conflict target is
+/// `("ts", (COALESCE("id", -987654321)))`.
+async fn expression_unique_key(c: &Ctx, table: &str) {
+    let literal = table.replace('\'', "''");
+    exec_all(
+        c,
+        &[
+            format!(
+                "DO $$ DECLARE r record; BEGIN \
+                 FOR r IN SELECT conname FROM pg_constraint WHERE conrelid = '{literal}'::regclass \
+                 AND contype = 'u' LOOP \
+                 EXECUTE format('ALTER TABLE {literal} DROP CONSTRAINT %I', r.conname); END LOOP; \
+                 FOR r IN SELECT indexrelid::regclass::text AS name FROM pg_index \
+                 WHERE indrelid = '{literal}'::regclass AND indisunique AND NOT indisprimary LOOP \
+                 EXECUTE 'DROP INDEX ' || r.name; END LOOP; END $$"
+            ),
+            format!(
+                "CREATE UNIQUE INDEX \"{}_ux\" ON {table} (ts, (COALESCE(id, -987654321)))",
+                c.prefix
+            ),
+        ],
+    )
+    .await;
+    let keys = c
+        .conn
+        .value(&format!(
+            "SELECT string_agg(pg_get_indexdef(indexrelid), ';') FROM pg_index \
+             WHERE indrelid = '{literal}'::regclass AND indisunique"
+        ))
+        .await;
+    let Some(SqlValue::Text(keys)) = keys else {
+        panic!("{}: {keys:?}", c.flavor);
+    };
+    assert!(
+        !keys.contains(';') && keys.contains("COALESCE(id, "),
+        "{}: {keys}",
+        c.flavor
+    );
+}
+
+// A unique index on key expressions: the guard's `ON CONFLICT` names those expressions.
+flavor_tests!(expression_conflict_target_upserts, |c: Ctx| async move {
+    if !pg_family(&c) {
+        return;
+    }
+    let params = |changed_only: bool| {
+        format!(
+            r#"{{"columns": {{"datetime": "ts", "id": "id"}}, "upsert": true, "hypertable": false,
+                "upsert_changed_only": {changed_only}}}"#
+        )
+    };
+    let pipe = c.pipe("ucs", "expr", None, &params(true));
+    let rows = |v: i64| kv_rows(&[(Some(1), i(1)), (None, i(v))]);
+    ok(c.sync(&pipe, rows(2)).await);
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    expression_unique_key(&c, &table).await;
+    let before = versions(&c, &table).await;
+    let result = ok(c.sync_with(&pipe, rows(2), no_diff()).await);
+    assert_eq!(result.message, upserted(0), "{}", c.flavor);
+    let result = ok(c.sync_with(&pipe, rows(3), no_diff()).await);
+    assert_eq!(result.message, upserted(1), "{}", c.flavor);
+    let after = versions(&c, &table).await;
+    assert_eq!(rewritten(&before, &after), vec![-1], "{}", c.flavor);
+    // Off: both rows are rewritten.
+    let pipe_off = c.pipe("ucs", "expr", None, &params(false));
+    ok(c.sync_with(&pipe_off, rows(3), no_diff()).await);
+    let last = versions(&c, &table).await;
+    assert_eq!(rewritten(&after, &last), vec![-1, 1], "{}", c.flavor);
+    assert_eq!(stored(&c, &table, "v::text").await, "3;1");
+    c.delete(&pipe).await;
+
+    // In place.
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!("CREATE TABLE \"{source}\" (ts timestamp NOT NULL, id bigint, v integer)"),
+            format!(
+                "INSERT INTO \"{source}\" VALUES ('2024-01-01 00:00:00', 1, 1), \
+                 ('2024-01-01 00:00:00', NULL, 2)"
+            ),
+        ],
+    )
+    .await;
+    let params = serde_json::json!({
+        "columns": {"datetime": "ts", "id": "id"},
+        "upsert": true,
+        "hypertable": false,
+        "upsert_changed_only": true,
+        "sql": format!("SELECT ts, id, v FROM \"{source}\""),
+    })
+    .to_string();
+    let pipe = c.pipe(&c.conn.keys(), "expr", None, &params);
+    inplace_sync(&c, &pipe).await;
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    expression_unique_key(&c, &table).await;
+    inplace_steps(
+        &c,
+        &pipe,
+        &source,
+        &table,
+        true,
+        &[
+            ("", vec![]),
+            ("v = 3 WHERE id IS NULL", vec![-1]),
+            ("v = 4 WHERE id = 1", vec![1]),
+        ],
+    )
+    .await;
+    assert_eq!(stored(&c, &table, "v::text").await, "3;4");
+    c.delete(&pipe).await;
+    exec_all(&c, &[format!("DROP TABLE \"{source}\"")]).await;
+});
+
+/// A partitioned target (native partitions on PostgreSQL and PostGIS, a hypertable on
+/// TimescaleDB) keyed by its primary column: the datetime column is folded into the key. Frame
+/// syncs only: an in-place sync creates an unpartitioned table and conflicts on the primary
+/// column alone, which a partitioned table's key does not match (with or without the guard).
+async fn partitioned(c: Ctx, changed_only: bool) {
+    if !pg_family(&c) {
+        return;
+    }
+    let rows = |v: i64| {
+        (1..=4)
+            .map(|id| {
+                doc(vec![
+                    ("ts", udt(2024, 1, id as u32, 0, 0)),
+                    ("id", i(id)),
+                    ("v", i(if id == 3 { v } else { id })),
+                ])
+            })
+            .collect::<Vec<_>>()
+    };
+    let params = format!(
+        r#"{{"columns": {{"datetime": "ts", "primary": "id"}}, "upsert": true,
+            "upsert_changed_only": {changed_only}, "verify": {{"chunk_minutes": 1440}}}}"#
+    );
+    let pipe = c.pipe("ucs", "partitioned", None, &params);
+    ok(c.sync(&pipe, rows(3)).await);
+    let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
+    if matches!(c.flavor, "postgresql" | "postgis") {
+        let kind = c
+            .conn
+            .value(&format!(
+                "SELECT relkind::text FROM pg_class WHERE oid = '{}'::regclass",
+                table.replace('\'', "''")
+            ))
+            .await;
+        assert_eq!(kind, Some(SqlValue::Text("p".into())), "{}", c.flavor);
+    }
+    let mut last = versions(&c, &table).await;
+    for (v, expected) in [(3, vec![]), (30, vec![3])] {
+        let result = ok(c.sync_with(&pipe, rows(v), no_diff()).await);
+        let now = versions(&c, &table).await;
+        if changed_only {
+            assert_eq!(result.message, upserted(expected.len()), "{}", c.flavor);
+            assert_eq!(rewritten(&last, &now), expected, "{}", c.flavor);
+        } else {
+            assert_eq!(rewritten(&last, &now), vec![1, 2, 3, 4], "{}", c.flavor);
+        }
+        last = now;
+    }
+    assert_eq!(stored(&c, &table, "v::text").await, "1;2;30;4");
+    c.delete(&pipe).await;
+}
+
+flavor_tests!(partitioned_upserts, |c: Ctx| async move {
+    partitioned(c, true).await;
+});
+
+flavor_tests!(partitioned_upserts_by_default, |c: Ctx| async move {
+    partitioned(c, false).await;
+});

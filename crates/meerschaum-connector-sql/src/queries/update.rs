@@ -6,7 +6,7 @@ use crate::dateadd::{DateArg, Number, dateadd_str};
 use crate::dtypes::{
     are_dtypes_equal, cast_dtype, get_pd_type_from_db_type, has_cast_dtypes, pd_to_db_entry,
 };
-use crate::flavor::Flavor;
+use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::sql_item_name_opt;
 use crate::queries::templates::update_queries;
 use meerschaum_core::pyfmt::{dedent_strip, py_format, py_isupper};
@@ -69,6 +69,34 @@ pub fn get_null_replacement(typ: &str, flavor: Option<Flavor>) -> String {
             ""
         }
     )
+}
+
+/// Whether `db_type` is one of the placeholders the PostgreSQL catalog
+/// (`information_schema.columns.data_type`) reports instead of a type name: `ARRAY` for every
+/// array and `USER-DEFINED` for extension, enum and composite types (`citext`, `hstore`,
+/// `vector`, ...). `CAST(x AS <placeholder>)` is a syntax error.
+pub(crate) fn is_catalog_placeholder_type(db_type: &str) -> bool {
+    let upper = db_type.trim().to_uppercase();
+    matches!(upper.as_str(), "ARRAY" | "USER-DEFINED")
+}
+
+/// Whether `CAST(x AS <db_type>)` names `db_type` (a catalog placeholder or an empty name does
+/// not).
+pub(crate) fn castable_by_name(db_type: &str) -> bool {
+    !db_type.trim().is_empty() && !is_catalog_placeholder_type(db_type)
+}
+
+/// `new`, a value of the staged type `new_type`, as the `upsert_changed_only` guard compares it
+/// with a stored value of `target_type` (before [`changed_only_comparable`]): cast to the target
+/// type when the two types differ, as the write's assignment converts it, so that both sides
+/// have one type (`integer = text` has no operator). A target type without a castable name is
+/// left alone: both sides then compare as text.
+pub(crate) fn changed_only_new_value(new: &str, new_type: &str, target_type: &str) -> String {
+    if new_type.trim().eq_ignore_ascii_case(target_type.trim()) || !castable_by_name(target_type) {
+        new.to_string()
+    } else {
+        format!("CAST({new} AS {target_type})")
+    }
 }
 
 /// `expression` (a value of PostgreSQL type `db_type`) in a form `IS DISTINCT FROM` compares
@@ -238,14 +266,7 @@ impl<'a> UpdateQueriesArgs<'a> {
 pub fn changed_only_applies(args: &UpdateQueriesArgs<'_>) -> bool {
     args.upsert
         && args.changed_only
-        && matches!(
-            args.flavor,
-            Flavor::Postgresql
-                | Flavor::Postgis
-                | Flavor::Timescaledb
-                | Flavor::TimescaledbHa
-                | Flavor::Citus
-        )
+        && args.flavor.supports_upsert_changed_only()
         && args
             .target_cols_types
             .keys()
@@ -349,16 +370,24 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
     };
 
     let tz_naive = flavor.is_some_and(Flavor::timezone_naive);
+    // Whether the value assigned to a column of `c_type` is cast to that type.
+    let casts_value = |c_type: &str| -> bool {
+        // The assignment itself coerces a value into a column whose catalog type has no name to
+        // cast to (an array, an extension or enum type).
+        let skip_cast = !args.cast_columns
+            || (flavor == Some(Flavor::Oracle)
+                && are_dtypes_equal(&get_pd_type_from_db_type(c_type, true), "bytes"))
+            || (flavor.is_some_and(|f| f.driver_family() == DriverFamily::Postgres)
+                && is_catalog_placeholder_type(c_type));
+        !skip_cast && !matches!(flavor, Some(Flavor::Sqlite | Flavor::Geopackage))
+    };
     // The value assigned to a value column (`r_prefix` is the patch or `EXCLUDED.`).
     let set_value = |c_name: &str, c_type: &str, r_prefix: &str| -> String {
         let utc = !tz_naive
             && get_pd_type_from_db_type(c_type, true)
                 .to_lowercase()
                 .contains("utc");
-        let skip_cast = !args.cast_columns
-            || (flavor == Some(Flavor::Oracle)
-                && are_dtypes_equal(&get_pd_type_from_db_type(c_type, true), "bytes"));
-        if skip_cast || matches!(flavor, Some(Flavor::Sqlite | Flavor::Geopackage)) {
+        if !casts_value(c_type) {
             return format!("{r_prefix}{}", q(c_name));
         }
         format!(
@@ -386,13 +415,20 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
     };
     let changed_only = changed_only_applies(args);
     // `(f.a, f.b) IS DISTINCT FROM (<new a>, <new b>)`: whether a stored row `f` would change.
+    // `EXCLUDED.` values already have the target's types; an uncast patch value is compared
+    // after the conversion its assignment makes.
     let distinct_subquery = |r_prefix: &str| -> String {
         let (old, new): (Vec<String>, Vec<String>) = value_cols
             .iter()
             .map(|(c_name, c_type)| {
+                let mut new = set_value(c_name, c_type, r_prefix);
+                if r_prefix != "EXCLUDED." && !casts_value(c_type) {
+                    let patch_type = patch_table_columns.get(c_name).map_or("", String::as_str);
+                    new = changed_only_new_value(&new, patch_type, c_type);
+                }
                 (
                     changed_only_comparable(&format!("f.{}", q(c_name)), c_type),
-                    changed_only_comparable(&set_value(c_name, c_type, r_prefix), c_type),
+                    changed_only_comparable(&new, c_type),
                 )
             })
             .unzip();
@@ -800,6 +836,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn upserts_assign_catalog_placeholder_types_uncast() {
+        let mut args = UpdateQueriesArgs::new("t", "p", vec!["id".into()], Flavor::Postgresql);
+        args.upsert = true;
+        args.target_cols_types = [
+            ("id", "BIGINT"),
+            ("arr", "ARRAY"),
+            ("m", "USER-DEFINED"),
+            ("v", "TEXT"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        for flavor in [
+            Flavor::Postgresql,
+            Flavor::Postgis,
+            Flavor::Timescaledb,
+            Flavor::TimescaledbHa,
+            Flavor::Citus,
+            Flavor::Cockroachdb,
+        ] {
+            args.flavor = flavor;
+            let qs = get_update_queries(&args);
+            assert!(
+                qs[0].ends_with(
+                    "DO UPDATE SET \"arr\" = EXCLUDED.\"arr\",\n\"m\" = EXCLUDED.\"m\",\n\"v\" = CAST(EXCLUDED.\"v\" AS TEXT)"
+                ),
+                "{flavor:?}: {qs:?}"
+            );
+            assert!(!qs[0].contains("AS ARRAY") && !qs[0].contains("AS USER-DEFINED"));
+        }
+        // The plain `UPDATE` too.
+        args.flavor = Flavor::Postgresql;
+        args.upsert = false;
+        let qs = get_update_queries(&args);
+        assert!(
+            qs.iter()
+                .all(|q| !q.contains("AS ARRAY") && !q.contains("AS USER-DEFINED")),
+            "{qs:?}"
+        );
+        assert!(
+            qs.iter().any(|q| q.contains("\"arr\" = p.\"arr\"")),
+            "{qs:?}"
+        );
+    }
+
     fn changed_only_args(flavor: Flavor) -> UpdateQueriesArgs<'static> {
         let mut args = UpdateQueriesArgs::new("t", "p", vec!["ts".into(), "id".into()], flavor);
         args.upsert = true;
@@ -949,6 +1032,89 @@ mod tests {
             qs[1]
         );
         assert!(qs[2].contains("AND NOT EXISTS ("), "{}", qs[2]);
+    }
+
+    #[test]
+    fn changed_only_compares_uncast_patch_values_as_stored() {
+        // `enforce: false` with staged types that differ from the stored ones.
+        let mut args =
+            UpdateQueriesArgs::new("t", "p", vec!["ts".into(), "id".into()], Flavor::Postgresql);
+        args.upsert = true;
+        args.null_safe_upsert = true;
+        args.changed_only = true;
+        args.cast_columns = false;
+        args.datetime_col = Some("ts");
+        let types = |pairs: &[(&str, &str)]| -> IndexMap<String, String> {
+            pairs
+                .iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect()
+        };
+        args.target_cols_types = types(&[
+            ("ts", "TIMESTAMP"),
+            ("id", "BIGINT"),
+            ("v", "TEXT"),
+            ("arr", "ARRAY"),
+            ("w", "DOUBLE PRECISION"),
+        ]);
+        args.patch_cols_types = types(&[
+            ("ts", "TIMESTAMP"),
+            ("id", "BIGINT"),
+            ("v", "BIGINT"),
+            ("arr", "TEXT"),
+            ("w", "double precision"),
+        ]);
+        let qs = get_update_queries(&args);
+        assert_eq!(qs.len(), 3, "{qs:#?}");
+        // `EXCLUDED.` already has the target's types.
+        assert!(
+            qs[0].ends_with(
+                "WHERE (f.\"v\", CAST(f.\"arr\" AS TEXT), f.\"w\") IS DISTINCT FROM (EXCLUDED.\"v\", CAST(EXCLUDED.\"arr\" AS TEXT), EXCLUDED.\"w\")"
+            ),
+            "{}",
+            qs[0]
+        );
+        // The patch's values are converted to the stored type (text where it has no name);
+        // the assignment stays uncast.
+        assert!(
+            qs[1].starts_with(
+                "UPDATE \"t\" AS f\nSET \"v\" = p.\"v\",\n\"arr\" = p.\"arr\",\n\"w\" = p.\"w\"\n"
+            ),
+            "{}",
+            qs[1]
+        );
+        assert!(
+            qs[1].ends_with(
+                "AND (f.\"v\", CAST(f.\"arr\" AS TEXT), f.\"w\") IS DISTINCT FROM (CAST(p.\"v\" AS TEXT), CAST(p.\"arr\" AS TEXT), p.\"w\")"
+            ),
+            "{}",
+            qs[1]
+        );
+        // With `enforce` on, the assignment's cast is the comparison's.
+        args.cast_columns = true;
+        let qs = get_update_queries(&args);
+        assert!(
+            qs[1].ends_with(
+                "IS DISTINCT FROM (CAST(p.\"v\" AS TEXT), CAST(p.\"arr\" AS TEXT), CAST(p.\"w\" AS DOUBLE PRECISION))"
+            ),
+            "{}",
+            qs[1]
+        );
+    }
+
+    #[test]
+    fn changed_only_new_values() {
+        let n = changed_only_new_value;
+        assert_eq!(n("x", "TEXT", "text"), "x");
+        assert_eq!(n("x", "INTEGER", "TEXT"), "CAST(x AS TEXT)");
+        assert_eq!(
+            n("x", "NUMERIC", "NUMERIC(28,10)"),
+            "CAST(x AS NUMERIC(28,10))"
+        );
+        assert_eq!(n("x", "", "BIGINT"), "CAST(x AS BIGINT)");
+        for target in ["ARRAY", "USER-DEFINED", "user-defined", ""] {
+            assert_eq!(n("x", "TEXT", target), "x", "{target}");
+        }
     }
 
     #[test]
