@@ -71,6 +71,80 @@ pub fn get_null_replacement(typ: &str, flavor: Option<Flavor>) -> String {
     )
 }
 
+/// `expression` (a value of PostgreSQL type `db_type`) in a form `IS DISTINCT FROM` compares
+/// exactly: `json` as `jsonb` (no equality operator; `jsonb` ignores key order and whitespace),
+/// PostGIS types as their EWKB bytes (`=` may compare bounding boxes), and any type not known to
+/// have a value equality as text.
+fn changed_only_comparable(expression: &str, db_type: &str) -> String {
+    let upper = db_type.trim().to_uppercase();
+    let (element, array) = match upper.strip_suffix("[]") {
+        Some(element) => (element, true),
+        None => match upper.strip_prefix('_') {
+            Some(element) => (element, true),
+            None => (upper.as_str(), upper == "ARRAY"),
+        },
+    };
+    let element = element.split('(').next().unwrap_or_default().trim();
+    if !array && element == "JSON" {
+        return format!("CAST({expression} AS JSONB)");
+    }
+    if !array && matches!(element, "GEOMETRY" | "GEOGRAPHY") {
+        return format!("CAST({expression} AS BYTEA)");
+    }
+    let equality = matches!(
+        element,
+        "SMALLINT"
+            | "INTEGER"
+            | "INT"
+            | "BIGINT"
+            | "INT2"
+            | "INT4"
+            | "INT8"
+            | "NUMERIC"
+            | "DECIMAL"
+            | "REAL"
+            | "FLOAT"
+            | "FLOAT4"
+            | "FLOAT8"
+            | "DOUBLE PRECISION"
+            | "BOOLEAN"
+            | "BOOL"
+            | "TEXT"
+            | "VARCHAR"
+            | "CHARACTER VARYING"
+            | "CHAR"
+            | "CHARACTER"
+            | "BPCHAR"
+            | "NAME"
+            | "UUID"
+            | "BYTEA"
+            | "JSONB"
+            | "DATE"
+            | "TIME"
+            | "TIMETZ"
+            | "TIME WITHOUT TIME ZONE"
+            | "TIME WITH TIME ZONE"
+            | "TIMESTAMP"
+            | "TIMESTAMPTZ"
+            | "TIMESTAMP WITHOUT TIME ZONE"
+            | "TIMESTAMP WITH TIME ZONE"
+            | "INTERVAL"
+            | "INET"
+            | "CIDR"
+            | "MACADDR"
+            | "MACADDR8"
+            | "MONEY"
+            | "BIT"
+            | "VARBIT"
+            | "BIT VARYING"
+    );
+    if equality {
+        expression.to_string()
+    } else {
+        format!("CAST({expression} AS TEXT)")
+    }
+}
+
 /// Arguments of `get_update_queries` (`utils/sql.py:1667`).
 ///
 /// Python fetches `target_cols_types` / `patch_cols_types` from the database when they are not
@@ -125,6 +199,11 @@ pub struct UpdateQueriesArgs<'a> {
     ///
     /// The patch must hold one row per key (the caller keeps a repeated key's last row).
     pub null_safe_upsert: bool,
+    /// Upserts that leave a conflicting row alone when none of its value columns would change
+    /// (the `upsert_changed_only` pipe parameter): `ON CONFLICT ... DO UPDATE ... WHERE (f.cols)
+    /// IS DISTINCT FROM (new values)`. PostgreSQL, PostGIS, TimescaleDB and Citus only; other
+    /// flavors ignore it.
+    pub changed_only: bool,
 }
 
 impl<'a> UpdateQueriesArgs<'a> {
@@ -147,6 +226,7 @@ impl<'a> UpdateQueriesArgs<'a> {
             db_version: None,
             conflict_target: None,
             null_safe_upsert: false,
+            changed_only: false,
         }
     }
 }
@@ -248,6 +328,25 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
     };
 
     let tz_naive = flavor.is_some_and(Flavor::timezone_naive);
+    // The value assigned to a value column (`r_prefix` is the patch or `EXCLUDED.`).
+    let set_value = |c_name: &str, c_type: &str, r_prefix: &str| -> String {
+        let utc = !tz_naive
+            && get_pd_type_from_db_type(c_type, true)
+                .to_lowercase()
+                .contains("utc");
+        let skip_cast = !args.cast_columns
+            || (flavor == Some(Flavor::Oracle)
+                && are_dtypes_equal(&get_pd_type_from_db_type(c_type, true), "bytes"));
+        if skip_cast || matches!(flavor, Some(Flavor::Sqlite | Flavor::Geopackage)) {
+            return format!("{r_prefix}{}", q(c_name));
+        }
+        format!(
+            "CAST({r_prefix}{} AS {}){}",
+            q(c_name),
+            c_type.replace('_', " "),
+            if utc { " AT TIME ZONE 'UTC'" } else { "" }
+        )
+    };
     let sets_subquery = |l_prefix: &str, r_prefix: &str| -> String {
         if value_cols.is_empty() {
             return String::new();
@@ -255,31 +354,44 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
         let parts: Vec<String> = value_cols
             .iter()
             .map(|(c_name, c_type)| {
-                let utc = !tz_naive
-                    && get_pd_type_from_db_type(c_type, true)
-                        .to_lowercase()
-                        .contains("utc");
-                let skip_cast = !args.cast_columns
-                    || (flavor == Some(Flavor::Oracle)
-                        && are_dtypes_equal(&get_pd_type_from_db_type(c_type, true), "bytes"));
-                let (open, mid, close) =
-                    if skip_cast || matches!(flavor, Some(Flavor::Sqlite | Flavor::Geopackage)) {
-                        (String::new(), String::new(), String::new())
-                    } else {
-                        (
-                            "CAST(".to_string(),
-                            format!(" AS {}", c_type.replace('_', " ")),
-                            format!("){}", if utc { " AT TIME ZONE 'UTC'" } else { "" }),
-                        )
-                    };
                 format!(
-                    "{l_prefix}{} = {open}{r_prefix}{}{mid}{close}",
+                    "{l_prefix}{} = {}",
                     q(c_name),
-                    q(c_name)
+                    set_value(c_name, c_type, r_prefix)
                 )
             })
             .collect();
         format!("SET {}", parts.join(",\n"))
+    };
+    let changed_only = args.upsert
+        && args.changed_only
+        && !value_cols.is_empty()
+        && matches!(
+            flavor,
+            Some(
+                Flavor::Postgresql
+                    | Flavor::Postgis
+                    | Flavor::Timescaledb
+                    | Flavor::TimescaledbHa
+                    | Flavor::Citus
+            )
+        );
+    // `(f.a, f.b) IS DISTINCT FROM (<new a>, <new b>)`: whether a stored row `f` would change.
+    let distinct_subquery = |r_prefix: &str| -> String {
+        let (old, new): (Vec<String>, Vec<String>) = value_cols
+            .iter()
+            .map(|(c_name, c_type)| {
+                (
+                    changed_only_comparable(&format!("f.{}", q(c_name)), c_type),
+                    changed_only_comparable(&set_value(c_name, c_type, r_prefix), c_type),
+                )
+            })
+            .unzip();
+        format!(
+            "({}) IS DISTINCT FROM ({})",
+            old.join(", "),
+            new.join(", ")
+        )
     };
 
     let and_subquery = |l_prefix: &str, r_prefix: &str| -> String {
@@ -408,6 +520,14 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
 
     let sets_none = sets_subquery("", "p.");
     let sets_excluded = sets_subquery("", "EXCLUDED.");
+    // The `upsert_changed_only` form of the `ON CONFLICT` upsert (`filter` restricts the patch
+    // rows): the target is aliased `f` so the condition can name the stored row.
+    let changed_only_upsert = |filter: &str| -> String {
+        format!(
+            "INSERT INTO {target_table_name} AS f ({patch_cols_str})\nSELECT {patch_cols_str}\nFROM {patch_table_name}{filter}\nON CONFLICT ({join_cols_str}) DO UPDATE {sets_excluded}\nWHERE {}",
+            distinct_subquery("EXCLUDED.")
+        )
+    };
 
     let null_safe_family = matches!(
         flavor,
@@ -462,13 +582,22 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
             .join("\n    AND ");
         let mut queries = Vec::new();
         // The rows whose keys are all set: the usual single statement.
-        queries.push(format!(
-            "INSERT INTO {target_table_name} ({patch_cols_str})\nSELECT {patch_cols_str}\nFROM {patch_table_name}\nWHERE {none_null}\nON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_excluded}"
-        ).trim_end().to_string());
+        queries.push(if changed_only {
+            changed_only_upsert(&format!("\nWHERE {none_null}"))
+        } else {
+            format!(
+                "INSERT INTO {target_table_name} ({patch_cols_str})\nSELECT {patch_cols_str}\nFROM {patch_table_name}\nWHERE {none_null}\nON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_excluded}"
+            ).trim_end().to_string()
+        });
         // The rows with a NULL key: update those that exist, then insert the others.
         if !value_cols.is_empty() {
+            let changed = if changed_only {
+                format!("\n    AND {}", distinct_subquery("p."))
+            } else {
+                String::new()
+            };
             queries.push(format!(
-                "UPDATE {target_table_name} AS f\n{sets_none}\nFROM (SELECT {patch_cols_str} FROM {patch_table_name} WHERE {}) AS p\nWHERE {keys_match}",
+                "UPDATE {target_table_name} AS f\n{sets_none}\nFROM (SELECT {patch_cols_str} FROM {patch_table_name} WHERE {}) AS p\nWHERE {keys_match}{changed}",
                 any_null("")
             ));
         }
@@ -477,6 +606,9 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
             any_null("p.")
         ));
         return queries;
+    }
+    if changed_only {
+        return vec![changed_only_upsert("")];
     }
     let sets_f = sets_subquery("f.", "p.");
     let and_f = and_subquery("p.", "f.");
@@ -661,5 +793,176 @@ mod tests {
                 "INSERT INTO \"t\" (\"id\", \"v\")\nSELECT \"id\", \"v\"\nFROM \"p\"\nON CONFLICT (\"id\") DO UPDATE SET \"v\" = CAST(EXCLUDED.\"v\" AS TEXT)"
             ]
         );
+    }
+
+    fn changed_only_args(flavor: Flavor) -> UpdateQueriesArgs<'static> {
+        let mut args = UpdateQueriesArgs::new("t", "p", vec!["ts".into(), "id".into()], flavor);
+        args.upsert = true;
+        args.changed_only = true;
+        args.schema = Some("s");
+        args.target_cols_types = [
+            ("ts", "TIMESTAMP WITH TIME ZONE"),
+            ("id", "BIGINT"),
+            ("v", "DOUBLE PRECISION"),
+            ("doc", "JSON"),
+            ("geom", "GEOMETRY(Point,4326)"),
+            ("tags", "TEXT[]"),
+            ("vec", "VECTOR(3)"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        args
+    }
+
+    #[test]
+    fn changed_only_upsert_skips_unchanged_rows_on_the_postgresql_family() {
+        for flavor in [
+            Flavor::Postgresql,
+            Flavor::Postgis,
+            Flavor::Timescaledb,
+            Flavor::TimescaledbHa,
+            Flavor::Citus,
+        ] {
+            let qs = get_update_queries(&changed_only_args(flavor));
+            assert_eq!(
+                qs,
+                vec![
+                    "INSERT INTO \"s\".\"t\" AS f (\"ts\", \"id\", \"v\", \"doc\", \"geom\", \"tags\", \"vec\")\n\
+                     SELECT \"ts\", \"id\", \"v\", \"doc\", \"geom\", \"tags\", \"vec\"\n\
+                     FROM \"s\".\"p\"\n\
+                     ON CONFLICT (\"ts\", \"id\") DO UPDATE SET \"v\" = CAST(EXCLUDED.\"v\" AS DOUBLE PRECISION),\n\
+                     \"doc\" = CAST(EXCLUDED.\"doc\" AS JSON),\n\
+                     \"geom\" = CAST(EXCLUDED.\"geom\" AS GEOMETRY(Point,4326)),\n\
+                     \"tags\" = CAST(EXCLUDED.\"tags\" AS TEXT[]),\n\
+                     \"vec\" = CAST(EXCLUDED.\"vec\" AS VECTOR(3))\n\
+                     WHERE (f.\"v\", CAST(f.\"doc\" AS JSONB), CAST(f.\"geom\" AS BYTEA), f.\"tags\", CAST(f.\"vec\" AS TEXT)) \
+                     IS DISTINCT FROM (CAST(EXCLUDED.\"v\" AS DOUBLE PRECISION), \
+                     CAST(CAST(EXCLUDED.\"doc\" AS JSON) AS JSONB), \
+                     CAST(CAST(EXCLUDED.\"geom\" AS GEOMETRY(Point,4326)) AS BYTEA), \
+                     CAST(EXCLUDED.\"tags\" AS TEXT[]), \
+                     CAST(CAST(EXCLUDED.\"vec\" AS VECTOR(3)) AS TEXT))"
+                ],
+                "{flavor:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn changed_only_upsert_leaves_other_flavors_and_index_only_pipes_alone() {
+        for flavor in [
+            Flavor::Cockroachdb,
+            Flavor::Sqlite,
+            Flavor::Geopackage,
+            Flavor::Mysql,
+            Flavor::Mariadb,
+            Flavor::Mssql,
+            Flavor::Oracle,
+            Flavor::Duckdb,
+        ] {
+            let mut args = changed_only_args(flavor);
+            let with = get_update_queries(&args);
+            args.changed_only = false;
+            assert_eq!(with, get_update_queries(&args), "{flavor:?}");
+        }
+        // Plain updates (`upsert: false`) are unchanged.
+        let mut args = changed_only_args(Flavor::Postgresql);
+        args.upsert = false;
+        let with = get_update_queries(&args);
+        args.changed_only = false;
+        assert_eq!(with, get_update_queries(&args));
+        // Only index columns: `DO NOTHING` has nothing to compare.
+        let mut args = changed_only_args(Flavor::Postgresql);
+        args.target_cols_types.retain(|c, _| c == "ts" || c == "id");
+        args.patch_cols_types = args.target_cols_types.clone();
+        let qs = get_update_queries(&args);
+        assert!(qs[0].ends_with("ON CONFLICT (\"ts\", \"id\") DO NOTHING"), "{qs:?}");
+        assert!(!qs[0].contains("AS f"), "{qs:?}");
+    }
+
+    #[test]
+    fn changed_only_upsert_compares_the_assigned_value() {
+        let mut args = UpdateQueriesArgs::new("t", "p", vec!["id".into()], Flavor::Postgresql);
+        args.upsert = true;
+        args.changed_only = true;
+        args.target_cols_types = [("id", "BIGINT"), ("v", "TEXT")]
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        args.conflict_target = Some("(COALESCE(id, '-987654321'::bigint))".into());
+        let qs = get_update_queries(&args);
+        assert_eq!(
+            qs,
+            vec![
+                "INSERT INTO \"t\" AS f (\"id\", \"v\")\nSELECT \"id\", \"v\"\nFROM \"p\"\n\
+                 ON CONFLICT ((COALESCE(id, '-987654321'::bigint))) DO UPDATE SET \"v\" = CAST(EXCLUDED.\"v\" AS TEXT)\n\
+                 WHERE (f.\"v\") IS DISTINCT FROM (CAST(EXCLUDED.\"v\" AS TEXT))"
+            ]
+        );
+        // `enforce: false` assigns the value uncast.
+        args.cast_columns = false;
+        let qs = get_update_queries(&args);
+        assert!(
+            qs[0].ends_with("SET \"v\" = EXCLUDED.\"v\"\nWHERE (f.\"v\") IS DISTINCT FROM (EXCLUDED.\"v\")"),
+            "{qs:?}"
+        );
+    }
+
+    #[test]
+    fn changed_only_null_safe_upsert_guards_both_writes() {
+        let mut args =
+            UpdateQueriesArgs::new("t", "p", vec!["ts".into(), "id".into()], Flavor::Postgresql);
+        args.upsert = true;
+        args.null_safe_upsert = true;
+        args.changed_only = true;
+        args.datetime_col = Some("ts");
+        args.target_cols_types = [("ts", "TIMESTAMP"), ("id", "BIGINT"), ("v", "TEXT")]
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        let qs = get_update_queries(&args);
+        assert_eq!(qs.len(), 3, "{qs:#?}");
+        assert_eq!(
+            qs[0],
+            "INSERT INTO \"t\" AS f (\"ts\", \"id\", \"v\")\nSELECT \"ts\", \"id\", \"v\"\nFROM \"p\"\nWHERE \"id\" IS NOT NULL\n\
+             ON CONFLICT (\"ts\", \"id\") DO UPDATE SET \"v\" = CAST(EXCLUDED.\"v\" AS TEXT)\n\
+             WHERE (f.\"v\") IS DISTINCT FROM (CAST(EXCLUDED.\"v\" AS TEXT))"
+        );
+        assert!(
+            qs[1].ends_with(
+                "AND COALESCE(f.\"id\", -987654321) = COALESCE(p.\"id\", -987654321)\n    AND (f.\"v\") IS DISTINCT FROM (CAST(p.\"v\" AS TEXT))"
+            ),
+            "{}",
+            qs[1]
+        );
+        assert!(qs[2].contains("AND NOT EXISTS ("), "{}", qs[2]);
+    }
+
+    #[test]
+    fn changed_only_comparable_types() {
+        let c = |t: &str| changed_only_comparable("x", t);
+        for t in [
+            "NUMERIC(28,10)",
+            "TIMESTAMP(6) WITH TIME ZONE",
+            "timestamp without time zone",
+            "BYTEA",
+            "JSONB",
+            "UUID",
+            "INTEGER[]",
+            "_int8",
+            "BOOLEAN",
+            "DATE",
+        ] {
+            assert_eq!(c(t), "x", "{t}");
+        }
+        assert_eq!(c("json"), "CAST(x AS JSONB)");
+        assert_eq!(c("geometry"), "CAST(x AS BYTEA)");
+        assert_eq!(c("GEOGRAPHY(Point,4326)"), "CAST(x AS BYTEA)");
+        for t in ["JSON[]", "_json", "GEOMETRY[]", "XML", "POINT", "ARRAY", "USER-DEFINED", ""] {
+            assert_eq!(c(t), "CAST(x AS TEXT)", "{t}");
+        }
     }
 }

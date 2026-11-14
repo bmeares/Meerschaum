@@ -1579,6 +1579,7 @@ impl SqlConnector {
             args.null_safe_upsert = sp.null_indices()
                 && pipe.connector_keys() != "mrsm"
                 && (matches!(flavor, Flavor::Mysql | Flavor::Mariadb) || !key_null_safe);
+            args.changed_only = sp.upsert_changed_only();
         }
         let apply_update_queries = get_update_queries(&args);
 

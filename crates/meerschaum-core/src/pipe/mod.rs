@@ -868,6 +868,12 @@ impl Pipe {
         self.bool_param("upsert", false)
     }
 
+    /// `upsert_changed_only` (default `False`): an upsert leaves rows whose values would not
+    /// change untouched (PostgreSQL family; see the `upsert_changed_only` parameter docs).
+    pub fn upsert_changed_only(&self) -> bool {
+        self.bool_param("upsert_changed_only", false)
+    }
+
     /// `pipe.static` (default `False`).
     pub fn is_static(&self) -> bool {
         self.bool_param("static", false)

@@ -1828,6 +1828,7 @@ impl SqlConnector {
             // statements where that key does not.
             args.conflict_target = conflict_target;
             args.null_safe_upsert = null_safe_upsert;
+            args.changed_only = sp.upsert_changed_only();
         }
         // SQLite cannot use a plain key index for the COALESCE equality used by v4.
         // Index the small staging table's exact expressions so a scattered update does not
