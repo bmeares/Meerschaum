@@ -67,7 +67,7 @@ It also takes `CONNECT` on the base database away from `PUBLIC`, so a team's rol
 
 A database is the stronger wall: the roles of one team cannot connect to the database of another. A schema shares the base database: its role cannot read other tables, but it can see their names.
 
-The server follows the configuration file, so the new connector works without a restart. Deleting a team keeps its database, roles and connector; drop them yourself when you no longer need the data.
+The server follows the configuration file, so the new connector works without a restart. Deleting a team keeps its database, roles and connector; drop them yourself when you no longer need the data. Until you do, the connector stays reserved for the team's name (`teams: [<name>]`), so a team created later with that name, or renamed to it, can use it: remove the connector (or its `teams`) when you delete the team.
 
 `api:permissions:instances:allow_multiple_instances` must stay `true` (the default) for teams to use their own instance.
 
@@ -92,34 +92,50 @@ Meerschaum can sign the console's users in to Grafana and keep one Grafana organ
 api:
   grafana:
     enabled: true
-    ### Grafana's server administrator (for its HTTP API). Change the password.
-    admin_user: admin
-    admin_password: <password>
     ### The address users reach Grafana at.
     root_url: https://your-api-host/grafana/
 ```
 
-Then run `mrsm stack up -d grafana`. With `enabled`, the stack's `grafana` service is started with what the sign-in needs: it is served under `/grafana`, and it accepts the signed-in user only from the API server (the auth-proxy header, from Docker's own networks). Settings your stack config already has are kept.
+Then run `mrsm stack up -d`. With `enabled`, the stack's `grafana` service is started with what the sign-in needs, and the settings that keep it safe replace whatever your stack config has for them:
+
+- **Grafana's administrator.** Meerschaum owns its password. Without `admin_password`, a strong one is generated once and kept in `api/.grafana_admin_password` under Meerschaum's root (`~/.config/meerschaum` by default; beside the API's secret key, readable by you only), and the stack's Grafana and API server are both given it. Grafana applies `GF_SECURITY_ADMIN_PASSWORD` only when its database is new: if an existing Grafana still has the default `admin` / `admin`, the API server changes it to Meerschaum's on its first call and logs that it did. If Grafana takes neither password, the integration stays off (the server logs why; users are told Grafana is not available). Grafana's default password is never used.
+- **Who may name the user.** Grafana accepts the signed-in user (the `X-WEBAUTH-USER` header) only from `proxy_whitelist`. By default that is exactly one address: the stack's `api` service joins a network of its own with Grafana (`proxy_subnet`), at a fixed address, and reaches `grafana` there. No other container, and no connection from the Docker host, comes from that address. When the stack has no `api` service and `proxy_whitelist` is not set, the sign-in is turned off (`GF_AUTH_PROXY_ENABLED=false`) and `mrsm stack` says what to set. It never falls back to a range of addresses.
+- **Served under `/grafana`.** `GF_SERVER_ROOT_URL` and `GF_SERVER_SERVE_FROM_SUB_PATH` are set unless your stack config sets them.
+
+Anonymous access is not changed: `GF_AUTH_ANONYMOUS_ENABLED`, its organization and its role stay as your stack config (or Grafana) has them, so public dashboards keep working.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `url` | `http://grafana:3000` | How the API server reaches Grafana. |
-| `admin_user`, `admin_password` | `admin`, `admin` | Grafana's server administrator. A Grafana that already has data keeps the password it has; change it in Grafana too. |
+| `url` | `http://grafana:3000` | How the API server reaches Grafana. The default resolves only inside the stack; an API server that runs outside the stack sets it, e.g. `http://localhost:3000`. |
+| `admin_user` | `admin` | Grafana's server administrator. |
+| `admin_password` | generated | Its password (never `admin`). |
 | `root_url` | Grafana's own guess | The public address of `/grafana/`. |
-| `proxy_whitelist` | `172.16.0.0/12` | Who may name the signed-in user to Grafana: the API server's address, or Docker's networks. |
+| `proxy_whitelist` | the stack's API server | The address (or a list of addresses) Grafana sees the API server connect from. Set it when the API server runs outside the stack. |
+| `proxy_subnet` | `10.213.71.0/29` | The network between the stack's API server and Grafana. Change it if it collides with one of yours. |
 | `database_url` | the connector's host and port | How Grafana reaches the teams' database server (`host:port`). |
 
-!!! warning "Who may name the user"
-    Grafana trusts the user named by an address in `proxy_whitelist`. The default covers Docker's networks, which on the Docker host includes local connections to Grafana's published port: narrow it to the API container's address, or stop publishing Grafana's own port, when other people have a login on that host. A Grafana you run yourself needs the same settings (`GF_AUTH_PROXY_*`, `GF_SERVER_ROOT_URL`, `GF_SERVER_SERVE_FROM_SUB_PATH`).
+A Grafana you run yourself needs the same settings: `GF_AUTH_PROXY_ENABLED=true`, `GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER`, `GF_AUTH_PROXY_HEADER_PROPERTY=username`, `GF_AUTH_PROXY_AUTO_SIGN_UP=true`, `GF_AUTH_PROXY_WHITELIST` set to the API server's address only, `GF_SERVER_ROOT_URL` and `GF_SERVER_SERVE_FROM_SUB_PATH=true`.
 
-Grafana's own address changes to `http://localhost:3000/grafana/`.
+An API server that runs on the Docker host (outside the stack) reaches a published Grafana port from the Docker network's gateway address, which every process on that host shares: anyone with a login there can then name any user to Grafana. Run the API server in the stack on a host other people use.
+
+Grafana's own port keeps working. Its old addresses without `/grafana` (such as `/d/<uid>/<slug>`) now redirect to the same page under `root_url`, so links and embeds of public dashboards still open, signed out, through the API server.
 
 Users then open **Grafana** from the console's user menu (`https://your-api-host/grafana/`):
 
-- each team is an organization named after it. A team with a database of its own gets a data source there for that database;
-- members are Editors, the team's managers are organization Admins, and Meerschaum administrators are Grafana administrators;
-- members of isolated teams are removed from Grafana's main organization, so they see only their teams' dashboards;
-- renaming a team renames its organization;
-- memberships are checked when a user opens Grafana (at most once a minute), and a signed-out or deleted user has no access. If Grafana's API cannot be reached, the request is refused instead of using memberships that may be stale.
+- a team gets its organization when an administrator creates it (**New team**, `bootstrap teams`) or saves its **Settings**. The organization's id is kept in the team's settings, and from then on that id, not its name, is the team's organization. A team with a database of its own gets a data source there for that database, and only there;
+- members are Editors, the team's managers are organization Admins, and Meerschaum administrators are Grafana administrators. A Meerschaum user whose name is Grafana's administrator login (any case) is let in only if they are a Meerschaum administrator;
+- members of isolated teams are removed from Grafana's main organization, so they see only their teams' dashboards. A member of isolated teams none of which has an organization is not let in;
+- renaming a team renames its organization when it is renamed in the console, with `mrsm edit teams` or through the API (`POST /teams/{name}/rename`). A rename made directly with the Python SDK (`Team.rename()`) on a database instance does not reach Grafana: the organization keeps its old name until you rename it in Grafana (the team still uses it, by id);
+- deleting a team (console, `delete teams`, API) keeps its dashboards: its organization is renamed `Deleted team <name> #<id>`, everyone but Grafana's administrator leaves it, and its data sources, with the team's database credentials, are deleted;
+- memberships are checked when a user opens Grafana (at most once a minute). If Grafana's API cannot be reached, the request is refused instead of using memberships that may be stale. A deleted user, like a signed-out one, gets only what anonymous access allows.
+
+A signed-out visitor to `/grafana` gets only what Grafana's anonymous access allows: Meerschaum forwards the request without any identity and without Grafana's own session cookies, so signing out of Meerschaum also signs out of Grafana. With anonymous access off, they are sent to the console's login.
+
+!!! warning "Anonymous access runs queries"
+    Anyone who can open a public dashboard can run any query with the credentials of every data source in the anonymous organization, not only the dashboard's own queries. Give those data sources read-only credentials that reach public data only. The stack's **Meerschaum Main** data source connects with `sql:main`'s user; see below. A team can never use the anonymous organization: a team named like it is refused, and so is a rename to that name.
 
 The built-in **Syncs** and **Engine** dashboards stay in the main organization.
+
+### The stack's main data source
+
+The stack provisions a **Meerschaum Main** data source in Grafana's main organization, which is also the stack's anonymous organization (`GF_AUTH_ANONYMOUS_ORG_NAME: Main Org.`). It connects with `sql:main`'s user, which in the stack's database is a superuser that owns the main database. Anyone who can query it (every member of the main organization, and every signed-out visitor while anonymous access is on) can read a schema team's tables in the main database and, as a superuser, reach a team's own database too. Users without a team and the members of open teams are in the main organization (members of isolated teams are taken out of it). Before you give teams data of their own on the stack's database, point **Meerschaum Main** (`mrsm edit config stack`, under `grafana: datasource:`) at a read-only role that can read only public tables; until then, treat that database as readable by every user of the main organization and, while anonymous access is on, by anyone.
