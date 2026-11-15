@@ -26,6 +26,10 @@ use crate::value::{ArgsMap, PyValue};
 
 /// Where the native manifest is cached (separate from the Python worker manifest).
 pub fn cache_path(root_dir: &std::path::Path) -> std::path::PathBuf {
+    // 5.1: a sandboxed team process keeps its own.
+    if let Some(dir) = meerschaum_core::team_scope::sandbox::private_cache_dir() {
+        return dir.join("native_plugins_manifest.json");
+    }
     root_dir.join("cache").join("native_plugins_manifest.json")
 }
 

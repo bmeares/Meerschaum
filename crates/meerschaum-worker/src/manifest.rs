@@ -490,7 +490,13 @@ impl Manifest {
 
 /// Where the manifest is cached: `<root>/cache/plugins_manifest.json`
 /// (`CACHE_RESOURCES_PATH`).
+///
+/// A sandboxed team process keeps its own (5.1,
+/// `meerschaum_core::team_scope::sandbox::private_cache_dir`).
 pub fn manifest_path(root_dir: &Path) -> PathBuf {
+    if let Some(dir) = meerschaum_core::team_scope::sandbox::private_cache_dir() {
+        return dir.join(MANIFEST_FILE_NAME);
+    }
     root_dir.join("cache").join(MANIFEST_FILE_NAME)
 }
 

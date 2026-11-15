@@ -300,8 +300,22 @@ pub fn externalize_team(
     let _ = std::fs::remove_file(dir.join(PATCH_FILENAME));
     let passthrough = Passthrough::from_config(config);
     passthrough.warn_refused();
+    let mut set = team_env(launching, job, &files, scope, &fingerprint, &passthrough);
+    // 5.1: the job's `mrsm` restricts itself to the team's filesystem sandbox before it runs the
+    // job's command (`system.engine.python_team_sandbox`); in `require` mode on a system without
+    // Landlock, the job does not start.
+    use meerschaum_core::team_scope::sandbox;
+    if let Some(prepared) = sandbox::prepare(
+        config,
+        scope,
+        &files,
+        Some(dir),
+        &dir.join(sandbox::JOB_SPEC_FILE),
+    )? {
+        sandbox::apply_env(&mut set, &prepared);
+    }
     Ok(JobEnvironment {
-        set: team_env(launching, job, &files, scope, &fingerprint, &passthrough),
+        set,
         remove: Vec::new(),
         clear: true,
     })

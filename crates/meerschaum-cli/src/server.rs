@@ -326,6 +326,17 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             &format!("The isolated teams' scopes were not recorded: {error}"),
         );
     }
+    // 5.1: whether isolated teams' processes are sandboxed here, and what the sandbox misses.
+    if let Ok(server_config) = backend.config() {
+        for (warning, line) in crate::team_sandbox::server_status(&server_config, &config.root_dir)
+        {
+            if warning {
+                native::warn(rt, &line);
+            } else {
+                native::info(rt, &line);
+            }
+        }
+    }
     // PARITY: v4's API startup ran `start_check_jobs_thread()`: while the server runs, it
     // restarts the root's stopped `--restart` jobs that were not stopped by hand (a container or
     // machine restart), every `check_restart_seconds`. Stops with this function.

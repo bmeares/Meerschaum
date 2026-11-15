@@ -658,6 +658,14 @@ impl Admission {
         &self.release_file
     }
 
+    /// Have the worker create its release file in `dir` instead (5.1: a sandboxed team job's
+    /// work directory, the only place its command may write).
+    pub fn relocate_release(&mut self, dir: &Path) {
+        if let Some(name) = self.release_file.file_name() {
+            self.release_file = dir.join(name);
+        }
+    }
+
     /// The value of [`RELEASE_ENV`] for the worker.
     pub fn release_env(&self) -> String {
         format!("{}:{}", std::process::id(), self.release_file.display())

@@ -1895,6 +1895,68 @@ fn disk_fact(_path: &Path) -> Option<DiskFact> {
     None
 }
 
+/// 5.1: isolated teams' filesystem sandbox: the mode, what this system enforces (Landlock ABI and
+/// features), and a container socket the sandbox does not stop.
+fn team_sandbox_checks(config: &Config) -> Vec<Check> {
+    use meerschaum_core::team_scope::sandbox::{self, Mode};
+    let root = config.paths().root_dir;
+    let mode = Mode::from_config(config);
+    let support = sandbox::kernel_support();
+    let isolated = meerschaum_core::team_scope::isolated_teams_recorded(&root);
+    let system = support.describe();
+    let mut out = Vec::new();
+    let (enforced, state) = match (mode, support.available()) {
+        (Mode::Off, _) => (
+            false,
+            "off: isolated teams' processes are not sandboxed".to_string(),
+        ),
+        (Mode::Auto, false) => (
+            false,
+            "auto, not enforced: isolated teams' processes run unsandboxed here".to_string(),
+        ),
+        (Mode::Require, false) => (
+            false,
+            "require, unavailable: isolated teams' code will not run here".to_string(),
+        ),
+        (mode, true) => (true, format!("{}, enforced", mode.as_str())),
+    };
+    let detail = format!("{state} ({system})");
+    if !isolated {
+        out.push(Check::pass(
+            "teams",
+            "sandbox",
+            format!("{detail}; no isolated team is recorded"),
+        ));
+    } else if enforced {
+        out.push(Check::pass("teams", "sandbox", detail));
+    } else {
+        out.push(Check::warn(
+            "teams",
+            "sandbox",
+            detail,
+            "Run the API server on Linux 5.13 or newer with Landlock enabled (Linux 7.1 or newer \
+             also restricts Unix sockets), and set `system.engine.python_team_sandbox` to `auto` \
+             or `require`.",
+        ));
+    }
+    if isolated
+        && !(mode != Mode::Off && support.abi() >= 9)
+        && let Some(socket) = crate::team_sandbox::container_socket_reachable()
+    {
+        out.push(Check::warn(
+            "teams",
+            "container socket",
+            format!(
+                "this user can open `{}` and the sandbox does not stop isolated teams' code from \
+                 doing the same (root on this host)",
+                socket.display()
+            ),
+            "Run the API server as a user without Docker access while isolated teams run code.",
+        ));
+    }
+    out
+}
+
 fn path_checks(config: &Config) -> Vec<Check> {
     let paths = config.paths();
     let mut out = Vec::new();
@@ -3044,6 +3106,7 @@ fn run_checks(args: &ArgsMap, rt: &mut Runtime<'_>) -> Report {
         let stack_handle = scope.spawn(|| timed(|| gather_stack(config, path_env.clone())));
 
         report.extend(timed(|| path_checks(config)));
+        report.extend(timed(|| team_sandbox_checks(config)));
         report.extend(timed(|| {
             config_checks(
                 config,

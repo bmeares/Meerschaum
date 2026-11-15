@@ -1406,6 +1406,28 @@ mod team_launch_tests {
             assert_eq!(get("MRSM_DAEMON_ID"), Some("team-job"));
             assert_eq!(get("MRSM_TEAM_SCOPE"), Some("wetlands"));
             assert!(get("MRSM_CONFIG_FILE").is_some_and(|f| f.ends_with(".mrsm_config.json")));
+            // 5.1: the job's `mrsm` is pointed at the team's filesystem sandbox (`auto`): its
+            // rules next to its configuration, the team's own temporary and plugins directories,
+            // and a work directory for what its command writes.
+            assert!(
+                get("MRSM_TEAM_SANDBOX").is_some_and(|f| f.ends_with(".mrsm_sandbox.json")),
+                "{env:?}"
+            );
+            assert!(
+                get("TMPDIR").is_some_and(|t| t.contains("-team-")),
+                "{env:?}"
+            );
+            assert!(
+                get("MRSM_PLUGINS_DIR").is_some_and(|p| p.contains("team_scopes")),
+                "{env:?}"
+            );
+            assert!(
+                daemon
+                    .paths
+                    .dir
+                    .join(meerschaum_core::team_scope::sandbox::JOB_WORK_DIR)
+                    .is_dir()
+            );
             // The next launch reopens the job from its files (as the restart monitor does).
             daemon = Daemon::open("team-job", &ctx).unwrap();
         }

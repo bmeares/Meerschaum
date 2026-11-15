@@ -47,6 +47,7 @@ pub mod shell;
 pub mod shlex;
 pub mod spec;
 pub mod sysargs;
+pub mod team_sandbox;
 pub mod team_scopes;
 pub mod tui;
 pub mod types;

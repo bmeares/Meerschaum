@@ -724,7 +724,6 @@ mod imp {
                 }
             }
         };
-        let release_file = admission.as_ref().map(|a| a.release_file().to_path_buf());
 
         // The job may have been deleted (or started again) while this supervisor waited.
         let state = launch_state(&dpaths.dir, &dpaths.properties, launch_id);
@@ -735,7 +734,17 @@ mod imp {
             return 0;
         }
 
-        let result_path = dpaths.dir.join(RESULT_FILE_NAME);
+        // 5.1: a sandboxed team job's command may write only in its work directory: its result,
+        // heartbeat and start-up release go there (the job's properties and PID file, which
+        // this supervisor and the server trust, stay out of its reach).
+        let work_dir = meerschaum_core::team_scope::sandbox::job_work_dir_from_env();
+        let mut admission = admission;
+        if let (Some(work), Some(a)) = (&work_dir, admission.as_mut()) {
+            a.relocate_release(work);
+        }
+        let release_file = admission.as_ref().map(|a| a.release_file().to_path_buf());
+        let output_dir = work_dir.clone().unwrap_or_else(|| dpaths.dir.clone());
+        let result_path = output_dir.join(RESULT_FILE_NAME);
         let _ = fs::remove_file(&result_path);
         let mut cmd = Command::new(&opts.command[0]);
         cmd.args(&opts.command[1..])
@@ -747,7 +756,7 @@ mod imp {
             // The worker's lap heartbeats (job health): see `crate::health`.
             .env(
                 crate::health::LAPS_PATH_ENV,
-                dpaths.dir.join(crate::health::LAPS_FILE_NAME),
+                output_dir.join(crate::health::LAPS_FILE_NAME),
             )
             .env(
                 crate::health::LAPS_PARENT_ENV,

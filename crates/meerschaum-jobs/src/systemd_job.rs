@@ -221,8 +221,17 @@ mod imp {
 
         // This program again: the binary itself, or `python -m meerschaum` in the extension.
         let (program, leading) = meerschaum_core::self_exe::self_program();
-        let child_result = job.log_path.with_extension("child-result.json");
+        // 5.1: a sandboxed team job's command writes only in its work directory.
+        let work_dir = meerschaum_core::team_scope::sandbox::job_work_dir_from_env();
+        let child_result = match &work_dir {
+            Some(work) => work.join("child-result.json"),
+            None => job.log_path.with_extension("child-result.json"),
+        };
         let _ = fs::remove_file(&child_result);
+        let mut admission = admission;
+        if let (Some(work), Some(a)) = (&work_dir, admission.as_mut()) {
+            a.relocate_release(work);
+        }
         // The previous run's result must not stand in for this one: a wrapper killed before it
         // records a result (`TimeoutStopSec=`, the OOM killer) leaves none, and the executor
         // reads systemd's account of the run instead.

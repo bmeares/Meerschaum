@@ -28,6 +28,11 @@ pub fn run(sysargs: &[String]) -> i32 {
     }
     meerschaum_jobs::supervisor::run_if_requested_with(sysargs);
     meerschaum_jobs::systemd_job::run_if_requested_with(sysargs);
+    // 5.1: an isolated team's job restricts itself to the team's filesystem sandbox before its
+    // command runs (a no-op in any other process).
+    if let Some(rc) = crate::team_sandbox::enforce_if_team_process() {
+        return rc;
+    }
     // The syncs this process records in pipes' sync statuses come from the command line
     // (`mrsm start api` switches to `api` while it serves). The previous role comes back when
     // the command line returns: Python's `_native.main()` runs it inside a Python process, whose
