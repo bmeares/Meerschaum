@@ -40,7 +40,19 @@ async fn the_host_is_launched_behind_the_guard() {
         env: Vec::new(),
     };
     let socket = dir.path().join("host.sock");
-    let mut process = launcher.launch(&socket).await.unwrap();
+    // The script was written a moment ago: another test thread that forks while it is open for
+    // writing leaves a child holding that descriptor until the child's own `exec`, and starting
+    // the script is "text file busy" (`ETXTBSY`) until then. Only that is retried.
+    let mut attempts = 0;
+    let mut process = loop {
+        match launcher.launch(&socket).await {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 100 => {
+                attempts += 1;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            other => break other.unwrap(),
+        }
+    };
     assert_eq!(process.wait().await.unwrap(), Some(0));
     let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
     let args: Vec<&str> = args.split('\0').filter(|a| !a.is_empty()).collect();

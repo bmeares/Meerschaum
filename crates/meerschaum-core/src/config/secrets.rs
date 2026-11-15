@@ -123,6 +123,8 @@ pub fn seen() -> bool {
 #[derive(Debug, Default)]
 struct FileCache {
     entries: HashMap<PathBuf, (FileStamp, String)>,
+    /// How many times each file was actually read (not served from the cache).
+    reads: HashMap<PathBuf, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,11 +149,13 @@ impl FileStamp {
 }
 
 static FILES: LazyLock<Mutex<FileCache>> = LazyLock::new(|| Mutex::new(FileCache::default()));
-static FILE_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// How many times a secret file was actually read (not served from the cache) in this process.
-pub fn file_reads() -> u64 {
-    FILE_READS.load(Ordering::Relaxed)
+/// How many times the secret file at `path` (the resolved path, as `resolve_path` returns it) was
+/// actually read (not served from the cache) in this process. Counted per path so concurrent
+/// readers of other files cannot disturb a caller that counts its own.
+pub fn file_reads(path: &Path) -> u64 {
+    let cache = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    cache.reads.get(path).copied().unwrap_or(0)
 }
 
 /// The path a file reference names: `~` is the home directory, a relative path is relative to
@@ -223,12 +227,11 @@ fn read_file(path: &Path) -> Result<String, String> {
         }
     }
     let bytes = std::fs::read(path).map_err(|e| io_reason(&e))?;
-    FILE_READS.fetch_add(1, Ordering::Relaxed);
-    let text = String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_string())?;
-    let text = strip_one_newline(text);
-    FILES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    let text = String::from_utf8(bytes);
+    let mut cache = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    *cache.reads.entry(path.to_path_buf()).or_insert(0) += 1;
+    let text = strip_one_newline(text.map_err(|_| "the file is not UTF-8 text".to_string())?);
+    cache
         .entries
         .insert(path.to_path_buf(), (stamp, text.clone()));
     Ok(text)
@@ -752,9 +755,9 @@ mod tests {
             target: path.to_string_lossy().into_owned(),
         };
         assert_eq!(resolve(&r, dir.path()).unwrap(), "first");
-        let reads = file_reads();
+        let reads = file_reads(&path);
         assert_eq!(resolve(&r, dir.path()).unwrap(), "first");
-        assert_eq!(file_reads(), reads, "served from the cache");
+        assert_eq!(file_reads(&path), reads, "served from the cache");
         // A rotation through a new file renamed over the old one (what secret mounts do).
         let next = dir.path().join("pw.new");
         std::fs::write(&next, "second-longer\n").unwrap();

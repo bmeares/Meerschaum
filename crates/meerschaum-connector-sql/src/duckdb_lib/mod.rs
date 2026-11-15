@@ -558,13 +558,19 @@ mod tests {
 
     #[test]
     fn a_relative_library_path_is_made_absolute_before_the_check_and_the_load() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("libduckdb-rel.so"), b"x").unwrap();
+        // The working directory is process-wide state that the other tests of this binary
+        // read (`resolve_path`), so a relative path is made from the unchanged current
+        // directory: a scratch directory inside it, named relative to it.
         let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix(".mrsm-duckdb-rel-")
+            .tempdir_in(&cwd)
+            .unwrap();
+        std::fs::write(dir.path().join("libduckdb-rel.so"), b"x").unwrap();
+        let relative = Path::new(dir.path().file_name().unwrap()).join("libduckdb-rel.so");
+        assert!(relative.is_relative(), "{relative:?}");
         // `absolutize` resolves against the working directory at the time it is called.
-        std::env::set_current_dir(dir.path()).unwrap();
-        let abs = absolutize(Path::new("libduckdb-rel.so"));
-        std::env::set_current_dir(cwd).unwrap();
+        let abs = absolutize(&relative);
         assert!(abs.is_absolute(), "{abs:?}");
         assert!(abs.is_file(), "{abs:?}");
         // A path that does not exist still becomes absolute (so the error names the real place).

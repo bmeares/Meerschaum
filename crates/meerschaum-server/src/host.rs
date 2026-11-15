@@ -1745,9 +1745,20 @@ mod tests {
             python: script,
             env: vec![("FAKE_OUT".into(), out.display().to_string())],
         };
-        let mut proc = launcher
-            .spawn_child(&HostEndpoint::from(dir.path().join("host.sock")))
-            .unwrap();
+        // The script was written a moment ago: another test thread that forks while it is open for
+        // writing leaves a child holding that descriptor until the child's own `exec`, and
+        // starting the script is "text file busy" (`ETXTBSY`) until then. Only that is retried.
+        let endpoint = HostEndpoint::from(dir.path().join("host.sock"));
+        let mut attempts = 0;
+        let mut proc = loop {
+            match launcher.spawn_child(&endpoint) {
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 100 => {
+                    attempts += 1;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                other => break other.unwrap(),
+            }
+        };
         let read = || std::fs::read_to_string(&out).unwrap_or_default();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !read().contains("pipe=") {

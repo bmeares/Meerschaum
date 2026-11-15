@@ -190,12 +190,12 @@ fn a_rotated_secret_file_is_read_at_the_next_access() {
     let config = config_with(root, &[]);
     let keys = ["meerschaum", "connectors", "sql", "rot", "password"];
     assert_eq!(get(&config, &keys), Some(s("first-value")));
-    let reads = secrets::file_reads();
+    let reads = secrets::file_reads(&secret);
     for _ in 0..50 {
         assert_eq!(get(&config, &keys), Some(s("first-value")));
     }
     assert!(
-        secrets::file_reads() - reads <= 1,
+        secrets::file_reads(&secret) == reads,
         "an unchanged file is not read again"
     );
     let next = root.join("rotating.next");
