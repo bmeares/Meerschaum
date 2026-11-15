@@ -71,7 +71,14 @@ def activate_venv(
     thread_id = get_ident()
     import sys
     import os
-    if venv is not None and init_if_not_exists:
+    ### 5.1: an isolated team's sandboxed process cannot create virtual environments (the server
+    ### creates them when it installs a plugin): a missing one is not activated.
+    sandboxed_missing = (
+        venv is not None
+        and bool(os.environ.get('MRSM_TEAM_SANDBOX'))
+        and not venv_exists(venv, debug=debug)
+    )
+    if venv is not None and init_if_not_exists and not sandboxed_missing:
         init_venv(venv=venv, debug=debug)
 
     with LOCKS['active_venvs']:
@@ -110,7 +117,12 @@ def activate_venv(
         else:
             threads_active_venvs[thread_id][venv] += 1
 
-        if not target_path.exists() and venv is not None and init_if_not_exists:
+        if (
+            not target_path.exists()
+            and venv is not None
+            and init_if_not_exists
+            and not sandboxed_missing
+        ):
             init_venv(venv=venv, force=True, debug=debug)
 
         if not target_path.exists():

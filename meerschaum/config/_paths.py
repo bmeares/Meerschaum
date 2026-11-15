@@ -318,7 +318,13 @@ def __getattr__(name: str) -> Path:
 
     ### Create directories or touch files.
     if name.endswith('RESOURCES_PATH') or name == 'CONFIG_DIR_PATH':
-        path.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            ### 5.1: an isolated team's sandboxed process may not create the server's resource
+            ### directories; the path is still returned (using it fails where it is denied).
+            if not os.environ.get('MRSM_TEAM_SANDBOX'):
+                raise
     elif 'FILENAME' in name:
         path = path.as_posix()
 

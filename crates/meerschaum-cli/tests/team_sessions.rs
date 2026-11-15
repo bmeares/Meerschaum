@@ -33,7 +33,18 @@ def tpr_probe(action=None, **kwargs):
             or k == 'MRSM_SQL_LISTED'),
         'file_has_others': any(s in text for s in ('d-pw', 'server-pw')),
         'file_has_own': 'w-pw' in text,
+        'sandbox': __import__('meerschaum._internal.team_sandbox', fromlist=['report']).report(),
+        'server_config': _attempt_read(os.path.join(os.environ['MRSM_ROOT_DIR'], 'config', 'meerschaum.yaml')),
     })
+
+def _attempt_read(path):
+    try:
+        open(path).read()
+        return 'read'
+    except PermissionError:
+        return 'denied'
+    except Exception as e:
+        return repr(e)
 "#;
 
 /// `Ok` when `python`'s `meerschaum` can run an isolated team's code (it reports the
@@ -143,6 +154,8 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     wetlands
         .attributes
         .insert("isolated".into(), meerschaum_core::Value::Bool(true));
+    // The plugin is the team's (5.1: a team's sandbox lets it read its own plugins only).
+    wetlands.set_names("plugins", &["tpr_probe".to_string()]);
 
     let scope = TeamScope::of(&wetlands, &connectors);
     let (team, lookup) = session.for_team(&scope, None, &config).unwrap();
@@ -162,6 +175,19 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     );
     assert_eq!(first["file_has_others"], false);
     assert_eq!(first["file_has_own"], true);
+    // 5.1: the worker restricted itself before it imported the plugin (where Landlock exists).
+    let support = meerschaum_core::team_scope::sandbox::kernel_support();
+    if support.available() {
+        assert_eq!(first["sandbox"]["enforced"], true, "{first}");
+        assert_eq!(first["sandbox"]["canary"], "denied", "{first}");
+        assert_eq!(first["server_config"], "denied", "{first}");
+    } else {
+        eprintln!(
+            "No Landlock here ({}): the sandbox is not checked.",
+            support.describe()
+        );
+        assert_eq!(first["server_config"], "read", "{first}");
+    }
     // The Rust side of the team's session resolves the team's connectors only (also what
     // `{{ Pipe(..., instance='sql:drylands') }}` would name).
     assert!(team.instance("sql:wetlands", &team_config).is_ok());

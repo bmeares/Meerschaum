@@ -17,7 +17,7 @@ use meerschaum_worker::{CallOptions, PoolConfig, Worker, WorkerError, WorkerOpti
 /// A stand-in worker: says `hello` as `TPR_FAKE_MODE` asks, and records any call it receives
 /// (team code would run there) in `TPR_FAKE_RAN`.
 const FAKE_WORKER: &str = r#"
-import os, socket, struct, sys
+import json, os, socket, struct, sys
 
 def pack(v):
     if v is None:
@@ -66,6 +66,8 @@ if mode != 'old':
             'team': team, 'fingerprint': fingerprint, 'config_file': '',
             'connectors': connectors,
         }
+        if os.environ.get('TPR_FAKE_SANDBOX'):
+            hello['team_scope']['sandbox'] = json.loads(os.environ['TPR_FAKE_SANDBOX'])
 send(f, hello)
 header = f.read(5)
 if header:
@@ -129,6 +131,7 @@ fn wetlands() -> TeamExpectation {
         team: "wetlands".into(),
         fingerprint: "fp-1".into(),
         connectors: ["sql:wetlands".to_string()].into_iter().collect(),
+        sandbox: None,
     }
 }
 
@@ -208,4 +211,67 @@ fn a_worker_that_proves_the_teams_configuration_serves_and_the_shared_pool_is_un
         .expect("the shared pool accepts an older package");
     assert_eq!(worker.hello().meerschaum, "5.0.2");
     assert!(worker.hello().capabilities.is_empty());
+}
+
+/// 5.1: the worker's filesystem sandbox report, judged by the server's mode.
+#[test]
+fn a_team_worker_is_judged_by_its_sandbox_report() {
+    use meerschaum_core::team_scope::sandbox::Mode;
+    let Some(fake) = Fake::new() else { return };
+    let rt = runtime();
+    let enforced = |canary: &str| {
+        format!(
+            r#"{{"mode": "auto", "enforced": true, "abi": 9, "kernel_abi": 11,
+                "features": ["filesystem"], "canary": "{canary}", "rules": 60}}"#
+        )
+    };
+    let unenforced = r#"{"mode": "auto", "enforced": false, "reason": "no Landlock here"}"#;
+    let spawn = |sandbox: Option<&str>, mode: Mode| {
+        let mut opts = fake.options(
+            "ok",
+            Some(TeamExpectation {
+                sandbox: Some(mode),
+                ..wetlands()
+            }),
+        );
+        if let Some(sandbox) = sandbox {
+            opts.env
+                .push(("TPR_FAKE_SANDBOX".into(), sandbox.to_string()));
+        }
+        rt.block_on(Worker::spawn(&opts)).map(|_| ())
+    };
+    // Required: enforced with the canary denied serves; anything else is stopped first.
+    assert!(spawn(Some(&enforced("denied")), Mode::Require).is_ok());
+    for (sandbox, cause) in [
+        (None, "reported no sandbox"),
+        (Some(unenforced.to_string()), "no Landlock here"),
+        (Some(enforced("readable")), "could still read the canary"),
+        (Some(enforced("missing")), "could not be proven"),
+    ] {
+        match spawn(sandbox.as_deref(), Mode::Require) {
+            Err(WorkerError::Refused(message)) => {
+                assert!(message.contains(cause), "{message}");
+                assert!(message.contains("'wetlands'"), "{message}");
+            }
+            other => panic!("{sandbox:?}: {other:?}"),
+        }
+        assert_nothing_ran(&fake.ran());
+    }
+    // Auto: a worker that could not be sandboxed serves (the server warns), one that claims
+    // the sandbox but read the canary does not.
+    assert!(spawn(Some(unenforced), Mode::Auto).is_ok());
+    assert!(spawn(None, Mode::Auto).is_ok());
+    assert!(matches!(
+        spawn(Some(&enforced("readable")), Mode::Auto),
+        Err(WorkerError::Refused(_))
+    ));
+    // A worker that ran in `require` is judged so even when the server says `auto`.
+    let required_unenforced =
+        r#"{"mode": "require", "enforced": false, "reason": "the rules could not be read"}"#;
+    assert!(matches!(
+        spawn(Some(required_unenforced), Mode::Auto),
+        Err(WorkerError::Refused(_))
+    ));
+    let reports = meerschaum_worker::worker::sandbox_reports();
+    assert!(reports.contains_key("wetlands"), "{reports:?}");
 }

@@ -36,4 +36,8 @@ def main(argv=None) -> int:
     parser.add_argument('--socket', required=True, help='The host socket (or named pipe) to connect to.')
     parser.add_argument('--version', action='version', version=f'protocol {PROTOCOL_VERSION}')
     args = parser.parse_args(argv)
+    ### 5.1: an isolated team's worker started without the host program (`-m`) restricts itself
+    ### here, before it connects and before any plugin is imported (a no-op otherwise).
+    from meerschaum._internal import team_sandbox
+    team_sandbox.boot(socket=args.socket)
     return serve(args.socket)

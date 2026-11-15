@@ -634,17 +634,23 @@ pub fn access_team_grants<'py>(
     grants_to_py(py, &TeamGrants::of(&user_teams, &records, primary))
 }
 
-/// `_core.access_team_process_env(root, team, connectors, env)` (5.1): the environment the API
-/// server gives a worker of the isolated team `team` whose connectors are `connectors`
-/// (`type:label`), built from the configuration under `root` and the launching environment `env`
-/// (a dict): the team's files are written under `<root>/team_scopes/` as the server writes them.
-/// For tests of the Python package's side of team-scoped workers.
+/// `_core.access_team_process_env(root, team, connectors, env, plugins=None, sandbox=False)`
+/// (5.1): the environment the API server gives a worker of the isolated team `team` whose
+/// connectors are `connectors` (`type:label`), built from the configuration under `root` and the
+/// launching environment `env` (a dict): the team's files are written under `<root>/team_scopes/`
+/// as the server writes them. With `sandbox`, also the team's filesystem sandbox (its spec,
+/// temporary and cache directories), for the team's `plugins`, as the server prepares it (unless
+/// `system.engine.python_team_sandbox` is `off`). For tests of the Python package's side of
+/// team-scoped workers.
 #[pyfunction]
+#[pyo3(signature = (root, team, connectors, env, plugins=None, sandbox=false))]
 pub fn access_team_process_env(
     root: &str,
     team: &str,
     connectors: Vec<String>,
     env: std::collections::HashMap<String, String>,
+    plugins: Option<Vec<String>>,
+    sandbox: bool,
 ) -> PyResult<std::collections::BTreeMap<String, String>> {
     use meerschaum_core::team_scope as ts;
     let mut launching: Vec<(String, String)> = env
@@ -660,21 +666,72 @@ pub fn access_team_process_env(
         team: team.to_string(),
         team_id: Some(format!("id-{team}")),
         connectors: connectors.into_iter().collect(),
+        plugins: plugins.unwrap_or_default().into_iter().collect(),
         ..ts::TeamScope::default()
     };
     let map = ts::team_config(&config, &scope);
     let fingerprint = ts::fingerprint(&scope, &map);
-    let files = ts::write_scope_files(
-        &ts::scope_dir(std::path::Path::new(root), &scope.key()),
-        &map,
-    )
-    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let scope_dir = ts::scope_dir(std::path::Path::new(root), &scope.key());
+    let files = ts::write_scope_files(&scope_dir, &map)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     let passthrough = ts::Passthrough::from_config(&config);
-    Ok(
-        ts::team_env(&launching, &[], &files, &scope, &fingerprint, &passthrough)
-            .into_iter()
-            .collect(),
-    )
+    let mut env = ts::team_env(&launching, &[], &files, &scope, &fingerprint, &passthrough);
+    if sandbox
+        && let Some(prepared) = ts::sandbox::prepare(
+            &config,
+            &scope,
+            &files,
+            None,
+            &scope_dir.join(ts::sandbox::SPEC_FILE),
+        )
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+    {
+        ts::sandbox::apply_env(&mut env, &prepared);
+    }
+    Ok(env.into_iter().collect())
+}
+
+/// `_core.team_sandbox_enforce(paths, socket=None)` (5.1): in a process started for an isolated
+/// team (`MRSM_TEAM_SANDBOX` names its rules), restrict this process and everything it starts to
+/// those rules plus `paths` (the interpreter's prefixes and import path, read and execute) and,
+/// with `socket`, connecting to that Unix socket (the worker's host); then try the canary.
+/// Irreversible. Returns the report as JSON text (`None` outside a sandboxed team process).
+/// Called by the worker's start-up (`meerschaum/_internal/team_sandbox.py`) before any plugin or
+/// user code is imported.
+#[pyfunction]
+#[pyo3(signature = (paths, socket=None))]
+pub fn team_sandbox_enforce(
+    py: Python<'_>,
+    paths: Vec<String>,
+    socket: Option<String>,
+) -> PyResult<Option<String>> {
+    use meerschaum_core::team_scope::sandbox::{Access, Rule, enforce_from_env};
+    let mut extra: Vec<Rule> = paths
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .map(|p| Rule::new(p, Access::ReadExec, "the interpreter"))
+        .collect();
+    if let Some(socket) = socket.filter(|s| !s.is_empty()) {
+        extra.push(Rule::new(socket, Access::Connect, "the worker's host"));
+    }
+    let report = py.detach(|| enforce_from_env(&extra));
+    Ok(report.map(|r| serde_json::to_string(&r).unwrap_or_default()))
+}
+
+/// `_core.team_sandbox_status()` (5.1): this system's support for isolated teams' filesystem
+/// sandbox and this process's own report, as JSON text: `{"support": ..., "describe": ...,
+/// "current": ...}`.
+#[pyfunction]
+pub fn team_sandbox_status() -> String {
+    use meerschaum_core::team_scope::sandbox::{current, kernel_support};
+    let support = kernel_support();
+    serde_json::json!({
+        "support": support,
+        "abi": support.abi(),
+        "describe": support.describe(),
+        "current": current(),
+    })
+    .to_string()
 }
 
 /// `_core.access_team_scope(user_teams, teams, primary=None, connectors=None, object_team=None,
@@ -1265,6 +1322,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_isolated_withheld, m)?)?;
     m.add_function(wrap_pyfunction!(access_team_scope, m)?)?;
     m.add_function(wrap_pyfunction!(access_team_process_env, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sandbox_enforce, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sandbox_status, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_use_plugin, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_write_plugins, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_see_team, m)?)?;

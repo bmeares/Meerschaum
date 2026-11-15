@@ -317,7 +317,21 @@ impl Session {
         // environment (cloud credentials, tokens) reaches the team's workers.
         let passthrough = ts::Passthrough::from_config(config);
         passthrough.warn_refused();
-        let team_env = ts::team_env(&base, &[], &files, scope, &fingerprint, &passthrough);
+        let mut team_env = ts::team_env(&base, &[], &files, scope, &fingerprint, &passthrough);
+        // 5.1: the team's filesystem sandbox: each worker restricts itself to these rules before
+        // it imports anything of the team's (`system.engine.python_team_sandbox`). In `require`
+        // mode on a system without Landlock, nothing of the team's starts.
+        let sandbox = ts::sandbox::prepare(
+            config,
+            scope,
+            &files,
+            None,
+            &files.dir.join(ts::sandbox::SPEC_FILE),
+        )
+        .map_err(|e| ActionError::new("RuntimeError", e.to_string()))?;
+        if let Some(prepared) = &sandbox {
+            ts::sandbox::apply_env(&mut team_env, prepared);
+        }
         let team_config = Arc::new(
             Config::new(meerschaum_core::config::ConfigOptions::with_env(
                 team_env.clone(),
@@ -380,7 +394,13 @@ impl Session {
                 team: scope.team.clone(),
                 fingerprint: fingerprint.clone(),
                 connectors: scope.connectors.clone(),
+                sandbox: sandbox.as_ref().map(|p| p.mode),
             });
+            // A sandboxed worker works in the team's temporary directory (the server's working
+            // directory is outside its rules).
+            if let Some(prepared) = &sandbox {
+                settings.worker.current_dir = Some(prepared.tmp_dir.clone());
+            }
             if !std::env::var("MRSM_PYTHON").is_ok_and(|v| !v.trim().is_empty())
                 && let Some(python) = &worker_python
             {

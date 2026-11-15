@@ -962,6 +962,16 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     import meerschaum.config.paths as paths
     from meerschaum.utils.locks import InterProcessLock
 
+    ### 5.1: an isolated team's sandboxed process may only read the plugins' symlinks (the server
+    ### and every other process keep them); it never rewrites the directory other teams share.
+    if os.environ.get('MRSM_TEAM_SANDBOX'):
+        with _locks['__path__']:
+            if str(paths.PLUGINS_RESOURCES_PATH.parent) not in __path__:
+                __path__.append(str(paths.PLUGINS_RESOURCES_PATH.parent))
+        with _locks['_synced_symlinks']:
+            _synced_symlinks += 1
+        return
+
     with InterProcessLock(paths.PLUGINS_INTERNAL_LOCK_PATH), _locks['internal_plugins']:
 
         try:
@@ -1574,25 +1584,46 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
     import meerschaum.config.paths as paths
     import os
     sync_plugins_symlinks()
-    _plugins = [
-        Plugin(name)
-        for name in (
-            to_load or [
-                (
-                    name if (paths.PLUGINS_RESOURCES_PATH / name).is_dir()
-                    else name[:-3]
-                )
-                for name in os.listdir(paths.PLUGINS_RESOURCES_PATH)
-                if name != '__init__.py'
-            ]
-        )
-    ]
+    sandboxed_names = sandboxed_plugins_names()
+    if to_load:
+        names = list(to_load)
+    elif sandboxed_names is not None:
+        names = sandboxed_names
+    else:
+        names = [
+            (
+                name if (paths.PLUGINS_RESOURCES_PATH / name).is_dir()
+                else name[:-3]
+            )
+            for name in os.listdir(paths.PLUGINS_RESOURCES_PATH)
+            if name != '__init__.py'
+        ]
+    _plugins = [Plugin(name) for name in names]
     plugins = tuple(plugin for plugin in _plugins if plugin.is_installed(try_import=try_import))
     if len(to_load) == 1:
         if len(plugins) == 0:
             raise ValueError(f"Plugin '{to_load[0]}' is not installed.")
         return plugins[0]
     return plugins
+
+
+def sandboxed_plugins_names() -> Union[List[str], None]:
+    """
+    In an isolated team's sandboxed process (5.1), the names of the team's own plugins (its
+    `MRSM_PLUGINS_DIR` links them); the shared plugins package names every team's, which the
+    process cannot read. `None` in any other process.
+    """
+    import os
+    if not os.environ.get('MRSM_TEAM_SANDBOX'):
+        return None
+    import meerschaum.config.paths as paths
+    return [
+        (item[:-3] if item.endswith('.py') else item)
+        for plugins_path in paths.PLUGINS_DIR_PATHS
+        if plugins_path.exists()
+        for item in sorted(os.listdir(plugins_path))
+        if not item.startswith('.') and item not in ('__pycache__', '__init__.py')
+    ]
 
 
 def get_plugins_names(*to_load, **kw) -> List[str]:

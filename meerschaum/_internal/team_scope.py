@@ -363,9 +363,15 @@ def hello_report() -> Optional[Dict[str, Any]]:
         for label, attrs in labels.items()
         if label != 'default' and attrs
     )
-    return {
+    report = {
         'team': team,
         'fingerprint': os.environ.get('MRSM_TEAM_FINGERPRINT', ''),
         'config_file': os.environ.get('MRSM_CONFIG_FILE', ''),
         'connectors': defined,
     }
+    ### The filesystem sandbox the worker applied at start-up (`team_sandbox.boot()`), with the
+    ### canary's result: the host stops a worker whose report its mode does not accept.
+    if os.environ.get('MRSM_TEAM_SANDBOX'):
+        from meerschaum._internal import team_sandbox
+        report['sandbox'] = team_sandbox.report() or team_sandbox.boot()
+    return report

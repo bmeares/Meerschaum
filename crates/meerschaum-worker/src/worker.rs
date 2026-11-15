@@ -268,6 +268,9 @@ pub struct TeamReport {
     pub config_file: String,
     /// The connectors (`type:label`) its loaded configuration defines.
     pub connectors: Vec<String>,
+    /// Its filesystem sandbox (5.1), applied at start-up before any plugin was imported; `None`
+    /// when it reported none (not started under one, or an older package).
+    pub sandbox: Option<meerschaum_core::team_scope::sandbox::Report>,
 }
 
 /// What a worker must prove before it serves an isolated team (5.1): a worker that does not
@@ -282,6 +285,11 @@ pub struct TeamExpectation {
     pub fingerprint: String,
     /// The connectors the team may have.
     pub connectors: std::collections::BTreeSet<String>,
+    /// The filesystem sandbox the worker must report (5.1; `None`: not checked, the `off` mode).
+    /// In `require` mode a worker whose report is missing, not enforced or whose canary read
+    /// succeeded is stopped; in `auto` mode one that is not enforced is accepted (with a warning,
+    /// once per reason) but one that claims enforcement without denying the canary is stopped.
+    pub sandbox: Option<meerschaum_core::team_scope::sandbox::Mode>,
 }
 
 impl TeamExpectation {
@@ -306,6 +314,7 @@ impl TeamExpectation {
                     team,
                     fingerprint: std::env::var(TEAM_FINGERPRINT_VAR).unwrap_or_default(),
                     connectors,
+                    sandbox: meerschaum_core::team_scope::sandbox::mode_from_env(),
                 })
             })
             .clone()
@@ -371,8 +380,76 @@ impl TeamExpectation {
                     .join(", ")
             ));
         }
+        if let Some(mode) = self.sandbox {
+            use meerschaum_core::team_scope::sandbox::{Mode, Report};
+            let sandbox = report.sandbox.clone().unwrap_or_else(|| {
+                Report::not_enforced(
+                    mode,
+                    format!(
+                        "the worker reported no sandbox (its `meerschaum` package, {}, at `{}`, \
+                         may predate it)",
+                        if hello.meerschaum.is_empty() {
+                            "an unknown version"
+                        } else {
+                            hello.meerschaum.as_str()
+                        },
+                        python.display()
+                    ),
+                )
+            });
+            // The server's mode decides, whatever the worker says it ran in.
+            let judged = Report {
+                mode: if mode == Mode::Require || sandbox.mode == Mode::Require {
+                    Mode::Require
+                } else {
+                    mode
+                },
+                ..sandbox.clone()
+            };
+            if let Err(why) = judged.verdict() {
+                return refuse(why);
+            }
+            record_sandbox(&self.team, &sandbox);
+        }
         Ok(())
     }
+}
+
+/// The last sandbox report of each isolated team's workers in this process (5.1), for status.
+static SANDBOX_REPORTS: std::sync::Mutex<
+    std::collections::BTreeMap<String, meerschaum_core::team_scope::sandbox::Report>,
+> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn record_sandbox(team: &str, report: &meerschaum_core::team_scope::sandbox::Report) {
+    if !report.enforced {
+        static WARNED: std::sync::Mutex<std::collections::BTreeSet<String>> =
+            std::sync::Mutex::new(std::collections::BTreeSet::new());
+        let reason = report.reason.clone().unwrap_or_default();
+        if WARNED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(reason.clone())
+        {
+            tracing::warn!(
+                "Isolated teams' workers run without the filesystem sandbox \
+                 (`system.engine.python_team_sandbox: auto`): {reason}. They can read whatever \
+                 the server's operating-system user can read."
+            );
+        }
+    }
+    SANDBOX_REPORTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(team.to_string(), report.clone());
+}
+
+/// The last sandbox report of each isolated team whose worker started in this process (5.1).
+pub fn sandbox_reports()
+-> std::collections::BTreeMap<String, meerschaum_core::team_scope::sandbox::Report> {
+    SANDBOX_REPORTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 /// The connectors (`type:label`, not `default`) a `meerschaum:connectors` map defines.
@@ -494,6 +571,9 @@ fn hello_from(msg: &Msg) -> WorkerResult<Hello> {
                 fingerprint: text("fingerprint"),
                 config_file: text("config_file"),
                 connectors: strings(field("connectors")),
+                sandbox: field("sandbox")
+                    .filter(|v| !v.is_nil())
+                    .and_then(|v| serde_json::from_value(crate::protocol::wire_to_json(v)).ok()),
             })
         }
         _ => None,
@@ -735,9 +815,12 @@ impl Worker {
         // first). Plugins are imported through the plugins directory, never the working one.
         cmd.arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG);
         if opts.module == "meerschaum.worker" {
+            // 5.1: an isolated team's worker restricts itself to its sandbox right after the
+            // guard, before the host imports anything of the package (`MRSM_TEAM_SANDBOX`).
             cmd.arg("-c").arg(format!(
-                "{}\n_mrsm_guard()\n{}",
+                "{}\n_mrsm_guard()\n{}\n_mrsm_sandbox()\n{}",
                 meerschaum_core::python_guard::SCRIPT,
+                include_str!("../python/sandbox.py"),
                 include_str!("../python/host.py")
             ));
         } else {

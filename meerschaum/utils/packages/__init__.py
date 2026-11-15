@@ -1920,6 +1920,13 @@ def get_modules_from_package(
                and not f.endswith('__init__.py')
                and not f.endswith('__pycache__')
     ]
+    ### 5.1: in an isolated team's sandboxed process the plugins package holds every team's
+    ### links, but only the team's own plugins can be read.
+    if package.__name__ == 'plugins':
+        from meerschaum.plugins import sandboxed_plugins_names
+        own = sandboxed_plugins_names()
+        if own is not None:
+            _all = [name for name in _all if name in own]
 
     if debug:
         from meerschaum.utils.debug import dprint
