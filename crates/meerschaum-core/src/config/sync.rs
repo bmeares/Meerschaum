@@ -4,8 +4,9 @@
 //! The first time the `stack` key is loaded (and whenever the stack actions ask), the Docker
 //! Compose file and the two Grafana files are rewritten from the config, keeping the comment
 //! header of the file already on disk, and the PostgreSQL extensions script is created once.
-//! The compose file of a stack `mrsm stack` hardens (one with Grafana, 5.1) is left to `mrsm
-//! stack` ([`ConfigState::stack_compose_hardened`]).
+//! The compose file of a stack `mrsm stack` hardens (one with Grafana, or whose `api` service
+//! gets `MRSM_CONFIG` / `MRSM_PATCH`, 5.1) is left to `mrsm stack`
+//! ([`ConfigState::stack_compose_hardened`]).
 //! The built-in Grafana dashboards are installed next to the provider file, and the ones an
 //! earlier release shipped are removed when Meerschaum still manages them.
 
@@ -13,6 +14,7 @@ use std::path::Path;
 
 use super::lossless::ConfigValue;
 use super::{ConfigState, GetOptions};
+use crate::value::Value;
 use crate::yaml::dumper::{DumpOptions, dump_node};
 use crate::yaml::loader::{LoadOptions, load_text};
 
@@ -330,12 +332,14 @@ impl ConfigState {
         }
     }
 
-    /// Whether `mrsm stack` hardens the stack's compose file (5.1): the stack has a `grafana`
+    /// Whether `mrsm stack` hardens the stack's compose file (5.1): its `api` service has an
+    /// `MRSM_CONFIG` or `MRSM_PATCH` in its environment (which `mrsm stack` moves to files, so
+    /// the compose file never holds the connectors' credentials), or the stack has a `grafana`
     /// service, and its "Meerschaum Main" data source is switched to the read-only role (`mrsm
     /// stack` adds the one-shot `grafana_readonly` service Grafana waits for) or
     /// `api:grafana:enabled` is set (the auth proxy, its network and the administrator password).
-    /// That transformation lives in `meerschaum-cli` (`os_sql_stack`), which writes the file
-    /// before every `docker compose` command.
+    /// That transformation lives in `meerschaum-cli` (`os_sql_stack`, `stack_secrets`), which
+    /// writes the file before every `docker compose` command.
     pub fn stack_compose_hardened(&mut self, compose_name: &str) -> bool {
         let opts = GetOptions {
             patch: true,
@@ -345,8 +349,24 @@ impl ConfigState {
         };
         let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
         let (_, compose) = self.get_config_lossless(&keys(&["stack", compose_name]), opts);
+        let compose = compose.to_value();
+        let api_environment = compose
+            .get("services")
+            .and_then(|services| services.get("api"))
+            .and_then(|api| api.get("environment"));
+        let names = &crate::static_config::static_config().environment;
+        if [&names.config, &names.patch].iter().any(|name| {
+            match api_environment {
+            Some(Value::Map(map)) => map.contains_key(name.as_str()),
+            Some(Value::List(items)) => items.iter().any(|item| {
+                matches!(item, Value::Str(s) if s == *name || s.starts_with(&format!("{name}=")))
+            }),
+            _ => false,
+        }
+        }) {
+            return true;
+        }
         let has_grafana = compose
-            .to_value()
             .get("services")
             .and_then(|services| services.get("grafana"))
             .is_some_and(|grafana| grafana.as_map().is_some());

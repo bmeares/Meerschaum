@@ -52,6 +52,7 @@ pub mod self_upgrade;
 pub mod session;
 pub mod show;
 pub mod stack_readonly;
+pub mod stack_secrets;
 pub mod subactions;
 pub mod sync;
 pub mod team_setup;

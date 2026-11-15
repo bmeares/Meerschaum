@@ -26,12 +26,40 @@ fn registry_with(root: &std::path::Path, allow_writes: bool, extra: &[(&str, &st
     Config::new(opts).unwrap()
 }
 
-/// A stack without a `grafana` service: nothing for `mrsm stack` to harden, so the core sync
-/// writes the compose file (5.1; a stack with Grafana leaves it to `mrsm stack`).
+/// A stack without a `grafana` service and without the `api` service's configuration: nothing
+/// for `mrsm stack` to harden, so the core sync writes the compose file (5.1; a stack with
+/// Grafana, or whose `api` service gets `MRSM_CONFIG`, leaves it to `mrsm stack`).
 const WITHOUT_GRAFANA: (&str, &str) = (
     "MRSM_CONFIG",
-    r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null}}}}"#,
+    r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null, "api": null}}}}"#,
 );
+
+/// 5.1: the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (every connector's credentials) never
+/// reach a compose file the core sync writes: with them, the file is left to `mrsm stack`,
+/// which moves them to files, also in a stack without Grafana.
+#[test]
+fn the_core_sync_never_writes_the_api_services_configuration() {
+    for services in [
+        r#"{"grafana": null}"#,
+        r#"{"grafana": null, "api": {"environment": ["MRSM_PATCH={}"]}}"#,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let patch =
+            format!(r#"{{"stack": {{"docker-compose.yaml": {{"services": {services}}}}}}}"#);
+        let config = registry_with(root.path(), true, &[("MRSM_CONFIG", patch.as_str())]);
+        assert!(config.with_state(|s| s.stack_compose_hardened("docker-compose.yaml")));
+        config
+            .with_state(|s| s.sync_files(&["stack"]))
+            .expect("sync");
+        assert!(
+            !config.paths().path("STACK_COMPOSE_PATH").exists(),
+            "{services}"
+        );
+    }
+    let root = tempfile::tempdir().unwrap();
+    let config = registry_with(root.path(), true, &[WITHOUT_GRAFANA]);
+    assert!(!config.with_state(|s| s.stack_compose_hardened("docker-compose.yaml")));
+}
 
 #[test]
 fn built_in_grafana_dashboards_upgrade_in_the_existing_folder_and_keep_user_files() {

@@ -36,6 +36,25 @@ pub const SERVICE: &str = "grafana_readonly";
 /// The `grafana` service's variable that changes with the provisioned data sources.
 pub const REVISION_VARIABLE: &str = "MRSM_DATASOURCE_REVISION";
 
+/// The [`SERVICE`] variable holding the read-only role's password (moved to a file by
+/// [`super::stack_secrets`] with the owner's `PGPASSWORD`).
+pub const PASSWORD_VARIABLE: &str = "MRSM_READONLY_PASSWORD";
+
+/// The [`SERVICE`] command when its passwords are in the environment.
+const ENV_COMMAND: &str = "printf '%s\\n' \"$MRSM_READONLY_SQL\" | psql -X -v ro_password=\"$MRSM_READONLY_PASSWORD\" -f -";
+
+/// The [`SERVICE`] command when its two passwords are in files (5.1, [`super::stack_secrets`]):
+/// the owner's at `owner_path`, the role's at `password_path`. Neither is in the container's
+/// configuration (`docker inspect`), and a file that cannot be read stops the setup (and so
+/// Grafana) before `psql` runs.
+pub fn file_command(owner_path: &str, password_path: &str) -> String {
+    format!(
+        "PGPASSWORD=\"$(cat '{owner_path}')\" && ro_password=\"$(cat '{password_path}')\" && \
+         export PGPASSWORD && \
+         printf '%s\\n' \"$MRSM_READONLY_SQL\" | psql -X -v ro_password=\"$ro_password\" -f -"
+    )
+}
+
 /// The provisioned data source's name.
 pub const MAIN_DATASOURCE: &str = meerschaum_core::config::grafana_readonly::MAIN_DATASOURCE_NAME;
 
@@ -167,7 +186,7 @@ pub fn add_role_setup(
     environment.insert("PGPASSWORD".into(), s(setup.owner_password));
     environment.insert("PGDATABASE".into(), s(database));
     environment.insert("PGCONNECT_TIMEOUT".into(), s("10"));
-    environment.insert("MRSM_READONLY_PASSWORD".into(), s(setup.password));
+    environment.insert(PASSWORD_VARIABLE.into(), s(setup.password));
     environment.insert(
         "MRSM_READONLY_SQL".into(),
         s(&team_database::main_readonly_psql_script(setup.schemas)),
@@ -178,12 +197,7 @@ pub fn add_role_setup(
         "entrypoint".into(),
         Value::List(vec![s("/bin/sh"), s("-c")]),
     );
-    service.insert(
-        "command".into(),
-        Value::List(vec![s(
-            "printf '%s\\n' \"$MRSM_READONLY_SQL\" | psql -X -v ro_password=\"$MRSM_READONLY_PASSWORD\" -f -",
-        )]),
-    );
+    service.insert("command".into(), Value::List(vec![s(ENV_COMMAND)]));
     service.insert("environment".into(), Value::Map(environment));
     service.insert("restart".into(), s("no"));
     let mut condition = Map::new();

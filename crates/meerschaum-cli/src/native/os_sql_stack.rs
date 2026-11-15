@@ -537,7 +537,8 @@ fn broken_client(client: &Client, script: &std::path::Path) -> Option<String> {
     if !client.prefix.is_empty() {
         interpreter = vec![client.program.clone()];
     }
-    let mut command = std::process::Command::new(&interpreter[0]);
+    let mut command =
+        std::process::Command::new(&interpreter[0]);
     command
         .args(&interpreter[1..])
         .args(["-c", &format!("import {module}")])
@@ -1282,6 +1283,66 @@ fn with_main_readonly(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value, war
     value
 }
 
+/// The compose file's config with the services' credentials in files (5.1,
+/// [`super::stack_secrets`]): the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (when its image
+/// reads `MRSM_CONFIG_FILE`, see [`super::stack_secrets::api_form`]), Grafana's administrator
+/// password and the `grafana_readonly` service's passwords. The files are written here; when
+/// they cannot be, the config is returned as it was (a container never starts without its
+/// configuration). `warn_`: tell the user what stays in the environment (once per command).
+fn with_secret_files(rt: &mut Runtime<'_>, keys: &[&str], value: Value, warn_: bool) -> Value {
+    use super::stack_secrets as secrets;
+    if keys != ["stack", "docker-compose.yaml"] {
+        return value;
+    }
+    let image = value
+        .get("services")
+        .and_then(|services| services.get("api"))
+        .and_then(|api| api.get("image"))
+        .map(Value::py_str);
+    let setting = rt
+        .config()
+        .get_with(
+            &["stack", secrets::API_SETTING],
+            meerschaum_core::config::GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        )
+        .1;
+    let setting = (!setting.is_null()).then_some(setting);
+    let form = secrets::api_form(image.as_deref(), setting.as_ref());
+    let dir = secrets::secrets_dir(&rt.config().paths().path("STACK_RESOURCES_PATH"));
+    let mut externalized = value.clone();
+    let written = secrets::prepare_dir(&dir).and_then(|salt| {
+        let done = secrets::externalize(&mut externalized, &dir, &form, &salt);
+        secrets::write_files(&dir, &done.services).map(|()| done)
+    });
+    match written {
+        Ok(done) => {
+            if warn_ {
+                for warning in &done.warnings {
+                    warn(rt, warning);
+                }
+            }
+            externalized
+        }
+        Err(e) => {
+            if warn_ {
+                warn(
+                    rt,
+                    &format!(
+                        "{e}\nThe stack's services get their credentials in their environment \
+                         (in `stack/docker-compose.yaml` and `docker inspect`)."
+                    ),
+                );
+            }
+            value
+        }
+    }
+}
+
 /// `sync_yaml_configs(keys, sub_path, substitute=True, replace_tuples=...)`.
 fn sync_yaml_config(
     rt: &mut Runtime<'_>,
@@ -1301,6 +1362,7 @@ fn sync_yaml_config(
     );
     let value = with_grafana_sign_in(rt, keys, value);
     let value = with_main_readonly(rt, keys, value, true);
+    let value = with_secret_files(rt, keys, value, true);
     let mut text = meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?;
     for (old, new) in replace {
         text = text.replace(old, new);
@@ -1393,6 +1455,7 @@ pub fn write_stack(rt: &mut Runtime<'_>) -> Result<(), String> {
         let value = with_grafana_sign_in(rt, &keys, value);
         // `sync_stack_files` below writes them again, with the warnings.
         let value = with_main_readonly(rt, &keys, value, false);
+        let value = with_secret_files(rt, &keys, value, false);
         let mut text = header.unwrap_or_default().to_string();
         text.push_str(&meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?);
         if let Some(parent) = path.parent() {
@@ -1727,15 +1790,173 @@ mod compose_writer_tests {
         }
     }
 
-    /// A stack without a `grafana` service is still written by the core sync (nothing to harden).
+    /// A stack without a `grafana` service and without the `api` service's configuration is
+    /// still written by the core sync (nothing to harden). 5.1: with the `api` service's
+    /// `MRSM_CONFIG`, the core sync leaves it to `mrsm stack`, which moves it to a file.
     #[test]
     fn the_core_sync_writes_a_compose_file_without_grafana() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("config")).unwrap();
-        let patch = r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null}}}}"#;
+        let patch =
+            r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null, "api": null}}}}"#;
         let (by_stack, by_core) = compose_after(dir.path(), &[("MRSM_CONFIG", patch)], false);
         assert!(!by_core.is_empty());
         assert!(!by_core.contains("grafana_readonly"), "{by_core}");
         assert!(by_stack.contains("services:"), "{by_stack}");
+
+        let dir = tempfile::tempdir().unwrap();
+        let patch = r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null}}}}"#;
+        let (by_stack, by_core) = compose_after(dir.path(), &[("MRSM_CONFIG", patch)], false);
+        assert!(by_core.is_empty() || by_core == by_stack, "{by_core}");
+        assert!(by_stack.contains("MRSM_CONFIG_FILE"), "{by_stack}");
+    }
+
+    /// A root whose files `write_stack` (and then the core sync) wrote, with `env` and an
+    /// optional `stack.yaml`: `(compose text, secrets directory)`.
+    fn stack_files(
+        root: &std::path::Path,
+        env: &[(&str, &str)],
+        stack_yaml: Option<&str>,
+    ) -> (String, std::path::PathBuf) {
+        if let Some(text) = stack_yaml {
+            std::fs::create_dir_all(root.join("config")).unwrap();
+            std::fs::write(root.join("config").join("stack.yaml"), text).unwrap();
+        }
+        let (by_stack, after_core) = compose_after(root, env, true);
+        assert_eq!(
+            by_stack, after_core,
+            "the core sync rewrote the compose file"
+        );
+        (by_stack, root.join("stack").join("secrets"))
+    }
+
+    const SECRET_CONFIG: &str = r#"{"meerschaum": {"connectors": {
+        "sql": {"main": {"username": "mrsm", "password": "pg-s3cret-xyz"}},
+        "api": {"main": {"password": "api-s3cret-xyz"}}}},
+        "api": {"grafana": {"enabled": true, "admin_password": "gf-s3cret-xyz"}}}"#;
+
+    fn assert_no_secret(text: &str) {
+        for secret in ["pg-s3cret-xyz", "api-s3cret-xyz", "gf-s3cret-xyz"] {
+            assert!(!text.contains(secret), "{secret} in:\n{text}");
+        }
+    }
+
+    /// 5.1: the default stack's compose file holds paths, not credentials; the `api` service
+    /// reads them from files only its owner's directory reaches.
+    #[test]
+    fn the_stack_passes_the_api_its_configuration_by_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (compose, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], None);
+        assert_no_secret(&compose);
+        assert!(
+            compose.contains("MRSM_CONFIG_FILE: /run/secrets/meerschaum/mrsm_config.json"),
+            "{compose}"
+        );
+        assert!(compose.contains("MRSM_PATCH_FILE:"), "{compose}");
+        assert!(
+            compose.contains("GF_SECURITY_ADMIN_PASSWORD__FILE:"),
+            "{compose}"
+        );
+        assert!(
+            compose.contains(super::super::stack_secrets::REVISION_LABEL),
+            "{compose}"
+        );
+        let config = std::fs::read_to_string(secrets.join("api").join("mrsm_config.json")).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            config["meerschaum"]["connectors"]["sql"]["main"]["password"],
+            "pg-s3cret-xyz"
+        );
+        assert!(config["system"].is_object());
+        let patch = std::fs::read_to_string(secrets.join("api").join("mrsm_patch.json")).unwrap();
+        let patch: serde_json::Value = serde_json::from_str(&patch).unwrap();
+        assert_eq!(
+            patch["meerschaum"]["connectors"]["sql"]["main"]["host"],
+            "db"
+        );
+        assert_eq!(patch["api"]["grafana"]["admin_password"], "gf-s3cret-xyz");
+        let owner =
+            std::fs::read_to_string(secrets.join("grafana_readonly").join("owner_password"))
+                .unwrap();
+        assert_eq!(owner, "pg-s3cret-xyz");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode =
+                |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&secrets), 0o700);
+            assert_eq!(mode(&secrets.join("api")), 0o755);
+            assert_eq!(mode(&secrets.join("api").join("mrsm_config.json")), 0o644);
+        }
+    }
+
+    /// Upgrades: a `stack.yaml` holding the old default entries (as `MRSM{...}` references or
+    /// materialized) is moved to files; a customized entry's own keys reach the container.
+    #[test]
+    fn an_upgraded_stack_yaml_moves_to_files_and_keeps_customized_keys() {
+        let references = r#"
+docker-compose.yaml:
+  services:
+    api:
+      environment:
+        MRSM_CONFIG: '{"meerschaum": MRSM{!meerschaum}, "system": MRSM{!system}, "api": MRSM{!api}}'
+        MRSM_PATCH: '{"meerschaum": {"connectors": {"sql": {"main": {"host": "db", "port": 5432}}}}}'
+"#;
+        let materialized = r#"
+docker-compose.yaml:
+  services:
+    api:
+      environment:
+        MRSM_CONFIG: '{"meerschaum": {"connectors": {"sql": {"main": {"password": "pg-s3cret-xyz"}}}}, "custom": {"kept": "yes"}}'
+"#;
+        for (stack_yaml, custom) in [(references, false), (materialized, true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let (compose, secrets) = stack_files(
+                dir.path(),
+                &[("MRSM_CONFIG", SECRET_CONFIG)],
+                Some(stack_yaml),
+            );
+            assert_no_secret(&compose);
+            let config =
+                std::fs::read_to_string(secrets.join("api").join("mrsm_config.json")).unwrap();
+            assert!(config.contains("pg-s3cret-xyz"), "{config}");
+            assert_eq!(config.contains("\"kept\": \"yes\""), custom, "{config}");
+            // The user's config file is never rewritten.
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("config").join("stack.yaml")).unwrap(),
+                stack_yaml
+            );
+        }
+    }
+
+    /// An image older than 5.1.0 keeps the environment form (its API server would start without
+    /// its configuration otherwise), and the files of a previous write are removed.
+    #[test]
+    fn an_old_image_keeps_the_environment_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], None);
+        assert!(secrets.join("api").join("mrsm_config.json").exists());
+        let old = r#"
+docker-compose.yaml:
+  services:
+    api:
+      image: bmeares/meerschaum:5.0.2-full
+"#;
+        let (compose, secrets) =
+            stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], Some(old));
+        assert!(compose.contains("MRSM_CONFIG: "), "{compose}");
+        assert!(!compose.contains("MRSM_CONFIG_FILE"), "{compose}");
+        assert!(!secrets.join("api").join("mrsm_config.json").exists());
+        // `stack:api_config_files: true` is the way for an image the rule cannot vouch for.
+        let custom = r#"
+api_config_files: true
+docker-compose.yaml:
+  services:
+    api:
+      image: example/meerschaum-custom:1
+"#;
+        let (compose, _) = stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], Some(custom));
+        assert!(compose.contains("MRSM_CONFIG_FILE"), "{compose}");
+        assert_no_secret(&compose);
     }
 }

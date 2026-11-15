@@ -6349,7 +6349,7 @@ The stack provisions the **Meerschaum Main** data source in Grafana. Since 5.1 i
 - **What it cannot do.** Write, create tables, schemas or databases, install extensions (such as `dblink`), or act as any other role. Its sessions are read-only by default.
 - **Its password** is generated once and kept in `api/.grafana_readonly_password` under Meerschaum's root (readable by you only).
 - **How it is set up.** `mrsm stack up` adds a one-shot `grafana_readonly` service, built from the `db` service's image, that creates or corrects the role with `psql` once `db` is healthy, on every `stack up`. Grafana starts only after it succeeded: if it fails, `stack up` fails and `docker logs` of that container says why. Grafana is recreated whenever the provisioned data sources change, and updates **Meerschaum Main** in place (same name and uid), so existing dashboards keep working.
-- **Who writes the compose file.** Only `mrsm stack` writes `stack/docker-compose.yaml` for a stack with a `grafana` service, with the setup service above (and, with `api:grafana`, Grafana's sign-in settings). Python no longer writes it when it first reads the `stack` config, nor does `meerschaum.config.stack.write_stack()`, so the file is never in a form that starts Grafana without them. Run `mrsm stack config` (or any `mrsm stack` command) to write it before using `docker compose` by hand.
+- **Who writes the compose file.** Only `mrsm stack` writes `stack/docker-compose.yaml` for a stack with a `grafana` service, with the setup service above (and, with `api:grafana`, Grafana's sign-in settings), or whose `api` service gets `MRSM_CONFIG` / `MRSM_PATCH` (see [Credentials in files](#credentials-in-files)). Python no longer writes it when it first reads the `stack` config, nor does `meerschaum.config.stack.write_stack()`, so the file is never in a form that starts Grafana without them or holds the connectors' credentials. Run `mrsm stack config` (or any `mrsm stack` command) to write it before using `docker compose` by hand.
 
 !!! warning "Upgrading from 5.0"
     The next `mrsm stack up -d` switches **Meerschaum Main** to the read-only role, also when your `config/stack.yaml` holds a copy of the old default (`sql:main`'s user, as `MRSM{...}` references or as literal values). A dashboard that writes through **Meerschaum Main**, or reads a schema owned by another role, stops working. To let it read another schema, list it:
@@ -6364,6 +6364,30 @@ The stack provisions the **Meerschaum Main** data source in Grafana. Since 5.1 i
     then run `mrsm stack up -d`. A data source whose user you changed to someone else is left as you wrote it (with a warning while anonymous access is on). There is no setting to give the owner's credentials back: to do that, edit **Meerschaum Main** in `stack:grafana:datasource` yourself and take responsibility for what anonymous visitors can then run.
 
 A stack without a `db` service cannot set the role up: `mrsm stack` warns, and **Meerschaum Main** cannot connect until you create `mrsm__main_ro` on your database. It never falls back to the owner's credentials.
+
+### Credentials in files
+
+Since 5.1, `mrsm stack` gives the containers their credentials in files instead of in the compose file. Up to 5.0 the `api` service's `environment` held `MRSM_CONFIG` (your whole `meerschaum`, `system` and `api` configuration, every connector's password included) and `MRSM_PATCH` (with Grafana's administrator password), so they were in `stack/docker-compose.yaml` and in `docker inspect`. Now, on every `mrsm stack` command:
+
+| Service | Credential | Host file (under `<root>/stack/secrets/`) | In the container |
+|---|---|---|---|
+| `api` | `MRSM_CONFIG`, `MRSM_PATCH` | `api/mrsm_config.json`, `api/mrsm_patch.json` | `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` = `/run/secrets/meerschaum/mrsm_config.json` / `mrsm_patch.json` |
+| `grafana` | the administrator password | `grafana/admin_password` | `GF_SECURITY_ADMIN_PASSWORD__FILE` |
+| `grafana_readonly` | `sql:main`'s password and the read-only role's | `grafana_readonly/owner_password`, `grafana_readonly/readonly_password` | read by its command |
+
+Each service mounts only its own subdirectory, read-only, at `/run/secrets/meerschaum`, and carries a label (`io.meerschaum.secrets-revision`, a salted hash of its files) so that `mrsm stack up -d` recreates a container whose credentials changed, as it did when they were in its environment. The compose file and `docker inspect` hold paths.
+
+- **Who can read them.** `<root>/stack/secrets/` is `0700` (set again on every write): other users of the host cannot reach the files. Inside it, each service's directory is `0755` and its files `0644`, because the container's user need not be you: Meerschaum's image runs as uid 1000, Grafana's as 472, TimescaleDB's as 1000. Docker mounts the subdirectory itself, so a container never needs to pass through the `0700` directory. Anyone in the container (and `root` and members of the `docker` group on the host, who can run any container) can read them, as they could read the environment before.
+- **Your configuration is kept.** Every `MRSM_CONFIG` / `MRSM_PATCH` entry of the `api` service is moved, whether `config/stack.yaml` holds the 5.0 default (as `MRSM{...}` references or as literal values) or your own: the file holds exactly what the variable would have held, so keys you added still reach the container. An entry that uses Docker Compose interpolation (`<DOLLAR>NAME`) stays in the environment with a warning, and so does everything when the service sets `MRSM_CONFIG_FILE` or `MRSM_PATCH_FILE` itself. Your `config/stack.yaml` is not rewritten.
+- **Only an image that understands the files gets them.** The `api` service gets the files when its image is `bmeares/meerschaum:<version>` (any variant) with `<version>` 5.1.0 or newer, which the default (`bmeares/meerschaum:<version>-full`, this release) always is. Any other image (an older version, `latest`, a tag without a version, your own build) keeps the environment form, and `mrsm stack` warns once per command with the reason, because an older API server would start without its configuration. If your image is 5.1.0 or newer, set it explicitly:
+
+    ```yaml
+    ### `mrsm edit config stack`
+    api_config_files: true    # false: keep the environment form, without the warning
+    ```
+
+    When the files cannot be written (a read-only root, for example), the environment form is kept with a warning: the API container never starts without its configuration. Back on the environment form, the old files are removed.
+- **Left in the environment.** `POSTGRES_PASSWORD` stays in the `db` service's environment (as `$POSTGRES_PASSWORD`, interpolated by `docker compose` from `sql:main`'s password, so it is in `docker inspect` but not in the file): `mrsm upgrade extensions`, `mrsm upgrade postgres` and `mrsm restore postgres` read it from the running container. `VALKEY_PASSWORD` stays too: the `valkey/valkey-bundle` image does not read it. The provisioned data source (`stack/grafana/resources/provisioning/datasources/datasource.yaml`) holds the read-only role's password, because Grafana reads that directory through its own mount; that role can only read.
 
 ## 💾 Backing Up and Upgrading the Database
 
@@ -15004,6 +15028,10 @@ ExecStart=/usr/local/bin/mrsm sync pipes -i sql:warehouse --loop
 
 systemd expands `${CREDENTIALS_DIRECTORY}` in `Environment=` lines; the credential file is readable by the service only.
 
+### In the stack
+
+`mrsm stack` keeps the credentials out of `stack/docker-compose.yaml` and `docker inspect`: the `api` service gets `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` pointing at files under `<root>/stack/secrets/` (a directory only you can read), and Grafana and the read-only role's setup read their passwords from files there too. An API image older than 5.1.0 cannot read the files and keeps the environment form, with a warning. See [Credentials in files](/reference/stack/#credentials-in-files).
+
 !!! warning "`MRSM{}` is not `{{ Pipe() }}`"
     These are two distinct features:
 
@@ -16902,6 +16930,7 @@ Several teams can now share one instance, each behind its own wall. See [Teams o
 - **Deleted teams leave nothing to their name.** Deleting a team (console, `delete teams`, API) keeps its connector, database and data but retires the connector's reservation (`teams` becomes `Deleted team <name> #<id>`), so a new team of that name, or one renamed to it, no longer gets the old database. Renaming a team moves its reservations to the new name. Creating or renaming a team onto a name a connector is still reserved for is refused unless an administrator passes `adopt`.
 - With `api:grafana`, the API server warns once at startup, while Grafana's anonymous access is on, about the data sources in the main and anonymous organizations other than the read-only **Meerschaum Main**.
 - **Secrets in configuration.** `MRSM{file:<path>}` reads a secret from a file (a Docker secret, a systemd credential) and `MRSM{env:<NAME>}` from an environment variable, wherever `MRSM{}` works; a rotated file reaches the next connector built, a reference that cannot be read fails only the connector that needs it, and the values they produce are masked everywhere. `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` read the two patches from files. Every config writer now writes the file as written plus its change: `register connectors` and the other writers no longer persist environment connectors, `MRSM_CONFIG` / `MRSM_PATCH` values or resolved secrets. A config file holding an inline secret that its group or others can read gets a warning with the `chmod` to run. See [Secrets in configuration](../reference/environment.md#secrets-in-configuration).
+- **The stack's credentials leave the compose file (upgrading users, read this).** `mrsm stack` now writes the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (every connector's password, Grafana's administrator password) to `<root>/stack/secrets/api/` and gives the container `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`; Grafana's administrator password and the `grafana_readonly` service's passwords move to files the same way. `stack/docker-compose.yaml` and `docker inspect` hold paths; `<root>/stack/secrets/` is readable by you only. A `config/stack.yaml` with the old entries (or your own) is moved as it is, with your extra keys. Only an image that reads the files gets them: `bmeares/meerschaum:<version>` with `<version>` 5.1.0 or newer (the default). Any other image (an older version, `latest`, your own build) keeps the environment form with a warning naming the reason; set `stack:api_config_files: true` for your own 5.1 image, `false` to keep the environment without the warning. The next `mrsm stack up -d` recreates the services whose credentials moved. See [Credentials in files](../reference/stack/index.md#credentials-in-files).
 - The teams table's row menu is no longer clipped when the table is short.
 - The MCP docs show the bearer token in the form the server accepts (the **API Key** of a token).
 - The new [`upsert_changed_only`](../reference/pipes/parameters.md#upsert_changed_only) parameter makes an `upsert` pipe on PostgreSQL, PostGIS, TimescaleDB, TimescaleDB-HA or Citus skip the update of rows whose values did not change, so a pipe that re-reads an overlapping window no longer rewrites identical rows (WAL, dead tuples, autovacuum). The sync message counts only the rows actually written.

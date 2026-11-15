@@ -182,10 +182,12 @@ print(json.dumps({
     assert result['compose'] is False, result
     assert 'user: mrsm__main_ro' in result['datasource'], result['datasource']
 
+    ### 5.1: without the `api` service's configuration too (`mrsm stack` moves it to files).
     without = tmp_path / 'without_grafana'
     (without / 'config').mkdir(parents=True)
     (without / 'config' / 'stack.yaml').write_text(
         "docker-compose.yaml:\n  services:\n    db:\n      image: postgres:18\n"
+        "    api: null\n    grafana: null\n"
     )
     result = run_python(
         """
@@ -198,4 +200,61 @@ print(json.dumps(paths.STACK_COMPOSE_PATH.read_text(encoding='utf-8')))
         without,
     )
     assert 'image: postgres:18' in result, result
-    assert 'grafana' not in result, result
+    assert 'image: grafana' not in result and 'grafana_readonly' not in result, result
+
+
+def test_the_stack_passes_the_api_its_configuration_by_file(tmp_path):
+    """
+    5.1: `mrsm stack` writes the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` to files under
+    `<root>/stack/secrets/api/` (an owner-only directory) and the compose file names them with
+    `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`: no connector's password is in the compose file, and
+    Python's writers never put it back. (A stand-in `docker` that fails keeps Docker untouched.)
+    """
+    import stat
+    root = tmp_path / 'root'
+    (root / 'config').mkdir(parents=True)
+    (root / 'plugins').mkdir()
+    (root / 'config' / 'meerschaum.yaml').write_text(
+        "connectors:\n  sql:\n    main:\n      flavor: timescaledb\n      username: mrsm\n"
+        "      password: pg-s3cret-xyz\n      database: meerschaum\n      host: localhost\n"
+    )
+    fake_bin = tmp_path / 'bin'
+    fake_bin.mkdir()
+    (fake_bin / 'docker').write_text('#!/bin/sh\nexit 1\n')
+    (fake_bin / 'docker').chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if not k.startswith('MRSM_')}
+    env.update({
+        'PYTHONPATH': str(REPO),
+        'MRSM_ROOT_DIR': str(root),
+        'MRSM_PLUGINS_DIR': str(root / 'plugins'),
+        'MRSM_NO_AUTO_INSTALL': '1',
+        'PATH': str(fake_bin) + os.pathsep + env.get('PATH', ''),
+    })
+    proc = subprocess.run(
+        [sys.executable, '-m', 'meerschaum', 'stack', 'ps'],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(root),
+    )
+    assert 'Docker' in proc.stdout + proc.stderr, proc.stdout + proc.stderr
+    compose = (root / 'stack' / 'docker-compose.yaml').read_text(encoding='utf-8')
+    assert 'pg-s3cret-xyz' not in compose, compose
+    assert 'MRSM_CONFIG_FILE: /run/secrets/meerschaum/mrsm_config.json' in compose, compose
+    secrets = root / 'stack' / 'secrets'
+    config = json.loads((secrets / 'api' / 'mrsm_config.json').read_text(encoding='utf-8'))
+    assert config['meerschaum']['connectors']['sql']['main']['password'] == 'pg-s3cret-xyz'
+    if os.name != 'nt':
+        assert stat.S_IMODE(secrets.stat().st_mode) == 0o700
+        assert stat.S_IMODE((secrets / 'api' / 'mrsm_config.json').stat().st_mode) == 0o644
+
+    result = run_python(
+        """
+import json
+import meerschaum.config.paths as paths
+from meerschaum.config import get_config
+from meerschaum.config.stack import write_stack
+get_config('stack', 'docker-compose.yaml')
+write_stack()
+print(json.dumps(paths.STACK_COMPOSE_PATH.read_text(encoding='utf-8')))
+""",
+        root,
+    )
+    assert result == compose
