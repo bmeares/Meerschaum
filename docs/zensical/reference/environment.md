@@ -19,6 +19,7 @@ Nearly all Meerschaum environment variables begin with the prefix `MRSM_`. The m
 | `MRSM_WORK_DIR` | Base directory under which the root directory is created when `MRSM_ROOT_DIR` is unset. | current working directory |
 | `MRSM_CONFIG` | Inline JSON or simplified-dictionary patch applied to the configuration. | _(unset)_ |
 | `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
+| `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` | A file holding what `MRSM_CONFIG` / `MRSM_PATCH` would hold (see [Secrets in configuration](#secrets-in-configuration)). | _(unset)_ |
 | `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). Only variables of an existing connector type are read. | _(unset)_ |
 | `MRSM_CONNECT_TIMEOUT` | Seconds to wait for the first connection of a SQL, API or Valkey connector; overrides every connector's `connect_timeout` attribute. | `5` |
 | `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
@@ -156,6 +157,21 @@ MRSM_CONFIG='{"foo": {"bar": 123}}' \
 MRSM_PATCH='baz:MRSM{foo:bar}' \
   mrsm show config baz
 ```
+
+## **`MRSM_CONFIG_FILE`** / **`MRSM_PATCH_FILE`**
+
+A path to a file whose contents are what `MRSM_CONFIG` (or `MRSM_PATCH`) would hold, parsed the same way (JSON or a simplified dictionary). A relative path is relative to the working directory. Use them to keep a patch with credentials out of the process environment (`ps e`, `/proc/<pid>/environ`, `docker inspect`), for example in a file only its owner can read:
+
+```bash
+install -m 600 /dev/null ~/.config/mrsm-patch.json
+echo '{"meerschaum": {"connectors": {"sql": {"main": {"host": "db.example"}}}}}' \
+  > ~/.config/mrsm-patch.json
+MRSM_CONFIG_FILE=~/.config/mrsm-patch.json mrsm show connectors sql
+```
+
+- Setting a variable and its `_FILE` form (`MRSM_CONFIG` and `MRSM_CONFIG_FILE`) is an error at startup that names both. An empty `_FILE` variable counts as unset.
+- Jobs, workers and the API server that Meerschaum starts inherit the variable and read the same file.
+- There is no `MRSM_<TYPE>_<LABEL>_FILE`: `MRSM_SQL_MAIN_FILE` defines the connector `sql:main_file`, as it always has. Put a connector's password in its own attribute with an [`MRSM{file:...}`](#secrets-in-configuration) reference instead.
 
 ## **`MRSM_RUNTIME`**
 
@@ -325,6 +341,77 @@ pipe = mrsm.Pipe('demo', 'cfg', parameters={
 })
 print(pipe.parameters['username'])  # resolved to the configured username at access time
 ```
+
+## Secrets in configuration
+
+Two reference sources keep secrets out of your configuration files and out of `MRSM_CONFIG`:
+
+| Reference | Resolves to |
+|---|---|
+| `MRSM{file:<path>}` | The contents of the file, minus exactly one trailing newline (`\n` or `\r\n`); nothing else is trimmed. The path is absolute, starts with `~` (your home directory), or is relative to `MRSM_ROOT_DIR`. Everything after `file:` up to the closing brace is the path, so it may contain `:` (`MRSM{file:C:\secrets\pg}`), but not `}`. |
+| `MRSM{env:<NAME>}` | The value of the environment variable `NAME`. |
+
+They work wherever `MRSM{}` works: in config files, in values inside `MRSM_CONFIG` / `MRSM_PATCH` (and their `_FILE` forms), in the JSON or URI of an `MRSM_<TYPE>_<LABEL>` connector, in a compose file's `config:` block, alone or inside a longer string. `file` and `env` are reserved: a top-level key with either name can still be read with `get_config('file', ...)`, but `MRSM{file:...}` always means a file (Meerschaum warns once when it loads such a key).
+
+```yaml
+# config/meerschaum.yaml
+connectors:
+  sql:
+    warehouse:
+      flavor: postgresql
+      host: db.example
+      username: reporting
+      password: MRSM{file:/run/secrets/warehouse_password}
+      database: warehouse
+  api:
+    upstream:
+      host: api.example
+      password: MRSM{env:UPSTREAM_PASSWORD}
+```
+
+!!! warning "Keep a password in its own attribute"
+    A reference inside a URI is substituted literally, without percent-encoding: `postgresql://u:MRSM{env:PW}@db/x` breaks if the password contains `@`, `/` or `:`. Give the password its own `password` attribute instead.
+
+**When they are read.** Like other symlinks, a reference is resolved when its key is loaded, and every `get_config` of a value holding one reads it again: a rotated secret file is picked up by the next connector built (each command, each job run, `mrsm.get_connector(..., refresh=True)`), without restarting the process. A file is read again only when its size, modification time or inode changed, so the cost of an unchanged secret is one `stat`. A connection pool already open keeps the credentials it opened with.
+
+**When they cannot be read.** A missing file, an unreadable file or an unset variable does not break anything else: other keys and connectors, `mrsm show config`, `mrsm edit config` and the shell work as usual, and the value reads as the reference's own text. Building the connector that needs it fails with an error that names the reference, the key it sits under and the reason, never the secret (`The secret reference `MRSM{file:/run/secrets/warehouse_password}` under `meerschaum:connectors:sql:warehouse:password` cannot be resolved: the file does not exist.`). Reading another setting that holds one warns once with the same text.
+
+**Masking.** A value a reference produced is a secret whatever its key: `mrsm show config`, `mrsm show connectors`, the web console, job metadata on the API and MCP, debug output and connection errors print it as `******`.
+
+**Never written back.** Every command that writes configuration (`register connectors`, `delete connectors`, `login`, `bootstrap connectors`, `bootstrap teams`, the web console, `write_config()` and `write_plugin_config()` from Python) writes the file as you wrote it plus its own change. References stay references, and nothing that came only from the environment is ever written to a file: not an `MRSM_<TYPE>_<LABEL>` connector, not a value from `MRSM_CONFIG` / `MRSM_PATCH` (or their files), not a resolved secret.
+
+**File permissions.** On Unix, when a file in the config directory holds a secret written inline (a connector's password, a key, a token, or a URI with a password) and its group or others may read it, Meerschaum warns once per process with the file and the `chmod 600` that fixes it. Files a `MRSM{file:...}` reference reads are not checked (a Docker secret is world-readable inside its container by design), and nothing is checked on Windows. Files Meerschaum creates are readable by their owner only.
+
+### With Docker secrets
+
+```yaml
+# docker-compose.yaml
+services:
+  api:
+    image: bmeares/meerschaum
+    command: start api --production
+    environment:
+      MRSM_SQL_MAIN: >-
+        {"flavor": "postgresql", "host": "db", "username": "mrsm", "database": "meerschaum",
+         "password": "MRSM{file:/run/secrets/db_password}"}
+    secrets:
+      - db_password
+secrets:
+  db_password:
+    file: ./db_password.txt
+```
+
+### With systemd credentials
+
+```ini
+# /etc/systemd/system/mrsm-job.service
+[Service]
+LoadCredential=warehouse_password:/etc/meerschaum/warehouse_password
+Environment=MRSM_SQL_WAREHOUSE={"flavor": "postgresql", "host": "db.example", "username": "reporting", "database": "warehouse", "password": "MRSM{file:${CREDENTIALS_DIRECTORY}/warehouse_password}"}
+ExecStart=/usr/local/bin/mrsm sync pipes -i sql:warehouse --loop
+```
+
+systemd expands `${CREDENTIALS_DIRECTORY}` in `Environment=` lines; the credential file is readable by the service only.
 
 !!! warning "`MRSM{}` is not `{{ Pipe() }}`"
     These are two distinct features:

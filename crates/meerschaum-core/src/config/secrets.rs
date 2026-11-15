@@ -522,6 +522,104 @@ pub fn is_secret_name(name: &str) -> bool {
     SECRET_WORDS.iter().any(|word| lowered.contains(word))
 }
 
+static INLINE_URI_PASSWORD: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"[A-Za-z][A-Za-z0-9+.\-]*://[^:/@\s?#]*:(?P<password>[^@\s]+)@")
+        .expect("valid regex")
+});
+
+/// Whether a value is a secret written inline: not empty, not only references (`MRSM{...}`)
+/// and not a `$VAR` / `<DOLLAR>VAR` placeholder for another program to fill in.
+fn is_inline_literal(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.starts_with('$') || trimmed.starts_with("<DOLLAR>") {
+        return false;
+    }
+    let without_refs = SYMLINK_RE.replace_all(trimmed, "");
+    !without_refs.trim().is_empty()
+}
+
+static SYMLINK_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"MRSM\{[^}\n]*\}").expect("valid regex"));
+
+/// The `:`-joined path of the first inline secret in a config file's value (5.1): a non-empty
+/// literal under a secret's name ([`is_secret_name`]: a connector password, a key, a token), or a
+/// URI with a password. References (`MRSM{file:...}`, `MRSM{env:...}`, other symlinks) are not
+/// inline secrets. The cosmetic `formatting` key (its icons are named `key`) is skipped.
+pub fn first_inline_secret(top_key: &str, value: &super::ConfigValue) -> Option<String> {
+    use super::ConfigValue;
+    if top_key == "formatting" {
+        return None;
+    }
+    fn walk(name: &str, value: &ConfigValue, path: &str) -> Option<String> {
+        match value {
+            ConfigValue::Str(s) => {
+                let named = is_secret_name(name) && is_inline_literal(s);
+                let in_uri = INLINE_URI_PASSWORD
+                    .captures(s)
+                    .is_some_and(|c| is_inline_literal(&c["password"]));
+                (named || in_uri).then(|| path.to_string())
+            }
+            ConfigValue::Int(_) | ConfigValue::BigInt(_) | ConfigValue::Float(_)
+                if is_secret_name(name) && !name.to_lowercase().contains("key") =>
+            {
+                // A numeric password (`password: 1234`); not `max_keys: 10`.
+                name.to_lowercase()
+                    .contains("pass")
+                    .then(|| path.to_string())
+            }
+            ConfigValue::Map(m) => m
+                .iter()
+                .find_map(|(k, v)| walk(k, v, &format!("{path}:{k}"))),
+            ConfigValue::List(items) | ConfigValue::Tuple(items) => {
+                items.iter().find_map(|v| walk(name, v, path))
+            }
+            _ => None,
+        }
+    }
+    walk(top_key, value, top_key)
+}
+
+/// On Unix, warn once per process (on stderr) when a config file that holds an inline secret is
+/// readable by its group or by others, naming the file and the `chmod` that fixes it. Files a
+/// reference reads (`MRSM{file:...}`) are never checked: a Docker secret is world-readable inside
+/// its container by design. Silent on other platforms.
+pub fn warn_if_exposed(path: &Path, top_key: &str, value: &super::ConfigValue) {
+    #[cfg(unix)]
+    {
+        if let Some(message) = exposure_warning(path, top_key, value)
+            && first_time(&format!("exposed\u{0}{}", path.display()))
+        {
+            eprintln!("{message}");
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, top_key, value);
+    }
+}
+
+/// The warning [`warn_if_exposed`] prints for a file, if any (every time it applies).
+#[cfg(unix)]
+pub fn exposure_warning(path: &Path, top_key: &str, value: &super::ConfigValue) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).ok()?.permissions().mode() & 0o777;
+    if mode & 0o077 == 0 {
+        return None;
+    }
+    let at = first_inline_secret(top_key, value)?;
+    let display = path.display();
+    Some(format!(
+        "Warning: the config file '{display}' holds a secret (at `{at}`) and is readable by \
+         {}. Run `chmod 600 '{display}'`, or move the secret into a file and refer to it with \
+         `MRSM{{file:<path>}}`.",
+        match (mode & 0o070 != 0, mode & 0o007 != 0) {
+            (true, true) => "its group and by others",
+            (true, false) => "its group",
+            _ => "others",
+        }
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

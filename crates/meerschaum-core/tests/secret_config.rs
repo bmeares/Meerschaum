@@ -630,3 +630,63 @@ fn a_stale_resolved_secret_is_never_written() {
     assert_clean(&path);
     assert!(!std::fs::read_to_string(&path).unwrap().contains("rotated"));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_readable_file_with_an_inline_secret_is_reported() {
+    use meerschaum_core::config::ConfigValue;
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("meerschaum.yaml");
+    std::fs::write(&path, "x").unwrap();
+    let inline = ConfigValue::from_value(
+        &Value::from_json_str(r#"{"connectors": {"sql": {"a": {"password": "hunter2"}}}}"#)
+            .unwrap(),
+    );
+    let referenced = ConfigValue::from_value(
+        &Value::from_json_str(
+            r#"{"connectors": {"sql": {"a": {"password": "MRSM{file:/run/secrets/pg}"}}}}"#,
+        )
+        .unwrap(),
+    );
+    let in_uri = ConfigValue::from_value(
+        &Value::from_json_str(
+            r#"{"connectors": {"sql": {"a": {"uri": "postgresql://u:p4ss@h/db"}}}}"#,
+        )
+        .unwrap(),
+    );
+    for mode in [0o644, 0o640, 0o604] {
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        let message = secrets::exposure_warning(&path, "meerschaum", &inline).unwrap();
+        assert!(
+            message.contains(&format!("chmod 600 '{}'", path.display())),
+            "{message}"
+        );
+        assert!(message.contains("connectors:sql:a:password"), "{message}");
+        assert!(!message.contains("hunter2"), "{message}");
+        assert!(secrets::exposure_warning(&path, "meerschaum", &in_uri).is_some());
+        assert!(secrets::exposure_warning(&path, "meerschaum", &referenced).is_none());
+    }
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(secrets::exposure_warning(&path, "meerschaum", &inline).is_none());
+    // The cosmetic icons named `key` are not secrets.
+    let icons =
+        ConfigValue::from_value(&Value::from_json_str(r#"{"emoji": {"key": "K"}}"#).unwrap());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(secrets::exposure_warning(&path, "formatting", &icons).is_none());
+}
+
+#[test]
+fn new_config_files_are_owner_only() {
+    let (_tmp, config, _path) = writer_root();
+    let _ = config.get(&["plugins"]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file = config.paths().config_dir.join("plugins.json");
+        if file.exists() {
+            let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+}

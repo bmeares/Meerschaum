@@ -1523,6 +1523,9 @@ impl ConfigState {
                      it with `MRSM{{}}`."
                 ));
             }
+            if directory == self.paths.config_dir {
+                secrets::warn_if_exposed(&filepath, &key, &config_key);
+            }
             let mut single = ConfigMap::new();
             single.insert(key.clone(), config_key);
             let single = if substitute {
