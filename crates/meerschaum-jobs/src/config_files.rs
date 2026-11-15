@@ -170,6 +170,42 @@ pub fn externalize(dir: &Path, env: &[(String, String)]) -> std::io::Result<JobE
     Ok(out)
 }
 
+/// The `env` property of a job (the environment an API server records for the jobs it creates:
+/// its whole environment) with `MRSM_CONFIG` / `MRSM_PATCH` moved to the job's files in `dir`
+/// (the same files a launch writes, [`externalize`]) and replaced by `MRSM_CONFIG_FILE` /
+/// `MRSM_PATCH_FILE` naming them, so `properties.json` never holds their text (5.1). The job
+/// starts the same way: a launch reads the file form and keeps the job's own file. `Ok(false)`:
+/// nothing to move. `Err`: a file could not be written; `env` is then unchanged.
+pub fn externalize_properties_env(
+    dir: &Path,
+    env: &mut meerschaum_core::value::Map,
+) -> std::io::Result<bool> {
+    use meerschaum_core::value::Value;
+    let mut moved = Vec::new();
+    for (var, file_var) in meerschaum_core::config::environment::patch_variables() {
+        let Some(Value::Str(text)) = env.get(&var) else {
+            continue;
+        };
+        if text.is_empty() {
+            continue;
+        }
+        let filename = if var.ends_with("_PATCH") {
+            PATCH_FILENAME
+        } else {
+            CONFIG_FILENAME
+        };
+        let path = dir.join(filename);
+        write_private(&path, text)?;
+        moved.push((var, file_var, path.to_string_lossy().into_owned()));
+    }
+    let changed = !moved.is_empty();
+    for (var, file_var, path) in moved {
+        env.shift_remove(&var);
+        env.insert(file_var, Value::Str(path));
+    }
+    Ok(changed)
+}
+
 /// This process's environment (variables whose name or value is not Unicode are left out).
 pub fn process_env() -> Vec<(String, String)> {
     meerschaum_core::process_env::vars()

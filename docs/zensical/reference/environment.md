@@ -415,7 +415,7 @@ systemd expands `${CREDENTIALS_DIRECTORY}` in `Environment=` lines; the credenti
 
 ### In jobs
 
-A job started from a process that holds `MRSM_CONFIG` or `MRSM_PATCH` (a [Compose](/reference/compose/) project's `config:` block, or your own patch) gets them in owner-only files in its directory (`$MRSM_ROOT_DIR/jobs/<name>/.mrsm_config.json`, or next to its `systemd` unit), named by `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`. Its environment and its unit file hold no credentials from them; the files are rewritten at every start and removed with the job. An `api:` executor's jobs run with the server's configuration, as before.
+A job started from a process that holds `MRSM_CONFIG` or `MRSM_PATCH` (a [Compose](/reference/compose/) project's `config:` block, or your own patch) gets them in owner-only files in its directory (`$MRSM_ROOT_DIR/jobs/<name>/.mrsm_config.json`, or next to its `systemd` unit), named by `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`. Its environment and its unit file hold no credentials from them; the files are rewritten at every start and removed with the job. A job an API server creates (through `/jobs`, the console's Execute box or a Pipeline run) records the server's environment in its `properties.json`: that file holds `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` instead of the patches' text and is readable by its owner only, since the rest of that environment (connector variables, other programs' credentials) stays in it. A job created by 5.0 gets the same treatment the next time its properties are written. An `api:` executor's jobs run with the server's configuration, as before.
 
 ### Processes that are not Meerschaum
 

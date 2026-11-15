@@ -193,7 +193,12 @@ impl ConfigState {
         if let Some(parent) = sub_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        std::fs::write(sub_path, format!("{header}{text}")).map_err(|e| e.to_string())
+        let owner_only = keys.first() == Some(&"stack")
+            && keys.len() == 2
+            && keys[1].ends_with(".yaml")
+            && compose_holds_credentials(&value.to_value());
+        write_stack_file(sub_path, &format!("{header}{text}"), owner_only)
+            .map_err(|e| e.to_string())
     }
 
     /// `_write_initdb()`: the PostgreSQL extensions script, created only when absent.
@@ -427,5 +432,141 @@ impl ConfigState {
         )?;
         self.write_initdb()?;
         self.write_grafana_dashboards()
+    }
+}
+
+/// Whether a stack compose file's config holds a credential (5.1): an `MRSM_CONFIG` /
+/// `MRSM_PATCH` in a service's environment, a variable named like a secret (`*_PASSWORD`,
+/// `*_TOKEN`, `*_SECRET`, ...) with an inline value, or a URI with a password in one. A Docker
+/// Compose placeholder (`$NAME`, `<DOLLAR>NAME`) and a `*_FILE` path are not credentials. Such a
+/// file is written owner-only ([`write_stack_file`]).
+pub fn compose_holds_credentials(compose: &Value) -> bool {
+    let names = &crate::static_config::static_config().environment;
+    let secret = |name: &str, value: &str| -> bool {
+        let value = value.trim();
+        if value.is_empty() || value.starts_with('$') || value.starts_with("<DOLLAR>") {
+            return false;
+        }
+        if name == names.config || name == names.patch {
+            return true;
+        }
+        let upper = name.to_ascii_uppercase();
+        (crate::debug::is_secret_key(name) && !upper.ends_with("_FILE"))
+            || crate::debug::redact_uris(value) != value
+    };
+    let Some(services) = compose.get("services").and_then(Value::as_map) else {
+        return false;
+    };
+    services
+        .values()
+        .any(|service| match service.get("environment") {
+            Some(Value::Map(map)) => map
+                .iter()
+                .any(|(k, v)| !v.is_null() && secret(k, &v.py_str())),
+            Some(Value::List(items)) => items.iter().any(|item| match item {
+                Value::Str(s) => s.split_once('=').is_some_and(|(k, v)| secret(k, v)),
+                _ => false,
+            }),
+            _ => false,
+        })
+}
+
+/// Write a stack file: owner-only (`0600`, created so before a byte is written, then renamed into
+/// place, which also tightens an existing file) when `owner_only`, else as it is.
+pub fn write_stack_file(path: &Path, text: &str, owner_only: bool) -> std::io::Result<()> {
+    if !owner_only {
+        return std::fs::write(path, text);
+    }
+    use std::io::Write;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temporary = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+
+    #[test]
+    fn a_compose_file_with_credentials_is_recognized() {
+        for (text, holds) in [
+            (
+                r#"{"services": {"api": {"environment": {"MRSM_CONFIG": "{}"}}}}"#,
+                true,
+            ),
+            (
+                r#"{"services": {"g": {"environment": {"GF_SECURITY_ADMIN_PASSWORD": "x"}}}}"#,
+                true,
+            ),
+            (
+                r#"{"services": {"g": {"environment": ["DB_URL=postgresql://u:p@h/d"]}}}"#,
+                true,
+            ),
+            (
+                r#"{"services": {"db": {"environment": {"POSTGRES_PASSWORD": "<DOLLAR>P"}}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"db": {"environment": ["POSTGRES_PASSWORD=$P"]}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"g": {"environment": {"GF_SECURITY_ADMIN_PASSWORD__FILE": "/f"}}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"api": {"environment": {"MRSM_CONFIG_FILE": "/f", "A": "1"}}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"v": {"environment": {"VALKEY_RDB_POLICY_DISABLED": "no"}}}}"#,
+                false,
+            ),
+        ] {
+            let value = Value::from_json_str(text).unwrap();
+            assert_eq!(compose_holds_credentials(&value), holds, "{text}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_owner_only_write_tightens_an_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("docker-compose.yaml");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_stack_file(&path, "new", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        write_stack_file(&path, "plain", false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "plain");
     }
 }

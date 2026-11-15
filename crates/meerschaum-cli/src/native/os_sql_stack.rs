@@ -1491,7 +1491,16 @@ fn sync_yaml_config(
     if let Some(parent) = sub_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(sub_path, format!("{header}{text}")).map_err(|e| e.to_string())
+    // 5.1: a compose file that still holds a credential (an image that keeps the environment
+    // form, a service of the user's own) is readable by its owner only.
+    let owner_only = keys == ["stack", "docker-compose.yaml"]
+        && meerschaum_core::config::sync::compose_holds_credentials(&value);
+    meerschaum_core::config::sync::write_stack_file(
+        sub_path,
+        &format!("{header}{text}"),
+        owner_only,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// `sync_files(['stack'])` (`config/_sync.py`): rewrite the compose, Grafana and init files from
@@ -1569,7 +1578,10 @@ pub fn write_stack(rt: &mut Runtime<'_>) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+        let owner_only = keys == ["stack", "docker-compose.yaml"]
+            && meerschaum_core::config::sync::compose_holds_credentials(&value);
+        meerschaum_core::config::sync::write_stack_file(&path, &text, owner_only)
+            .map_err(|e| e.to_string())?;
     }
     sync_stack_files(rt)
 }
@@ -2121,9 +2133,21 @@ docker-compose.yaml:
     api:
       image: bmeares/meerschaum:5.0.2-full
 "#;
+        let compose_path = dir.path().join("stack").join("docker-compose.yaml");
+        #[cfg(unix)]
+        let mode = |p: &std::path::Path| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+        };
+        // The hardened file holds paths: no reason to hide it.
+        #[cfg(unix)]
+        assert_ne!(mode(&compose_path), 0o600);
         let (compose, secrets) =
             stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], Some(old));
         assert!(compose.contains("MRSM_CONFIG: "), "{compose}");
+        // 5.1: the environment form holds the credentials: the file is owner-only.
+        #[cfg(unix)]
+        assert_eq!(mode(&compose_path), 0o600);
         assert!(!compose.contains("MRSM_CONFIG_FILE"), "{compose}");
         assert!(!secrets.join("api").join("mrsm_config.json").exists());
         // `stack:api_config_files: true` is the way for an image the rule cannot vouch for.

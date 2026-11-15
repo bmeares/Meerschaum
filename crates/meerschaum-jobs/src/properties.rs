@@ -64,9 +64,20 @@ fn write_properties_with(
     if !create_dir && !dir.is_dir() {
         return SuccessTuple::fail("The job's directory does not exist.");
     }
+    // 5.1: a job with an `env` property (an API server records its whole environment for the
+    // jobs it creates) gets `MRSM_CONFIG` / `MRSM_PATCH` as owner-only files in its directory
+    // (`config_files`), and the properties file is owner-only too: the rest of that environment
+    // (connector variables, other programs' credentials) stays in it.
+    let private = matches!(props.get("env"), Some(Value::Map(_)));
     (|| -> std::io::Result<()> {
         if create_dir {
             fs::create_dir_all(dir)?;
+        }
+        #[cfg(not(unix))]
+        let _ = private;
+        let mut props = props.clone();
+        if let Some(Value::Map(env)) = props.get_mut("env") {
+            let _ = crate::config_files::externalize_properties_env(dir, env);
         }
         let staged = dir.join(format!(
             ".properties-{}-{}.tmp",
@@ -80,6 +91,13 @@ fn write_properties_with(
         };
         // Exclusive creation ensures a failed writer never truncates or removes another
         // writer's staging file. Nothing below recreates a directory deleted during the write.
+        #[cfg(unix)]
+        let permissions = if private {
+            use std::os::unix::fs::PermissionsExt;
+            Some(fs::Permissions::from_mode(0o600))
+        } else {
+            permissions
+        };
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -420,5 +438,52 @@ mod tests {
                 assert!(!job_dir.exists());
             }
         }
+    }
+
+    /// 5.1: an API-created job's `env` (the server's environment) never holds `MRSM_CONFIG` /
+    /// `MRSM_PATCH` in `properties.json`: they go to the job's owner-only files, and the file
+    /// itself is owner-only (an existing one is tightened).
+    #[cfg(unix)]
+    #[test]
+    fn an_env_property_keeps_no_patch_text_and_the_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let job = dir.path().join("jobs").join("x");
+        let path = job.join("properties.json");
+        fs::create_dir_all(&job).unwrap();
+        fs::write(&path, "{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let props = map(
+            r#"{"env": {"MRSM_PATCH": "{\"x\": {\"password\": \"p-s3cret\"}}",
+                "MRSM_CONFIG": "{}", "MRSM_SQL_X": "sqlite:////x.db", "PATH": "/bin"},
+                "sysargs": ["show", "version"]}"#,
+        );
+        assert!(write_properties(&path, &props).success);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("p-s3cret"), "{text}");
+        let written: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let env = &written["env"];
+        assert!(
+            env.get("MRSM_PATCH").is_none() && env.get("MRSM_CONFIG").is_none(),
+            "{env}"
+        );
+        let patch_file = env["MRSM_PATCH_FILE"].as_str().unwrap();
+        assert_eq!(Path::new(patch_file), job.join(".mrsm_patch.json"));
+        assert!(fs::read_to_string(patch_file).unwrap().contains("p-s3cret"));
+        assert_eq!(
+            env["MRSM_CONFIG_FILE"].as_str().unwrap(),
+            job.join(".mrsm_config.json").to_str().unwrap()
+        );
+        assert_eq!(env["MRSM_SQL_X"], "sqlite:////x.db");
+        assert_eq!(env["PATH"], "/bin");
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(Path::new(patch_file)), 0o600);
+        // Without an `env` property, the mode is kept.
+        let plain = job.join("plain.json");
+        fs::write(&plain, "{}").unwrap();
+        fs::set_permissions(&plain, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(write_properties(&plain, &map(r#"{"sysargs": []}"#)).success);
+        assert_eq!(mode(&plain), 0o644);
     }
 }
