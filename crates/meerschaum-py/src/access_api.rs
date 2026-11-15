@@ -634,6 +634,44 @@ pub fn access_team_grants<'py>(
     grants_to_py(py, &TeamGrants::of(&user_teams, &records, primary))
 }
 
+/// `_core.access_team_scope(user_teams, teams, primary=None, connectors=None, object_team=None,
+/// is_admin=False)` (5.1): the isolated team a user acts for when server-side Python code runs on
+/// their behalf (`meerschaum_core::team_scope::acting_team`), as `{team, team_id, connectors,
+/// plugins, instance}`, or `None` for the open view. `connectors` is the server's
+/// `meerschaum:connectors` section (the connectors reserved for the team).
+#[pyfunction]
+#[pyo3(signature = (user_teams, teams, primary=None, connectors=None, object_team=None, is_admin=false))]
+pub fn access_team_scope<'py>(
+    py: Python<'py>,
+    user_teams: &Bound<'py, PyAny>,
+    teams: &Bound<'py, PyAny>,
+    primary: Option<&str>,
+    connectors: Option<&Bound<'py, PyAny>>,
+    object_team: Option<&str>,
+    is_admin: bool,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let user_teams = teams_of(Some(user_teams).filter(|t| !t.is_none()))?;
+    let mut records = Vec::new();
+    for item in teams.try_iter()? {
+        records.push(team_of(&item?)?);
+    }
+    let Some(team) = meerschaum_core::team_scope::acting_team(
+        is_admin,
+        &user_teams,
+        &records,
+        primary,
+        object_team,
+    ) else {
+        return Ok(None);
+    };
+    let connectors = match connectors.filter(|c| !c.is_none()) {
+        Some(c) => py_to_core(c)?.to_map(),
+        None => Map::new(),
+    };
+    let scope = meerschaum_core::team_scope::TeamScope::of(&team, &connectors);
+    Ok(Some(core_to_py(py, &scope.to_value())?))
+}
+
 /// `_core.access_isolated_withheld()`: the permissions a walled-off principal never holds.
 #[pyfunction]
 pub fn access_isolated_withheld() -> Vec<&'static str> {
@@ -1182,6 +1220,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_team_grants, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_name_connector, m)?)?;
     m.add_function(wrap_pyfunction!(access_isolated_withheld, m)?)?;
+    m.add_function(wrap_pyfunction!(access_team_scope, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_use_plugin, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_write_plugins, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_see_team, m)?)?;

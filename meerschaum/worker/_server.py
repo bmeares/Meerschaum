@@ -223,6 +223,8 @@ def serve(address: str) -> int:
     import meerschaum as mrsm
     from meerschaum.worker import _ops
     from meerschaum.worker._ops import HANDLERS, error_message
+    from meerschaum._internal import team_scope
+    team_scope.install_thread_propagation()
     from meerschaum.worker._msgpack import USING_FALLBACK
     from meerschaum.utils.venv import ensure_default_venvs
 
@@ -269,8 +271,12 @@ def serve(address: str) -> int:
             conn.send({'t': 'result', 'id': call_id, 'value': True})
             break
         allow_protected = bool(message.get('allow_protected', False))
+        ### A call the host makes for an isolated team (5.1): plugin code may look up only the
+        ### team's connectors. Only the host sends `team_scope`.
+        scope_token = None
         try:
             try:
+                scope_token = team_scope._enter(args.pop('team_scope', None))
                 interruptible = True
                 _ops.CALL_DEBUG = bool(message.get('debug', False))
                 if allow_protected:
@@ -284,6 +290,7 @@ def serve(address: str) -> int:
             finally:
                 interruptible = False
                 _ops.CALL_DEBUG = False
+                team_scope._exit(scope_token)
                 if allow_protected:
                     _allow_protected(False)
             conn.send({'t': 'result', 'id': call_id, 'value': value}, out_frames)

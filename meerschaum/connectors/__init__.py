@@ -148,6 +148,10 @@ def get_connector(
     ### Only fall back to 'main' if the type is provided by the label is omitted.
     label = label if label is not None else STATIC_CONFIG['connectors']['default_label']
 
+    ### Work the API server runs for an isolated team may use only that team's connectors (5.1).
+    from meerschaum._internal.team_scope import check_connector
+    check_connector(type, label)
+
     ### A type declared by a native (Rust) plugin is registered on first use.
     if type not in connectors and _load_plugins and isinstance(type, str):
         _load_native_connector_type(type)

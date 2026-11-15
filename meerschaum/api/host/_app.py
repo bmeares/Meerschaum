@@ -156,6 +156,12 @@ def build_app(load_plugins: bool = True, debug: bool = False):
                 host_dash.mount_page_contract_routes(app, debug=debug)
                 host_dash.mount_native_page_routes(app)
 
+    ### The requests of an isolated team's members look up only the team's connectors (5.1).
+    from meerschaum._internal.team_scope import install_thread_propagation
+    from meerschaum.api.host._team_scope import TeamScopeMiddleware
+    install_thread_propagation()
+    app.add_middleware(TeamScopeMiddleware)
+
     _built['app'] = app
     return app
 
