@@ -383,6 +383,8 @@ fn prepare_writes_the_spec_and_points_the_environment_at_it() {
             .is_none()
     );
     assert!(!job_spec.exists());
+    // The team's temporary directory is under the system's: leave nothing behind.
+    let _ = std::fs::remove_dir_all(&prepared.tmp_dir);
 }
 
 // --- Real sandboxed processes (Linux with Landlock) ---------------------------------------------

@@ -1261,4 +1261,8 @@ fn a_team_jobs_unit_holds_an_allowlisted_environment() {
     let mut names: Vec<&String> = env.keys().collect();
     names.sort();
     assert_eq!(names, vec!["LANG", "TPR_PASSED"], "{recorded:?}");
+    // 5.1: the team's temporary directory is under the system's: leave nothing behind.
+    if let Ok(tmp) = meerschaum_core::team_scope::sandbox::team_tmp_dir(&root, "id-w") {
+        let _ = std::fs::remove_dir_all(tmp);
+    }
 }

@@ -224,6 +224,10 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     let retired = session.retire_teams(|_, _| false);
     assert_eq!(retired, vec!["id-wetlands".to_string()]);
     assert!(session.team_pools(&config).keys().is_empty());
+    // 5.1: the team's temporary directory is under the system's: leave nothing behind.
+    if let Ok(tmp) = meerschaum_core::team_scope::sandbox::team_tmp_dir(root.path(), &scope.key()) {
+        let _ = std::fs::remove_dir_all(tmp);
+    }
 
     // The server's own session is unchanged: every connector.
     let open = probe(&session, &config);

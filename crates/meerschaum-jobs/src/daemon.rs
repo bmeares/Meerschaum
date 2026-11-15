@@ -1435,5 +1435,9 @@ mod team_launch_tests {
         let mut names: Vec<&String> = recorded.keys().collect();
         names.sort();
         assert_eq!(names, vec!["LANG", "MRSM_ROOT_DIR", "TPR_PASSED"]);
+        // The team's temporary directory is under the system's: leave nothing behind.
+        if let Ok(tmp) = meerschaum_core::team_scope::sandbox::team_tmp_dir(&root, "id-w") {
+            let _ = std::fs::remove_dir_all(tmp);
+        }
     }
 }

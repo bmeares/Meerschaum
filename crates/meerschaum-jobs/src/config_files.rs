@@ -597,6 +597,12 @@ mod tests {
             recorded.keys().collect::<Vec<_>>(),
             vec!["LANG", "TPR_PASSED", "MRSM_DAEMON_ID"]
         );
+        // 5.1: the team's temporary directory is under the system's: leave nothing behind.
+        if let Ok(tmp) =
+            meerschaum_core::team_scope::sandbox::team_tmp_dir(root.path(), &scope.key())
+        {
+            let _ = std::fs::remove_dir_all(tmp);
+        }
     }
 
     #[test]

@@ -232,6 +232,9 @@ def test_a_team_worker_is_confined_to_its_sandbox(team_root, tmp_path):
         timeout=180,
         cwd=env['TMPDIR'],
     )
+    ### The team's temporary directory is under the system's: leave nothing behind.
+    import shutil
+    shutil.rmtree(env['TMPDIR'], ignore_errors=True)
     assert result.returncode == 0, result.stderr[-6000:]
     line = [line for line in result.stdout.splitlines() if line.startswith('JSON:')][-1]
     out = json.loads(line[len('JSON:'):])
