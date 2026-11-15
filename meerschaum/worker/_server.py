@@ -228,14 +228,20 @@ def serve(address: str) -> int:
     from meerschaum.worker._msgpack import USING_FALLBACK
     from meerschaum.utils.venv import ensure_default_venvs
 
-    conn.send({
+    hello = {
         't': 'hello',
         'protocol': PROTOCOL_VERSION,
         'pid': os.getpid(),
         'python': platform.python_version(),
         'meerschaum': mrsm.__version__,
         'msgpack': ('stdlib' if USING_FALLBACK else 'msgpack'),
-    })
+        'capabilities': [team_scope.CAPABILITY],
+    }
+    ### 5.1: a worker started for an isolated team proves it loaded the team's configuration.
+    report = team_scope.hello_report()
+    if report is not None:
+        hello['team_scope'] = report
+    conn.send(hello)
 
     reader = threading.Thread(target=conn.reader, name='mrsm-worker-reader', daemon=True)
     reader.start()

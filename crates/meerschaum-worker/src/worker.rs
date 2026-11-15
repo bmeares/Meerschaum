@@ -57,6 +57,10 @@ pub struct WorkerOptions {
     pub quiet: bool,
     /// The defaults used to rebuild pipes sent back by the worker.
     pub pipe_defaults: PipeDefaults,
+    /// What a worker must prove in its handshake before it receives a call (5.1: an isolated
+    /// team's worker; [`TeamExpectation::from_process_env`] by default, so a team job's workers
+    /// are checked too). `None`: nothing (the shared pool).
+    pub team: Option<TeamExpectation>,
 }
 
 /// Whether a start already had the same-major warning enabled (one per program).
@@ -222,6 +226,7 @@ impl Default for WorkerOptions {
             quiet: false,
             inherit_stdin: false,
             pipe_defaults: PipeDefaults::default(),
+            team: TeamExpectation::from_process_env(),
         }
     }
 }
@@ -239,6 +244,150 @@ pub struct Hello {
     pub meerschaum: String,
     /// The MessagePack implementation (`msgpack` or `stdlib`).
     pub msgpack: String,
+    /// What the worker can do (5.1: [`TEAM_SCOPE_CAPABILITY`]); empty for an older package.
+    pub capabilities: Vec<String>,
+    /// The proof a worker started for an isolated team gives that it loaded the team's
+    /// configuration (5.1); `None` otherwise or from an older package.
+    pub team_scope: Option<TeamReport>,
+}
+
+/// The capability a worker that can run an isolated team's code reports in its `hello` (5.1).
+pub const TEAM_SCOPE_CAPABILITY: &str = "team_scope";
+/// The variable naming the fingerprint of an isolated team's configuration in its processes.
+pub const TEAM_FINGERPRINT_VAR: &str = "MRSM_TEAM_FINGERPRINT";
+
+/// What a worker started for an isolated team reports in its `hello` (5.1), read back from the
+/// configuration it loaded.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TeamReport {
+    /// The team it was started for (`MRSM_TEAM_SCOPE`).
+    pub team: String,
+    /// The fingerprint of the configuration it was given (`MRSM_TEAM_FINGERPRINT`).
+    pub fingerprint: String,
+    /// The configuration file it read (`MRSM_CONFIG_FILE`).
+    pub config_file: String,
+    /// The connectors (`type:label`) its loaded configuration defines.
+    pub connectors: Vec<String>,
+}
+
+/// What a worker must prove before it serves an isolated team (5.1): a worker that does not
+/// report [`TEAM_SCOPE_CAPABILITY`] (an older `meerschaum` package, which would ignore the team's
+/// configuration and load the default connectors), reports another team or configuration, or
+/// defines a connector outside the team's set is stopped before it receives any call.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TeamExpectation {
+    /// The team.
+    pub team: String,
+    /// The fingerprint of the team's configuration (empty: not checked).
+    pub fingerprint: String,
+    /// The connectors the team may have.
+    pub connectors: std::collections::BTreeSet<String>,
+}
+
+impl TeamExpectation {
+    /// The expectation of a process started for an isolated team (a team job's `mrsm`: its
+    /// `MRSM_TEAM_SCOPE` is set): its workers must load the same team's configuration and define
+    /// no connector its own configuration does not. `None` in any other process.
+    pub fn from_process_env() -> Option<TeamExpectation> {
+        static EXPECTED: std::sync::OnceLock<Option<TeamExpectation>> = std::sync::OnceLock::new();
+        EXPECTED
+            .get_or_init(|| {
+                let team = std::env::var(meerschaum_core::team_scope::TEAM_SCOPE_VAR)
+                    .ok()
+                    .filter(|t| !t.trim().is_empty())?;
+                let mut options = meerschaum_core::config::ConfigOptions::from_process();
+                options.allow_writes = false;
+                let connectors = meerschaum_core::Config::new(options)
+                    .ok()
+                    .and_then(|config| config.get(&["meerschaum", "connectors"]))
+                    .map(|v| defined_connectors(&v.to_map()))
+                    .unwrap_or_default();
+                Some(TeamExpectation {
+                    team,
+                    fingerprint: std::env::var(TEAM_FINGERPRINT_VAR).unwrap_or_default(),
+                    connectors,
+                })
+            })
+            .clone()
+    }
+
+    /// `Err` (why, and the fix) unless `hello` proves the worker loaded this team's configuration.
+    pub fn check(&self, hello: &Hello, python: &Path) -> Result<(), String> {
+        let version = meerschaum_core::python_guard::expected_version();
+        let Some(report) = &hello.team_scope else {
+            if !hello
+                .capabilities
+                .iter()
+                .any(|c| c == TEAM_SCOPE_CAPABILITY)
+            {
+                return Err(format!(
+                    "The Python worker for the isolated team '{team}' was stopped before running \
+                     any of the team's code: its `meerschaum` package ({found}, at `{python}`) \
+                     predates team-scoped workers and would not apply the team's configuration (it \
+                     would load the default connectors). Install `meerschaum>={version}` in that \
+                     interpreter (`{python} -m pip install 'meerschaum=={version}'`) or set \
+                     MRSM_PYTHON to an interpreter that has it.",
+                    team = self.team,
+                    found = if hello.meerschaum.is_empty() {
+                        "an unknown version"
+                    } else {
+                        hello.meerschaum.as_str()
+                    },
+                    python = python.display(),
+                ));
+            }
+            return Err(format!(
+                "The Python worker for the isolated team '{}' was stopped before running any of \
+                 the team's code: it did not report the team's configuration (was it started \
+                 without `MRSM_TEAM_SCOPE`?).",
+                self.team
+            ));
+        };
+        let refuse = |why: String| {
+            Err(format!(
+                "The Python worker for the isolated team '{}' was stopped before running any of \
+                 the team's code: {why}.",
+                self.team
+            ))
+        };
+        if report.team != self.team {
+            return refuse(format!("it loaded the scope of team '{}'", report.team));
+        }
+        if !self.fingerprint.is_empty() && report.fingerprint != self.fingerprint {
+            return refuse("it loaded another version of the team's configuration".into());
+        }
+        let outside: Vec<&String> = report
+            .connectors
+            .iter()
+            .filter(|k| !self.connectors.contains(*k))
+            .collect();
+        if !outside.is_empty() {
+            return refuse(format!(
+                "its configuration defines connectors the team was not given ({})",
+                outside
+                    .iter()
+                    .map(|k| k.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The connectors (`type:label`, not `default`) a `meerschaum:connectors` map defines.
+pub fn defined_connectors(connectors: &meerschaum_core::Map) -> std::collections::BTreeSet<String> {
+    connectors
+        .iter()
+        .flat_map(|(typ, labels)| {
+            labels
+                .to_map()
+                .into_iter()
+                .filter(|(label, attrs)| label != "default" && attrs.truthy())
+                .map(|(label, _)| format!("{typ}:{label}"))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Options for one call.
@@ -317,12 +466,46 @@ fn hello_from(msg: &Msg) -> WorkerResult<Hello> {
             got: protocol,
         });
     }
+    let strings = |v: Option<&Wire>| -> Vec<String> {
+        match v {
+            Some(Wire::Array(items)) => items
+                .iter()
+                .filter_map(|i| i.as_str().map(str::to_string))
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    let team_scope = match msg.get("team_scope") {
+        Some(Wire::Map(entries)) => {
+            let field = |name: &str| {
+                entries
+                    .iter()
+                    .find(|(k, _)| k.as_str() == Some(name))
+                    .map(|(_, v)| v)
+            };
+            let text = |name: &str| {
+                field(name)
+                    .and_then(Wire::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            Some(TeamReport {
+                team: text("team"),
+                fingerprint: text("fingerprint"),
+                config_file: text("config_file"),
+                connectors: strings(field("connectors")),
+            })
+        }
+        _ => None,
+    };
     Ok(Hello {
         protocol,
         pid: msg.u64("pid").unwrap_or(0) as u32,
         python: msg.str("python").unwrap_or_default().to_string(),
         meerschaum: msg.str("meerschaum").unwrap_or_default().to_string(),
         msgpack: msg.str("msgpack").unwrap_or_default().to_string(),
+        capabilities: strings(msg.get("capabilities")),
+        team_scope,
     })
 }
 
@@ -675,6 +858,15 @@ impl Worker {
             Ok(Err(e)) => Err(WorkerError::Handshake(e.to_string())),
             Err(_) => Err(silent("connected but sent no `hello`")),
         };
+        // 5.1: an isolated team's worker proves it loaded the team's configuration before it
+        // receives anything; one that cannot (an older package) is stopped.
+        let hello = hello.and_then(|h| match &opts.team {
+            Some(expected) => expected
+                .check(&h, &opts.python)
+                .map(|()| h)
+                .map_err(WorkerError::Refused),
+            None => Ok(h),
+        });
         let hello = match hello {
             Ok(h) => h,
             Err(e) => {

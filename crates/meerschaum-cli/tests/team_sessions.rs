@@ -36,6 +36,34 @@ def tpr_probe(action=None, **kwargs):
     })
 "#;
 
+/// `Ok` when `python`'s `meerschaum` can run an isolated team's code (it reports the
+/// `team_scope` capability); else why not.
+fn team_capable(python: &Path) -> Result<(), String> {
+    let output = std::process::Command::new(python)
+        .args([
+            "-c",
+            "import meerschaum\n\
+             try:\n    from meerschaum._internal.team_scope import CAPABILITY\n\
+             except Exception:\n    CAPABILITY = ''\n\
+             print(meerschaum.__version__, CAPABILITY)",
+        ])
+        .current_dir(std::env::temp_dir())
+        .output()
+        .map_err(|e| format!("`{}` could not run: {e}", python.display()))?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut words = text.split_whitespace();
+    let version = words.next().unwrap_or("unknown").to_string();
+    if words.next() != Some("team_scope") {
+        return Err(format!(
+            "the `meerschaum` package of `{}` is {version}, older than this workspace ({}): it \
+             cannot run team-scoped workers.",
+            python.display(),
+            env!("CARGO_PKG_VERSION"),
+        ));
+    }
+    Ok(())
+}
+
 fn root_with_teams(root: &Path, plugins: &Path) -> Config {
     let config_dir = root.join("config");
     std::fs::create_dir_all(&config_dir).unwrap();
@@ -85,6 +113,13 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
         eprintln!("Skipping: no Python with meerschaum.");
         return;
     };
+    // Team-scoped workers need the Python package of this release (an older one is refused:
+    // `meerschaum-worker`'s `team_handshake` tests); the same behavior is covered where the
+    // extension is built by `tests/test_team_workers.py`.
+    if let Err(reason) = team_capable(&python) {
+        eprintln!("Skipping: {reason}");
+        return;
+    }
     let root = tempfile::tempdir().unwrap();
     let plugins = tempfile::tempdir().unwrap();
     let config = root_with_teams(root.path(), plugins.path());

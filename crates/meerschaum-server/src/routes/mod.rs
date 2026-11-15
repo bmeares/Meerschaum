@@ -184,6 +184,10 @@ async fn fallback(State(state): State<AppState>, req: Request) -> Response {
         && host.is_active()
         && is_proxyable(&state.config, req.uri().path())
     {
+        // 5.1: a host that would serve an isolated team's request without its check does not.
+        if let Some(refused) = crate::access::outdated_host_refusal(&state, req.headers()).await {
+            return refused;
+        }
         return host.forward(req).await;
     }
     let mut resp = ApiError::not_found().into_response();

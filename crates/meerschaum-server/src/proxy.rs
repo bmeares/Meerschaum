@@ -137,6 +137,9 @@ pub struct HostProxy {
     console: Arc<std::sync::Mutex<ConsoleStatus>>,
     /// Whether the unavailable console was already reported in the log.
     warned: Arc<AtomicBool>,
+    /// Whether the host applies the lookup check to isolated teams' requests (5.1, its status
+    /// reports the `team_scope` capability), per host process (keyed by its start count).
+    team_guard: Arc<std::sync::Mutex<Option<(usize, bool)>>>,
     /// `api:limits:proxy_bytes`: the largest forwarded request body (`None`: no limit).
     body_limit: Option<usize>,
     /// `api:host:response_seconds`: the longest wait for the host's response headers.
@@ -269,6 +272,7 @@ impl HostProxy {
             supervisor: None,
             console: Arc::default(),
             warned: Arc::default(),
+            team_guard: Arc::default(),
             body_limit: Some(crate::config::DEFAULT_PROXY_BYTES),
             response_timeout: Some(Duration::from_secs(
                 crate::config::DEFAULT_HOST_RESPONSE_SECONDS,
@@ -382,6 +386,44 @@ impl HostProxy {
         }
         self.set_console_status(status.clone());
         status
+    }
+
+    /// Whether the current host process applies the lookup check to isolated teams' requests
+    /// (5.1): its status reports the `team_scope` capability. `Some(false)` for a host whose
+    /// `meerschaum` package predates it; `None` while the host does not answer (not asked again
+    /// until it does).
+    pub async fn guards_teams(&self, secret: &[u8]) -> Option<bool> {
+        let starts = self.supervisor.as_ref().map_or(0, |s| s.starts());
+        if let Some((at, known)) = *self
+            .team_guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            && at == starts
+        {
+            return Some(known);
+        }
+        let status = self.internal_get(STATUS_PATH, secret).await?;
+        let guards = status
+            .get("capabilities")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|caps| caps.iter().any(|c| c.as_str() == Some("team_scope")));
+        if !guards {
+            tracing::warn!(
+                "The Python API host's `meerschaum` package ({}) predates the lookup check for \
+                 isolated teams: their requests to plugin routes and pages are refused until it \
+                 is {} or newer.",
+                status
+                    .get("version")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("an unknown version"),
+                meerschaum_core::python_guard::expected_version(),
+            );
+        }
+        *self
+            .team_guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((starts, guards));
+        Some(guards)
     }
 
     /// The console status, asking the host first when it was not asked yet.

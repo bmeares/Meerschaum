@@ -282,9 +282,11 @@ pub fn externalize_team(
     scope: &meerschaum_core::team_scope::TeamScope,
 ) -> std::io::Result<JobEnvironment> {
     use meerschaum_core::team_scope::{
-        JOB_CONFIG_DIR, Passthrough, ScopeFiles, create_private_dir, team_config, team_env,
+        JOB_CONFIG_DIR, Passthrough, ScopeFiles, create_private_dir, fingerprint, team_config,
+        team_env,
     };
     let team = team_config(config, scope);
+    let fingerprint = fingerprint(scope, &team);
     let files = ScopeFiles {
         dir: dir.to_path_buf(),
         config_dir: dir.join(JOB_CONFIG_DIR),
@@ -299,7 +301,7 @@ pub fn externalize_team(
     let passthrough = Passthrough::from_config(config);
     passthrough.warn_refused();
     Ok(JobEnvironment {
-        set: team_env(launching, job, &files, scope, &passthrough),
+        set: team_env(launching, job, &files, scope, &fingerprint, &passthrough),
         remove: Vec::new(),
         clear: true,
     })

@@ -643,6 +643,14 @@ pub fn read_scope_record(root: &Path, key: &str) -> Option<TeamScope> {
     serde_json::from_str(&text).ok()
 }
 
+/// Whether an isolated team is recorded under `root` (the index holds isolated teams only).
+pub fn isolated_teams_recorded(root: &Path) -> bool {
+    std::fs::read_to_string(root.join(SCOPES_DIR).join(INDEX_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str::<BTreeMap<String, String>>(&text).ok())
+        .is_some_and(|index| !index.is_empty())
+}
+
 /// The scope key recorded under `root` for the team named `team` (any case).
 pub fn scope_key_of(root: &Path, team: &str) -> Option<String> {
     let text = std::fs::read_to_string(root.join(SCOPES_DIR).join(INDEX_FILE)).ok()?;
@@ -676,8 +684,8 @@ pub fn connector_variables(
 
 mod environment;
 pub use environment::{
-    JOB_NAMES, MEERSCHAUM_NAMES, PASSTHROUGH_KEY, Passthrough, SYSTEM_NAMES, is_allowed,
-    is_job_name, is_refused, may_record, team_env,
+    FINGERPRINT_VAR, JOB_NAMES, MEERSCHAUM_NAMES, PASSTHROUGH_KEY, Passthrough, SYSTEM_NAMES,
+    is_allowed, is_job_name, is_refused, may_record, team_env,
 };
 
 #[cfg(test)]

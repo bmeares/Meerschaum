@@ -15,7 +15,8 @@
 //! - the names an administrator lists under `system.engine.python_team_env_passthrough`
 //!   ([`PASSTHROUGH_KEY`]), except any `MRSM_*` name that is not allowed above (configuration,
 //!   patches and connector variables), which is refused with a warning ([`Passthrough`]);
-//! - the team's config directory, configuration file and name (set, never inherited).
+//! - the team's config directory, configuration file, name and configuration fingerprint (set,
+//!   never inherited).
 //!
 //! Everything else the server holds (cloud credentials, tokens, its own settings) stays out.
 
@@ -160,6 +161,10 @@ pub const JOB_NAMES: &[&str] = &[
     "MRSM__COMPOSE_ROOT",
 ];
 
+/// The fingerprint of the team's configuration ([`super::fingerprint`]) in its processes: their
+/// Python workers echo it in their handshake, which proves they loaded that configuration.
+pub const FINGERPRINT_VAR: &str = "MRSM_TEAM_FINGERPRINT";
+
 /// Variable names compare without case on Windows.
 fn same_name(a: &str, b: &str) -> bool {
     if cfg!(windows) {
@@ -268,12 +273,14 @@ impl Passthrough {
 /// The environment of a team's process: from `launching` (the launching process's), the allowed
 /// variables ([`is_allowed`]) and the passed-through ones; from `job` (a job's own settings, applied
 /// after), those and the job's context ([`is_job_name`]); then the team's config directory,
-/// configuration file and name. The process must start from an empty environment.
+/// configuration file, name and configuration `fingerprint` ([`FINGERPRINT_VAR`]). The process
+/// must start from an empty environment.
 pub fn team_env(
     launching: &[(String, String)],
     job: &[(String, String)],
     files: &ScopeFiles,
     scope: &TeamScope,
+    fingerprint: &str,
     passthrough: &Passthrough,
 ) -> Vec<(String, String)> {
     let config_file_var = &crate::static_config::static_config()
@@ -297,6 +304,8 @@ pub fn team_env(
     put(CONFIG_DIR_VAR, &files.config_dir.to_string_lossy());
     put(config_file_var, &files.config_file.to_string_lossy());
     put(TEAM_SCOPE_VAR, &scope.team);
+    // What the team's workers echo back in their handshake (`meerschaum_worker`'s check).
+    put(FINGERPRINT_VAR, fingerprint);
     out
 }
 

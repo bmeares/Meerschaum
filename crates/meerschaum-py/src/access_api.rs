@@ -634,6 +634,49 @@ pub fn access_team_grants<'py>(
     grants_to_py(py, &TeamGrants::of(&user_teams, &records, primary))
 }
 
+/// `_core.access_team_process_env(root, team, connectors, env)` (5.1): the environment the API
+/// server gives a worker of the isolated team `team` whose connectors are `connectors`
+/// (`type:label`), built from the configuration under `root` and the launching environment `env`
+/// (a dict): the team's files are written under `<root>/team_scopes/` as the server writes them.
+/// For tests of the Python package's side of team-scoped workers.
+#[pyfunction]
+pub fn access_team_process_env(
+    root: &str,
+    team: &str,
+    connectors: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+) -> PyResult<std::collections::BTreeMap<String, String>> {
+    use meerschaum_core::team_scope as ts;
+    let mut launching: Vec<(String, String)> = env
+        .into_iter()
+        .filter(|(k, _)| k != "MRSM_ROOT_DIR")
+        .collect();
+    launching.push(("MRSM_ROOT_DIR".into(), root.to_string()));
+    let mut options = meerschaum_core::config::ConfigOptions::with_env(launching.clone());
+    options.allow_writes = false;
+    let config = meerschaum_core::Config::new(options)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let scope = ts::TeamScope {
+        team: team.to_string(),
+        team_id: Some(format!("id-{team}")),
+        connectors: connectors.into_iter().collect(),
+        ..ts::TeamScope::default()
+    };
+    let map = ts::team_config(&config, &scope);
+    let fingerprint = ts::fingerprint(&scope, &map);
+    let files = ts::write_scope_files(
+        &ts::scope_dir(std::path::Path::new(root), &scope.key()),
+        &map,
+    )
+    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let passthrough = ts::Passthrough::from_config(&config);
+    Ok(
+        ts::team_env(&launching, &[], &files, &scope, &fingerprint, &passthrough)
+            .into_iter()
+            .collect(),
+    )
+}
+
 /// `_core.access_team_scope(user_teams, teams, primary=None, connectors=None, object_team=None,
 /// is_admin=False)` (5.1): the isolated team a user acts for when server-side Python code runs on
 /// their behalf (`meerschaum_core::team_scope::acting_team`), as `{team, team_id, connectors,
@@ -1221,6 +1264,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_can_name_connector, m)?)?;
     m.add_function(wrap_pyfunction!(access_isolated_withheld, m)?)?;
     m.add_function(wrap_pyfunction!(access_team_scope, m)?)?;
+    m.add_function(wrap_pyfunction!(access_team_process_env, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_use_plugin, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_write_plugins, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_see_team, m)?)?;

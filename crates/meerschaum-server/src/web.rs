@@ -123,7 +123,15 @@ pub async fn console_entry(state: AppState, req: Request) -> Response {
         None => ConsoleStatus::Unavailable("this server has no Python API host".into()),
     };
     match (status, &state.host) {
-        (ConsoleStatus::Mounted, Some(host)) => host.forward(req).await,
+        (ConsoleStatus::Mounted, Some(host)) => {
+            // 5.1: a host that would serve an isolated team's session without its check does
+            // not.
+            if let Some(refused) = crate::access::outdated_host_refusal(&state, req.headers()).await
+            {
+                return refused;
+            }
+            host.forward(req).await
+        }
         // The host has not answered yet (it is starting): nothing was remembered, so a retry
         // asks it again.
         (ConsoleStatus::Unavailable(_), Some(host))

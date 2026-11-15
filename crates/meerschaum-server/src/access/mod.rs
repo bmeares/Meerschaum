@@ -603,6 +603,63 @@ pub async fn acting_team_layer(
     meerschaum_connector::acting_team::scope(acting, next.run(req)).await
 }
 
+/// Why a request may not reach the Python API host (5.1): the host's `meerschaum` package
+/// predates the lookup check for isolated teams ([`crate::proxy::HostProxy::guards_teams`]), an
+/// isolated team is recorded, and the request may act for one: a bearer credential of a caller
+/// who acts for an isolated team, or a console session (the server cannot tell whose it is
+/// without the host). Such a host would serve those requests without the check, so they are
+/// refused (`503`) with the cause and the fix. `None`: forward as before (an up-to-date host, no
+/// isolated team, an anonymous request, or a caller who does not act for an isolated team).
+pub async fn outdated_host_refusal(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Option<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let host = state.host.as_ref()?;
+    if !meerschaum_core::team_scope::isolated_teams_recorded(&state.config.root_dir) {
+        return None;
+    }
+    // A host that does not answer is refused too: whether it would check is unknown.
+    if host.guards_teams(state.secret()).await == Some(true) {
+        return None;
+    }
+    let bearer = headers.contains_key(axum::http::header::AUTHORIZATION);
+    let session = headers
+        .get_all(axum::http::header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .any(|cookie| {
+            cookie
+                .split(';')
+                .any(|pair| pair.split('=').next().map(str::trim) == Some("mrsm-session-id"))
+        });
+    let acts_for_team = if bearer {
+        match instance_scope(state, headers).await {
+            Some(access) => acting_for(state, &access, None).is_some(),
+            // Invalid credentials: the host answers them as it always did (no team).
+            None => false,
+        }
+    } else {
+        false
+    };
+    if !(acts_for_team || session) {
+        return None;
+    }
+    Some(
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "The API host's Python package `meerschaum` predates the lookup check for isolated \
+                 teams, so plugin routes and pages are not served to requests that may act for \
+                 one. Install `meerschaum>={}` in the API server's Python environment (or set \
+                 MRSM_PYTHON to an interpreter that has it) and restart the server.",
+                meerschaum_core::python_guard::expected_version()
+            ),
+        )
+            .into_response(),
+    )
+}
+
 /// Resolve the access of a request and require `scopes` (see [`Access::require`]).
 pub async fn require(
     state: &AppState,

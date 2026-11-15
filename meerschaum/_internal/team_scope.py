@@ -335,3 +335,37 @@ def install_thread_propagation() -> None:
         return original_submit(self, fn, *args, **kwargs)
 
     ThreadPoolExecutor.submit = submit
+
+
+#: What a worker reports in its handshake when it can run an isolated team's code (5.1).
+CAPABILITY: str = 'team_scope'
+
+
+def hello_report() -> Optional[Dict[str, Any]]:
+    """
+    The proof a worker started for an isolated team sends in its handshake (5.1): the team it was
+    started for (`MRSM_TEAM_SCOPE`), the fingerprint of the configuration it was given
+    (`MRSM_TEAM_FINGERPRINT`), the configuration file it read, and the connectors its configuration
+    actually defines, read back from the loaded configuration. The Rust host checks it before it
+    sends the worker any call and stops a worker whose report is missing or does not match.
+    `None` in a process that was not started for a team.
+    """
+    import os
+    team = os.environ.get('MRSM_TEAM_SCOPE', '')
+    if not team:
+        return None
+    from meerschaum import _core
+    raw = _core.get_config('meerschaum', 'connectors', warn=False) or {}
+    defined = sorted(
+        f"{typ}:{label}"
+        for typ, labels in raw.items()
+        if isinstance(labels, dict)
+        for label, attrs in labels.items()
+        if label != 'default' and attrs
+    )
+    return {
+        'team': team,
+        'fingerprint': os.environ.get('MRSM_TEAM_FINGERPRINT', ''),
+        'config_file': os.environ.get('MRSM_CONFIG_FILE', ''),
+        'connectors': defined,
+    }

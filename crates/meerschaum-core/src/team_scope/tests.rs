@@ -268,7 +268,7 @@ fn a_team_process_sees_only_its_connectors() {
     );
     assert_eq!(passthrough.names, vec!["TPR_PASSED".to_string()]);
     assert_eq!(passthrough.refused.len(), 3);
-    let env = team_env(&launching, &[], &files, &scope, &passthrough);
+    let env = team_env(&launching, &[], &files, &scope, "fp", &passthrough);
     let names: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
     for absent in [
         "MRSM_SQL_ENVDB",
@@ -299,6 +299,7 @@ fn a_team_process_sees_only_its_connectors() {
         ],
         &files,
         &scope,
+        "fp",
         &passthrough,
     );
     assert!(job.contains(&("MRSM_DAEMON_ID".into(), "team-job".into())));

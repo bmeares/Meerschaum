@@ -317,7 +317,7 @@ impl Session {
         // environment (cloud credentials, tokens) reaches the team's workers.
         let passthrough = ts::Passthrough::from_config(config);
         passthrough.warn_refused();
-        let team_env = ts::team_env(&base, &[], &files, scope, &passthrough);
+        let team_env = ts::team_env(&base, &[], &files, scope, &fingerprint, &passthrough);
         let team_config = Arc::new(
             Config::new(meerschaum_core::config::ConfigOptions::with_env(
                 team_env.clone(),
@@ -375,6 +375,12 @@ impl Session {
             // Workers start from an empty environment: the team's allowlisted one only.
             settings.worker.env_clear = true;
             settings.worker.env = team_env.clone();
+            // Each worker proves it loaded this configuration before it runs the team's code.
+            settings.worker.team = Some(meerschaum_worker::worker::TeamExpectation {
+                team: scope.team.clone(),
+                fingerprint: fingerprint.clone(),
+                connectors: scope.connectors.clone(),
+            });
             if !std::env::var("MRSM_PYTHON").is_ok_and(|v| !v.trim().is_empty())
                 && let Some(python) = &worker_python
             {
