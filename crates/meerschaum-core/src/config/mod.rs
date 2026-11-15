@@ -373,6 +373,17 @@ pub struct ConfigState {
     /// `MRSM_CONFIG` / `MRSM_PATCH`, `patch_config/`): what [`provenance`] replays to know
     /// where a value came from, so a writer never persists what only they hold.
     layers: Vec<EnvLayer>,
+    /// 5.1: a team-scoped process's registry (`MRSM_TEAM_SCOPE` is set). Its configuration sets
+    /// the connectors the team was not given to `null`: a key path through such a `null` is
+    /// withheld, not missing, and never falls back to the defaults (which would resurrect a
+    /// default connector's attributes, and merge every default into the configuration on each
+    /// such lookup).
+    withholds: bool,
+}
+
+/// Whether a registry built from `lookup` is a team-scoped process's ([`ConfigState::withholds`]).
+fn team_scoped(lookup: impl Fn(&str) -> Option<String>) -> bool {
+    lookup(crate::team_scope::TEAM_SCOPE_VAR).is_some_and(|v| !v.trim().is_empty())
 }
 
 /// The keyword arguments of `search_and_substitute_config`.
@@ -477,6 +488,7 @@ impl Config {
             notices: Vec::new(),
             write_error: None,
             layers: Vec::new(),
+            withholds: team_scoped(lookup),
         };
         state.apply_environment_uris(&opts.env, false);
         state.apply_environment_patches(&opts.env);
@@ -508,6 +520,8 @@ impl Config {
                 notices: Vec::new(),
                 write_error: None,
                 layers: Vec::new(),
+                // The Python boundary's registry: the process's own environment.
+                withholds: team_scoped(|k| std::env::var(k).ok()),
             }),
         }
     }
@@ -1124,19 +1138,28 @@ impl ConfigState {
 
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let mut found: Option<ConfigValue> = None;
+        let mut withheld = false;
         if !invalid_keys {
             let mut current: Option<&ConfigValue> = None;
             for (i, k) in key_refs.iter().enumerate() {
                 current = if i == 0 {
                     self.config.get(*k)
                 } else {
-                    current.and_then(|c| c.get(k))
+                    let parent = current;
+                    let child = parent.and_then(|c| c.get(k));
+                    withheld = child.is_none() && matches!(parent, Some(ConfigValue::Null));
+                    child
                 };
                 if current.is_none() {
                     break;
                 }
             }
             found = current.cloned();
+        }
+        // 5.1: below a connector a team-scoped process was not given (`null`): withheld. No
+        // default stands in for it and nothing is merged (see `ConfigState::withholds`).
+        if withheld && self.withholds {
+            return (false, ConfigValue::Null);
         }
         if let Some(mut value) = found {
             // 5.1: a path holding a secret reference re-reads it (a rotated file is seen by the

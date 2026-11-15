@@ -509,3 +509,86 @@ fn passthrough_names_never_include_meerschaums_secrets() {
     .unwrap();
     assert_eq!(Passthrough::from_config(&empty), Passthrough::default());
 }
+
+/// 5.1: in a team-scoped process, a key path below a connector the team was not given (`null` in
+/// its configuration) is withheld: no default stands in for it (the default `sql:main`'s
+/// attributes never come back) and nothing is merged into the configuration. Elsewhere an explicit
+/// `null` keeps v4's fallback to the defaults.
+#[test]
+fn a_withheld_connector_has_no_default_attributes_in_a_team_process() {
+    let r = root_with(&[]);
+    let wet = team("wetlands", true, &[], &[]);
+    let scope = TeamScope::of(&wet, &connectors_of(&r.config));
+    let config = team_config(&r.config, &scope);
+    let files = write_scope_files(&scope_dir(r.root.path(), &scope.key()), &config).unwrap();
+    let launching = vec![("MRSM_ROOT_DIR".into(), r.root.path().display().to_string())];
+    let env = team_env(
+        &launching,
+        &[],
+        &files,
+        &scope,
+        "fp",
+        &Passthrough::default(),
+    );
+    let team_process = Config::new(ConfigOptions::with_env(env)).unwrap();
+    assert_eq!(
+        team_process.get(&["meerschaum", "connectors", "sql", "main", "port"]),
+        None
+    );
+    assert!(
+        team_process
+            .get(&["meerschaum", "connectors", "sql", "main"])
+            .is_none_or(|v| v.is_null())
+    );
+    // An absent key still falls back to the defaults (and nothing resurrects `sql:main`).
+    assert!(
+        team_process
+            .get(&["system", "engine", "python_workers"])
+            .is_some()
+    );
+    let _ = team_process.get(&["system", "engine", "tpr_absent"]);
+    assert!(
+        team_process
+            .get(&["meerschaum", "connectors", "sql", "main"])
+            .is_none_or(|v| v.is_null())
+    );
+    // `set_config` is seen at once (nothing is cached).
+    let mut snapshot = team_process.snapshot();
+    if let Some(Value::Map(m)) = snapshot.get_mut("meerschaum")
+        && let Some(Value::Map(c)) = m.get_mut("connectors")
+        && let Some(Value::Map(sql)) = c.get_mut("sql")
+    {
+        sql.insert(
+            "wetlands".into(),
+            Value::from_json_str(r#"{"flavor": "sqlite", "database": "/tmp/changed.db"}"#).unwrap(),
+        );
+    }
+    team_process.set_config(snapshot);
+    assert_eq!(
+        team_process
+            .get(&["meerschaum", "connectors", "sql", "wetlands", "database"])
+            .and_then(|v| v.as_str().map(str::to_string))
+            .as_deref(),
+        Some("/tmp/changed.db")
+    );
+
+    // Not a team process: an explicit `null` keeps v4's fallback to the default attributes.
+    let shared = Config::new(ConfigOptions::with_env(vec![(
+        "MRSM_ROOT_DIR".into(),
+        r.root.path().display().to_string(),
+    )]))
+    .unwrap();
+    let mut snapshot = shared.snapshot();
+    if let Some(Value::Map(m)) = snapshot.get_mut("meerschaum")
+        && let Some(Value::Map(c)) = m.get_mut("connectors")
+        && let Some(Value::Map(sql)) = c.get_mut("sql")
+    {
+        sql.insert("main".into(), Value::Null);
+    }
+    shared.set_config(snapshot);
+    assert!(
+        shared
+            .get(&["meerschaum", "connectors", "sql", "main", "port"])
+            .is_some()
+    );
+}

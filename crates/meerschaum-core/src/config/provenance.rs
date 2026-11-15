@@ -148,6 +148,7 @@ impl ConfigState {
             notices: Vec::new(),
             write_error: None,
             layers: Vec::new(),
+            withholds: self.withholds,
         }
     }
 

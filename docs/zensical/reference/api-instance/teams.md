@@ -128,7 +128,7 @@ Everything else in the server's environment (cloud credentials, tokens, a privat
 | `python_worker_team_idle_seconds` | `60` | Stop an isolated team's idle worker after this long (`0`: never) |
 | `python_team_env_passthrough` | `[]` | Further variables of the server's environment, by name, that isolated teams' workers and jobs receive (never Meerschaum's configuration, patch or connector variables) |
 
-A team's workers otherwise follow `python_workers`, `python_worker_max_calls` and `python_worker_max_memory_mb`. The shared pool is not affected. Each live team worker is a Python interpreter: measured on one Linux host (Python 3.14), an idle one held about 59 MiB resident (27 MiB of it private), a team's first call after its workers stopped took about 0.6 s instead of 0.08 s (the interpreter starts), and later calls about 0.2 s (the team's configuration is read again for each call). Ten teams syncing at once with `python_team_workers: 10` kept ten workers (about 590 MiB resident); with the default limit (4 on that host) they shared four, and calls waited up to about a second.
+A team's workers otherwise follow `python_workers`, `python_worker_max_calls` and `python_worker_max_memory_mb`. The shared pool is not affected. Each live team worker is a Python interpreter: measured on one Linux host (Python 3.14), an idle one held about 59 MiB resident (27 MiB of it private), a team's first call after its workers stopped took about 0.45 s instead of 0.07 s (the interpreter starts), and later calls about 0.07 s, as in the shared pool. Ten teams syncing at once with `python_team_workers: 10` kept ten workers (about 590 MiB resident); with the default limit (4 on that host) they shared four, and calls waited up to about a second.
 
 ## Agents and MCP
 
