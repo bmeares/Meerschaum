@@ -223,7 +223,12 @@ BEGIN
             SELECT rolname FROM pg_roles
             WHERE rolcanlogin AND NOT rolsuper AND rolname !~ '^pg_'
         LOOP
-            EXECUTE format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', current_database(), r.rolname);
+            IF r.rolname = 'mrsm__main_ro' THEN
+                -- The stack's main read-only role keeps CONNECT only (no temporary tables).
+                EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), r.rolname);
+            ELSE
+                EXECUTE format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', current_database(), r.rolname);
+            END IF;
         END LOOP;
         EXECUTE format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
     END IF;
@@ -389,6 +394,17 @@ async fn build(
     )
     .await?;
     undo.push(format!("DROP ROLE IF EXISTS {readonly}"));
+    // Marks both as a team's: the stack's main read-only role is never granted what they own.
+    for (r, what) in [(&role, "role"), (&readonly, "read-only role")] {
+        run(
+            base,
+            &format!(
+                "COMMENT ON ROLE {r} IS {}",
+                literal(&format!("{TEAM_ROLE_COMMENT}{}: {what}", made.database))
+            ),
+        )
+        .await?;
+    }
 
     match made.kind {
         TeamDatabaseKind::Database => {
@@ -398,11 +414,8 @@ async fn build(
             let _ = run(base, &format!("GRANT {role} TO CURRENT_USER")).await;
             run(base, &format!("CREATE DATABASE {database} OWNER {role}")).await?;
             undo.push(format!("DROP DATABASE IF EXISTS {database}"));
-            run(
-                base,
-                &format!("REVOKE ALL ON DATABASE {database} FROM PUBLIC"),
-            )
-            .await?;
+            // Nothing reaches it through PUBLIC, nor the stack's main read-only role.
+            shut_out_main_readonly(base, made, name).await?;
             run(
                 base,
                 &format!("GRANT CONNECT ON DATABASE {database} TO {readonly}"),
@@ -466,6 +479,7 @@ async fn build(
             )
             .await?;
             undo.push(format!("DROP SCHEMA IF EXISTS {schema} CASCADE"));
+            shut_out_main_readonly(base, made, name).await?;
             for statement in [
                 // Meerschaum runs `CREATE SCHEMA IF NOT EXISTS` before creating a table, which
                 // PostgreSQL refuses without `CREATE` on the database even when the schema
@@ -484,6 +498,246 @@ async fn build(
         }
     }
     Ok(notes)
+}
+
+// ---------------------------------------------------------------------------------------------
+// The stack's main read-only role (5.1)
+// ---------------------------------------------------------------------------------------------
+
+/// The read-only login role the stack's provisioned Grafana data source ("Meerschaum Main")
+/// connects as. A team's roles are `mrsm_<slug>` and `mrsm_<slug>_ro`, and a slug never holds
+/// `__` nor starts with `_`, so no team can ever be given this name.
+pub const MAIN_READONLY_ROLE: &str = meerschaum_core::config::grafana_readonly::MAIN_READONLY_ROLE;
+
+/// How the comment on a team's roles starts (`COMMENT ON ROLE`): the main read-only role is never
+/// granted a schema such a role owns.
+pub const TEAM_ROLE_COMMENT: &str = "Meerschaum team ";
+
+/// Whether the role whose oid is the SQL expression `owner` is a team's: it is not the current
+/// user, and it is named like one (`mrsm_...`, also the roles made before they were commented)
+/// or carries [`TEAM_ROLE_COMMENT`].
+fn team_owner_sql(owner: &str) -> String {
+    format!(
+        "({owner} <> (SELECT oid FROM pg_roles WHERE rolname = current_user) AND EXISTS (\
+         SELECT 1 FROM pg_roles tr WHERE tr.oid = {owner} AND tr.rolname <> {main} AND \
+         (tr.rolname LIKE 'mrsm\\_%' OR coalesce(shobj_description(tr.oid, 'pg_authid'), '') \
+         LIKE {comment})))",
+        main = literal(MAIN_READONLY_ROLE),
+        comment = literal(&format!("{TEAM_ROLE_COMMENT}%")),
+    )
+}
+
+/// Schemas that belong to PostgreSQL or an extension (left alone: neither granted nor revoked).
+const SYSTEM_SCHEMAS_SQL: &str = "(n.nspname LIKE 'pg\\_%' OR n.nspname = 'information_schema' \
+     OR n.nspname LIKE '\\_timescaledb%' OR n.nspname LIKE 'timescaledb\\_%' \
+     OR n.nspname LIKE 'toolkit\\_%')";
+
+/// The statement that creates (or corrects) [`MAIN_READONLY_ROLE`] in the current database, run
+/// by the instance's owner (`sql:main`'s user). Idempotent; safe on every start.
+///
+/// - A login role without superuser, `CREATEDB`, `CREATEROLE`, replication, `BYPASSRLS` or any
+///   role membership (removed if found), with `default_transaction_read_only`.
+/// - `CONNECT` on the current database and nothing else on it (no `CREATE`, no explicit
+///   `TEMPORARY`); explicit `CONNECT` on any other database is revoked.
+/// - Readable: every schema that is not PostgreSQL's or an extension's and whose owner is the
+///   current user or `pg_database_owner`, plus `extra_schemas` (`stack:grafana:readonly_schemas`),
+///   but never a schema or table owned by a team's role. `USAGE` on the schema, `SELECT` on its
+///   tables, views and hypertables, and default privileges for the tables the current user
+///   creates there later. Everything else is revoked from the role.
+/// - `CREATE` granted to `PUBLIC` on a readable schema (a database made before PostgreSQL 15) is
+///   taken from `PUBLIC`; every other login role that had it keeps an explicit grant.
+/// - Finally the role is checked: it fails (`RAISE EXCEPTION`) if it is privileged, a member of a
+///   role, may create in any schema or database, or may read a team's schema.
+///
+/// The password is set separately ([`main_readonly_password_sql`]) so a psql variable can carry
+/// it.
+pub fn main_readonly_sql(extra_schemas: &[String]) -> String {
+    let extra = if extra_schemas.is_empty() {
+        "ARRAY[]::text[]".to_string()
+    } else {
+        format!(
+            "ARRAY[{}]::text[]",
+            extra_schemas
+                .iter()
+                .map(|s| literal(s))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let team_schema = team_owner_sql("n.nspowner");
+    let team_table = team_owner_sql("c.relowner");
+    let team_schema_any = team_owner_sql("n2.nspowner");
+    format!(
+        r#"DO $mrsm$
+DECLARE
+    ro text := {role};
+    ro_oid oid;
+    extra text[] := {extra};
+    r record;
+    t record;
+    readable boolean;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ro) THEN
+        EXECUTE format('CREATE ROLE %I LOGIN', ro);
+    END IF;
+    EXECUTE format('ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT', ro);
+    EXECUTE format('ALTER ROLE %I SET default_transaction_read_only = on', ro);
+    EXECUTE format('COMMENT ON ROLE %I IS %L', ro, 'Meerschaum: the read-only role of the stack''s main Grafana data source');
+    SELECT oid INTO ro_oid FROM pg_roles WHERE rolname = ro;
+    FOR r IN SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid WHERE m.member = ro_oid LOOP
+        EXECUTE format('REVOKE %I FROM %I', r.rolname, ro);
+    END LOOP;
+
+    -- Databases: CONNECT on this one only.
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), ro);
+    EXECUTE format('REVOKE CREATE, TEMPORARY ON DATABASE %I FROM %I', current_database(), ro);
+    FOR r IN
+        SELECT d.datname FROM pg_database d, aclexplode(d.datacl) a
+        WHERE d.datname <> current_database() AND a.grantee = ro_oid
+    LOOP
+        EXECUTE format('REVOKE ALL ON DATABASE %I FROM %I', r.datname, ro);
+    END LOOP;
+
+    -- Schemas.
+    FOR r IN
+        SELECT n.oid, n.nspname,
+            {team_schema} AS team,
+            (n.nspowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+             OR n.nspowner = (SELECT oid FROM pg_roles WHERE rolname = 'pg_database_owner')
+             OR n.nspname = ANY(extra)) AS wanted
+        FROM pg_namespace n
+        WHERE NOT {system}
+    LOOP
+        readable := r.wanted AND NOT r.team;
+        IF r.team AND r.nspname = ANY(extra) THEN
+            RAISE WARNING 'Meerschaum: the schema % belongs to a team and is not granted to %.', r.nspname, ro;
+        END IF;
+        IF readable THEN
+            IF has_schema_privilege('public', r.oid, 'CREATE') THEN
+                FOR t IN
+                    SELECT pr.rolname FROM pg_roles pr
+                    WHERE pr.rolcanlogin AND NOT pr.rolsuper AND pr.rolname !~ '^pg_'
+                      AND pr.rolname <> ro
+                      AND NOT EXISTS (SELECT 1 FROM pg_roles x WHERE x.oid = pr.oid AND (x.rolname LIKE 'mrsm\_%' OR coalesce(shobj_description(x.oid, 'pg_authid'), '') LIKE {comment}))
+                LOOP
+                    EXECUTE format('GRANT CREATE ON SCHEMA %I TO %I', r.nspname, t.rolname);
+                END LOOP;
+                EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM PUBLIC', r.nspname);
+            END IF;
+            EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', r.nspname, ro);
+            EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM %I', r.nspname, ro);
+            FOR t IN
+                SELECT c.oid::regclass AS rel, {team_table} AS team
+                FROM pg_class c
+                WHERE c.relnamespace = r.oid AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+            LOOP
+                IF t.team THEN
+                    EXECUTE format('REVOKE ALL ON %s FROM %I', t.rel, ro);
+                ELSE
+                    EXECUTE format('GRANT SELECT ON %s TO %I', t.rel, ro);
+                END IF;
+            END LOOP;
+            EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT SELECT ON TABLES TO %I', current_user, r.nspname, ro);
+        ELSE
+            EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', r.nspname, ro);
+            EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', r.nspname, ro);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', current_user, r.nspname, ro);
+        END IF;
+    END LOOP;
+
+    -- What the role must never be able to do.
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE oid = ro_oid AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls))
+       OR EXISTS (SELECT 1 FROM pg_auth_members WHERE member = ro_oid) THEN
+        RAISE EXCEPTION 'Meerschaum: the role % is privileged or a member of another role.', ro;
+    END IF;
+    IF has_database_privilege(ro, current_database(), 'CREATE') THEN
+        RAISE EXCEPTION 'Meerschaum: the role % may create schemas in %.', ro, current_database();
+    END IF;
+    FOR r IN SELECT n2.nspname FROM pg_namespace n2 WHERE has_schema_privilege(ro, n2.oid, 'CREATE') LOOP
+        RAISE EXCEPTION 'Meerschaum: the role % may create in the schema %.', ro, r.nspname;
+    END LOOP;
+    FOR r IN SELECT n2.nspname FROM pg_namespace n2 WHERE {team_schema_any} AND has_schema_privilege(ro, n2.oid, 'USAGE') LOOP
+        RAISE EXCEPTION 'Meerschaum: the role % may read the team schema %.', ro, r.nspname;
+    END LOOP;
+END
+$mrsm$"#,
+        role = literal(MAIN_READONLY_ROLE),
+        system = SYSTEM_SCHEMAS_SQL,
+        comment = literal(&format!("{TEAM_ROLE_COMMENT}%")),
+    )
+}
+
+/// `ALTER ROLE` [`MAIN_READONLY_ROLE`] `PASSWORD <password>`: `password` is SQL (a literal, or a
+/// psql variable such as `:'ro_password'`).
+pub fn main_readonly_password_sql(password: &str) -> String {
+    format!(
+        "ALTER ROLE {} PASSWORD {password}",
+        quoted(MAIN_READONLY_ROLE)
+    )
+}
+
+/// The psql script the stack runs before Grafana starts: [`main_readonly_sql`], then the password
+/// from the psql variable `ro_password`. Stops at the first error.
+pub fn main_readonly_psql_script(extra_schemas: &[String]) -> String {
+    format!(
+        "\\set ON_ERROR_STOP on\n{};\n{};\n",
+        main_readonly_sql(extra_schemas),
+        main_readonly_password_sql(":'ro_password'")
+    )
+}
+
+/// Create or correct [`MAIN_READONLY_ROLE`] in `conn`'s database with `password` (what the stack
+/// runs, for a connection Meerschaum holds).
+pub async fn ensure_main_readonly(
+    conn: &SqlConnector,
+    password: &str,
+    extra_schemas: &[String],
+) -> Result<(), String> {
+    if !supported(conn.flavor()) {
+        return Err(format!(
+            "The main read-only role needs a PostgreSQL-family database (not '{}').",
+            conn.flavor().as_str()
+        ));
+    }
+    run(conn, &main_readonly_sql(extra_schemas)).await?;
+    run(conn, &main_readonly_password_sql(&literal(password))).await
+}
+
+/// Revoke from [`MAIN_READONLY_ROLE`] (when it exists) what a team's new schema or database
+/// could give it, and anything granted to `PUBLIC` there.
+async fn shut_out_main_readonly(
+    conn: &SqlConnector,
+    made: &TeamDatabase,
+    name: &str,
+) -> Result<(), String> {
+    let main = quoted(MAIN_READONLY_ROLE);
+    let main_exists = exists(
+        conn,
+        &format!(
+            "SELECT 1 FROM pg_roles WHERE rolname = {}",
+            literal(MAIN_READONLY_ROLE)
+        ),
+    )
+    .await?;
+    let thing = match made.kind {
+        TeamDatabaseKind::Database => format!("DATABASE {}", quoted(name)),
+        TeamDatabaseKind::Schema => format!("SCHEMA {}", quoted(name)),
+    };
+    run(conn, &format!("REVOKE ALL ON {thing} FROM PUBLIC")).await?;
+    if main_exists {
+        run(conn, &format!("REVOKE ALL ON {thing} FROM {main}")).await?;
+        if made.kind == TeamDatabaseKind::Schema {
+            run(
+                conn,
+                &format!(
+                    "REVOKE ALL ON ALL TABLES IN SCHEMA {} FROM {main}",
+                    quoted(name)
+                ),
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 async fn installed(conn: &SqlConnector, extension: &str) -> bool {

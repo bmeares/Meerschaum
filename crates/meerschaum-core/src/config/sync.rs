@@ -9,6 +9,7 @@
 
 use std::path::Path;
 
+use super::lossless::ConfigValue;
 use super::{ConfigState, GetOptions};
 use crate::yaml::dumper::{DumpOptions, dump_node};
 use crate::yaml::loader::{LoadOptions, load_text};
@@ -159,6 +160,20 @@ impl ConfigState {
                 warn: true,
             },
         );
+        // 5.1: "Meerschaum Main" never connects as the instance's owner
+        // (`grafana_readonly`), whoever writes the file.
+        let value = if keys == ["stack", "grafana", "datasource"] {
+            let mut plain = value.to_value();
+            let (_, error) = self.main_readonly_datasource(&mut plain);
+            if let Some(error) = error {
+                self.warn(format!(
+                    "{error}\nGrafana's 'Meerschaum Main' data source is written without a password."
+                ));
+            }
+            ConfigValue::from_value(&plain)
+        } else {
+            value
+        };
         let header = self.read_yaml_header(sub_path);
         let mut text = dump_node(
             &value.to_node(),

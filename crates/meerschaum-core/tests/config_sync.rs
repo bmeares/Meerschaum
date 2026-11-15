@@ -330,6 +330,56 @@ fn stack_files_are_derived_from_the_config_and_keep_their_header() {
         datasource.contains("postgresVersion: 1800\n"),
         "{datasource}"
     );
+    // 5.1: never the owner's credentials (`sql:main`'s), whoever writes the file.
+    assert!(datasource.contains("user: mrsm__main_ro\n"), "{datasource}");
+    let generated = std::fs::read_to_string(
+        paths
+            .path("API_CONFIG_RESOURCES_PATH")
+            .join(".grafana_readonly_password"),
+    )
+    .unwrap();
+    assert!(
+        datasource.contains(&format!("password: {generated}\n")),
+        "{datasource}"
+    );
+}
+
+/// A `stack.yaml` holding a copy of the 5.0 default (the owner's credentials, here literally)
+/// is written with the read-only role; a customized data source is left as written.
+#[test]
+fn the_main_data_source_switches_unless_customized() {
+    for (user, switched) in [("literal_owner", true), ("someone_else", false)] {
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = root.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("meerschaum.yaml"),
+            "connectors:\n  sql:\n    main:\n      flavor: timescaledb\n      \
+             username: literal_owner\n      password: owner_pw\n      database: meerschaum\n",
+        )
+        .unwrap();
+        std::fs::write(
+            config_dir.join("stack.yaml"),
+            format!(
+                "grafana:\n  datasource:\n    apiVersion: 1\n    datasources:\n    - name: \
+                 Meerschaum Main\n      type: postgres\n      user: {user}\n      \
+                 secureJsonData:\n        password: owner_pw\n      url: db:5432\n"
+            ),
+        )
+        .unwrap();
+        let config = registry(root.path(), true);
+        config
+            .with_state(|state| state.sync_files(&["stack"]))
+            .unwrap();
+        let paths = config.paths();
+        let datasource = std::fs::read_to_string(paths.path("GRAFANA_DATASOURCE_PATH")).unwrap();
+        assert_eq!(
+            datasource.contains("user: mrsm__main_ro"),
+            switched,
+            "{datasource}"
+        );
+        assert_eq!(datasource.contains("owner_pw"), !switched, "{datasource}");
+    }
 }
 
 /// The setup script is safe on any PostgreSQL image (PARITY.md W17K1-001): every extension is

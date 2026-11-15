@@ -33,6 +33,9 @@ def make_env(root: pathlib.Path, plugins: pathlib.Path, host_mode: bool = True) 
         'MRSM_NO_AUTO_INSTALL': '1',
         'PYTHONDONTWRITEBYTECODE': '1',
         'MRSM_SQL_APIHOSTTEST': f"sqlite:///{root / 'instance.db'}",
+        ### Whatever resolves `sql:main` (its default is a database on localhost:5432) reaches a
+        ### closed port: a test never writes to a database it did not create.
+        'MRSM_SQL_MAIN': 'timescaledb://mrsm:mrsm@127.0.0.1:1/meerschaum',
         'MRSM_API_HOST_CONFIG': json.dumps({'mrsm_instance': 'sql:apihosttest'}),
     })
     ### Starlette 1.9 warns when `starlette.testclient` falls back to `httpx` (it wants `httpx2`,

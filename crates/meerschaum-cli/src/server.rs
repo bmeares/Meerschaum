@@ -343,6 +343,20 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     if let Some(e) = grafana_teams.error() {
         native::warn(rt, &format!("The Grafana integration is inactive: {e}"));
     }
+    // Once at startup: the data sources Grafana's anonymous visitors can query (5.1).
+    let anonymous_check = match meerschaum_web::grafana::GrafanaSettings::from_section(
+        &config.grafana,
+        &config.grafana_password_path,
+    ) {
+        Ok(Some(settings)) if !stdio => Some((
+            settings,
+            rt.config()
+                .get(&["meerschaum", "connectors", "sql", "main", "username"])
+                .map(|v| v.py_str())
+                .filter(|u| !u.is_empty() && u != "None"),
+        )),
+        _ => None,
+    };
     let state = AppState::builder(config, instance.conn())
         .resolver(Arc::new(plugin_host.clone()))
         .team_events(Arc::new(grafana_teams))
@@ -395,6 +409,13 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     }
     let server_runtime = builder.enable_all().build().map_err(io_error)?;
     let result = server_runtime.block_on(async {
+        if let Some((settings, owner)) = anonymous_check {
+            tokio::spawn(meerschaum_web::grafana::warn_about_anonymous_datasources(
+                settings,
+                meerschaum_connector_sql::team_database::MAIN_READONLY_ROLE.to_string(),
+                owner,
+            ));
+        }
         // Register synchronously before either serving future can expose readiness. An async
         // ctrl_c() constructor would register only when select! first polls that branch.
         let mut shutdown = ShutdownSignal::new().map_err(io_error)?;

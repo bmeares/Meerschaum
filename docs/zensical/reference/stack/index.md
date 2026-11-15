@@ -159,6 +159,29 @@ Rows affected count inserted, updated, upserted and deleted rows. Replacements c
 
 Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](../api-instance/sync-metrics.md) for capture and history limits.
 
+### Grafana's read-only data source
+
+The stack provisions the **Meerschaum Main** data source in Grafana. Since 5.1 it connects as `mrsm__main_ro`, a read-only role, instead of `sql:main`'s user (the database's owner, a superuser in the stack's own database). Grafana's anonymous access is on in the default stack, so anyone who can open a dashboard could otherwise run any SQL with the owner's rights.
+
+- **What it reads.** Every table, view and hypertable in the schemas `sql:main`'s user owns (and `public`), including tables created there later, plus the schemas you list in `stack:grafana:readonly_schemas`. Nothing of a team's (a [team's schema or database](/reference/api-instance/teams/#a-database-for-each-team)), not even when its schema is listed.
+- **What it cannot do.** Write, create tables, schemas or databases, install extensions (such as `dblink`), or act as any other role. Its sessions are read-only by default.
+- **Its password** is generated once and kept in `api/.grafana_readonly_password` under Meerschaum's root (readable by you only).
+- **How it is set up.** `mrsm stack up` adds a one-shot `grafana_readonly` service, built from the `db` service's image, that creates or corrects the role with `psql` once `db` is healthy, on every `stack up`. Grafana starts only after it succeeded: if it fails, `stack up` fails and `docker logs` of that container says why. Grafana is recreated whenever the provisioned data sources change, and updates **Meerschaum Main** in place (same name and uid), so existing dashboards keep working.
+
+!!! warning "Upgrading from 5.0"
+    The next `mrsm stack up -d` switches **Meerschaum Main** to the read-only role, also when your `config/stack.yaml` holds a copy of the old default (`sql:main`'s user, as `MRSM{...}` references or as literal values). A dashboard that writes through **Meerschaum Main**, or reads a schema owned by another role, stops working. To let it read another schema, list it:
+
+    ```yaml
+    ### `mrsm edit config stack`
+    grafana:
+      readonly_schemas:
+        - reports
+    ```
+
+    then run `mrsm stack up -d`. A data source whose user you changed to someone else is left as you wrote it (with a warning while anonymous access is on). There is no setting to give the owner's credentials back: to do that, edit **Meerschaum Main** in `stack:grafana:datasource` yourself and take responsibility for what anonymous visitors can then run.
+
+A stack without a `db` service cannot set the role up: `mrsm stack` warns, and **Meerschaum Main** cannot connect until you create `mrsm__main_ro` on your database. It never falls back to the owner's credentials.
+
 ## 💾 Backing Up and Upgrading the Database
 
 `mrsm backup postgres` takes an online backup of the stack's database (nothing is stopped) into

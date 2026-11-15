@@ -101,33 +101,13 @@ pub fn admin_password_path(api_config_dir: &Path) -> PathBuf {
 /// The password in `path`, or a new one (32 random bytes as hex) written there, as the API's
 /// secret key is (`generate_secret_key`). The file is readable by its owner only.
 pub fn read_or_generate_admin_password(path: &Path) -> Result<String, String> {
-    let failed = |e: &dyn std::fmt::Display| {
-        format!(
-            "Cannot read or create Grafana's administrator password at {}: {e}",
-            path.display()
-        )
-    };
-    if path.exists() {
-        let text = std::fs::read_to_string(path).map_err(|e| failed(&e))?;
-        let text = text.trim().to_string();
-        if text.is_empty() || text == DEFAULT_ADMIN_PASSWORD {
-            return Err(failed(&"the file holds no usable password"));
-        }
-        return Ok(text);
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| failed(&e))?;
-    }
-    let bytes = meerschaum_core::users::urandom(32).map_err(|e| failed(&e))?;
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    std::fs::write(path, &hex).map_err(|e| failed(&e))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(hex)
+    read_or_generate_secret(path, "Grafana's administrator password")
 }
+
+pub use meerschaum_core::config::grafana_readonly::{
+    MAIN_DATASOURCE_NAME, READONLY_PASSWORD_FILENAME, read_or_generate_secret,
+    readonly_password_path,
+};
 
 /// A setting of `api:grafana` as text: a string (trimmed), or a list joined with commas (as
 /// Grafana reads lists such as `GF_AUTH_PROXY_WHITELIST`). `None` when unset or empty.
@@ -1108,6 +1088,120 @@ impl GrafanaClient {
         }
         Ok(report)
     }
+}
+
+impl GrafanaClient {
+    /// One warning about the data sources signed-out visitors can query (`None` when anonymous
+    /// access is off, or there is nothing to say): every data source of the main and the
+    /// anonymous organization except "Meerschaum Main" connecting as `readonly_role` (the stack's
+    /// main read-only role). Meerschaum cannot know what the others' credentials may read.
+    /// `owner` (`sql:main`'s user) singles out a data source that connects as the instance's
+    /// owner.
+    pub async fn anonymous_datasources_warning(
+        &self,
+        readonly_role: &str,
+        owner: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let policy = self.anonymous_policy().await?;
+        if !policy.enabled {
+            return Ok(None);
+        }
+        let mut orgs = vec![MAIN_ORG_ID];
+        if let Some(id) = policy.org_id
+            && id != MAIN_ORG_ID
+        {
+            orgs.push(id);
+        }
+        let mut listed: Vec<String> = Vec::new();
+        let mut as_owner: Vec<String> = Vec::new();
+        for org in orgs {
+            let sources = Self::check(
+                "reading an organization's data sources",
+                self.call(reqwest::Method::GET, "/api/datasources", Some(org), None)
+                    .await?,
+            )?;
+            for source in sources.as_array().into_iter().flatten() {
+                // `X-Grafana-Org-Id` is honored for members only: skip another org's answer.
+                if source["orgId"].as_i64() != Some(org) {
+                    continue;
+                }
+                let name = source["name"].as_str().unwrap_or("").to_string();
+                let user = source["user"].as_str().unwrap_or("").to_string();
+                if name == MAIN_DATASOURCE_NAME && user == readonly_role {
+                    continue;
+                }
+                let kind = source["type"].as_str().unwrap_or("?");
+                let line = if user.is_empty() {
+                    format!("'{name}' ({kind}, organization {org})")
+                } else {
+                    format!("'{name}' ({kind}, organization {org}, user '{user}')")
+                };
+                if owner.is_some_and(|owner| !owner.is_empty() && owner == user) {
+                    as_owner.push(format!("'{name}'"));
+                }
+                listed.push(line);
+            }
+        }
+        if listed.is_empty() {
+            return Ok(None);
+        }
+        let mut message = format!(
+            "Grafana's anonymous access is on ('{}' as {}): anyone who can open a public \
+             dashboard can run any query with the credentials of these data sources: {}. \
+             Meerschaum cannot know what they may read; give them read-only credentials that \
+             reach public data only.",
+            policy.org_name,
+            policy.role,
+            listed.join(", ")
+        );
+        if !as_owner.is_empty() {
+            message.push_str(&format!(
+                " These connect as the instance's owner, who can read every team's data: {}.",
+                as_owner.join(", ")
+            ));
+        }
+        Ok(Some(message))
+    }
+}
+
+/// [`GrafanaClient::anonymous_datasources_warning`] for the API server's start: tried a few
+/// times while Grafana starts (about two minutes), then the warning (or why Grafana could not
+/// be asked) is told to the administrator once.
+pub async fn warn_about_anonymous_datasources(
+    settings: GrafanaSettings,
+    readonly_role: String,
+    owner: Option<String>,
+) {
+    let client = match GrafanaClient::new(settings) {
+        Ok(client) => client,
+        Err(e) => {
+            tell_administrator(true, &e);
+            return;
+        }
+    };
+    let mut last = String::new();
+    for attempt in 0..8 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+        }
+        match client
+            .anonymous_datasources_warning(&readonly_role, owner.as_deref())
+            .await
+        {
+            Ok(Some(warning)) => {
+                tell_administrator(true, &warning);
+                return;
+            }
+            Ok(None) => return,
+            Err(e) => last = e,
+        }
+    }
+    tell_administrator(
+        true,
+        &format!(
+            "Could not check which data sources Grafana's anonymous visitors can query: {last}"
+        ),
+    );
 }
 
 /// Keeps the teams' Grafana organizations in step with changes made through the API server

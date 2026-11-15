@@ -347,7 +347,9 @@ async fn handle(State(fake): State<Shared>, req: Request) -> Response {
                         .datasources
                         .iter()
                         .filter(|(_, (o, _, _))| *o == org)
-                        .map(|(uid, (o, n, _))| json!({"uid": uid, "orgId": o, "name": n}))
+                        .map(|(uid, (o, n, u))| {
+                            json!({"uid": uid, "orgId": o, "name": n, "user": u, "type": "postgres"})
+                        })
                         .collect();
                     reply(200, Json::Array(list))
                 }
@@ -717,6 +719,66 @@ async fn team_data_sources_only_land_in_their_teams_organization() {
         f.datasources
     );
     assert_eq!(f.requests("POST", "/api/datasources"), 1);
+}
+
+/// The startup check lists every data source anonymous visitors can query except the stack's
+/// read-only "Meerschaum Main", singles out the instance owner's, and says nothing when anonymous
+/// access is off.
+#[tokio::test]
+async fn the_anonymous_data_sources_are_listed_once() {
+    let (url, fake) = fake_grafana("pw").await;
+    let grafana = client(&url, "pw");
+    {
+        let mut f = fake.lock().unwrap();
+        let uid = f.add_datasource(MAIN_ORG_ID, "Meerschaum Main");
+        f.datasources.get_mut(&uid).unwrap().2 = "mrsm__main_ro".into();
+    }
+    assert_eq!(
+        grafana
+            .anonymous_datasources_warning("mrsm__main_ro", Some("owner"))
+            .await
+            .unwrap(),
+        None,
+        "the read-only main data source alone needs no warning"
+    );
+    {
+        let mut f = fake.lock().unwrap();
+        let uid = f.add_datasource(MAIN_ORG_ID, "Hand made");
+        f.datasources.get_mut(&uid).unwrap().2 = "owner".into();
+    }
+    let warning = grafana
+        .anonymous_datasources_warning("mrsm__main_ro", Some("owner"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(warning.contains("'Hand made'"), "{warning}");
+    assert!(warning.contains("instance's owner"), "{warning}");
+    assert!(!warning.contains("'Meerschaum Main'"), "{warning}");
+    // A "Meerschaum Main" pointed at another user is listed too.
+    {
+        let mut f = fake.lock().unwrap();
+        for source in f.datasources.values_mut() {
+            if source.1 == "Meerschaum Main" {
+                source.2 = "reader".into();
+            }
+        }
+    }
+    let warning = grafana
+        .anonymous_datasources_warning("mrsm__main_ro", Some("owner"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(warning.contains("'Meerschaum Main'"), "{warning}");
+    // Anonymous access off: nothing to say.
+    fake.lock().unwrap().anonymous_enabled = false;
+    let grafana = client(&url, "pw");
+    assert_eq!(
+        grafana
+            .anonymous_datasources_warning("mrsm__main_ro", Some("owner"))
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -6331,6 +6331,29 @@ Rows affected count inserted, updated, upserted and deleted rows. Replacements c
 
 Grafana queries the configured database directly with its data-source credentials. Its visibility follows those database permissions. The web console and HTTP API apply their Pipe and team access rules. See [Sync metrics](../api-instance/sync-metrics.md) for capture and history limits.
 
+### Grafana's read-only data source
+
+The stack provisions the **Meerschaum Main** data source in Grafana. Since 5.1 it connects as `mrsm__main_ro`, a read-only role, instead of `sql:main`'s user (the database's owner, a superuser in the stack's own database). Grafana's anonymous access is on in the default stack, so anyone who can open a dashboard could otherwise run any SQL with the owner's rights.
+
+- **What it reads.** Every table, view and hypertable in the schemas `sql:main`'s user owns (and `public`), including tables created there later, plus the schemas you list in `stack:grafana:readonly_schemas`. Nothing of a team's (a [team's schema or database](/reference/api-instance/teams/#a-database-for-each-team)), not even when its schema is listed.
+- **What it cannot do.** Write, create tables, schemas or databases, install extensions (such as `dblink`), or act as any other role. Its sessions are read-only by default.
+- **Its password** is generated once and kept in `api/.grafana_readonly_password` under Meerschaum's root (readable by you only).
+- **How it is set up.** `mrsm stack up` adds a one-shot `grafana_readonly` service, built from the `db` service's image, that creates or corrects the role with `psql` once `db` is healthy, on every `stack up`. Grafana starts only after it succeeded: if it fails, `stack up` fails and `docker logs` of that container says why. Grafana is recreated whenever the provisioned data sources change, and updates **Meerschaum Main** in place (same name and uid), so existing dashboards keep working.
+
+!!! warning "Upgrading from 5.0"
+    The next `mrsm stack up -d` switches **Meerschaum Main** to the read-only role, also when your `config/stack.yaml` holds a copy of the old default (`sql:main`'s user, as `MRSM{...}` references or as literal values). A dashboard that writes through **Meerschaum Main**, or reads a schema owned by another role, stops working. To let it read another schema, list it:
+
+    ```yaml
+    ### `mrsm edit config stack`
+    grafana:
+      readonly_schemas:
+        - reports
+    ```
+
+    then run `mrsm stack up -d`. A data source whose user you changed to someone else is left as you wrote it (with a warning while anonymous access is on). There is no setting to give the owner's credentials back: to do that, edit **Meerschaum Main** in `stack:grafana:datasource` yourself and take responsibility for what anonymous visitors can then run.
+
+A stack without a `db` service cannot set the role up: `mrsm stack` warns, and **Meerschaum Main** cannot connect until you create `mrsm__main_ro` on your database. It never falls back to the owner's credentials.
+
 ## 💾 Backing Up and Upgrading the Database
 
 `mrsm backup postgres` takes an online backup of the stack's database (nothing is stopped) into
@@ -7464,7 +7487,7 @@ When a request names no instance, the console, the pipe routes and the MCP tools
 
 - a login role `mrsm_<team>` with a generated password. It owns the team's database (or schema) and is not a superuser;
 - a read-only login role `mrsm_<team>_ro` for dashboards, which may only `SELECT` what the team's role creates;
-- the database (TimescaleDB and PostGIS are installed in it when the base server has them), which nobody else may connect to, or the schema, which becomes the roles' `search_path`;
+- the database (TimescaleDB and PostGIS are installed in it when the base server has them), which nobody else may connect to, or the schema, which becomes the roles' `search_path`. Nothing on it is granted to `PUBLIC`, nor to the stack's read-only Grafana role (`mrsm__main_ro`, see [the stack's main data source](#the-stacks-main-data-source)), also when that role already exists;
 - a connector `sql:<team>` in your configuration, reserved for the team, which becomes the team's default instance. The team's pipes are registered there.
 
 It also takes `CONNECT` on the base database away from `PUBLIC`, so a team's role cannot open it. Every login role that could connect before keeps an explicit grant.
@@ -7536,13 +7559,17 @@ Users then open **Grafana** from the console's user menu (`https://your-api-host
 A signed-out visitor to `/grafana` gets only what Grafana's anonymous access allows: Meerschaum forwards the request without any identity and without Grafana's own session cookies, so signing out of Meerschaum also signs out of Grafana. With anonymous access off, they are sent to the console's login.
 
 !!! warning "Anonymous access runs queries"
-    Anyone who can open a public dashboard can run any query with the credentials of every data source in the anonymous organization, not only the dashboard's own queries. Give those data sources read-only credentials that reach public data only. The stack's **Meerschaum Main** data source connects with `sql:main`'s user; see below. A team can never use the anonymous organization: a team named like it is refused, and so is a rename to that name.
+    Anyone who can open a public dashboard can run any query with the credentials of every data source in the anonymous organization, not only the dashboard's own queries. The stack's **Meerschaum Main** data source connects as a read-only role that reads the instance's own schemas and nothing of any team's (see below). Data sources you add yourself in the main or the anonymous organization are not Meerschaum's to check: while anonymous access is on, the API server lists them in one warning when it starts; give them read-only credentials that reach public data only. A team can never use the anonymous organization: a team named like it is refused, and so is a rename to that name.
 
 The built-in **Syncs** and **Engine** dashboards stay in the main organization.
 
 ### The stack's main data source
 
-The stack provisions a **Meerschaum Main** data source in Grafana's main organization, which is also the stack's anonymous organization (`GF_AUTH_ANONYMOUS_ORG_NAME: Main Org.`). It connects with `sql:main`'s user, which in the stack's database is a superuser that owns the main database. Anyone who can query it (every member of the main organization, and every signed-out visitor while anonymous access is on) can read a schema team's tables in the main database and, as a superuser, reach a team's own database too. Users without a team and the members of open teams are in the main organization (members of isolated teams are taken out of it). Before you give teams data of their own on the stack's database, point **Meerschaum Main** (`mrsm edit config stack`, under `grafana: datasource:`) at a read-only role that can read only public tables; until then, treat that database as readable by every user of the main organization and, while anonymous access is on, by anyone.
+The stack provisions a **Meerschaum Main** data source in Grafana's main organization, which is also the stack's anonymous organization (`GF_AUTH_ANONYMOUS_ORG_NAME: Main Org.`). It connects as `mrsm__main_ro`, a read-only role the stack sets up before Grafana starts, whether or not `api:grafana` is enabled: see [Grafana's read-only data source](/reference/stack/#grafanas-read-only-data-source).
+
+So every member of the main organization, and every signed-out visitor while anonymous access is on, can read the instance's own tables (the `public` schema and the other schemas `sql:main`'s user owns) and the schemas listed in `stack:grafana:readonly_schemas`, and nothing else: not a schema team's schema or tables, not a database team's database (no `CONNECT`), and they cannot write, create tables or schemas, or install extensions such as `dblink`. A team created after the role exists is never readable by it. Like any user of the database they can still see the names of other schemas and tables in PostgreSQL's catalogs.
+
+A **Meerschaum Main** you changed to connect as another user is left as you wrote it and is included in the warning above.
 
 
 ---
@@ -16711,6 +16738,8 @@ Several teams can now share one instance, each behind its own wall. See [Teams o
 - **Connect an agent.** The Tokens page shows ready-to-paste MCP configuration for Claude Code, Claude Desktop, Codex, OpenCode and other clients, with the API key of a new token filled in.
 - **Grafana.** With `api:grafana:enabled`, the server signs console users in to Grafana at `/grafana`, keeps one organization per team with a data source for the team's database, and removes members of isolated teams from the main organization. The stack's `grafana` service gets the settings it needs when the stack is next started.
 - **Grafana safety.** Meerschaum owns Grafana's administrator password (generated when `api:grafana:admin_password` is unset, and Grafana's default `admin` replaced), trusts the sign-in header only from the stack's API server at a fixed address (never a range), keeps each team's organization by its saved id, retires a deleted team's organization (dashboards kept, members and data sources removed), never lets a team use the anonymous or main organization, and forwards signed-out visitors to Grafana's own anonymous access without any identity.
+- **The stack's Grafana reads through a read-only role (upgrading users, read this).** The provisioned **Meerschaum Main** data source now connects as `mrsm__main_ro` instead of `sql:main`'s user (the database's owner), on every stack, with or without `api:grafana`. The next `mrsm stack up -d` sets the role up (a one-shot `grafana_readonly` service runs before Grafana starts) and switches the data source in place, also when `config/stack.yaml` holds a copy of the old default; dashboards keep working. The role reads the tables, views and hypertables in the schemas `sql:main`'s user owns and nothing of any team's; anonymous visitors can no longer write, create tables or install extensions such as `dblink`. A dashboard that writes through **Meerschaum Main**, or reads a schema owned by another role, stops working: list such schemas under `stack:grafana:readonly_schemas`. A **Meerschaum Main** you pointed at another user is left as it is. See [Grafana's read-only data source](../reference/stack/index.md#grafanas-read-only-data-source).
+- With `api:grafana`, the API server warns once at startup, while Grafana's anonymous access is on, about the data sources in the main and anonymous organizations other than the read-only **Meerschaum Main**.
 - The teams table's row menu is no longer clipped when the table is short.
 - The MCP docs show the bearer token in the form the server accepts (the **API Key** of a token).
 - The new [`upsert_changed_only`](../reference/pipes/parameters.md#upsert_changed_only) parameter makes an `upsert` pipe on PostgreSQL, PostGIS, TimescaleDB, TimescaleDB-HA or Citus skip the update of rows whose values did not change, so a pipe that re-reads an overlapping window no longer rewrites identical rows (WAL, dead tuples, autovacuum). The sync message counts only the rows actually written.

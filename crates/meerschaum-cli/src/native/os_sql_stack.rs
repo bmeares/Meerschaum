@@ -936,7 +936,7 @@ pub fn grafana_sign_in_environment(
 
 /// Set `name` in a compose `environment` (a map or a `KEY=value` list); `force` replaces an
 /// existing value.
-fn set_environment(environment: &mut Value, name: &str, value: &str, force: bool) {
+pub(super) fn set_environment(environment: &mut Value, name: &str, value: &str, force: bool) {
     match environment {
         Value::Map(map) => {
             if force || !map.contains_key(name) {
@@ -1161,6 +1161,127 @@ fn with_grafana_sign_in(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value) -
     value
 }
 
+/// The stack's provisioned "Meerschaum Main" data source reads through the main read-only role
+/// (5.1, [`super::stack_readonly`]): the data source file gets the role's credentials, the
+/// compose file the one-shot service that sets the role up before Grafana starts. `warn`: tell
+/// the user what could not be done (once per command).
+fn with_main_readonly(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value, warn_: bool) -> Value {
+    use super::stack_readonly as ro;
+    let is_datasource = keys == ["stack", "grafana", "datasource"];
+    let is_compose = keys == ["stack", "docker-compose.yaml"];
+    if !is_datasource && !is_compose {
+        return value;
+    }
+    let opts = meerschaum_core::config::GetOptions {
+        patch: true,
+        substitute: true,
+        write_missing: false,
+        warn: false,
+    };
+    let main = rt
+        .config()
+        .get_with(&["meerschaum", "connectors", "sql", "main"], opts)
+        .1
+        .to_map();
+    let setting = |key: &str| {
+        main.get(key)
+            .filter(|v| !v.is_null())
+            .map(Value::py_str)
+            .filter(|s| !s.is_empty())
+    };
+    let owner_user = setting("username");
+    let owner_password = setting("password").unwrap_or_default();
+    let mut datasource = if is_datasource {
+        value.clone()
+    } else {
+        rt.config()
+            .get_with(&["stack", "grafana", "datasource"], opts)
+            .1
+    };
+    // The same switch every writer of the data source file applies (fails closed: no password
+    // rather than the owner's).
+    let (source, error) = rt
+        .config()
+        .with_state(|s| s.main_readonly_datasource(&mut datasource));
+    if let Some(e) = error
+        && warn_
+        && is_datasource
+    {
+        warn(
+            rt,
+            &format!(
+                "{e}\nGrafana's '{}' data source is written without a password.",
+                ro::MAIN_DATASOURCE
+            ),
+        );
+    }
+    let password = datasource
+        .get("datasources")
+        .and_then(Value::as_list)
+        .and_then(|sources| {
+            sources
+                .iter()
+                .find(|s| s.get("name").map(Value::py_str).as_deref() == Some(ro::MAIN_DATASOURCE))
+        })
+        .and_then(|s| s.get("secureJsonData"))
+        .and_then(|s| s.get("password"))
+        .map(Value::py_str)
+        .unwrap_or_default();
+    let stack_grafana = rt.config().get_with(&["stack", "grafana"], opts).1.to_map();
+    let sql_connectors = rt
+        .config()
+        .get_with(&["meerschaum", "connectors", "sql"], opts)
+        .1
+        .to_map();
+    let (schemas, refused) = ro::readonly_schemas(&stack_grafana, &sql_connectors);
+    if is_datasource {
+        if warn_ {
+            if !refused.is_empty() {
+                warn(
+                    rt,
+                    &format!(
+                        "`stack:grafana:readonly_schemas` names the schema of a team ({}): it is \
+                         never granted to Grafana's read-only main data source.",
+                        refused.join(", ")
+                    ),
+                );
+            }
+            let compose = rt
+                .config()
+                .get_with(&["stack", "docker-compose.yaml"], opts)
+                .1;
+            if ro::anonymous_enabled(&compose)
+                && let Some(warning) = ro::anonymous_warning(&datasource, &source)
+            {
+                warn(rt, &warning);
+            }
+        }
+        return datasource;
+    }
+    let setup = ro::RoleSetup {
+        owner_user: owner_user.as_deref().unwrap_or(""),
+        owner_password: &owner_password,
+        password: &password,
+        schemas: &schemas,
+        revision: &ro::revision(&datasource, &schemas),
+    };
+    if let Err(e) = ro::add_role_setup(&mut value, &source, &setup)
+        && warn_
+    {
+        warn(
+            rt,
+            &format!(
+                "Grafana's '{}' data source connects as the read-only role '{}', which `mrsm \
+                 stack` cannot create: {e}. It cannot connect until the role exists on its \
+                 database.",
+                ro::MAIN_DATASOURCE,
+                meerschaum_connector_sql::team_database::MAIN_READONLY_ROLE
+            ),
+        );
+    }
+    value
+}
+
 /// `sync_yaml_configs(keys, sub_path, substitute=True, replace_tuples=...)`.
 fn sync_yaml_config(
     rt: &mut Runtime<'_>,
@@ -1179,6 +1300,7 @@ fn sync_yaml_config(
         },
     );
     let value = with_grafana_sign_in(rt, keys, value);
+    let value = with_main_readonly(rt, keys, value, true);
     let mut text = meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?;
     for (old, new) in replace {
         text = text.replace(old, new);
@@ -1269,6 +1391,8 @@ pub fn write_stack(rt: &mut Runtime<'_>) -> Result<(), String> {
     for (path, keys, header) in files {
         let (_, value) = rt.config().get_with(&keys, opts);
         let value = with_grafana_sign_in(rt, &keys, value);
+        // `sync_stack_files` below writes them again, with the warnings.
+        let value = with_main_readonly(rt, &keys, value, false);
         let mut text = header.unwrap_or_default().to_string();
         text.push_str(&meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?);
         if let Some(parent) = path.parent() {

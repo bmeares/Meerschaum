@@ -30,6 +30,7 @@
 pub mod backup;
 pub mod connector_types;
 pub mod dataframe;
+pub mod grafana_readonly;
 pub mod lossless;
 pub mod paths;
 pub mod sync;

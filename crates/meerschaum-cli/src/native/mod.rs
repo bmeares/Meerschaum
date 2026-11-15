@@ -51,6 +51,7 @@ pub mod rich_json;
 pub mod self_upgrade;
 pub mod session;
 pub mod show;
+pub mod stack_readonly;
 pub mod subactions;
 pub mod sync;
 pub mod team_setup;

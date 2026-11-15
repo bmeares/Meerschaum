@@ -313,3 +313,254 @@ async fn teams_get_isolated_databases_and_schemas() {
     }
     result
 }
+
+async fn text(conn: &SqlConnector, sql: &str) -> Option<String> {
+    conn.driver()
+        .value(sql)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| match v {
+            meerschaum_connector_sql::driver::SqlValue::Text(s) => Some(s),
+            _ => None,
+        })
+}
+
+/// The stack's main read-only role (`ensure_main_readonly`): it reads the instance's own
+/// schemas (tables, views and hypertables, also those created later) and the extra schemas it
+/// is given, and nothing of a team's, including a team created after the role; it writes,
+/// creates and installs nothing, and is not privileged. Run twice: idempotent.
+#[tokio::test]
+async fn the_main_read_only_role_reads_public_data_only() {
+    let Some((admin, _)) = admin().await else {
+        return;
+    };
+    let base = admin.database().unwrap().to_string();
+    let tag = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let open = format!("rs_open_{tag}");
+    let other = format!("rs_other_{tag}");
+    let other_owner = format!("rs_owner_{tag}");
+    let main = team_database::MAIN_READONLY_ROLE;
+    let password = team_database::generate_password();
+    let timescale = int(
+        &admin,
+        "SELECT COUNT(*) FROM pg_extension WHERE extname = 'timescaledb'",
+    )
+    .await
+        == Some(1);
+    let public_could_connect = int(
+        &admin,
+        "SELECT COUNT(*) FROM pg_database d, \
+         aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a \
+         WHERE d.datname = current_database() AND a.grantee = 0 AND a.privilege_type = 'CONNECT'",
+    )
+    .await
+        == Some(1);
+    for sql in [
+        format!("CREATE SCHEMA \"{open}\""),
+        format!("CREATE TABLE \"{open}\".readings (ts TIMESTAMPTZ NOT NULL, v INT)"),
+        format!("INSERT INTO \"{open}\".readings VALUES (now(), 1), (now(), 2)"),
+        format!("CREATE VIEW \"{open}\".readings_view AS SELECT * FROM \"{open}\".readings"),
+        format!("CREATE TABLE public.\"rs_public_{tag}\" (id INT)"),
+        format!("INSERT INTO public.\"rs_public_{tag}\" VALUES (1)"),
+        format!("CREATE ROLE \"{other_owner}\" NOLOGIN"),
+        format!("CREATE SCHEMA \"{other}\" AUTHORIZATION \"{other_owner}\""),
+        format!("CREATE TABLE \"{other}\".extra (id INT)"),
+    ] {
+        exec(&admin, &sql).await.unwrap();
+    }
+    if timescale {
+        exec(
+            &admin,
+            &format!("SELECT create_hypertable('\"{open}\".readings', 'ts', migrate_data => true)"),
+        )
+        .await
+        .unwrap();
+    }
+    // A team made before the role.
+    let before_team = unique("before");
+    let before = team_database::create(&admin, &before_team, TeamDatabaseKind::Schema, None)
+        .await
+        .unwrap();
+    let before_schema = before.schema.clone().unwrap();
+    exec(
+        &admin,
+        &format!("CREATE TABLE \"{before_schema}\".secret (id INT)"),
+    )
+    .await
+    .unwrap();
+
+    let mut teams = vec![before.clone()];
+    let result = async {
+        // The extra list names a team's schema too: it is never granted.
+        let extra = vec![other.clone(), before_schema.clone()];
+        team_database::ensure_main_readonly(&admin, &password, &extra)
+            .await
+            .unwrap();
+        team_database::ensure_main_readonly(&admin, &password, &extra)
+            .await
+            .expect("idempotent");
+
+        // Teams made after the role exists.
+        let schema_team = team_database::create(
+            &admin,
+            &unique("after schema"),
+            TeamDatabaseKind::Schema,
+            None,
+        )
+        .await
+        .unwrap();
+        teams.push(schema_team.clone());
+        let db_team = team_database::create(
+            &admin,
+            &unique("after db"),
+            TeamDatabaseKind::Database,
+            None,
+        )
+        .await
+        .unwrap();
+        teams.push(db_team.clone());
+        let after_schema = schema_team.schema.clone().unwrap();
+        let team_owner = connect_as(&admin, &base, &schema_team.role, &schema_team.password)
+            .await
+            .unwrap();
+        exec(&team_owner, "CREATE TABLE plots (id INT)")
+            .await
+            .unwrap();
+        exec(&team_owner, "INSERT INTO plots VALUES (1)")
+            .await
+            .unwrap();
+        // The administrator writes into the team's schema too (as a superuser could).
+        exec(
+            &admin,
+            &format!("CREATE TABLE \"{after_schema}\".admin_made (id INT)"),
+        )
+        .await
+        .unwrap();
+        // A table the instance's owner creates later in a readable schema.
+        exec(&admin, &format!("CREATE TABLE \"{open}\".later (id INT)"))
+            .await
+            .unwrap();
+        exec(&admin, &format!("INSERT INTO \"{open}\".later VALUES (5)"))
+            .await
+            .unwrap();
+
+        let reader = connect_as(&admin, &base, main, &password)
+            .await
+            .expect("the main read-only role connects to the main database");
+        assert_eq!(
+            text(&reader, "SELECT current_user::text").await.as_deref(),
+            Some(main)
+        );
+        assert_eq!(
+            text(
+                &reader,
+                "SELECT rolsuper::text FROM pg_roles WHERE rolname = current_user"
+            )
+            .await
+            .as_deref(),
+            Some("false")
+        );
+        // Reads.
+        for (sql, n) in [
+            (format!("SELECT COUNT(*) FROM \"{open}\".readings"), 2),
+            (format!("SELECT COUNT(*) FROM \"{open}\".readings_view"), 2),
+            (format!("SELECT COUNT(*) FROM \"{open}\".later"), 1),
+            (
+                format!("SELECT COUNT(*) FROM public.\"rs_public_{tag}\""),
+                1,
+            ),
+            (format!("SELECT COUNT(*) FROM \"{other}\".extra"), 0),
+        ] {
+            assert_eq!(int(&reader, &sql).await, Some(n), "{sql}");
+        }
+        // Never a team's.
+        for sql in [
+            format!("SELECT COUNT(*) FROM \"{before_schema}\".secret"),
+            format!("SELECT COUNT(*) FROM \"{after_schema}\".plots"),
+            format!("SELECT COUNT(*) FROM \"{after_schema}\".admin_made"),
+        ] {
+            assert!(int(&reader, &sql).await.is_none(), "{sql}");
+        }
+        assert!(
+            connect_as(&admin, &db_team.database, main, &password)
+                .await
+                .is_err(),
+            "no CONNECT on a team's database"
+        );
+        // Writes, DDL and extensions are refused.
+        for sql in [
+            format!("INSERT INTO \"{open}\".readings VALUES (now(), 3)"),
+            format!("DELETE FROM \"{open}\".readings"),
+            format!("CREATE TABLE \"{open}\".sneaky (id INT)"),
+            "CREATE TABLE public.sneaky (id INT)".to_string(),
+            "CREATE SCHEMA sneaky".to_string(),
+            "CREATE EXTENSION IF NOT EXISTS dblink".to_string(),
+            "SET default_transaction_read_only = off; CREATE TABLE public.sneaky2 (id INT)"
+                .to_string(),
+        ] {
+            assert!(exec(&reader, &sql).await.is_err(), "{sql}");
+        }
+        assert_eq!(
+            int(
+                &admin,
+                "SELECT COUNT(*) FROM pg_extension WHERE extname = 'dblink'"
+            )
+            .await,
+            Some(0)
+        );
+        // The checks the role setup enforces hold.
+        assert_eq!(
+            int(
+                &admin,
+                &format!(
+                    "SELECT COUNT(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member \
+                     WHERE r.rolname = '{main}'"
+                )
+            )
+            .await,
+            Some(0)
+        );
+        // Running it again after the teams exist still grants nothing of theirs.
+        team_database::ensure_main_readonly(&admin, &password, &extra)
+            .await
+            .unwrap();
+        assert!(
+            int(
+                &reader,
+                &format!("SELECT COUNT(*) FROM \"{after_schema}\".plots")
+            )
+            .await
+            .is_none()
+        );
+        // The script the stack runs has the same statement and takes the password from psql.
+        let script = team_database::main_readonly_psql_script(&extra);
+        assert!(script.contains(&team_database::main_readonly_sql(&extra)));
+        assert!(script.contains(":'ro_password'"));
+    }
+    .await;
+
+    for made in &teams {
+        drop_team(&admin, made).await;
+    }
+    for sql in [
+        format!("DROP SCHEMA IF EXISTS \"{open}\" CASCADE"),
+        format!("DROP SCHEMA IF EXISTS \"{other}\" CASCADE"),
+        format!("DROP TABLE IF EXISTS public.\"rs_public_{tag}\""),
+        format!("DROP ROLE IF EXISTS \"{other_owner}\""),
+        format!("DROP OWNED BY \"{main}\""),
+        format!("DROP ROLE IF EXISTS \"{main}\""),
+    ] {
+        if let Err(e) = exec(&admin, &sql).await {
+            eprintln!("cleanup: {sql}: {e}");
+        }
+    }
+    if public_could_connect {
+        let _ = exec(
+            &admin,
+            &format!("GRANT CONNECT, TEMPORARY ON DATABASE \"{base}\" TO PUBLIC"),
+        )
+        .await;
+    }
+    result
+}
