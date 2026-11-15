@@ -35,6 +35,22 @@ threads_active_venvs: Dict[int, 'set[str]'] = {}
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
+def _venvs_cache_path() -> pathlib.Path:
+    """
+    Where the locks of virtual environments are kept: `<root>/.cache/venvs`, shared by every
+    process of the root. An isolated team's sandboxed process (5.1) keeps the locks of its own
+    environments in its cache directory (`XDG_CACHE_HOME`): it never takes, holds or writes a
+    lock the server's processes take.
+    """
+    import os
+    import meerschaum.config.paths as paths
+    if os.environ.get('MRSM_TEAM_SANDBOX') and os.environ.get('XDG_CACHE_HOME'):
+        path = pathlib.Path(os.environ['XDG_CACHE_HOME']) / 'mrsm_venvs'
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    return paths.VENVS_CACHE_RESOURCES_PATH
+
+
 def activate_venv(
     venv: Optional[str] = 'mrsm',
     color: bool = True,
@@ -71,8 +87,9 @@ def activate_venv(
     thread_id = get_ident()
     import sys
     import os
-    ### 5.1: an isolated team's sandboxed process cannot create virtual environments (the server
-    ### creates them when it installs a plugin): a missing one is not activated.
+    ### 5.1: an isolated team's sandboxed process has virtual environments of its own
+    ### (`MRSM_VENVS_DIR`, seeded from the server's): a missing one is not created merely to be
+    ### activated (there is nothing in it); installing into it creates it.
     sandboxed_missing = (
         venv is not None
         and bool(os.environ.get('MRSM_TEAM_SANDBOX'))
@@ -353,7 +370,7 @@ def _locked_venv_mutation(func):
 
         # Keep this distinct from the legacy existence-marker `<venv>.lock`: file locks
         # persist after release. Share the same object for recursive init / verify calls.
-        lock_path = paths.VENVS_CACHE_RESOURCES_PATH / (venv + '.mutation.lock')
+        lock_path = _venvs_cache_path() / (venv + '.mutation.lock')
         lock_key = str(lock_path.absolute())
         with _venv_mutation_locks_guard:
             thread_lock, process_lock = _venv_mutation_locks.setdefault(
@@ -557,7 +574,7 @@ def init_venv(
     venv_path = paths.VIRTENV_RESOURCES_PATH / venv
     vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
-    lock_path = paths.VENVS_CACHE_RESOURCES_PATH / (venv + '.lock')
+    lock_path = _venvs_cache_path() / (venv + '.lock')
     work_dir_env_var = STATIC_CONFIG['environment']['work_dir']
 
     def update_lock(active: bool):
@@ -619,7 +636,7 @@ def init_venv(
         virtualenv = None
 
     _venv_success = False
-    temp_vtp = paths.VENVS_CACHE_RESOURCES_PATH / str(venv)
+    temp_vtp = _venvs_cache_path() / str(venv)
     ### NOTE: Disable site-packages movement for now.
     rename_vtp = False and vtp.exists() and not temp_vtp.exists()
 

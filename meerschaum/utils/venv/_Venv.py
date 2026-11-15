@@ -78,11 +78,9 @@ class Venv:
             if self._venv is None:
                 raise
             if self._init_if_not_exists:
-                ### 5.1: an isolated team's sandboxed process cannot (re)create a virtual
-                ### environment; the error stands.
-                import os
-                if os.environ.get('MRSM_TEAM_SANDBOX'):
-                    raise e
+                ### 5.1: an isolated team's sandboxed process recreates only its own environments
+                ### (`MRSM_VENVS_DIR`); the server's shared `mrsm` environment is read-only to it,
+                ### so recreating that one fails and the error stands.
                 if not init_venv(self._venv, force=True):
                     raise e
         return self._activate(

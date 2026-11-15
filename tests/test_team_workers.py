@@ -137,6 +137,16 @@ attempt('other team job', lambda: read(os.environ['TPR_OTHER_JOB']))
 attempt('other team plugin', lambda: read(os.environ['TPR_OTHER_PLUGIN']))
 attempt('parent environ', lambda: read(f"/proc/{os.getppid()}/environ"))
 attempt('write root', lambda: open(os.path.join(os.environ['MRSM_ROOT_DIR'], 'planted'), 'w').close())
+def write(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, 'w').close()
+### 5.1: nothing a process outside the team loads, only its own virtual environments.
+attempt("write server's plugin venv", lambda: write(os.path.join(os.environ['TPR_SERVER_VENV'], 'planted.py')))
+attempt('write plugin source', lambda: write(os.path.join(os.environ['TPR_PLUGIN_DIR'], 'planted.py')))
+attempt('write bytecode next to shared source', lambda: write(
+    os.path.join(os.environ['TPR_PLUGIN_DIR'], '__pycache__', '__init__.cpython-314.pyc')
+))
+attempt('write own venv', lambda: write(os.path.join(os.environ['MRSM_VENVS_DIR'], 'tpr_probe', 'planted.py')))
 import meerschaum as mrsm
 from meerschaum._internal import team_scope, team_sandbox
 results['report'] = team_sandbox.report()
@@ -169,6 +179,8 @@ def requirement():
     from meerschaum.utils.packages import attempt_import
     dep = attempt_import('tpr_sandbox_dep', venv='tpr_probe', install=False, lazy=False)
     assert dep.VALUE == 42
+    ### From the team's own copy of the server's environment.
+    assert os.path.realpath(dep.__file__).startswith(os.path.realpath(os.environ['MRSM_VENVS_DIR'])), dep.__file__
 attempt('plugin requirement from its venv', requirement)
 attempt('pandas', lambda: __import__('pandas') and None)
 def memory_sync():
@@ -223,6 +235,8 @@ def test_a_team_worker_is_confined_to_its_sandbox(team_root, tmp_path):
         'TPR_CONFIG_DIR': str(root / 'config'),
         'TPR_OTHER_JOB': str(other_job),
         'TPR_OTHER_PLUGIN': str(other_plugin),
+        'TPR_SERVER_VENV': str(venv_dir),
+        'TPR_PLUGIN_DIR': str(plugins / 'tpr_probe'),
     })
     result = subprocess.run(
         [sys.executable, '-P', '-c', SANDBOX_PRELUDE + SANDBOX_PROBE],
@@ -244,12 +258,15 @@ def test_a_team_worker_is_confined_to_its_sandbox(team_root, tmp_path):
     assert out['hello'] == report
     for label in (
         'server config canary', 'server config listing', 'other team job',
-        'other team plugin', 'parent environ', 'write root',
+        'other team plugin', 'parent environ', 'write root', "write server's plugin venv",
+        'write plugin source', 'write bytecode next to shared source',
     ):
         assert out[label] == 'denied', (label, json.dumps(out, indent=1))
     for label in (
         'temporary file', 'threads', 'multiprocessing', 'dns localhost', 'tls context',
         'own plugin', 'plugin requirement from its venv', 'pandas', 'in-memory sqlite sync',
+        'write own venv',
     ):
         assert out[label] == 'ok', (label, json.dumps(out, indent=1))
     assert not (root / 'planted').exists()
+    assert not (venv_dir / 'planted.py').exists()

@@ -18,15 +18,23 @@
 //!   directories, the processor and memory facts of `/proc` and `/sys`, its own `/proc/<pid>`;
 //! - list (names only): the plugins symlink directory under `.internal/`;
 //! - read and write: the team's temporary directory ([`team_tmp_dir`], `TMPDIR`), its cache
-//!   directory (`XDG_CACHE_HOME`), its plugins' virtual environments (a team's plugin code
-//!   installs missing requirements there at run time, as it always could), a job's work
-//!   directory ([`JOB_WORK_DIR`]: its result, heartbeat and start-up release files);
+//!   directory (`XDG_CACHE_HOME`), its own virtual environments ([`VENVS_DIR`],
+//!   `MRSM_VENVS_DIR`: a team's plugin code installs missing requirements there at run time, as
+//!   it always could), a job's work directory ([`JOB_WORK_DIR`]: its result, heartbeat and
+//!   start-up release files);
 //! - devices: `/dev/null`, `/dev/zero`, `/dev/full`, `/dev/random`, `/dev/urandom`, `/dev/tty`;
 //!   `/dev/shm` to create, use and remove shared memory (POSIX semaphores, `multiprocessing`),
 //!   but not to list it.
 //!
 //! Nothing else: not the root's `config/` (every connector's password), its secret files, other
 //! teams' configuration, jobs or plugins, the home directory, `~/.ssh`, cloud credentials.
+//!
+//! **A team writes nothing others load.** A team process has write access to nothing a process
+//! outside the team later executes, imports or loads: its virtual environments are its own
+//! ([`VENVS_DIR`], seeded from the server's copy of each of its plugins' environments by
+//! [`prepare`], never shared), the server's virtual environments, the plugins directories and
+//! their links, the bytecode next to shared source and the server's lock files are read-only or
+//! out of reach, and the locks of its own environments are kept in its cache directory.
 //! A rule that would cover the root, its `config/`, `jobs/`, `team_scopes/`, `venvs/`, a plugins
 //! directory or the home directory (a `PYTHONPATH` of `~`, a root under `/opt`) is dropped
 //! ([`Spec::protected`]).
@@ -69,6 +77,12 @@ pub const JOB_WORK_DIR: &str = ".mrsm_team_work";
 pub const CANARY_FILE: &str = ".sandbox_canary";
 /// A team's cache directory in its scope directory (`XDG_CACHE_HOME`).
 pub const CACHE_DIR: &str = "cache";
+/// A team's own virtual environments in its scope directory (`MRSM_VENVS_DIR` of its processes).
+/// Nothing outside the team imports from them; the server's environments stay read-only to it.
+pub const VENVS_DIR: &str = "venvs";
+/// The shared virtual environment of Meerschaum's own dependencies (read-only to a team; linked
+/// from the team's [`VENVS_DIR`]).
+pub const SHARED_VENV: &str = "mrsm";
 
 /// How isolated teams' processes are sandboxed (`system.engine.python_team_sandbox`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -337,8 +351,10 @@ pub struct SpecInputs<'a> {
     pub home: Option<&'a Path>,
     /// The plugins directories.
     pub plugins_dirs: &'a [PathBuf],
-    /// The virtual environments directory.
+    /// The server's virtual environments directory (only its `mrsm` environment is readable).
     pub venvs_dir: &'a Path,
+    /// The team's own virtual environments directory (read and write).
+    pub team_venvs_dir: &'a Path,
     /// The team's plugins.
     pub plugins: &'a BTreeSet<String>,
     /// The team's own plugins directory (links to its plugins), if any.
@@ -392,12 +408,14 @@ pub fn build_spec(inputs: &SpecInputs<'_>) -> Spec {
                 rules.push(Rule::new(dir.join(name), Access::Read, "the team's plugin"));
             }
         }
-        rules.push(Rule::new(
-            inputs.venvs_dir.join(plugin),
-            Access::ReadWrite,
-            "the team's plugin's virtual environment (requirements installed at run time)",
-        ));
     }
+    // Its own virtual environments only: the server's environment of a plugin is also imported
+    // by the server, the open side and every other team granted the plugin.
+    rules.push(Rule::new(
+        inputs.team_venvs_dir,
+        Access::ReadWrite,
+        "the team's own virtual environments (requirements installed at run time)",
+    ));
     if let Some(view) = inputs.plugins_view {
         rules.push(Rule::new(
             view,
@@ -417,19 +435,10 @@ pub fn build_spec(inputs: &SpecInputs<'_>) -> Spec {
         "the plugins package",
     ));
     rules.push(Rule::new(
-        inputs.venvs_dir.join("mrsm"),
+        inputs.venvs_dir.join(SHARED_VENV),
         Access::ReadExec,
         "Meerschaum's shared virtual environment",
     ));
-    // Activating a virtual environment takes its lock (`.cache/venvs/<venv>.mutation.lock`,
-    // shared with the server's processes): the file only, created by `prepare`.
-    for venv in venv_lock_names(inputs.plugins) {
-        rules.push(Rule::new(
-            venv_lock_path(root, &venv),
-            Access::Lock,
-            "the lock of a virtual environment it activates",
-        ));
-    }
     rules.push(Rule::new(
         inputs.tmp_dir,
         Access::ReadWrite,
@@ -473,19 +482,74 @@ pub fn build_spec(inputs: &SpecInputs<'_>) -> Spec {
     spec
 }
 
-/// The virtual environments a team process activates: its plugins' and `mrsm`.
-fn venv_lock_names(plugins: &BTreeSet<String>) -> Vec<String> {
-    let mut names: Vec<String> = plugins.iter().filter(|p| plain_name(p)).cloned().collect();
-    names.push("mrsm".to_string());
-    names
+/// Copy the server's virtual environment `shared` of a plugin to the team's own `private` (5.1),
+/// unless `private` exists: the team then starts with what the server installed, and what its
+/// code installs at run time lands in its copy only. Never links a file (a hard link would let
+/// the team write the server's copy); the file system may share blocks copy-on-write. Bytecode
+/// caches are left out, and a symbolic link into `shared` points into the copy. The copy is
+/// made beside `private` and renamed into place, so a team process never sees half of one.
+/// `Ok(false)`: nothing to copy (no `shared`, or `private` exists).
+pub fn seed_team_venv(shared: &Path, private: &Path) -> std::io::Result<bool> {
+    if !shared.is_dir() || std::fs::symlink_metadata(private).is_ok() {
+        return Ok(false);
+    }
+    let parent = private.parent().unwrap_or(Path::new("."));
+    let name = private
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let staging = parent.join(format!(
+        ".{name}.seed-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    ));
+    let copied = copy_tree(shared, &staging, shared, private);
+    let placed = copied.and_then(|()| std::fs::rename(&staging, private));
+    if placed.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+        // Another of the team's processes placed its copy first.
+        if private.is_dir() {
+            return Ok(false);
+        }
+    }
+    placed.map(|()| true)
 }
 
-/// The lock a process takes to activate (verify) the virtual environment `venv`
-/// (`meerschaum.utils.venv`'s `VENVS_CACHE_RESOURCES_PATH / '<venv>.mutation.lock'`).
-pub fn venv_lock_path(root: &Path, venv: &str) -> PathBuf {
-    root.join(".cache")
-        .join("venvs")
-        .join(format!("{venv}.mutation.lock"))
+/// Copy the directory `from` to `to` (see [`seed_team_venv`]): files by content, links as links
+/// (an absolute link under `shared` pointing under `private` instead), `__pycache__` skipped.
+fn copy_tree(from: &Path, to: &Path, shared: &Path, private: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(to)?;
+    if let Ok(metadata) = std::fs::metadata(from) {
+        let _ = std::fs::set_permissions(to, metadata.permissions());
+    }
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name == "__pycache__" {
+            continue;
+        }
+        let source = entry.path();
+        let target = to.join(&name);
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            let mut link = std::fs::read_link(&source)?;
+            if let Ok(inside) = link.strip_prefix(shared) {
+                link = private.join(inside);
+            }
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&link, &target)?;
+            #[cfg(not(unix))]
+            let _ = (&link, &target);
+        } else if kind.is_dir() {
+            copy_tree(&source, &target, shared, private)?;
+        } else if kind.is_file() {
+            std::fs::copy(&source, &target)?;
+        }
+    }
+    Ok(())
 }
 
 /// `path` made absolute and without `.` / `..` components (no file system access).
@@ -935,6 +999,8 @@ pub struct Prepared {
     pub cache_dir: PathBuf,
     /// The team's plugins directory (`MRSM_PLUGINS_DIR`): links to its plugins only.
     pub plugins_dir: PathBuf,
+    /// The team's own virtual environments (`MRSM_VENVS_DIR`).
+    pub venvs_dir: PathBuf,
     /// The spec.
     pub spec: Spec,
 }
@@ -993,22 +1059,12 @@ pub fn prepare(
         }
     }
     link_team_plugins(&plugins_view, &paths.plugins_dirs, &scope.plugins);
-    for venv in venv_lock_names(&scope.plugins) {
-        let lock = venv_lock_path(&root, &venv);
-        if let Some(dir) = lock.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        if !lock.exists() {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&lock)?;
-        }
-    }
     let venvs_dir = paths
         .venvs_dir
         .clone()
         .unwrap_or_else(|| root.join("venvs"));
+    let team_venvs_dir = scope_dir.join(VENVS_DIR);
+    prepare_team_venvs(&venvs_dir, &team_venvs_dir, &scope.plugins)?;
     let work_dir = match job_dir {
         Some(dir) => {
             let work = dir.join(JOB_WORK_DIR);
@@ -1033,6 +1089,7 @@ pub fn prepare(
         home: home.as_deref(),
         plugins_dirs: &paths.plugins_dirs,
         venvs_dir: &venvs_dir,
+        team_venvs_dir: &team_venvs_dir,
         plugins: &scope.plugins,
         plugins_view: Some(&plugins_view),
         files,
@@ -1069,8 +1126,37 @@ pub fn prepare(
         tmp_dir,
         cache_dir,
         plugins_dir: plugins_view,
+        venvs_dir: team_venvs_dir,
         spec,
     }))
+}
+
+/// The team's own virtual environments directory `team` (created owner-only): a link to the
+/// server's shared `mrsm` environment (read-only to the team), and a copy of the server's
+/// environment of each of the team's `plugins` that it does not have yet ([`seed_team_venv`]).
+/// A copy that fails is left out (the team's code installs what it needs at run time).
+fn prepare_team_venvs(
+    shared: &Path,
+    team: &Path,
+    plugins: &BTreeSet<String>,
+) -> std::io::Result<()> {
+    super::create_private_dir(team)?;
+    let link = team.join(SHARED_VENV);
+    if std::fs::symlink_metadata(&link).is_err() && shared.join(SHARED_VENV).is_dir() {
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(shared.join(SHARED_VENV), &link);
+    }
+    for plugin in plugins
+        .iter()
+        .filter(|p| plain_name(p) && *p != SHARED_VENV)
+    {
+        if let Err(e) = seed_team_venv(&shared.join(plugin), &team.join(plugin)) {
+            tracing::warn!(
+                "The virtual environment of plugin '{plugin}' could not be copied for an isolated                  team ({e}): its requirements are installed again when the team's code needs them."
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Make sure the plugins package links each of the team's plugins (`.internal/plugins/<name>`
@@ -1149,15 +1235,18 @@ fn team_database_files(config: &Config, scope: &TeamScope) -> Vec<Rule> {
 }
 
 /// Point a team process's environment at its sandbox: [`SPEC_VAR`], `TMPDIR` / `TMP` / `TEMP`
-/// (the team's temporary directory), `XDG_CACHE_HOME` (its cache directory) and
-/// `MRSM_PLUGINS_DIR` (its own plugins directory, [`PLUGINS_VIEW_DIR`]).
+/// (the team's temporary directory), `XDG_CACHE_HOME` (its cache directory), `MRSM_PLUGINS_DIR`
+/// (its own plugins directory, [`PLUGINS_VIEW_DIR`]) and `MRSM_VENVS_DIR` (its own virtual
+/// environments, [`VENVS_DIR`]).
 pub fn apply_env(env: &mut Vec<(String, String)>, prepared: &Prepared) {
+    let venvs = prepared.venvs_dir.to_string_lossy().into_owned();
     let tmp = prepared.tmp_dir.to_string_lossy().into_owned();
     let cache = prepared.cache_dir.to_string_lossy().into_owned();
     let spec = prepared.spec_file.to_string_lossy().into_owned();
     let plugins = prepared.plugins_dir.to_string_lossy().into_owned();
     for (name, value) in [
         ("MRSM_PLUGINS_DIR", plugins.as_str()),
+        ("MRSM_VENVS_DIR", venvs.as_str()),
         ("TMPDIR", tmp.as_str()),
         ("TMP", tmp.as_str()),
         ("TEMP", tmp.as_str()),

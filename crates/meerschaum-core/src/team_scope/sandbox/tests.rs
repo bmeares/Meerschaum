@@ -20,6 +20,8 @@ struct Layout {
     work: PathBuf,
     other_job: PathBuf,
     spec_file: PathBuf,
+    /// The team's own virtual environments.
+    venvs: PathBuf,
 }
 
 /// A root with two teams' files, a home directory and a plugins directory (all synthetic).
@@ -68,6 +70,8 @@ fn layout() -> Layout {
     std::fs::create_dir_all(&cache).unwrap();
     ensure_canary(&root).unwrap();
     let spec_file = scope.join(SPEC_FILE);
+    let venvs = scope.join(VENVS_DIR);
+    write(venvs.join("mine/lib/site.py"), "");
     Layout {
         _temp: temp,
         root,
@@ -80,6 +84,7 @@ fn layout() -> Layout {
         work,
         other_job,
         spec_file,
+        venvs,
     }
 }
 
@@ -93,6 +98,7 @@ fn spec_of(l: &Layout, mode: Mode, plugins: &[&str]) -> Spec {
         home: Some(&l.home),
         plugins_dirs: std::slice::from_ref(&l.plugins_dir),
         venvs_dir: &l.root.join("venvs"),
+        team_venvs_dir: &l.venvs,
         plugins: &plugins,
         plugins_view: None,
         files: &l.files,
@@ -153,11 +159,24 @@ fn the_rules_cover_the_teams_own_paths_only() {
             .any(|r| r.path.to_string_lossy().contains("evil")
                 || r.path.to_string_lossy().contains("hidden"))
     );
+    // 5.1: its own virtual environments, never the server's of a plugin it was granted.
     assert_eq!(
-        rule_for(&spec, &l.root.join("venvs/mine")).map(|r| r.access),
+        rule_for(&spec, &l.venvs).map(|r| r.access),
         Some(Access::ReadWrite)
     );
+    assert!(rule_for(&spec, &l.root.join("venvs/mine")).is_none());
     assert!(rule_for(&spec, &l.root.join("venvs/theirs")).is_none());
+    assert_eq!(
+        rule_for(&spec, &l.root.join("venvs/mrsm")).map(|r| r.access),
+        Some(Access::ReadExec)
+    );
+    assert!(
+        !spec
+            .rules
+            .iter()
+            .any(|r| r.path.starts_with(l.root.join(".cache"))),
+        "no lock file of the server's"
+    );
     assert_eq!(
         rule_for(&spec, &l.files.config_file).map(|r| r.access),
         Some(Access::Read)
@@ -545,7 +564,11 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
             (s("own plugin"), l.plugins_dir.join("mine/__init__.py")),
             (s("own single-file plugin"), l.plugins_dir.join("single.py")),
             (s("own job"), l.job.join("properties.json")),
-            (s("own venv"), l.root.join("venvs/mine/lib/site.py")),
+            (s("own venv"), l.venvs.join("mine/lib/site.py")),
+            (
+                s("server's venv of its plugin"),
+                l.root.join("venvs/mine/lib/site.py"),
+            ),
             (
                 s("plugins package"),
                 l.root.join(".internal/plugins/__init__.py"),
@@ -567,8 +590,9 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
             (s("write tmp"), l.tmp.join("scratch.txt")),
             (s("write work"), l.work.join(".result.json")),
             (s("write cache"), l.cache.join("x")),
+            (s("write own venv"), l.venvs.join("mine/lib/installed.py")),
             (
-                s("write own venv"),
+                s("write server's venv of its plugin"),
                 l.root.join("venvs/mine/lib/installed.py"),
             ),
             (s("write /dev/null"), PathBuf::from("/dev/null")),
@@ -604,6 +628,8 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
         "write own job properties",
         "write other venv",
         "write own config dir",
+        "server's venv of its plugin",
+        "write server's venv of its plugin",
     ] {
         assert_eq!(get(label), "denied", "{label}: {results:?}");
     }
@@ -683,4 +709,190 @@ fn the_kernel_support_probe_restricts_nothing() {
     let l = layout();
     assert!(std::fs::read(l.root.join("config/meerschaum.yaml")).is_ok());
     assert!(current().is_none());
+}
+
+/// 5.1: a team's process may write nothing that a process outside the team later executes,
+/// imports or loads: not the virtual environment of a plugin it was granted (which the server,
+/// the open side and other teams granted the same plugin import), the plugins directory, the
+/// bytecode next to shared source, the plugins package's links or the lock files the server's
+/// processes take.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_team_process_writes_nothing_that_others_load() {
+    let l = layout();
+    let spec = spec_of(&l, Mode::Require, &["mine", "single"]);
+    std::fs::create_dir_all(l.root.join(".cache/venvs")).unwrap();
+    std::fs::write(l.root.join(".cache/venvs/mine.mutation.lock"), "").unwrap();
+    std::fs::create_dir_all(l.plugins_dir.join("mine/__pycache__")).unwrap();
+    let s = |v: &str| v.to_string();
+    let plan = ChildPlan {
+        spec,
+        extra: Vec::new(),
+        read: Vec::new(),
+        write: vec![
+            (
+                s("shared venv of a granted plugin"),
+                l.root.join("venvs/mine/lib/planted.py"),
+            ),
+            (
+                s("plugins directory"),
+                l.plugins_dir.join("mine/planted.py"),
+            ),
+            (
+                s("bytecode next to shared source"),
+                l.plugins_dir
+                    .join("mine/__pycache__/__init__.cpython-314.pyc"),
+            ),
+            (
+                s("plugins package links"),
+                l.root.join(".internal/plugins/planted.py"),
+            ),
+            (
+                s("a lock the server takes"),
+                l.root.join(".cache/venvs/mine.mutation.lock"),
+            ),
+        ],
+        connect: Vec::new(),
+        connect_abstract: Vec::new(),
+        signal: None,
+    };
+    let mut plan = plan;
+    plan.write
+        .push((s("its own venv"), l.venvs.join("mine/lib/installed.py")));
+    let Some((report, results)) = run_child(&plan) else {
+        return;
+    };
+    assert!(report.enforced, "{report:?}");
+    for (label, _) in &plan.write {
+        let expected = if label == "its own venv" {
+            "ok"
+        } else {
+            "denied"
+        };
+        assert_eq!(results[label.as_str()], expected, "{label}: {results:?}");
+    }
+}
+
+/// 5.1: two teams granted the same plugin each get a copy of the server's virtual environment of
+/// it (bytecode left out, links into it pointing into the copy) and a link to the shared `mrsm`
+/// environment; neither copy is the other's or the server's, and a team's process may write its
+/// own copy only.
+#[test]
+fn teams_granted_one_plugin_get_their_own_copies_of_its_environment() {
+    let l = layout();
+    let shared = l.root.join("venvs/mine");
+    std::fs::create_dir_all(shared.join("lib/__pycache__")).unwrap();
+    std::fs::write(shared.join("lib/__pycache__/site.cpython-314.pyc"), "x").unwrap();
+    std::fs::write(shared.join("lib/pkg.py"), "VALUE = 'server'\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(shared.join("lib"), shared.join("lib64")).unwrap();
+    std::fs::create_dir_all(l.root.join("venvs/mrsm/lib")).unwrap();
+    let env = vec![
+        (
+            "MRSM_ROOT_DIR".to_string(),
+            l.root.to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_PLUGINS_DIR".to_string(),
+            l.plugins_dir.to_string_lossy().into_owned(),
+        ),
+    ];
+    let mut options = crate::config::ConfigOptions::with_env(env);
+    options.allow_writes = false;
+    let config = Config::new(options).unwrap();
+    let mut prepared = Vec::new();
+    for key in ["key-c", "key-d"] {
+        let scope = TeamScope {
+            team: key.into(),
+            team_id: Some(key.into()),
+            plugins: ["mine".to_string()].into_iter().collect(),
+            ..TeamScope::default()
+        };
+        let dir = l.root.join("team_scopes").join(key);
+        let team_files = files(&dir);
+        std::fs::create_dir_all(&team_files.config_dir).unwrap();
+        std::fs::write(&team_files.config_file, "{}").unwrap();
+        let spec_file = dir.join(SPEC_FILE);
+        let p = prepare(&config, &scope, &team_files, None, &spec_file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(p.venvs_dir, dir.join(VENVS_DIR));
+        let mut env = Vec::new();
+        apply_env(&mut env, &p);
+        assert!(env.contains(&(
+            "MRSM_VENVS_DIR".to_string(),
+            p.venvs_dir.to_string_lossy().into_owned()
+        )));
+        let copy = p.venvs_dir.join("mine");
+        assert_eq!(
+            std::fs::read_to_string(copy.join("lib/pkg.py")).unwrap(),
+            "VALUE = 'server'\n"
+        );
+        assert!(!copy.join("lib/__pycache__").exists());
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                std::fs::read_link(copy.join("lib64")).unwrap(),
+                copy.join("lib")
+            );
+            assert_eq!(
+                std::fs::read_link(p.venvs_dir.join(SHARED_VENV)).unwrap(),
+                l.root.join("venvs/mrsm")
+            );
+        }
+        // A copy that exists is the team's: a second preparation leaves it as it is.
+        std::fs::write(copy.join("lib/installed.py"), key).unwrap();
+        prepare(&config, &scope, &team_files, None, &spec_file).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(copy.join("lib/installed.py")).unwrap(),
+            key
+        );
+        prepared.push(p);
+    }
+    assert!(!shared.join("lib/installed.py").exists());
+    assert_eq!(
+        std::fs::read_to_string(prepared[1].venvs_dir.join("mine/lib/installed.py")).unwrap(),
+        "key-d"
+    );
+    #[cfg(target_os = "linux")]
+    {
+        let s = |v: &str| v.to_string();
+        let plan = ChildPlan {
+            spec: prepared[0].spec.clone(),
+            extra: Vec::new(),
+            read: vec![(
+                s("read its copy"),
+                prepared[0].venvs_dir.join("mine/lib/pkg.py"),
+            )],
+            write: vec![
+                (s("its copy"), prepared[0].venvs_dir.join("mine/lib/new.py")),
+                (
+                    s("the other team's copy"),
+                    prepared[1].venvs_dir.join("mine/lib/new.py"),
+                ),
+                (s("the server's"), shared.join("lib/new.py")),
+                (
+                    s("the shared mrsm environment"),
+                    prepared[0].venvs_dir.join("mrsm/lib/new.py"),
+                ),
+            ],
+            connect: Vec::new(),
+            connect_abstract: Vec::new(),
+            signal: None,
+        };
+        if let Some((report, results)) = run_child(&plan) {
+            assert!(report.enforced, "{report:?}");
+            assert_eq!(results["its copy"], "ok", "{results:?}");
+            for label in [
+                "the other team's copy",
+                "the server's",
+                "the shared mrsm environment",
+            ] {
+                assert_eq!(results[label], "denied", "{label}: {results:?}");
+            }
+        }
+    }
+    for p in &prepared {
+        let _ = std::fs::remove_dir_all(&p.tmp_dir);
+    }
 }

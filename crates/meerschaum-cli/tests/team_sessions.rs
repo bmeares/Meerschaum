@@ -35,7 +35,66 @@ def tpr_probe(action=None, **kwargs):
         'file_has_own': 'w-pw' in text,
         'sandbox': __import__('meerschaum._internal.team_sandbox', fromlist=['report']).report(),
         'server_config': _attempt_read(os.path.join(os.environ['MRSM_ROOT_DIR'], 'config', 'meerschaum.yaml')),
+        'venvs_dir': os.environ.get('MRSM_VENVS_DIR'),
+        'writes': _writes() if os.environ.get('MRSM_TEAM_SCOPE') else {},
     })
+
+def _attempt_write(path):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write('planted = True\n')
+        return 'written'
+    except PermissionError:
+        return 'denied'
+    except Exception as e:
+        return repr(e)
+
+def _writes():
+    root = os.environ['MRSM_ROOT_DIR']
+    here = os.path.dirname(os.path.realpath(__file__))
+    own = os.environ.get('MRSM_VENVS_DIR') or ''
+    out = {
+        "server's venv": _attempt_write(os.path.join(root, 'venvs', 'tpr_probe', 'planted.py')),
+        'plugins dir': _attempt_write(os.path.join(here, 'planted.py')),
+        'pycache': _attempt_write(os.path.join(here, '__pycache__', 'tpr_probe.cpython-314.pyc')),
+        'own venv': _attempt_write(os.path.join(own, 'tpr_probe', 'planted.py')),
+    }
+    for key in ('id-wetlands', 'id-drylands'):
+        if key not in own:
+            out["other team's venv"] = _attempt_write(
+                os.path.join(root, 'team_scopes', key, 'venvs', 'tpr_probe', 'planted.py')
+            )
+    return out
+
+from meerschaum.plugins import make_action
+
+@make_action
+def tpr_install(action=None, **kwargs):
+    """Install a local wheel into this plugin's virtual environment and import it."""
+    import tempfile, zipfile
+    from meerschaum.utils.packages import pip_install
+    from meerschaum.utils.venv import Venv
+    tmp = tempfile.mkdtemp()
+    wheel = os.path.join(tmp, 'tpr_local_pkg-0.1-py3-none-any.whl')
+    with zipfile.ZipFile(wheel, 'w') as z:
+        z.writestr('tpr_local_pkg/__init__.py', "WHO = 'installed'\n")
+        z.writestr('tpr_local_pkg-0.1.dist-info/METADATA',
+                   'Metadata-Version: 2.1\nName: tpr-local-pkg\nVersion: 0.1\n')
+        z.writestr('tpr_local_pkg-0.1.dist-info/WHEEL',
+                   'Wheel-Version: 1.0\nGenerator: tpr\nRoot-Is-Purelib: true\nTag: py3-none-any\n')
+        z.writestr('tpr_local_pkg-0.1.dist-info/RECORD', '')
+    installed = pip_install(
+        wheel, venv='tpr_probe', args=['--no-deps', '--no-index'],
+        check_update=False, check_pypi=False, check_wheel=False, silent=True,
+    )
+    try:
+        with Venv('tpr_probe'):
+            import tpr_local_pkg
+        where = os.path.realpath(tpr_local_pkg.__file__)
+    except Exception as e:
+        where = repr(e)
+    return True, json.dumps({'installed': bool(installed), 'where': where})
 
 def _attempt_read(path):
     try:
@@ -105,17 +164,33 @@ fn root_with_teams(root: &Path, plugins: &Path) -> Config {
 }
 
 fn probe(session: &Session, config: &Config) -> serde_json::Value {
+    action(session, config, "probe")
+}
+
+/// Run the plugin's action `tpr <name>` and parse the JSON it returns.
+fn action(session: &Session, config: &Config, name: &str) -> serde_json::Value {
     let pool = session.pool(config);
     let result = session
         .block_on(run_action(
             &pool,
-            &ActionRequest::Sysargs(vec!["tpr".into(), "probe".into()]),
+            &ActionRequest::Sysargs(vec!["tpr".into(), name.into()]),
             None,
             CallOptions::default(),
         ))
         .expect("the action runs");
     assert!(result.success, "{}", result.message);
     serde_json::from_str(result.message.trim()).unwrap()
+}
+
+/// Whether a file or directory named `name` is anywhere under `dir`.
+fn tree_has(dir: &Path, name: &str) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            e.file_name() == name
+                || e.file_type().is_ok_and(|t| t.is_dir() && !t.is_symlink())
+                    && tree_has(&e.path(), name)
+        })
+    })
 }
 
 #[test]
@@ -134,6 +209,11 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     let root = tempfile::tempdir().unwrap();
     let plugins = tempfile::tempdir().unwrap();
     let config = root_with_teams(root.path(), plugins.path());
+    // The server's virtual environment of the plugin (the server, the open side and every team
+    // granted it import from it).
+    let shared_venv = root.path().join("venvs").join("tpr_probe");
+    std::fs::create_dir_all(shared_venv.join("lib")).unwrap();
+    std::fs::write(shared_venv.join("lib").join("marker.txt"), "server").unwrap();
     // The server's environment holds a credential of its own (a cloud key): team workers start
     // from an allowlist and never see it. (This file's only test: nothing else reads the
     // environment meanwhile.)
@@ -181,6 +261,18 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
         assert_eq!(first["sandbox"]["enforced"], true, "{first}");
         assert_eq!(first["sandbox"]["canary"], "denied", "{first}");
         assert_eq!(first["server_config"], "denied", "{first}");
+        // 5.1: it writes nothing a process outside the team loads, only its own environments.
+        let writes = &first["writes"];
+        for target in [
+            "server's venv",
+            "plugins dir",
+            "pycache",
+            "other team's venv",
+        ] {
+            assert_eq!(writes[target], "denied", "{target}: {first}");
+        }
+        assert_eq!(writes["own venv"], "written", "{first}");
+        assert!(!shared_venv.join("planted.py").exists());
     } else {
         eprintln!(
             "No Landlock here ({}): the sandbox is not checked.",
@@ -193,6 +285,58 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     assert!(team.instance("sql:wetlands", &team_config).is_ok());
     for other in ["sql:drylands", "sql:main"] {
         assert!(team.instance(other, &team_config).is_err(), "{other}");
+    }
+
+    // Its own environment is a copy of the server's, and what it installs at run time lands
+    // there only.
+    let own_venv = std::path::PathBuf::from(first["venvs_dir"].as_str().unwrap()).join("tpr_probe");
+    assert!(
+        own_venv.starts_with(root.path().join("team_scopes")),
+        "{first}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(own_venv.join("lib").join("marker.txt")).unwrap(),
+        "server"
+    );
+    let installed = action(&team, &team_config, "install");
+    assert_eq!(installed["installed"], true, "{installed}");
+    assert!(
+        installed["where"]
+            .as_str()
+            .is_some_and(|w| w.starts_with(&own_venv.display().to_string())),
+        "{installed}"
+    );
+    assert!(!tree_has(&shared_venv, "tpr_local_pkg"));
+
+    // Another isolated team granted the same plugin works with its own copy, which the first
+    // team's install did not touch, and cannot write the first team's.
+    let mut drylands = Team::new("drylands");
+    drylands.id = Some("id-drylands".into());
+    drylands
+        .attributes
+        .insert("isolated".into(), meerschaum_core::Value::Bool(true));
+    drylands.set_names("plugins", &["tpr_probe".to_string()]);
+    let dry_scope = TeamScope::of(&drylands, &connectors);
+    let (dry, _) = session.for_team(&dry_scope, None, &config).unwrap();
+    let dry_config = dry.team().unwrap().new_config().unwrap();
+    let dry_probe = probe(&dry, &dry_config);
+    assert_eq!(dry_probe["team"], "drylands");
+    let dry_venv =
+        std::path::PathBuf::from(dry_probe["venvs_dir"].as_str().unwrap()).join("tpr_probe");
+    assert_ne!(dry_venv, own_venv);
+    assert!(!tree_has(&dry_venv, "tpr_local_pkg"));
+    if support.available() {
+        assert_eq!(
+            dry_probe["writes"]["other team's venv"], "denied",
+            "{dry_probe}"
+        );
+    }
+    let dry_retired = session.retire_teams(|key, _| key != "id-drylands");
+    assert_eq!(dry_retired, vec!["id-drylands".to_string()]);
+    if let Ok(tmp) =
+        meerschaum_core::team_scope::sandbox::team_tmp_dir(root.path(), &dry_scope.key())
+    {
+        let _ = std::fs::remove_dir_all(tmp);
     }
 
     // Unchanged: the warm session and worker.

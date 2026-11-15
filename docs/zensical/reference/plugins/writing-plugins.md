@@ -917,7 +917,7 @@ Actions, hooks, API endpoints, and web pages defined in submodules belong to the
 
 ### Plugins of an Isolated Team
 
-On an API server shared by several teams, a plugin of an [isolated team](/reference/api-instance/teams/#team-scoped-workers) runs in that team's own Python workers and jobs, whose configuration holds only the team's connectors and the settings of the team's plugins (`plugins:<name>`). `mrsm.get_connector()` raises `PermissionError` for another connector, `get_config('meerschaum', 'connectors')` leaves them out, and the server's connector variables are not in `os.environ`. A plugin that uses only its team's connectors needs no change.
+On an API server shared by several teams, a plugin of an [isolated team](/reference/api-instance/teams/#team-scoped-workers) runs in that team's own Python workers and jobs, whose configuration holds only the team's connectors and the settings of the team's plugins (`plugins:<name>`). `mrsm.get_connector()` raises `PermissionError` for another connector, `get_config('meerschaum', 'connectors')` leaves them out, and the server's connector variables are not in `os.environ`. A plugin that uses only its team's connectors needs no change. On Linux its processes also run in the team's [filesystem sandbox](/reference/api-instance/teams/#the-filesystem-sandbox): the plugin's virtual environment there is the team's own copy of the server's, so what the plugin installs at run time is installed for that team only, and the plugin cannot change files that the server or other teams load (the plugins directory, the server's virtual environments, compiled bytecode next to shared source).
 
 ### Package Management
 
