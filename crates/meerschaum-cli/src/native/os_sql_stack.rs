@@ -1319,7 +1319,13 @@ fn with_secret_files(rt: &mut Runtime<'_>, keys: &[&str], value: Value, warn_: b
     let dir = secrets::secrets_dir(&rt.config().paths().path("STACK_RESOURCES_PATH"));
     let mut externalized = value.clone();
     let written = secrets::prepare_dir(&dir).and_then(|salt| {
-        let done = secrets::externalize(&mut externalized, &dir, &form, &salt);
+        let (valkey_password, extra_warnings) = stack_valkey_password(rt, &mut externalized, &dir);
+        let mut done = secrets::externalize(&mut externalized, &dir, &form, &salt);
+        let (valkey, warnings) =
+            secrets::externalize_valkey(&mut externalized, &dir, valkey_password.as_deref(), &salt);
+        done.services.push(valkey);
+        done.warnings.extend(extra_warnings);
+        done.warnings.extend(warnings);
         secrets::write_files(&dir, &done.services).map(|()| done)
     });
     match written {
@@ -1344,6 +1350,105 @@ fn with_secret_files(rt: &mut Runtime<'_>, keys: &[&str], value: Value, warn_: b
             value
         }
     }
+}
+
+/// The password the stack's Valkey requires (5.1, [`super::stack_secrets::externalize_valkey`])
+/// and what to tell the user: `valkey:main`'s password. When it has none, one is generated once
+/// (owner-only, in the secrets directory, as Grafana's administrator password is when unset) and
+/// given to the `api` service through its `MRSM_PATCH`, with a warning saying how to point
+/// `valkey:main` on this host at it. `None` when the stack has no service of Valkey's images.
+fn stack_valkey_password(
+    rt: &mut Runtime<'_>,
+    compose: &mut Value,
+    dir: &std::path::Path,
+) -> (Option<String>, Vec<String>) {
+    use super::stack_secrets as secrets;
+    let image = compose
+        .get("services")
+        .and_then(|services| services.get("valkey"))
+        .and_then(|valkey| valkey.get("image"))
+        .map(Value::py_str);
+    if !secrets::is_valkey_image(image.as_deref()) {
+        return (None, Vec::new());
+    }
+    let configured = rt
+        .config()
+        .get_with(
+            &["meerschaum", "connectors", "valkey", "main", "password"],
+            meerschaum_core::config::GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        )
+        .1;
+    if !configured.is_null() && !configured.py_str().is_empty() {
+        return (Some(configured.py_str()), Vec::new());
+    }
+    let path = dir.join(secrets::VALKEY_GENERATED_FILENAME);
+    let password = match meerschaum_core::config::grafana_readonly::read_or_generate_secret(
+        &path,
+        "the stack's Valkey password",
+    ) {
+        Ok(password) => password,
+        Err(e) => {
+            return (
+                None,
+                vec![format!("{e}\nThe stack's Valkey runs without a password.")],
+            );
+        }
+    };
+    if let Some(Value::Map(api)) = compose
+        .as_map_mut()
+        .and_then(|c| c.get_mut("services"))
+        .and_then(Value::as_map_mut)
+        .and_then(|services| services.get_mut("api"))
+    {
+        let environment = api
+            .entry("environment".to_string())
+            .or_insert_with(|| Value::Map(Map::new()));
+        let existing = secrets::env_get(Some(environment), "MRSM_PATCH");
+        match patched_valkey_patch(existing.as_deref(), &password) {
+            Some(patch) => set_environment(environment, "MRSM_PATCH", &patch, true),
+            None => {
+                return (
+                    None,
+                    vec![
+                        "`valkey:main` has no password and the stack's `api` service's \
+                         `MRSM_PATCH` is not JSON: the stack's Valkey runs without a password. \
+                         Set `meerschaum:connectors:valkey:main:password`."
+                            .into(),
+                    ],
+                );
+            }
+        }
+    }
+    let warning = format!(
+        "`valkey:main` has no password, so the stack's Valkey requires a generated one, stored \
+         in {path}. Set `meerschaum:connectors:valkey:main:password` to `MRSM{{file:{path}}}` so \
+         `valkey:main` on this host can connect.",
+        path = path.display()
+    );
+    (Some(password), vec![warning])
+}
+
+/// The api service's `MRSM_PATCH` with `valkey:main`'s generated password (see
+/// [`stack_valkey_password`]). `None` when the variable is not JSON.
+fn patched_valkey_patch(existing: Option<&str>, password: &str) -> Option<String> {
+    let mut patch: serde_json::Value = match existing.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(text) => serde_json::from_str(text).ok()?,
+        None => serde_json::json!({}),
+    };
+    let mut node = patch.as_object_mut()?;
+    for key in ["meerschaum", "connectors", "valkey", "main"] {
+        node = node
+            .entry(key)
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()?;
+    }
+    node.insert("password".into(), password.into());
+    serde_json::to_string_pretty(&patch).ok()
 }
 
 /// `sync_yaml_configs(keys, sub_path, substitute=True, replace_tuples=...)`.
@@ -1801,8 +1906,9 @@ mod compose_writer_tests {
     fn the_core_sync_writes_a_compose_file_without_grafana() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("config")).unwrap();
-        let patch =
-            r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null, "api": null}}}}"#;
+        // 5.1: nor a `valkey` service (`mrsm stack` gives it its password in a file).
+        let patch = r#"{"stack": {"docker-compose.yaml": {"services":
+            {"grafana": null, "api": null, "valkey": null}}}}"#;
         let (by_stack, by_core) = compose_after(dir.path(), &[("MRSM_CONFIG", patch)], false);
         assert!(!by_core.is_empty());
         assert!(!by_core.contains("grafana_readonly"), "{by_core}");
@@ -1931,6 +2037,75 @@ docker-compose.yaml:
                 stack_yaml
             );
         }
+    }
+
+    /// 5.1: the stack's Valkey requires `valkey:main`'s password (its images ignore
+    /// `VALKEY_PASSWORD`): a configuration file in its own secrets subdirectory, mounted
+    /// read-only, and no password in the compose file.
+    #[test]
+    fn the_stacks_valkey_requires_the_configured_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = r#"{"meerschaum": {"connectors": {"valkey": {"main":
+            {"password": "vk-s3cret-\"xyz"}}}}}"#;
+        let (compose, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", config)], None);
+        assert!(!compose.contains("vk-s3cret"), "{compose}");
+        assert!(!compose.contains("VALKEY_PASSWORD"), "{compose}");
+        assert!(
+            compose.contains("- /run/secrets/meerschaum/valkey.conf"),
+            "{compose}"
+        );
+        let conf = std::fs::read_to_string(secrets.join("valkey").join("valkey.conf")).unwrap();
+        assert!(conf.contains(r#"requirepass "vk-s3cret-\"xyz""#), "{conf}");
+        // The default password (an upgraded root that never set one).
+        let dir = tempfile::tempdir().unwrap();
+        let (_, secrets) = stack_files(dir.path(), &[], None);
+        let conf = std::fs::read_to_string(secrets.join("valkey").join("valkey.conf")).unwrap();
+        assert!(conf.contains(r#"requirepass "mrsm""#), "{conf}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode =
+                |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&secrets.join("valkey")), 0o755);
+            assert_eq!(mode(&secrets.join("valkey").join("valkey.conf")), 0o644);
+        }
+    }
+
+    /// 5.1: `valkey:main` without a password: one is generated once (owner-only), the stack's
+    /// Valkey requires it and the `api` service is given it; the next write keeps it.
+    #[test]
+    fn a_stack_without_a_valkey_password_gets_a_generated_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = r#"{"meerschaum": {"connectors": {"valkey": {"main": {"password": null}}}}}"#;
+        let (compose, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", config)], None);
+        let generated = std::fs::read_to_string(secrets.join(".valkey_password")).unwrap();
+        assert_eq!(generated.len(), 64);
+        assert!(!compose.contains(&generated), "{compose}");
+        let conf = std::fs::read_to_string(secrets.join("valkey").join("valkey.conf")).unwrap();
+        assert!(
+            conf.contains(&format!("requirepass \"{generated}\"")),
+            "{conf}"
+        );
+        let patch = std::fs::read_to_string(secrets.join("api").join("mrsm_patch.json")).unwrap();
+        let patch: serde_json::Value = serde_json::from_str(&patch).unwrap();
+        assert_eq!(
+            patch["meerschaum"]["connectors"]["valkey"]["main"]["password"],
+            generated.as_str()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(secrets.join(".valkey_password"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let (_, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", config)], None);
+        assert_eq!(
+            std::fs::read_to_string(secrets.join(".valkey_password")).unwrap(),
+            generated
+        );
     }
 
     /// An image older than 5.1.0 keeps the environment form (its API server would start without

@@ -29,9 +29,11 @@ fn registry_with(root: &std::path::Path, allow_writes: bool, extra: &[(&str, &st
 /// A stack without a `grafana` service and without the `api` service's configuration: nothing
 /// for `mrsm stack` to harden, so the core sync writes the compose file (5.1; a stack with
 /// Grafana, or whose `api` service gets `MRSM_CONFIG`, leaves it to `mrsm stack`).
+/// (5.1: nor a `valkey` service, which `mrsm stack` starts with its password in a file.)
 const WITHOUT_GRAFANA: (&str, &str) = (
     "MRSM_CONFIG",
-    r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null, "api": null}}}}"#,
+    r#"{"stack": {"docker-compose.yaml": {"services":
+        {"grafana": null, "api": null, "valkey": null}}}}"#,
 );
 
 /// 5.1: the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (every connector's credentials) never
@@ -40,8 +42,10 @@ const WITHOUT_GRAFANA: (&str, &str) = (
 #[test]
 fn the_core_sync_never_writes_the_api_services_configuration() {
     for services in [
-        r#"{"grafana": null}"#,
-        r#"{"grafana": null, "api": {"environment": ["MRSM_PATCH={}"]}}"#,
+        r#"{"grafana": null, "valkey": null}"#,
+        r#"{"grafana": null, "valkey": null, "api": {"environment": ["MRSM_PATCH={}"]}}"#,
+        // 5.1: a `valkey` service gets its password file from `mrsm stack`.
+        r#"{"grafana": null, "api": null}"#,
     ] {
         let root = tempfile::tempdir().unwrap();
         let patch =

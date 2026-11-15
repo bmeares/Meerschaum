@@ -334,7 +334,8 @@ impl ConfigState {
 
     /// Whether `mrsm stack` hardens the stack's compose file (5.1): its `api` service has an
     /// `MRSM_CONFIG` or `MRSM_PATCH` in its environment (which `mrsm stack` moves to files, so
-    /// the compose file never holds the connectors' credentials), or the stack has a `grafana`
+    /// the compose file never holds the connectors' credentials), the stack has a `valkey`
+    /// service (`mrsm stack` starts it with its password in a file), or it has a `grafana`
     /// service, and its "Meerschaum Main" data source is switched to the read-only role (`mrsm
     /// stack` adds the one-shot `grafana_readonly` service Grafana waits for) or
     /// `api:grafana:enabled` is set (the auth proxy, its network and the administrator password).
@@ -364,6 +365,14 @@ impl ConfigState {
             _ => false,
         }
         }) {
+            return true;
+        }
+        // 5.1: `mrsm stack` starts the stack's Valkey with a password file.
+        if compose
+            .get("services")
+            .and_then(|services| services.get("valkey"))
+            .is_some_and(|valkey| valkey.as_map().is_some())
+        {
             return true;
         }
         let has_grafana = compose

@@ -9,8 +9,10 @@
 //!   `<root>/stack/secrets/<service>/`, and the service gets the variable's file form pointing at
 //!   a read-only mount of that directory ([`CONTAINER_DIR`]): `MRSM_CONFIG_FILE` /
 //!   `MRSM_PATCH_FILE` for `api`, `GF_SECURITY_ADMIN_PASSWORD__FILE` for `grafana`, and the
-//!   one-shot `grafana_readonly` service reads its two passwords from files. The compose file and
-//!   `docker inspect` then hold paths, not credentials.
+//!   one-shot `grafana_readonly` service reads its two passwords from files. The `valkey`
+//!   service, whose images ignore `VALKEY_PASSWORD`, is started with a configuration file holding
+//!   `requirepass` ([`externalize_valkey`]). The compose file and `docker inspect` then hold
+//!   paths, not credentials.
 //! - **Who can read them.** `<root>/stack/secrets/` is `0700`: no other host user can reach the
 //!   files. Each service's subdirectory is `0755` with `0644` files, because the container's user
 //!   (uid 1000 in Meerschaum's image, 472 in Grafana's, 1000 in TimescaleDB's) need not be the host
@@ -70,6 +72,11 @@ pub const GRAFANA_ADMIN_FILENAME: &str = "admin_password";
 pub const OWNER_PASSWORD_FILENAME: &str = "owner_password";
 /// The read-only role's password.
 pub const READONLY_PASSWORD_FILENAME: &str = "readonly_password";
+/// The `valkey` service's configuration file (its `requirepass`).
+pub const VALKEY_CONF_FILENAME: &str = "valkey.conf";
+/// The password generated for the stack's Valkey when `valkey:main` has none (in the secrets
+/// directory, owner-only, never mounted).
+pub const VALKEY_GENERATED_FILENAME: &str = ".valkey_password";
 
 /// The services this module writes files for, with the files each may have.
 const SERVICES: &[(&str, &[&str])] = &[
@@ -79,6 +86,7 @@ const SERVICES: &[(&str, &[&str])] = &[
         super::stack_readonly::SERVICE,
         &[OWNER_PASSWORD_FILENAME, READONLY_PASSWORD_FILENAME],
     ),
+    ("valkey", &[VALKEY_CONF_FILENAME]),
 ];
 
 /// How the `api` service gets its configuration.
@@ -432,6 +440,111 @@ pub fn externalize(
     }
     out.services.push(readonly_files);
     out
+}
+
+/// Whether `image` is one of Valkey's own images (`valkey/valkey`, `valkey/valkey-bundle`), whose
+/// server takes a configuration file as its first argument.
+pub fn is_valkey_image(image: Option<&str>) -> bool {
+    let Some(image) = image else {
+        return false;
+    };
+    let image = ["docker.io/", "index.docker.io/", "registry-1.docker.io/"]
+        .iter()
+        .find_map(|prefix| image.strip_prefix(prefix))
+        .unwrap_or(image);
+    let repository = image.split(['@', ':']).next().unwrap_or_default();
+    matches!(repository, "valkey/valkey" | "valkey/valkey-bundle")
+}
+
+/// `requirepass` for a Valkey configuration file, quoted as Valkey reads it.
+pub fn valkey_conf(password: &str) -> String {
+    let quoted = password.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "# Written by `mrsm stack` from `valkey:main`'s password; rewritten on every command.\n\
+         requirepass \"{quoted}\"\n"
+    )
+}
+
+/// The `valkey` service's password (5.1): Valkey's images ignore `VALKEY_PASSWORD`, so the stack
+/// starts the server with a configuration file holding `requirepass` (in the service's secrets
+/// subdirectory, mounted read-only like the others) and drops the variable. `password` is what
+/// `VALKEY_PASSWORD` stands for (`valkey:main`'s password, `None` when it has none: the caller
+/// generates one). A service with its own `command`, another image or a `VALKEY_PASSWORD` given
+/// through another variable is left as it is, with a warning.
+pub fn externalize_valkey(
+    compose: &mut Value,
+    host_dir: &Path,
+    password: Option<&str>,
+    salt: &str,
+) -> (ServiceFiles, Vec<String>) {
+    let mut files = ServiceFiles {
+        service: "valkey".into(),
+        files: Vec::new(),
+    };
+    let mut warnings = Vec::new();
+    let Some(Value::Map(service)) = compose
+        .as_map_mut()
+        .and_then(|c| c.get_mut("services"))
+        .and_then(Value::as_map_mut)
+        .and_then(|services| services.get_mut("valkey"))
+    else {
+        return (files, warnings);
+    };
+    let image = service.get("image").map(Value::py_str);
+    if !is_valkey_image(image.as_deref()) {
+        return (files, warnings);
+    }
+    let environment = service.get("environment");
+    let given = env_get(environment, "VALKEY_PASSWORD");
+    let password = match given.as_deref() {
+        // The stack's variable: `valkey:main`'s password.
+        Some("<DOLLAR>VALKEY_PASSWORD") | Some("<DOLLAR>{VALKEY_PASSWORD}") | None => password,
+        Some(other) if other.contains("<DOLLAR>") => {
+            warnings.push(
+                "The stack's `valkey` service takes `VALKEY_PASSWORD` from another variable: \
+                 it is left as it is, and Valkey ignores that variable. Give the server \
+                 `--requirepass` yourself."
+                    .into(),
+            );
+            return (files, warnings);
+        }
+        Some(literal) => Some(literal),
+    };
+    let Some(password) = password.filter(|p| !p.is_empty()) else {
+        return (files, warnings);
+    };
+    if password.contains(['\n', '\r']) {
+        warnings.push(
+            "`valkey:main`'s password holds a line break, which a Valkey configuration file \
+             cannot: the stack's Valkey runs without a password."
+                .into(),
+        );
+        return (files, warnings);
+    }
+    if service.get("command").is_some_and(|c| !c.is_null()) {
+        warnings.push(
+            "The stack's `valkey` service has its own `command`: it is left as it is. Make sure \
+             it sets `requirepass` (Valkey ignores `VALKEY_PASSWORD`)."
+                .into(),
+        );
+        return (files, warnings);
+    }
+    files
+        .files
+        .push((VALKEY_CONF_FILENAME.to_string(), valkey_conf(password)));
+    if let Some(environment) = service.get_mut("environment") {
+        env_remove(environment, "VALKEY_PASSWORD");
+    }
+    service.insert(
+        "command".into(),
+        Value::List(vec![
+            Value::Str("valkey-server".into()),
+            Value::Str(format!("{CONTAINER_DIR}/{VALKEY_CONF_FILENAME}")),
+        ]),
+    );
+    mount(service, &host_dir.join("valkey"));
+    set_label(service, &revision(salt, "valkey", &files.files));
+    (files, warnings)
 }
 
 /// `<root>/stack/secrets`.
@@ -798,5 +911,70 @@ mod tests {
         // Back on the environment: the copy is removed.
         write_files(&dir, &[]).unwrap();
         assert!(!dir.join("api").exists());
+    }
+
+    #[test]
+    fn the_valkey_service_reads_its_password_from_a_file() {
+        let compose_text = r#"{"services": {"valkey": {
+            "image": "valkey/valkey-bundle:latest",
+            "environment": {"VALKEY_PASSWORD": "<DOLLAR>VALKEY_PASSWORD", "OTHER": "1"},
+            "volumes": ["valkey_data:/data"]}}}"#;
+        let mut compose = value(compose_text);
+        let (files, warnings) =
+            externalize_valkey(&mut compose, Path::new("/d"), Some("p\\w\"d"), "s");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(files.files[0].0, VALKEY_CONF_FILENAME);
+        assert_eq!(
+            files.files[0].1.lines().last().unwrap(),
+            r#"requirepass "p\\w\"d""#
+        );
+        let service = compose.get("services").unwrap().get("valkey").unwrap();
+        assert_eq!(
+            service.get("command").unwrap(),
+            &value(r#"["valkey-server", "/run/secrets/meerschaum/valkey.conf"]"#)
+        );
+        let environment = service.get("environment").unwrap();
+        assert!(environment.get("VALKEY_PASSWORD").is_none());
+        assert_eq!(environment.get("OTHER"), Some(&Value::Str("1".into())));
+        assert!(
+            service
+                .get("volumes")
+                .unwrap()
+                .py_str()
+                .contains("/d/valkey:/run/secrets/meerschaum:z,ro")
+        );
+
+        // No password, another image, or a command of the user's own: left as it is.
+        for (text, password, warned) in [
+            (compose_text, None, false),
+            (
+                r#"{"services": {"valkey": {"image": "bitnami/valkey:8"}}}"#,
+                Some("p"),
+                false,
+            ),
+            (
+                r#"{"services": {"valkey": {"image": "valkey/valkey:8", "command": "valkey-server"}}}"#,
+                Some("p"),
+                true,
+            ),
+            (
+                r#"{"services": {"valkey": {"image": "valkey/valkey:8",
+                    "environment": {"VALKEY_PASSWORD": "<DOLLAR>OTHER"}}}}"#,
+                Some("p"),
+                true,
+            ),
+        ] {
+            let mut compose = value(text);
+            let before = compose.clone();
+            let (files, warnings) =
+                externalize_valkey(&mut compose, Path::new("/d"), password, "s");
+            assert!(files.files.is_empty(), "{text}");
+            assert_eq!(compose, before, "{text}");
+            assert_eq!(!warnings.is_empty(), warned, "{text}: {warnings:?}");
+        }
+        for image in ["valkey/valkey", "docker.io/valkey/valkey-bundle:9@sha256:0"] {
+            assert!(is_valkey_image(Some(image)), "{image}");
+        }
+        assert!(!is_valkey_image(Some("redis:7")));
     }
 }
