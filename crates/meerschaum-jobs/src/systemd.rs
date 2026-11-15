@@ -11,8 +11,10 @@
 //! Compose started, else a short hash of the root's path. A root lists only its own units: the ones
 //! whose files live under its `systemd/services/` directory, so the default root never sees
 //! another root's jobs. Units of other roots export `MRSM_ROOT_DIR` so they come back after a
-//! reboot, and every unit file is private (`0600`: it may carry the project's `MRSM_CONFIG`). Status, PID and timestamps come from `systemctl is-active` / `show`; the job's
-//! properties live in the hidden "sister" local job (`jobs/<name>/`, externally managed); logs
+//! reboot, and every unit file is private (`0600`). Since 5.1 a unit names `MRSM_CONFIG_FILE` /
+//! `MRSM_PATCH_FILE` (owner-only files next to it, [`crate::config_files`]) instead of carrying
+//! the launching process's `MRSM_CONFIG` / `MRSM_PATCH`. Status, PID and timestamps come from
+//! `systemctl is-active` / `show`; the job's properties live in the hidden "sister" local job (`jobs/<name>/`, externally managed); logs
 //! are the service's rotating log file under `<root>/systemd/logs/`.
 //!
 //! The job-side runtime (what runs inside the unit: the rotating log, the result file, the stdin
@@ -904,6 +906,15 @@ impl SystemdExecutor {
         {
             warnings.push(unpinned_python_warning(name));
         }
+        // 5.1: the unit names owner-only files in its directory instead of carrying
+        // `MRSM_CONFIG` / `MRSM_PATCH` (`config_files`); unchanged when they cannot be written.
+        let process_env = match crate::config_files::externalize(
+            &self.get_service_job_path(name),
+            &process_env,
+        ) {
+            Ok(changes) => changes.apply(&process_env),
+            Err(_) => process_env,
+        };
         let text = self.get_service_file_text(name, sysargs, &self.exec_program(), &process_env);
         if let Err(e) = write_private(&service_file_path, &text) {
             return SuccessTuple::fail(e.to_string());
@@ -1300,8 +1311,9 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     canon(a) == canon(b)
 }
 
-/// Write a file only its owner can read (`0600` on Unix): a unit may carry credentials in its
-/// `Environment=MRSM_CONFIG=...` line.
+/// Write a file only its owner can read (`0600` on Unix): a unit written before 5.1 may carry
+/// credentials in its `Environment=MRSM_CONFIG=...` line, and a user's `MRSM_<TYPE>_<LABEL>`
+/// in `properties.env` still reaches it.
 fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     #[cfg(unix)]
     {

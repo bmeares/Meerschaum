@@ -187,7 +187,7 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   A list of plugins expected to be in the plugins directory. Missing plugins will be [installed from `api:mrsm`](/reference/plugins/repositories/#installing-plugins).
   To install from a custom repository, append `@api:<label>` to the plugins' names or set the configuration variable `meerschaum:default_repository`.
 - **`config`**
-  Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config).
+  Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config). The project's commands get it as `MRSM_CONFIG`; its jobs get it in an owner-only file in the job's directory instead (`MRSM_CONFIG_FILE`), so neither `/proc/<pid>/environ` of a job nor its `systemd` unit holds the credentials in it. `compose up` rewrites the file when the block changes and `compose down` removes it with the job.
 - **`environment`**
   Additional environment variables to pass to subprocesses.
 - **`include`**

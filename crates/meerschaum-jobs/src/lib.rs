@@ -41,6 +41,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+pub mod config_files;
 pub mod daemon;
 pub mod detached;
 pub mod executor;

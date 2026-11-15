@@ -646,3 +646,51 @@ fn deleting_a_job_right_after_creating_it_sticks() {
         );
     }
 }
+
+/// 5.1: a job gets `MRSM_CONFIG` in an owner-only file in its directory, never in its
+/// environment (`config_files`), and the file goes with the job.
+#[test]
+fn a_job_reads_its_configuration_from_a_file_in_its_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = common::sh_context(dir.path());
+    let mut env = Map::new();
+    env.insert(
+        "MRSM_CONFIG".into(),
+        Value::Str(r#"{"job": {"password": "job-s3cret"}}"#.into()),
+    );
+    let mut properties = Map::new();
+    properties.insert("env".into(), Value::Map(env));
+    let mut job = sh_job(
+        &ctx,
+        "configured",
+        r#"echo "env=${MRSM_CONFIG:-unset} file=$MRSM_CONFIG_FILE"; cat "$MRSM_CONFIG_FILE"; echo; tr '\0' '\n' < /proc/$$/environ | grep -c job-s3cret || true"#,
+        JobOptions {
+            properties: Some(properties),
+            ..JobOptions::default()
+        },
+    );
+    assert!(job.start().success);
+    wait_stopped(&mut job);
+    let file = dir
+        .path()
+        .join("jobs/configured")
+        .join(meerschaum_jobs::config_files::CONFIG_FILENAME);
+    let logs = job.get_logs().unwrap();
+    assert!(
+        logs.contains(&format!("env=unset file={}", file.display())),
+        "{logs}"
+    );
+    assert!(
+        logs.contains(r#"{"job": {"password": "job-s3cret"}}"#),
+        "{logs}"
+    );
+    // `/proc/<pid>/environ` of the worker holds no credential.
+    assert!(logs.contains("| 0\n"), "{logs}");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(job.delete().success);
+    assert!(!file.exists());
+}

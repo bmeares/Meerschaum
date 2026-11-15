@@ -413,6 +413,10 @@ ExecStart=/usr/local/bin/mrsm sync pipes -i sql:warehouse --loop
 
 systemd expands `${CREDENTIALS_DIRECTORY}` in `Environment=` lines; the credential file is readable by the service only.
 
+### In jobs
+
+A job started from a process that holds `MRSM_CONFIG` or `MRSM_PATCH` (a [Compose](/reference/compose/) project's `config:` block, or your own patch) gets them in owner-only files in its directory (`$MRSM_ROOT_DIR/jobs/<name>/.mrsm_config.json`, or next to its `systemd` unit), named by `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`. Its environment and its unit file hold no credentials from them; the files are rewritten at every start and removed with the job. An `api:` executor's jobs run with the server's configuration, as before.
+
 ### In the stack
 
 `mrsm stack` keeps the credentials out of `stack/docker-compose.yaml` and `docker inspect`: the `api` service gets `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` pointing at files under `<root>/stack/secrets/` (a directory only you can read), and Grafana and the read-only role's setup read their passwords from files there too. An API image older than 5.1.0 cannot read the files and keeps the environment form, with a warning. See [Credentials in files](/reference/stack/#credentials-in-files).

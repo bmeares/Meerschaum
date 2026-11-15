@@ -877,8 +877,16 @@ impl Daemon {
         cmd.args(leading).args(opts.to_args());
         let sc = meerschaum_core::static_config::static_config();
         cmd.env_remove(&sc.environment.systemd_stdin_path);
-        for (k, v) in self.worker_env() {
+        let worker_env = self.worker_env();
+        for (k, v) in &worker_env {
             cmd.env(k, v);
+        }
+        // 5.1: `MRSM_CONFIG` / `MRSM_PATCH` reach the job in owner-only files in its directory
+        // (`config_files`). A file that cannot be written leaves the environment as it is.
+        let mut launching = crate::config_files::process_env();
+        launching.extend(worker_env);
+        if let Ok(changes) = crate::config_files::externalize(&self.paths.dir, &launching) {
+            changes.apply_to(&mut cmd);
         }
         crate::supervisor::spawn_detached(&mut cmd)
     }
