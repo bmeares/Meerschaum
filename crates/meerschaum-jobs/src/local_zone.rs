@@ -161,6 +161,25 @@ fn numeric_abbreviation(gmtoff: i32) -> String {
     }
 }
 
+/// The host's zone as `tz local` names it, on every platform: `TZ`, else the system zone
+/// (`iana-time-zone`: `/etc/localtime` and friends on Unix, the registry on Windows). `None` when
+/// it cannot be named. Unlike [`LocalZone::detect`] this is not limited to what v4's `dateutil`
+/// can see (Windows included). Computed once.
+pub fn host_tz() -> Option<Tz> {
+    static HOST: OnceLock<Option<Tz>> = OnceLock::new();
+    *HOST.get_or_init(|| host_name().and_then(|name| name.parse::<Tz>().ok()))
+}
+
+#[cfg(unix)]
+fn host_name() -> Option<String> {
+    detect_name()
+}
+
+#[cfg(not(unix))]
+fn host_name() -> Option<String> {
+    iana_time_zone::get_timezone().ok()
+}
+
 /// The IANA name of the process's zone (see [`LocalZone::detect`]).
 #[cfg(unix)]
 fn detect_name() -> Option<String> {

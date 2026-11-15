@@ -520,6 +520,29 @@ mod tests {
         assert!(JobsCadence.timer("every blue moons", now).is_err());
     }
 
+    #[test]
+    fn pipe_schedule_takes_a_time_zone() {
+        use meerschaum_engine::Cadence;
+        // `parameters['schedule']` with the `tz` clause keeps 21:00 New York time across the
+        // 2027-03-14 change (02:00Z, then 01:00Z), and a jitter on top of it.
+        let now = "2027-03-01T00:00:00Z".parse().unwrap();
+        let mut timer = JobsCadence
+            .timer("daily starting 2027-03-13 21:00 tz America/New_York", now)
+            .unwrap();
+        let first = timer.first(now).unwrap();
+        assert_eq!(first.to_rfc3339(), "2027-03-14T02:00:00+00:00");
+        let second = timer.after(first).unwrap();
+        assert_eq!(second.to_rfc3339(), "2027-03-15T01:00:00+00:00");
+        let mut jittered = JobsCadence
+            .timer(
+                "daily starting 2027-03-13 21:00 tz America/New_York jitter 0",
+                now,
+            )
+            .unwrap();
+        assert_eq!(jittered.first(now), Some(first));
+        assert!(JobsCadence.timer("daily tz Nowhere/Land", now).is_err());
+    }
+
     #[tokio::test]
     async fn inplace_with_ledger_commits_only_recorded_snapshot() {
         let root = tempfile::tempdir().unwrap();

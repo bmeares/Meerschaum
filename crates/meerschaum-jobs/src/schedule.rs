@@ -5,8 +5,8 @@
 //! datetimes with a fixed UTC offset; all arithmetic is done in whole microseconds, which is what
 //! Python's `datetime.fromtimestamp(ts + step, tz)` round-trips to.
 //!
-//! A schedule may carry a zone (an abbreviation of the host's zone after `starting`, which v4
-//! reads as `tzlocal()`): its triggers then step on that zone's wall
+//! A schedule may carry a zone (v5's `tz <zone>` clause, or an abbreviation of the host's zone
+//! after `starting`, which v4 reads as `tzlocal()`): its triggers then step on that zone's wall
 //! clock (see [`crate::zoned`]) and report each fire time with the zone's offset at that instant.
 //! Without one they keep the fixed offset of the start.
 
@@ -14,6 +14,7 @@ use chrono::{
     DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
     Timelike,
 };
+use chrono_tz::Tz;
 use meerschaum_core::pyfmt::{PyDateTime, parse_py_float, parse_py_int};
 use regex::Regex;
 use std::sync::Arc;
@@ -858,7 +859,7 @@ impl Trigger {
         }
     }
 
-    /// The zone this trigger steps in (the host's zone named by an abbreviation
+    /// The zone this trigger steps in (`tz <zone>`, or the host's zone named by an abbreviation
     /// after `starting`), or `None` for fixed-offset stepping.
     pub fn zone(&self) -> Option<ScheduleZone> {
         match self {
@@ -1041,6 +1042,9 @@ pub struct ParseEnv {
     pub local: Option<Arc<LocalZone>>,
     /// The date a bare time (`21:00`) takes.
     pub today: NaiveDate,
+    /// The zone `tz local` names (on every platform), or `None` when the host's zone cannot be
+    /// determined (`tz local` then steps in UTC, with a warning).
+    pub host: Option<Tz>,
 }
 
 impl ParseEnv {
@@ -1051,17 +1055,95 @@ impl ParseEnv {
             Some(zone) => zone.today(chrono::Utc::now()),
             None => chrono::Local::now().date_naive(),
         };
-        ParseEnv { local, today }
+        ParseEnv {
+            local,
+            today,
+            host: crate::local_zone::host_tz(),
+        }
     }
 
     /// A process whose zone is the IANA zone `name`, as Python sees it at `as_of`, on `today`
     /// (for tests and for callers that pin the zone).
     pub fn in_zone(name: &str, as_of: chrono::DateTime<chrono::Utc>, today: NaiveDate) -> ParseEnv {
+        let local = LocalZone::from_name(name, as_of);
         ParseEnv {
-            local: LocalZone::from_name(name, as_of).map(Arc::new),
+            host: local.as_ref().map(LocalZone::tz),
+            local: local.map(Arc::new),
             today,
         }
     }
+}
+
+/// Split the trailing `tz <zone>` and `jitter <n> [unit]` clauses off a schedule, in either order
+/// (`daily starting 21:00 tz local jitter 5 minutes`). `tz` anywhere else is an error.
+pub fn split_clauses(
+    schedule: &str,
+) -> Result<(String, Option<f64>, Option<String>), ScheduleError> {
+    static TZ_SUFFIX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static TZ_WORD: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let tz_suffix =
+        TZ_SUFFIX.get_or_init(|| Regex::new(r"(?i)^(.*?)\s+tz\s+(\S+)\s*$").expect("valid regex"));
+    let tz_word = TZ_WORD.get_or_init(|| Regex::new(r"(?i)(?:^|\s)tz\s+\S").expect("valid regex"));
+    let mut base = schedule.to_string();
+    let (mut jitter, mut zone) = (None, None);
+    for _ in 0..2 {
+        if zone.is_none()
+            && let Some(caps) = tz_suffix.captures(&base)
+        {
+            zone = Some(caps[2].to_string());
+            base = caps[1].to_string();
+            continue;
+        }
+        if jitter.is_none() {
+            let (rest, seconds) = split_jitter(&base)?;
+            if seconds.is_some() {
+                jitter = seconds;
+                base = rest;
+                continue;
+            }
+        }
+        break;
+    }
+    if tz_word.is_match(&base) {
+        return Err(freq(
+            "'tz <zone>' must come at the end of the schedule (after 'starting', before or after 'jitter').",
+        ));
+    }
+    Ok((base, jitter, zone))
+}
+
+/// The zone a `tz <zone>` clause names: `None` for `utc` (the default), the host's zone for
+/// `local` (UTC with a warning when it cannot be determined), or an IANA zone matched without
+/// regard to case.
+fn parse_zone_clause(
+    text: &str,
+    env: &ParseEnv,
+    warnings: &mut Vec<String>,
+) -> Result<Option<ScheduleZone>, ScheduleError> {
+    if text.eq_ignore_ascii_case("utc") {
+        return Ok(None);
+    }
+    if text.eq_ignore_ascii_case("local") {
+        return Ok(match env.host {
+            Some(tz) => Some(ScheduleZone::host(tz)),
+            None => {
+                warnings.push(
+                    "The time zone of this host could not be determined; 'tz local' steps in UTC.  Set TZ or name the zone, e.g. 'tz America/New_York'."
+                        .to_string(),
+                );
+                None
+            }
+        });
+    }
+    chrono_tz::TZ_VARIANTS
+        .iter()
+        .find(|tz| tz.name().eq_ignore_ascii_case(text))
+        .map(|tz| Some(ScheduleZone::named(*tz)))
+        .ok_or_else(|| {
+            freq(format!(
+                "Unknown time zone '{text}'.\n    Use 'local' (this host's zone), 'utc', or an IANA name such as 'America/New_York'."
+            ))
+        })
 }
 
 /// `parse_schedule(schedule, now)`. A trailing `jitter <n> [unit]` moves every fire time by a
@@ -1100,10 +1182,13 @@ pub fn parse_schedule_in(
     spec: Option<JitterSpec<'_>>,
     env: &ParseEnv,
 ) -> Result<(Trigger, Vec<String>), ScheduleError> {
-    let (base, suffix) = split_jitter(schedule)?;
+    let (base, suffix, zone) = split_clauses(schedule)?;
     let offset_us = jitter_us(&base, suffix, spec);
     let mut warnings = Vec::new();
-    let trigger = parse_schedule_unjittered(&base, now, env, &mut warnings)?;
+    let clause = zone
+        .map(|text| parse_zone_clause(&text, env, &mut warnings))
+        .transpose()?;
+    let trigger = parse_schedule_unjittered(&base, now, env, &mut warnings, clause)?;
     if offset_us == 0 {
         return Ok((trigger, warnings));
     }
@@ -1112,7 +1197,7 @@ pub fn parse_schedule_in(
 
 /// The fixed offset of a schedule's fire times in microseconds (see [`parse_schedule_jittered`]):
 /// its own `jitter` suffix, else the default, seeded by the job (or the schedule without its
-/// suffix).
+/// clauses).
 fn jitter_us(base: &str, suffix: Option<f64>, spec: Option<JitterSpec<'_>>) -> i64 {
     let seconds = suffix.or(spec.map(|s| s.default_seconds)).unwrap_or(0.0);
     crate::startup::fixed_offset(spec.map_or(base, |s| s.seed), seconds).as_micros() as i64
@@ -1120,8 +1205,8 @@ fn jitter_us(base: &str, suffix: Option<f64>, spec: Option<JitterSpec<'_>>) -> i
 
 /// [`parse_schedule_jittered`] for a job that resumes `fire`, a fire time an earlier process
 /// drew from this schedule: the trigger is anchored there, so `next_after(fire)` keeps the
-/// cadence of that fire (`daily` stays 24 hours after it, a start in the host's zone stays at its
-/// wall-clock time across a daylight-saving change) instead of starting over from the restart. Cron fields
+/// cadence of that fire (`daily` stays 24 hours after it, `daily tz local` stays at its wall-clock
+/// time across a daylight-saving change) instead of starting over from the restart. Cron fields
 /// and an explicit `starting` time do not depend on the anchor.
 pub fn parse_schedule_resumed(
     schedule: &str,
@@ -1138,7 +1223,7 @@ pub fn parse_schedule_resumed_in(
     spec: Option<JitterSpec<'_>>,
     env: &ParseEnv,
 ) -> Result<Trigger, ScheduleError> {
-    let (base, suffix) = split_jitter(schedule)?;
+    let (base, suffix, _) = split_clauses(schedule)?;
     let offset_us = jitter_us(&base, suffix, spec);
     parse_schedule_in(schedule, add_us(fire, -offset_us), spec, env).map(|(t, _)| t)
 }
@@ -1172,21 +1257,29 @@ fn period_seconds_at(schedule: &str, now: Fire) -> Option<f64> {
     longest.filter(|s| *s > 0.0)
 }
 
+/// `clause` is the `tz <zone>` clause: `None` without one, `Some(None)` for `tz utc`.
 fn parse_schedule_unjittered(
     schedule: &str,
     now: Fire,
     env: &ParseEnv,
     warnings: &mut Vec<String>,
+    clause: Option<Option<ScheduleZone>>,
 ) -> Result<Trigger, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
-    let info = parse_start(&schedule, Some(now), env, warnings)?;
+    let info = parse_start(
+        &schedule,
+        Some(now),
+        env,
+        warnings,
+        clause.flatten().as_ref(),
+    )?;
     let starting_ts = info.fire;
-    // The zone the triggers step in: the host's when the start was written with one of its
-    // abbreviations (v4's `tzlocal()`), else none (a fixed offset).
-    let zone = if info.local {
-        env.local.as_ref().map(|l| ScheduleZone::host(l.tz()))
-    } else {
-        None
+    // The zone the triggers step in: the clause's, else the host's when the start was written
+    // with one of its abbreviations (v4's `tzlocal()`), else none (a fixed offset).
+    let zone = match clause {
+        Some(zone) => zone,
+        None if info.local => env.local.as_ref().map(|l| ScheduleZone::host(l.tz())),
+        None => None,
     };
     let start = zone.map(|z| Start {
         fire: starting_ts,
@@ -1327,7 +1420,25 @@ pub fn parse_start_time_in(
     env: &ParseEnv,
     warnings: &mut Vec<String>,
 ) -> Result<Fire, ScheduleError> {
-    parse_start(schedule, now, env, warnings).map(|info| info.fire)
+    parse_start(schedule, now, env, warnings, None).map(|info| info.fire)
+}
+
+/// The starting time of a schedule that may carry the v5 `tz <zone>` and `jitter` clauses
+/// (without them this is [`parse_start_time_in`]): under `tz`, a time without a zone of its own is
+/// read on the zone's wall clock. Returns the warnings the parse raised.
+pub fn parse_start_time_clauses(
+    schedule: &str,
+    now: Option<Fire>,
+    env: &ParseEnv,
+) -> Result<(Fire, Vec<String>), ScheduleError> {
+    let (base, _, zone) = split_clauses(schedule)?;
+    let mut warnings = Vec::new();
+    let zone = zone
+        .map(|text| parse_zone_clause(&text, env, &mut warnings))
+        .transpose()?
+        .flatten();
+    let info = parse_start(&base, now, env, &mut warnings, zone.as_ref())?;
+    Ok((info.fire, warnings))
 }
 
 /// A `_CronTrigger`, matched on `zone`'s wall clock when there is one.
@@ -1347,20 +1458,22 @@ fn new_cron(
 struct StartInfo {
     /// The instant.
     fire: Fire,
-    /// The wall time as written, when it was read in the host's zone through one of its
-    /// abbreviations.
+    /// The wall time as written, when it was read in the schedule's zone (or in the host's zone
+    /// through one of its abbreviations).
     wall: Option<NaiveDateTime>,
     /// Whether the time carried an abbreviation of the host's zone (dateutil's `tzlocal()`).
     local: bool,
 }
 
-/// The starting time of `schedule` (v4's `parse_start_time`), with the wall time as written
-/// when it carried an abbreviation of the host's zone.
+/// The starting time of `schedule`. Without `zone` this is v4's `parse_start_time`; with a zone
+/// (`tz <zone>`), relative forms and times without a zone of their own are read on its wall
+/// clock, and a time with its own offset or abbreviation keeps the instant it names.
 fn parse_start(
     schedule: &str,
     now: Option<Fire>,
     env: &ParseEnv,
     warnings: &mut Vec<String>,
+    zone: Option<&ScheduleZone>,
 ) -> Result<StartInfo, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
     let parts: Vec<&str> = schedule.split(STARTING_KEYWORD).collect();
@@ -1376,6 +1489,24 @@ fn parse_start(
         fire,
         wall: None,
         local: false,
+    };
+    // A wall time on the zone's clock.
+    let in_zone = |zone: &ScheduleZone, wall: NaiveDateTime| StartInfo {
+        fire: zone.start_instant(wall),
+        wall: Some(wall),
+        local: false,
+    };
+    // dateutil fills a bare time with today's date: the zone's today under `tz`.
+    let zone_env;
+    let env = match zone {
+        Some(zone) => {
+            zone_env = ParseEnv {
+                today: zone.wall(&now).date(),
+                ..env.clone()
+            };
+            &zone_env
+        }
+        None => env,
     };
     let starting = if starting_str == "now" {
         instant(now)
@@ -1395,10 +1526,6 @@ fn parse_start(
         let us = timedelta_us(&unit, num).map_err(err)?;
         instant(add_us(now, us))
     } else if starting_str.contains("tomorrow") || starting_str.contains("today") {
-        // `round_time(now, timedelta(days=1))`: midnight of `now`'s wall-clock date.
-        let today = combine(now.date_naive(), NaiveTime::MIN, *now.offset())
-            .ok_or_else(|| err("Invalid date.".to_string()))?;
-        let tomorrow = today + Duration::days(1);
         let is_tomorrow = starting_str.contains("tomorrow");
         let time_str = starting_str
             .replace("tomorrow", "")
@@ -1411,21 +1538,39 @@ fn parse_start(
             let parsed = parse_datetime_in(&time_str, env, warnings).map_err(err)?;
             (parsed.hour(), parsed.minute())
         };
-        instant(
-            (if is_tomorrow { tomorrow } else { today })
-                + Duration::hours(hour as i64)
-                + Duration::minutes(minute as i64),
-        )
+        let clock = Duration::hours(hour as i64) + Duration::minutes(minute as i64);
+        match zone {
+            // Midnight of today (or tomorrow) on the zone's calendar, plus the time.
+            Some(zone) => {
+                let date = zone.wall(&now).date();
+                let date = if is_tomorrow {
+                    date.succ_opt()
+                        .ok_or_else(|| err("Invalid date.".to_string()))?
+                } else {
+                    date
+                };
+                in_zone(zone, date.and_time(NaiveTime::MIN) + clock)
+            }
+            None => {
+                // `round_time(now, timedelta(days=1))`: midnight of `now`'s wall-clock date.
+                let today = combine(now.date_naive(), NaiveTime::MIN, *now.offset())
+                    .ok_or_else(|| err("Invalid date.".to_string()))?;
+                let tomorrow = today + Duration::days(1);
+                instant((if is_tomorrow { tomorrow } else { today }) + clock)
+            }
+        }
     } else {
         let (parsed, local) = parse_datetime_flagged(starting_str, env, warnings).map_err(err)?;
-        match parsed {
-            Parsed::Naive(n) => instant(
+        match (parsed, zone) {
+            (Parsed::Naive(n), Some(zone)) => in_zone(zone, n),
+            (Parsed::Naive(n), None) => instant(
                 FixedOffset::east_opt(0)
                     .and_then(|utc| utc.from_local_datetime(&n).single())
                     .ok_or_else(|| err("Invalid datetime.".to_string()))?,
             ),
+            (Parsed::Aware(a), Some(_)) => instant(a),
             // The written wall time on the host's clock (its offset is the zone's on that date).
-            Parsed::Aware(a) => StartInfo {
+            (Parsed::Aware(a), None) => StartInfo {
                 fire: a,
                 wall: local.then(|| a.naive_local()),
                 local,
@@ -1836,6 +1981,25 @@ mod tests {
     }
 
     #[test]
+    fn periods_of_zoned_schedules_include_the_clock_change() {
+        let march = chrono::DateTime::parse_from_rfc3339("2027-03-01T00:00:00Z").unwrap();
+        // The day the clock springs forward is 23 hours; the longest gap is still a day.
+        assert_eq!(
+            period_seconds_at("daily starting 2027-03-12 21:00 tz America/New_York", march),
+            Some(86400.0)
+        );
+        // The day it falls back is 25 hours.
+        assert_eq!(
+            period_seconds_at("daily starting 2027-11-05 21:00 tz America/New_York", march),
+            Some(90000.0)
+        );
+        assert_eq!(
+            period_seconds_at("every 10 minutes tz Asia/Tokyo jitter 30", march),
+            Some(600.0)
+        );
+    }
+
+    #[test]
     fn quirky_errors() {
         let e = parse_schedule("every 5 fortnights", now()).unwrap_err();
         assert!(e.py_message().starts_with("Invalid interval 'fs'."));
@@ -1894,6 +2058,7 @@ mod tests {
         let env = ParseEnv {
             local: None,
             today: NaiveDate::from_ymd_opt(2026, 11, 14).unwrap(),
+            host: None,
         };
         for (text, want) in [
             ("21:00 UTC", "2026-11-14T21:00:00+00:00"),

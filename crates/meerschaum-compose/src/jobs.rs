@@ -402,6 +402,24 @@ mod tests {
     }
 
     #[test]
+    fn a_schedule_with_a_time_zone_passes_through() {
+        // `schedule:` uses the `-s` grammar: the `tz` and `jitter` clauses reach the job as one
+        // argument, unchanged.
+        let schedule = "daily starting 21:00 tz America/New_York jitter 5 minutes";
+        let cfg = config(&format!(
+            r#"{{"project_name": "p", "jobs": {{"nightly": "sync pipes -s '{schedule}'"}}}}"#
+        ));
+        let cmds = get_jobs_commands(&cfg, &[], &mut Messages::default()).unwrap();
+        assert!(
+            cmds["nightly"]
+                .windows(2)
+                .any(|w| w[0] == "-s" && w[1] == schedule),
+            "{:?}",
+            cmds["nightly"]
+        );
+    }
+
+    #[test]
     fn ownership_rules() {
         let cfg = config(r#"{"project_name": "alpha", "jobs": {"api": "start api"}}"#);
         let mut jobs = IndexMap::new();
