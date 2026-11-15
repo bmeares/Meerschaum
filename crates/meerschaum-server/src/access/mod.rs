@@ -121,6 +121,9 @@ pub struct Access {
     pub attributes: Option<Map>,
     /// Under `--no-auth` (everyone is an administrator).
     pub no_auth: bool,
+    /// The records of the caller's teams other than Everyone (their settings decide the team the
+    /// caller acts for: [`Access::acting_team`]).
+    pub team_records: Vec<rules::Team>,
 }
 
 impl Access {
@@ -132,7 +135,26 @@ impl Access {
             primary_team: EVERYONE.to_string(),
             attributes: None,
             no_auth: true,
+            team_records: Vec::new(),
         }
+    }
+
+    /// The isolated team the caller acts for when Python code runs on their behalf (5.1,
+    /// [`meerschaum_core::team_scope::acting_team`]): `None` for administrators, `--no-auth` and
+    /// the open side. `object_team` is the team of the object acted on (a pipe's, a job's).
+    pub fn acting_team(&self, object_team: Option<&str>) -> Option<rules::Team> {
+        if self.no_auth || !self.principal.is_isolated() {
+            return None;
+        }
+        meerschaum_core::team_scope::acting_team(
+            self.principal.is_admin,
+            &self.principal.teams,
+            &self.team_records,
+            Some(&self.primary_team),
+            object_team,
+        )
+        // Walled off, yet no record names the team: a team without connectors.
+        .or_else(|| Some(rules::Team::new(&self.primary_team)))
     }
 
     /// Whether the caller is an administrator (everyone is under `--no-auth`).
@@ -490,6 +512,7 @@ async fn access_of_with(
         primary_team,
         attributes,
         no_auth: false,
+        team_records: records,
     })
 }
 
@@ -546,6 +569,38 @@ pub async fn instance_scope(state: &AppState, headers: &HeaderMap) -> Option<Acc
         Some(access) => Some(access),
         None => resolve(state, headers).await.ok(),
     }
+}
+
+/// The isolated team `access` acts for when Python code runs on its behalf (5.1), for an object
+/// of `object_team` (a pipe's or a job's team; `None`: no object): see [`Access::acting_team`].
+pub fn acting_for(
+    state: &AppState,
+    access: &Access,
+    object_team: Option<&str>,
+) -> Option<Arc<meerschaum_connector::acting_team::ActingTeam>> {
+    let team = access.acting_team(object_team)?;
+    Some(Arc::new(meerschaum_connector::acting_team::ActingTeam::of(
+        &team,
+        &state.connectors(),
+    )))
+}
+
+/// Run every request of a caller who acts for an isolated team inside that team's scope
+/// ([`meerschaum_connector::acting_team`]), so the Python code it starts runs in the team's own
+/// workers (5.1). Other requests run as before.
+pub async fn acting_team_layer(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let acting = match instance_scope(&state, req.headers()).await {
+        Some(access) => acting_for(&state, &access, None),
+        None => None,
+    };
+    if acting.is_none() {
+        return next.run(req).await;
+    }
+    meerschaum_connector::acting_team::scope(acting, next.run(req)).await
 }
 
 /// Resolve the access of a request and require `scopes` (see [`Access::require`]).

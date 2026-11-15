@@ -75,7 +75,7 @@ use crate::format::TupleArgs;
 use crate::format::rich::pretty::PyObj;
 use crate::value::{ArgsMap, PyValue};
 
-pub use session::{Instance, Session};
+pub use session::{Instance, Session, TeamBinding, TeamLookup};
 /// The engine registry builder (native connectors, worker pool, native plugins), for hosts
 /// such as `meerschaum-py`: `meerschaum_cli::native::engine_registry(..)`, or
 /// `registry_with(.., RegistryOptions { overrides, .. })` with the host's own connectors.

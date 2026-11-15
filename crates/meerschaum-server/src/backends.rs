@@ -706,6 +706,12 @@ pub trait TeamEvents: Send + Sync {
     async fn deleted(&self, _team: &meerschaum_core::access::Team) -> Result<(), String> {
         Ok(())
     }
+
+    /// A team or its members changed through this server (registered, edited, a member added or
+    /// removed): what depends on the teams' settings follows (5.1: the isolated teams' scopes).
+    async fn changed(&self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Nothing follows.

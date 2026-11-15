@@ -206,6 +206,20 @@ impl JobsBackend for LocalJobsBackend {
                     }
                 }
             }
+            // 5.1: a job of an isolated team does not record the server's connectors and
+            // patches in its `env` (its launch removes them too).
+            let root = ctx.paths.root.clone();
+            if let Some(props) = properties.as_ref()
+                && meerschaum_jobs::config_files::job_team_scope(&root, props).is_some()
+            {
+                let mut recorded: meerschaum_core::Map = env
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Value::Str(v.clone())))
+                    .collect();
+                if meerschaum_jobs::config_files::strip_team_env(&mut recorded, &root, &[]) {
+                    env.retain(|k, _| recorded.contains_key(k));
+                }
+            }
             let job = Job::new(
                 &name,
                 Some(sysargs),

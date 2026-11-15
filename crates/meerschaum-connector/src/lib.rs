@@ -16,6 +16,7 @@
 //! - [`sync_status`]: the per-pipe sync status every sync path records (`mrsm:engine_sync_status`).
 //! - [`locks`]: pipe locks (`parameters['locks']`) in every instance connector's write paths, and
 //!   the defaults of `lock_pipe`, `unlock_pipe` and `set_pipe_access`.
+//! - [`acting_team`]: the isolated team a request acts for (5.1).
 //! - [`teams`]: the team store over the internal pipe `mrsm:teams` (the defaults of the team
 //!   methods) and the renames and deletions that keep pipes' `access` consistent.
 //!
@@ -24,6 +25,7 @@
 //! `meerschaum-connector-valkey`, `meerschaum-connector-api`), the engine and the server depend on this crate.
 #![deny(unsafe_code)]
 
+pub mod acting_team;
 pub mod locks;
 pub mod models;
 pub mod passwords;

@@ -33,7 +33,7 @@ use meerschaum_worker::manifest::{
     Manifest, ManifestSource, ensure_manifest_for, manifest_path, probe_entry_points,
     rebuild_manifest_for, stale_plugins_for,
 };
-use meerschaum_worker::{PoolConfig, WorkerPool};
+use meerschaum_worker::{PoolConfig, PoolScope, TeamPools, WorkerPool};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io::IsTerminal;
@@ -125,7 +125,61 @@ pub struct Session {
     worker_python: Arc<Mutex<Option<String>>>,
     hook_results: Arc<Mutex<Vec<meerschaum_core::SuccessTuple>>>,
     manifests: Arc<Mutex<ManifestState>>,
+    /// The isolated teams' pools and sessions of this process (5.1), shared by clones.
+    teams: Arc<TeamSessions>,
+    /// The team this session runs for (a team's session, [`Session::for_team`]).
+    team: Option<Arc<TeamBinding>>,
 }
+
+/// The isolated teams' sessions of a process (5.1): one per team, rebuilt when the team's
+/// configuration changes, with the pools under one limit.
+#[derive(Default)]
+struct TeamSessions {
+    pools: std::sync::OnceLock<TeamPools>,
+    sessions: Mutex<HashMap<String, (String, Session)>>,
+}
+
+/// What a team's session runs for.
+pub struct TeamBinding {
+    /// The team.
+    pub scope: meerschaum_core::team_scope::TeamScope,
+    /// The team's configuration (what its workers are started with), as a registry.
+    pub config: Arc<Config>,
+    /// The fingerprint of that configuration.
+    pub fingerprint: String,
+    /// The team's files (`team_scopes/<key>/`).
+    pub files: meerschaum_core::team_scope::ScopeFiles,
+    /// The environment of the team's processes.
+    pub env: Vec<(String, String)>,
+    /// The team's configuration, loaded once (every key), for [`TeamBinding::new_config`].
+    snapshot: Map,
+}
+
+impl TeamBinding {
+    /// A fresh registry of the team's configuration (what an action run for the team reads),
+    /// from the snapshot loaded when the team's session was built (no file is read again).
+    pub fn new_config(&self) -> Result<Config, ActionError> {
+        // The snapshot already holds the team's configuration file: without the patch
+        // variables, no lookup replays that patch to learn where a value came from.
+        let patch_variables: Vec<String> = meerschaum_core::config::environment::patch_variables()
+            .into_iter()
+            .flat_map(|(var, file_var)| [var, file_var])
+            .collect();
+        let env: Vec<(String, String)> = self
+            .env
+            .iter()
+            .filter(|(k, _)| !patch_variables.contains(k))
+            .cloned()
+            .collect();
+        let config = Config::new(meerschaum_core::config::ConfigOptions::with_env(env))
+            .map_err(|e| ActionError::new("ConfigError", e.to_string()))?;
+        config.set_config(self.snapshot.clone());
+        Ok(config)
+    }
+}
+
+/// How [`Session::for_team`] found the team's session.
+pub use meerschaum_worker::team::Lookup as TeamLookup;
 
 /// The session's plugin manifests and whether they were validated since the last
 /// [`Session::invalidate_manifest`].
@@ -183,7 +237,227 @@ impl Session {
             worker_python: Arc::new(Mutex::new(None)),
             hook_results: Arc::new(Mutex::new(Vec::new())),
             manifests: Arc::new(Mutex::new(ManifestState::default())),
+            teams: Arc::new(TeamSessions::default()),
+            team: None,
         }
+    }
+
+    /// The team this session runs for (`None`: the server's own session).
+    pub fn team(&self) -> Option<&Arc<TeamBinding>> {
+        self.team.as_ref()
+    }
+
+    /// The isolated teams' pools of this process (5.1), created with the limit of `config`
+    /// (`system.engine.python_team_workers`) on first use.
+    pub fn team_pools(&self, config: &Config) -> TeamPools {
+        self.teams
+            .pools
+            .get_or_init(|| TeamPools::new(meerschaum_worker::pool::team_workers_limit(config)))
+            .clone()
+    }
+
+    /// The session of an isolated team (5.1): its own connectors and worker pool, built from the
+    /// team's configuration only ([`meerschaum_core::team_scope::team_config`] of the server's
+    /// `config`). Python code the session runs starts in workers that never receive the
+    /// server's configuration (`MRSM_CONFIG`, `MRSM_PATCH`, connector variables, config files)
+    /// and whose callbacks may only touch the team's instances (and, with `member`, pipes that
+    /// member may change). Reused while the team's configuration is unchanged; a change (a
+    /// connector granted or revoked, a rename, a deletion, a rotated password) retires the
+    /// team's workers and builds a new session. Returns the session and how it was found.
+    pub fn for_team(
+        &self,
+        scope: &meerschaum_core::team_scope::TeamScope,
+        member: Option<meerschaum_core::access::Principal>,
+        config: &Config,
+    ) -> Result<(Session, TeamLookup), ActionError> {
+        use meerschaum_core::team_scope as ts;
+        let io = |e: std::io::Error| ActionError::new("OSError", e.to_string());
+        // A connector another process registered (a team's database) since the last read.
+        config.refresh_connectors();
+        let team_map = ts::team_config(config, scope);
+        let fingerprint = ts::fingerprint(scope, &team_map);
+        let key = scope.key();
+        {
+            let sessions = self
+                .teams
+                .sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some((current, session)) = sessions.get(&key)
+                && *current == fingerprint
+            {
+                return Ok((session.clone(), TeamLookup::Warm));
+            }
+        }
+        let paths = config.paths();
+        let files =
+            ts::write_scope_files(&ts::scope_dir(&paths.root_dir, &key), &team_map).map_err(io)?;
+        ts::write_scope_record(&paths.root_dir, scope).map_err(io)?;
+        let mut base: Vec<(String, String)> = meerschaum_core::process_env::vars()
+            .into_iter()
+            .filter(|(k, _)| k != "MRSM_ROOT_DIR" && k != "MRSM_PLUGINS_DIR")
+            .collect();
+        base.push((
+            "MRSM_ROOT_DIR".into(),
+            paths.root_dir.to_string_lossy().into_owned(),
+        ));
+        if !paths.plugins_dirs.is_empty() {
+            let dirs: Vec<String> = paths
+                .plugins_dirs
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            base.push((
+                "MRSM_PLUGINS_DIR".into(),
+                serde_json::to_string(&dirs).unwrap_or_default(),
+            ));
+        }
+        let changes = ts::scoped_env(&base, &files, scope, &paths.root_dir, &paths.plugins_dirs);
+        let team_env = changes.apply(&base);
+        let team_config = Arc::new(
+            Config::new(meerschaum_core::config::ConfigOptions::with_env(
+                team_env.clone(),
+            ))
+            .map_err(|e| ActionError::new("ConfigError", e.to_string()))?,
+        );
+        let configured: std::collections::BTreeSet<String> = config
+            .get(&["meerschaum", "connectors"])
+            .map(|v| v.to_map())
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|(typ, labels)| {
+                labels
+                    .to_map()
+                    .into_iter()
+                    .filter(|(label, attrs)| label != "default" && !attrs.is_null())
+                    .map(|(label, _)| format!("{typ}:{label}"))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        let mut child = Session {
+            rt: self.rt.clone(),
+            instances: Arc::new(Mutex::new(HashMap::new())),
+            registered: Arc::new(Mutex::new(HashSet::new())),
+            registered_only: Arc::new(AtomicBool::new(false)),
+            python_worker: self.python_worker.clone(),
+            pool: Arc::new(Mutex::new(None)),
+            worker_environment: Arc::new(Mutex::new(None)),
+            worker_python: self.worker_python.clone(),
+            hook_results: Arc::new(Mutex::new(Vec::new())),
+            manifests: self.manifests.clone(),
+            teams: self.teams.clone(),
+            team: None,
+        };
+        let guard: Option<Arc<dyn meerschaum_worker::callback::CallbackGuard>> =
+            member.map(|member| {
+                Arc::new(TeamPipeGuard {
+                    instances: child.instances.clone(),
+                    member,
+                }) as Arc<dyn meerschaum_worker::callback::CallbackGuard>
+            });
+        let pool_scope = PoolScope {
+            scope: Arc::new(scope.clone()),
+            configured: Arc::new(configured),
+            guard,
+        };
+        let worker_python = self
+            .worker_python
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let (pool, lookup) = self.team_pools(config).get(&key, &fingerprint, |live| {
+            let mut settings = PoolConfig::for_team(&team_config, pool_scope, live);
+            // Workers inherit the server's environment: what only the server holds is removed,
+            // the team's config directory and file are set.
+            settings.worker.env_remove = changes.remove.clone();
+            settings.worker.env.retain(|(k, _)| {
+                k != ts::CONFIG_DIR_VAR && !changes.set.iter().any(|(s, _)| s == k)
+            });
+            settings.worker.env.extend(changes.set.iter().cloned());
+            if !std::env::var("MRSM_PYTHON").is_ok_and(|v| !v.trim().is_empty())
+                && let Some(python) = &worker_python
+            {
+                settings.worker.python = python.into();
+            }
+            settings
+        });
+        *child.pool.lock().unwrap_or_else(|e| e.into_inner()) = Some(pool);
+        // The keys of the team's configuration, loaded once: an action run for the team reads
+        // them from memory.
+        for key in team_map.keys() {
+            let _ = team_config.get(&[key.as_str()]);
+        }
+        let mut snapshot = team_config.snapshot();
+        // The values are substituted already; the originals would only slow every lookup (the
+        // team's configuration is never written back).
+        snapshot.shift_remove("_symlinks");
+        // The engine's settings (v5-only defaults, absent from a written `system` file) in the
+        // snapshot: each lookup of one finds it instead of re-substituting every default.
+        if let Some(Value::Map(engine)) = team_config
+            .defaults()
+            .get("system")
+            .and_then(|s| s.as_map())
+            .and_then(|s| s.get("engine"))
+            .cloned()
+            && let Some(Value::Map(system)) = snapshot.get_mut("system")
+        {
+            let merged = match system.get("engine") {
+                Some(Value::Map(own)) => apply_patch_maps(&engine, own),
+                _ => engine,
+            };
+            system.insert("engine".into(), Value::Map(merged));
+        }
+        child.team = Some(Arc::new(TeamBinding {
+            scope: scope.clone(),
+            config: team_config,
+            fingerprint: fingerprint.clone(),
+            files,
+            env: team_env,
+            snapshot,
+        }));
+        let lookup = match lookup {
+            TeamLookup::Warm => TeamLookup::Replaced,
+            other => other,
+        };
+        self.teams
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, (fingerprint, child.clone()));
+        Ok((child, lookup))
+    }
+
+    /// Retire the sessions (and workers) of the teams `keep` refuses (5.1: a deleted team's, or
+    /// one whose configuration changed). Returns the retired teams' keys.
+    pub fn retire_teams(&self, keep: impl Fn(&str, &str) -> bool) -> Vec<String> {
+        let mut retired = Vec::new();
+        let pools = self.teams.pools.get().cloned();
+        let mut sessions = self
+            .teams
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        sessions.retain(|key, (fingerprint, _)| {
+            let kept = keep(key, fingerprint);
+            if !kept {
+                retired.push(key.clone());
+                if let Some(pools) = &pools {
+                    pools.retire(key);
+                }
+            }
+            kept
+        });
+        retired
+    }
+
+    /// An already built connector of this session (never builds one).
+    pub fn cached_instance(&self, keys: &str) -> Option<Instance> {
+        self.instances
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&full_keys(keys))
+            .cloned()
     }
 
     /// Register a connector the host built for `keys` (`type:label`; a bare type means the
@@ -455,6 +729,12 @@ impl Session {
                 {
                     self.block_on(pool.recycle());
                 }
+                // Team workers hold plugin modules too (5.1).
+                if previous.as_ref().is_some_and(|p| **p != manifest)
+                    && let Some(pools) = self.teams.pools.get().cloned()
+                {
+                    self.block_on(pools.recycle_all());
+                }
                 python_changed |= previous.as_ref().is_none_or(|p| **p != manifest);
                 Arc::new(manifest)
             }
@@ -519,6 +799,11 @@ impl Session {
         let pool = self.pool.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(pool) = pool {
             self.block_on(pool.shutdown());
+        }
+        if self.team.is_none()
+            && let Some(pools) = self.teams.pools.get().cloned()
+        {
+            self.block_on(pools.shutdown());
         }
     }
 
@@ -830,6 +1115,47 @@ fn sql_attributes(label: &str, attrs: &Map) -> Result<ConnectorAttributes, Actio
         }
     }
     Ok(ca)
+}
+
+/// What a callback from a team's plugin code may do to a pipe (5.1): what a member of the team
+/// may change through the API ([`meerschaum_core::access::can_edit`] of the pipe's stored
+/// access). A pipe that is not registered yet, or on an instance the session has not built, is
+/// left to the team's instance check.
+struct TeamPipeGuard {
+    instances: Arc<Mutex<HashMap<String, Instance>>>,
+    member: meerschaum_core::access::Principal,
+}
+
+#[meerschaum_connector::async_trait]
+impl meerschaum_worker::callback::CallbackGuard for TeamPipeGuard {
+    async fn check(&self, request: &meerschaum_worker::CallbackRequest) -> Result<(), String> {
+        let Some(pipe) = request.pipe.as_ref() else {
+            return Ok(());
+        };
+        let instance = self
+            .instances
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&full_keys(pipe.instance_keys()))
+            .cloned();
+        let Some(instance) = instance else {
+            return Ok(());
+        };
+        let conn = instance.conn();
+        let stored = match conn.get_pipe_attributes(pipe).await {
+            Ok(attributes) => attributes,
+            Err(_) => return Ok(()),
+        };
+        let Some(Value::Map(parameters)) = stored.get("parameters") else {
+            return Ok(());
+        };
+        let access = meerschaum_core::access::PipeAccess::from_parameters(parameters);
+        if meerschaum_core::access::can_edit(&self.member, &access) {
+            Ok(())
+        } else {
+            Err(format!("You may not change {pipe}."))
+        }
+    }
 }
 
 /// Builds `sql:<label>` connectors from the configured `meerschaum:connectors:sql` section

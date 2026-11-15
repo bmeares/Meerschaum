@@ -357,6 +357,10 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
     }
     app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
+        crate::access::acting_team_layer,
+    ))
+    .layer(axum::middleware::from_fn_with_state(
+        state.clone(),
         crate::web::protect_sessions,
     ))
     .fallback(fallback)

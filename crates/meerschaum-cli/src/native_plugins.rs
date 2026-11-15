@@ -934,6 +934,31 @@ impl HostEnv {
 
     /// The connector `keys` from the session (built on first use).
     fn connector(&self, keys: &str) -> Result<crate::native::Instance, String> {
+        // 5.1: a Python instance connector (a plugin's type) built for a request of an isolated
+        // team runs in that team's workers, with its configuration. Rust connectors are the
+        // server's (the routes check the team's access to them).
+        if !matches!(keys.split(':').next(), Some("sql" | "api" | "valkey"))
+            && let Some(acting) = meerschaum_connector::acting_team::current()
+        {
+            return blocking(|| {
+                let (session, _) = self.session.for_team(
+                    &acting.scope,
+                    Some(acting.member.clone()),
+                    &self.config,
+                )?;
+                let config = match session.team() {
+                    Some(binding) => binding.new_config()?,
+                    None => {
+                        return Err(crate::builtin::ActionError::new(
+                            "RuntimeError",
+                            "No team session.",
+                        ));
+                    }
+                };
+                session.instance(keys, &config)
+            })
+            .map_err(|e| e.message);
+        }
         blocking(|| self.session.instance(keys, &self.config)).map_err(|e| e.message)
     }
 
@@ -1464,6 +1489,7 @@ impl PluginHost {
                 primary_team: EVERYONE.into(),
                 attributes: None,
                 no_auth: false,
+                team_records: Vec::new(),
             }
         };
         // Reading the process config requires the caller's own full administrator rights;

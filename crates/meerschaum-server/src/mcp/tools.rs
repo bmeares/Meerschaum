@@ -111,6 +111,24 @@ pub async fn caller_access(cx: &ToolCx<'_>) -> Result<Access, ToolError> {
     }
 }
 
+/// Run `future` for the isolated team that owns `pipe` when the caller acts for one (5.1): a
+/// caller in several isolated teams syncs a pipe of one of them with that team's workers.
+async fn for_pipe_team<F: std::future::Future>(
+    cx: &ToolCx<'_>,
+    pipe: &Pipe,
+    future: F,
+) -> F::Output {
+    if !cx.caller.api {
+        return future.await;
+    }
+    let Ok(caller) = caller_access(cx).await else {
+        return future.await;
+    };
+    let team = access::PipeAccess::of_pipe(pipe).team_name();
+    let acting = access::acting_for(cx.state, &caller, Some(&team));
+    meerschaum_connector::acting_team::scope(acting, future).await
+}
+
 /// A pipe the caller cannot see, as the tools report it (a pipe that does not exist).
 fn hidden(pipe: &Pipe) -> ToolError {
     ToolError::value(format!("{pipe} was not found."))
@@ -528,23 +546,26 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
                     }
                 }
             }
-            let res = if parents.is_none() && children.is_none() {
-                cx.server
-                    .backend
-                    .sync_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
-                    .await
-            } else {
-                cx.server
-                    .backend
-                    .sync_pipe_graph(
-                        &pipe,
-                        str_arg(args, "begin"),
-                        str_arg(args, "end"),
-                        parents,
-                        children,
-                    )
-                    .await
-            };
+            let res = for_pipe_team(cx, &pipe, async {
+                if parents.is_none() && children.is_none() {
+                    cx.server
+                        .backend
+                        .sync_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
+                        .await
+                } else {
+                    cx.server
+                        .backend
+                        .sync_pipe_graph(
+                            &pipe,
+                            str_arg(args, "begin"),
+                            str_arg(args, "end"),
+                            parents,
+                            children,
+                        )
+                        .await
+                }
+            })
+            .await;
             Ok(tuple_value(&res))
         }
         "sync_documents" => {
@@ -583,11 +604,14 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
         }
         "verify_pipe" => {
             let (_, pipe) = resolve_editable(cx, args, Some(LockOp::Sync)).await?;
-            let res = cx
-                .server
-                .backend
-                .verify_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
-                .await;
+            let res = for_pipe_team(
+                cx,
+                &pipe,
+                cx.server
+                    .backend
+                    .verify_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end")),
+            )
+            .await;
             Ok(tuple_value(&res))
         }
         "deduplicate_pipe" | "clear_pipe" => {

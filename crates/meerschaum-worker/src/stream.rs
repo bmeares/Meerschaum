@@ -165,7 +165,7 @@ async fn supervise(
         let error = match worker {
             Err(e) => e.to_string(),
             Ok(worker) => {
-                worker.set_callback_handler(Some(Arc::clone(&handler)));
+                worker.set_callback_handler(Some(pool.guard_handler(Arc::clone(&handler))));
                 let _ = events.send(StreamEvent::Started { pid: worker.pid() });
                 let mut stop_requested = false;
                 let mut error = String::new();
@@ -174,6 +174,7 @@ async fn supervise(
                     if let Some(defined) = pool.connector_attributes_wire() {
                         call_args.insert("connector_attributes", defined);
                     }
+                    pool.scope_args(&mut call_args);
                     let call = worker.call(op, call_args, Vec::new(), CallOptions::default());
                     tokio::select! {
                         res = call => match res {

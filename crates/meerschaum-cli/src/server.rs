@@ -308,6 +308,24 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         }
     }
     let jobs_context = crate::native::jobs::jobs_context(rt);
+    // 5.1: the isolated teams' scopes, recorded before the restart monitor starts their jobs
+    // (with the team's configuration only), and kept current while the server runs.
+    let team_scopes = {
+        let backend = backend.clone();
+        crate::team_scopes::TeamScopes::new(
+            session.clone(),
+            instance.conn(),
+            Arc::new(move || backend.config().ok()),
+            config.root_dir.clone(),
+            Some(jobs_context.clone()),
+        )
+    };
+    if let Err(error) = session.block_on(team_scopes.refresh()) {
+        native::warn(
+            rt,
+            &format!("The isolated teams' scopes were not recorded: {error}"),
+        );
+    }
     // PARITY: v4's API startup ran `start_check_jobs_thread()`: while the server runs, it
     // restarts the root's stopped `--restart` jobs that were not stopped by hand (a container or
     // machine restart), every `check_restart_seconds`. Stops with this function.
@@ -362,6 +380,7 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         .team_events(Arc::new(TeamFollowers {
             config: crate::native_plugins::host_config(rt.config()),
             grafana: grafana_teams,
+            scopes: team_scopes.clone(),
         }))
         .actions(backend.clone())
         .jobs(jobs)
@@ -412,6 +431,28 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     }
     let server_runtime = builder.enable_all().build().map_err(io_error)?;
     let result = server_runtime.block_on(async {
+        {
+            let team_scopes = team_scopes.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(crate::team_scopes::REFRESH_INTERVAL);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                interval.tick().await;
+                loop {
+                    interval.tick().await;
+                    match team_scopes.refresh().await {
+                        Ok(done) if !done.restarted.is_empty() || !done.retired.is_empty() => {
+                            tracing::info!(
+                                "Team scopes: restarted jobs {:?}, retired team workers {:?}.",
+                                done.restarted,
+                                done.retired
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => tracing::warn!("The team scopes were not refreshed: {error}"),
+                    }
+                }
+            });
+        }
         if let Some((settings, owner)) = anonymous_check {
             tokio::spawn(meerschaum_web::grafana::warn_about_anonymous_datasources(
                 settings,
@@ -670,6 +711,27 @@ impl NativeBackend {
         Ok(config)
     }
 
+    /// The session and configuration a call runs with (5.1): the team's own (its workers and
+    /// connectors, built from its configuration only) when the request acts for an isolated
+    /// team, else the server's.
+    fn scoped(
+        &self,
+        acting: Option<&meerschaum_connector::acting_team::ActingTeam>,
+    ) -> Result<(Session, Config), ActionError> {
+        let config = self.config()?;
+        let Some(team) = acting else {
+            return Ok((self.session.clone(), config));
+        };
+        let (session, _) =
+            self.session
+                .for_team(&team.scope, Some(team.member.clone()), &config)?;
+        let team_config = match session.team() {
+            Some(binding) => binding.new_config()?,
+            None => return Err(ActionError::new("RuntimeError", "No team session.")),
+        };
+        Ok((session, team_config))
+    }
+
     async fn sync(
         &self,
         pipe: &Pipe,
@@ -679,17 +741,19 @@ impl NativeBackend {
     ) -> SuccessTuple {
         let backend = self.clone();
         let pipe = pipe.clone();
+        let acting = meerschaum_connector::acting_team::current();
         tokio::task::spawn_blocking(move || {
             let mut stderr = std::io::stderr();
             let mut runtime = Runtime::system(&mut stderr);
             // A server console is not a terminal session: no spinners, no colored graphs.
             runtime.progress = crate::format::progress::ProgressSink::Off;
             runtime.live = false;
-            runtime.native = Some(backend.session.clone());
-            runtime.config = match backend.config() {
-                Ok(config) => Some(config),
+            let (scoped_session, config) = match backend.scoped(acting.as_deref()) {
+                Ok(scoped) => scoped,
                 Err(error) => return SuccessTuple::fail(error.message),
             };
+            runtime.native = Some(scoped_session);
+            runtime.config = Some(config);
             let session = native::session(&mut runtime);
             let instance = match session.instance(pipe.instance_keys(), runtime.config()) {
                 Ok(instance) => instance,
@@ -738,6 +802,7 @@ impl NativeBackend {
     /// what it prints captured: the action's result and its output.
     async fn run_captured(&self, argv: Vec<String>) -> Result<(SuccessTuple, String), String> {
         let backend = self.clone();
+        let acting = meerschaum_connector::acting_team::current();
         tokio::task::spawn_blocking(move || {
             let mut out: Vec<u8> = Vec::new();
             let result = {
@@ -745,8 +810,9 @@ impl NativeBackend {
                 // A server console is not a terminal session: no spinners, no colored graphs.
                 runtime.progress = crate::format::progress::ProgressSink::Off;
                 runtime.live = false;
-                runtime.native = Some(backend.session.clone());
-                runtime.config = Some(backend.config().map_err(|e| e.message)?);
+                let (session, config) = backend.scoped(acting.as_deref()).map_err(|e| e.message)?;
+                runtime.native = Some(session);
+                runtime.config = Some(config);
                 let args =
                     crate::parse::parse_arguments(&argv, &runtime.dates).map_err(|e| e.message)?;
                 meerschaum_core::debug::without_scopes(|| {
@@ -835,17 +901,19 @@ impl meerschaum_server::backends::ActionsBackend for NativeBackend {
     async fn execute(&self, action: &str, keywords: Map) -> SuccessTuple {
         let backend = self.clone();
         let action = action.to_string();
+        let acting = meerschaum_connector::acting_team::current();
         tokio::task::spawn_blocking(move || {
             let mut stderr = std::io::stderr();
             let mut runtime = Runtime::system(&mut stderr);
             // A server console is not a terminal session: no spinners, no colored graphs.
             runtime.progress = crate::format::progress::ProgressSink::Off;
             runtime.live = false;
-            runtime.native = Some(backend.session.clone());
-            runtime.config = match backend.config() {
-                Ok(config) => Some(config),
+            let (session, config) = match backend.scoped(acting.as_deref()) {
+                Ok(scoped) => scoped,
                 Err(error) => return SuccessTuple::fail(error.message),
             };
+            runtime.native = Some(session);
+            runtime.config = Some(config);
             let mut args: ArgsMap = keywords
                 .into_iter()
                 .map(|(key, value)| (key, argument(value)))
@@ -871,11 +939,12 @@ impl McpBackend for NativeBackend {
     async fn connector_register(&self, pipe: &Pipe) -> ConnectorRegister {
         let backend = self.clone();
         let pipe = pipe.clone();
+        let acting = meerschaum_connector::acting_team::current();
         tokio::task::spawn_blocking(move || {
-            let Ok(config) = backend.config() else {
+            let Ok((session, config)) = backend.scoped(acting.as_deref()) else {
                 return ConnectorRegister::Undefined;
             };
-            match native::manage::ask_connector_register(&backend.session, &config, &pipe) {
+            match native::manage::ask_connector_register(&session, &config, &pipe) {
                 None => ConnectorRegister::Undefined,
                 Some(Ok(outcome)) if outcome.valid => {
                     ConnectorRegister::Parameters(outcome.parameters)
@@ -997,6 +1066,7 @@ impl McpBackend for NativeBackend {
 struct TeamFollowers {
     config: Arc<meerschaum_core::config::Config>,
     grafana: meerschaum_web::grafana::GrafanaTeams,
+    scopes: crate::team_scopes::TeamScopes,
 }
 
 impl TeamFollowers {
@@ -1014,6 +1084,7 @@ impl meerschaum_server::backends::TeamEvents for TeamFollowers {
         let notes: Vec<String> = [
             self.reservations(old, &team.name),
             self.grafana.renamed(team, old).await,
+            self.scopes.refresh().await.map(|_| ()),
         ]
         .into_iter()
         .filter_map(Result::err)
@@ -1025,11 +1096,16 @@ impl meerschaum_server::backends::TeamEvents for TeamFollowers {
         }
     }
 
+    async fn changed(&self) -> Result<(), String> {
+        self.scopes.refresh().await.map(|_| ())
+    }
+
     async fn deleted(&self, team: &meerschaum_core::access::Team) -> Result<(), String> {
         let retired = meerschaum_core::access::retired_reservation(&team.name, team.id.as_deref());
         let notes: Vec<String> = [
             self.reservations(&team.name, &retired),
             self.grafana.deleted(team).await,
+            self.scopes.refresh().await.map(|_| ()),
         ]
         .into_iter()
         .filter_map(Result::err)

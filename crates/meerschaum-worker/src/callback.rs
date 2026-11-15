@@ -13,6 +13,7 @@ use meerschaum_connector::{
     pipe_ops::{bool_param, dtypes_context},
 };
 use meerschaum_core::dtypes::is_dtype_special;
+use meerschaum_core::team_scope::TeamScope;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value as CValue};
 use meerschaum_kernel::detect::get_special_cols;
 use meerschaum_kernel::enforce::pipe_enforce_dtypes;
@@ -40,6 +41,70 @@ pub struct CallbackRequest {
 pub trait CallbackHandler: Send + Sync {
     /// Run the request and return the `SuccessTuple` plugin code receives.
     async fn handle(&self, request: CallbackRequest) -> SuccessTuple;
+}
+
+/// Checks a callback before the host runs it (5.1): a team's workers may ask the host only for
+/// what an API request by that team's member could do.
+#[async_trait]
+pub trait CallbackGuard: Send + Sync {
+    /// `Err` with the refusal plugin code receives (as a failed `SuccessTuple`).
+    async fn check(&self, request: &CallbackRequest) -> Result<(), String>;
+}
+
+/// Why a team's worker may not make `request` (`None`: it may): its pipe must live on one of the
+/// team's instances and name a connector the team may use ([`TeamScope::may_name`]: its own, a
+/// granted data plugin, or a label that names no connector of the server's, `configured`).
+pub fn team_refusal(
+    scope: &TeamScope,
+    configured: &std::collections::BTreeSet<String>,
+    request: &CallbackRequest,
+) -> Option<String> {
+    if scope.deleted {
+        return Some(format!("The team '{}' was deleted.", scope.team));
+    }
+    let pipe = request.pipe.as_ref()?;
+    let instance = pipe.instance_keys();
+    if !scope.allows(instance) {
+        return Some(format!(
+            "The instance '{instance}' is not available to your teams."
+        ));
+    }
+    let keys = pipe.connector_keys();
+    if !scope.may_name(keys, configured.contains(keys)) {
+        return Some(match keys.strip_prefix("plugin:") {
+            Some(plugin) => format!("The plugin '{plugin}' is not available to your teams."),
+            None => format!("The connector '{keys}' is not available to your teams."),
+        });
+    }
+    None
+}
+
+/// A handler that runs `inner` only for the callbacks its team may make ([`team_refusal`], then
+/// the host's own `guard`, e.g. the pipe's access).
+pub struct GuardedHandler {
+    /// The handler of the allowed callbacks.
+    pub inner: Arc<dyn CallbackHandler>,
+    /// The team.
+    pub scope: Arc<TeamScope>,
+    /// The connector keys the server defines.
+    pub configured: Arc<std::collections::BTreeSet<String>>,
+    /// The host's further checks.
+    pub guard: Option<Arc<dyn CallbackGuard>>,
+}
+
+#[async_trait]
+impl CallbackHandler for GuardedHandler {
+    async fn handle(&self, request: CallbackRequest) -> SuccessTuple {
+        if let Some(refusal) = team_refusal(&self.scope, &self.configured, &request) {
+            return SuccessTuple::fail(refusal);
+        }
+        if let Some(guard) = &self.guard
+            && let Err(refusal) = guard.check(&request).await
+        {
+            return SuccessTuple::fail(refusal);
+        }
+        self.inner.handle(request).await
+    }
 }
 
 /// Resolves instance keys to an instance connector.

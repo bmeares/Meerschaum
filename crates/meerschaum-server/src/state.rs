@@ -321,6 +321,16 @@ impl AppState {
         if keys == default || keys == self.0.instance.connector_keys() {
             return Ok(self.instance());
         }
+        // 5.1: a Python instance connector of an isolated team's request is the team's own (its
+        // workers), never the one cached for other callers.
+        if !matches!(keys.split(':').next(), Some("sql" | "api" | "valkey"))
+            && meerschaum_connector::acting_team::current().is_some()
+        {
+            return self
+                .resolver
+                .resolve(keys)
+                .ok_or_else(|| ApiError::new(422, "Invalid instance keys."));
+        }
         let mut cache = self.instances.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(c) = cache.get(keys) {
             return Ok(c.clone());

@@ -1,0 +1,149 @@
+//! An isolated team's session (5.1): its workers are started with the team's configuration only
+//! and are retired when the team's connectors change.
+
+mod python_support;
+
+use std::path::Path;
+
+use meerschaum_cli::native::{Session, TeamLookup};
+use meerschaum_core::access::Team;
+use meerschaum_core::config::{Config, ConfigOptions};
+use meerschaum_core::team_scope::TeamScope;
+use meerschaum_worker::CallOptions;
+use meerschaum_worker::plugins::{ActionRequest, run_action};
+
+const PLUGIN: &str = r#"
+import json, os
+__version__ = '0.0.1'
+
+def tpr_probe(action=None, **kwargs):
+    from meerschaum import _core
+    from meerschaum.config import get_config
+    raw = _core.get_config('meerschaum', 'connectors', 'sql', warn=False) or {}
+    config_file = os.environ.get('MRSM_CONFIG_FILE', '')
+    text = open(config_file).read() if config_file else ''
+    return True, json.dumps({
+        'pid': os.getpid(),
+        'defined': sorted(label for label, attrs in raw.items() if attrs),
+        'visible': sorted((get_config('meerschaum', 'connectors', 'sql') or {}).keys()),
+        'env': sorted(k for k in os.environ if k.startswith('MRSM_SQL_') or k in (
+            'MRSM_CONFIG', 'MRSM_PATCH')),
+        'team': os.environ.get('MRSM_TEAM_SCOPE'),
+        'file_has_others': any(s in text for s in ('d-pw', 'server-pw')),
+        'file_has_own': 'w-pw' in text,
+    })
+"#;
+
+fn root_with_teams(root: &Path, plugins: &Path) -> Config {
+    let config_dir = root.join("config");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let db = |name: &str| root.join(format!("{name}.db")).display().to_string();
+    std::fs::write(
+        config_dir.join("meerschaum.yaml"),
+        format!(
+            "connectors:\n  sql:\n    main:\n      flavor: sqlite\n      database: {}\n      password: server-pw\n    wetlands:\n      flavor: sqlite\n      database: {}\n      password: w-pw\n      teams: [wetlands]\n    drylands:\n      flavor: sqlite\n      database: {}\n      password: d-pw\n      teams: [drylands]\n    shared:\n      flavor: sqlite\n      database: {}\n",
+            db("main"),
+            db("wetlands"),
+            db("drylands"),
+            db("shared"),
+        ),
+    )
+    .unwrap();
+    std::fs::write(plugins.join("tpr_probe.py"), PLUGIN).unwrap();
+    Config::new(ConfigOptions::with_env(vec![
+        ("MRSM_ROOT_DIR".into(), root.display().to_string()),
+        ("MRSM_PLUGINS_DIR".into(), plugins.display().to_string()),
+    ]))
+    .unwrap()
+}
+
+fn probe(session: &Session, config: &Config) -> serde_json::Value {
+    let pool = session.pool(config);
+    let result = session
+        .block_on(run_action(
+            &pool,
+            &ActionRequest::Sysargs(vec!["tpr".into(), "probe".into()]),
+            None,
+            CallOptions::default(),
+        ))
+        .expect("the action runs");
+    assert!(result.success, "{}", result.message);
+    serde_json::from_str(result.message.trim()).unwrap()
+}
+
+#[test]
+fn a_team_session_runs_python_with_the_teams_configuration_only() {
+    let Some(python) = python_support::current("MRSM_PYTHON") else {
+        eprintln!("Skipping: no Python with meerschaum.");
+        return;
+    };
+    let root = tempfile::tempdir().unwrap();
+    let plugins = tempfile::tempdir().unwrap();
+    let config = root_with_teams(root.path(), plugins.path());
+    let session = Session::new();
+    session.set_worker_python(&python.display().to_string());
+    let connectors = config.get(&["meerschaum", "connectors"]).unwrap().to_map();
+    let mut wetlands = Team::new("wetlands");
+    wetlands.id = Some("id-wetlands".into());
+    wetlands
+        .attributes
+        .insert("isolated".into(), meerschaum_core::Value::Bool(true));
+
+    let scope = TeamScope::of(&wetlands, &connectors);
+    let (team, lookup) = session.for_team(&scope, None, &config).unwrap();
+    assert_eq!(lookup, TeamLookup::Created);
+    let binding = team.team().unwrap().clone();
+    let team_config = binding.new_config().unwrap();
+    let first = probe(&team, &team_config);
+    // The process itself holds the team's connector only (not merely hidden by the guard).
+    assert_eq!(first["defined"], serde_json::json!(["wetlands"]), "{first}");
+    assert_eq!(first["visible"], serde_json::json!(["default", "wetlands"]));
+    assert_eq!(first["env"], serde_json::json!([]), "{first}");
+    assert_eq!(first["team"], "wetlands");
+    assert_eq!(first["file_has_others"], false);
+    assert_eq!(first["file_has_own"], true);
+    // The Rust side of the team's session resolves the team's connectors only (also what
+    // `{{ Pipe(..., instance='sql:drylands') }}` would name).
+    assert!(team.instance("sql:wetlands", &team_config).is_ok());
+    for other in ["sql:drylands", "sql:main"] {
+        assert!(team.instance(other, &team_config).is_err(), "{other}");
+    }
+
+    // Unchanged: the warm session and worker.
+    let (same, lookup) = session.for_team(&scope, None, &config).unwrap();
+    assert_eq!(lookup, TeamLookup::Warm);
+    assert_eq!(probe(&same, &team_config)["pid"], first["pid"]);
+
+    // Granted a connector: the old workers are retired; the new ones have it.
+    wetlands.set_names("connectors", &["sql:shared".to_string()]);
+    let granted = TeamScope::of(&wetlands, &connectors);
+    let (team, lookup) = session.for_team(&granted, None, &config).unwrap();
+    assert_eq!(lookup, TeamLookup::Replaced);
+    let team_config = team.team().unwrap().new_config().unwrap();
+    let second = probe(&team, &team_config);
+    assert_ne!(second["pid"], first["pid"]);
+    assert_eq!(second["defined"], serde_json::json!(["shared", "wetlands"]));
+
+    // Revoked: no warm worker keeps it.
+    wetlands.set_names("connectors", &[]);
+    let revoked = TeamScope::of(&wetlands, &connectors);
+    let (team, lookup) = session.for_team(&revoked, None, &config).unwrap();
+    assert_eq!(lookup, TeamLookup::Replaced);
+    let team_config = team.team().unwrap().new_config().unwrap();
+    let third = probe(&team, &team_config);
+    assert_ne!(third["pid"], second["pid"]);
+    assert_eq!(third["defined"], serde_json::json!(["wetlands"]));
+
+    // A deleted team's session is retired with its workers.
+    let retired = session.retire_teams(|_, _| false);
+    assert_eq!(retired, vec!["id-wetlands".to_string()]);
+    assert!(session.team_pools(&config).keys().is_empty());
+
+    // The server's own session is unchanged: every connector.
+    let open = probe(&session, &config);
+    assert_eq!(
+        open["defined"],
+        serde_json::json!(["drylands", "local", "main", "memory", "shared", "wetlands"])
+    );
+    session.shutdown();
+}

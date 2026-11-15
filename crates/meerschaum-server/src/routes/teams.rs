@@ -171,6 +171,12 @@ fn visible_team(caller: &Access, mut team: Team) -> Team {
 fn forget(state: &AppState) {
     state.access_cache().forget_identities();
     state.access_cache().forget_pipes();
+    let events = state.team_events.clone();
+    tokio::spawn(async move {
+        if let Err(error) = events.changed().await {
+            tracing::warn!("{error}");
+        }
+    });
 }
 
 async fn list(ctx: Ctx) -> ApiResult {
