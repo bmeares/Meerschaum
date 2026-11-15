@@ -3105,7 +3105,9 @@ name = "meerschaum-jobs"
 version = "5.1.0"
 dependencies = [
  "chrono",
+ "chrono-tz",
  "getrandom 0.4.3",
+ "iana-time-zone",
  "indexmap",
  "libc",
  "meerschaum-core",

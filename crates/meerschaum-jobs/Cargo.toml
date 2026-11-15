@@ -25,6 +25,7 @@ doc = false
 [dependencies]
 meerschaum-core = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = { workspace = true }
 indexmap = { workspace = true }
 regex = { workspace = true }
 serde_json = { workspace = true }
@@ -32,6 +33,7 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 getrandom = "0.4"
+iana-time-zone = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["fs", "process", "signal", "poll"] }

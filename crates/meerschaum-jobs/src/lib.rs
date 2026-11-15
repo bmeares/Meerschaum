@@ -47,6 +47,7 @@ pub mod executor;
 pub mod health;
 pub mod job;
 pub mod laps;
+pub mod local_zone;
 pub mod monitor;
 pub mod names;
 pub mod ownership;
@@ -66,6 +67,7 @@ pub mod supervisor;
 pub mod systemd;
 pub mod systemd_job;
 pub mod v4_pickle;
+pub mod zoned;
 
 pub use config::{JobPaths, JobsConfig, Seconds};
 pub use daemon::{Daemon, JobsContext, Status};
@@ -78,8 +80,10 @@ pub use rotating::RotatingFile;
 pub use runner::{FakeSystemctl, ProcessRunner, SystemRunner};
 pub use schedule::{
     JitterSpec, Trigger, parse_schedule, parse_schedule_jittered, parse_schedule_resumed,
+    parse_schedule_warned,
 };
 pub use scheduler::{RootScheduler, ScheduleState};
 pub use startup::{StartKind, StartupConfig, StartupPolicy};
 pub use summary::{JobSummary, get_job_summaries};
 pub use supervisor::Launcher;
+pub use zoned::ScheduleZone;

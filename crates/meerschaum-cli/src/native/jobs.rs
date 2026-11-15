@@ -1686,8 +1686,15 @@ pub fn run_schedule_jittered(
         default_seconds: default_jitter,
         seed: job.as_deref().unwrap_or(schedule),
     };
-    let mut trigger = match meerschaum_jobs::parse_schedule_jittered(schedule, now, Some(spec)) {
-        Ok(t) => t,
+    // The one parse of this run that warns (an unknown zone abbreviation after `starting`): the
+    // warning reaches the job's log once, not once per helper that re-parses the schedule.
+    let mut trigger = match meerschaum_jobs::parse_schedule_warned(schedule, now, Some(spec)) {
+        Ok((t, warnings)) => {
+            for message in warnings {
+                super::warn(rt, &message);
+            }
+            t
+        }
         Err(e) => return SuccessTuple::fail(e.py_message()),
     };
     install_stop_handler(&super::session(rt));
@@ -1755,7 +1762,8 @@ pub fn run_schedule_jittered(
             finished = pending.is_none();
         }
         if let (Some(scheduler), Some(job)) = (&scheduler, &job) {
-            let fired = chrono::Utc::now().fixed_offset();
+            // Recorded with the offset of the fire it served (the schedule's zone, if any).
+            let fired = chrono::Utc::now().with_timezone(next.offset());
             let _ = scheduler.record_fire(job, schedule, fired, pending);
         }
         if finished {
