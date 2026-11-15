@@ -199,6 +199,9 @@ def _diff(left, right, path=''):
 V5_ONLY_STATIC_KEYS = (
     ('environment', 'compose_root'),
     ('environment', 'dataframe'),
+    # 5.1: `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`.
+    ('environment', 'config_file'),
+    ('environment', 'patch_file'),
     ('tokens', 'scopes', 'pipes:register'),
     ('tokens', 'scopes', 'pipes:define_sql'),
     ('tokens', 'scopes', 'webterm:use'),
