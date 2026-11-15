@@ -52,6 +52,7 @@ pub mod self_exe;
 pub mod shlex;
 pub mod static_config;
 pub mod success;
+pub mod team_scope;
 pub mod template;
 pub mod users;
 pub mod value;

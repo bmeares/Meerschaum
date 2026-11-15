@@ -480,7 +480,11 @@ impl Config {
         };
         state.apply_environment_uris(&opts.env, false);
         state.apply_environment_patches(&opts.env);
-        state.apply_patch_dirs();
+        // A team-scoped process (5.1) never reads or consumes the root's patch directories:
+        // what they hold is the server's.
+        if lookup(crate::team_scope::TEAM_SCOPE_VAR).is_none_or(|v| v.is_empty()) {
+            state.apply_patch_dirs();
+        }
         Ok(Config {
             state: Mutex::new(state),
         })

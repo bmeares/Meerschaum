@@ -609,6 +609,13 @@ fn is_inline_literal(text: &str) -> bool {
     !without_refs.trim().is_empty()
 }
 
+/// Whether `text` holds a URI with a password written inline (`postgresql://u:p@h/db`).
+pub fn has_inline_uri_password(text: &str) -> bool {
+    INLINE_URI_PASSWORD
+        .captures(text)
+        .is_some_and(|c| is_inline_literal(&c["password"]))
+}
+
 static SYMLINK_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"MRSM\{[^}\n]*\}").expect("valid regex"));
 
