@@ -1200,7 +1200,14 @@ def _result(value: Any, default_message: str) -> SuccessTuple:
 
 
 def create_team(name: str, conn: Any = None) -> SuccessTuple:
-    """Register a team (administrators only, checked by the caller)."""
+    """
+    Register a team (administrators only, checked by the caller). Connectors still reserved for
+    its name are never adopted.
+    """
+    from meerschaum.api.dash import team_setup
+    refused = team_setup.refuse_reserved(str(name))
+    if refused:
+        return False, refused
     try:
         return _result(_team(name, conn).register(), f"Created team '{name}'.")
     except Exception as e:
@@ -1208,19 +1215,56 @@ def create_team(name: str, conn: Any = None) -> SuccessTuple:
 
 
 def rename_team(name: str, new_name: str, conn: Any = None) -> SuccessTuple:
-    """Rename a team (its pipes and jobs follow)."""
+    """
+    Rename a team (its pipes, jobs and connector reservations follow). A name that connectors
+    are still reserved for is refused.
+    """
+    from meerschaum.api.dash import team_setup
+    if str(name).strip().lower() != str(new_name).strip().lower():
+        try:
+            exists = _team(new_name, conn).exists()
+        except Exception:
+            exists = False
+        refused = None if exists else team_setup.refuse_reserved(str(new_name))
+        if refused:
+            return False, refused
     try:
-        return _result(_team(name, conn).rename(str(new_name)), f"Renamed team '{name}' to '{new_name}'.")
+        success, message = _result(
+            _team(name, conn).rename(str(new_name)),
+            f"Renamed team '{name}' to '{new_name}'.",
+        )
     except Exception as e:
         return False, str(e)
+    if success:
+        note = team_setup.move_reservations(str(name), str(new_name))
+        if note:
+            message += '\n' + note
+    return success, message
 
 
 def delete_team(name: str, conn: Any = None) -> SuccessTuple:
-    """Delete a team (its pipes and jobs move to Everyone)."""
+    """
+    Delete a team (its pipes and jobs move to Everyone). Its connectors and databases stay, and
+    their reservations are retired so no later team of its name inherits them.
+    """
+    from meerschaum.api.dash import team_setup
     try:
-        return _result(_team(name, conn).delete(), f"Deleted team '{name}'.")
+        team = _team(name, conn)
+        team_id = None
+        try:
+            team_id = team.id
+        except Exception:
+            team_id = None
+        success, message = _result(team.delete(), f"Deleted team '{name}'.")
     except Exception as e:
         return False, str(e)
+    if success:
+        note = team_setup.move_reservations(
+            str(name), team_setup.retired_reservation(str(name), str(team_id) if team_id else None),
+        )
+        if note:
+            message += '\n' + note
+    return success, message
 
 
 def set_team_member(team: str, username: str, role: Optional[str], conn: Any = None) -> SuccessTuple:

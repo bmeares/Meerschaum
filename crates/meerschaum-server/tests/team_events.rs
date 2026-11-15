@@ -135,3 +135,79 @@ async fn deletion_notifies_once_with_the_deleted_record() {
         "{attributes}"
     );
 }
+
+/// A connector still reserved for a team name that no team has (left by a deleted team, or
+/// written by hand) is not handed to a new team of that name, nor to a team renamed to it, unless
+/// an administrator sends `adopt`.
+#[tokio::test]
+async fn a_reserved_connector_is_not_adopted_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(common::MemoryInstance::new("team-adopt"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    assert!(
+        instance
+            .register_team(&mut Team::new("Forest"))
+            .await
+            .success
+    );
+    let mut config = common::config(dir.path());
+    config.connectors = Value::from_json_str(
+        r#"{"sql": {"wetlands": {"flavor": "timescaledb", "database": "wetlands",
+                                 "teams": ["Wetlands"]}}}"#,
+    )
+    .unwrap()
+    .to_map();
+    let state = AppState::builder(config, instance.clone())
+        .secret(SECRET.to_vec())
+        .build()
+        .unwrap();
+    let app = meerschaum_server::app(state);
+    let admin = common::login(&app, "admin", "pass", None).await;
+    let json = |text: &str| Some(("application/json", text.as_bytes().to_vec()));
+
+    let refused = send(
+        &app,
+        req("POST", "/teams/wetlands/register", Some(&admin), json("{}")),
+    )
+    .await;
+    assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.text());
+    assert!(
+        refused.text().contains("sql:wetlands"),
+        "{}",
+        refused.text()
+    );
+    assert!(instance.get_team("wetlands").await.unwrap().is_none());
+
+    let refused = send(
+        &app,
+        req(
+            "POST",
+            "/teams/Forest/rename",
+            Some(&admin),
+            json(r#"{"name": "Wetlands"}"#),
+        ),
+    )
+    .await;
+    assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.text());
+    assert!(instance.get_team("Forest").await.unwrap().is_some());
+
+    // An administrator who means it.
+    let adopted = send(
+        &app,
+        req(
+            "POST",
+            "/teams/Wetlands/register",
+            Some(&admin),
+            json(r#"{"adopt": true}"#),
+        ),
+    )
+    .await;
+    assert_eq!(adopted.status, StatusCode::OK, "{}", adopted.text());
+    // A name nothing is reserved for is unaffected.
+    let plain = send(
+        &app,
+        req("POST", "/teams/Prairie/register", Some(&admin), json("{}")),
+    )
+    .await;
+    assert_eq!(plain.status, StatusCode::OK, "{}", plain.text());
+}

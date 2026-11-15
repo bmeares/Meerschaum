@@ -604,6 +604,55 @@ impl Config {
         self.lock().write_config(config, directory)
     }
 
+    /// Move the connector reservations of team `from` to `to` (5.1,
+    /// [`crate::access::move_reservations`]) in the configuration file, as written (references
+    /// are kept), and in memory. The connectors changed (`type:label`); `Err` when the file could
+    /// not be read or written. Connectors that exist only in memory (environment connectors) are
+    /// rewritten in memory only.
+    pub fn move_team_reservations(&self, from: &str, to: &str) -> Result<Vec<String>, String> {
+        self.with_state(|s| {
+            let key = "meerschaum".to_string();
+            let (disk, _) = s
+                .read_config(None, Some(std::slice::from_ref(&key)), false, false, true)
+                .map_err(|e| format!("The configuration could not be read: {e:?}"))?;
+            let mut section = disk.get(&key).map(|v| v.to_map()).unwrap_or_default();
+            let mut changed = Vec::new();
+            if let Some(Value::Map(connectors)) = section.get_mut("connectors") {
+                changed = crate::access::move_reservations(connectors, from, to);
+            }
+            if !changed.is_empty() {
+                let mut config = Map::new();
+                config.insert(key.clone(), Value::Map(section));
+                if !s.write_config(Some(&config), None) {
+                    return Err(format!(
+                        "The connectors {} could not be written to the configuration.",
+                        changed.join(", ")
+                    ));
+                }
+                s.refresh_connectors();
+            }
+            // What is only in memory.
+            let mut live = ConfigValue::map_to_value(&s.config);
+            if let Some(Value::Map(meerschaum)) = live.get_mut(&key)
+                && let Some(Value::Map(connectors)) = meerschaum.get_mut("connectors")
+            {
+                let more = crate::access::move_reservations(connectors, from, to);
+                if !more.is_empty() {
+                    let connectors = ConfigValue::from_value(&Value::Map(connectors.clone()));
+                    if let Some(section) = s.config.get_mut(&key).and_then(|m| m.as_map_mut()) {
+                        section.insert("connectors".to_string(), connectors);
+                    }
+                    for keys in more {
+                        if !changed.contains(&keys) {
+                            changed.push(keys);
+                        }
+                    }
+                }
+            }
+            Ok(changed)
+        })
+    }
+
     /// Drain the warnings recorded so far (Python emits them with `warn()`).
     ///
     /// The messages v4 `print()`s are included, except those Rust callers never saw

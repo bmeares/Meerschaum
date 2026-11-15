@@ -371,3 +371,53 @@ print('JSON:' + json.dumps(out, default=str))
     assert ensure[0] == 'ensure' and ensure[1] == 'gf-plain'
     assert ['gf-other', 8] in ensure[2]
     assert out['plain']['grafana'] == {'org_id': 41}
+
+
+def test_a_deleted_teams_connector_is_not_inherited_by_name(sandbox):
+    """
+    Deleting a team in the console keeps its connector (and its database) but retires the
+    connector's reservation, so a new team of that name gets nothing of the old one; renaming a
+    team moves its reservation; and a name a connector is still reserved for is refused.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, SEED + '''
+from meerschaum.config._read_config import read_config
+attributes = {'flavor': 'sqlite', 'database': 'old.db'}
+assert team_setup.write_connector('sql:res_old', dict(attributes, teams=['ti-res']))[0]
+assert team_setup.write_connector('sql:res_move', dict(attributes, teams=['ti-move']))[0]
+assert team_setup.write_connector('sql:res_left', dict(attributes, teams=['ti-left']))[0]
+out = {}
+### A name a connector is still reserved for (no such team) is refused, by both dialogs.
+out['create_refused'] = team_setup.create_team('ti-left', isolated=True)
+team('ti-other')
+out['rename_refused'] = access.rename_team('ti-other', 'ti-left')
+
+### Delete: the connector stays, its reservation names no team.
+old = team('ti-res')
+old_id = old.id
+out['deleted'] = access.delete_team('ti-res')
+disk = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
+out['old_teams'] = disk['meerschaum']['connectors']['sql']['res_old']['teams']
+out['old_kept'] = disk['meerschaum']['connectors']['sql']['res_old']['database']
+out['old_id'] = old_id
+out['reserved_after_delete'] = team_setup.reserved_connectors('ti-res')
+### A new team of the deleted team's name is created and gets nothing.
+out['recreated'] = team_setup.create_team('ti-res', isolated=True)
+
+### Rename: the reservation follows the team.
+team('ti-move')
+out['renamed'] = access.rename_team('ti-move', 'ti-moved')
+disk = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
+out['moved_teams'] = disk['meerschaum']['connectors']['sql']['res_move']['teams']
+print('JSON:' + json.dumps(out, default=str))
+'''))
+    assert out['create_refused'][0] is False, out
+    assert 'sql:res_left' in out['create_refused'][1]
+    assert out['rename_refused'][0] is False and 'sql:res_left' in out['rename_refused'][1]
+    assert out['deleted'][0] is True, out
+    assert out['old_teams'] == [f"Deleted team ti-res #{out['old_id']}"], out
+    assert out['old_kept'] == 'old.db'
+    assert out['reserved_after_delete'] == []
+    assert out['recreated'][0] is True, out
+    assert out['renamed'][0] is True, out
+    assert out['moved_teams'] == ['ti-moved']

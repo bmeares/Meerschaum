@@ -243,6 +243,88 @@ def write_connector(keys: str, attributes: Dict[str, Any]) -> SuccessTuple:
     return True, "Success"
 
 
+def _native():
+    """The extension itself, for the connector reservations (never the Grafana seam `_core`)."""
+    from meerschaum import _core as core
+    return core
+
+
+def reserved_connectors(name: str) -> List[str]:
+    """
+    The connectors (`type:label`) still reserved for a team named `name` (`teams: [<name>]`):
+    what a new team of that name, or one renamed to it, would get.
+    """
+    from meerschaum.config import get_config
+    connectors = get_config('meerschaum', 'connectors', warn=False) or {}
+    try:
+        return list(_native().team_reservations_of(connectors, str(name)))
+    except Exception:
+        return []
+
+
+def refuse_reserved(name: str) -> Optional[str]:
+    """
+    Why a team may not take the name `name` (connectors still reserved for it, left by a deleted
+    or renamed team or written by hand), or `None`. The console never adopts them; an
+    administrator does with `mrsm bootstrap teams NAME --params '{"adopt": true}'`.
+    """
+    reserved = reserved_connectors(name)
+    if not reserved:
+        return None
+    return (
+        f"The connector{'s' if len(reserved) > 1 else ''} {', '.join(reserved)} "
+        f"{'are' if len(reserved) > 1 else 'is'} reserved for a team named '{name}' that does "
+        "not exist (it may hold another team's data). Choose another name, or remove the "
+        "connector's `teams` first."
+    )
+
+
+def move_reservations(old: str, new: str) -> Optional[str]:
+    """
+    Move the connector reservations of team `old` to `new` (a rename), or to
+    `_core.team_reservation_retired(...)` (a deletion), in the configuration file and in this
+    process. Returns why it could not be done, or `None`.
+    """
+    from meerschaum.config import get_config
+    from meerschaum.config._read_config import read_config
+    from meerschaum.config._edit import write_config
+    with _LOCK:
+        try:
+            disk = read_config(
+                keys=['meerschaum'], write_missing=False, substitute=False,
+                raise_parsing_errors=True,
+            )
+            section = disk.setdefault('meerschaum', {})
+            connectors, changed = _native().team_reservations_move(
+                section.get('connectors', None) or {}, str(old), str(new),
+            )
+            if changed:
+                section['connectors'] = connectors
+                if not write_config({'meerschaum': section}):
+                    return (
+                        f"The connectors reserved for team '{old}' ({', '.join(changed)}) "
+                        "could not be written to the configuration."
+                    )
+            live = get_config('meerschaum', 'connectors', warn=False)
+            if isinstance(live, dict):
+                moved, _ = _native().team_reservations_move(live, str(old), str(new))
+                for typ, labels in (moved or {}).items():
+                    if not isinstance(labels, dict) or not isinstance(live.get(typ, None), dict):
+                        continue
+                    for label, attributes in labels.items():
+                        if isinstance(attributes, dict) and 'teams' in attributes:
+                            live[typ].setdefault(label, {})['teams'] = attributes['teams']
+            _remember_mtime()
+        except Exception as e:
+            return f"The connectors reserved for team '{old}' were not updated: {e}"
+    return None
+
+
+def retired_reservation(name: str, team_id: Optional[str]) -> str:
+    """What a deleted team's reservations become (a name no team can have)."""
+    return str(_native().team_reservation_retired(str(name), team_id))
+
+
 def _connectors_file() -> Optional[str]:
     try:
         from meerschaum.config.paths import CONFIG_DIR_PATH
@@ -331,6 +413,9 @@ def create_team(
     storage = str(storage or 'instance')
     if storage not in ('database', 'schema', 'instance'):
         return False, f"Unknown storage '{storage}'."
+    refused = refuse_reserved(name)
+    if refused:
+        return False, refused
 
     made: Optional[Dict[str, Any]] = None
     grafana_org: Optional[int] = None

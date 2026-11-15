@@ -12,7 +12,8 @@
 //!   database through the read-only role.
 //!
 //! Every answer may be given up front in `--params` (`isolated`, `database`, `base`, `name`,
-//! `label`, `instance`, `connectors`, `plugins`, `plugins_write`), with `--members` and
+//! `label`, `instance`, `connectors`, `plugins`, `plugins_write`; `adopt` to take connectors
+//! still reserved for the team's name), with `--members` and
 //! `--managers`; `--yes` / `--noask` take the defaults for the rest.
 //!
 //! The team is registered on the instance (`-i`), where the users are. Locally the instance's
@@ -261,6 +262,17 @@ pub fn bootstrap_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         Ok(Some(_)) => return fail(format!("Team '{name}' already exists.")),
         Ok(None) => {}
         Err(e) => return fail(format!("Failed to look up team '{name}': {e}")),
+    }
+    // Never a connector left reserved for this name (a deleted team's) unless asked to.
+    if let Some(refused) = super::teams::refuse_reserved(
+        rt,
+        &inst,
+        &name,
+        params
+            .as_ref()
+            .is_some_and(|p| p.get("adopt").is_some_and(Value::truthy)),
+    ) {
+        return Ok(refused);
     }
     let members = list_arg(args, "members").unwrap_or_default();
     let managers = list_arg(args, "managers").unwrap_or_default();

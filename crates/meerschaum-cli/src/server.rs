@@ -359,7 +359,10 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     };
     let state = AppState::builder(config, instance.conn())
         .resolver(Arc::new(plugin_host.clone()))
-        .team_events(Arc::new(grafana_teams))
+        .team_events(Arc::new(TeamFollowers {
+            config: crate::native_plugins::host_config(rt.config()),
+            grafana: grafana_teams,
+        }))
         .actions(backend.clone())
         .jobs(jobs)
         .engine(engine_store)
@@ -985,6 +988,57 @@ impl McpBackend for NativeBackend {
         })
         .await
         .map_err(|_| SqlReadError::Failed)?
+    }
+}
+
+/// What follows a team's rename or deletion through the API server (5.1): its connector
+/// reservations (`teams: [<name>]`) move to the new name or are retired (no later team of the
+/// deleted team's name inherits its connector or database), then its Grafana organization.
+struct TeamFollowers {
+    config: Arc<meerschaum_core::config::Config>,
+    grafana: meerschaum_web::grafana::GrafanaTeams,
+}
+
+impl TeamFollowers {
+    fn reservations(&self, from: &str, to: &str) -> Result<(), String> {
+        self.config
+            .move_team_reservations(from, to)
+            .map(|_| ())
+            .map_err(|e| format!("The connectors reserved for team '{from}' were not updated: {e}"))
+    }
+}
+
+#[async_trait::async_trait]
+impl meerschaum_server::backends::TeamEvents for TeamFollowers {
+    async fn renamed(&self, team: &meerschaum_core::access::Team, old: &str) -> Result<(), String> {
+        let notes: Vec<String> = [
+            self.reservations(old, &team.name),
+            self.grafana.renamed(team, old).await,
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if notes.is_empty() {
+            Ok(())
+        } else {
+            Err(notes.join("\n"))
+        }
+    }
+
+    async fn deleted(&self, team: &meerschaum_core::access::Team) -> Result<(), String> {
+        let retired = meerschaum_core::access::retired_reservation(&team.name, team.id.as_deref());
+        let notes: Vec<String> = [
+            self.reservations(&team.name, &retired),
+            self.grafana.deleted(team).await,
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if notes.is_empty() {
+            Ok(())
+        } else {
+            Err(notes.join("\n"))
+        }
     }
 }
 

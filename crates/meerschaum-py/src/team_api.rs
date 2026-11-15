@@ -255,6 +255,38 @@ pub fn team_database_supported(flavor: &str) -> bool {
     flavor.parse().is_ok_and(team_database::supported)
 }
 
+/// `_core.team_reservations_of(connectors, team)`: the connectors (`type:label`) of a
+/// `meerschaum:connectors` section reserved for a team named `team` (any case).
+#[pyfunction]
+pub fn team_reservations_of(connectors: &Bound<'_, PyAny>, team: &str) -> PyResult<Vec<String>> {
+    Ok(meerschaum_core::access::reserved_for(
+        &py_to_core(connectors)?.to_map(),
+        team,
+    ))
+}
+
+/// `_core.team_reservations_move(connectors, old, new)`: `(connectors, changed)`, the section with
+/// the reservations of `old` naming `new` instead.
+#[pyfunction]
+pub fn team_reservations_move<'py>(
+    py: Python<'py>,
+    connectors: &Bound<'py, PyAny>,
+    old: &str,
+    new: &str,
+) -> PyResult<(Bound<'py, PyAny>, Vec<String>)> {
+    let mut map = py_to_core(connectors)?.to_map();
+    let changed = meerschaum_core::access::move_reservations(&mut map, old, new);
+    Ok((core_to_py(py, &meerschaum_core::Value::Map(map))?, changed))
+}
+
+/// `_core.team_reservation_retired(team, team_id)`: what a deleted team's reservations become
+/// (a name no team can have).
+#[pyfunction]
+#[pyo3(signature = (team, team_id=None))]
+pub fn team_reservation_retired(team: &str, team_id: Option<String>) -> String {
+    meerschaum_core::access::retired_reservation(team, team_id.as_deref())
+}
+
 /// Register this module's functions.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(team_database_create, m)?)?;
@@ -264,5 +296,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(team_database_slug, m)?)?;
     m.add_function(wrap_pyfunction!(team_database_valid_name, m)?)?;
     m.add_function(wrap_pyfunction!(team_database_supported, m)?)?;
+    m.add_function(wrap_pyfunction!(team_reservations_of, m)?)?;
+    m.add_function(wrap_pyfunction!(team_reservations_move, m)?)?;
+    m.add_function(wrap_pyfunction!(team_reservation_retired, m)?)?;
     Ok(())
 }

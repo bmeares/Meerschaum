@@ -67,7 +67,13 @@ It also takes `CONNECT` on the base database away from `PUBLIC`, so a team's rol
 
 A database is the stronger wall: the roles of one team cannot connect to the database of another. A schema shares the base database: its role cannot read other tables, but it can see their names.
 
-The server follows the configuration file, so the new connector works without a restart. Deleting a team keeps its database, roles and connector; drop them yourself when you no longer need the data. Until you do, the connector stays reserved for the team's name (`teams: [<name>]`), so a team created later with that name, or renamed to it, can use it: remove the connector (or its `teams`) when you delete the team.
+The server follows the configuration file, so the new connector works without a restart.
+
+### Deleting and renaming
+
+Deleting a team keeps its database, roles, connector and data; drop them yourself when you no longer need them. Its connector is no longer reserved for its name: its `teams` becomes `Deleted team <name> #<id>`, which no team can be named, so a team created later with the same name, or renamed to it, gets nothing of the old one. Renaming a team moves its reservations to the new name. Both happen in the console, with `delete teams` / `edit teams` and through the API (`DELETE /teams/{name}/delete`, `POST /teams/{name}/rename`); the configuration file is rewritten as it is written (references such as `MRSM{...}` are kept). A deletion or rename made directly with the Python SDK (`Team.delete()`, `Team.rename()`) does not change the configuration.
+
+A connector that is still reserved for a name no team has (left by such a deletion, by a version before 5.1, or written by hand) is not handed out by name: creating a team with that name, or renaming one to it, is refused and names the connector. An administrator who wants the team to use it says so: `"adopt": true` in the body of `POST /teams/{name}/register` or `/rename`, or `--params '{"adopt": true}'` with `register teams`, `bootstrap teams` or `edit teams`. The console does not adopt; remove the connector's `teams` first, or use the command line.
 
 `api:permissions:instances:allow_multiple_instances` must stay `true` (the default) for teams to use their own instance.
 

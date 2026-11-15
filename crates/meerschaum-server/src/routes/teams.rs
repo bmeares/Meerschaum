@@ -6,10 +6,10 @@
 //! |---|---|---|---|
 //! | `GET /teams` | `users:read` | anyone | Every team (`teams`): Everyone first, then by name (a walled-off caller: their own teams) |
 //! | `GET /teams/{name}` | `users:read` | anyone | One team (`team`); `?counts=true` adds its `pipes` and `jobs` counts |
-//! | `POST /teams/{name}/register` | `users:write` | administrators | A new team (`members`, `managers`, `attributes`) |
+//! | `POST /teams/{name}/register` | `users:write` | administrators | A new team (`members`, `managers`, `attributes`; `adopt` to take a connector reserved for that name) |
 //! | `PATCH /teams/{name}/edit` | `users:write` | administrators; the team's managers for members | Change members (`members`, `add_members`, `remove_members`), `managers`, `attributes` |
-//! | `POST /teams/{name}/rename` | `users:write` | administrators | Rename (`{"name": new}`): in its pipes, saved Pipelines, primary teams and jobs too |
-//! | `DELETE /teams/{name}/delete` | `users:write` | administrators | Delete: its pipes, saved Pipelines and jobs move to Everyone (its Grafana organization is retired) |
+//! | `POST /teams/{name}/rename` | `users:write` | administrators | Rename (`{"name": new}`, `adopt`): in its pipes, saved Pipelines, primary teams, jobs and connector reservations too |
+//! | `DELETE /teams/{name}/delete` | `users:write` | administrators | Delete: its pipes, saved Pipelines and jobs move to Everyone (its Grafana organization and connector reservations are retired) |
 //!
 //! A team is `{"id", "name", "members": {username: "member" | "manager"}, "managers": [...],
 //! "attributes": {...}}` (managers are members too). The built-in team Everyone has every user
@@ -111,6 +111,30 @@ fn attributes(body: &Json) -> Result<Option<Map>, ApiError> {
             format!("`attributes` must be a dictionary, got {other}."),
         )),
     }
+}
+
+/// A connector reserved for a team named `name` that does not exist (a deleted or renamed team's,
+/// or one written by hand) is not handed to a new team of that name, nor to a team renamed to it,
+/// unless an administrator asks for it (`"adopt": true`).
+fn refuse_reserved(state: &AppState, name: &str, body: &Json) -> Result<(), ApiError> {
+    if body.get("adopt").and_then(Json::as_bool) == Some(true) {
+        return Ok(());
+    }
+    let reserved = meerschaum_core::access::reserved_for(&state.connectors(), name);
+    if reserved.is_empty() {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        409,
+        format!(
+            "The connector{} {} {} reserved for a team named '{name}' that does not exist (it \
+             may hold another team's data). Give the team another name, remove the connector's \
+             `teams`, or send `\"adopt\": true` to let the team use it.",
+            if reserved.len() == 1 { "" } else { "s" },
+            reserved.join(", "),
+            if reserved.len() == 1 { "is" } else { "are" },
+        ),
+    ))
 }
 
 async fn team_or_404(state: &AppState, name: &str) -> Result<Team, ApiError> {
@@ -231,6 +255,7 @@ async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     {
         return Err(ApiError::new(409, format!("Team '{name}' already exists.")));
     }
+    refuse_reserved(&ctx.state, &name, &body)?;
     let res = conn.register_team(&mut team).await;
     forget(&ctx.state);
     if !res.success {
@@ -345,6 +370,17 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         return Err(ApiError::new(400, "Give the team's new `name`."));
     };
     let team = team_or_404(&ctx.state, &name).await?;
+    if !meerschaum_core::access::same_team(Some(&team.name), Some(&new_name))
+        && ctx
+            .state
+            .instance()
+            .get_team(&new_name)
+            .await
+            .map_err(|e| failed("get_team", e))?
+            .is_none()
+    {
+        refuse_reserved(&ctx.state, &new_name, &body)?;
+    }
     let res = ctx
         .state
         .instance()

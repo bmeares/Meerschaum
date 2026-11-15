@@ -2105,6 +2105,97 @@ pub fn can_administer_teams(principal: &Principal) -> bool {
     principal.is_admin
 }
 
+/// How a deleted team's connector reservations (`teams: [<name>]`) are rewritten: a name no team
+/// can have (team names never hold a space or `#`), so the connector, its database and data stay
+/// but nothing is inherited by a later team of the same name. `id`: the deleted team's id.
+pub fn retired_reservation(team: &str, id: Option<&str>) -> String {
+    format!("Deleted team {team} #{}", id.unwrap_or("unknown"))
+}
+
+/// The teams a connector's `teams` attribute names (a list, or a comma-separated string).
+fn reservation_names(value: &Value) -> Option<Vec<String>> {
+    match value {
+        Value::Null => None,
+        Value::List(items) => Some(
+            items
+                .iter()
+                .filter(|v| !v.is_null())
+                .map(|v| v.py_str().trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+        ),
+        Value::Str(text) => Some(
+            text.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect(),
+        ),
+        other => Some(vec![other.py_str()]),
+    }
+}
+
+/// The connectors (`type:label`, from a `meerschaum:connectors` section) reserved for a team named
+/// `team` (any case): what a new team of that name, or one renamed to it, would get.
+pub fn reserved_for(connectors: &Map, team: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (typ, labels) in connectors {
+        let Some(labels) = labels.as_map() else {
+            continue;
+        };
+        for (label, attrs) in labels {
+            let names = attrs
+                .as_map()
+                .and_then(|a| a.get("teams"))
+                .and_then(reservation_names)
+                .unwrap_or_default();
+            if names.iter().any(|name| same_team(Some(name), Some(team))) {
+                out.push(format!("{typ}:{label}"));
+            }
+        }
+    }
+    out
+}
+
+/// Replace the team `from` (any case) with `to` in every connector's `teams`
+/// (`meerschaum:connectors`); the connectors changed (`type:label`). Renaming a team moves its
+/// reservations to the new name; deleting one moves them to [`retired_reservation`].
+pub fn move_reservations(connectors: &mut Map, from: &str, to: &str) -> Vec<String> {
+    let mut changed = Vec::new();
+    for (typ, labels) in connectors.iter_mut() {
+        let Some(labels) = labels.as_map_mut() else {
+            continue;
+        };
+        for (label, attrs) in labels.iter_mut() {
+            let Some(attrs) = attrs.as_map_mut() else {
+                continue;
+            };
+            let Some(names) = attrs.get("teams").and_then(reservation_names) else {
+                continue;
+            };
+            if !names.iter().any(|name| same_team(Some(name), Some(from))) {
+                continue;
+            }
+            let mut moved: Vec<String> = Vec::new();
+            for name in names {
+                let name = if same_team(Some(&name), Some(from)) {
+                    to.to_string()
+                } else {
+                    name
+                };
+                if !moved.contains(&name) {
+                    moved.push(name);
+                }
+            }
+            attrs.insert(
+                "teams".into(),
+                Value::List(moved.into_iter().map(Value::Str).collect()),
+            );
+            changed.push(format!("{typ}:{label}"));
+        }
+    }
+    changed
+}
+
 /// Whether a principal may use a connector restricted to these teams (`None`: unrestricted,
 /// which a walled-off principal may not use).
 pub fn can_use_connector(principal: &Principal, teams: Option<&[String]>) -> bool {
