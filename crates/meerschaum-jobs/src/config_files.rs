@@ -216,10 +216,11 @@ pub fn externalize_properties_env(
 }
 
 /// The job property that ties a job to its isolated team's scope for good (5.1): the scope's key
-/// (`meerschaum_core::team_scope::TeamScope::key`), written at the job's first team-scoped launch.
-/// A rename or a deletion of the team (which moves its jobs to Everyone) never gives the job the
-/// server's configuration: a deleted team's jobs get no connector at all.
-pub const TEAM_SCOPE_PROPERTY: &str = "team_scope";
+/// (`meerschaum_core::team_scope::TeamScope::key`), written at the job's first team-scoped launch
+/// and nowhere else (a job's creator never sets it: `meerschaum_core::job_access::
+/// strip_server_only`). A rename or a deletion of the team (which moves its jobs to Everyone)
+/// never gives the job the server's configuration: a deleted team's jobs get no connector at all.
+pub const TEAM_SCOPE_PROPERTY: &str = meerschaum_core::job_access::TEAM_SCOPE_KEY;
 
 /// The isolated team's scope a job is launched with (5.1), from its properties and the scopes the
 /// API server recorded under `root` (`team_scopes/`): the scope its `team_scope` property names
@@ -479,6 +480,51 @@ mod tests {
         team.id = Some("id-w".into());
         write_scope_record(root.path(), &TeamScope::opened(&team)).unwrap();
         assert!(job_team_scope(root.path(), &props(r#"{"team_scope": "id-w"}"#)).is_none());
+    }
+
+    /// 5.1: a new job's `team_scope` is written by its first team-scoped launch only, never
+    /// taken from whoever created the job (a client of the API server, the console, plugin code):
+    /// a creator who names another team's scope gets the scope of the job's `team`.
+    #[test]
+    fn a_new_job_never_takes_its_team_scope_from_its_creator() {
+        use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+        let root = tempfile::tempdir().unwrap();
+        for (team, id) in [("Wetlands", "id-w"), ("Drylands", "id-d")] {
+            let scope = TeamScope {
+                team: team.into(),
+                team_id: Some(id.into()),
+                ..TeamScope::default()
+            };
+            write_scope_record(root.path(), &scope).unwrap();
+        }
+        let ctx = crate::JobsContext::for_root(root.path());
+        let mut job = crate::Job::new(
+            "claims-wetlands",
+            Some(vec!["show".into(), "version".into()]),
+            crate::JobOptions {
+                executor_keys: Some("local".into()),
+                properties: Some(props(r#"{"team": "Drylands", "team_scope": "id-w"}"#)),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .unwrap();
+        let recorded = job.daemon().properties();
+        assert_eq!(recorded.get(TEAM_SCOPE_PROPERTY), None, "{recorded:?}");
+        let (key, scope) = job_team_scope(root.path(), &recorded).unwrap();
+        assert_eq!((key.as_str(), scope.team.as_str()), ("id-d", "Drylands"));
+        let mut open = crate::Job::new(
+            "open-claims-wetlands",
+            Some(vec!["show".into(), "version".into()]),
+            crate::JobOptions {
+                executor_keys: Some("local".into()),
+                properties: Some(props(r#"{"team": null, "team_scope": "id-w"}"#)),
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert!(job_team_scope(root.path(), &open.daemon().properties()).is_none());
     }
 
     #[test]

@@ -15,6 +15,12 @@
 //! server's and the console's to write: a client cannot choose it ([`JobAccess::stamp`] replaces
 //! whatever a request carried).
 //!
+//! **The isolated team a job runs for** (5.1, [`TEAM_SCOPE_KEY`]) follows from its `team` and is
+//! recorded by the job's first team-scoped launch (`meerschaum_jobs::daemon`), never by whoever
+//! creates the job: [`JobAccess::stamp`] and a new job's creation
+//! (`meerschaum_jobs::Job::new`) drop it from the properties they are given
+//! ([`strip_server_only`]).
+//!
 //! **Visibility** ([`can_see_job`]): administrators see every job, the owner sees their own, and
 //!
 //! - a job of team `T` is visible to the members (and managers) of `T`; a job of Everyone (no
@@ -53,6 +59,25 @@ pub const LEGACY_OWNER_KEY: &str = "mrsm_owner";
 
 /// The property describing an execution (`{"kind": ..., "origin": ..., ...}`).
 pub const EXECUTION_KEY: &str = "mrsm_execution";
+
+/// The property that ties a job to its isolated team's scope for good (5.1): the scope's key,
+/// written by the job's first team-scoped launch, never taken from a request (see the module
+/// documentation).
+pub const TEAM_SCOPE_KEY: &str = "team_scope";
+
+/// The properties only the job's own launch writes (5.1). A client, the console or plugin code
+/// creating a job never sets them: [`strip_server_only`].
+pub const SERVER_ONLY_KEYS: &[&str] = &[TEAM_SCOPE_KEY];
+
+/// Drop the [`SERVER_ONLY_KEYS`] from the properties a job is created with; `true` when one was
+/// there.
+pub fn strip_server_only(props: &mut Map) -> bool {
+    let mut stripped = false;
+    for key in SERVER_ONLY_KEYS {
+        stripped |= props.shift_remove(*key).is_some();
+    }
+    stripped
+}
 
 /// The `mrsm_execution.kind` of the console's automatic runs.
 pub const TEMPORARY_KIND: &str = "temporary_execution";
@@ -116,9 +141,11 @@ impl JobAccess {
     }
 
     /// Record who started a job: `owner` and `team` (Everyone is stored as `null`) replace
-    /// whatever `props` carried (a client never chooses them). The pre-rc15 `mrsm_owner` is kept
-    /// in step.
+    /// whatever `props` carried (a client never chooses them), and the [`SERVER_ONLY_KEYS`] are
+    /// dropped. The pre-rc15 `mrsm_owner` is kept in step.
     pub fn stamp(props: &mut Map, owner: Option<&str>, team: Option<&str>) {
+        // 5.1: the isolated team a job runs for follows from `team`; a request never names it.
+        strip_server_only(props);
         let owner = owner.map(str::trim).filter(|o| !o.is_empty());
         props.insert(
             OWNER_KEY.to_string(),
@@ -295,7 +322,10 @@ mod tests {
 
     #[test]
     fn a_client_never_chooses_the_record() {
-        let mut p = props(r#"{"owner": "admin", "team": "Ops", "mrsm_owner": "admin"}"#);
+        // 5.1: nor the isolated team's scope a job runs with.
+        let mut p = props(
+            r#"{"owner": "admin", "team": "Ops", "mrsm_owner": "admin", "team_scope": "id-ops"}"#,
+        );
         JobAccess::stamp(&mut p, Some("bob"), Some("Data"));
         assert_eq!(
             Value::Map(p.clone()).json_dumps(),

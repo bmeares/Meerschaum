@@ -160,6 +160,7 @@ struct Fixture {
     app: Router,
     state: AppState,
     jobs: Arc<FakeJobs>,
+    instance: Arc<common::MemoryInstance>,
     _dir: tempfile::TempDir,
 }
 
@@ -228,7 +229,7 @@ async fn fixture_with(tweak: impl FnOnce(&mut meerschaum_server::ServerConfig)) 
     let mut cfg = common::config(dir.path());
     tweak(&mut cfg);
     let jobs = Arc::new(FakeJobs::default());
-    let state = AppState::builder(cfg, instance)
+    let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
         .jobs(jobs.clone())
         .build()
@@ -237,6 +238,7 @@ async fn fixture_with(tweak: impl FnOnce(&mut meerschaum_server::ServerConfig)) 
         app: meerschaum_server::app(state.clone()),
         state,
         jobs,
+        instance,
         _dir: dir,
     }
 }
@@ -583,6 +585,52 @@ async fn mcp_job_tools_apply_the_same_rule() {
         .await
         .unwrap();
     assert_eq!(logs["logs"], "output of data-job");
+}
+
+/// 5.1: which isolated team a job runs for (its `team_scope`, the team's configuration and
+/// credentials) is the server's to record, from the authenticated caller. A caller of the open
+/// side, an administrator and a member of another isolated team who send another team's scope
+/// (and its name) get a job of their own team, with no scope of the request's.
+#[tokio::test]
+async fn a_client_never_chooses_a_jobs_team_scope() {
+    let f = fixture(false).await;
+    // An isolated team (`Drylands`, member `ivan`) besides the open teams of the fixture.
+    let instance = f.instance.clone();
+    instance.seed_user("ivan", "pw", None);
+    let perms = permissions(Role::Operator);
+    let perms: Vec<&str> = perms.iter().map(String::as_str).collect();
+    instance.seed_user_scopes("ivan", &perms);
+    let mut drylands = Team::new("Drylands");
+    drylands.id = Some("id-drylands".into());
+    drylands
+        .attributes
+        .insert("isolated".into(), Value::Bool(true));
+    drylands.add_member("ivan", TeamRole::Member);
+    assert!(instance.register_team(&mut drylands).await.success);
+    let claimed = json!({
+        "team_scope": "id-wetlands",
+        "team": "Wetlands",
+        "owner": "someone-else",
+    });
+    for (user, team) in [
+        ("alice", Some("Data")),
+        ("admin", None),
+        ("ivan", Some("Drylands")),
+    ] {
+        let auth = token(&f, user).await;
+        let name = format!("{user}-claims-wetlands");
+        let r = create(&f, &auth, &name, claimed.clone()).await;
+        assert_eq!(r.status, StatusCode::OK, "{user}: {}", r.text());
+        if !f.jobs.exists(&name).await {
+            // Refused outright (a walled-off caller holds no `actions:execute`): no job at all.
+            assert_eq!(user, "ivan", "{}", r.text());
+            continue;
+        }
+        let props = f.jobs.properties(&name);
+        assert_eq!(props.get("team_scope"), None, "{user}: {props:?}");
+        assert_eq!(props.get("team").and_then(Value::as_str), team, "{user}");
+        assert_eq!(props.get("owner").and_then(Value::as_str), Some(user));
+    }
 }
 
 #[tokio::test]

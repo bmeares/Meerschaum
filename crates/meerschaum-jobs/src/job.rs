@@ -181,6 +181,9 @@ impl Job {
         // New user Jobs are persistent regardless of their name. Do not rewrite an
         // existing legacy record; automatic API workers provide their explicit kind.
         if executor_keys == "local" && daemon.is_none() {
+            // 5.1: the isolated team a new job runs for is recorded by its first launch, from its
+            // `team`, never by whoever creates it.
+            meerschaum_core::job_access::strip_server_only(&mut patch);
             mark_persistent_job(&mut patch);
             // A job started from inside another job (a console run's `start pipeline NAME`) is
             // that job's owner's (see `crate::ownership`). The `systemd` executor's jobs pass
