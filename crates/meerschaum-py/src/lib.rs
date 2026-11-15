@@ -53,6 +53,7 @@ pub mod pipe_methods;
 pub mod pipe_methods_api;
 pub mod plugin_bootstrap_api;
 pub mod polars_bridge;
+pub mod retry_api;
 pub mod runtime;
 pub mod sql_api;
 pub mod sql_raw_api;
@@ -204,6 +205,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // meerschaum-connector-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;
     m.add_function(wrap_pyfunction!(sql_api::pipe_metadata_epoch, m)?)?;
+    // `retry_connect()` for the connectors above (sql, valkey, api)
+    m.add_function(wrap_pyfunction!(retry_api::retry_connect_native, m)?)?;
     sql_raw_api::register(m)?;
 
     Ok(())

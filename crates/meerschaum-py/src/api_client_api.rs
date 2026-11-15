@@ -346,7 +346,7 @@ impl PyApiResponse {
 /// Run `fut` on the runtime until it ends, checking for Python signals every 100 ms (a
 /// `KeyboardInterrupt` aborts the task and propagates) and for `stop`, which a callback notifies
 /// to end the task early. `Ok(None)` is an early stop.
-fn run_interruptible<T: Send + 'static>(
+pub(crate) fn run_interruptible<T: Send + 'static>(
     py: Python<'_>,
     fut: impl std::future::Future<Output = T> + Send + 'static,
     stop: Option<Arc<tokio::sync::Notify>>,

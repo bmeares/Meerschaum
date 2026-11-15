@@ -12,6 +12,8 @@
 //!   implementations over the internal pipes.
 //! - [`models`]: the stored token model (`TokenModel`).
 //! - [`policy`]: protected connectors and the hidden internal `mrsm` pipes.
+//! - [`retry`]: the loop of `retry_connect()` (attempts, waits and messages), over probes the
+//!   instance crates implement.
 //! - [`schema`]: the schema plans of `verify schema`.
 //! - [`sync_status`]: the per-pipe sync status every sync path records (`mrsm:engine_sync_status`).
 //! - [`locks`]: pipe locks (`parameters['locks']`) in every instance connector's write paths, and
@@ -32,6 +34,7 @@ pub mod passwords;
 pub mod pipe_ops;
 pub mod policy;
 pub mod replace;
+pub mod retry;
 pub mod schema;
 pub mod sync_metrics;
 pub mod sync_status;

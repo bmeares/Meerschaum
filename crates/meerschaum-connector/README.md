@@ -23,6 +23,10 @@ The `Connector` and `InstanceConnector` traits, their option and result types, a
   user from every team and clears their ownership.
 - **Users**: the default lookups match usernames and ids exactly (`pipe_ops::exact_row`), never
   through the `params` grammar (a leading `_` there is a negation).
+- **Waiting for an instance** (`retry`): the loop of `meerschaum.connectors.poll.retry_connect()`
+  (v4's attempts, waits and messages) over a `RetryProbe` each instance crate implements
+  (`SqlRetryProbe`, `ValkeyRetryProbe`, `ApiRetryProbe`), a `RetryWaiter` and the host's
+  `RetryEvents`.
 - `testing` (feature `testing`): the shared checks (`check_locks`, `check_teams`,
   `check_user_lookups`) every instance crate's tests run.
 
