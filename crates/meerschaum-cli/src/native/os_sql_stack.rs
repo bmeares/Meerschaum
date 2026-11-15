@@ -51,8 +51,9 @@ pub fn os(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .config()
         .get(&["shell", "timeout"])
         .and_then(|v| pyfmt::py_int(&v).map(|n| (n, v.py_str())));
+    // The user's own command: it keeps the whole environment, like `sh` (5.1).
     let spec = CommandSpec {
-        scrub_secrets: true,
+        scrub_secrets: false,
         program: command[0].clone(),
         args: command[1..].to_vec(),
         ..CommandSpec::default()

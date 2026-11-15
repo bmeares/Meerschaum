@@ -5,11 +5,14 @@
 //! `MRSM_<TYPE>_<LABEL>` connector variable ([`get_connector_env_vars`] whose value is a URI or
 //! JSON object, see [`is_secret_variable`]). Children that are
 //! Meerschaum (anything started through [`crate::self_exe`], the Python worker, the API host,
-//! jobs, the web terminal's `mrsm` shell) need them and inherit them. Everything else (package
-//! installers, shell commands and `!command`, editors, SQL clients, `cargo`, `systemctl`, `ps`,
-//! ...) gets an environment without them, through [`scrub_command`] (or [`scrub`] for an explicit
-//! environment). The running process's own environment is never changed: `get_config` reads it
-//! live.
+//! jobs, the web terminal's `mrsm` shell) need them and inherit them, and so do the commands a
+//! user asks Meerschaum to run (`sh`, `os`, `!command`, a word that is not an action, a job's
+//! command): they may run `mrsm` again or read a connector variable, and whoever typed them can
+//! read the same data. The incidental children Meerschaum starts on its own (package installers,
+//! editors, version and capability probes, SQL clients given their connection on the command
+//! line, `cargo`, `systemctl`, `ps`, `clear`, ...) get an environment without them, through
+//! [`scrub_command`] (or [`scrub`] for an explicit environment). The running process's own
+//! environment is never changed: `get_config` reads it live.
 //!
 //! The Python package has the same rule in `meerschaum.config.environment.get_child_env()`.
 //!

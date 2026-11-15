@@ -140,11 +140,13 @@ def get_connector_env_vars(env: Optional[Dict[str, Any]] = None) -> List[str]:
 
 def get_child_env(env: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """
-    Return the environment for a process Meerschaum starts that is not Meerschaum itself
-    (a package installer, an editor, a shell command, ...): `env` (default `os.environ`)
+    Return the environment for an incidental process Meerschaum starts that is not Meerschaum
+    itself (a package installer, an editor, a version probe, ...): `env` (default `os.environ`)
     without `MRSM_CONFIG`, `MRSM_PATCH`, their `_FILE` forms and every `MRSM_<TYPE>_<LABEL>`
-    connector variable (one whose value is a URI or a JSON object), which hold credentials (5.1). The running process's own environment
-    is never changed. The Rust crates follow the same rule (`meerschaum_core::child_env`).
+    connector variable (one whose value is a URI or a JSON object), which hold credentials (5.1).
+    Commands the user asks Meerschaum to run (`sh`, `os`, `!command`, a job's command) keep the
+    whole environment. The running process's own environment is never changed. The Rust crates
+    follow the same rule (`meerschaum_core::child_env`).
 
     Examples
     --------

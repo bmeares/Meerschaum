@@ -51,8 +51,10 @@ pub struct CommandSpec {
     pub quiet: bool,
     /// The working directory.
     pub cwd: Option<PathBuf>,
-    /// The program is not Meerschaum: it gets no `MRSM_CONFIG`, `MRSM_PATCH`, `_FILE` form or
-    /// `MRSM_<TYPE>_<LABEL>` variable ([`meerschaum_core::child_env`], 5.1).
+    /// The program is an incidental child that is not Meerschaum (an installer, an editor, a
+    /// probe): it gets no `MRSM_CONFIG`, `MRSM_PATCH`, `_FILE` form or `MRSM_<TYPE>_<LABEL>`
+    /// variable ([`meerschaum_core::child_env`], 5.1). Commands the user asked for (`sh`, `os`)
+    /// leave it `false`.
     pub scrub_secrets: bool,
 }
 

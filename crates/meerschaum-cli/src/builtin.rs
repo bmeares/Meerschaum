@@ -601,8 +601,10 @@ pub fn sh(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         command.push("-c".into());
         command.push(crate::shlex::join(&cmd_list));
     }
+    // A command the user asked for keeps the whole environment (5.1): it may run `mrsm` again
+    // or read `MRSM_<TYPE>_<LABEL>`, and whoever typed it can read the same data.
     let spec = CommandSpec {
-        scrub_secrets: true,
+        scrub_secrets: false,
         program: command[0].clone(),
         args: command[1..].to_vec(),
         ..CommandSpec::default()

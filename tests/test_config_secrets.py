@@ -369,3 +369,44 @@ def test_processes_that_are_not_meerschaum_inherit_no_secret(tmp_path):
     text = out.read_text()
     assert URI_ONLY not in text and CONFIG_ONLY not in text, text
     assert 'MRSM_ROOT_DIR=' in text, text
+
+
+def test_commands_the_user_asks_for_keep_the_whole_environment(tmp_path):
+    """
+    5.1: `sh`, `os` and `!command` (run here through `meerschaum.entry`) are the user's own
+    commands: they keep `MRSM_CONFIG`, `MRSM_PATCH` and the connector variables, and a `mrsm`
+    they start reads the parent's configuration.
+    """
+    root = _root(tmp_path)
+    out = tmp_path / 'user.env'
+    again = tmp_path / 'again.txt'
+    script = tmp_path / 'user.sh'
+    script.write_text(
+        '#!/bin/sh\n'
+        f'env >> {out}\n'
+        f'"{sys.executable}" -m meerschaum show config py_child --nopretty > {again}\n'
+    )
+    script.chmod(0o755)
+    result = _python(
+        root,
+        f"""
+        import json
+        import meerschaum as mrsm
+        print(json.dumps({{
+            'sh': list(mrsm.entry(['sh', {str(script)!r}])),
+            'os': list(mrsm.entry(['os', {str(script)!r}])),
+            'bang': list(mrsm.entry(['!' + {str(script)!r}])),
+        }}))
+        """,
+        MRSM_SQL_PYCHILD=f'sqlite:////tmp/x.db?password={URI_ONLY}',
+        MRSM_PATCH=json.dumps({'py_child': {'password': CONFIG_ONLY}}),
+        MRSM_CONFIG=json.dumps({'py_config': {'marker': 'kept'}}),
+    )
+    for key in ('sh', 'os', 'bang'):
+        assert result[key][0] is True, result
+    text = out.read_text()
+    assert text.count('MRSM_SQL_PYCHILD=') == 3, text
+    assert text.count('MRSM_PATCH=') == 3, text
+    assert text.count('MRSM_CONFIG=') == 3, text
+    assert URI_ONLY in text and CONFIG_ONLY in text, text
+    assert CONFIG_ONLY in again.read_text()
