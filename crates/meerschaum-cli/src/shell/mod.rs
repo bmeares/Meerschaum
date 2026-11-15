@@ -334,6 +334,7 @@ pub fn clear_screen(rt: &mut Runtime<'_>, debug: bool) {
         rt.print("\x1b[2J\x1b[H");
     } else {
         let _ = rt.host.run(&dispatch::CommandSpec {
+            scrub_secrets: true,
             program: if cfg!(windows) { "cls" } else { "clear" }.into(),
             ..dispatch::CommandSpec::default()
         });

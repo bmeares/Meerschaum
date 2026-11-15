@@ -257,7 +257,7 @@ pub fn build(
 
 fn run_cargo(name: &str, spec: &SourceBuild, library: &Path) -> std::result::Result<(), String> {
     eprintln!("Building native plugin '{name}' (cargo build --release)...");
-    let output = Command::new(&spec.cargo)
+    let output = meerschaum_core::child_env::scrubbed(Command::new(&spec.cargo))
         .args(["build", "--release", "--manifest-path"])
         .arg(&spec.manifest_path)
         .arg("--target-dir")

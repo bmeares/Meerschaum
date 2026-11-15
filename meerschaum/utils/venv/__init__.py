@@ -410,10 +410,12 @@ def verify_venv(
             ### It might be a broken symlink, so skip on errors.
             if debug:
                 print(f"Getting python version for {python_path}")
+            from meerschaum.config.environment import get_child_env
             proc = run_process(
                 [str(python_path), '-V'],
                 as_proc=True,
                 capture_output=True,
+                env=get_child_env(),
             )
             stdout, stderr = proc.communicate(timeout=1.0)
         except Exception as e:

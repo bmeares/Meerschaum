@@ -52,6 +52,7 @@ pub fn os(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .get(&["shell", "timeout"])
         .and_then(|v| pyfmt::py_int(&v).map(|n| (n, v.py_str())));
     let spec = CommandSpec {
+        scrub_secrets: true,
         program: command[0].clone(),
         args: command[1..].to_vec(),
         ..CommandSpec::default()
@@ -284,6 +285,7 @@ fn open_cli_with_options(
         _ => vec![target.clone()],
     };
     let mut command = CommandSpec {
+        scrub_secrets: true,
         program: client.program,
         args: client.prefix.into_iter().chain(args).collect(),
         env: client.env,
@@ -538,7 +540,7 @@ fn broken_client(client: &Client, script: &std::path::Path) -> Option<String> {
         interpreter = vec![client.program.clone()];
     }
     let mut command =
-        std::process::Command::new(&interpreter[0]);
+        meerschaum_core::child_env::scrubbed(std::process::Command::new(&interpreter[0]));
     command
         .args(&interpreter[1..])
         .args(["-c", &format!("import {module}")])
@@ -1513,6 +1515,7 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .unwrap_or_else(|| "mrsm".into());
     let docker = |args: &[&str]| CommandSpec {
         program: "docker".into(),
+        scrub_secrets: true,
         args: args.iter().map(|a| a.to_string()).collect(),
         quiet: true,
         ..CommandSpec::default()

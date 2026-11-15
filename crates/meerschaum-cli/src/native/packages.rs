@@ -236,7 +236,7 @@ pub fn upgrade_packages(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
 /// `is_docker_available()`: `docker ps` succeeds.
 fn docker_available() -> bool {
-    Command::new("docker")
+    meerschaum_core::child_env::scrubbed(Command::new("docker"))
         .arg("ps")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -303,7 +303,7 @@ fn wait_for_stack_db(rt: &mut Runtime<'_>, limit: std::time::Duration) -> bool {
         .unwrap_or_else(|| "mrsm".into());
     let start = std::time::Instant::now();
     loop {
-        let ids = Command::new("docker")
+        let ids = meerschaum_core::child_env::scrubbed(Command::new("docker"))
             .args([
                 "ps",
                 "-q",
@@ -320,7 +320,7 @@ fn wait_for_stack_db(rt: &mut Runtime<'_>, limit: std::time::Duration) -> bool {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default();
         let state = ids.lines().next().and_then(|id| {
-            Command::new("docker")
+            meerschaum_core::child_env::scrubbed(Command::new("docker"))
                 .args([
                     "inspect",
                     "-f",
@@ -383,7 +383,7 @@ for name in sys.argv[1:]:
     except Exception:
         pass
 ";
-    let output = Command::new(&interpreter.executable)
+    let output = meerschaum_core::child_env::scrubbed(Command::new(&interpreter.executable))
         .args(["-c", PROBE])
         .args(import_names)
         .env("PYTHONSAFEPATH", "1")

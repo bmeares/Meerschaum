@@ -168,6 +168,7 @@ pub fn is_stack_instance(rt: &mut Runtime<'_>, keys: &str) -> bool {
 fn container_query(rt: &mut Runtime<'_>, id: &str, database: &str, sql: &str) -> Option<String> {
     // Never inherit PGHOST: the owned container's loopback server is the one being checked.
     let probe = CommandSpec {
+        scrub_secrets: true,
         program: "docker".into(),
         args: ["exec", id, "sh", "-c", "export PGHOST=127.0.0.1 PGUSER=\"${POSTGRES_USER:-postgres}\"; export PGPASSWORD=\"${POSTGRES_PASSWORD:-}\"; exec psql -X -q -At -v ON_ERROR_STOP=1 -d \"$1\" -c \"$2\"", "mrsm-stack-identity", database, sql].into_iter().map(str::to_string).collect(),
         quiet: true, ..CommandSpec::default()
@@ -330,6 +331,7 @@ fn owned_service(rt: &mut Runtime<'_>, service: &str, running: bool) -> Option<J
         args.insert(1, "-a".into());
     }
     let spec = CommandSpec {
+        scrub_secrets: true,
         program: "docker".into(),
         args,
         quiet: true,
@@ -347,6 +349,7 @@ fn owned_service(rt: &mut Runtime<'_>, service: &str, running: bool) -> Option<J
         return None;
     }
     let spec = CommandSpec {
+        scrub_secrets: true,
         program: "docker".into(),
         args: vec![
             "container".into(),

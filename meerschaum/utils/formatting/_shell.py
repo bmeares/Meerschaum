@@ -97,13 +97,15 @@ def clear_screen(debug: bool = False) -> bool:
         return True
 
     ### ANSI support is disabled, try system level instead
+    import subprocess
+    from meerschaum.config.environment import get_child_env
     if _tried_clear_command is not None:
-        return os.system(_tried_clear_command) == 0
+        return subprocess.call(_tried_clear_command, shell=True, env=get_child_env()) == 0
     
     rc = -1
     command = 'clear' if platform.system() != 'Windows' else 'cls'
     try:
-        rc = os.system(command)
+        rc = subprocess.call(command, shell=True, env=get_child_env())
     except Exception:
         pass
     if rc == 0:

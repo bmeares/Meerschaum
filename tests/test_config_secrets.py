@@ -324,3 +324,48 @@ def test_a_child_python_process_sees_the_same_configuration(tmp_path):
         MRSM_CONFIG_FILE=config_file,
     )
     assert result == {'child': FILE_SECRET}
+
+
+def test_processes_that_are_not_meerschaum_inherit_no_secret(tmp_path):
+    """
+    5.1: `get_child_env()` (the one Python helper) drops `MRSM_CONFIG`, `MRSM_PATCH`, their
+    `_FILE` forms and every `MRSM_<TYPE>_<LABEL>`; the editor, pip / uv and the availability
+    checks start with it, and this process keeps its own environment.
+    """
+    root = _root(tmp_path)
+    out = tmp_path / 'editor.env'
+    editor = tmp_path / 'editor.sh'
+    editor.write_text(f'#!/bin/sh\nenv > {out}\n')
+    editor.chmod(0o755)
+    result = _python(
+        root,
+        """
+        import json, os
+        from meerschaum.config.environment import get_child_env
+        from meerschaum.utils.misc import edit_file
+        from meerschaum.utils.packages import _get_pip_os_env
+        child = get_child_env()
+        edit_file(os.path.join(os.environ['MRSM_ROOT_DIR'], 'pg-password'))
+        print(json.dumps({
+            'child': sorted(k for k in child if k.startswith('MRSM_')),
+            'pip': sorted(k for k in _get_pip_os_env() if k.startswith('MRSM_')),
+            'own': sorted(k for k in os.environ if k.startswith('MRSM_')),
+            'explicit': get_child_env({
+                'MRSM_SQL_X': 'sqlite:////x.db', 'MRSM_CONFIG_FILE': 'f', 'A': '1',
+                'MRSM_TEST_PATH': '/kept',
+            }),
+        }))
+        """,
+        MRSM_SQL_PYCHILD=f'sqlite:////tmp/x.db?password={URI_ONLY}',
+        MRSM_PATCH=json.dumps({'py_child': {'password': CONFIG_ONLY}}),
+        EDITOR=str(editor),
+    )
+    for kept in ('MRSM_ROOT_DIR', 'MRSM_PLUGINS_DIR', 'MRSM_NOASK'):
+        assert kept in result['child'] and kept in result['pip'], result
+    for secret in ('MRSM_SQL_PYCHILD', 'MRSM_PATCH'):
+        assert secret not in result['child'] and secret not in result['pip'], result
+        assert secret in result['own'], result
+    assert result['explicit'] == {'A': '1', 'MRSM_TEST_PATH': '/kept'}
+    text = out.read_text()
+    assert URI_ONLY not in text and CONFIG_ONLY not in text, text
+    assert 'MRSM_ROOT_DIR=' in text, text

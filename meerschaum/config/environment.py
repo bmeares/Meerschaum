@@ -138,6 +138,31 @@ def get_connector_env_vars(env: Optional[Dict[str, Any]] = None) -> List[str]:
     return env_vars
 
 
+def get_child_env(env: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """
+    Return the environment for a process Meerschaum starts that is not Meerschaum itself
+    (a package installer, an editor, a shell command, ...): `env` (default `os.environ`)
+    without `MRSM_CONFIG`, `MRSM_PATCH`, their `_FILE` forms and every `MRSM_<TYPE>_<LABEL>`
+    connector variable (one whose value is a URI or a JSON object), which hold credentials (5.1). The running process's own environment
+    is never changed. The Rust crates follow the same rule (`meerschaum_core::child_env`).
+
+    Examples
+    --------
+    >>> get_child_env({'PATH': '/bin', 'MRSM_SQL_MAIN': 'postgresql://u:p@h/db'})
+    {'PATH': '/bin'}
+    """
+    env = dict(env if env is not None else os.environ)
+    names = STATIC_CONFIG['environment']
+    secret = {names['config'], names['patch'], names['config_file'], names['patch_file']}
+    ### A connector variable defines a connector by URI or JSON; another `MRSM_X_Y` is kept.
+    secret.update(
+        key
+        for key in get_connector_env_vars(env)
+        if '://' in str(env[key]) or str(env[key]).strip().startswith('{')
+    )
+    return {key: str(value) for key, value in env.items() if key not in secret}
+
+
 def apply_connector_uri(env_var: str, env: Optional[Dict[str, Any]] = None) -> None:
     """
     Parse and validate a URI obtained from an environment variable.

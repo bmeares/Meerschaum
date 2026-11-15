@@ -431,7 +431,7 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
         ),
         Installation::Cargo { executable, prefix } => (|| {
             let version = cargo_version(&release.version)?;
-            let mut command = Command::new("cargo");
+            let mut command = meerschaum_core::child_env::scrubbed(Command::new("cargo"));
             command
                 .args(["install", "--locked", "--force", "--root"])
                 .arg(prefix)
@@ -529,7 +529,7 @@ pub(super) fn install_python(
         }
         let quote = |s: &String| format!("'{}'", s.replace('\'', "'\\''"));
         run_command(
-            Command::new("pipx")
+            meerschaum_core::child_env::scrubbed(Command::new("pipx"))
                 .arg("upgrade")
                 .arg(name)
                 .arg("--pip-args")
@@ -541,7 +541,7 @@ pub(super) fn install_python(
             .parent()
             .ok_or("Cannot locate the owning uv tool directory")?;
         run_command(
-            Command::new("uv")
+            meerschaum_core::child_env::scrubbed(Command::new("uv"))
                 .args(["tool", "upgrade", &package])
                 .env("UV_TOOL_DIR", tools)
                 .args(passthrough),
@@ -568,7 +568,7 @@ pub(super) fn install_python(
             ));
         }
     }
-    let output = Command::new(python)
+    let output = meerschaum_core::child_env::scrubbed(Command::new(python))
         .args([
             "-E",
             "-P",

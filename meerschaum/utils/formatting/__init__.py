@@ -245,7 +245,9 @@ def _init():
     from ctypes import windll
     k = windll.kernel32
     k.SetConsoleMode(k.GetStdHandle(-11), 7)
-    os.system("color")
+    import subprocess
+    from meerschaum.config.environment import get_child_env
+    subprocess.call("color", shell=True, env=get_child_env())
 
     from meerschaum.utils.packages import attempt_import
     ### init colorama for Windows color output

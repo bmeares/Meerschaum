@@ -219,7 +219,7 @@ pub fn probe_console_within(
         available: false,
         missing: vec![why],
     };
-    let spawned = std::process::Command::new(python)
+    let spawned = meerschaum_core::child_env::scrubbed(std::process::Command::new(python))
         .args([
             meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
             "-c",

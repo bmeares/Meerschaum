@@ -35,6 +35,7 @@
 
 pub mod access;
 pub mod chain;
+pub mod child_env;
 pub mod config;
 pub mod connect;
 pub mod debug;

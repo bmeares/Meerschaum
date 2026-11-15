@@ -1742,6 +1742,7 @@ fn config_opts() -> GetOptions {
 pub(super) fn probe_python(python: &str) -> Result<PyProbe, String> {
     let modules: Vec<Json> = PROBE_MODULES.iter().map(|(m, d)| json!([m, d])).collect();
     let spec = CommandSpec {
+        scrub_secrets: true,
         program: python.to_string(),
         args: vec![
             "-c".into(),
@@ -2394,6 +2395,7 @@ fn gather_stack(config: &Config, path: Option<String>) -> Vec<Check> {
     // `docker ps` with the compose project label: read-only, needs no compose file parsing and
     // never prints a container's environment.
     let spec = CommandSpec {
+        scrub_secrets: true,
         program: docker.to_string_lossy().into_owned(),
         args: vec![
             "ps".into(),

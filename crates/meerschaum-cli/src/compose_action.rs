@@ -340,6 +340,8 @@ impl CommandRunner for MrsmRunner<'_, '_> {
             env_clear,
             quiet: command.capture_output,
             cwd: None,
+            // `mrsm` itself: it gets the project's configuration.
+            scrub_secrets: false,
         };
         let status = self.rt.borrow_mut().host.run(&spec);
         // The directory (and the file in it) is removed when `result_dir` drops.

@@ -602,6 +602,7 @@ pub fn sh(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         command.push(crate::shlex::join(&cmd_list));
     }
     let spec = CommandSpec {
+        scrub_secrets: true,
         program: command[0].clone(),
         args: command[1..].to_vec(),
         ..CommandSpec::default()

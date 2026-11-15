@@ -30,6 +30,7 @@ pub fn edit_file(rt: &mut Runtime<'_>, path: &Path) -> Result<bool, String> {
     let (program, mut args) = editor_command(rt);
     args.push(path.to_string_lossy().into_owned());
     let spec = CommandSpec {
+        scrub_secrets: true,
         program: program.clone(),
         args,
         ..CommandSpec::default()

@@ -70,7 +70,7 @@ except Exception:
 pub fn probe_interpreter(python: &str) -> Result<Interpreter, String> {
     // `PYTHONSAFEPATH` keeps the current directory off `sys.path` (a `pip.py` there must not run);
     // unlike `-P` it is ignored by interpreters older than 3.11 instead of failing the probe.
-    let output = Command::new(python)
+    let output = meerschaum_core::child_env::scrubbed(Command::new(python))
         .args(["-c", PROBE])
         .env("PYTHONSAFEPATH", "1")
         .stdin(Stdio::null())
@@ -350,10 +350,11 @@ impl PipEnv {
                 args.push("--without-pip".into());
             }
             // The module's own output goes nowhere (v4 redirects stdout while it runs).
-            let status = Command::new(&interpreter.executable)
-                .args(&args)
-                .stdout(Stdio::null())
-                .status();
+            let status =
+                meerschaum_core::child_env::scrubbed(Command::new(&interpreter.executable))
+                    .args(&args)
+                    .stdout(Stdio::null())
+                    .status();
             created = status.is_ok_and(|s| s.success());
             if !created {
                 rt.print(
@@ -381,7 +382,7 @@ impl PipEnv {
             rt.eprint(&format!("{}\n", py_list(&command)));
         }
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        let mut command = Command::new(program);
+        let mut command = meerschaum_core::child_env::scrubbed(Command::new(program));
         command.args(args).envs(self.installer_env());
         if quiet_stdout {
             command.stdout(Stdio::null());

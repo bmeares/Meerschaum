@@ -49,6 +49,9 @@ pub fn command(spec: &CommandSpec) -> Command {
         cmd.env_clear();
     }
     cmd.envs(spec.env.iter().map(|(k, v)| (k, v)));
+    if spec.scrub_secrets {
+        meerschaum_core::child_env::scrub_command(&mut cmd);
+    }
     if let Some(cwd) = &spec.cwd {
         cmd.current_dir(cwd);
     }

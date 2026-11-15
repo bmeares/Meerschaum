@@ -71,7 +71,7 @@ fn free_port() -> Option<u16> {
 
 /// Stop the server: SIGTERM, up to `grace` for it to exit, then SIGKILL.
 fn stop_server(child: &mut std::process::Child, grace: Duration) {
-    let _ = Command::new("kill")
+    let _ = meerschaum_core::child_env::scrubbed(Command::new("kill"))
         .args(["-TERM", &child.id().to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -94,7 +94,7 @@ pub fn start_gui(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let instance = super::instance_keys(args, rt);
 
     let python = crate::builtin::python_executable(rt, None);
-    let probe = Command::new(&python)
+    let probe = meerschaum_core::child_env::scrubbed(Command::new(&python))
         .args(["-c", "import webview"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -154,7 +154,7 @@ pub fn start_gui(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         )));
     }
     let url = format!("http://127.0.0.1:{port}/dash/");
-    let status = Command::new(&python)
+    let status = meerschaum_core::child_env::scrubbed(Command::new(&python))
         .args(["-c", WINDOW, &url, if debug { "1" } else { "0" }])
         .status();
     stop_server(&mut child, Duration::from_secs(5));

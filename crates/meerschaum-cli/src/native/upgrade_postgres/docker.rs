@@ -970,7 +970,7 @@ pub fn compose_in_flight(ps: &str, project: &str, own_pid: u32) -> Vec<(u32, Str
 /// The `docker compose` commands of `project` running now (`None`: the process list cannot be
 /// read here, e.g. on Windows).
 pub fn compose_commands_running(project: &str) -> Option<Vec<(u32, String)>> {
-    let out = std::process::Command::new("ps")
+    let out = meerschaum_core::child_env::scrubbed(std::process::Command::new("ps"))
         .args(["-A", "-o", "pid=,args="])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

@@ -417,6 +417,12 @@ systemd expands `${CREDENTIALS_DIRECTORY}` in `Environment=` lines; the credenti
 
 A job started from a process that holds `MRSM_CONFIG` or `MRSM_PATCH` (a [Compose](/reference/compose/) project's `config:` block, or your own patch) gets them in owner-only files in its directory (`$MRSM_ROOT_DIR/jobs/<name>/.mrsm_config.json`, or next to its `systemd` unit), named by `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`. Its environment and its unit file hold no credentials from them; the files are rewritten at every start and removed with the job. An `api:` executor's jobs run with the server's configuration, as before.
 
+### Processes that are not Meerschaum
+
+Processes Meerschaum starts that are not Meerschaum get an environment without `MRSM_CONFIG`, `MRSM_PATCH`, `MRSM_CONFIG_FILE`, `MRSM_PATCH_FILE` and every `MRSM_<TYPE>_<LABEL>` connector variable (one that holds a URI or a JSON object; another `MRSM_...` variable of your own is kept): shell commands (`mrsm sh`, `!command` in the shell, a word that is not an action), `mrsm os`, editors (`edit config`, `edit pipes`, ...), SQL clients (`mrsm sql`, which still get the one connector's password they need), pip, uv and `python -m venv`, `cargo` (installs and source plugins), `systemctl`, `ps`, `docker` status checks, and the Python package's editor, installers and availability checks. The rest of the environment (`MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR`, `PATH`, ...) is kept, and Meerschaum's own process keeps everything.
+
+What still gets them: Meerschaum itself (jobs, the Python worker, the API host, `mrsm python`, the web terminal's `mrsm` shell, Compose's commands, a restarted shell) and `docker compose` for the stack, whose compose file may interpolate variables. A shell command that runs `mrsm` again (`mrsm sh "mrsm show pipes"`, `!mrsm ...`) therefore runs without your `MRSM_CONFIG` / `MRSM_PATCH` and connector variables: run the action directly instead. Python code can build the same environment with `meerschaum.config.environment.get_child_env()`.
+
 ### In the stack
 
 `mrsm stack` keeps the credentials out of `stack/docker-compose.yaml` and `docker inspect`: the `api` service gets `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` pointing at files under `<root>/stack/secrets/` (a directory only you can read), and Grafana and the read-only role's setup read their passwords from files there too. An API image older than 5.1.0 cannot read the files and keeps the environment form, with a warning. See [Credentials in files](/reference/stack/#credentials-in-files).

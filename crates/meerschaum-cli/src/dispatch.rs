@@ -51,6 +51,9 @@ pub struct CommandSpec {
     pub quiet: bool,
     /// The working directory.
     pub cwd: Option<PathBuf>,
+    /// The program is not Meerschaum: it gets no `MRSM_CONFIG`, `MRSM_PATCH`, `_FILE` form or
+    /// `MRSM_<TYPE>_<LABEL>` variable ([`meerschaum_core::child_env`], 5.1).
+    pub scrub_secrets: bool,
 }
 
 /// The side effects actions need from the host: running processes in the foreground and
@@ -146,6 +149,9 @@ impl Host for SystemHost {
             cmd.env_clear();
         }
         cmd.envs(spec.env.iter().map(|(k, v)| (k, v)));
+        if spec.scrub_secrets {
+            meerschaum_core::child_env::scrub_command(&mut cmd);
+        }
         if let Some(cwd) = &spec.cwd {
             cmd.current_dir(cwd);
         }

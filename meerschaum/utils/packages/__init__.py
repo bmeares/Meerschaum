@@ -562,8 +562,9 @@ def determine_version(
         + "except:\n"
         + f"  print('{_no_version_str}', end='')"
     )
+    from meerschaum.config.environment import get_child_env
     exit_code, stdout_bytes, stderr_bytes = venv_exec(
-        code, venv=venv, with_extras=True, debug=debug
+        code, venv=venv, with_extras=True, env=get_child_env(), debug=debug
     )
     stdout, stderr = stdout_bytes.decode('utf-8'), stderr_bytes.decode('utf-8')
     _version = stdout.split('\n')[-1] if exit_code == 0 else None
@@ -1414,7 +1415,8 @@ def run_python_package(
         os.chdir(cwd)
     executable = venv_executable(venv=venv)
     venv_path = (paths.VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
-    env_dict = (env if isinstance(env, dict) else (os.environ or {})).copy()
+    from meerschaum.config.environment import get_child_env
+    env_dict = get_child_env(env if isinstance(env, dict) else (os.environ or {}))
     if venv_path is not None:
         env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
     uv_bin = _get_uv_bin() if package_name == 'uv' else None
@@ -2201,8 +2203,9 @@ def _get_pip_os_env(color: bool = True):
     See PEP 668 for why we are overriding the environment.
     """
     import os, sys, platform
+    from meerschaum.config.environment import get_child_env
     python_bin_path = pathlib.Path(sys.executable)
-    pip_os_env = os.environ.copy()
+    pip_os_env = get_child_env()
     path_str = pip_os_env.get('PATH', '') or ''
     path_sep = ':' if platform.system() != 'Windows' else ';'
     pip_os_env.update({
