@@ -753,9 +753,11 @@ def _job_instance(job: Any, default_instance: str) -> str:
         env = dict(job.env or {})
     except Exception:
         env = {}
+    from meerschaum import _core
     for key in ('MRSM_PATCH', 'MRSM_CONFIG'):
         try:
-            patch = json.loads(env.get(key) or '{}')
+            ### 5.1: the variable, or the file its `*_FILE` form names.
+            patch = json.loads(_core.environment_patch_text(key, env=env) or '{}')
         except (TypeError, ValueError):
             continue
         instance = ((patch.get('meerschaum', None) or {}) if isinstance(patch, dict) else {}).get('instance', None)

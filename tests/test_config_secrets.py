@@ -215,3 +215,85 @@ def test_the_console_masks_values_a_reference_produced(tmp_path):
         """,
     )
     assert ENV_SECRET not in json.dumps(result)
+
+
+def test_config_file_variables_and_the_cli_agree(tmp_path):
+    root = _root(tmp_path)
+    config_file = tmp_path / 'mrsm-config.json'
+    config_file.write_text(json.dumps({'meerschaum': {'connectors': {'sql': {'fromfile': {
+        'flavor': 'sqlite', 'database': 'MRSM{file:db-path}',
+    }}}}}))
+    db_path = tmp_path / 'from-a-secret.db'
+    (root / 'db-path').write_text(str(db_path) + '\n')
+    patch_file = tmp_path / 'mrsm-patch.json'
+    patch_file.write_text(json.dumps({'plugins': {'p': {'setting': 7}}}))
+    extra = {'MRSM_CONFIG_FILE': config_file, 'MRSM_PATCH_FILE': patch_file}
+    result = _python(
+        root,
+        """
+        import json
+        import meerschaum as mrsm
+        from meerschaum.config import get_config
+        print(json.dumps({
+            'database': mrsm.get_connector('sql:fromfile').database,
+            'setting': get_config('plugins', 'p', 'setting'),
+            'connectors': sorted(get_config('meerschaum', 'connectors')),
+        }))
+        """,
+        **extra,
+    )
+    assert result['database'] == str(db_path)
+    assert result['setting'] == 7
+    assert 'config' not in result['connectors'] and 'patch' not in result['connectors']
+
+    # The CLI (and the processes it starts) read the same: the SQLite file is the secret's path.
+    proc = _cli(root, 'show', 'pipes', '-i', 'sql:fromfile', **extra)
+    assert db_path.exists(), proc.stdout + proc.stderr
+
+    # Both forms of one variable stop both the CLI and Python, naming both.
+    proc = _cli(root, 'show', 'version', MRSM_CONFIG='{}', **extra)
+    assert proc.returncode != 0
+    assert 'MRSM_CONFIG' in proc.stdout + proc.stderr
+    assert 'MRSM_CONFIG_FILE' in proc.stdout + proc.stderr
+    proc = subprocess.run(
+        [sys.executable, '-c', 'import meerschaum.config'],
+        env=_env(root, MRSM_CONFIG='{}', **extra),
+        capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode != 0
+    assert 'MRSM_CONFIG_FILE' in proc.stderr
+
+    # `MRSM_SQL_MAIN_FILE` is still the connector `sql:main_file`.
+    result = _python(
+        root,
+        """
+        import json
+        from meerschaum.config import get_config
+        print(json.dumps(get_config('meerschaum', 'connectors', 'sql', 'main_file')))
+        """,
+        MRSM_SQL_MAIN_FILE='sqlite:////tmp/x.db',
+    )
+    assert result == {'uri': 'sqlite:////tmp/x.db'}
+
+
+def test_a_child_python_process_sees_the_same_configuration(tmp_path):
+    """A process Meerschaum starts as itself (a worker, a job) inherits `MRSM_CONFIG_FILE`."""
+    root = _root(tmp_path)
+    config_file = tmp_path / 'mrsm-config.json'
+    config_file.write_text(json.dumps({'plugins': {'child': {'token': 'MRSM{file:pg-password}'}}}))
+    result = _python(
+        root,
+        """
+        import json, subprocess, sys
+        code = (
+            "import json; from meerschaum.config import get_config; "
+            "print(json.dumps(get_config('plugins', 'child', 'token')))"
+        )
+        child = subprocess.run(
+            [sys.executable, '-c', code], capture_output=True, text=True, check=True,
+        )
+        print(json.dumps({'child': json.loads(child.stdout.strip().splitlines()[-1])}))
+        """,
+        MRSM_CONFIG_FILE=config_file,
+    )
+    assert result == {'child': FILE_SECRET}

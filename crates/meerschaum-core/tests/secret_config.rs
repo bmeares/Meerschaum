@@ -9,7 +9,7 @@ use std::sync::Once;
 
 use meerschaum_core::Value;
 use meerschaum_core::config::secrets;
-use meerschaum_core::config::{Config, ConfigOptions};
+use meerschaum_core::config::{Config, ConfigError, ConfigOptions};
 
 /// The environment variables the `env:` references of these tests read (set once, before any
 /// test reads them).
@@ -308,4 +308,99 @@ fn no_shipped_top_level_key_is_reserved() {
     for key in secrets::RESERVED_KEYS {
         assert!(!defaults.contains_key(key), "{key}");
     }
+}
+
+#[test]
+fn config_file_variables_are_read_like_their_variables() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let config_file = root.join("mrsm-config.json");
+    std::fs::write(
+        &config_file,
+        r#"{"meerschaum": {"connectors": {"sql": {"fromfile": {"flavor": "sqlite", "database": "/tmp/f.db"}}}}}"#,
+    )
+    .unwrap();
+    let patch_file = root.join("mrsm-patch.json");
+    std::fs::write(&patch_file, r#"{"plugins": {"p": {"setting": 7}}}"#).unwrap();
+    let config = config_with(
+        root,
+        &[
+            (
+                "MRSM_CONFIG_FILE",
+                config_file.to_string_lossy().into_owned(),
+            ),
+            ("MRSM_PATCH_FILE", patch_file.to_string_lossy().into_owned()),
+            ("MRSM_SQL_MAIN_FILE", "sqlite:////tmp/main_file.db".into()),
+        ],
+    );
+    assert_eq!(
+        get(
+            &config,
+            &["meerschaum", "connectors", "sql", "fromfile", "flavor"]
+        ),
+        Some(s("sqlite"))
+    );
+    assert_eq!(
+        get(&config, &["plugins", "p", "setting"]),
+        Some(Value::Int(7))
+    );
+    // `MRSM_SQL_MAIN_FILE` still defines `sql:main_file`; the `*_FILE` config variables are not
+    // connectors.
+    assert_eq!(
+        get(
+            &config,
+            &["meerschaum", "connectors", "sql", "main_file", "uri"]
+        ),
+        Some(s("sqlite:////tmp/main_file.db"))
+    );
+    let vars = meerschaum_core::config::get_connector_env_vars(&[
+        ("MRSM_CONFIG_FILE".into(), "x".into()),
+        ("MRSM_PATCH_FILE".into(), "x".into()),
+        ("MRSM_SQL_MAIN_FILE".into(), "x".into()),
+    ]);
+    assert_eq!(vars, vec!["MRSM_SQL_MAIN_FILE".to_string()]);
+}
+
+#[test]
+fn both_forms_of_one_variable_are_an_error_naming_both() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let file = root.join("c.json");
+    std::fs::write(&file, "{}").unwrap();
+    for (var, file_var) in [
+        ("MRSM_CONFIG", "MRSM_CONFIG_FILE"),
+        ("MRSM_PATCH", "MRSM_PATCH_FILE"),
+    ] {
+        let mut env = vec![
+            (
+                "MRSM_ROOT_DIR".to_string(),
+                root.to_string_lossy().into_owned(),
+            ),
+            (var.to_string(), "{}".to_string()),
+            (file_var.to_string(), file.to_string_lossy().into_owned()),
+        ];
+        let error = Config::new(ConfigOptions::with_env(env.clone())).unwrap_err();
+        let ConfigError::Environment(message) = error else {
+            panic!("{error:?}")
+        };
+        assert!(
+            message.contains(var) && message.contains(file_var),
+            "{message}"
+        );
+        // An empty `*_FILE` is unset (how a child process drops an inherited one).
+        env[2].1 = String::new();
+        assert!(Config::new(ConfigOptions::with_env(env)).is_ok());
+    }
+    let missing = vec![
+        (
+            "MRSM_ROOT_DIR".to_string(),
+            root.to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_CONFIG_FILE".to_string(),
+            root.join("missing.json").to_string_lossy().into_owned(),
+        ),
+    ];
+    let error = Config::new(ConfigOptions::with_env(missing)).unwrap_err();
+    assert!(error.to_string().contains("MRSM_CONFIG_FILE"), "{error}");
 }

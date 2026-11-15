@@ -237,6 +237,8 @@ STATIC_CONFIG: Dict[str, Any] = {
         'config': 'MRSM_CONFIG',
         'config_dir': 'MRSM_CONFIG_DIR',
         'patch': 'MRSM_PATCH',
+        'config_file': 'MRSM_CONFIG_FILE',
+        'patch_file': 'MRSM_PATCH_FILE',
         'root': 'MRSM_ROOT_DIR',
         'plugins': 'MRSM_PLUGINS_DIR',
         'venvs': 'MRSM_VENVS_DIR',

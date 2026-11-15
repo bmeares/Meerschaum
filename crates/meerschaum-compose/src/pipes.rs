@@ -111,10 +111,12 @@ fn apply_environment_layers(
 ) {
     use meerschaum_core::value::apply_patch_maps;
 
-    // The project's block replaces MRSM_CONFIG; only MRSM_PATCH is reapplied.
+    // The project's block replaces MRSM_CONFIG (and 5.1's MRSM_CONFIG_FILE); only MRSM_PATCH
+    // (or MRSM_PATCH_FILE) is reapplied.
+    let names = &meerschaum_core::static_config().environment;
     let patch_env: Vec<_> = env
         .iter()
-        .filter(|(name, _)| name != &meerschaum_core::static_config().environment.config)
+        .filter(|(name, _)| name != &names.config && name != &names.config_file)
         .cloned()
         .collect();
     registry.apply_environment_patches(&patch_env);

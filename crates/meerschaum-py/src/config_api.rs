@@ -1546,7 +1546,23 @@ fn apply_layer(py: Python<'_>, f: impl FnOnce(&mut ConfigState)) -> PyResult<()>
 #[pyo3(signature = (env=None))]
 pub fn apply_environment_patches(py: Python<'_>, env: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
     let pairs = env_pairs(py, env)?;
+    // 5.1: `MRSM_CONFIG` with `MRSM_CONFIG_FILE` (or an unreadable file) is an error.
+    meerschaum_core::config::environment::environment_patch_texts(&pairs)
+        .map_err(PyValueError::new_err)?;
     apply_layer(py, move |s| s.apply_environment_patches(&pairs))
+}
+
+/// `environment_patch_text(var, env=None)` (5.1): what `MRSM_CONFIG` / `MRSM_PATCH` holds, from
+/// the variable or the file its `*_FILE` form names (`None` when neither is set).
+#[pyfunction]
+#[pyo3(signature = (var, env=None))]
+pub fn environment_patch_text(
+    py: Python<'_>,
+    var: &str,
+    env: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<String>> {
+    let pairs = env_pairs(py, env)?;
+    Ok(meerschaum_core::config::environment::environment_patch_text(&pairs, var))
 }
 
 /// `secret_values()` (5.1): every value a secret reference (`MRSM{file:...}`, `MRSM{env:...}`)
@@ -1606,6 +1622,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(apply_environment_uris, m)?)?;
     m.add_function(wrap_pyfunction!(sync_files, m)?)?;
     m.add_function(wrap_pyfunction!(live_config_paths, m)?)?;
+    m.add_function(wrap_pyfunction!(environment_patch_text, m)?)?;
     m.add_function(wrap_pyfunction!(secret_values, m)?)?;
     m.add_function(wrap_pyfunction!(check_connector_secrets, m)?)?;
     Ok(())

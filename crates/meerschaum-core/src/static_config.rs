@@ -200,6 +200,10 @@ pub struct EnvironmentStatic {
     pub config_dir: String,
     /// `MRSM_PATCH`.
     pub patch: String,
+    /// `MRSM_CONFIG_FILE` (5.1): a file holding what `MRSM_CONFIG` would hold.
+    pub config_file: String,
+    /// `MRSM_PATCH_FILE` (5.1): a file holding what `MRSM_PATCH` would hold.
+    pub patch_file: String,
     /// `MRSM_ROOT_DIR`.
     pub root: String,
     /// `MRSM_PLUGINS_DIR`.

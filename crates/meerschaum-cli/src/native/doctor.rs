@@ -2024,9 +2024,23 @@ fn config_checks(
             other_vars.join(", ")
         ));
     }
-    let bad_patch = ["MRSM_CONFIG", "MRSM_PATCH"].iter().find_map(|var| {
-        env(var)
-            .filter(|v| !v.trim().is_empty())
+    // 5.1: `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` hold the same text in a file.
+    let bad_patch = [
+        "MRSM_CONFIG",
+        "MRSM_PATCH",
+        "MRSM_CONFIG_FILE",
+        "MRSM_PATCH_FILE",
+    ]
+    .iter()
+    .find_map(|var| {
+        let text = if var.ends_with("_FILE") {
+            env(var)
+                .filter(|path| !path.is_empty())
+                .and_then(|path| std::fs::read_to_string(path).ok())
+        } else {
+            env(var)
+        };
+        text.filter(|v| !v.trim().is_empty())
             .and_then(|v| serde_json::from_str::<Json>(&v).err().map(|e| (*var, e)))
     });
     match bad_patch {

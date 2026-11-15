@@ -633,8 +633,10 @@ def _env_patches() -> List[Tuple[str, Dict[str, Any]]]:
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.misc import string_to_dict
     patches = []
+    from meerschaum import _core
     for variable in (STATIC_CONFIG['environment']['config'], STATIC_CONFIG['environment']['patch']):
-        text = os.environ.get(variable, None)
+        ### 5.1: the variable, or the file its `*_FILE` form names.
+        text = _core.environment_patch_text(variable)
         if not text:
             continue
         try:

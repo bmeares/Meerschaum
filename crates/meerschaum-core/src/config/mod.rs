@@ -30,6 +30,7 @@
 pub mod backup;
 pub mod connector_types;
 pub mod dataframe;
+pub mod environment;
 pub mod grafana_readonly;
 pub mod lossless;
 pub mod paths;
@@ -41,7 +42,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use regex::Regex;
 
-use crate::pyfmt::{JsonStyle, json_dumps_str, py_repr, str_repr, string_to_dict};
+use crate::pyfmt::{JsonStyle, json_dumps_str, py_repr, str_repr};
 use crate::static_config::static_config;
 use crate::value::{Map, Value};
 use crate::yaml::dumper::{DumpOptions, dump_node};
@@ -147,6 +148,10 @@ pub enum ConfigError {
     /// An I/O error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The environment configures the same thing twice (`MRSM_CONFIG` and `MRSM_CONFIG_FILE`),
+    /// or a `*_FILE` variable names a file that cannot be read.
+    #[error("{0}")]
+    Environment(String),
 }
 
 /// The default-config paths v5 adds to v4.1.4's `default_config` (see [`default_config`]).
@@ -457,6 +462,7 @@ impl Config {
             opts.cpu_count,
             opts.windows,
         ));
+        environment::environment_patch_texts(&opts.env).map_err(ConfigError::Environment)?;
         let mut state = ConfigState {
             paths,
             defaults,
@@ -1991,31 +1997,21 @@ impl ConfigState {
         applied
     }
 
-    /// Port of `apply_environment_patches` (`MRSM_CONFIG`, then `MRSM_PATCH`).
+    /// Port of `apply_environment_patches` (`MRSM_CONFIG`, then `MRSM_PATCH`; 5.1: or the file
+    /// `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` names). Both forms of one set, or an unreadable
+    /// file, is reported and nothing is applied ([`Config::new`] refuses it).
     pub fn apply_environment_patches(&mut self, env: &[(String, String)]) {
-        let env_names = &static_config().environment;
-        for var in [env_names.config.clone(), env_names.patch.clone()] {
-            let Some((_, raw)) = env.iter().find(|(k, _)| k == &var) else {
-                continue;
-            };
-            let patch = match string_to_dict(raw.trim_start()) {
-                Ok(p) => ConfigValue::map_from_value(&p),
-                Err(_) => {
-                    self.print(format!(
-                        "Environment variable {var} is set but cannot be parsed.\nUnset {var} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n{var} is set to:\n{raw}\nSkipping patching os environment into config..."
-                    ));
-                    continue;
-                }
-            };
-            for key in patch.keys() {
-                let opts = GetOptions {
-                    warn: false,
-                    ..GetOptions::default()
-                };
-                let _ = self.get_config_lossless(std::slice::from_ref(key), opts);
+        let texts = match environment::environment_patch_texts(env) {
+            Ok(texts) => texts,
+            Err(message) => {
+                self.warn(message);
+                return;
             }
-            self.config = apply_patch_maps(&self.config, &patch);
+        };
+        if texts.is_empty() {
+            return;
         }
+        self.apply_patch_texts(&texts);
     }
 
     /// Apply `patch_config/` and `permanent_patch_config/` under the root directory.

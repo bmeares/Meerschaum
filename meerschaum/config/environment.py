@@ -30,12 +30,13 @@ def apply_environment_patches(env: Optional[Dict[str, Any]] = None) -> None:
     """
     Apply patches defined in `MRSM_CONFIG` and `MRSM_PATCH`.
     """
-    config_var = STATIC_CONFIG['environment']['config']
-    patch_var = STATIC_CONFIG['environment']['patch']
+    names = STATIC_CONFIG['environment']
+    ### 5.1: `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` name files holding what the variables would.
+    variables = (names['config'], names['patch'], names['config_file'], names['patch_file'])
     ### Nothing to apply: do not touch the native registry (importing `meerschaum.config` runs
     ### this, and a bare import must not load the extension).
     _env = env if env is not None else os.environ
-    if config_var not in _env and patch_var not in _env:
+    if not any(variable in _env for variable in variables):
         return
     return _core.apply_environment_patches(env)
 
