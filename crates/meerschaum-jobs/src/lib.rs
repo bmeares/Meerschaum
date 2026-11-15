@@ -47,6 +47,7 @@ pub mod executor;
 pub mod health;
 pub mod job;
 pub mod laps;
+pub mod local_zone;
 pub mod monitor;
 pub mod names;
 pub mod ownership;
@@ -78,6 +79,7 @@ pub use rotating::RotatingFile;
 pub use runner::{FakeSystemctl, ProcessRunner, SystemRunner};
 pub use schedule::{
     JitterSpec, Trigger, parse_schedule, parse_schedule_jittered, parse_schedule_resumed,
+    parse_schedule_warned,
 };
 pub use scheduler::{RootScheduler, ScheduleState};
 pub use startup::{StartKind, StartupConfig, StartupPolicy};

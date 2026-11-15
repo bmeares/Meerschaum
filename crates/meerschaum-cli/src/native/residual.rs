@@ -572,8 +572,13 @@ pub fn show_schedules(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .map(|s| s.trim().parse::<i64>().unwrap_or(default_count))
         .unwrap_or(default_count);
     let now = chrono::Utc::now().fixed_offset();
-    let mut trigger = match meerschaum_jobs::parse_schedule(schedule, now) {
-        Ok(t) => t,
+    let mut trigger = match meerschaum_jobs::parse_schedule_warned(schedule, now, None) {
+        Ok((t, warnings)) => {
+            for message in warnings {
+                super::warn(rt, &message);
+            }
+            t
+        }
         Err(meerschaum_jobs::schedule::ScheduleError::Frequency(message)) => {
             return Ok(SuccessTuple::fail(message));
         }

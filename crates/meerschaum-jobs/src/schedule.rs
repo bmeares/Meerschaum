@@ -11,6 +11,9 @@ use chrono::{
 };
 use meerschaum_core::pyfmt::{PyDateTime, parse_py_float, parse_py_int};
 use regex::Regex;
+use std::sync::Arc;
+
+use crate::local_zone::LocalZone;
 
 /// An aware datetime with a fixed offset (`datetime` with `tzinfo`).
 pub type Fire = DateTime<FixedOffset>;
@@ -714,6 +717,28 @@ pub struct JitterSpec<'a> {
     pub seed: &'a str,
 }
 
+/// What `dateutil.parser.parse` reads from the process: the zone behind `tzlocal()` and
+/// `time.tzname`, and the default date ("today" on the local wall clock). Tests pin both.
+#[derive(Debug, Clone)]
+pub struct ParseEnv {
+    /// The local zone, or `None` when it is unknown (no abbreviation then means "local").
+    pub local: Option<Arc<LocalZone>>,
+    /// The date a bare time (`21:00`) takes.
+    pub today: NaiveDate,
+}
+
+impl ParseEnv {
+    /// This process's zone and today's date in it.
+    pub fn process() -> ParseEnv {
+        let local = LocalZone::detect();
+        let today = match &local {
+            Some(zone) => zone.today(chrono::Utc::now()),
+            None => chrono::Local::now().date_naive(),
+        };
+        ParseEnv { local, today }
+    }
+}
+
 /// `parse_schedule(schedule, now)`. A trailing `jitter <n> [unit]` moves every fire time by a
 /// fixed offset in `[0, n]` seconds (seeded by the schedule text; see [`parse_schedule_jittered`]).
 pub fn parse_schedule(schedule: &str, now: Fire) -> Result<Trigger, ScheduleError> {
@@ -729,12 +754,34 @@ pub fn parse_schedule_jittered(
     now: Fire,
     spec: Option<JitterSpec<'_>>,
 ) -> Result<Trigger, ScheduleError> {
+    parse_schedule_warned(schedule, now, spec).map(|(trigger, _)| trigger)
+}
+
+/// [`parse_schedule_jittered`] with the warnings the parse raised (dateutil's
+/// `UnknownTimezoneWarning`, see [`parse_datetime_in`]): one entry per warning, for the caller to
+/// show through its own warning path. Call it once per parse that should warn.
+pub fn parse_schedule_warned(
+    schedule: &str,
+    now: Fire,
+    spec: Option<JitterSpec<'_>>,
+) -> Result<(Trigger, Vec<String>), ScheduleError> {
+    parse_schedule_in(schedule, now, spec, &ParseEnv::process())
+}
+
+/// [`parse_schedule_warned`] in an explicit [`ParseEnv`].
+pub fn parse_schedule_in(
+    schedule: &str,
+    now: Fire,
+    spec: Option<JitterSpec<'_>>,
+    env: &ParseEnv,
+) -> Result<(Trigger, Vec<String>), ScheduleError> {
     let (base, offset_us) = jitter_offset_us(schedule, spec)?;
-    let trigger = parse_schedule_unjittered(&base, now)?;
+    let mut warnings = Vec::new();
+    let trigger = parse_schedule_unjittered(&base, now, env, &mut warnings)?;
     if offset_us == 0 {
-        return Ok(trigger);
+        return Ok((trigger, warnings));
     }
-    Ok(Trigger::Jittered(Box::new(trigger), offset_us))
+    Ok((Trigger::Jittered(Box::new(trigger), offset_us), warnings))
 }
 
 /// A schedule without its `jitter` suffix, and the fixed offset of its fire times in
@@ -791,9 +838,14 @@ fn period_seconds_at(schedule: &str, now: Fire) -> Option<f64> {
     longest.filter(|s| *s > 0.0)
 }
 
-fn parse_schedule_unjittered(schedule: &str, now: Fire) -> Result<Trigger, ScheduleError> {
+fn parse_schedule_unjittered(
+    schedule: &str,
+    now: Fire,
+    env: &ParseEnv,
+    warnings: &mut Vec<String>,
+) -> Result<Trigger, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
-    let starting_ts = parse_start_time(&schedule, Some(now))?;
+    let starting_ts = parse_start_time_in(&schedule, Some(now), env, warnings)?;
     let mut s = schedule
         .split(STARTING_KEYWORD)
         .next()
@@ -909,6 +961,16 @@ fn parse_schedule_unjittered(schedule: &str, now: Fire) -> Result<Trigger, Sched
 
 /// `parse_start_time(schedule, now)`: the explicit starting datetime, or `now`.
 pub fn parse_start_time(schedule: &str, now: Option<Fire>) -> Result<Fire, ScheduleError> {
+    parse_start_time_in(schedule, now, &ParseEnv::process(), &mut Vec::new())
+}
+
+/// [`parse_start_time`] in an explicit [`ParseEnv`], collecting dateutil's warnings.
+pub fn parse_start_time_in(
+    schedule: &str,
+    now: Option<Fire>,
+    env: &ParseEnv,
+    warnings: &mut Vec<String>,
+) -> Result<Fire, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
     let parts: Vec<&str> = schedule.split(STARTING_KEYWORD).collect();
     let starting_str = if parts.len() == 1 {
@@ -950,14 +1012,14 @@ pub fn parse_start_time(schedule: &str, now: Option<Fire>) -> Result<Fire, Sched
         let (hour, minute) = if time_str.is_empty() {
             (0, 0)
         } else {
-            let parsed = parse_datetime(&time_str).map_err(err)?;
+            let parsed = parse_datetime_in(&time_str, env, warnings).map_err(err)?;
             (parsed.hour(), parsed.minute())
         };
         (if is_tomorrow { tomorrow } else { today })
             + Duration::hours(hour as i64)
             + Duration::minutes(minute as i64)
     } else {
-        match parse_datetime(starting_str).map_err(err)? {
+        match parse_datetime_in(starting_str, env, warnings).map_err(err)? {
             Parsed::Naive(n) => FixedOffset::east_opt(0)
                 .and_then(|utc| utc.from_local_datetime(&n).single())
                 .ok_or_else(|| err("Invalid datetime.".to_string()))?,
@@ -992,22 +1054,31 @@ impl Parsed {
     }
 }
 
-/// The subset of `dateutil.parser.parse()` the corpus uses: `YYYY-MM-DD` / `YYYY/MM/DD`, an
-/// optional `[T ]H:MM[:SS[.ffffff]]` with `AM` / `PM`, an optional zone (`Z`, `UTC`, `GMT`,
-/// `±HH[:MM]`), or a bare time (`10:00`, `7pm`) on today's local date. Errors carry dateutil's
-/// messages.
+/// [`parse_datetime_in`] in this process's zone, discarding warnings.
 pub fn parse_datetime(s: &str) -> Result<Parsed, String> {
+    parse_datetime_in(s, &ParseEnv::process(), &mut Vec::new())
+}
+
+/// The subset of `dateutil.parser.parse()` the corpus uses: `YYYY-MM-DD` / `YYYY/MM/DD`, an
+/// optional `[T ]H:MM[:SS[.ffffff]]` with `AM` / `PM`, then an optional zone read the way
+/// dateutil reads it (see [`parse_tz_tail`] and [`build_tzaware`]), or a bare time (`10:00`,
+/// `7pm`) on `env.today`. Errors carry dateutil's messages; dateutil's `UnknownTimezoneWarning` is
+/// pushed on `warnings`.
+pub fn parse_datetime_in(
+    s: &str,
+    env: &ParseEnv,
+    warnings: &mut Vec<String>,
+) -> Result<Parsed, String> {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
         Regex::new(
-            r"(?ix)^\s*
+            r"(?isx)^\s*
             (?:(?P<y>\d{4})[-/](?P<mo>\d{1,2})[-/](?P<d>\d{1,2}))?
             (?:(?:^|[T\s])\s*
                 (?P<h>\d{1,2})(?::(?P<mi>\d{1,2})(?::(?P<s>\d{1,2})(?:\.(?P<f>\d{1,6}))?)?)?
-                \s*(?P<ampm>am|pm)?
+                (?:\s*(?P<ampm>(?:am|pm)\b))?
             )?
-            \s*(?P<tz>z|utc|gmt|[+-]\d{2}(?::?\d{2})?)?
-            \s*$",
+            (?P<rest>.*)$",
         )
         .expect("valid regex")
     });
@@ -1055,11 +1126,10 @@ pub fn parse_datetime(s: &str) -> Result<Parsed, String> {
         )
     } else {
         // dateutil's default: today's local date.
-        let today = chrono::Local::now().date_naive();
         (
-            today.year() as i64,
-            today.month() as i64,
-            today.day() as i64,
+            env.today.year() as i64,
+            env.today.month() as i64,
+            env.today.day() as i64,
         )
     };
     let suffix = |m: String| format!("{m}: {s}");
@@ -1090,25 +1160,215 @@ pub fn parse_datetime(s: &str) -> Result<Parsed, String> {
         NaiveTime::from_hms_micro_opt(hour as u32, minute as u32, second as u32, micro as u32)
             .ok_or_else(unknown)?;
     let naive = NaiveDateTime::new(date, time);
-    let Some(tz) = caps.name("tz") else {
-        return Ok(Parsed::Naive(naive));
+    let rest = caps.name("rest").map_or("", |m| m.as_str());
+    let tz = parse_tz_tail(rest, has_time).ok_or_else(unknown)?;
+    build_tzaware(naive, tz, env, warnings).ok_or_else(unknown)
+}
+
+/// `res.tzname` / `res.tzoffset` after dateutil read the text behind a time.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct TzFields {
+    name: Option<String>,
+    /// Seconds east of UTC.
+    offset: Option<i64>,
+}
+
+/// `parserinfo.UTCZONE`: `parserinfo.utczone(name)` is case-insensitive.
+fn is_utczone(name: &str) -> bool {
+    matches!(name.to_ascii_lowercase().as_str(), "utc" | "gmt" | "z")
+}
+
+/// `_could_be_tzname`: up to five capitals, or exactly one of `UTC`, `GMT`, `Z`, `z`.
+fn could_be_tzname(token: &str) -> bool {
+    token.chars().count() <= 5
+        && (token.chars().all(|c| c.is_ascii_uppercase())
+            || matches!(token, "UTC" | "GMT" | "Z" | "z"))
+}
+
+/// `_timelex.split` for what can follow a time: one token per whitespace character, runs of
+/// letters, runs of digits, every other character alone.
+fn lex_tail(rest: &str) -> Vec<String> {
+    let chars: Vec<char> = rest.chars().collect();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let mut j = i + 1;
+        if c.is_whitespace() {
+            tokens.push(" ".to_string());
+            i = j;
+            continue;
+        }
+        if c.is_alphabetic() {
+            while j < chars.len() && chars[j].is_alphabetic() {
+                j += 1;
+            }
+        } else if c.is_ascii_digit() {
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j + 1 < chars.len() && chars[j] == '.' && chars[j + 1].is_ascii_digit() {
+                j += 1;
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    j += 1;
+                }
+            }
+        }
+        tokens.push(chars[i..j].iter().collect());
+        i = j;
+    }
+    tokens
+}
+
+/// `parserinfo.jump`: tokens dateutil skips.
+fn is_jump(token: &str) -> bool {
+    matches!(
+        token.to_lowercase().as_str(),
+        " " | "."
+            | ","
+            | ";"
+            | "-"
+            | "/"
+            | "'"
+            | "at"
+            | "on"
+            | "and"
+            | "ad"
+            | "m"
+            | "t"
+            | "of"
+            | "st"
+            | "nd"
+            | "rd"
+            | "th"
+    )
+}
+
+/// The timezone branches of `parser._parse` for the text after the time, then
+/// `parserinfo.validate`. `hour_set` is whether a time was read (`res.hour is not None`: without
+/// it dateutil reads neither a name nor an offset). `None` is dateutil's `ValueError`.
+///
+/// Not ported: dateutil's other readings of what follows a time (a date, a weekday or month name,
+/// `AM` / `PM` after a zone); they are an error here.
+fn parse_tz_tail(rest: &str, hour_set: bool) -> Option<TzFields> {
+    let mut l = lex_tail(rest);
+    let len = l.len();
+    let mut res = TzFields::default();
+    let mut i = 0;
+    while i < len {
+        let token = l[i].clone();
+        if hour_set && res.name.is_none() && res.offset.is_none() && could_be_tzname(&token) {
+            // `info.tzoffset(name)`: its table holds only the lowercase `z`.
+            res.offset = (token == "z").then_some(0);
+            res.name = Some(token);
+            // PARITY: dateutil reads `GMT+3` / `EDT+3` as "my time +3 is GMT": the sign flips,
+            // and `UTC` / `GMT` / `Z` followed by an offset is not the UTC zone itself.
+            if i + 1 < len && (l[i + 1] == "+" || l[i + 1] == "-") {
+                l[i + 1] = if l[i + 1] == "+" { "-" } else { "+" }.to_string();
+                res.offset = None;
+                if res.name.as_deref().is_some_and(is_utczone) {
+                    res.name = None;
+                }
+            }
+        } else if hour_set && (token == "+" || token == "-") {
+            let sign: i64 = if token == "+" { 1 } else { -1 };
+            let digits = l.get(i + 1)?.clone();
+            let int = |text: &str| -> Option<i64> {
+                (!text.is_empty() && text.chars().all(|c| c.is_ascii_digit()))
+                    .then(|| text.parse().ok())
+                    .flatten()
+            };
+            let head = |text: &str, n: usize| text.chars().take(n).collect::<String>();
+            let (hours, minutes);
+            if digits.chars().count() == 4 {
+                hours = int(&head(&digits, 2))?;
+                minutes = int(&digits.chars().skip(2).collect::<String>())?;
+            } else if i + 2 < len && l[i + 2] == ":" {
+                hours = int(&digits)?;
+                minutes = int(l.get(i + 3)?)?;
+                i += 2;
+            } else if digits.chars().count() <= 2 {
+                hours = int(&head(&digits, 2))?;
+                minutes = 0;
+            } else {
+                return None;
+            }
+            res.offset = Some(sign * (hours * 3600 + minutes * 60));
+            // `-0300 (BRST)`: a name in parentheses behind the offset.
+            if i + 5 < len
+                && is_jump(&l[i + 2])
+                && l[i + 3] == "("
+                && l[i + 5] == ")"
+                && l[i + 4].chars().count() >= 3
+                && res.name.is_none()
+                && could_be_tzname(&l[i + 4])
+            {
+                res.name = Some(l[i + 4].clone());
+                i += 4;
+            }
+            i += 1;
+        } else if !is_jump(&token) {
+            return None;
+        }
+        i += 1;
+    }
+    // `parserinfo.validate`.
+    let nameless = res.name.as_deref().is_none_or(str::is_empty);
+    if (res.offset == Some(0) && nameless) || matches!(res.name.as_deref(), Some("Z" | "z")) {
+        res.name = Some("UTC".to_string());
+        res.offset = Some(0);
+    } else if res.offset != Some(0) && !nameless && res.name.as_deref().is_some_and(is_utczone) {
+        res.offset = Some(0);
+    }
+    Some(res)
+}
+
+/// `parser._build_tzaware`, minus `tzinfos`: the zone of a parsed time.
+fn build_tzaware(
+    naive: NaiveDateTime,
+    tz: TzFields,
+    env: &ParseEnv,
+    warnings: &mut Vec<String>,
+) -> Option<Parsed> {
+    let utc = FixedOffset::east_opt(0)?;
+    let aware = |offset: FixedOffset| {
+        offset
+            .from_local_datetime(&naive)
+            .single()
+            .map(Parsed::Aware)
     };
-    let tz = tz.as_str().to_ascii_lowercase();
-    let offset_seconds = if tz == "z" || tz == "utc" || tz == "gmt" {
-        0
-    } else {
-        let sign = if tz.starts_with('-') { -1 } else { 1 };
-        let digits: String = tz[1..].chars().filter(|c| c.is_ascii_digit()).collect();
-        let hh: i32 = digits[..2].parse().unwrap_or(0);
-        let mm: i32 = digits.get(2..4).and_then(|m| m.parse().ok()).unwrap_or(0);
-        sign * (hh * 3600 + mm * 60)
-    };
-    let offset = FixedOffset::east_opt(offset_seconds).ok_or_else(unknown)?;
-    let aware = offset
-        .from_local_datetime(&naive)
-        .single()
-        .ok_or_else(unknown)?;
-    Ok(Parsed::Aware(aware))
+    let name = tz.name.as_deref().filter(|n| !n.is_empty());
+    if let (Some(name), Some(local)) = (name, &env.local)
+        && local.has_name(name)
+    {
+        // PARITY: a name equal to either of `time.tzname` (`EST` and `EDT` alike) is the local
+        // zone, `tzlocal()`: the offset is the zone's own on that date, not the abbreviation's.
+        // `_assign_tzname` picks the second occurrence of a repeated wall time when only that one
+        // carries the name.
+        let fold =
+            local.abbreviation(naive, false) != name && local.abbreviation(naive, true) == name;
+        // PARITY: "mostly relevant for winter GMT zones parsed in the UK": a `UTC` / `GMT` name
+        // the local zone does not carry on that date is UTC.
+        if local.abbreviation(naive, fold) != name && matches!(name, "UTC" | "GMT" | "Z" | "z") {
+            return aware(utc);
+        }
+        return aware(local.offset(naive, fold));
+    }
+    match tz.offset {
+        Some(0) => aware(utc),
+        Some(seconds) => aware(FixedOffset::east_opt(i32::try_from(seconds).ok()?)?),
+        None => {
+            if let Some(name) = name {
+                // PARITY: dateutil's `UnknownTimezoneWarning`: the abbreviation is neither a
+                // UTC name nor one of `time.tzname`, so the time stays naive (Meerschaum reads
+                // a naive starting time as UTC).
+                warnings.push(format!(
+                    "tzname {name} identified but not understood.  The starting time is read as UTC; use a UTC offset such as -07:00 or an abbreviation of this host's time zone."
+                ));
+            }
+            Some(Parsed::Naive(naive))
+        }
+    }
 }
 
 /// `dt.isoformat()` for a fire time.
@@ -1168,6 +1428,108 @@ mod tests {
             e.py_message(),
             "\n\x1b[1;31m 🛑 Unknown string format: Tomorrow\x1b[0m"
         );
+    }
+
+    fn new_york(as_of: &str) -> ParseEnv {
+        ParseEnv {
+            local: LocalZone::from_name(
+                "America/New_York",
+                chrono::DateTime::parse_from_rfc3339(as_of)
+                    .unwrap()
+                    .to_utc(),
+            )
+            .map(Arc::new),
+            today: NaiveDate::from_ymd_opt(2026, 11, 14).unwrap(),
+        }
+    }
+
+    fn start(schedule: &str, env: &ParseEnv) -> (Result<String, String>, Vec<String>) {
+        let mut warnings = Vec::new();
+        let start = parse_start_time_in(schedule, Some(now()), env, &mut warnings)
+            .map(|f| isoformat(&f))
+            .map_err(|e| e.to_string());
+        (start, warnings)
+    }
+
+    #[test]
+    fn either_abbreviation_of_the_local_zone_is_the_local_zone() {
+        let env = new_york("2026-11-14T12:00:00Z");
+        for name in ["EDT", "EST"] {
+            // PARITY: dateutil maps both `time.tzname` entries to `tzlocal()`.
+            assert_eq!(
+                start(&format!("daily starting 21:00 {name}"), &env).0,
+                Ok("2026-11-14T21:00:00-05:00".to_string())
+            );
+            assert_eq!(
+                start(&format!("daily starting 2026-07-01 21:00 {name}"), &env).0,
+                Ok("2026-07-01T21:00:00-04:00".to_string())
+            );
+        }
+        // A repeated wall time takes the occurrence that carries the name.
+        assert_eq!(
+            start("daily starting 2026-11-01 01:30 EST", &env).0,
+            Ok("2026-11-01T01:30:00-05:00".to_string())
+        );
+        assert_eq!(
+            start("daily starting 2026-11-01 01:30 EDT", &env).0,
+            Ok("2026-11-01T01:30:00-04:00".to_string())
+        );
+    }
+
+    #[test]
+    fn utc_names_and_offsets_do_not_need_a_local_zone() {
+        let env = ParseEnv {
+            local: None,
+            today: NaiveDate::from_ymd_opt(2026, 11, 14).unwrap(),
+        };
+        for (text, want) in [
+            ("21:00 UTC", "2026-11-14T21:00:00+00:00"),
+            ("21:00 GMT", "2026-11-14T21:00:00+00:00"),
+            ("21:00 Z", "2026-11-14T21:00:00+00:00"),
+            ("21:00Z", "2026-11-14T21:00:00+00:00"),
+            ("21:00 -0400", "2026-11-14T21:00:00-04:00"),
+            ("21:00 UTC+3", "2026-11-14T21:00:00-03:00"),
+            ("21:00 GMT-3", "2026-11-14T21:00:00+03:00"),
+            ("21:00 EDT+3", "2026-11-14T21:00:00-03:00"),
+        ] {
+            let (got, warnings) = start(&format!("daily starting {text}"), &env);
+            assert_eq!(got.as_deref(), Ok(want), "{text}");
+            assert!(warnings.is_empty(), "{text}");
+        }
+        // PARITY: dateutil reads zone names only in capitals.
+        for text in [
+            "21:00 utc",
+            "21:00 gmt",
+            "21:00 edt",
+            "2026-07-01 EDT",
+            "21:00 ABCDEF",
+        ] {
+            assert!(
+                start(&format!("daily starting {text}"), &env).0.is_err(),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_abbreviation_warns_once_and_reads_utc() {
+        let env = new_york("2026-11-14T12:00:00Z");
+        let (got, warnings) = start("daily starting 21:00 PDT", &env);
+        assert_eq!(got, Ok("2026-11-14T21:00:00+00:00".to_string()));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].starts_with("tzname PDT identified but not understood."));
+        // Without a local zone even EDT is unknown (a host whose zone cannot be named).
+        let none = ParseEnv {
+            local: None,
+            ..new_york("2026-11-14T12:00:00Z")
+        };
+        let (got, warnings) = start("daily starting 21:00 EDT", &none);
+        assert_eq!(got, Ok("2026-11-14T21:00:00+00:00".to_string()));
+        assert_eq!(warnings.len(), 1);
+        // A schedule parse carries the same warning to its caller.
+        let (_, warnings) =
+            parse_schedule_in("daily starting 21:00 PDT", now(), None, &env).unwrap();
+        assert_eq!(warnings.len(), 1);
     }
 
     #[test]
