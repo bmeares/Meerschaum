@@ -81,7 +81,8 @@ pub fn connect_failure_message(
     error: &meerschaum_connector_sql::SqlError,
 ) -> String {
     use meerschaum_core::connect::ConnectErrorKind as Kind;
-    let message = error.to_string();
+    // 5.1: a value a secret reference produced never appears in an error.
+    let message = meerschaum_core::config::secrets::mask_known(&error.to_string());
     let unreachable = matches!(
         error,
         meerschaum_connector_sql::SqlError::Connect(e)

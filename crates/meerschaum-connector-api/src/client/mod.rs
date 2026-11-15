@@ -133,6 +133,13 @@ impl APIConnector {
     /// `protocol`, `username` / `password`, `client_id` / `client_secret`, `api_key`,
     /// `instance_keys` and `verify`.
     pub fn new(label: Option<&str>, attributes: Map) -> ConnectorResult<APIConnector> {
+        // 5.1: an unresolved secret reference fails here, naming the reference and the key.
+        meerschaum_core::config::secrets::check_connector_attributes(
+            "api",
+            label.unwrap_or("main"),
+            &attributes,
+        )
+        .map_err(ConnectorError::Invalid)?;
         let mut attributes = attributes;
         let mut label = label.map(String::from);
         if let Some(uri) = attributes.get("uri").map(attr_str) {

@@ -114,28 +114,7 @@ const DATABASE_PATH_TYPES: &[&str] = &["sql", "valkey"];
 /// Words that make a name look like a secret's (`password`, `api_key`, `ssh_passphrase`): its
 /// value is masked in any text shown (`Pwd=...` in a connection string), it is scrubbed from the
 /// other fields, and a group of settings under such a name is masked whole.
-pub const SECRET_WORDS: &[&str] = &[
-    "password",
-    "passwd",
-    "pass",
-    "pwd",
-    "pw",
-    "secret",
-    "token",
-    "key",
-    "credential",
-    "private",
-    "auth",
-    "phrase",
-    "cookie",
-    "session",
-    "sig",
-    "salt",
-    "sas",
-    "jwt",
-    "bearer",
-    "otp",
-];
+pub use meerschaum_core::config::secrets::SECRET_WORDS;
 
 /// Schemes whose bare user information (`https://<token>@host`) is usually a token.
 const TOKEN_USERINFO_SCHEMES: &[&str] = &["http", "https", "ws", "wss", "git+https"];
@@ -193,8 +172,7 @@ static URI_ADDRESS: LazyLock<regex::Regex> = LazyLock::new(|| {
 /// Whether a name looks like a secret's (`password`, `api_key`, `client_secret`, `pass`, `pw`,
 /// `ssh_passphrase`, `cookie`, ...). More than these is masked: see [`is_public_name`].
 pub fn is_secret_name(name: &str) -> bool {
-    let lowered = name.to_lowercase();
-    SECRET_WORDS.iter().any(|word| lowered.contains(word))
+    meerschaum_core::config::secrets::is_secret_name(name)
 }
 
 /// Whether the value of an attribute (or setting) of this name is shown.
@@ -531,6 +509,15 @@ fn decoded_views(text: &str) -> BTreeSet<String> {
 
 /// `text` with what looks like a secret ([`mask_text`]) and every known secret value masked.
 pub fn scrub(text: &str, secrets: &[String]) -> String {
+    // 5.1: every value a secret reference produced is a secret, whatever its name.
+    let known = meerschaum_core::config::secrets::known_values();
+    let with_known;
+    let secrets = if known.is_empty() {
+        secrets
+    } else {
+        with_known = secrets.iter().cloned().chain(known).collect::<Vec<_>>();
+        &with_known[..]
+    };
     let mut text = text.to_string();
     let mut candidates: BTreeSet<String> = BTreeSet::new();
     let mut short: BTreeSet<String> = BTreeSet::new();

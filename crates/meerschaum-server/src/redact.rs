@@ -146,7 +146,8 @@ pub fn redact_value(key: Option<&str>, value: &mut Json) {
                 }
                 return;
             }
-            let masked = mask_uri_passwords(text);
+            // 5.1: a value a secret reference produced, whatever the key it sits under.
+            let masked = meerschaum_core::config::secrets::mask_known(&mask_uri_passwords(text));
             if masked != *text {
                 *text = masked;
             }

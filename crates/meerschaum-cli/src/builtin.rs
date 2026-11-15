@@ -266,6 +266,12 @@ pub fn show_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         } else {
             map.into_iter().filter(|(k, _)| k != symlinks_key).collect()
         };
+        // 5.1: a value a secret reference produced is masked, whatever its key.
+        let to_print = match meerschaum_core::config::secrets::mask_known_in(&Value::Map(to_print))
+        {
+            Value::Map(m) => m,
+            _ => Map::new(),
+        };
         if nopretty {
             return Ok(Some(format!(
                 "{}\n",

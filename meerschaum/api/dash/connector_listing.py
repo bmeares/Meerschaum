@@ -343,6 +343,15 @@ def collect_secrets(attributes: Any, name: str = '') -> List[str]:
     return secrets
 
 
+def _known_secret_values() -> List[str]:
+    """The values secret references produced in this process (`_core.secret_values()`)."""
+    try:
+        from meerschaum import _core
+        return list(_core.secret_values())
+    except Exception:
+        return []
+
+
 def hidden_values(attributes: Any, name: str = '', typ: Optional[str] = None) -> List[str]:
     """
     Every value the page masks in a connector's attributes (`mask_attributes`), its secrets
@@ -355,6 +364,11 @@ def hidden_values(attributes: Any, name: str = '', typ: Optional[str] = None) ->
 
 def scrub(text: Any, secrets: List[str]) -> str:
     """`text` with what looks like a secret (`mask_text`) and every known secret value masked."""
+    ### 5.1: every value a secret reference (`MRSM{file:...}`, `MRSM{env:...}`) produced is a
+    ### secret, whatever its name.
+    known = _known_secret_values()
+    if known:
+        secrets = list(secrets) + known
     text = str(text)
     candidates = set()
     short = set()

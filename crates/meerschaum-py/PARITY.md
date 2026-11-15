@@ -1799,3 +1799,10 @@ databases); the rows below are the deliberate differences and the gaps the compa
 | ID | v4 behavior | v5 behavior | Reason and coverage |
 |---|---|---|---|
 | 51-UPSERT-PLACEHOLDER-CAST | `get_update_queries` casts every assigned value to the column type the catalog reports (`CAST(EXCLUDED."c" AS <type>)`). PostgreSQL's `information_schema` reports `ARRAY` for arrays and `USER-DEFINED` for extension, enum and composite types, so an upsert or update touching such a column fails with a syntax error | On the PostgreSQL family (CockroachDB included) a column whose catalog type is `ARRAY` or `USER-DEFINED` is assigned without a cast; the assignment converts the value, as it does for `enforce: false`. Every other type and flavor keeps v4's statement | A v4 bug that failed every such upsert. Tests: `connector-sql` `queries::update::tests::upserts_assign_catalog_placeholder_types_uncast`, `tests/upsert_changed_only.rs::user_defined_values_upsert_in_place` |
+
+## 5.1: secrets in configuration
+
+| ID | v4 behavior | v5 behavior | Reason and coverage |
+|----|-------------|-------------|---------------------|
+| 51-SEC-002 | `MRSM{file:...}` and `MRSM{env:...}` read the top-level config keys `file` and `env` | They read a file's contents and an environment variable (secret references); `get_config('file', ...)` still reads a key named `file`, and loading such a key warns once | New reference sources (owner decision, 5.1); no shipped key has either name. `secret_config.rs::a_user_key_named_file_or_env_is_reported_and_references_win` |
+| 51-SEC-003 | `show config` prints every value | Values a secret reference produced are printed as `******` (also in `show connectors`, the console's Connectors page, job metadata on the API and MCP, and debug output) | Masking extends to values whose key does not look secret. `secret_config_writers.rs::show_config_and_show_connectors_mask_values_a_reference_produced`, `tests/test_config_secrets.py::test_the_console_masks_values_a_reference_produced` |

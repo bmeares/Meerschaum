@@ -784,6 +784,13 @@ fn fast_lookup<'py>(
     if substitute && holds_symlink(&top, 0) != Some(false) {
         return Ok(None);
     }
+    // 5.1: a path holding a secret reference re-reads it (a rotated file reaches the next
+    // connector), in place; one that also holds an ordinary symlink goes through the registry.
+    // Free until the process meets a reference.
+    if substitute && meerschaum_core::config::secrets::seen() && !refresh_secret_links(dict, keys)?
+    {
+        return Ok(None);
+    }
     let mut current = top;
     for i in 1..n {
         let key = keys.get_item(i)?;
@@ -799,6 +806,101 @@ fn fast_lookup<'py>(
         }
     }
     Ok(Some(current))
+}
+
+/// Re-resolve the secret references `_symlinks` records at the key path `keys` (or below) and
+/// update the live values that changed, in place. `false` when one also holds an ordinary symlink
+/// (the registry must resolve it).
+fn refresh_secret_links(dict: &Bound<'_, PyDict>, keys: &Bound<'_, PyTuple>) -> PyResult<bool> {
+    use meerschaum_core::config::secrets;
+    fn collect<'py>(
+        obj: &Bound<'py, PyAny>,
+        path: &mut Vec<Bound<'py, PyAny>>,
+        out: &mut Vec<(Vec<Bound<'py, PyAny>>, String)>,
+        depth: usize,
+    ) {
+        if depth > 64 {
+            return;
+        }
+        if let Ok(s) = obj.cast::<PyString>() {
+            if let Ok(text) = s.to_str()
+                && secrets::contains_reference(text)
+            {
+                out.push((path.clone(), text.to_string()));
+            }
+        } else if let Ok(d) = obj.cast_exact::<PyDict>() {
+            for (k, v) in d.iter() {
+                path.push(k);
+                collect(&v, path, out, depth + 1);
+                path.pop();
+            }
+        }
+    }
+    let symlinks_key = &meerschaum_core::static_config().config.symlinks_key;
+    let Some(mut node) = dict.get_item(symlinks_key)? else {
+        return Ok(true);
+    };
+    for key in keys.iter() {
+        let Ok(d) = node.cast_exact::<PyDict>() else {
+            return Ok(true);
+        };
+        match d.get_item(&key)? {
+            Some(next) => node = next,
+            None => return Ok(true),
+        }
+    }
+    let mut found = Vec::new();
+    collect(&node, &mut Vec::new(), &mut found, 0);
+    if found.is_empty() {
+        return Ok(true);
+    }
+    let py = dict.py();
+    let root = || host(py).map(|h| h.root).unwrap_or_default();
+    for (rel, original) in found {
+        let Some(resolved) = secrets::substitute_references_with(&original, &root) else {
+            return Ok(false);
+        };
+        // Walk to the live value's parent: the key path, then the path below it.
+        let path: Vec<Bound<'_, PyAny>> = keys.iter().chain(rel).collect();
+        let Some((last, parents)) = path.split_last() else {
+            continue;
+        };
+        let mut parent: Bound<'_, PyAny> = dict.clone().into_any();
+        let mut reachable = true;
+        for key in parents {
+            match parent
+                .cast_exact::<PyDict>()
+                .ok()
+                .map(|d| d.get_item(key))
+                .transpose()?
+                .flatten()
+            {
+                Some(next) => parent = next,
+                None => {
+                    reachable = false;
+                    break;
+                }
+            }
+        }
+        let Ok(parent) = parent.cast_exact::<PyDict>() else {
+            continue;
+        };
+        if !reachable {
+            continue;
+        }
+        let Some(current) = parent.get_item(last)? else {
+            continue;
+        };
+        let unchanged = current
+            .cast::<PyString>()
+            .ok()
+            .and_then(|c| c.to_str().ok().map(|c| c == resolved))
+            .unwrap_or(false);
+        if !unchanged {
+            parent.set_item(last, resolved)?;
+        }
+    }
+    Ok(true)
 }
 
 fn tuple_result<'py>(
@@ -1447,6 +1549,30 @@ pub fn apply_environment_patches(py: Python<'_>, env: Option<&Bound<'_, PyAny>>)
     apply_layer(py, move |s| s.apply_environment_patches(&pairs))
 }
 
+/// `secret_values()` (5.1): every value a secret reference (`MRSM{file:...}`, `MRSM{env:...}`)
+/// produced in this process, for the masking code (longest first).
+#[pyfunction]
+pub fn secret_values() -> Vec<String> {
+    meerschaum_core::config::secrets::known_values()
+}
+
+/// `check_connector_secrets(type, label, attributes)` (5.1): raise `ValueError` naming the
+/// reference and the config key when a connector's attributes still hold a secret reference that
+/// could not be resolved.
+#[pyfunction]
+pub fn check_connector_secrets(
+    typ: &str,
+    label: &str,
+    attributes: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    // Attributes that are not plain data (an engine passed as a keyword) hold no reference.
+    let Ok(Value::Map(map)) = crate::convert::py_to_core(attributes) else {
+        return Ok(());
+    };
+    meerschaum_core::config::secrets::check_connector_attributes(typ, label, &map)
+        .map_err(PyValueError::new_err)
+}
+
 /// `apply_environment_uris(env=None)`: the `MRSM_<TYPE>_<LABEL>` connectors.
 #[pyfunction]
 #[pyo3(signature = (env=None))]
@@ -1480,5 +1606,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(apply_environment_uris, m)?)?;
     m.add_function(wrap_pyfunction!(sync_files, m)?)?;
     m.add_function(wrap_pyfunction!(live_config_paths, m)?)?;
+    m.add_function(wrap_pyfunction!(secret_values, m)?)?;
+    m.add_function(wrap_pyfunction!(check_connector_secrets, m)?)?;
     Ok(())
 }

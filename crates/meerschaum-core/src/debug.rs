@@ -236,7 +236,9 @@ pub fn redact_uris(text: &str) -> String {
             _ => format!("{}'***'", &caps["lead"]),
         }
     });
-    FLAG.replace_all(&text, "${lead}***").into_owned()
+    let text = FLAG.replace_all(&text, "${lead}***").into_owned();
+    // 5.1: a value a secret reference produced, wherever it appears.
+    crate::config::secrets::mask_known(&text)
 }
 
 /// Whether a key or flag names a secret (`password`, `api_key`, `--client-secret`, `token`):

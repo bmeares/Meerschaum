@@ -131,6 +131,11 @@ class Connector(metaclass=abc.ABCMeta):
             if key not in ('type', 'label')
         }
 
+        ### 5.1: a secret reference (`MRSM{file:...}`, `MRSM{env:...}`) that could not be resolved
+        ### fails here, naming the reference and the config key (never the secret).
+        from meerschaum import _core
+        _core.check_connector_secrets(self.type, str(label), self._attributes)
+
         ### finally, update __dict__ with _attributes.
         self.__dict__.update(self._attributes)
 

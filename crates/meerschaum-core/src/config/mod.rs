@@ -33,6 +33,7 @@ pub mod dataframe;
 pub mod grafana_readonly;
 pub mod lossless;
 pub mod paths;
+pub mod secrets;
 pub mod sync;
 
 use std::path::{Path, PathBuf};
@@ -1114,7 +1115,15 @@ impl ConfigState {
             }
             found = current.cloned();
         }
-        if let Some(value) = found {
+        if let Some(mut value) = found {
+            // 5.1: a path holding a secret reference re-reads it (a rotated file is seen by the
+            // next connector built); a process that never met one pays an atomic load.
+            if opts.substitute && k0 != symlinks_key && secrets::seen() {
+                if let Some(fresh) = self.refresh_secrets(keys) {
+                    value = fresh;
+                }
+                self.warn_unresolved_secret(keys, &value);
+            }
             return (true, value);
         }
 
@@ -1174,6 +1183,87 @@ impl ConfigState {
         }
 
         (true, default_value)
+    }
+
+    /// Re-resolve the secret references (5.1) recorded under `_symlinks` at `keys` (or below), and
+    /// update the in-memory values that changed. Returns the value at `keys` when one did.
+    fn refresh_secrets(&mut self, keys: &[String]) -> Option<ConfigValue> {
+        let symlinks_key = Self::symlinks_key();
+        let mut node = self.config.get(symlinks_key)?;
+        for k in keys {
+            node = node.get(k)?;
+        }
+        let mut found: Vec<(Vec<String>, String)> = Vec::new();
+        fn collect(v: &ConfigValue, path: &mut Vec<String>, out: &mut Vec<(Vec<String>, String)>) {
+            match v {
+                ConfigValue::Str(s) if secrets::contains_reference(s) => {
+                    out.push((path.clone(), s.clone()))
+                }
+                ConfigValue::Map(m) => {
+                    for (k, v) in m {
+                        path.push(k.clone());
+                        collect(v, path, out);
+                        path.pop();
+                    }
+                }
+                _ => {}
+            }
+        }
+        collect(node, &mut Vec::new(), &mut found);
+        if found.is_empty() {
+            return None;
+        }
+        let options = SubstituteOptions {
+            keep_symlinks: false,
+            ..SubstituteOptions::default()
+        };
+        let mut changed = false;
+        for (rel, original) in found {
+            let resolved = match secrets::substitute_references(&original, &self.paths.root_dir) {
+                Some(text) => ConfigValue::Str(text),
+                // Also an ordinary symlink: the general substitution.
+                None => {
+                    let mut single = ConfigMap::new();
+                    single.insert("v".into(), ConfigValue::Str(original));
+                    let Ok(subbed) = self.search_and_substitute_with(&single, &options) else {
+                        continue;
+                    };
+                    let Some(resolved) = subbed.get("v").cloned() else {
+                        continue;
+                    };
+                    resolved
+                }
+            };
+            let full: Vec<&str> = keys.iter().chain(rel.iter()).map(String::as_str).collect();
+            if let Some(slot) = value_at_mut(&mut self.config, &full)
+                && *slot != resolved
+            {
+                *slot = resolved;
+                changed = true;
+            }
+        }
+        if !changed {
+            return None;
+        }
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        self.config
+            .get(refs[0])
+            .and_then(|v| v.get_path(&refs[1..]))
+            .cloned()
+    }
+
+    /// Warn once per process when a setting read through `get_config` is a secret reference that
+    /// could not be resolved (its text is what the caller gets).
+    fn warn_unresolved_secret(&mut self, keys: &[String], value: &ConfigValue) {
+        let ConfigValue::Str(text) = value else {
+            return;
+        };
+        for reference in secrets::references_in(text) {
+            let key = keys.join(":");
+            if secrets::first_time(&format!("unresolved\u{0}{key}\u{0}{reference}")) {
+                self.warn(secrets::unresolved_message(&key, &reference));
+            }
+        }
     }
 
     /// The file names in a config directory (sorted, for determinism).
@@ -1399,6 +1489,21 @@ impl ConfigState {
                         .unwrap_or_else(ConfigValue::new_map)
                 }
             };
+            if secrets::RESERVED_KEYS.contains(&key.as_str())
+                && secrets::first_time(&format!("reserved\u{0}{}", filepath.display()))
+            {
+                let source = if key == secrets::FILE_SOURCE {
+                    "a file's contents"
+                } else {
+                    "an environment variable"
+                };
+                self.warn(format!(
+                    "The config file '{filename}' defines the top-level key '{key}', which is \
+                     reserved for secret references: `MRSM{{{key}:...}}` reads {source}, not this \
+                     key. `get_config('{key}', ...)` still reads it; rename the key to refer to \
+                     it with `MRSM{{}}`."
+                ));
+            }
             let mut single = ConfigMap::new();
             single.insert(key.clone(), config_key);
             let single = if substitute {
@@ -1679,6 +1784,9 @@ impl ConfigState {
                 std::collections::HashMap::new();
             let mut memo: std::collections::HashMap<Vec<String>, (bool, ConfigValue)> =
                 std::collections::HashMap::new();
+            // 5.1: `MRSM{file:...}` / `MRSM{env:...}` (the resolved secret of each pattern).
+            let mut secret_values: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             let matches: Vec<(String, String, usize, usize)> = pattern_re
                 .captures_iter(&haystack)
                 .filter_map(|caps| {
@@ -1698,6 +1806,21 @@ impl ConfigState {
                     .split(options.delimiter.as_str())
                     .map(String::from)
                     .collect();
+                if let Some(reference) = secret_reference(&raw_keys, options) {
+                    match secrets::resolve(&reference, &self.paths.root_dir) {
+                        Ok(value) => {
+                            if !patterns.contains_key(&pattern)
+                                && !secret_values.contains_key(&pattern)
+                            {
+                                order.push(pattern.clone());
+                            }
+                            secret_values.insert(pattern, value);
+                        }
+                        // The reference stays as its text: only what needs the value fails.
+                        Err(error) => self.debug(error.to_string()),
+                    }
+                    continue;
+                }
                 let mut force_literal = false;
                 if let Some(first) = keys.first_mut()
                     && let Some(stripped) = first.strip_prefix(options.literal_key.as_str())
@@ -1740,6 +1863,13 @@ impl ConfigState {
                 );
             }
             for pattern in order {
+                if let Some(secret) = secret_values.get(&pattern) {
+                    // A string, alone or inside a longer one: the same JSON-escaped text either
+                    // way (a quote or backslash in a secret never breaks the document).
+                    let dumped = json_dumps_str(secret, true);
+                    haystack = haystack.replace(&pattern, &dumped[1..dumped.len() - 1]);
+                    continue;
+                }
                 let (value, isolated, literal) = &patterns[&pattern];
                 if *isolated {
                     let dumped = json_dumps_lossless(value, JsonStyle::Default, true, &mut table)?;
@@ -1922,6 +2052,44 @@ impl ConfigState {
             }
         }
     }
+}
+
+/// The value at a key path of a config map, mutably.
+fn value_at_mut<'a>(map: &'a mut ConfigMap, path: &[&str]) -> Option<&'a mut ConfigValue> {
+    let (first, rest) = path.split_first()?;
+    let mut current = map.get_mut(*first)?;
+    for k in rest {
+        current = current.as_map_mut()?.get_mut(*k)?;
+    }
+    Some(current)
+}
+
+/// The secret reference a symlink's keys name (5.1), read from the JSON text the substitution
+/// edits (so `\\` in a Windows path is one backslash). `None` for an ordinary symlink, or with
+/// a non-default syntax (another leading key or delimiter).
+fn secret_reference(raw_keys: &str, options: &SubstituteOptions) -> Option<secrets::SecretRef> {
+    let default = SubstituteOptions::default();
+    if options.delimiter != default.delimiter || options.leading_key != default.leading_key {
+        return None;
+    }
+    let first = raw_keys.split(':').next()?;
+    let first = first
+        .strip_prefix(options.literal_key.as_str())
+        .unwrap_or(first);
+    if !secrets::RESERVED_KEYS.contains(&first) {
+        return None;
+    }
+    let text = match json_loads(&format!("\"{raw_keys}\"")) {
+        Ok(ConfigValue::Str(text)) => text,
+        _ => raw_keys.to_string(),
+    };
+    let mut keys: Vec<String> = text.split(':').map(String::from).collect();
+    if let Some(first) = keys.first_mut()
+        && let Some(stripped) = first.strip_prefix(options.literal_key.as_str())
+    {
+        *first = stripped.to_string();
+    }
+    secrets::SecretRef::from_keys(&keys)
 }
 
 fn uri_attrs(uri: &str) -> ConfigValue {
