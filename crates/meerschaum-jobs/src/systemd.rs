@@ -908,12 +908,43 @@ impl SystemdExecutor {
         }
         // 5.1: the unit names owner-only files in its directory instead of carrying
         // `MRSM_CONFIG` / `MRSM_PATCH` (`config_files`); unchanged when they cannot be written.
-        let process_env = match crate::config_files::externalize(
-            &self.get_service_job_path(name),
-            &process_env,
-        ) {
-            Ok(changes) => changes.apply(&process_env),
-            Err(_) => process_env,
+        // 5.1: the unit of an isolated team's job carries that team's configuration only (written
+        // when the unit is written), or it is not written.
+        let team = match properties.filter(|p| crate::config_files::may_be_team_job(p)) {
+            None => None,
+            Some(props) => {
+                let config = match meerschaum_core::Config::new(
+                    meerschaum_core::config::ConfigOptions::with_env(process_env.clone()),
+                ) {
+                    Ok(config) => config,
+                    Err(e) => return SuccessTuple::fail(e.to_string()),
+                };
+                crate::config_files::job_team_scope(&config.paths().root_dir, props)
+                    .map(|(_, scope)| (config, scope))
+            }
+        };
+        let process_env = match team {
+            Some((config, scope)) => match crate::config_files::externalize_team(
+                &self.get_service_job_path(name),
+                &process_env,
+                &config,
+                &scope,
+            ) {
+                Ok(changes) => changes.apply(&process_env),
+                Err(e) => {
+                    return SuccessTuple::fail(format!(
+                        "The configuration of team '{}' could not be written for job '{name}': {e}",
+                        scope.team
+                    ));
+                }
+            },
+            None => match crate::config_files::externalize(
+                &self.get_service_job_path(name),
+                &process_env,
+            ) {
+                Ok(changes) => changes.apply(&process_env),
+                Err(_) => process_env,
+            },
         };
         let text = self.get_service_file_text(name, sysargs, &self.exec_program(), &process_env);
         if let Err(e) = write_private(&service_file_path, &text) {

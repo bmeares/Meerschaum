@@ -206,6 +206,113 @@ pub fn externalize_properties_env(
     Ok(changed)
 }
 
+/// The job property that ties a job to its isolated team's scope for good (5.1): the scope's key
+/// (`meerschaum_core::team_scope::TeamScope::key`), written at the job's first team-scoped launch.
+/// A rename or a deletion of the team (which moves its jobs to Everyone) never gives the job the
+/// server's configuration: a deleted team's jobs get no connector at all.
+pub const TEAM_SCOPE_PROPERTY: &str = "team_scope";
+
+/// The isolated team's scope a job is launched with (5.1), from its properties and the scopes the
+/// API server recorded under `root` (`team_scopes/`): the scope its `team_scope` property names
+/// (a missing record counts as a deleted team), else the scope of its `team`. `None` for a job of
+/// Everyone, of an open team, or of a team that is no longer isolated.
+pub fn job_team_scope(
+    root: &Path,
+    props: &meerschaum_core::value::Map,
+) -> Option<(String, meerschaum_core::team_scope::TeamScope)> {
+    use meerschaum_core::team_scope::{TeamScope, read_scope_record, scope_key_of};
+    use meerschaum_core::value::Value;
+    let text = |key: &str| {
+        props
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let (key, record) = match text(TEAM_SCOPE_PROPERTY) {
+        Some(key) => {
+            let record = read_scope_record(root, &key)
+                .unwrap_or_else(|| TeamScope::deleted(&key, Some(&key)));
+            (key, record)
+        }
+        None => {
+            let team = text("team").filter(|t| !meerschaum_core::access::is_everyone(Some(t)))?;
+            let key = scope_key_of(root, &team)?;
+            let record = read_scope_record(root, &key)?;
+            (key, record)
+        }
+    };
+    (!record.open).then_some((key, record))
+}
+
+/// Whether a job's properties might name an isolated team (a cheap check before
+/// [`job_team_scope`]).
+pub fn may_be_team_job(props: &meerschaum_core::value::Map) -> bool {
+    use meerschaum_core::value::Value;
+    props.get(TEAM_SCOPE_PROPERTY).is_some_and(|v| !v.is_null())
+        || props
+            .get("team")
+            .and_then(Value::as_str)
+            .is_some_and(|t| !meerschaum_core::access::is_everyone(Some(t)))
+}
+
+/// Write an isolated team's job configuration to its directory `dir` and say how the job's
+/// environment changes (5.1): the team's configuration ([`meerschaum_core::team_scope::team_config`]
+/// of `config`, the launching process's) in [`CONFIG_FILENAME`] (owner-only) named by
+/// `MRSM_CONFIG_FILE`, an empty config directory of the job's own named by `MRSM_CONFIG_DIR`, and
+/// none of the launching process's `MRSM_CONFIG`, `MRSM_PATCH` or connector variables. `Err` when
+/// a file cannot be written: the caller must not launch the job then.
+pub fn externalize_team(
+    dir: &Path,
+    env: &[(String, String)],
+    config: &meerschaum_core::Config,
+    scope: &meerschaum_core::team_scope::TeamScope,
+) -> std::io::Result<JobEnvironment> {
+    use meerschaum_core::team_scope::{
+        JOB_CONFIG_DIR, ScopeFiles, create_private_dir, scoped_env, team_config,
+    };
+    let paths = config.paths();
+    let team = team_config(config, scope);
+    let files = ScopeFiles {
+        dir: dir.to_path_buf(),
+        config_dir: dir.join(JOB_CONFIG_DIR),
+        config_file: dir.join(CONFIG_FILENAME),
+    };
+    create_private_dir(&files.config_dir)?;
+    write_private(
+        &files.config_file,
+        &meerschaum_core::value::Value::Map(team).to_json_string(),
+    )?;
+    let _ = std::fs::remove_file(dir.join(PATCH_FILENAME));
+    let changes = scoped_env(env, &files, scope, &paths.root_dir, &paths.plugins_dirs);
+    Ok(JobEnvironment {
+        set: changes.set,
+        remove: changes.remove,
+    })
+}
+
+/// A team job's `env` property without what only the server should hold (5.1): `MRSM_CONFIG`,
+/// `MRSM_PATCH` (and their file forms), the Compose configuration and connector variables (an API
+/// server records its whole environment for the jobs it creates). `true` when something went.
+pub fn strip_team_env(
+    env: &mut meerschaum_core::value::Map,
+    root: &Path,
+    plugins_dirs: &[PathBuf],
+) -> bool {
+    let pairs: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.py_str())).collect();
+    let mut remove = meerschaum_core::team_scope::connector_variables(&pairs, root, plugins_dirs);
+    for (var, file_var) in meerschaum_core::config::environment::patch_variables() {
+        remove.push(var);
+        remove.push(file_var);
+    }
+    remove.push(COMPOSE_CONFIG_VAR.into());
+    remove.push(meerschaum_core::team_scope::CONFIG_DIR_VAR.into());
+    let before = env.len();
+    env.retain(|k, _| !remove.contains(k));
+    env.len() != before
+}
+
 /// This process's environment (variables whose name or value is not Unicode are left out).
 pub fn process_env() -> Vec<(String, String)> {
     meerschaum_core::process_env::vars()
@@ -306,6 +413,139 @@ mod tests {
         )]);
         externalize(&job, &launching).unwrap();
         assert!(job.join(CONFIG_FILENAME).exists());
+    }
+
+    fn props(json: &str) -> meerschaum_core::value::Map {
+        meerschaum_core::value::Value::from_json_str(json)
+            .unwrap()
+            .to_map()
+    }
+
+    #[test]
+    fn a_team_job_follows_its_scope_for_good() {
+        use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+        let root = tempfile::tempdir().unwrap();
+        let scope = TeamScope {
+            team: "Wetlands".into(),
+            team_id: Some("id-w".into()),
+            connectors: ["sql:wetlands".to_string()].into_iter().collect(),
+            ..TeamScope::default()
+        };
+        write_scope_record(root.path(), &scope).unwrap();
+        // By its team's name (any case), and by its recorded scope.
+        let (key, found) = job_team_scope(root.path(), &props(r#"{"team": "wetlands"}"#)).unwrap();
+        assert_eq!((key.as_str(), &found), ("id-w", &scope));
+        assert!(job_team_scope(root.path(), &props(r#"{"team_scope": "id-w"}"#)).is_some());
+        // Everyone's jobs and open teams' jobs are not team jobs.
+        assert!(job_team_scope(root.path(), &props(r#"{"team": null}"#)).is_none());
+        assert!(job_team_scope(root.path(), &props(r#"{"team": "Open"}"#)).is_none());
+        assert!(!may_be_team_job(&props(r#"{"team": "Everyone"}"#)));
+        // A deletion moves the job to Everyone (`team: null`): its recorded scope still holds,
+        // with no connector at all; a missing record counts as deleted.
+        write_scope_record(root.path(), &TeamScope::deleted("Wetlands", Some("id-w"))).unwrap();
+        let (_, deleted) = job_team_scope(
+            root.path(),
+            &props(r#"{"team": null, "team_scope": "id-w"}"#),
+        )
+        .unwrap();
+        assert!(deleted.deleted && !deleted.allows("sql:wetlands"));
+        let (_, missing) =
+            job_team_scope(root.path(), &props(r#"{"team_scope": "nowhere"}"#)).unwrap();
+        assert!(missing.deleted);
+        // A team that is no longer isolated: its jobs get the server's configuration.
+        let mut team = meerschaum_core::access::Team::new("Wetlands");
+        team.id = Some("id-w".into());
+        write_scope_record(root.path(), &TeamScope::opened(&team)).unwrap();
+        assert!(job_team_scope(root.path(), &props(r#"{"team_scope": "id-w"}"#)).is_none());
+    }
+
+    #[test]
+    fn a_team_jobs_files_and_environment_hold_only_its_connectors() {
+        use meerschaum_core::team_scope::{JOB_CONFIG_DIR, TEAM_SCOPE_VAR, TeamScope};
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = root.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("meerschaum.yaml"),
+            "connectors:\n  sql:\n    wetlands:\n      flavor: sqlite\n      database: /tmp/w.db\n      password: w-pw\n      teams: [wetlands]\n    drylands:\n      flavor: sqlite\n      database: /tmp/d.db\n      password: d-pw\n      teams: [drylands]\n",
+        )
+        .unwrap();
+        let launching = env(&[
+            ("MRSM_ROOT_DIR", root.path().to_str().unwrap()),
+            ("MRSM_SQL_MAIN", "postgresql://u:server-pw@db/m"),
+            (
+                "MRSM_CONFIG",
+                r#"{"meerschaum": {"connectors": {"sql": {"x": {"password": "patch-pw"}}}}}"#,
+            ),
+            ("PATH", "/usr/bin"),
+        ]);
+        let config = meerschaum_core::Config::new(
+            meerschaum_core::config::ConfigOptions::with_env(launching.clone()),
+        )
+        .unwrap();
+        let scope = TeamScope {
+            team: "wetlands".into(),
+            connectors: ["sql:wetlands".to_string()].into_iter().collect(),
+            instance: Some("sql:wetlands".into()),
+            ..TeamScope::default()
+        };
+        let dir = root.path().join("jobs/team-job");
+        std::fs::create_dir_all(&dir).unwrap();
+        let changes = externalize_team(&dir, &launching, &config, &scope).unwrap();
+        let file = std::fs::read_to_string(dir.join(CONFIG_FILENAME)).unwrap();
+        assert!(file.contains("w-pw"));
+        for secret in ["d-pw", "server-pw", "patch-pw"] {
+            assert!(!file.contains(secret), "{secret}: {file}");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(CONFIG_FILENAME))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let job = changes.apply(&launching);
+        assert_eq!(lookup(&job, "MRSM_SQL_MAIN"), None);
+        assert_eq!(lookup(&job, "MRSM_CONFIG"), None);
+        assert_eq!(lookup(&job, TEAM_SCOPE_VAR), Some("wetlands"));
+        assert_eq!(
+            lookup(&job, "MRSM_CONFIG_DIR"),
+            Some(dir.join(JOB_CONFIG_DIR).to_str().unwrap())
+        );
+        assert_eq!(lookup(&job, "PATH"), Some("/usr/bin"));
+        // The job's own process (and a relaunch from inside it) sees the team's connector only.
+        let inside = meerschaum_core::Config::new(
+            meerschaum_core::config::ConfigOptions::with_env(job.clone()),
+        )
+        .unwrap();
+        assert!(
+            inside
+                .get(&["meerschaum", "connectors", "sql", "wetlands"])
+                .is_some()
+        );
+        for label in ["drylands", "main", "x"] {
+            assert!(
+                inside
+                    .get(&["meerschaum", "connectors", "sql", label])
+                    .is_none_or(|v| v.is_null()),
+                "{label}"
+            );
+        }
+        let again = externalize_team(&dir, &job, &inside, &scope).unwrap();
+        assert_eq!(again.apply(&job), job);
+        assert!(
+            !std::fs::read_to_string(dir.join(CONFIG_FILENAME))
+                .unwrap()
+                .contains("d-pw")
+        );
+
+        // The `env` property an API server recorded loses the server's connectors and patches.
+        let mut recorded =
+            props(r#"{"MRSM_SQL_MAIN": "postgresql://u:p@h/d", "MRSM_CONFIG": "{}", "LANG": "C"}"#);
+        assert!(strip_team_env(&mut recorded, root.path(), &[]));
+        assert_eq!(recorded.keys().collect::<Vec<_>>(), vec!["LANG"]);
     }
 
     #[test]

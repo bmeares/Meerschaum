@@ -885,10 +885,52 @@ impl Daemon {
         // (`config_files`). A file that cannot be written leaves the environment as it is.
         let mut launching = crate::config_files::process_env();
         launching.extend(worker_env);
-        if let Ok(changes) = crate::config_files::externalize(&self.paths.dir, &launching) {
+        // 5.1: a job of an isolated team gets that team's configuration only, or does not start.
+        if let Some(changes) = self.team_environment(&launching)? {
+            changes.apply_to(&mut cmd);
+        } else if let Ok(changes) = crate::config_files::externalize(&self.paths.dir, &launching) {
             changes.apply_to(&mut cmd);
         }
         crate::supervisor::spawn_detached(&mut cmd)
+    }
+
+    /// How the environment of a job of an isolated team differs from `launching` (5.1,
+    /// [`crate::config_files::externalize_team`]); `None` for any other job. Records the job's
+    /// scope for good ([`crate::config_files::TEAM_SCOPE_PROPERTY`]) and drops what only the
+    /// server should hold from its `env` property. `Err` when the team's files cannot be written.
+    fn team_environment(
+        &mut self,
+        launching: &[(String, String)],
+    ) -> std::io::Result<Option<crate::config_files::JobEnvironment>> {
+        use crate::config_files::{
+            TEAM_SCOPE_PROPERTY, externalize_team, job_team_scope, may_be_team_job, strip_team_env,
+        };
+        let props = self.properties();
+        if !may_be_team_job(&props) {
+            return Ok(None);
+        }
+        let config = meerschaum_core::Config::new(
+            meerschaum_core::config::ConfigOptions::with_env(launching.to_vec()),
+        )
+        .map_err(std::io::Error::other)?;
+        let paths = config.paths();
+        let Some((key, scope)) = job_team_scope(&paths.root_dir, &props) else {
+            return Ok(None);
+        };
+        let changes = externalize_team(&self.paths.dir, launching, &config, &scope)?;
+        let mut patch = Map::new();
+        patch.insert(TEAM_SCOPE_PROPERTY.into(), Value::Str(key));
+        if let Some(Value::Map(mut env)) = props.get("env").cloned()
+            && strip_team_env(&mut env, &paths.root_dir, &paths.plugins_dirs)
+        {
+            patch.insert("env".into(), Value::Map(env));
+        }
+        self.update_properties(&patch);
+        let written = self.write_properties();
+        if !written.success {
+            return Err(std::io::Error::other(written.message));
+        }
+        Ok(Some(changes))
     }
 
     fn sweep_stop(&self, action: &str) {
