@@ -23,6 +23,7 @@ pub mod keys;
 pub mod memory;
 pub mod pipes;
 pub mod pyjson;
+pub mod retry;
 pub mod users;
 
 pub use backend::{BackendError, ScoreBound, ValkeyBackend, WriteOp};

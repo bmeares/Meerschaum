@@ -25,6 +25,7 @@ pub mod partition;
 pub mod pipes;
 pub mod plugins;
 pub mod reflect;
+pub mod retry;
 pub mod schema;
 pub mod sync;
 pub mod tables;

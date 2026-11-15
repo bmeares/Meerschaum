@@ -94,6 +94,12 @@ pub struct PyValkeyConnector {
 }
 
 impl PyValkeyConnector {
+    /// The label and the shared state (`retry_connect()` connects through it, so the
+    /// connection it makes is the one every later call uses).
+    pub(crate) fn retry_parts(&self) -> (String, Arc<ValkeyShared>) {
+        (self.label.clone(), self.shared.clone())
+    }
+
     /// The connected connector (the first call connects; a failure is a `ConnectionError`
     /// and is retried by the next call).
     fn conn(&self, py: Python<'_>) -> PyResult<Arc<RsValkeyConnector>> {

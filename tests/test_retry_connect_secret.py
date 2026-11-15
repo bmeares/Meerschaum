@@ -3,9 +3,15 @@
 # vim:fenc=utf-8
 
 """
-5.1: `retry_connect()` starts a child Python process to test a connection. The connector's
-attributes (its password among them) must never be on that child's command line, where any local
-user can read them (`ps`, `/proc/<pid>/cmdline`), nor in its environment.
+5.1: for a connector the Rust core does not implement (a plugin's), `retry_connect()` starts a
+child Python process to test the connection. The connector's attributes (its password among them)
+must never be on that child's command line, where any local user can read them (`ps`,
+`/proc/<pid>/cmdline`), nor in its environment.
+
+The `sql`, `valkey` and `api` connectors are retried in process (`tests/test_retry_connect_native.py`
+checks that nothing is spawned and no file is written); here a SQLite connector is sent down the
+child-process path on purpose (`_native_target` answers `None`, as for a driver that cannot be
+built), because the child can rebuild it from its attributes without a plugin.
 """
 
 import pathlib
@@ -25,7 +31,10 @@ def test_retry_connect_keeps_the_connector_off_the_command_line(
     if not dill_importable:
         ### The base wheel has no runtime dependencies: `retry_connect` must not need `dill`.
         monkeypatch.setitem(sys.modules, 'dill', None)
+    import meerschaum.connectors.poll as poll
     from meerschaum.connectors.poll import retry_connect
+    ### The core implements `sql`: take the child-process path the other connectors take.
+    monkeypatch.setattr(poll, '_native_target', lambda connector, debug=False: None)
 
     conn = mrsm.get_connector(
         'sql',

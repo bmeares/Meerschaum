@@ -22,6 +22,7 @@ mod misc;
 mod pipes;
 mod plugins;
 mod request;
+pub mod retry;
 mod sync_metrics;
 mod sync_status;
 mod tokens;
