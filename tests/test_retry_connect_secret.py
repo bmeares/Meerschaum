@@ -11,11 +11,20 @@ user can read them (`ps`, `/proc/<pid>/cmdline`), nor in its environment.
 import pathlib
 import subprocess
 
+import pytest
+
 SECRET = 'retry-connect-s3cret-value'
 
 
-def test_retry_connect_keeps_the_connector_off_the_command_line(tmp_path, monkeypatch):
+@pytest.mark.parametrize('dill_importable', [True, False])
+def test_retry_connect_keeps_the_connector_off_the_command_line(
+    tmp_path, monkeypatch, dill_importable,
+):
+    import sys
     import meerschaum as mrsm
+    if not dill_importable:
+        ### The base wheel has no runtime dependencies: `retry_connect` must not need `dill`.
+        monkeypatch.setitem(sys.modules, 'dill', None)
     from meerschaum.connectors.poll import retry_connect
 
     conn = mrsm.get_connector(

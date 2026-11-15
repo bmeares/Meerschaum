@@ -60,7 +60,6 @@ def retry_connect(
     import os
     import tempfile
     from meerschaum.utils.venv import venv_exec
-    from meerschaum.utils.packages import attempt_import
 
     kw = {
         'connector_meta': connector.meta,
@@ -74,7 +73,6 @@ def retry_connect(
         'debug': debug,
     }
 
-    dill = attempt_import('dill', lazy=False)
     ### The connector's attributes (its password among them) travel in an owner-only file the
     ### child reads and removes, never on its command line, where `ps` would show them (5.1).
     fd, kw_path = tempfile.mkstemp(prefix='mrsm-retry-', suffix='.json')
@@ -83,8 +81,9 @@ def retry_connect(
             json.dump(kw, kw_file)
         code = (
             "import sys, json, os\n"
-            + "from meerschaum.utils.typing import Optional, Dict, Any\n\n"
-            + dill.source.getsource(_wrap_retry_connect) + '\n\n'
+            ### The child imports the helper (no source text, no `dill`: the base wheel has no
+            ### runtime dependencies).
+            + "from meerschaum.connectors.poll import _wrap_retry_connect\n\n"
             + f"_kw_path = {kw_path!r}\n"
             + "with open(_kw_path, 'r', encoding='utf-8') as _kw_file:\n"
             + "    kw = json.load(_kw_file)\n"
