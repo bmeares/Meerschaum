@@ -198,6 +198,33 @@ def test_an_unresolved_reference_fails_only_its_connector(tmp_path):
     assert 'MRSM{file:pg-password}' in used.stdout + used.stderr
 
 
+def test_python_writers_never_persist_environment_secrets(tmp_path):
+    root = _root(tmp_path)
+    _python(
+        root,
+        """
+        import json
+        from meerschaum.config import get_config, write_config
+        section = get_config('meerschaum')
+        section['connectors']['sql']['written']['port'] = 6543
+        assert write_config({'meerschaum': section})
+        assert write_config()
+        print(json.dumps({}))
+        """,
+        MRSM_CONFIG=json.dumps({'meerschaum': {'connectors': {'api': {'cfg': {
+            'host': 'h', 'password': CONFIG_ONLY,
+        }}}}}),
+        MRSM_SQL_ENVCONN=f'postgresql://u:{URI_ONLY}@h:5432/d',
+    )
+    text = (root / 'config' / 'meerschaum.yaml').read_text()
+    for secret in (FILE_SECRET, ENV_SECRET, CONFIG_ONLY, URI_ONLY):
+        assert secret not in text, text
+    assert 'MRSM{file:pg-password}' in text
+    assert 'MRSM{env:PY_SECRET_VAR}' in text
+    assert 'MRSM{meerschaum:connectors:sql:local:database}' in text
+    assert 'port: 6543' in text
+
+
 def test_the_console_masks_values_a_reference_produced(tmp_path):
     root = _root(tmp_path)
     result = _python(

@@ -9,7 +9,7 @@ use std::sync::Once;
 
 use meerschaum_core::Value;
 use meerschaum_core::config::secrets;
-use meerschaum_core::config::{Config, ConfigError, ConfigOptions};
+use meerschaum_core::config::{Config, ConfigError, ConfigOptions, Origin};
 
 /// The environment variables the `env:` references of these tests read (set once, before any
 /// test reads them).
@@ -403,4 +403,230 @@ fn both_forms_of_one_variable_are_an_error_naming_both() {
     ];
     let error = Config::new(ConfigOptions::with_env(missing)).unwrap_err();
     assert!(error.to_string().contains("MRSM_CONFIG_FILE"), "{error}");
+}
+
+#[test]
+fn origins_name_every_layer() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let path = write(
+        root,
+        "meerschaum.yaml",
+        &format!(
+            "instance: sql:main\nconnectors:\n  sql:\n    written:\n      flavor: postgresql\n      \
+             password: MRSM{{env:{ENV_VAR}}}\n"
+        ),
+    );
+    let config = config_with(
+        root,
+        &[
+            ("MRSM_SQL_ENVCONN", "postgresql://u:p@h/db".into()),
+            (
+                "MRSM_CONFIG",
+                r#"{"meerschaum": {"connectors": {"sql": {"written": {"host": "from-config"}}}}}"#
+                    .into(),
+            ),
+            (
+                "MRSM_PATCH",
+                r#"{"meerschaum": {"connectors": {"sql": {"written": {"port": 1}}}}}"#.into(),
+            ),
+        ],
+    );
+    let origins = config.origins("meerschaum");
+    let at = |p: &[&str]| {
+        origins
+            .origin(&p.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+            .cloned()
+    };
+    assert_eq!(at(&["instance"]), Some(Origin::File(path.clone())));
+    assert_eq!(
+        at(&["connectors", "sql", "written", "host"]),
+        Some(Origin::Environment("MRSM_CONFIG".into()))
+    );
+    assert_eq!(
+        at(&["connectors", "sql", "written", "port"]),
+        Some(Origin::Environment("MRSM_PATCH".into()))
+    );
+    assert_eq!(
+        at(&["connectors", "sql", "envconn", "uri"]),
+        Some(Origin::Environment("MRSM_SQL_ENVCONN".into()))
+    );
+    assert_eq!(
+        at(&["connectors", "sql", "written", "password"]),
+        Some(Origin::Secret {
+            reference: format!("MRSM{{env:{ENV_VAR}}}"),
+            under: Box::new(Origin::File(path)),
+        })
+    );
+    assert_eq!(
+        at(&["connectors", "sql", "local", "flavor"]),
+        Some(Origin::Default)
+    );
+}
+
+/// The environment of the writer tests: secrets in every environment layer.
+const PATCH_ONLY: &str = "patch-only-s3cret-value";
+const CONFIG_ONLY: &str = "config-only-s3cret-value";
+const URI_ONLY: &str = "uri-only-s3cret-value";
+const FILE_SECRET: &str = "file-only-s3cret-value";
+
+fn writer_root() -> (tempfile::TempDir, Config, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    std::fs::write(root.join("pg-password"), format!("{FILE_SECRET}\n")).unwrap();
+    let path = write(
+        &root,
+        "meerschaum.yaml",
+        &format!(
+            "instance: sql:main\nconnectors:\n  sql:\n    written:\n      flavor: postgresql\n      \
+             host: db.example\n      password: MRSM{{file:pg-password}}\n      username: \
+             MRSM{{env:{ENV_VAR}}}\n    linked:\n      flavor: sqlite\n      database: \
+             MRSM{{meerschaum:connectors:sql:local:database}}\n"
+        ),
+    );
+    let config = config_with(
+        &root,
+        &[
+            (
+                "MRSM_SQL_ENVCONN",
+                format!("postgresql://u:{URI_ONLY}@h/db"),
+            ),
+            (
+                "MRSM_CONFIG",
+                format!(
+                    r#"{{"meerschaum": {{"connectors": {{"api": {{"cfg": {{"host": "h", "password": "{CONFIG_ONLY}"}}}}}}}}}}"#
+                ),
+            ),
+            (
+                "MRSM_PATCH",
+                format!(
+                    r#"{{"meerschaum": {{"connectors": {{"sql": {{"written": {{"options": {{"token": "{PATCH_ONLY}"}}}}}}}}}}}}"#
+                ),
+            ),
+        ],
+    );
+    (tmp, config, path)
+}
+
+fn assert_clean(path: &Path) {
+    let text = std::fs::read_to_string(path).unwrap();
+    for secret in [PATCH_ONLY, CONFIG_ONLY, URI_ONLY, FILE_SECRET, ENV_SECRET] {
+        assert!(
+            !text.contains(secret),
+            "{secret} reached {}:\n{text}",
+            path.display()
+        );
+    }
+    assert!(text.contains("MRSM{file:pg-password}"), "{text}");
+    assert!(text.contains(&format!("MRSM{{env:{ENV_VAR}}}")), "{text}");
+    assert!(
+        text.contains("MRSM{meerschaum:connectors:sql:local:database}"),
+        "{text}"
+    );
+}
+
+/// `write_config({'meerschaum': get_config('meerschaum') + change})`: the pattern of
+/// `register connectors`, `delete connectors`, `login` (`save_credentials`), `bootstrap
+/// connectors` and the console's writers.
+#[test]
+fn writing_a_loaded_section_keeps_references_and_drops_the_environment() {
+    let (_tmp, config, path) = writer_root();
+    let mut section = config.get(&["meerschaum"]).unwrap().to_map();
+    if let Some(Value::Map(connectors)) = section.get_mut("connectors")
+        && let Some(Value::Map(sql)) = connectors.get_mut("sql")
+    {
+        sql.insert(
+            "added".into(),
+            Value::from_json_str(r#"{"flavor": "sqlite", "database": "/tmp/added.db"}"#).unwrap(),
+        );
+        if let Some(Value::Map(written)) = sql.get_mut("written") {
+            written.insert("port".into(), Value::Int(6543));
+        }
+    }
+    let mut whole = meerschaum_core::Map::new();
+    whole.insert("meerschaum".into(), Value::Map(section));
+    assert!(config.write_config(Some(&whole), None));
+    assert_clean(&path);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("added:") && text.contains("port: 6543"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("envconn") && !text.contains("cfg:"),
+        "{text}"
+    );
+}
+
+/// The whole in-memory config (`write_config()`), the default-fill write of `get_config` and the
+/// permanent patch directory all write the whole config.
+#[test]
+fn writing_the_whole_config_and_default_fills_keep_the_file_as_written() {
+    let (_tmp, config, path) = writer_root();
+    let _ = config.get(&["meerschaum", "connectors", "sql", "written", "password"]);
+    assert!(config.write_config(None, None));
+    assert_clean(&path);
+    // A key with no file falls back to the defaults and writes the loaded config.
+    let _ = config.get(&["plugins", "nothing-here"]);
+    let _ = config.get(&["jobs", "logs"]);
+    assert_clean(&path);
+}
+
+#[test]
+fn add_connector_and_team_moves_keep_references() {
+    let (_tmp, config, path) = writer_root();
+    let attrs = Value::from_json_str(r#"{"flavor": "sqlite", "database": "/tmp/team.db"}"#)
+        .unwrap()
+        .to_map();
+    config.add_connector("sql", "team_x", &attrs).unwrap();
+    assert_clean(&path);
+    config.move_team_reservations("a", "b").unwrap();
+    assert_clean(&path);
+}
+
+#[test]
+fn a_permanent_patch_directory_keeps_references() {
+    let (tmp, _config, path) = writer_root();
+    let root = tmp.path();
+    let permanent = root.join("permanent_patch_config");
+    std::fs::create_dir_all(&permanent).unwrap();
+    std::fs::write(permanent.join("meerschaum.yaml"), "instance: sql:other\n").unwrap();
+    let config = config_with(
+        root,
+        &[(
+            "MRSM_CONFIG",
+            format!(
+                r#"{{"meerschaum": {{"connectors": {{"api": {{"cfg": {{"password": "{CONFIG_ONLY}"}}}}}}}}}}"#
+            ),
+        )],
+    );
+    drop(config);
+    assert_clean(&path);
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("instance: sql:other")
+    );
+}
+
+/// A stale copy of a rotated secret written back keeps the reference.
+#[test]
+fn a_stale_resolved_secret_is_never_written() {
+    let (tmp, config, path) = writer_root();
+    let section = config.get(&["meerschaum"]).unwrap().to_map();
+    std::fs::write(
+        tmp.path().join("pg-password.next"),
+        "rotated-s3cret-value\n",
+    )
+    .unwrap();
+    std::fs::rename(
+        tmp.path().join("pg-password.next"),
+        tmp.path().join("pg-password"),
+    )
+    .unwrap();
+    let mut whole = meerschaum_core::Map::new();
+    whole.insert("meerschaum".into(), Value::Map(section));
+    assert!(config.write_config(Some(&whole), None));
+    assert_clean(&path);
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("rotated"));
 }

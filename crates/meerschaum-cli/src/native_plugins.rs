@@ -3166,6 +3166,72 @@ mod host_access_tests {
         }
     }
 
+    /// 5.1: a plugin's `write_plugin_config` keeps the other sections as written (secret
+    /// references included) and never writes what `MRSM_PATCH` holds.
+    #[test]
+    fn write_plugin_config_never_writes_environment_secrets() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = tempfile::tempdir().unwrap();
+        let secret = root.path().join("plugin-token");
+        std::fs::write(&secret, "plugin-file-s3cret\n").unwrap();
+        let config_dir = root.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let file = config_dir.join("plugins.json");
+        std::fs::write(
+            &file,
+            r#"{"other": {"token": "MRSM{file:plugin-token}", "keys": "MRSM{meerschaum:instance}"}}"#,
+        )
+        .unwrap();
+        let config = meerschaum_core::config::Config::new(
+            meerschaum_core::config::ConfigOptions::with_env(vec![
+                ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+                (
+                    "MRSM_PLUGINS_DIR".into(),
+                    plugins.path().display().to_string(),
+                ),
+                (
+                    "MRSM_PATCH".into(),
+                    r#"{"plugins": {"other": {"api_key": "patch-only-plugin-s3cret"}}}"#.into(),
+                ),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            config.get_plugin_config("other", &["token"]),
+            Some(Value::Str("plugin-file-s3cret".into()))
+        );
+        let mut out = Vec::new();
+        let mut rt = crate::dispatch::Runtime::new(
+            crate::types::DateContext::system(),
+            80,
+            &mut out,
+            |_| None,
+        );
+        rt.config = Some(config);
+        let natives = Arc::new(NativePlugins::empty());
+        let request = meerschaum_plugin::Request {
+            method: "action".into(),
+            connector_type: String::new(),
+            label: String::new(),
+            config: serde_json::Value::Null,
+            context: json!({}),
+        };
+        let written = with_command_host(&mut rt, &natives, None, |host| {
+            host.host_call(
+                &request,
+                &call("write_plugin_config", json!({"config": {"cursor": 1}})),
+                None,
+            )
+        })
+        .unwrap()
+        .value;
+        assert_eq!(written[0], json!(true), "{written}");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains("s3cret"), "{text}");
+        assert!(text.contains("MRSM{file:plugin-token}"), "{text}");
+        assert!(text.contains("\"cursor\": 1"), "{text}");
+    }
+
     #[test]
     fn a_commands_host_calls_use_its_own_config_and_later_reads_see_their_writes() {
         let root = tempfile::tempdir().unwrap();

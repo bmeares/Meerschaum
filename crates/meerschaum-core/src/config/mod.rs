@@ -34,6 +34,7 @@ pub mod environment;
 pub mod grafana_readonly;
 pub mod lossless;
 pub mod paths;
+pub mod provenance;
 pub mod secrets;
 pub mod sync;
 
@@ -51,6 +52,7 @@ use crate::yaml::scanner::PyYamlError;
 
 pub use lossless::{ConfigMap, ConfigValue, JsonDecodeError};
 pub use paths::{PathValue, Paths};
+pub use provenance::{EnvLayer, Origin};
 
 use lossless::{
     apply_patch, apply_patch_maps, json_dumps, json_dumps_lossless, json_dumps_map_lossless,
@@ -367,6 +369,10 @@ pub struct ConfigState {
     allow_writes: bool,
     notices: Vec<Notice>,
     write_error: Option<(std::io::ErrorKind, String)>,
+    /// The layers applied over the files, in order (`MRSM_<TYPE>_<LABEL>` connectors,
+    /// `MRSM_CONFIG` / `MRSM_PATCH`, `patch_config/`): what [`provenance`] replays to know
+    /// where a value came from, so a writer never persists what only they hold.
+    layers: Vec<EnvLayer>,
 }
 
 /// The keyword arguments of `search_and_substitute_config`.
@@ -470,6 +476,7 @@ impl Config {
             allow_writes: opts.allow_writes,
             notices: Vec::new(),
             write_error: None,
+            layers: Vec::new(),
         };
         state.apply_environment_uris(&opts.env, false);
         state.apply_environment_patches(&opts.env);
@@ -496,6 +503,7 @@ impl Config {
                 allow_writes,
                 notices: Vec::new(),
                 write_error: None,
+                layers: Vec::new(),
             }),
         }
     }
@@ -745,6 +753,11 @@ impl Config {
             }
             Ok(changed)
         })
+    }
+
+    /// Where each value of the top-level key `key` comes from (5.1, see [`provenance`]).
+    pub fn origins(&self, key: &str) -> provenance::KeyOrigins {
+        self.with_state(|s| s.origins(key))
     }
 
     /// Drain the warnings recorded so far (Python emits them with `warn()`).
@@ -1646,7 +1659,14 @@ impl ConfigState {
             Some(c) => c.clone(),
             None => self.config.clone(),
         };
-        let config_dict = revert_symlinks_lossless(&config_dict);
+        // 5.1: into the config directory, only the file as written plus the caller's change
+        // (never what the environment, a patch or a secret reference holds; see `provenance`).
+        // Another directory (a patch directory, the defaults copy) gets what the caller passed.
+        let config_dict = if directory == self.paths.config_dir {
+            self.persistable_config(&config_dict)
+        } else {
+            revert_symlinks_lossless(&config_dict)
+        };
         let default_ft = static_config().config.default_filetype.clone();
         for (k, v) in &config_dict {
             let filetype = if k == "meerschaum" {
@@ -1932,6 +1952,7 @@ impl ConfigState {
         preserve_keys: bool,
     ) -> usize {
         let mut applied = 0;
+        let mut used: Vec<(String, String)> = Vec::new();
         // Plugin connector types, read lazily: only a variable of a non-built-in type needs them.
         let mut plugin_types: Option<std::collections::BTreeSet<String>> = None;
         for var in get_connector_env_vars(env) {
@@ -1993,6 +2014,10 @@ impl ConfigState {
             patch.insert("meerschaum".to_string(), ConfigValue::Map(connectors));
             self.config = apply_patch_maps(&base, &patch);
             applied += 1;
+            used.push((var.clone(), uri.to_string()));
+        }
+        if !used.is_empty() {
+            self.record_layer(EnvLayer::Uris(used));
         }
         applied
     }
@@ -2011,6 +2036,7 @@ impl ConfigState {
         if texts.is_empty() {
             return;
         }
+        self.record_layer(EnvLayer::Patches(texts.clone()));
         self.apply_patch_texts(&texts);
     }
 
@@ -2033,6 +2059,7 @@ impl ConfigState {
             None
         };
         if let Some(patch) = patch_config {
+            self.record_layer(EnvLayer::PatchDir(patch.clone()));
             self.config = apply_patch_maps(&self.config, &patch);
             if self.allow_writes {
                 let _ = std::fs::remove_dir_all(&patch_dir);
