@@ -439,6 +439,11 @@ pub struct ServerConfig {
     pub webterm_tmux_config: Option<PathBuf>,
     /// `WEBTERM_INTERNAL_RESOURCES_PATH`: where the tmux path keeps the shell's environment file.
     pub webterm_resources_path: PathBuf,
+    /// `system.engine.python_team_sandbox` (5.1): how isolated teams' processes are sandboxed.
+    /// The web terminal runs without tmux while isolated teams exist and their sandbox does not
+    /// refuse connections to pathname Unix sockets (tmux's socket runs commands for whoever
+    /// connects).
+    pub team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode,
     /// The private key and certificate of HTTPS (`--keyfile` / `--certfile`,
     /// `api:server:ssl_keyfile` / `ssl_certfile`, 4.1's `api:uvicorn:ssl_*`); none: plain HTTP.
     pub tls: crate::tls::TlsSettings,
@@ -975,6 +980,10 @@ impl ServerConfig {
                 _ => None,
             },
             webterm_resources_path: PathBuf::from("internal/webterm"),
+            team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode::from_value(get(
+                cfg,
+                &meerschaum_core::team_scope::sandbox::MODE_KEY,
+            )),
             tls,
             internal_addr: None,
             limits,

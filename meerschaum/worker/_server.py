@@ -195,7 +195,18 @@ def _define_connectors(defined: Optional[Dict[str, Dict[str, Any]]]) -> None:
         _DEFINED_CONNECTORS[keys] = attributes
 
 
+#: 5.1: this module opens an inherited channel (`fd:<n>`); the host program checks for it.
+SUPPORTS_INHERITED_CHANNEL: bool = True
+
+
 def _connect(address: str):
+    if address.startswith('fd:'):
+        ### 5.1: the end of a socket pair the Rust host created and this process inherited
+        ### (nothing listens, so no other process can take the worker's place). Nothing this
+        ### worker starts inherits it.
+        sock = socket.socket(fileno=int(address[len('fd:'):]))
+        sock.set_inheritable(False)
+        return sock.makefile('rwb', buffering=1024 * 1024)
     if address.startswith('\\\\.\\pipe\\'):
         ### Windows named pipe: the host created it; open it like a file.
         return open(address, 'r+b', buffering=0)

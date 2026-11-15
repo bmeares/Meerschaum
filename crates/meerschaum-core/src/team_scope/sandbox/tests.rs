@@ -430,6 +430,9 @@ struct ChildPlan {
     connect_abstract: Vec<(String, String)>,
     /// A process to signal (signal 0): its PID.
     signal: Option<i32>,
+    /// FIFOs to open for reading and writing without blocking (a job's stdin): (label, path).
+    #[serde(default)]
+    fifo: Vec<(String, PathBuf)>,
 }
 
 #[cfg(target_os = "linux")]
@@ -469,6 +472,16 @@ fn sandboxed_child() {
         use std::os::linux::net::SocketAddrExt;
         let r = std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes())
             .and_then(|addr| std::os::unix::net::UnixStream::connect_addr(&addr))
+            .map(|_| ());
+        results.insert(label.clone(), outcome(r).into());
+    }
+    for (label, path) in &plan.fifo {
+        use std::os::unix::fs::OpenOptionsExt;
+        let r = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
             .map(|_| ());
         results.insert(label.clone(), outcome(r).into());
     }
@@ -603,6 +616,7 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
         ],
         connect_abstract: vec![(s("abstract socket"), name.clone())],
         signal: Some(std::process::id() as i32),
+        fifo: Vec::new(),
     };
     let Some((report, results)) = run_child(&plan) else {
         return;
@@ -692,6 +706,7 @@ fn an_interpreter_path_covering_the_root_is_dropped_in_the_child() {
         connect: Vec::new(),
         connect_abstract: Vec::new(),
         signal: None,
+        fifo: Vec::new(),
     };
     let Some((report, results)) = run_child(&plan) else {
         return;
@@ -755,6 +770,7 @@ fn a_team_process_writes_nothing_that_others_load() {
         connect: Vec::new(),
         connect_abstract: Vec::new(),
         signal: None,
+        fifo: Vec::new(),
     };
     let mut plan = plan;
     plan.write
@@ -879,6 +895,7 @@ fn teams_granted_one_plugin_get_their_own_copies_of_its_environment() {
             connect: Vec::new(),
             connect_abstract: Vec::new(),
             signal: None,
+            fifo: Vec::new(),
         };
         if let Some((report, results)) = run_child(&plan) {
             assert!(report.enforced, "{report:?}");
@@ -895,4 +912,50 @@ fn teams_granted_one_plugin_get_their_own_copies_of_its_environment() {
     for p in &prepared {
         let _ = std::fs::remove_dir_all(&p.tmp_dir);
     }
+}
+
+/// 5.1: a job's stdin is a FIFO in its directory, written by the server (`mrsm attach`, the
+/// console's prompt answers) and read by the job. Opening a FIFO is opening a path, which the
+/// filesystem rules (Landlock ABI 1) restrict on every kernel: a team's process cannot write to
+/// another job's stdin, nor to its own job's (its job directory is read-only to it).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_team_process_cannot_write_to_a_jobs_stdin() {
+    let l = layout();
+    let spec = spec_of(&l, Mode::Require, &["mine"]);
+    let other = l.other_job.join("b-job.stdin");
+    let own = l.job.join("a-job.stdin");
+    for fifo in [&other, &own] {
+        nix_mkfifo(fifo);
+    }
+    let plan = ChildPlan {
+        spec,
+        extra: Vec::new(),
+        read: Vec::new(),
+        write: Vec::new(),
+        connect: Vec::new(),
+        connect_abstract: Vec::new(),
+        signal: None,
+        fifo: vec![
+            ("another job's stdin".into(), other.clone()),
+            ("its own job's stdin".into(), own.clone()),
+        ],
+    };
+    let Some((report, results)) = run_child(&plan) else {
+        return;
+    };
+    assert!(report.enforced, "{report:?}");
+    for label in ["another job's stdin", "its own job's stdin"] {
+        assert_eq!(results[label], "denied", "{label}: {results:?}");
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn nix_mkfifo(path: &Path) {
+    let status = std::process::Command::new("mkfifo")
+        .args(["-m", "600"])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success(), "mkfifo {}", path.display());
 }

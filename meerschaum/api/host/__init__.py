@@ -121,7 +121,10 @@ def build_app(load_plugins: bool = True, debug: bool = False):
 
 def run(socket_path: str, debug: bool = False) -> None:
     """
-    Serve the host on a Unix socket with uvicorn until interrupted.
+    Serve the host on a Unix socket with uvicorn until interrupted. If
+    `MRSM_API_HOST_PROXY_TOKEN` is set (the Rust server sets it for every host it starts), every
+    request and websocket handshake without the matching `X-Mrsm-Host-Proxy-Token` header is
+    refused, as on TCP.
     """
     from meerschaum.api.host._app import run as _run
     _run(socket_path, debug=debug)

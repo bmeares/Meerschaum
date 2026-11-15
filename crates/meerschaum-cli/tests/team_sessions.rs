@@ -37,7 +37,16 @@ def tpr_probe(action=None, **kwargs):
         'server_config': _attempt_read(os.path.join(os.environ['MRSM_ROOT_DIR'], 'config', 'meerschaum.yaml')),
         'venvs_dir': os.environ.get('MRSM_VENVS_DIR'),
         'writes': _writes() if os.environ.get('MRSM_TEAM_SCOPE') else {},
+        'worker_sockets': _worker_sockets(),
     })
+
+def _worker_sockets():
+    """The bound Unix sockets of Rust hosts' worker channels this process could see."""
+    try:
+        lines = open('/proc/self/net/unix').read().splitlines()[1:]
+    except Exception as e:
+        return [repr(e)]
+    return sorted(line.split()[-1] for line in lines if 'mrsm-w-' in line.split()[-1])
 
 def _attempt_write(path):
     try:
@@ -228,6 +237,9 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     }
     let session = Session::new();
     session.set_worker_python(&python.display().to_string());
+    // The server's own workers run first (5.1: their channels are socket pairs, so a team's code
+    // finds nothing of theirs to connect to).
+    let _ = probe(&session, &config);
     let connectors = config.get(&["meerschaum", "connectors"]).unwrap().to_map();
     let mut wetlands = Team::new("wetlands");
     wetlands.id = Some("id-wetlands".into());
@@ -254,6 +266,7 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
         "{first}"
     );
     assert_eq!(first["file_has_others"], false);
+    assert_eq!(first["worker_sockets"], serde_json::json!([]), "{first}");
     assert_eq!(first["file_has_own"], true);
     // 5.1: the worker restricted itself before it imported the plugin (where Landlock exists).
     let support = meerschaum_core::team_scope::sandbox::kernel_support();

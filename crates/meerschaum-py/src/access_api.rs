@@ -711,7 +711,8 @@ pub fn team_sandbox_enforce(
         .filter(|p| !p.is_empty())
         .map(|p| Rule::new(p, Access::ReadExec, "the interpreter"))
         .collect();
-    if let Some(socket) = socket.filter(|s| !s.is_empty()) {
+    // 5.1: a worker on Unix inherits its channel (`fd:<n>`) and connects to nothing.
+    if let Some(socket) = socket.filter(|s| !s.is_empty() && !s.starts_with("fd:")) {
         extra.push(Rule::new(socket, Access::Connect, "the worker's host"));
     }
     let report = py.detach(|| enforce_from_env(&extra));

@@ -1,5 +1,5 @@
 //! The Python API host lifecycle (§7.3, D17, D21): start `python -m meerschaum.api.host` on a Unix
-//! socket under the root directory (TCP loopback with a per-start token on Windows) when an
+//! socket under the root directory (TCP loopback on Windows) when an
 //! installed plugin needs it or the Dash web console is available, supervise it like a job, and
 //! restart it with backoff when it crashes.
 //!
@@ -22,6 +22,14 @@
 //! with `504` after `api:host:response_seconds` ([`crate::proxy`]). Restarts back off, doubling up
 //! to [`SupervisorOptions::backoff_max`], and the delay starts over only after a process stayed
 //! ready for [`SupervisorOptions::stable_after`].
+//!
+//! **Only this server reaches the host** (5.1). Every host this module starts gets a per-start
+//! token in [`PROXY_TOKEN_ENV`] (its own environment only; the host drops it from `os.environ`
+//! before any plugin is imported), and refuses every request that does not carry it in
+//! [`PROXY_TOKEN_HEADER`], on a Unix socket as on TCP: another process of the server's
+//! operating-system user (an isolated team's sandboxed code on a kernel that does not restrict
+//! connecting to pathname Unix sockets) that connects to the socket gets `403`, so it cannot
+//! skip the server's route allowlist, rate limits and checks.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -281,8 +289,14 @@ pub fn probe_console_within(
 /// How the host is reached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostEndpoint {
-    /// A Unix-domain socket (everywhere but Windows).
-    Unix(PathBuf),
+    /// A Unix-domain socket (everywhere but Windows), with the per-start token every forwarded
+    /// request carries in [`PROXY_TOKEN_HEADER`] (`None`: a host this server did not start).
+    Unix {
+        /// The socket.
+        socket: PathBuf,
+        /// The token the host requires (`MRSM_API_HOST_PROXY_TOKEN`).
+        token: Option<String>,
+    },
     /// TCP on loopback, with a per-start token every forwarded request carries in
     /// [`PROXY_TOKEN_HEADER`] (Windows, where Unix sockets are not used; also
     /// `MRSM_API_HOST_TRANSPORT=tcp` anywhere, for tests).
@@ -296,24 +310,44 @@ pub enum HostEndpoint {
 
 impl From<PathBuf> for HostEndpoint {
     fn from(socket: PathBuf) -> HostEndpoint {
-        HostEndpoint::Unix(socket)
+        HostEndpoint::Unix {
+            socket,
+            token: None,
+        }
     }
 }
 
 impl From<&Path> for HostEndpoint {
     fn from(socket: &Path) -> HostEndpoint {
-        HostEndpoint::Unix(socket.to_path_buf())
+        HostEndpoint::from(socket.to_path_buf())
     }
 }
 
 impl HostEndpoint {
-    /// The proxy token (TCP only).
+    /// The proxy token.
     pub fn token(&self) -> Option<&str> {
         match self {
-            HostEndpoint::Unix(_) => None,
+            HostEndpoint::Unix { token, .. } => token.as_deref(),
             HostEndpoint::Tcp { token, .. } => Some(token),
         }
     }
+
+    /// The Unix socket, if the host listens on one.
+    pub fn socket(&self) -> Option<&Path> {
+        match self {
+            HostEndpoint::Unix { socket, .. } => Some(socket),
+            HostEndpoint::Tcp { .. } => None,
+        }
+    }
+}
+
+/// A fresh per-start token for the host (256 random bits, hex).
+pub fn new_proxy_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// The host's status route (`GET /_mrsm/host/status`, internal token): `{"console": {"mounted":
@@ -478,7 +512,7 @@ pub trait HostLauncher: Send + Sync {
         endpoint: &HostEndpoint,
     ) -> std::io::Result<Box<dyn HostProcess>> {
         match endpoint {
-            HostEndpoint::Unix(socket) => self.launch(socket).await,
+            HostEndpoint::Unix { socket, .. } => self.launch(socket).await,
             HostEndpoint::Tcp { .. } => Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "this launcher cannot serve the API host over TCP",
@@ -559,12 +593,14 @@ impl PythonHostLauncher {
     /// The arguments after `meerschaum.api.host` that bind `endpoint`.
     pub fn endpoint_args(endpoint: &HostEndpoint) -> Vec<std::ffi::OsString> {
         match endpoint {
-            HostEndpoint::Unix(socket) => vec!["--socket".into(), socket.as_os_str().to_owned()],
+            HostEndpoint::Unix { socket, .. } => {
+                vec!["--socket".into(), socket.as_os_str().to_owned()]
+            }
             HostEndpoint::Tcp { addr, .. } => vec!["--tcp".into(), addr.to_string().into()],
         }
     }
 
-    /// The environment that goes with `endpoint` (the proxy token for TCP).
+    /// The environment that goes with `endpoint` (its proxy token).
     pub fn endpoint_env(endpoint: &HostEndpoint) -> Vec<(&'static str, String)> {
         endpoint
             .token()
@@ -975,7 +1011,7 @@ impl HostSupervisor {
         Arc::new(HostSupervisor {
             launcher,
             transport,
-            endpoint: std::sync::Mutex::new(HostEndpoint::Unix(socket.clone())),
+            endpoint: std::sync::Mutex::new(HostEndpoint::from(socket.clone())),
             console: std::sync::Mutex::new(ConsoleStatus::Unknown),
             socket,
             opts,
@@ -1197,7 +1233,10 @@ impl HostSupervisor {
                 if let Some(parent) = self.socket.parent() {
                     private_dir(parent)?;
                 }
-                Ok(HostEndpoint::Unix(self.socket.clone()))
+                Ok(HostEndpoint::Unix {
+                    socket: self.socket.clone(),
+                    token: Some(new_proxy_token()),
+                })
             }
             HostTransport::Tcp => {
                 // Bind port 0 to learn a free port, then release it for the host (a small race
@@ -1205,11 +1244,7 @@ impl HostSupervisor {
                 let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
                 let addr = listener.local_addr()?;
                 drop(listener);
-                let token = format!(
-                    "{}{}",
-                    uuid::Uuid::new_v4().simple(),
-                    uuid::Uuid::new_v4().simple()
-                );
+                let token = new_proxy_token();
                 Ok(HostEndpoint::Tcp { addr, token })
             }
         }
@@ -1573,7 +1608,7 @@ mod tests {
         }
         // ... a Unix endpoint needs none ...
         assert!(
-            endpoint_proves_token(&HostEndpoint::Unix(PathBuf::from("/nowhere")))
+            endpoint_proves_token(&HostEndpoint::from(PathBuf::from("/nowhere")))
                 .await
                 .unwrap()
         );
@@ -1798,6 +1833,15 @@ mod tests {
             ]
         );
         assert!(PythonHostLauncher::endpoint_env(&unix).is_empty());
+        // 5.1: a host this server starts on a Unix socket gets its token too.
+        let started = HostEndpoint::Unix {
+            socket: PathBuf::from("/r/host.sock"),
+            token: Some("t0k".into()),
+        };
+        assert_eq!(
+            PythonHostLauncher::endpoint_env(&started),
+            vec![(PROXY_TOKEN_ENV, "t0k".to_string())]
+        );
         let tcp = HostEndpoint::Tcp {
             addr: "127.0.0.1:4242".parse().unwrap(),
             token: "t0k".into(),

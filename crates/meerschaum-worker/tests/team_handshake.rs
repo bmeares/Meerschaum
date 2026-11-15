@@ -42,8 +42,11 @@ def send(f, msg):
     f.flush()
 
 address = sys.argv[sys.argv.index('--socket') + 1]
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(address)
+if address.startswith('fd:'):
+    s = socket.socket(fileno=int(address[3:]))
+else:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(address)
 f = s.makefile('rwb')
 mode = os.environ['TPR_FAKE_MODE']
 hello = {

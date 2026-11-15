@@ -15,6 +15,9 @@ def _mrsm_sandbox():
     if '--socket' in sys.argv:
         index = sys.argv.index('--socket')
         socket = sys.argv[index + 1] if index + 1 < len(sys.argv) else None
+    if socket and socket.startswith('fd:'):
+        ### 5.1: an inherited channel; nothing to connect to.
+        socket = None
     try:
         import importlib.util
         spec = importlib.util.find_spec('meerschaum')

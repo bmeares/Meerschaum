@@ -29,7 +29,11 @@
 //!   terminal attaches to a server that already runs) or the file `api:webterm:tmux:config`
 //!   names. A server this process started is stopped with the API ([`stop_owned_servers`]); its
 //!   owner is recorded next to the socket ([`tmux_owner_path`]), so the next API on the root
-//!   takes over (and later stops) a server whose API was killed before it could.
+//!   takes over (and later stops) a server whose API was killed before it could. While isolated
+//!   teams are recorded on the root and their sandbox does not refuse connections to pathname
+//!   Unix sockets (before Linux 7.1, [`WebtermConfig::tmux_refused`]), terminals run without
+//!   tmux and the server's tmux server is stopped: tmux's socket runs commands for any process of
+//!   the server's user that connects, isolated teams' code included, and cannot ask for a secret.
 //! - **The shell** is `<this binary> -i <instance>` (the `mrsm` shell on the server's instance)
 //!   started with the server's connection/config environment. Job execution context (including
 //!   `MRSM_NONINTERACTIVE`, which every job's environment sets) and `COLUMNS`/`LINES`/`TMUX` are
@@ -268,8 +272,14 @@ pub struct WebtermConfig {
     pub page: PageRenderer,
     /// The shell to run.
     pub shell: ShellCommand,
-    /// `Some` runs the shell inside a tmux session.
+    /// `Some` runs the shell inside a tmux session (unless [`WebtermConfig::tmux_refused`]).
     pub tmux: Option<TmuxSettings>,
+    /// The server's root (5.1): while isolated teams are recorded there and their sandbox does
+    /// not refuse connections to pathname Unix sockets, terminals run without tmux.
+    pub teams_root: Option<PathBuf>,
+    /// Whether isolated teams' sandbox refuses connections to pathname Unix sockets here
+    /// ([`meerschaum_core::team_scope::sandbox::stops_unix_sockets`]).
+    pub sandbox_stops_sockets: bool,
     /// How often an open terminal authorizes its session again ([`REAUTHORIZE_EVERY`]).
     pub reauthorize_every: Duration,
 }
@@ -309,13 +319,53 @@ impl WebtermConfig {
         } else {
             None
         };
+        let sandbox_stops_sockets = meerschaum_core::team_scope::sandbox::stops_unix_sockets(
+            state.config.team_sandbox_mode,
+            &meerschaum_core::team_scope::sandbox::kernel_support(),
+        );
         WebtermConfig {
             sessions,
             page,
             shell,
             tmux,
+            teams_root: Some(state.config.root_dir.clone()),
+            sandbox_stops_sockets,
             reauthorize_every: REAUTHORIZE_EVERY,
         }
+    }
+
+    /// Why terminals run without tmux now, though it is configured (5.1): isolated teams are
+    /// recorded and their sandbox does not refuse connections to pathname Unix sockets. Any
+    /// process of the server's user that connects to tmux's socket can run commands outside
+    /// every sandbox, and tmux cannot require a secret; a terminal without tmux listens on
+    /// nothing. `None`: tmux may be used.
+    pub fn tmux_refused(&self) -> Option<&'static str> {
+        self.tmux.as_ref()?;
+        let root = self.teams_root.as_deref()?;
+        (!self.sandbox_stops_sockets && meerschaum_core::team_scope::isolated_teams_recorded(root))
+            .then_some(
+                "isolated teams exist and their sandbox does not refuse connections to Unix \
+                 sockets on this system (Landlock ABI 9, Linux 7.1), so tmux's socket would let \
+                 their code run commands outside it",
+            )
+    }
+
+    /// The tmux settings a terminal uses now: [`WebtermConfig::tmux`] unless
+    /// [`WebtermConfig::tmux_refused`], in which case the terminal's tmux server is stopped if
+    /// this process started it (the refusal is logged once).
+    pub fn active_tmux(&self) -> Option<&TmuxSettings> {
+        if let Some(why) = self.tmux_refused() {
+            static WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !WARNED.swap(true, Ordering::SeqCst) {
+                tracing::warn!("The web terminal runs without tmux: {why}.");
+            }
+            if let Some(socket) = self.tmux.as_ref().and_then(|t| t.socket.as_ref()) {
+                stop_owned_server(socket);
+            }
+            return None;
+        }
+        self.tmux.as_ref()
     }
 
     /// Replace how often an open terminal authorizes its session again (tests shorten it).
@@ -1193,7 +1243,7 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                             if new_windows < MAX_NEW_WINDOWS
                                 && active_terminals() < MAX_TERMINALS
                                 && let (Some(settings), Some(session)) =
-                                    (&config.tmux, &tmux_session)
+                                    (config.active_tmux(), &tmux_session)
                             {
                                 new_windows += 1;
                                 let (settings, shell, session) =
@@ -1500,7 +1550,7 @@ fn shell_state(
     process_id: Option<u32>,
 ) -> Option<Value> {
     let dir = config.shell_state_directory()?;
-    let pid = if let (Some(tmux), Some(session)) = (&config.tmux, session) {
+    let pid = if let (Some(tmux), Some(session)) = (config.active_tmux(), session) {
         let mut command = std::process::Command::new(&tmux.binary);
         if let Some(socket) = &tmux.socket {
             command.arg("-S").arg(socket);
@@ -1562,7 +1612,7 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
     };
     let mut builder;
     let mut session = None;
-    match &config.tmux {
+    match config.active_tmux() {
         Some(tmux) => {
             let name = tmux_session_name(term_name, &tmux.session_suffix);
             let wrapped = tmux_shell_argv(tmux, &config.shell)?;

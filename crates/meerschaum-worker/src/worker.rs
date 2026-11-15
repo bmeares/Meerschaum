@@ -1,7 +1,9 @@
 //! One Python worker process and its connection.
 //!
-//! [`Worker::spawn`] binds a private socket, starts `python -m meerschaum.worker --socket PATH`,
-//! accepts its connection and checks the `hello` handshake (protocol version). A reader task
+//! [`Worker::spawn`] creates the worker's channel (on Unix a socket pair whose other end the
+//! worker inherits, `--socket fd:<n>`: nothing listens, so no other process can connect in its
+//! place; a named pipe on Windows), starts `python -m meerschaum.worker --socket ADDRESS` and
+//! checks the `hello` handshake (protocol version). A reader task
 //! demultiplexes the worker's messages: `chunk` / `result` / `error` go to the waiting call,
 //! `callback` runs the installed [`CallbackHandler`] and answers with `cb_result`. When the
 //! process dies, every pending call fails with [`WorkerError::Crashed`] and nothing else.
@@ -23,7 +25,7 @@ use crate::callback::{CallbackHandler, CallbackRequest};
 use crate::chunk::FetchChunk;
 use crate::error::{PyErrorKind, WorkerError, WorkerResult};
 use crate::protocol::{Msg, PROTOCOL_VERSION, read_envelope, wire_map_to_core, write_envelope};
-use crate::transport::{Listener, ReadHalf, WriteHalf};
+use crate::transport::{Channel, ReadHalf, WriteHalf};
 
 /// How worker processes are started.
 #[derive(Debug, Clone)]
@@ -517,7 +519,7 @@ pub struct Worker {
     child: Arc<tokio::sync::Mutex<Option<Child>>>,
     dead_rx: watch::Receiver<bool>,
     reader: tokio::task::JoinHandle<()>,
-    _listener: Listener,
+    _channel: Channel,
 }
 
 impl std::fmt::Debug for Worker {
@@ -808,7 +810,7 @@ impl Worker {
         {
             hook();
         }
-        let listener = Listener::bind(opts.socket_dir.as_deref())?;
+        let mut channel = Channel::new(opts.socket_dir.as_deref())?;
         let mut cmd = Command::new(&opts.python);
         // `-P`: the working directory (the user's, a project's) stays off `sys.path`, where a
         // `meerschaum.py` or `meerschaum/` would replace the package (`-c` and `-m` both put it
@@ -827,7 +829,7 @@ impl Worker {
             cmd.arg("-m").arg(&opts.module);
         }
         cmd.arg("--socket")
-            .arg(listener.address())
+            .arg(channel.address())
             .stdin(if opts.inherit_stdin {
                 Stdio::inherit()
             } else {
@@ -862,9 +864,11 @@ impl Worker {
         if let Some(dir) = &opts.current_dir {
             cmd.current_dir(dir);
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| WorkerError::Spawn(format!("{}: {e}", opts.python.display())))?;
+        channel.prepare(&mut cmd);
+        let spawned = cmd.spawn();
+        channel.spawned();
+        let mut child =
+            spawned.map_err(|e| WorkerError::Spawn(format!("{}: {e}", opts.python.display())))?;
         if let Some(&hook) = OUTPUT_HOOK.get() {
             if let Some(stdout) = child.stdout.take() {
                 tokio::spawn(forward_output(stdout, false, hook));
@@ -896,8 +900,42 @@ impl Worker {
                 ),
             )
         };
+        // Why a worker that exited before its `hello` did (its output is above).
+        let exited = |status: std::io::Result<std::process::ExitStatus>| -> WorkerError {
+            if status
+                .as_ref()
+                .is_ok_and(|s| s.code() == Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE))
+                && opts.module == "meerschaum.worker"
+            {
+                // The host said why on stderr (the preflight normally catches this first, with
+                // the message in the error). Do not start another one for this interpreter until
+                // `clear_refusals` (`reload`).
+                return refuse(
+                    &opts.python,
+                    format!(
+                        "The Python worker host started by `{python}` refused to start (its \
+                         message is above): the `meerschaum` package it would import does not \
+                         fit this program ({version}). Install the matching release \
+                         (`{python} -m pip install 'meerschaum=={version}'`) or set MRSM_PYTHON \
+                         to an interpreter that has it.",
+                        python = opts.python.display(),
+                        version = meerschaum_core::python_guard::expected_version(),
+                    ),
+                );
+            }
+            WorkerError::Spawn(format!(
+                "the worker started by `{python}` exited before connecting ({status}); its \
+                 output is above. Check that `{python} -c 'import meerschaum.worker'` works, or \
+                 set MRSM_PYTHON to an interpreter with `meerschaum=={version}`",
+                python = opts.python.display(),
+                status = status
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|e| e.to_string()),
+                version = meerschaum_core::python_guard::expected_version(),
+            ))
+        };
         let accepted = tokio::select! {
-            res = tokio::time::timeout_at(deadline, listener.accept()) => match res {
+            res = tokio::time::timeout_at(deadline, channel.connect()) => match res {
                 Ok(Ok(halves)) => halves,
                 Ok(Err(e)) => return Err(WorkerError::Io(e)),
                 Err(_) => {
@@ -905,41 +943,29 @@ impl Worker {
                     return Err(silent("did not connect"));
                 }
             },
-            status = child.wait() => {
-                if status.as_ref().is_ok_and(|s| {
-                    s.code() == Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE)
-                }) && opts.module == "meerschaum.worker" {
-                    // The host said why on stderr (the preflight normally catches this first,
-                    // with the message in the error). Do not start another one for this
-                    // interpreter until `clear_refusals` (`reload`).
-                    return Err(refuse(
-                        &opts.python,
-                        format!(
-                            "The Python worker host started by `{python}` refused to start \
-                             (its message is above): the `meerschaum` package it would import \
-                             does not fit this program ({version}). Install the matching \
-                             release (`{python} -m pip install 'meerschaum=={version}'`) or set \
-                             MRSM_PYTHON to an interpreter that has it.",
-                            python = opts.python.display(),
-                            version = meerschaum_core::python_guard::expected_version(),
-                        ),
-                    ));
-                }
-                return Err(WorkerError::Spawn(format!(
-                    "the worker started by `{python}` exited before connecting ({status}); its \
-                     output is above. Check that `{python} -c 'import meerschaum.worker'` works, \
-                     or set MRSM_PYTHON to an interpreter with `meerschaum=={version}`",
-                    python = opts.python.display(),
-                    status = status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string()),
-                    version = meerschaum_core::python_guard::expected_version(),
-                )));
-            }
+            status = child.wait() => return Err(exited(status)),
         };
         let (mut reader, writer): (ReadHalf, WriteHalf) = accepted;
-        let hello = match tokio::time::timeout_at(deadline, read_envelope(&mut reader)).await {
-            Ok(Ok(env)) => hello_from(&env.msg),
-            Ok(Err(e)) => Err(WorkerError::Handshake(e.to_string())),
-            Err(_) => Err(silent("connected but sent no `hello`")),
+        let hello = tokio::select! {
+            res = tokio::time::timeout_at(deadline, read_envelope(&mut reader)) => match res {
+                Ok(Ok(env)) => hello_from(&env.msg),
+                Ok(Err(e)) => {
+                    // The channel closed: a worker that exited (a refusal, a crash) says why
+                    // by its exit status.
+                    match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+                        Ok(status) => return Err(exited(status)),
+                        Err(_) => Err(WorkerError::Handshake(e.to_string())),
+                    }
+                }
+                // On Unix the channel is inherited, not connected: a worker that never speaks
+                // never connected.
+                Err(_) => Err(silent(if cfg!(unix) {
+                    "did not connect"
+                } else {
+                    "connected but sent no `hello`"
+                })),
+            },
+            status = child.wait() => return Err(exited(status)),
         };
         // 5.1: an isolated team's worker proves it loaded the team's configuration before it
         // receives anything; one that cannot (an older package) is stopped.
@@ -976,7 +1002,7 @@ impl Worker {
             child: Arc::new(tokio::sync::Mutex::new(Some(child))),
             dead_rx,
             reader: reader_task,
-            _listener: listener,
+            _channel: channel,
         })
     }
 

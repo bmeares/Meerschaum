@@ -418,9 +418,9 @@ impl FakeLauncher {
                 })
             }
             #[cfg(unix)]
-            HostEndpoint::Unix(socket) => serve_unix(socket, app).await,
+            HostEndpoint::Unix { socket, .. } => serve_unix(socket, app).await,
             #[cfg(not(unix))]
-            HostEndpoint::Unix(_) => {
+            HostEndpoint::Unix { .. } => {
                 return Err(std::io::Error::other("no Unix sockets here"));
             }
         };

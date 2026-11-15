@@ -1,5 +1,6 @@
 //! The extension-host reverse proxy (§7.3): every request no Rust route matches is forwarded to
-//! the Python API host over a Unix socket (TCP loopback with a per-start token on Windows) with
+//! the Python API host over a Unix socket (TCP loopback on Windows), with the host's per-start
+//! token (`crate::host::PROXY_TOKEN_HEADER`) and
 //! its method, path, query, headers, cookies and body unchanged. Bodies stream in both
 //! directions, and `Upgrade` requests (websockets) are bridged byte-for-byte after the host
 //! answers `101 Switching Protocols`.
@@ -119,7 +120,7 @@ pub async fn connect_host(_socket: &Path) -> std::io::Result<HostStream> {
 /// Connect to the API host at `endpoint`.
 pub async fn connect_endpoint(endpoint: &HostEndpoint) -> std::io::Result<HostStream> {
     match endpoint {
-        HostEndpoint::Unix(socket) => connect_host(socket).await,
+        HostEndpoint::Unix { socket, .. } => connect_host(socket).await,
         HostEndpoint::Tcp { addr, .. } => {
             let stream = tokio::net::TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
@@ -331,7 +332,7 @@ impl HostProxy {
     pub fn endpoint(&self) -> HostEndpoint {
         match &self.supervisor {
             Some(supervisor) => supervisor.endpoint(),
-            None => HostEndpoint::Unix(self.socket.clone()),
+            None => HostEndpoint::from(self.socket.clone()),
         }
     }
 
@@ -554,8 +555,8 @@ impl HostProxy {
             .parse::<Uri>()
             .unwrap_or_else(|_| Uri::from_static("/"));
         strip_hop_by_hop(&mut parts.headers, is_upgrade);
-        // The per-start token of the TCP transport is the proxy's alone: a client's copy is
-        // dropped, ours added.
+        // The host's per-start token is the proxy's alone: a client's copy is dropped, ours
+        // added.
         parts.headers.remove(PROXY_TOKEN_HEADER);
         if let Some(token) = endpoint.token()
             && let Ok(v) = token.parse()

@@ -112,8 +112,13 @@ impl Mode {
     /// The mode `config` sets ([`MODE_KEY`]); an unknown value is `require` (with a warning, once):
     /// a typo must not turn the sandbox off.
     pub fn from_config(config: &Config) -> Mode {
+        Mode::from_value(config.get(&MODE_KEY).as_ref())
+    }
+
+    /// The mode the value of [`MODE_KEY`] sets (see [`Mode::from_config`]).
+    pub fn from_value(value: Option<&crate::value::Value>) -> Mode {
         use crate::value::Value;
-        match config.get(&MODE_KEY) {
+        match value.cloned() {
             None | Some(Value::Null) => Mode::Auto,
             Some(Value::Bool(true)) => Mode::Require,
             Some(Value::Bool(false)) => Mode::Off,
@@ -731,6 +736,14 @@ impl Support {
             Support::Unsupported { reason } => format!("Landlock unavailable: {reason}"),
         }
     }
+}
+
+/// Whether isolated teams' sandboxed processes are refused connections to pathname Unix sockets
+/// outside their rules (5.1): the sandbox is not off and the kernel has Landlock ABI 9
+/// (`resolve_unix`, Linux 7.1). Elsewhere a team's code can connect to any Unix socket the
+/// server's operating-system user can.
+pub fn stops_unix_sockets(mode: Mode, support: &Support) -> bool {
+    mode != Mode::Off && support.abi() >= 9
 }
 
 /// Whether this system can sandbox a process: the kernel's Landlock ABI, asked without

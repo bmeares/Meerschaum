@@ -65,9 +65,14 @@ engine, jobs, server and CLI depend on this crate, never the reverse).
 
 ### Transport
 
-The host binds a listener and starts the worker with `--socket ADDRESS`; the worker connects.
+The host creates the channel and starts the worker with `--socket ADDRESS`.
 
-- **Unix:** a Unix domain socket `s.sock` in a fresh `0700` directory under the temp dir.
+- **Unix** (5.1): a socket pair. The worker inherits its end and is passed `--socket fd:<n>`
+  (the descriptor number); nothing listens, so no other process (of this user or another, an
+  isolated team's code included) can connect in the worker's place, receive its calls or keep
+  it out. Before 5.1 the host listened on `s.sock` in a fresh `0700` directory, which any
+  process of the same user could connect to first. The worker host program embedded in the
+  binary opens `fd:` addresses itself for a `meerschaum` package whose worker does not.
 - **Windows:** a named pipe `\\.\pipe\mrsm-w-<pid>-<id>` (first instance, remote clients
   rejected). The Rust side compiles on Windows; the Python side opens the pipe as a file. Unix is
   the tested platform.

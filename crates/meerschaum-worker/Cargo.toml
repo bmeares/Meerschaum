@@ -32,6 +32,10 @@ rmpv = "1"
 sha2 = { workspace = true }
 hex = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# The worker's end of its socket pair survives `exec` (`transport`).
+rustix = { version = "1", features = ["std"] }
+
 [dev-dependencies]
 meerschaum-connector-sql = { workspace = true }
 tempfile = "3"

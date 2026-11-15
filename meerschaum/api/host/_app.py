@@ -184,9 +184,10 @@ def _import_uvicorn():
 class ProxyTokenMiddleware:
     """
     A pure ASGI middleware answering `403` (HTTP) or closing the connection (websocket) unless the
-    request carries `X-Mrsm-Host-Proxy-Token` equal to `token`. On a TCP port any local process
-    can connect; the token (known to the Rust server that started the host) is what makes the
-    host reachable only through the proxy.
+    request carries `X-Mrsm-Host-Proxy-Token` equal to `token`. Any local process of the server's
+    operating-system user can connect to a TCP port or to the host's Unix socket; the token
+    (known to the Rust server that started the host) is what makes the host reachable only
+    through the proxy.
     """
 
     def __init__(self, app, token: str):
@@ -289,6 +290,16 @@ def exit_with_parent() -> Optional[threading.Thread]:
     return thread
 
 
+def take_proxy_token() -> str:
+    """
+    Return the per-start token the Rust server gave this host (`MRSM_API_HOST_PROXY_TOKEN`), and
+    remove it from this process's environment before any plugin is imported, so nothing this
+    host starts (a job, a subprocess of a plugin) inherits it.
+    """
+    from meerschaum.api.host import PROXY_TOKEN_ENV
+    return os.environ.pop(PROXY_TOKEN_ENV, '') or ''
+
+
 def run_tcp(host: str, port: int, debug: bool = False) -> None:
     """
     Serve the host app with uvicorn on a TCP port (the Windows transport); see
@@ -296,11 +307,11 @@ def run_tcp(host: str, port: int, debug: bool = False) -> None:
     """
     from meerschaum.api.host import PROXY_TOKEN_ENV
     from meerschaum.utils.venv import Venv
+    token = take_proxy_token()
     exit_with_parent()
     with Venv('mrsm', debug=debug):
         uvicorn = _import_uvicorn()
         app = build_app(debug=debug)
-        token = os.environ.get(PROXY_TOKEN_ENV, '')
         if not token:
             # Any local process can connect to a TCP port: never serve one without the token.
             raise SystemExit(
@@ -327,15 +338,20 @@ def run(socket_path: str, debug: bool = False) -> None:
     has returned, so the environment holding them must stay on `sys.path` until the server stops.
     """
     from meerschaum.utils.venv import Venv
+    ### 5.1: a host the Rust server started requires its per-start token on the Unix socket too:
+    ### another process of the same operating-system user (an isolated team's code on a kernel
+    ### that does not restrict connecting to pathname Unix sockets) that connects is refused.
+    token = take_proxy_token()
     exit_with_parent()
     with Venv('mrsm', debug=debug):
         uvicorn = _import_uvicorn()
         app = build_app(debug=debug)
+        served = ProxyTokenMiddleware(app, token) if token else app
         if os.path.exists(socket_path):
             os.remove(socket_path)
         os.makedirs(os.path.dirname(os.path.abspath(socket_path)), exist_ok=True)
         uvicorn.run(
-            app,
+            served,
             uds=socket_path,
             log_level=('debug' if debug else 'warning'),
             proxy_headers=False,

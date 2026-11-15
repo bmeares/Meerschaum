@@ -19,6 +19,25 @@ sys.stdout = sys.stderr
 from meerschaum.worker import main
 from meerschaum.worker import _ops
 
+# 5.1: the Rust host passes the worker's end of a socket pair (`--socket fd:<n>`). A package
+# whose worker only connects to a socket path opens it here.
+try:
+    from meerschaum.worker import _server as _worker_server
+    if not getattr(_worker_server, 'SUPPORTS_INHERITED_CHANNEL', False):
+        _connect_path = _worker_server._connect
+
+        def _connect_channel(address):
+            if str(address).startswith('fd:'):
+                import socket as _socket
+                sock = _socket.socket(fileno=int(str(address)[3:]))
+                sock.set_inheritable(False)
+                return sock.makefile('rwb', buffering=1024 * 1024)
+            return _connect_path(address)
+
+        _worker_server._connect = _connect_channel
+except Exception:
+    pass
+
 # This interpreter is a worker: while it imports a plugin, no worker is started (a plugin whose
 # import syncs a `plugin:` pipe or calls `mrsm.entry()` would recurse without end).
 try:
