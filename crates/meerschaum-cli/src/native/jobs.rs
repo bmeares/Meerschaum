@@ -1762,7 +1762,8 @@ pub fn run_schedule_jittered(
             finished = pending.is_none();
         }
         if let (Some(scheduler), Some(job)) = (&scheduler, &job) {
-            let fired = chrono::Utc::now().fixed_offset();
+            // Recorded with the offset of the fire it served (the schedule's zone, if any).
+            let fired = chrono::Utc::now().with_timezone(next.offset());
             let _ = scheduler.record_fire(job, schedule, fired, pending);
         }
         if finished {

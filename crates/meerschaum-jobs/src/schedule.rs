@@ -4,6 +4,11 @@
 //! `_CalendarIntervalTrigger`, `_CronTrigger`, `_OrTrigger` and `_AndTrigger`. Times are aware
 //! datetimes with a fixed UTC offset; all arithmetic is done in whole microseconds, which is what
 //! Python's `datetime.fromtimestamp(ts + step, tz)` round-trips to.
+//!
+//! A schedule may carry a zone (an abbreviation of the host's zone after `starting`, which v4
+//! reads as `tzlocal()`): its triggers then step on that zone's wall
+//! clock (see [`crate::zoned`]) and report each fire time with the zone's offset at that instant.
+//! Without one they keep the fixed offset of the start.
 
 use chrono::{
     DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
@@ -14,6 +19,7 @@ use regex::Regex;
 use std::sync::Arc;
 
 use crate::local_zone::LocalZone;
+use crate::zoned::{Policy, ScheduleZone, Stream, WallSource, occurrence_of};
 
 /// An aware datetime with a fixed offset (`datetime` with `tzinfo`).
 pub type Fire = DateTime<FixedOffset>;
@@ -124,6 +130,7 @@ pub struct IntervalTrigger {
     start_time: Fire,
     interval_us: i64,
     last: Option<Fire>,
+    zoned: Option<Box<Zoned<IntervalWalls>>>,
 }
 
 impl IntervalTrigger {
@@ -135,10 +142,36 @@ impl IntervalTrigger {
             start_time,
             interval_us,
             last: None,
+            zoned: None,
         })
     }
 
+    /// Step on `zone`'s wall clock from `start` (see [`crate::zoned`]).
+    fn new_zoned(
+        start: &Start,
+        zone: ScheduleZone,
+        interval_us: i64,
+    ) -> Result<Self, ScheduleError> {
+        let mut trigger = IntervalTrigger::new(start.fire, interval_us)?;
+        let walls = IntervalWalls {
+            anchor: start.wall,
+            step_us: interval_us,
+            k: 0,
+        };
+        trigger.zoned = Some(Box::new(Zoned::new(
+            zone,
+            Policy::interval(interval_us),
+            start,
+            walls,
+            true,
+        )));
+        Ok(trigger)
+    }
+
     fn next(&mut self) -> Option<Fire> {
+        if let Some(z) = &mut self.zoned {
+            return z.next();
+        }
         let next = match self.last {
             None => self.start_time,
             Some(last) => add_us(last, self.interval_us),
@@ -148,6 +181,25 @@ impl IntervalTrigger {
     }
 
     fn next_after(&mut self, after: Fire) -> Option<Fire> {
+        if let Some(z) = &mut self.zoned {
+            // PARITY: v4 returns `start + timedelta(0)`, which drops `fold`: for a start written
+            // as the second occurrence of a repeated wall time that is an hour before the start.
+            if after < z.start {
+                return z.restart();
+            }
+            // Resume the wall-clock steps a few intervals before `after` (a repeated period can
+            // put a later step's instant before an earlier one's); the stream drops the rest.
+            let step = self.interval_us;
+            let wall_after = z.stream.zone.wall(&after);
+            let delta = (wall_after - z.walls.anchor)
+                .num_microseconds()
+                .unwrap_or(i64::MAX);
+            let margin = 3 * 3_600_000_000 / step + 1;
+            z.walls.k = (delta.div_euclid(step) - margin).max(0);
+            let seed = if z.walls.k == 0 { z.seed } else { None };
+            z.stream.reset(Some(z.start), Some(after), seed);
+            return z.next();
+        }
         let diff = (after - self.start_time)
             .num_microseconds()
             .unwrap_or(i64::MAX);
@@ -156,6 +208,74 @@ impl IntervalTrigger {
         self.last = Some(next);
         Some(next)
     }
+}
+
+/// The wall times of a zoned interval: `anchor + k * step`.
+#[derive(Debug, Clone)]
+struct IntervalWalls {
+    anchor: NaiveDateTime,
+    step_us: i64,
+    k: i64,
+}
+
+impl WallSource for IntervalWalls {
+    fn next_wall(&mut self) -> Option<NaiveDateTime> {
+        let offset = Duration::microseconds(self.step_us.checked_mul(self.k)?);
+        let wall = self.anchor.checked_add_signed(offset)?;
+        self.k += 1;
+        (wall.year() <= 9999).then_some(wall)
+    }
+}
+
+/// A zoned trigger's state: its wall-time source, the stream that resolves it, and its start.
+#[derive(Debug, Clone)]
+struct Zoned<W: WallSource + Clone> {
+    stream: Stream,
+    walls: W,
+    /// The first source state, for a restart.
+    initial: W,
+    /// The start instant: nothing fires before it.
+    start: Fire,
+    /// The start itself, when it is an occurrence of its wall time (it fires first).
+    seed: Option<Fire>,
+}
+
+impl<W: WallSource + Clone> Zoned<W> {
+    /// `seeded`: the start is the first fire (intervals and calendar steps; a cron start fires
+    /// only when it matches).
+    fn new(zone: ScheduleZone, policy: Policy, start: &Start, walls: W, seeded: bool) -> Self {
+        let seed = seeded
+            .then(|| occurrence_of(&zone, start.wall, start.fire))
+            .flatten();
+        let mut stream = Stream::new(zone, policy);
+        stream.reset(Some(start.fire), None, seed);
+        Zoned {
+            stream,
+            initial: walls.clone(),
+            walls,
+            start: start.fire,
+            seed,
+        }
+    }
+
+    fn next(&mut self) -> Option<Fire> {
+        self.stream.next(&mut self.walls)
+    }
+
+    /// Start over from the first fire time and return it.
+    fn restart(&mut self) -> Option<Fire> {
+        self.walls = self.initial.clone();
+        self.stream.reset(Some(self.start), None, self.seed);
+        self.next()
+    }
+}
+
+/// A schedule's start: the instant it names and its wall time in the schedule's zone (the
+/// written time when it was read in the zone, else the instant's wall time there).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Start {
+    fire: Fire,
+    wall: NaiveDateTime,
 }
 
 /// `_CalendarIntervalTrigger`: month / year steps which keep the start's day and skip invalid
@@ -168,6 +288,23 @@ pub struct CalendarIntervalTrigger {
     years: i32,
     months: i32,
     last_date: Option<NaiveDate>,
+    zoned: Option<Box<Zoned<CalendarWalls>>>,
+}
+
+/// The date `years` and `months` after `prev`, keeping its day and skipping months without it.
+fn calendar_step(prev: NaiveDate, years: i32, months: i32) -> Option<NaiveDate> {
+    let (mut year, mut month) = (prev.year(), prev.month() as i32);
+    loop {
+        month += months;
+        year += years + (month - 1).div_euclid(12);
+        month = (month - 1).rem_euclid(12) + 1;
+        if year > 9999 {
+            return None;
+        }
+        if let Some(d) = NaiveDate::from_ymd_opt(year, month as u32, prev.day()) {
+            return Some(d);
+        }
+    }
 }
 
 impl CalendarIntervalTrigger {
@@ -182,26 +319,42 @@ impl CalendarIntervalTrigger {
             years: years as i32,
             months: months as i32,
             last_date: None,
+            zoned: None,
         })
     }
 
+    /// Step on `zone`'s wall clock: the start's wall time on each calendar step.
+    fn new_zoned(
+        start: &Start,
+        zone: ScheduleZone,
+        years: i64,
+        months: i64,
+    ) -> Result<Self, ScheduleError> {
+        let mut trigger = CalendarIntervalTrigger::new(start.fire, years, months)?;
+        let walls = CalendarWalls {
+            start_date: start.wall.date(),
+            time: start.wall.time(),
+            years: years as i32,
+            months: months as i32,
+            last_date: None,
+        };
+        trigger.zoned = Some(Box::new(Zoned::new(
+            zone,
+            Policy::calendar(),
+            start,
+            walls,
+            true,
+        )));
+        Ok(trigger)
+    }
+
     fn next(&mut self) -> Option<Fire> {
+        if let Some(z) = &mut self.zoned {
+            return z.next();
+        }
         let next_date = match self.last_date {
             None => self.start_date,
-            Some(prev) => {
-                let (mut year, mut month) = (prev.year(), prev.month() as i32);
-                loop {
-                    month += self.months;
-                    year += self.years + (month - 1).div_euclid(12);
-                    month = (month - 1).rem_euclid(12) + 1;
-                    if year > 9999 {
-                        return None;
-                    }
-                    if let Some(d) = NaiveDate::from_ymd_opt(year, month as u32, prev.day()) {
-                        break d;
-                    }
-                }
-            }
+            Some(prev) => calendar_step(prev, self.years, self.months)?,
         };
         // PARITY: the `candidate.timetz() != self._time` DST check never fires for fixed offsets.
         let candidate = combine(next_date, self.time, self.tz)?;
@@ -210,12 +363,39 @@ impl CalendarIntervalTrigger {
     }
 
     fn next_after(&mut self, after: Fire) -> Option<Fire> {
+        if let Some(z) = &mut self.zoned {
+            // `next_after` walks from the start, as v4 does.
+            z.walls = z.initial.clone();
+            z.stream.reset(Some(z.start), Some(after), z.seed);
+            return z.next();
+        }
         self.last_date = None;
         let mut candidate = self.next()?;
         while candidate <= after {
             candidate = self.next()?;
         }
         Some(candidate)
+    }
+}
+
+/// The wall times of a zoned calendar interval.
+#[derive(Debug, Clone)]
+struct CalendarWalls {
+    start_date: NaiveDate,
+    time: NaiveTime,
+    years: i32,
+    months: i32,
+    last_date: Option<NaiveDate>,
+}
+
+impl WallSource for CalendarWalls {
+    fn next_wall(&mut self) -> Option<NaiveDateTime> {
+        let date = match self.last_date {
+            None => self.start_date,
+            Some(prev) => calendar_step(prev, self.years, self.months)?,
+        };
+        self.last_date = Some(date);
+        Some(NaiveDateTime::new(date, self.time))
     }
 }
 
@@ -387,11 +567,9 @@ impl Default for CronFields {
     }
 }
 
-/// `_CronTrigger`: the five-field cron subset (plus year and second).
+/// The fields a `_CronTrigger` matches, expanded.
 #[derive(Debug, Clone)]
-pub struct CronTrigger {
-    start_time: Fire,
-    tz: FixedOffset,
+struct CronMatcher {
     minutes: Vec<i64>,
     hours: Vec<i64>,
     days: Vec<i64>,
@@ -401,9 +579,51 @@ pub struct CronTrigger {
     weekdays_have_wildcard: bool,
     years: Option<Vec<i64>>,
     seconds: Vec<i64>,
+}
+
+impl CronMatcher {
+    fn date_matches<T: Datelike>(&self, c: &T) -> bool {
+        let mut day_matches = self.days.contains(&(c.day() as i64));
+        let weekday_matches = self.weekdays.contains(&c.weekday().num_days_from_monday());
+        if self.days_have_wildcard || self.weekdays_have_wildcard {
+            day_matches = day_matches && weekday_matches;
+        } else {
+            day_matches = day_matches || weekday_matches;
+        }
+        self.years
+            .as_ref()
+            .is_none_or(|y| y.contains(&(c.year() as i64)))
+            && self.months.contains(&(c.month() as i64))
+            && day_matches
+    }
+
+    fn matches<T: Datelike + Timelike>(&self, c: &T) -> bool {
+        self.date_matches(c)
+            && self.hours.contains(&(c.hour() as i64))
+            && self.minutes.contains(&(c.minute() as i64))
+            && self.seconds.contains(&(c.second() as i64))
+    }
+
+    fn min_second(&self) -> u32 {
+        self.seconds.first().copied().unwrap_or(0) as u32
+    }
+}
+
+/// `_CronTrigger`: the five-field cron subset (plus year and second).
+#[derive(Debug, Clone)]
+pub struct CronTrigger {
+    start_time: Fire,
+    tz: FixedOffset,
+    m: CronMatcher,
     microsecond: u32,
     step_seconds: i64,
     last: Option<Fire>,
+    zoned: Option<Box<Zoned<CronWalls>>>,
+}
+
+/// v4's `max_iterations` of one `_CronTrigger.next()` call.
+fn cron_max_iterations(step_seconds: i64) -> u64 {
+    11 * 366 * 24 * 60 * if step_seconds == 1 { 60 } else { 1 }
 }
 
 impl CronTrigger {
@@ -424,49 +644,51 @@ impl CronTrigger {
         Ok(CronTrigger {
             tz: *start_time.offset(),
             start_time,
-            minutes,
-            hours,
-            days,
-            days_have_wildcard: f.day.contains('*'),
-            months,
-            weekdays,
-            weekdays_have_wildcard: f.day_of_week.contains('*'),
-            years,
-            seconds,
+            m: CronMatcher {
+                minutes,
+                hours,
+                days,
+                days_have_wildcard: f.day.contains('*'),
+                months,
+                weekdays,
+                weekdays_have_wildcard: f.day_of_week.contains('*'),
+                years,
+                seconds,
+            },
             microsecond: f.microsecond,
             step_seconds,
             last: None,
+            zoned: None,
         })
     }
 
-    fn date_matches(&self, c: &Fire) -> bool {
-        let mut day_matches = self.days.contains(&(c.day() as i64));
-        let weekday_matches = self.weekdays.contains(&c.weekday().num_days_from_monday());
-        if self.days_have_wildcard || self.weekdays_have_wildcard {
-            day_matches = day_matches && weekday_matches;
-        } else {
-            day_matches = day_matches || weekday_matches;
-        }
-        self.years
-            .as_ref()
-            .is_none_or(|y| y.contains(&(c.year() as i64)))
-            && self.months.contains(&(c.month() as i64))
-            && day_matches
-    }
-
-    fn matches(&self, c: &Fire) -> bool {
-        self.date_matches(c)
-            && self.hours.contains(&(c.hour() as i64))
-            && self.minutes.contains(&(c.minute() as i64))
-            && self.seconds.contains(&(c.second() as i64))
+    /// Match the fields against `zone`'s wall clock. An hour field that is a wildcard or a step
+    /// fires through a repeated hour twice and not inside a gap; a specific hour fires once.
+    fn new_zoned(start: &Start, zone: ScheduleZone, f: CronFields) -> Result<Self, ScheduleError> {
+        let wildcard_hour = f.hour.contains('*') || f.hour.contains('/');
+        let mut trigger = CronTrigger::new(start.fire, f)?;
+        let walls = CronWalls {
+            m: trigger.m.clone(),
+            step_seconds: trigger.step_seconds,
+            candidate: CronWalls::first_candidate(
+                start.wall,
+                trigger.microsecond,
+                trigger.step_seconds,
+                trigger.m.min_second(),
+            ),
+        };
+        trigger.zoned = Some(Box::new(Zoned::new(
+            zone,
+            Policy::cron(wildcard_hour),
+            start,
+            walls,
+            false,
+        )));
+        Ok(trigger)
     }
 
     fn with_micro(dt: Fire, micro: u32) -> Fire {
         dt.with_nanosecond(micro * 1000).unwrap_or(dt)
-    }
-
-    fn min_second(&self) -> u32 {
-        self.seconds.first().copied().unwrap_or(0) as u32
     }
 
     fn step(&self, dt: Fire) -> Fire {
@@ -474,11 +696,14 @@ impl CronTrigger {
     }
 
     fn next(&mut self) -> Option<Fire> {
+        if let Some(z) = &mut self.zoned {
+            return z.next();
+        }
         let mut candidate = match self.last {
             None => {
                 let mut c = Self::with_micro(self.start_time, self.microsecond);
                 if self.step_seconds == 60 {
-                    c = c.with_second(self.min_second()).unwrap_or(c);
+                    c = c.with_second(self.m.min_second()).unwrap_or(c);
                 }
                 if c < self.start_time {
                     c = self.step(c);
@@ -489,13 +714,12 @@ impl CronTrigger {
         };
         // PARITY: a rejected date jumps to the next day at the *same time of day*, so e.g. `mon`
         // first fires on Monday at the start's wall-clock time, not at midnight.
-        let max_iterations: u64 = 11 * 366 * 24 * 60 * if self.step_seconds == 1 { 60 } else { 1 };
-        for _ in 0..max_iterations {
-            if self.matches(&candidate) {
+        for _ in 0..cron_max_iterations(self.step_seconds) {
+            if self.m.matches(&candidate) {
                 self.last = Some(candidate);
                 return Some(candidate);
             }
-            if !self.date_matches(&candidate) {
+            if !self.m.date_matches(&candidate) {
                 let date = candidate.date_naive().succ_opt()?;
                 candidate = combine(date, candidate.time(), self.tz)?;
                 continue;
@@ -506,6 +730,32 @@ impl CronTrigger {
     }
 
     fn next_after(&mut self, after: Fire) -> Option<Fire> {
+        if let Some(z) = &mut self.zoned {
+            if after < z.start {
+                return z.restart();
+            }
+            let wall_after = z.stream.zone.wall(&after);
+            let mut candidate = wall_after
+                .with_nanosecond(self.microsecond * 1000)
+                .unwrap_or(wall_after);
+            if self.step_seconds == 60 {
+                candidate = candidate
+                    .with_second(self.m.min_second())
+                    .unwrap_or(candidate);
+            }
+            if candidate <= wall_after {
+                candidate += Duration::seconds(self.step_seconds);
+            }
+            // A wildcard hour fires a repeated hour's second occurrences after its first ones:
+            // walk the hours before `after` on its (matching) date again so they are not missed.
+            if z.stream.policy == Policy::cron(true) && self.m.date_matches(&candidate) {
+                let midnight = candidate.date().and_time(NaiveTime::MIN);
+                candidate = (candidate - Duration::hours(3)).max(midnight);
+            }
+            z.walls.candidate = Some(candidate);
+            z.stream.reset(Some(z.start), Some(after), None);
+            return z.next();
+        }
         if after < self.start_time {
             self.last = None;
             return self.next();
@@ -514,7 +764,7 @@ impl CronTrigger {
         let mut candidate = Self::with_micro(after, self.microsecond);
         if self.step_seconds == 60 {
             candidate = candidate
-                .with_second(self.min_second())
+                .with_second(self.m.min_second())
                 .unwrap_or(candidate);
         }
         if candidate <= after {
@@ -522,6 +772,57 @@ impl CronTrigger {
         }
         self.last = Some(candidate - Duration::seconds(self.step_seconds));
         self.next()
+    }
+}
+
+/// The wall times a zoned cron trigger matches, walked the way v4 walks its candidates.
+#[derive(Debug, Clone)]
+struct CronWalls {
+    m: CronMatcher,
+    step_seconds: i64,
+    /// The next wall time to test.
+    candidate: Option<NaiveDateTime>,
+}
+
+impl CronWalls {
+    /// v4's first candidate: the start with the trigger's microsecond (and smallest second),
+    /// stepped once when that is before the start.
+    fn first_candidate(
+        start: NaiveDateTime,
+        microsecond: u32,
+        step_seconds: i64,
+        min_second: u32,
+    ) -> Option<NaiveDateTime> {
+        let mut c = start.with_nanosecond(microsecond * 1000).unwrap_or(start);
+        if step_seconds == 60 {
+            c = c.with_second(min_second).unwrap_or(c);
+        }
+        if c < start {
+            c += Duration::seconds(step_seconds);
+        }
+        Some(c)
+    }
+}
+
+impl WallSource for CronWalls {
+    fn next_wall(&mut self) -> Option<NaiveDateTime> {
+        let mut candidate = self.candidate?;
+        let step = Duration::seconds(self.step_seconds);
+        // PARITY: a rejected date jumps to the next day at the same time of day (see
+        // `CronTrigger::next`).
+        for _ in 0..cron_max_iterations(self.step_seconds) {
+            if self.m.matches(&candidate) {
+                self.candidate = candidate.checked_add_signed(step);
+                return Some(candidate);
+            }
+            if !self.m.date_matches(&candidate) {
+                candidate = NaiveDateTime::new(candidate.date().succ_opt()?, candidate.time());
+                continue;
+            }
+            candidate = candidate.checked_add_signed(step)?;
+        }
+        self.candidate = None;
+        None
     }
 }
 
@@ -554,6 +855,20 @@ impl Trigger {
             Trigger::Or(..) => "_OrTrigger",
             Trigger::And(..) => "_AndTrigger",
             Trigger::Jittered(..) => "_JitteredTrigger",
+        }
+    }
+
+    /// The zone this trigger steps in (the host's zone named by an abbreviation
+    /// after `starting`), or `None` for fixed-offset stepping.
+    pub fn zone(&self) -> Option<ScheduleZone> {
+        match self {
+            Trigger::Interval(t) => t.zoned.as_ref().map(|z| z.stream.zone),
+            Trigger::Calendar(t) => t.zoned.as_ref().map(|z| z.stream.zone),
+            Trigger::Cron(t) => t.zoned.as_ref().map(|z| z.stream.zone),
+            Trigger::Or(triggers, _) | Trigger::And(triggers, _) => {
+                triggers.iter().find_map(Trigger::zone)
+            }
+            Trigger::Jittered(inner, _) => inner.zone(),
         }
     }
 
@@ -721,7 +1036,8 @@ pub struct JitterSpec<'a> {
 /// `time.tzname`, and the default date ("today" on the local wall clock). Tests pin both.
 #[derive(Debug, Clone)]
 pub struct ParseEnv {
-    /// The local zone, or `None` when it is unknown (no abbreviation then means "local").
+    /// The local zone, or `None` when it is unknown (no abbreviation then means "local"). Always
+    /// `None` on Windows (see [`LocalZone::detect`]).
     pub local: Option<Arc<LocalZone>>,
     /// The date a bare time (`21:00`) takes.
     pub today: NaiveDate,
@@ -736,6 +1052,15 @@ impl ParseEnv {
             None => chrono::Local::now().date_naive(),
         };
         ParseEnv { local, today }
+    }
+
+    /// A process whose zone is the IANA zone `name`, as Python sees it at `as_of`, on `today`
+    /// (for tests and for callers that pin the zone).
+    pub fn in_zone(name: &str, as_of: chrono::DateTime<chrono::Utc>, today: NaiveDate) -> ParseEnv {
+        ParseEnv {
+            local: LocalZone::from_name(name, as_of).map(Arc::new),
+            today,
+        }
     }
 }
 
@@ -775,7 +1100,8 @@ pub fn parse_schedule_in(
     spec: Option<JitterSpec<'_>>,
     env: &ParseEnv,
 ) -> Result<(Trigger, Vec<String>), ScheduleError> {
-    let (base, offset_us) = jitter_offset_us(schedule, spec)?;
+    let (base, suffix) = split_jitter(schedule)?;
+    let offset_us = jitter_us(&base, suffix, spec);
     let mut warnings = Vec::new();
     let trigger = parse_schedule_unjittered(&base, now, env, &mut warnings)?;
     if offset_us == 0 {
@@ -784,29 +1110,37 @@ pub fn parse_schedule_in(
     Ok((Trigger::Jittered(Box::new(trigger), offset_us), warnings))
 }
 
-/// A schedule without its `jitter` suffix, and the fixed offset of its fire times in
-/// microseconds (see [`parse_schedule_jittered`]).
-fn jitter_offset_us(
-    schedule: &str,
-    spec: Option<JitterSpec<'_>>,
-) -> Result<(String, i64), ScheduleError> {
-    let (base, suffix) = split_jitter(schedule)?;
+/// The fixed offset of a schedule's fire times in microseconds (see [`parse_schedule_jittered`]):
+/// its own `jitter` suffix, else the default, seeded by the job (or the schedule without its
+/// suffix).
+fn jitter_us(base: &str, suffix: Option<f64>, spec: Option<JitterSpec<'_>>) -> i64 {
     let seconds = suffix.or(spec.map(|s| s.default_seconds)).unwrap_or(0.0);
-    let offset = crate::startup::fixed_offset(spec.map_or(base.as_str(), |s| s.seed), seconds);
-    Ok((base, offset.as_micros() as i64))
+    crate::startup::fixed_offset(spec.map_or(base, |s| s.seed), seconds).as_micros() as i64
 }
 
 /// [`parse_schedule_jittered`] for a job that resumes `fire`, a fire time an earlier process
 /// drew from this schedule: the trigger is anchored there, so `next_after(fire)` keeps the
-/// cadence of that fire (`daily` stays 24 hours after it) instead of starting over from the
-/// restart. Cron fields and an explicit `starting` time do not depend on the anchor.
+/// cadence of that fire (`daily` stays 24 hours after it, a start in the host's zone stays at its
+/// wall-clock time across a daylight-saving change) instead of starting over from the restart. Cron fields
+/// and an explicit `starting` time do not depend on the anchor.
 pub fn parse_schedule_resumed(
     schedule: &str,
     fire: Fire,
     spec: Option<JitterSpec<'_>>,
 ) -> Result<Trigger, ScheduleError> {
-    let (_, offset_us) = jitter_offset_us(schedule, spec)?;
-    parse_schedule_jittered(schedule, add_us(fire, -offset_us), spec)
+    parse_schedule_resumed_in(schedule, fire, spec, &ParseEnv::process())
+}
+
+/// [`parse_schedule_resumed`] in an explicit [`ParseEnv`].
+pub fn parse_schedule_resumed_in(
+    schedule: &str,
+    fire: Fire,
+    spec: Option<JitterSpec<'_>>,
+    env: &ParseEnv,
+) -> Result<Trigger, ScheduleError> {
+    let (base, suffix) = split_jitter(schedule)?;
+    let offset_us = jitter_us(&base, suffix, spec);
+    parse_schedule_in(schedule, add_us(fire, -offset_us), spec, env).map(|(t, _)| t)
 }
 
 /// The longest gap between a schedule's next few fire times, in seconds (`every 10 minutes`:
@@ -845,7 +1179,21 @@ fn parse_schedule_unjittered(
     warnings: &mut Vec<String>,
 ) -> Result<Trigger, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
-    let starting_ts = parse_start_time_in(&schedule, Some(now), env, warnings)?;
+    let info = parse_start(&schedule, Some(now), env, warnings)?;
+    let starting_ts = info.fire;
+    // The zone the triggers step in: the host's when the start was written with one of its
+    // abbreviations (v4's `tzlocal()`), else none (a fixed offset).
+    let zone = if info.local {
+        env.local.as_ref().map(|l| ScheduleZone::host(l.tz()))
+    } else {
+        None
+    };
+    let start = zone.map(|z| Start {
+        fire: starting_ts,
+        wall: info.wall.unwrap_or_else(|| z.wall(&starting_ts)),
+    });
+    // The start's wall-clock fields (a named weekday or month keeps the start's minute).
+    let anchor = start.map_or(starting_ts.naive_local(), |s| s.wall);
     let mut s = schedule
         .split(STARTING_KEYWORD)
         .next()
@@ -901,10 +1249,18 @@ fn parse_schedule_unjittered(
                 }
                 let n = num as i64;
                 let (years, months) = if unit == "years" { (n, 0) } else { (0, n) };
-                Trigger::Calendar(CalendarIntervalTrigger::new(starting_ts, years, months)?)
+                Trigger::Calendar(match (&start, zone) {
+                    (Some(start), Some(zone)) => {
+                        CalendarIntervalTrigger::new_zoned(start, zone, years, months)?
+                    }
+                    _ => CalendarIntervalTrigger::new(starting_ts, years, months)?,
+                })
             } else {
                 let us = timedelta_us(&unit, num).map_err(freq)?;
-                Trigger::Interval(IntervalTrigger::new(starting_ts, us)?)
+                Trigger::Interval(match (&start, zone) {
+                    (Some(start), Some(zone)) => IntervalTrigger::new_zoned(start, zone, us)?,
+                    _ => IntervalTrigger::new(starting_ts, us)?,
+                })
             }
         } else {
             let prefix3: String = part.chars().take(3).collect::<String>().to_lowercase();
@@ -925,15 +1281,15 @@ fn parse_schedule_unjittered(
                 fields.minute = if has_minutes || has_seconds {
                     "*".into()
                 } else {
-                    starting_ts.minute().to_string()
+                    anchor.minute().to_string()
                 };
                 fields.second = if has_seconds {
                     "*".into()
                 } else {
-                    starting_ts.second().to_string()
+                    anchor.second().to_string()
                 };
-                fields.microsecond = starting_ts.nanosecond() / 1000;
-                Trigger::Cron(CronTrigger::new(starting_ts, fields)?)
+                fields.microsecond = anchor.nanosecond() / 1000;
+                Trigger::Cron(new_cron(starting_ts, start.as_ref(), zone, fields)?)
             } else {
                 let cron_parts: Vec<&str> = part.split_whitespace().collect();
                 if cron_parts.len() != 5 {
@@ -944,7 +1300,7 @@ fn parse_schedule_unjittered(
                 fields.day = cron_parts[2].into();
                 fields.month = cron_parts[3].into();
                 fields.day_of_week = cron_parts[4].into();
-                Trigger::Cron(CronTrigger::new(starting_ts, fields)?)
+                Trigger::Cron(new_cron(starting_ts, start.as_ref(), zone, fields)?)
             }
         };
         triggers.push(trigger);
@@ -971,6 +1327,41 @@ pub fn parse_start_time_in(
     env: &ParseEnv,
     warnings: &mut Vec<String>,
 ) -> Result<Fire, ScheduleError> {
+    parse_start(schedule, now, env, warnings).map(|info| info.fire)
+}
+
+/// A `_CronTrigger`, matched on `zone`'s wall clock when there is one.
+fn new_cron(
+    starting_ts: Fire,
+    start: Option<&Start>,
+    zone: Option<ScheduleZone>,
+    fields: CronFields,
+) -> Result<CronTrigger, ScheduleError> {
+    match (start, zone) {
+        (Some(start), Some(zone)) => CronTrigger::new_zoned(start, zone, fields),
+        _ => CronTrigger::new(starting_ts, fields),
+    }
+}
+
+/// What a `starting` clause names.
+struct StartInfo {
+    /// The instant.
+    fire: Fire,
+    /// The wall time as written, when it was read in the host's zone through one of its
+    /// abbreviations.
+    wall: Option<NaiveDateTime>,
+    /// Whether the time carried an abbreviation of the host's zone (dateutil's `tzlocal()`).
+    local: bool,
+}
+
+/// The starting time of `schedule` (v4's `parse_start_time`), with the wall time as written
+/// when it carried an abbreviation of the host's zone.
+fn parse_start(
+    schedule: &str,
+    now: Option<Fire>,
+    env: &ParseEnv,
+    warnings: &mut Vec<String>,
+) -> Result<StartInfo, ScheduleError> {
     let schedule = canonicalize_starting_keyword(schedule);
     let parts: Vec<&str> = schedule.split(STARTING_KEYWORD).collect();
     let starting_str = if parts.len() == 1 {
@@ -981,8 +1372,13 @@ pub fn parse_start_time_in(
     .trim();
     let now = now.unwrap_or_else(|| chrono::Utc::now().fixed_offset());
     let err = ScheduleError::StartTime;
+    let instant = |fire: Fire| StartInfo {
+        fire,
+        wall: None,
+        local: false,
+    };
     let starting = if starting_str == "now" {
-        now
+        instant(now)
     } else if starting_str.starts_with("in ") {
         let replaced = starting_str.replace("in ", "");
         let delta_vals: Vec<&str> = replaced.splitn(2, ' ').collect();
@@ -997,7 +1393,7 @@ pub fn parse_start_time_in(
             ))
         })?;
         let us = timedelta_us(&unit, num).map_err(err)?;
-        add_us(now, us)
+        instant(add_us(now, us))
     } else if starting_str.contains("tomorrow") || starting_str.contains("today") {
         // `round_time(now, timedelta(days=1))`: midnight of `now`'s wall-clock date.
         let today = combine(now.date_naive(), NaiveTime::MIN, *now.offset())
@@ -1015,15 +1411,25 @@ pub fn parse_start_time_in(
             let parsed = parse_datetime_in(&time_str, env, warnings).map_err(err)?;
             (parsed.hour(), parsed.minute())
         };
-        (if is_tomorrow { tomorrow } else { today })
-            + Duration::hours(hour as i64)
-            + Duration::minutes(minute as i64)
+        instant(
+            (if is_tomorrow { tomorrow } else { today })
+                + Duration::hours(hour as i64)
+                + Duration::minutes(minute as i64),
+        )
     } else {
-        match parse_datetime_in(starting_str, env, warnings).map_err(err)? {
-            Parsed::Naive(n) => FixedOffset::east_opt(0)
-                .and_then(|utc| utc.from_local_datetime(&n).single())
-                .ok_or_else(|| err("Invalid datetime.".to_string()))?,
-            Parsed::Aware(a) => a,
+        let (parsed, local) = parse_datetime_flagged(starting_str, env, warnings).map_err(err)?;
+        match parsed {
+            Parsed::Naive(n) => instant(
+                FixedOffset::east_opt(0)
+                    .and_then(|utc| utc.from_local_datetime(&n).single())
+                    .ok_or_else(|| err("Invalid datetime.".to_string()))?,
+            ),
+            // The written wall time on the host's clock (its offset is the zone's on that date).
+            Parsed::Aware(a) => StartInfo {
+                fire: a,
+                wall: local.then(|| a.naive_local()),
+                local,
+            },
         }
     };
     Ok(starting)
@@ -1061,7 +1467,7 @@ pub fn parse_datetime(s: &str) -> Result<Parsed, String> {
 
 /// The subset of `dateutil.parser.parse()` the corpus uses: `YYYY-MM-DD` / `YYYY/MM/DD`, an
 /// optional `[T ]H:MM[:SS[.ffffff]]` with `AM` / `PM`, then an optional zone read the way
-/// dateutil reads it (see [`parse_tz_tail`] and [`build_tzaware`]), or a bare time (`10:00`,
+/// dateutil reads it (see `parse_tz_tail` and `build_tzaware`), or a bare time (`10:00`,
 /// `7pm`) on `env.today`. Errors carry dateutil's messages; dateutil's `UnknownTimezoneWarning` is
 /// pushed on `warnings`.
 pub fn parse_datetime_in(
@@ -1069,6 +1475,16 @@ pub fn parse_datetime_in(
     env: &ParseEnv,
     warnings: &mut Vec<String>,
 ) -> Result<Parsed, String> {
+    parse_datetime_flagged(s, env, warnings).map(|(parsed, _)| parsed)
+}
+
+/// [`parse_datetime_in`], and whether the zone was an abbreviation of the host's zone
+/// (dateutil's `tzlocal()`).
+fn parse_datetime_flagged(
+    s: &str,
+    env: &ParseEnv,
+    warnings: &mut Vec<String>,
+) -> Result<(Parsed, bool), String> {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
         Regex::new(
@@ -1329,13 +1745,13 @@ fn build_tzaware(
     tz: TzFields,
     env: &ParseEnv,
     warnings: &mut Vec<String>,
-) -> Option<Parsed> {
+) -> Option<(Parsed, bool)> {
     let utc = FixedOffset::east_opt(0)?;
     let aware = |offset: FixedOffset| {
         offset
             .from_local_datetime(&naive)
             .single()
-            .map(Parsed::Aware)
+            .map(|a| (Parsed::Aware(a), false))
     };
     let name = tz.name.as_deref().filter(|n| !n.is_empty());
     if let (Some(name), Some(local)) = (name, &env.local)
@@ -1352,7 +1768,7 @@ fn build_tzaware(
         if local.abbreviation(naive, fold) != name && matches!(name, "UTC" | "GMT" | "Z" | "z") {
             return aware(utc);
         }
-        return aware(local.offset(naive, fold));
+        return aware(local.offset(naive, fold)).map(|(parsed, _)| (parsed, true));
     }
     match tz.offset {
         Some(0) => aware(utc),
@@ -1366,7 +1782,7 @@ fn build_tzaware(
                     "tzname {name} identified but not understood.  The starting time is read as UTC; use a UTC offset such as -07:00 or an abbreviation of this host's time zone."
                 ));
             }
-            Some(Parsed::Naive(naive))
+            Some((Parsed::Naive(naive), false))
         }
     }
 }
@@ -1431,16 +1847,13 @@ mod tests {
     }
 
     fn new_york(as_of: &str) -> ParseEnv {
-        ParseEnv {
-            local: LocalZone::from_name(
-                "America/New_York",
-                chrono::DateTime::parse_from_rfc3339(as_of)
-                    .unwrap()
-                    .to_utc(),
-            )
-            .map(Arc::new),
-            today: NaiveDate::from_ymd_opt(2026, 11, 14).unwrap(),
-        }
+        ParseEnv::in_zone(
+            "America/New_York",
+            chrono::DateTime::parse_from_rfc3339(as_of)
+                .unwrap()
+                .to_utc(),
+            NaiveDate::from_ymd_opt(2026, 11, 14).unwrap(),
+        )
     }
 
     fn start(schedule: &str, env: &ParseEnv) -> (Result<String, String>, Vec<String>) {

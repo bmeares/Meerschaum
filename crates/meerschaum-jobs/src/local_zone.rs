@@ -90,6 +90,11 @@ impl LocalZone {
             .clone()
     }
 
+    /// The IANA zone.
+    pub fn tz(&self) -> Tz {
+        self.tz
+    }
+
     /// `time.tzname`.
     pub fn names(&self) -> [&str; 2] {
         [&self.names[0], &self.names[1]]

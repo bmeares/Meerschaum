@@ -67,6 +67,7 @@ pub mod supervisor;
 pub mod systemd;
 pub mod systemd_job;
 pub mod v4_pickle;
+pub mod zoned;
 
 pub use config::{JobPaths, JobsConfig, Seconds};
 pub use daemon::{Daemon, JobsContext, Status};
@@ -85,3 +86,4 @@ pub use scheduler::{RootScheduler, ScheduleState};
 pub use startup::{StartKind, StartupConfig, StartupPolicy};
 pub use summary::{JobSummary, get_job_summaries};
 pub use supervisor::Launcher;
+pub use zoned::ScheduleZone;
