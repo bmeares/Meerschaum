@@ -30,9 +30,9 @@
 //! view. A user in several isolated teams acts for the team of the object at hand (a pipe's team,
 //! a job's team) when they are in it, else for their primary team. Never for several at once.
 //!
-//! This keeps credentials of connectors a team was not given out of that team's processes. It is
-//! not isolation: those processes run as the server's operating-system user and can read what it
-//! can read on disk.
+//! This keeps credentials of connectors a team was not given out of that team's processes. Those
+//! processes run as the server's operating-system user; on Linux, [`sandbox`] restricts them to
+//! the team's own paths so they cannot read the rest from disk either.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -681,6 +681,8 @@ pub fn connector_variables(
         })
         .collect()
 }
+
+pub mod sandbox;
 
 mod environment;
 pub use environment::{
