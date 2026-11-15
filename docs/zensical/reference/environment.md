@@ -380,7 +380,7 @@ connectors:
 
 **Never written back.** Every command that writes configuration (`register connectors`, `delete connectors`, `login`, `bootstrap connectors`, `bootstrap teams`, the web console, `write_config()` and `write_plugin_config()` from Python) writes the file as you wrote it plus its own change. References stay references, and nothing that came only from the environment is ever written to a file: not an `MRSM_<TYPE>_<LABEL>` connector, not a value from `MRSM_CONFIG` / `MRSM_PATCH` (or their files), not a resolved secret.
 
-**File permissions.** On Unix, when a file in the config directory holds a secret written inline (a connector's password, a key, a token, or a URI with a password) and its group or others may read it, Meerschaum warns once per process with the file and the `chmod 600` that fixes it. Files a `MRSM{file:...}` reference reads are not checked (a Docker secret is world-readable inside its container by design), and nothing is checked on Windows. Files Meerschaum creates are readable by their owner only.
+**File permissions.** On Unix, when a file in the config directory holds a secret written inline (a value under a name that ends in a credential's word, such as `password`, `db_pass`, `client_secret`, `access_token`, `api_key`, `private_key` or `credentials`, or a URI with a password; not names such as `allowed_instance_keys` or `session_timeout`) and its group or others may read it, Meerschaum warns once per process with the file and the `chmod 600` that fixes it. Files a `MRSM{file:...}` reference reads are not checked (a Docker secret is world-readable inside its container by design), and nothing is checked on Windows. Files Meerschaum creates are readable by their owner only.
 
 ### With Docker secrets
 

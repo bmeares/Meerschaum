@@ -522,6 +522,77 @@ pub fn is_secret_name(name: &str) -> bool {
     SECRET_WORDS.iter().any(|word| lowered.contains(word))
 }
 
+/// The words that make a name a credential's when they end it ([`is_credential_name`]).
+pub const CREDENTIAL_WORDS: &[&str] = &[
+    "password",
+    "passwd",
+    "pass",
+    "pwd",
+    "pw",
+    "passphrase",
+    "secret",
+    "token",
+    "credential",
+    "credentials",
+    "apikey",
+    "privatekey",
+];
+
+/// The two-word endings that make a name a credential's (`api_key`, `private_key`, ...).
+pub const CREDENTIAL_PAIRS: &[(&str, &str)] = &[
+    ("api", "key"),
+    ("private", "key"),
+    ("secret", "key"),
+    ("access", "key"),
+    ("signing", "key"),
+];
+
+/// The words of a name: split at `_`, `-`, `.`, spaces and lowercase-to-uppercase steps
+/// (`apiKey`, `ADMIN_PASSWORD`), lowercase.
+fn name_words(name: &str) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut previous_lower = false;
+    for c in name.chars() {
+        if !c.is_alphanumeric() {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            previous_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && previous_lower && !current.is_empty() {
+            words.push(std::mem::take(&mut current));
+        }
+        previous_lower = c.is_lowercase() || c.is_ascii_digit();
+        current.extend(c.to_lowercase());
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// Whether a config key's name means a credential (5.1, for the readable-file warning): its last
+/// word is one of [`CREDENTIAL_WORDS`] (`password`, `db_pass`, `client_secret`, `access_token`,
+/// `credentials`) or its last two are one of [`CREDENTIAL_PAIRS`] (`api_key`, `privateKey`).
+/// Unlike [`is_secret_name`] (the masking code's broad net), a name that merely contains `key`,
+/// `auth`, `session` or `policy` is not one (`allowed_instance_keys`, `VALKEY_RDB_POLICY_DISABLED`,
+/// `session_timeout`), nor is a credential's file path (`GF_SECURITY_ADMIN_PASSWORD__FILE`).
+pub fn is_credential_name(name: &str) -> bool {
+    let words = name_words(name);
+    let Some(last) = words.last() else {
+        return false;
+    };
+    if CREDENTIAL_WORDS.contains(&last.as_str()) {
+        return true;
+    }
+    words.len() >= 2 && {
+        let pair = (words[words.len() - 2].as_str(), last.as_str());
+        CREDENTIAL_PAIRS.contains(&pair)
+    }
+}
+
 static INLINE_URI_PASSWORD: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"[A-Za-z][A-Za-z0-9+.\-]*://[^:/@\s?#]*:(?P<password>[^@\s]+)@")
         .expect("valid regex")
@@ -542,7 +613,7 @@ static SYMLINK_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"MRSM\{[^}\n]*\}").expect("valid regex"));
 
 /// The `:`-joined path of the first inline secret in a config file's value (5.1): a non-empty
-/// literal under a secret's name ([`is_secret_name`]: a connector password, a key, a token), or a
+/// literal under a credential's name ([`is_credential_name`]: a password, a token, an API key), or a
 /// URI with a password. References (`MRSM{file:...}`, `MRSM{env:...}`, other symlinks) are not
 /// inline secrets. The cosmetic `formatting` key (its icons are named `key`) is skipped.
 pub fn first_inline_secret(top_key: &str, value: &super::ConfigValue) -> Option<String> {
@@ -553,19 +624,17 @@ pub fn first_inline_secret(top_key: &str, value: &super::ConfigValue) -> Option<
     fn walk(name: &str, value: &ConfigValue, path: &str) -> Option<String> {
         match value {
             ConfigValue::Str(s) => {
-                let named = is_secret_name(name) && is_inline_literal(s);
+                let named = is_credential_name(name) && is_inline_literal(s);
                 let in_uri = INLINE_URI_PASSWORD
                     .captures(s)
                     .is_some_and(|c| is_inline_literal(&c["password"]));
                 (named || in_uri).then(|| path.to_string())
             }
             ConfigValue::Int(_) | ConfigValue::BigInt(_) | ConfigValue::Float(_)
-                if is_secret_name(name) && !name.to_lowercase().contains("key") =>
+                if is_credential_name(name) =>
             {
-                // A numeric password (`password: 1234`); not `max_keys: 10`.
-                name.to_lowercase()
-                    .contains("pass")
-                    .then(|| path.to_string())
+                // A numeric password (`password: 1234`, `pin`-like secrets); not `max_keys: 10`.
+                Some(path.to_string())
             }
             ConfigValue::Map(m) => m
                 .iter()

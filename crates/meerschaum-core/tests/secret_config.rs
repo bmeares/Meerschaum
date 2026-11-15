@@ -674,6 +674,67 @@ fn a_readable_file_with_an_inline_secret_is_reported() {
         ConfigValue::from_value(&Value::from_json_str(r#"{"emoji": {"key": "K"}}"#).unwrap());
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     assert!(secrets::exposure_warning(&path, "formatting", &icons).is_none());
+
+    // 5.1 regressions: names that contain `key`, `policy`, `auth`, `session`, ... but are no
+    // credential's (two reported on a real config: `allowed_instance_keys`,
+    // `VALKEY_RDB_POLICY_DISABLED`).
+    for (top, json) in [
+        (
+            "api",
+            r#"{"permissions": {"instances": {"allowed_instance_keys": ["*"]}}}"#,
+        ),
+        (
+            "stack",
+            r#"{"docker-compose.yaml": {"services": {"valkey": {"environment":
+                {"VALKEY_RDB_POLICY_DISABLED": "no", "VALKEY_RDB_POLICY": "900#1"}}}}}"#,
+        ),
+        (
+            "api",
+            r#"{"session_timeout": "30", "auth_type": "basic", "authority": "x"}"#,
+        ),
+        (
+            "meerschaum",
+            r#"{"sort_keys": "yes", "primary_key": "id", "key_file": "/k"}"#,
+        ),
+        (
+            "api",
+            r#"{"password_policy": "strict", "token_url": "https://example.com/t"}"#,
+        ),
+        (
+            "stack",
+            r#"{"grafana": {"GF_SECURITY_ADMIN_PASSWORD__FILE": "/run/secrets/x", "signal": "s"}}"#,
+        ),
+        (
+            "meerschaum",
+            r#"{"max_keys": 10, "compass": "n", "passthrough": "yes"}"#,
+        ),
+    ] {
+        let value = ConfigValue::from_value(&Value::from_json_str(json).unwrap());
+        assert_eq!(
+            secrets::exposure_warning(&path, top, &value),
+            None,
+            "{top}: {json}"
+        );
+    }
+    for (json, at) in [
+        (r#"{"db_pass": "x"}"#, "db_pass"),
+        (r#"{"client_secret": "x"}"#, "client_secret"),
+        (r#"{"access_token": "x"}"#, "access_token"),
+        (r#"{"api_key": "x"}"#, "api_key"),
+        (r#"{"apiKey": "x"}"#, "apiKey"),
+        (r#"{"privateKey": "x"}"#, "privateKey"),
+        (r#"{"credentials": "x"}"#, "credentials"),
+        (
+            r#"{"GF_SECURITY_ADMIN_PASSWORD": "x"}"#,
+            "GF_SECURITY_ADMIN_PASSWORD",
+        ),
+        (r#"{"password": 1234}"#, "password"),
+    ] {
+        let value = ConfigValue::from_value(&Value::from_json_str(json).unwrap());
+        let message = secrets::exposure_warning(&path, "api", &value)
+            .unwrap_or_else(|| panic!("not reported: {json}"));
+        assert!(message.contains(&format!("api:{at}")), "{message}");
+    }
 }
 
 #[test]
