@@ -60,7 +60,10 @@ def test_postgresql_identifier_clipping_is_shared_and_offline(sandbox):
     root, plugins = sandbox
     out = _json(run_python(root, plugins, SETUP + '''
 pg = mrsm.get_connector('sql', 'guardoffline', flavor='postgresql', host='127.0.0.1',
-                        port=1, database='guard', username='guard', schema='public')
+                        port=1, database='guard', username='guard', password='guard',
+                        schema='public')
+### Never the default instance (`sql:main` is the sandbox's SQLite file).
+assert pg is not None and pg.flavor == 'postgresql'
 pipe = mrsm.Pipe('guard:src', 'unicode', instance=pg, temporary=True,
                  parameters={'target': 'é' * 70})
 metadata = sql_guard.pipe_metadata(pipe)

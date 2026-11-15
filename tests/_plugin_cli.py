@@ -9,6 +9,7 @@ throwaway root: what the plugin-parity tests drive.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -43,6 +44,8 @@ def run_mrsm(
         'MRSM_PLUGINS_DIR': str(plugins_dir),
         'MRSM_PYTHON': sys.executable,
         'MRSM_SQL_PLUGINCLI': f"sqlite:///{tmp_path / 'plugincli.db'}",
+        ### Never the default `sql:main` (a database on localhost:5432).
+        'MRSM_SQL_MAIN': json.dumps({'flavor': 'sqlite', 'database': str(tmp_path / 'sql_main.db')}),
         'MRSM_CONFIG': '{"meerschaum": {"instance": "sql:plugincli"}}',
         **(extra_env or {}),
     }

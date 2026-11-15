@@ -368,6 +368,9 @@ def base_env(root: pathlib.Path, plugins: pathlib.Path, config: dict | None = No
         'MRSM_PYTHON': server_python(),
         'MRSM_W7_CONSOLE': '1',
         'MRSM_SQL_W7CONSOLE': f"sqlite:///{root / 'w7console.db'}",
+        ### Parts of the API host resolve `sql:main` whatever the instance (its default is a
+        ### database on localhost:5432): a SQLite file in the root, never a network database.
+        'MRSM_SQL_MAIN': json.dumps({'flavor': 'sqlite', 'database': str(root / 'sql_main.db')}),
         'MRSM_CONFIG': json.dumps(merged_config),
     })
     return env

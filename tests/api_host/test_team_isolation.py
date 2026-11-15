@@ -283,7 +283,8 @@ print('JSON:' + json.dumps(out, default=str))
     assert rivers['connectors'][0] == rivers['instance'] and 'plugin:noaa' in rivers['connectors']
     assert 'database' not in rivers
 
-    assert out['bases'] == ['sql:main', 'sql:pgbase']
+    ### `sql:main` is the sandbox's SQLite file: not a base.
+    assert out['bases'] == ['sql:pgbase']
     assert out['wet_closed'] is False, out['wet_alert']
     assert len(out['calls']) == 1
     base, _, team, kind, keys, name, grafana = out['calls'][0]
@@ -298,7 +299,7 @@ print('JSON:' + json.dumps(out, default=str))
     for where in ('connector_live', 'connector_disk'):
         assert out[where]['password'] == 'generated-secret', where
         assert out[where]['teams'] == ['Wet-Lands'], where
-    assert out['bases_after'] == ['sql:main', 'sql:pgbase']
+    assert out['bases_after'] == ['sql:pgbase']
     assert 'exists' in out['duplicate']
 
     assert out['settings_open'] == [True, {'team': 'Wet-Lands'}, 'sql:wet_lands', True, ['sql:wet_lands']]
