@@ -260,7 +260,8 @@ impl Session {
     /// team's configuration only ([`meerschaum_core::team_scope::team_config`] of the server's
     /// `config`). Python code the session runs starts in workers that never receive the
     /// server's configuration (`MRSM_CONFIG`, `MRSM_PATCH`, connector variables, config files)
-    /// and whose callbacks may only touch the team's instances (and, with `member`, pipes that
+    /// nor any other server variable outside an allowlist
+    /// ([`meerschaum_core::team_scope::team_env`]), and whose callbacks may only touch the team's instances (and, with `member`, pipes that
     /// member may change). Reused while the team's configuration is unchanged; a change (a
     /// connector granted or revoked, a rename, a deletion, a rotated password) retires the
     /// team's workers and builds a new session. Returns the session and how it was found.
@@ -312,8 +313,11 @@ impl Session {
                 serde_json::to_string(&dirs).unwrap_or_default(),
             ));
         }
-        let changes = ts::scoped_env(&base, &files, scope, &paths.root_dir, &paths.plugins_dirs);
-        let team_env = changes.apply(&base);
+        // An allowlist (`meerschaum_core::team_scope::team_env`): nothing else of the server's
+        // environment (cloud credentials, tokens) reaches the team's workers.
+        let passthrough = ts::Passthrough::from_config(config);
+        passthrough.warn_refused();
+        let team_env = ts::team_env(&base, &[], &files, scope, &passthrough);
         let team_config = Arc::new(
             Config::new(meerschaum_core::config::ConfigOptions::with_env(
                 team_env.clone(),
@@ -368,13 +372,9 @@ impl Session {
             .clone();
         let (pool, lookup) = self.team_pools(config).get(&key, &fingerprint, |live| {
             let mut settings = PoolConfig::for_team(&team_config, pool_scope, live);
-            // Workers inherit the server's environment: what only the server holds is removed,
-            // the team's config directory and file are set.
-            settings.worker.env_remove = changes.remove.clone();
-            settings.worker.env.retain(|(k, _)| {
-                k != ts::CONFIG_DIR_VAR && !changes.set.iter().any(|(s, _)| s == k)
-            });
-            settings.worker.env.extend(changes.set.iter().cloned());
+            // Workers start from an empty environment: the team's allowlisted one only.
+            settings.worker.env_clear = true;
+            settings.worker.env = team_env.clone();
             if !std::env::var("MRSM_PYTHON").is_ok_and(|v| !v.trim().is_empty())
                 && let Some(python) = &worker_python
             {

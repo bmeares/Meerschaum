@@ -206,19 +206,25 @@ impl JobsBackend for LocalJobsBackend {
                     }
                 }
             }
-            // 5.1: a job of an isolated team does not record the server's connectors and
-            // patches in its `env` (its launch removes them too).
+            // 5.1: a job of an isolated team records only what its process may receive (an
+            // allowlist and the administrator's passthrough names), never the rest of the
+            // server's environment (its launch applies the same allowlist).
             let root = ctx.paths.root.clone();
             if let Some(props) = properties.as_ref()
                 && meerschaum_jobs::config_files::job_team_scope(&root, props).is_some()
             {
-                let mut recorded: meerschaum_core::Map = env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Value::Str(v.clone())))
-                    .collect();
-                if meerschaum_jobs::config_files::strip_team_env(&mut recorded, &root, &[]) {
-                    env.retain(|k, _| recorded.contains_key(k));
-                }
+                let mut options = meerschaum_core::config::ConfigOptions::with_env(
+                    meerschaum_core::process_env::vars(),
+                );
+                options.env.retain(|(k, _)| k != "MRSM_ROOT_DIR");
+                options
+                    .env
+                    .push(("MRSM_ROOT_DIR".into(), root.to_string_lossy().into()));
+                options.allow_writes = false;
+                let passthrough = meerschaum_core::Config::new(options)
+                    .map(|config| meerschaum_core::team_scope::Passthrough::from_config(&config))
+                    .unwrap_or_default();
+                env.retain(|k, _| meerschaum_core::team_scope::may_record(k, &passthrough));
             }
             let job = Job::new(
                 &name,

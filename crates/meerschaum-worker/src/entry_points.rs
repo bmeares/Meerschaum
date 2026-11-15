@@ -245,6 +245,8 @@ fn environment_identity(options: &WorkerOptions) -> String {
             String::new()
         } else if let Some((_, v)) = options.env.iter().rev().find(|(k, _)| k == name) {
             v.clone()
+        } else if options.env_clear {
+            String::new()
         } else {
             std::env::var(name).unwrap_or_default()
         };
@@ -265,6 +267,9 @@ fn run_probe(options: &WorkerOptions) -> Option<ProbeOutput> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    if options.env_clear {
+        command.env_clear();
+    }
     for key in &options.env_remove {
         command.env_remove(key);
     }

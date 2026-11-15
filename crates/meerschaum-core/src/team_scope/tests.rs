@@ -248,15 +248,61 @@ fn a_team_process_sees_only_its_connectors() {
         ("MRSM_CONFIG".into(), "{\"x\": 1}".into()),
         ("MRSM_WORKER_EXPECT_VERSION".into(), "5.1.0".into()),
         ("PATH".into(), "/usr/bin".into()),
+        ("TPR_SENTINEL_SECRET".into(), "cloud-key".into()),
+        ("TPR_PASSED".into(), "passed".into()),
+        (
+            "MRSM_SQL_LISTED".into(),
+            "postgresql://u:listed-pw@db/x".into(),
+        ),
+        ("MRSM_DAEMON_ID".into(), "the-servers-own-job".into()),
+        ("LC_TIME".into(), "C".into()),
     ];
-    let changes = scoped_env(&launching, &files, &scope, r.root.path(), &[]);
-    let env = changes.apply(&launching);
+    let passthrough = Passthrough::new(
+        [
+            "TPR_PASSED",
+            "MRSM_SQL_LISTED",
+            "MRSM_CONFIG",
+            "MRSM_PATCH_FILE",
+        ]
+        .map(String::from),
+    );
+    assert_eq!(passthrough.names, vec!["TPR_PASSED".to_string()]);
+    assert_eq!(passthrough.refused.len(), 3);
+    let env = team_env(&launching, &[], &files, &scope, &passthrough);
     let names: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
-    assert!(!names.contains(&"MRSM_SQL_ENVDB"));
-    assert!(!names.contains(&"MRSM_CONFIG"));
-    assert!(names.contains(&"MRSM_WORKER_EXPECT_VERSION"));
-    assert!(names.contains(&"PATH"));
-    assert!(names.contains(&TEAM_SCOPE_VAR));
+    for absent in [
+        "MRSM_SQL_ENVDB",
+        "MRSM_CONFIG",
+        "TPR_SENTINEL_SECRET",
+        "MRSM_SQL_LISTED",
+        // The launching process's own job context never reaches a team process.
+        "MRSM_DAEMON_ID",
+    ] {
+        assert!(!names.contains(&absent), "{absent}: {names:?}");
+    }
+    for present in [
+        "MRSM_WORKER_EXPECT_VERSION",
+        "PATH",
+        "TPR_PASSED",
+        "LC_TIME",
+        "MRSM_ROOT_DIR",
+        TEAM_SCOPE_VAR,
+    ] {
+        assert!(names.contains(&present), "{present}: {names:?}");
+    }
+    // A job's own context comes from its settings (applied over the launching environment).
+    let job = team_env(
+        &launching,
+        &[
+            ("MRSM_DAEMON_ID".into(), "team-job".into()),
+            ("TPR_SENTINEL_SECRET".into(), "recorded".into()),
+        ],
+        &files,
+        &scope,
+        &passthrough,
+    );
+    assert!(job.contains(&("MRSM_DAEMON_ID".into(), "team-job".into())));
+    assert!(!job.iter().any(|(k, _)| k == "TPR_SENTINEL_SECRET"));
     // The process built from that environment: the team's connector and nothing else.
     let team_process = Config::new(ConfigOptions::with_env(env)).unwrap();
     let wet_attrs = team_process
@@ -410,4 +456,55 @@ fn a_team_process_skips_the_roots_patch_directories() {
         patch.exists(),
         "a team process never consumes the directory"
     );
+}
+
+#[test]
+fn passthrough_names_never_include_meerschaums_secrets() {
+    for refused in [
+        "MRSM_CONFIG",
+        "MRSM_PATCH",
+        "MRSM_CONFIG_FILE",
+        "MRSM_PATCH_FILE",
+        "MRSM_CONFIG_DIR",
+        "MRSM_TEAM_SCOPE",
+        "MRSM__COMPOSE_CONFIG",
+        "MRSM_SQL_MAIN",
+        "MRSM_VALKEY_CACHE",
+        "mrsm_sql_main",
+        "MRSM_MYTYPE_LABEL",
+        "",
+        "A=B",
+    ] {
+        assert!(is_refused(refused), "{refused}");
+    }
+    for passed in [
+        "AWS_PROFILE",
+        "MRSM_ROOT_DIR",
+        "MRSM_DAEMON_ID",
+        "PGSSLMODE",
+    ] {
+        assert!(!is_refused(passed), "{passed}");
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("config")).unwrap();
+    std::fs::write(
+        root.path().join("config/system.yaml"),
+        "engine:\n  python_team_env_passthrough: [AWS_PROFILE, MRSM_SQL_MAIN, AWS_PROFILE]\n",
+    )
+    .unwrap();
+    let config = Config::new(ConfigOptions::with_env(vec![(
+        "MRSM_ROOT_DIR".into(),
+        root.path().display().to_string(),
+    )]))
+    .unwrap();
+    let passthrough = Passthrough::from_config(&config);
+    assert_eq!(passthrough.names, vec!["AWS_PROFILE".to_string()]);
+    assert_eq!(passthrough.refused, vec!["MRSM_SQL_MAIN".to_string()]);
+    // Unset: nothing more.
+    let empty = Config::new(ConfigOptions::with_env(vec![(
+        "MRSM_ROOT_DIR".into(),
+        tempfile::tempdir().unwrap().path().display().to_string(),
+    )]))
+    .unwrap();
+    assert_eq!(Passthrough::from_config(&empty), Passthrough::default());
 }

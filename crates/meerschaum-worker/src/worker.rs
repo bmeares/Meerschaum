@@ -36,6 +36,9 @@ pub struct WorkerOptions {
     pub env: Vec<(String, String)>,
     /// Environment variables to remove.
     pub env_remove: Vec<String>,
+    /// Start from an empty environment: the worker gets [`WorkerOptions::env`] only (5.1: an
+    /// isolated team's workers, whose environment is an allowlist).
+    pub env_clear: bool,
     /// The working directory.
     pub current_dir: Option<PathBuf>,
     /// How long to wait, in all, for the worker to connect and say hello (`MRSM_WORKER_STARTUP_TIMEOUT`
@@ -211,6 +214,7 @@ impl Default for WorkerOptions {
             module: "meerschaum.worker".into(),
             env: Vec::new(),
             env_remove: Vec::new(),
+            env_clear: false,
             current_dir: None,
             startup_timeout: startup_timeout_default(),
             preflight_timeout: PREFLIGHT_TIMEOUT,
@@ -429,6 +433,9 @@ async fn preflight(opts: &WorkerOptions) -> WorkerResult<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if opts.env_clear {
+        cmd.env_clear();
+    }
     for k in &opts.env_remove {
         cmd.env_remove(k);
     }
@@ -566,6 +573,13 @@ impl Worker {
         } else if OUTPUT_HOOK.get().is_some() {
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
             cmd.env("PYTHONUNBUFFERED", "1");
+        }
+        if opts.env_clear {
+            // Before the variables this function sets (`PYTHONUNBUFFERED`, the guard's).
+            cmd.env_clear();
+            if OUTPUT_HOOK.get().is_some() && !opts.quiet {
+                cmd.env("PYTHONUNBUFFERED", "1");
+            }
         }
         for k in &opts.env_remove {
             cmd.env_remove(k);

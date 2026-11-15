@@ -42,22 +42,31 @@ pub struct JobEnvironment {
     pub set: Vec<(String, String)>,
     /// Variables to remove.
     pub remove: Vec<String>,
+    /// Start from an empty environment (5.1: an isolated team's job, whose environment is
+    /// [`JobEnvironment::set`] only).
+    pub clear: bool,
 }
 
 impl JobEnvironment {
-    /// `env` with the changes applied (removed first, then set).
+    /// `env` with the changes applied (cleared or removed first, then set).
     pub fn apply(&self, env: &[(String, String)]) -> Vec<(String, String)> {
-        let mut out: Vec<(String, String)> = env
-            .iter()
-            .filter(|(k, _)| !self.remove.contains(k) && !self.set.iter().any(|(s, _)| s == k))
-            .cloned()
-            .collect();
+        let mut out: Vec<(String, String)> = if self.clear {
+            Vec::new()
+        } else {
+            env.iter()
+                .filter(|(k, _)| !self.remove.contains(k) && !self.set.iter().any(|(s, _)| s == k))
+                .cloned()
+                .collect()
+        };
         out.extend(self.set.iter().cloned());
         out
     }
 
     /// Apply the changes to a command whose environment starts from this process's.
     pub fn apply_to(&self, command: &mut std::process::Command) {
+        if self.clear {
+            command.env_clear();
+        }
         for name in &self.remove {
             command.env_remove(name);
         }
@@ -257,22 +266,24 @@ pub fn may_be_team_job(props: &meerschaum_core::value::Map) -> bool {
             .is_some_and(|t| !meerschaum_core::access::is_everyone(Some(t)))
 }
 
-/// Write an isolated team's job configuration to its directory `dir` and say how the job's
-/// environment changes (5.1): the team's configuration ([`meerschaum_core::team_scope::team_config`]
+/// Write an isolated team's job configuration to its directory `dir` and say what the job's
+/// environment is (5.1): the team's configuration ([`meerschaum_core::team_scope::team_config`]
 /// of `config`, the launching process's) in [`CONFIG_FILENAME`] (owner-only) named by
 /// `MRSM_CONFIG_FILE`, an empty config directory of the job's own named by `MRSM_CONFIG_DIR`, and
-/// none of the launching process's `MRSM_CONFIG`, `MRSM_PATCH` or connector variables. `Err` when
-/// a file cannot be written: the caller must not launch the job then.
+/// an environment built from an allowlist ([`meerschaum_core::team_scope::team_env`]) of
+/// `launching` (the launching process's environment) and `job` (the job's own variables): none
+/// of the launching process's patches, connector variables or other variables outside it. `Err`
+/// when a file cannot be written: the caller must not launch the job then.
 pub fn externalize_team(
     dir: &Path,
-    env: &[(String, String)],
+    launching: &[(String, String)],
+    job: &[(String, String)],
     config: &meerschaum_core::Config,
     scope: &meerschaum_core::team_scope::TeamScope,
 ) -> std::io::Result<JobEnvironment> {
     use meerschaum_core::team_scope::{
-        JOB_CONFIG_DIR, ScopeFiles, create_private_dir, scoped_env, team_config,
+        JOB_CONFIG_DIR, Passthrough, ScopeFiles, create_private_dir, team_config, team_env,
     };
-    let paths = config.paths();
     let team = team_config(config, scope);
     let files = ScopeFiles {
         dir: dir.to_path_buf(),
@@ -285,31 +296,26 @@ pub fn externalize_team(
         &meerschaum_core::value::Value::Map(team).to_json_string(),
     )?;
     let _ = std::fs::remove_file(dir.join(PATCH_FILENAME));
-    let changes = scoped_env(env, &files, scope, &paths.root_dir, &paths.plugins_dirs);
+    let passthrough = Passthrough::from_config(config);
+    passthrough.warn_refused();
     Ok(JobEnvironment {
-        set: changes.set,
-        remove: changes.remove,
+        set: team_env(launching, job, &files, scope, &passthrough),
+        remove: Vec::new(),
+        clear: true,
     })
 }
 
-/// A team job's `env` property without what only the server should hold (5.1): `MRSM_CONFIG`,
-/// `MRSM_PATCH` (and their file forms), the Compose configuration and connector variables (an API
-/// server records its whole environment for the jobs it creates). `true` when something went.
+/// A team job's `env` property reduced to what its process may receive (5.1,
+/// [`meerschaum_core::team_scope::may_record`]): an API server records its whole environment for
+/// the jobs it creates, and a launch (also the restart monitor's after a reboot) applies it.
+/// `passthrough` is the administrator's list ([`meerschaum_core::team_scope::PASSTHROUGH_KEY`]).
+/// `true` when something went.
 pub fn strip_team_env(
     env: &mut meerschaum_core::value::Map,
-    root: &Path,
-    plugins_dirs: &[PathBuf],
+    passthrough: &meerschaum_core::team_scope::Passthrough,
 ) -> bool {
-    let pairs: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.py_str())).collect();
-    let mut remove = meerschaum_core::team_scope::connector_variables(&pairs, root, plugins_dirs);
-    for (var, file_var) in meerschaum_core::config::environment::patch_variables() {
-        remove.push(var);
-        remove.push(file_var);
-    }
-    remove.push(COMPOSE_CONFIG_VAR.into());
-    remove.push(meerschaum_core::team_scope::CONFIG_DIR_VAR.into());
     let before = env.len();
-    env.retain(|k, _| !remove.contains(k));
+    env.retain(|k, _| meerschaum_core::team_scope::may_record(k, passthrough));
     env.len() != before
 }
 
@@ -470,6 +476,12 @@ mod tests {
             "connectors:\n  sql:\n    wetlands:\n      flavor: sqlite\n      database: /tmp/w.db\n      password: w-pw\n      teams: [wetlands]\n    drylands:\n      flavor: sqlite\n      database: /tmp/d.db\n      password: d-pw\n      teams: [drylands]\n",
         )
         .unwrap();
+        // An administrator passes `TPR_PASSED` on; `MRSM_SQL_MAIN` is refused even if listed.
+        std::fs::write(
+            config_dir.join("system.yaml"),
+            "engine:\n  python_team_env_passthrough: [TPR_PASSED, MRSM_SQL_MAIN]\n",
+        )
+        .unwrap();
         let launching = env(&[
             ("MRSM_ROOT_DIR", root.path().to_str().unwrap()),
             ("MRSM_SQL_MAIN", "postgresql://u:server-pw@db/m"),
@@ -478,6 +490,9 @@ mod tests {
                 r#"{"meerschaum": {"connectors": {"sql": {"x": {"password": "patch-pw"}}}}}"#,
             ),
             ("PATH", "/usr/bin"),
+            ("TPR_CLOUD_KEY", "cloud-secret"),
+            ("TPR_PASSED", "passed"),
+            ("MRSM_DAEMON_ID", "the-servers-own-job"),
         ]);
         let config = meerschaum_core::Config::new(
             meerschaum_core::config::ConfigOptions::with_env(launching.clone()),
@@ -491,7 +506,12 @@ mod tests {
         };
         let dir = root.path().join("jobs/team-job");
         std::fs::create_dir_all(&dir).unwrap();
-        let changes = externalize_team(&dir, &launching, &config, &scope).unwrap();
+        let own = env(&[
+            ("MRSM_DAEMON_ID", "team-job"),
+            ("TPR_CLOUD_KEY", "recorded"),
+        ]);
+        let changes = externalize_team(&dir, &launching, &own, &config, &scope).unwrap();
+        assert!(changes.clear);
         let file = std::fs::read_to_string(dir.join(CONFIG_FILENAME)).unwrap();
         assert!(file.contains("w-pw"));
         for secret in ["d-pw", "server-pw", "patch-pw"] {
@@ -515,6 +535,14 @@ mod tests {
             Some(dir.join(JOB_CONFIG_DIR).to_str().unwrap())
         );
         assert_eq!(lookup(&job, "PATH"), Some("/usr/bin"));
+        // An allowlist: the sentinel stays out (from the launching process and from the job's
+        // recorded variables), the passed-through name is in, the job's own name is its own.
+        assert_eq!(lookup(&job, "TPR_CLOUD_KEY"), None);
+        assert_eq!(lookup(&job, "TPR_PASSED"), Some("passed"));
+        assert_eq!(lookup(&job, "MRSM_DAEMON_ID"), Some("team-job"));
+        let mut command = std::process::Command::new("env");
+        changes.apply_to(&mut command);
+        assert!(command.get_envs().all(|(k, _)| k != "TPR_CLOUD_KEY"));
         // The job's own process (and a relaunch from inside it) sees the team's connector only.
         let inside = meerschaum_core::Config::new(
             meerschaum_core::config::ConfigOptions::with_env(job.clone()),
@@ -533,7 +561,8 @@ mod tests {
                 "{label}"
             );
         }
-        let again = externalize_team(&dir, &job, &inside, &scope).unwrap();
+        // Relaunched from inside (its own variables again): the same environment.
+        let again = externalize_team(&dir, &job, &own[..1], &inside, &scope).unwrap();
         assert_eq!(again.apply(&job), job);
         assert!(
             !std::fs::read_to_string(dir.join(CONFIG_FILENAME))
@@ -541,11 +570,17 @@ mod tests {
                 .contains("d-pw")
         );
 
-        // The `env` property an API server recorded loses the server's connectors and patches.
-        let mut recorded =
-            props(r#"{"MRSM_SQL_MAIN": "postgresql://u:p@h/d", "MRSM_CONFIG": "{}", "LANG": "C"}"#);
-        assert!(strip_team_env(&mut recorded, root.path(), &[]));
-        assert_eq!(recorded.keys().collect::<Vec<_>>(), vec!["LANG"]);
+        // The `env` property an API server recorded keeps the allowlist and passthrough names.
+        let mut recorded = props(
+            r#"{"MRSM_SQL_MAIN": "postgresql://u:p@h/d", "MRSM_CONFIG": "{}", "LANG": "C",
+                "TPR_CLOUD_KEY": "s", "TPR_PASSED": "p", "MRSM_DAEMON_ID": "j"}"#,
+        );
+        let passthrough = meerschaum_core::team_scope::Passthrough::from_config(&config);
+        assert!(strip_team_env(&mut recorded, &passthrough));
+        assert_eq!(
+            recorded.keys().collect::<Vec<_>>(),
+            vec!["LANG", "TPR_PASSED", "MRSM_DAEMON_ID"]
+        );
     }
 
     #[test]

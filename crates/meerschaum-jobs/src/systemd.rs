@@ -253,7 +253,9 @@ impl SystemdExecutor {
             .unwrap_or_default();
         let mut vars: indexmap::IndexMap<String, String> = process_env
             .iter()
-            .filter(|(k, _)| env_names.contains(k))
+            .filter(|(k, _)| {
+                env_names.contains(k) || k == meerschaum_core::team_scope::TEAM_SCOPE_VAR
+            })
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         // The unit runs the `mrsm` binary, which starts its Python workers with `MRSM_PYTHON`
@@ -927,10 +929,25 @@ impl SystemdExecutor {
             Some((config, scope)) => match crate::config_files::externalize_team(
                 &self.get_service_job_path(name),
                 &process_env,
+                &[],
                 &config,
                 &scope,
             ) {
-                Ok(changes) => changes.apply(&process_env),
+                Ok(changes) => {
+                    // The unit adds the job's `env` property: reduced to the allowlist first.
+                    let passthrough =
+                        meerschaum_core::team_scope::Passthrough::from_config(&config);
+                    let daemon = job.daemon();
+                    if let Some(Value::Map(mut env)) = daemon.properties().get("env").cloned()
+                        && crate::config_files::strip_team_env(&mut env, &passthrough)
+                    {
+                        let written = daemon.replace_property("env", Value::Map(env));
+                        if !written.success {
+                            return written;
+                        }
+                    }
+                    changes.apply(&process_env)
+                }
                 Err(e) => {
                     return SuccessTuple::fail(format!(
                         "The configuration of team '{}' could not be written for job '{name}': {e}",

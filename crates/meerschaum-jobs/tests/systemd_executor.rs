@@ -1181,3 +1181,84 @@ fn a_run_without_a_result_reports_how_systemd_saw_it_end() {
         (false, "No result available.")
     );
 }
+
+/// 5.1: the unit of an isolated team's job carries the team's configuration and an allowlisted
+/// environment: neither the launching process's variables of its own nor those the job's `env`
+/// property recorded (an API server records its whole environment), except the names an
+/// administrator passes on; never Meerschaum's patches or connector variables.
+#[test]
+fn a_team_jobs_unit_holds_an_allowlisted_environment() {
+    use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+    let r = Roots::new();
+    let root = r.root("teams/root");
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    std::fs::write(
+        root.join("config/meerschaum.yaml"),
+        "connectors:\n  sql:\n    wetlands:\n      flavor: sqlite\n      database: /tmp/w.db\n      password: w-pw\n      teams: [wetlands]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("config/system.yaml"),
+        "engine:\n  python_team_env_passthrough: [TPR_PASSED, MRSM_SQL_MAIN]\n",
+    )
+    .unwrap();
+    write_scope_record(
+        &root,
+        &TeamScope {
+            team: "wetlands".into(),
+            team_id: Some("id-w".into()),
+            connectors: ["sql:wetlands".to_string()].into_iter().collect(),
+            ..TeamScope::default()
+        },
+    )
+    .unwrap();
+    let ex = SystemdExecutor::new(r.ctx("teams/root")).with_process_env(vec![
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("MRSM_ROOT_DIR".to_string(), root.to_string_lossy().into()),
+        (
+            "MRSM_SQL_MAIN".to_string(),
+            "postgresql://u:server-pw@db/m".into(),
+        ),
+        ("TPR_SENTINEL_CLOUD_KEY".to_string(), "cloud-secret".into()),
+        ("TPR_PASSED".to_string(), "passed".into()),
+    ]);
+    let mut env = Map::new();
+    for (k, v) in [
+        ("TPR_SENTINEL_CLOUD_KEY", "recorded-secret"),
+        ("TPR_PASSED", "passed"),
+        ("MRSM_SQL_MAIN", "postgresql://u:server-pw@db/m"),
+        ("LANG", "C"),
+    ] {
+        env.insert(k.into(), Value::Str(v.into()));
+    }
+    let mut props = Map::new();
+    props.insert("team".into(), Value::Str("wetlands".into()));
+    props.insert("env".into(), Value::Map(env));
+    let sysargs: Vec<String> = vec!["sync".into(), "pipes".into()];
+    let created = ex.create_job("team-sync", &sysargs, Some(&props));
+    assert!(created.success, "{}", created.message);
+    let text = std::fs::read_to_string(ex.get_service_file_path("team-sync")).unwrap();
+    for absent in [
+        "TPR_SENTINEL_CLOUD_KEY",
+        "secret",
+        "MRSM_SQL_MAIN",
+        "server-pw",
+    ] {
+        assert!(!text.contains(absent), "{absent}: {text}");
+    }
+    for present in [
+        "Environment=MRSM_TEAM_SCOPE=wetlands",
+        "Environment=MRSM_CONFIG_FILE=",
+        "Environment=TPR_PASSED=passed",
+        "Environment=LANG=C",
+    ] {
+        assert!(text.contains(present), "{present}: {text}");
+    }
+    // The recorded properties keep the allowlist only (a later unit or launch reads them).
+    let mut hidden = ex.get_hidden_job("team-sync", None, None).unwrap();
+    let recorded = hidden.properties();
+    let env = recorded["env"].to_map();
+    let mut names: Vec<&String> = env.keys().collect();
+    names.sort();
+    assert_eq!(names, vec!["LANG", "TPR_PASSED"], "{recorded:?}");
+}

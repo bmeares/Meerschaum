@@ -308,6 +308,16 @@ impl Daemon {
         }
     }
 
+    /// Replace the property `key` with `value` (not merged with what `properties.json` holds,
+    /// unlike [`Daemon::update_properties`]: a map loses the entries `value` does not have) and
+    /// write the properties.
+    pub fn replace_property(&mut self, key: &str, value: Value) -> SuccessTuple {
+        let mut props = self.properties();
+        props.insert(key.to_string(), value.clone());
+        self.mem.insert(key.to_string(), value);
+        properties::write_properties(&self.paths.properties, &props)
+    }
+
     /// Pop a key from the in-memory properties.
     pub fn pop_property(&mut self, key: &str) -> Option<Value> {
         self.mem.shift_remove(key)
@@ -883,24 +893,32 @@ impl Daemon {
         }
         // 5.1: `MRSM_CONFIG` / `MRSM_PATCH` reach the job in owner-only files in its directory
         // (`config_files`). A file that cannot be written leaves the environment as it is.
-        let mut launching = crate::config_files::process_env();
-        launching.extend(worker_env);
-        // 5.1: a job of an isolated team gets that team's configuration only, or does not start.
-        if let Some(changes) = self.team_environment(&launching)? {
+        let process_env = crate::config_files::process_env();
+        // 5.1: a job of an isolated team gets that team's configuration and an allowlisted
+        // environment only, or does not start.
+        if let Some(changes) = self.team_environment(&process_env, &worker_env)? {
             changes.apply_to(&mut cmd);
-        } else if let Ok(changes) = crate::config_files::externalize(&self.paths.dir, &launching) {
+            return crate::supervisor::spawn_detached(&mut cmd);
+        }
+        let mut launching = process_env;
+        launching.extend(worker_env);
+        if let Ok(changes) = crate::config_files::externalize(&self.paths.dir, &launching) {
             changes.apply_to(&mut cmd);
         }
         crate::supervisor::spawn_detached(&mut cmd)
     }
 
-    /// How the environment of a job of an isolated team differs from `launching` (5.1,
-    /// [`crate::config_files::externalize_team`]); `None` for any other job. Records the job's
-    /// scope for good ([`crate::config_files::TEAM_SCOPE_PROPERTY`]) and drops what only the
-    /// server should hold from its `env` property. `Err` when the team's files cannot be written.
+    /// The environment of a job of an isolated team (5.1,
+    /// [`crate::config_files::externalize_team`]): an allowlist of `process_env` (the launching
+    /// process's) and `job_env` (the job's own variables, [`Daemon::worker_env`]), applied to a
+    /// command started from an empty environment; `None` for any other job. Records the job's
+    /// scope for good ([`crate::config_files::TEAM_SCOPE_PROPERTY`]) and reduces its `env`
+    /// property to the allowlist, so no later launch (the restart monitor's after a reboot)
+    /// brings the server's environment back. `Err` when the team's files cannot be written.
     fn team_environment(
         &mut self,
-        launching: &[(String, String)],
+        process_env: &[(String, String)],
+        job_env: &[(String, String)],
     ) -> std::io::Result<Option<crate::config_files::JobEnvironment>> {
         use crate::config_files::{
             TEAM_SCOPE_PROPERTY, externalize_team, job_team_scope, may_be_team_job, strip_team_env,
@@ -909,24 +927,37 @@ impl Daemon {
         if !may_be_team_job(&props) {
             return Ok(None);
         }
+        // The job's own variables win (a registry reads the first of a name).
+        let mut launching: Vec<(String, String)> = process_env
+            .iter()
+            .filter(|(k, _)| !job_env.iter().any(|(j, _)| j == k))
+            .cloned()
+            .collect();
+        launching.extend(job_env.iter().cloned());
         let config = meerschaum_core::Config::new(
-            meerschaum_core::config::ConfigOptions::with_env(launching.to_vec()),
+            meerschaum_core::config::ConfigOptions::with_env(launching),
         )
         .map_err(std::io::Error::other)?;
         let paths = config.paths();
         let Some((key, scope)) = job_team_scope(&paths.root_dir, &props) else {
             return Ok(None);
         };
-        let changes = externalize_team(&self.paths.dir, launching, &config, &scope)?;
+        let changes = externalize_team(&self.paths.dir, process_env, job_env, &config, &scope)?;
+        let passthrough = meerschaum_core::team_scope::Passthrough::from_config(&config);
         let mut patch = Map::new();
         patch.insert(TEAM_SCOPE_PROPERTY.into(), Value::Str(key));
-        if let Some(Value::Map(mut env)) = props.get("env").cloned()
-            && strip_team_env(&mut env, &paths.root_dir, &paths.plugins_dirs)
-        {
-            patch.insert("env".into(), Value::Map(env));
-        }
         self.update_properties(&patch);
-        let written = self.write_properties();
+        // Replaced, not merged: a merge would keep the names the file still holds.
+        let written = match props.get("env").cloned() {
+            Some(Value::Map(mut env)) => {
+                if strip_team_env(&mut env, &passthrough) {
+                    self.replace_property("env", Value::Map(env))
+                } else {
+                    self.write_properties()
+                }
+            }
+            _ => self.write_properties(),
+        };
         if !written.success {
             return Err(std::io::Error::other(written.message));
         }
@@ -1279,4 +1310,108 @@ pub fn get_daemon_ids(paths: &JobPaths) -> Vec<String> {
         .collect();
     ids.sort();
     ids
+}
+
+#[cfg(all(test, unix))]
+mod team_launch_tests {
+    use super::*;
+
+    /// 5.1: an isolated team's job is launched from an empty environment with the allowlist only:
+    /// neither the launching process's other variables nor those its recorded `env` holds (an API
+    /// server records its whole environment), except the names passed on; a relaunch (the restart
+    /// monitor's after a reboot) gets the same, and the recorded `env` keeps the allowlist only.
+    #[test]
+    fn a_team_jobs_process_gets_the_allowlisted_environment_at_every_launch() {
+        use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::write(
+            root.join("config/meerschaum.yaml"),
+            "connectors:\n  sql:\n    wetlands:\n      flavor: sqlite\n      database: /tmp/w.db\n      teams: [wetlands]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("config/system.yaml"),
+            "engine:\n  python_team_env_passthrough: [TPR_PASSED, MRSM_SQL_LISTED]\n",
+        )
+        .unwrap();
+        write_scope_record(
+            &root,
+            &TeamScope {
+                team: "wetlands".into(),
+                team_id: Some("id-w".into()),
+                connectors: ["sql:wetlands".to_string()].into_iter().collect(),
+                ..TeamScope::default()
+            },
+        )
+        .unwrap();
+        let out = root.join("seen-env");
+        // The "supervisor" writes the environment it was started with.
+        let ctx = JobsContext::for_root(&root).with_launcher(Launcher {
+            supervisor: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                format!("env > '{}.tmp' && mv '{0}.tmp' '{0}'", out.display()),
+            ],
+            program: vec!["unused".into()],
+        });
+        let mut env = Map::new();
+        for (k, v) in [
+            ("MRSM_ROOT_DIR", root.to_str().unwrap()),
+            ("TPR_SENTINEL_CLOUD_KEY", "recorded-secret"),
+            ("TPR_PASSED", "passed"),
+            ("MRSM_SQL_LISTED", "postgresql://u:server-pw@db/m"),
+            ("LANG", "C"),
+        ] {
+            env.insert(k.into(), Value::Str(v.into()));
+        }
+        let mut props = Map::new();
+        props.insert("team".into(), Value::Str("wetlands".into()));
+        props.insert("env".into(), Value::Map(env));
+        let mut daemon = Daemon::new("team-job", vec!["sync".into()], None, props, &ctx);
+        assert!(daemon.write_properties().success);
+        let seen = |daemon: &mut Daemon| -> Vec<(String, String)> {
+            let _ = std::fs::remove_file(&out);
+            daemon.launch(false, None).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while !out.exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the launch wrote nothing"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            std::fs::read_to_string(&out)
+                .unwrap()
+                .lines()
+                .filter_map(|l| l.split_once('='))
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        for launch in 0..2 {
+            let env = seen(&mut daemon);
+            let get = |name: &str| env.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+            // The test process's own variables (cargo's) and the recorded sentinel stay out.
+            for absent in [
+                "CARGO_MANIFEST_DIR",
+                "TPR_SENTINEL_CLOUD_KEY",
+                "MRSM_SQL_LISTED",
+                "MRSM_CONFIG",
+            ] {
+                assert_eq!(get(absent), None, "{launch} {absent}: {env:?}");
+            }
+            assert_eq!(get("TPR_PASSED"), Some("passed"), "{env:?}");
+            assert_eq!(get("LANG"), Some("C"));
+            assert_eq!(get("MRSM_DAEMON_ID"), Some("team-job"));
+            assert_eq!(get("MRSM_TEAM_SCOPE"), Some("wetlands"));
+            assert!(get("MRSM_CONFIG_FILE").is_some_and(|f| f.ends_with(".mrsm_config.json")));
+            // The next launch reopens the job from its files (as the restart monitor does).
+            daemon = Daemon::open("team-job", &ctx).unwrap();
+        }
+        let recorded = daemon.properties()["env"].to_map();
+        let mut names: Vec<&String> = recorded.keys().collect();
+        names.sort();
+        assert_eq!(names, vec!["LANG", "MRSM_ROOT_DIR", "TPR_PASSED"]);
+    }
 }

@@ -5,8 +5,9 @@
 //! pool on the API server, and its jobs). Those processes never receive the server's
 //! configuration: they get [`team_config`], a configuration holding only the connectors of the
 //! team's [`TeamScope`], through an owner-only file named by `MRSM_CONFIG_FILE` and an empty
-//! config directory of their own (`MRSM_CONFIG_DIR`), and none of the server's `MRSM_CONFIG`,
-//! `MRSM_PATCH` or `MRSM_<TYPE>_<LABEL>` variables ([`scoped_env`]).
+//! config directory of their own (`MRSM_CONFIG_DIR`), and an environment built from an allowlist
+//! ([`team_env`]): none of the server's `MRSM_CONFIG`, `MRSM_PATCH`, `MRSM_<TYPE>_<LABEL>` or
+//! other variables (cloud credentials, tokens) unless an administrator passes them on by name.
 //!
 //! **What a team's configuration holds.**
 //!
@@ -673,76 +674,11 @@ pub fn connector_variables(
         .collect()
 }
 
-/// How a team-scoped process's environment differs from the launching process's.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ScopedEnv {
-    /// Variables to set.
-    pub set: Vec<(String, String)>,
-    /// Variables to remove.
-    pub remove: Vec<String>,
-}
-
-impl ScopedEnv {
-    /// `env` with the changes applied (removed first, then set).
-    pub fn apply(&self, env: &[(String, String)]) -> Vec<(String, String)> {
-        let mut out: Vec<(String, String)> = env
-            .iter()
-            .filter(|(k, _)| !self.remove.contains(k) && !self.set.iter().any(|(s, _)| s == k))
-            .cloned()
-            .collect();
-        out.extend(self.set.iter().cloned());
-        out
-    }
-}
-
-/// The environment of a team's process started from `env` (the launching process's): the
-/// server's config patches, Compose configuration and connector variables removed; the team's
-/// config directory and file set (see the module documentation).
-pub fn scoped_env(
-    env: &[(String, String)],
-    files: &ScopeFiles,
-    scope: &TeamScope,
-    root: &Path,
-    plugins_dirs: &[PathBuf],
-) -> ScopedEnv {
-    let mut remove: Vec<String> = Vec::new();
-    for (var, file_var) in crate::config::environment::patch_variables() {
-        remove.push(var);
-        remove.push(file_var);
-    }
-    remove.push("MRSM__COMPOSE_CONFIG".into());
-    remove.push(CONFIG_DIR_VAR.into());
-    remove.extend(connector_variables(env, root, plugins_dirs));
-    remove.sort();
-    remove.dedup();
-    let config_file_var = crate::static_config::static_config()
-        .environment
-        .config_file
-        .clone();
-    ScopedEnv {
-        set: vec![
-            (
-                CONFIG_DIR_VAR.into(),
-                files.config_dir.to_string_lossy().into_owned(),
-            ),
-            (
-                config_file_var,
-                files.config_file.to_string_lossy().into_owned(),
-            ),
-            (TEAM_SCOPE_VAR.into(), scope.team.clone()),
-        ],
-        remove: remove
-            .into_iter()
-            .filter(|k| {
-                k != CONFIG_DIR_VAR
-                    && k != crate::static_config::static_config()
-                        .environment
-                        .config_file
-                        .as_str()
-            })
-            .collect(),
-    }
-}
+mod environment;
+pub use environment::{
+    JOB_NAMES, MEERSCHAUM_NAMES, PASSTHROUGH_KEY, Passthrough, SYSTEM_NAMES, is_allowed,
+    is_job_name, is_refused, may_record, team_env,
+};
 
 #[cfg(test)]
 mod tests;

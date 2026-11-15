@@ -29,6 +29,8 @@ def tpr_probe(action=None, **kwargs):
         'env': sorted(k for k in os.environ if k.startswith('MRSM_SQL_') or k in (
             'MRSM_CONFIG', 'MRSM_PATCH')),
         'team': os.environ.get('MRSM_TEAM_SCOPE'),
+        'sentinels': sorted(k for k in os.environ if k.startswith('TPR_')
+            or k == 'MRSM_SQL_LISTED'),
         'file_has_others': any(s in text for s in ('d-pw', 'server-pw')),
         'file_has_own': 'w-pw' in text,
     })
@@ -47,6 +49,12 @@ fn root_with_teams(root: &Path, plugins: &Path) -> Config {
             db("drylands"),
             db("shared"),
         ),
+    )
+    .unwrap();
+    // `TPR_PASSED` is passed on to team processes; `MRSM_SQL_LISTED` is refused although listed.
+    std::fs::write(
+        config_dir.join("system.yaml"),
+        "engine:\n  python_team_env_passthrough: [TPR_PASSED, MRSM_SQL_LISTED]\n",
     )
     .unwrap();
     std::fs::write(plugins.join("tpr_probe.py"), PLUGIN).unwrap();
@@ -80,6 +88,18 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     let root = tempfile::tempdir().unwrap();
     let plugins = tempfile::tempdir().unwrap();
     let config = root_with_teams(root.path(), plugins.path());
+    // The server's environment holds a credential of its own (a cloud key): team workers start
+    // from an allowlist and never see it. (This file's only test: nothing else reads the
+    // environment meanwhile.)
+    // SAFETY: no other thread of this test binary reads or writes the environment now.
+    unsafe {
+        std::env::set_var("TPR_SENTINEL_CLOUD_KEY", "cloud-secret");
+        std::env::set_var("TPR_PASSED", "passed");
+        std::env::set_var(
+            "MRSM_SQL_LISTED",
+            format!("sqlite:///{}", root.path().join("listed.db").display()),
+        );
+    }
     let session = Session::new();
     session.set_worker_python(&python.display().to_string());
     let connectors = config.get(&["meerschaum", "connectors"]).unwrap().to_map();
@@ -100,6 +120,11 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     assert_eq!(first["visible"], serde_json::json!(["default", "wetlands"]));
     assert_eq!(first["env"], serde_json::json!([]), "{first}");
     assert_eq!(first["team"], "wetlands");
+    assert_eq!(
+        first["sentinels"],
+        serde_json::json!(["TPR_PASSED"]),
+        "{first}"
+    );
     assert_eq!(first["file_has_others"], false);
     assert_eq!(first["file_has_own"], true);
     // The Rust side of the team's session resolves the team's connectors only (also what
@@ -143,7 +168,14 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
     let open = probe(&session, &config);
     assert_eq!(
         open["defined"],
-        serde_json::json!(["drylands", "local", "main", "memory", "shared", "wetlands"])
+        serde_json::json!([
+            "drylands", "listed", "local", "main", "memory", "shared", "wetlands"
+        ])
+    );
+    // ... and its whole environment.
+    assert_eq!(
+        open["sentinels"],
+        serde_json::json!(["MRSM_SQL_LISTED", "TPR_PASSED", "TPR_SENTINEL_CLOUD_KEY"])
     );
     session.shutdown();
 }
