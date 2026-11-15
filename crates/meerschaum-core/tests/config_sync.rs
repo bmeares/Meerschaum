@@ -15,11 +15,23 @@ fn written(source: &str) -> String {
 }
 
 fn registry(root: &std::path::Path, allow_writes: bool) -> Config {
-    let env = vec![("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned())];
+    registry_with(root, allow_writes, &[])
+}
+
+fn registry_with(root: &std::path::Path, allow_writes: bool, extra: &[(&str, &str)]) -> Config {
+    let mut env = vec![("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned())];
+    env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
     let mut opts = ConfigOptions::with_env(env);
     opts.allow_writes = allow_writes;
     Config::new(opts).unwrap()
 }
+
+/// A stack without a `grafana` service: nothing for `mrsm stack` to harden, so the core sync
+/// writes the compose file (5.1; a stack with Grafana leaves it to `mrsm stack`).
+const WITHOUT_GRAFANA: (&str, &str) = (
+    "MRSM_CONFIG",
+    r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null}}}}"#,
+);
 
 #[test]
 fn built_in_grafana_dashboards_upgrade_in_the_existing_folder_and_keep_user_files() {
@@ -297,6 +309,15 @@ fn stack_files_are_derived_from_the_config_and_keep_their_header() {
     config
         .with_state(|s| s.sync_files(&["stack"]))
         .expect("sync");
+    // 5.1: the default stack has Grafana, whose compose service `mrsm stack` hardens: the core
+    // sync leaves the compose file to it and never writes it unhardened.
+    assert_eq!(
+        std::fs::read_to_string(&compose).unwrap(),
+        "# keep this header\n\nstale: true\n"
+    );
+    registry_with(root.path(), true, &[WITHOUT_GRAFANA])
+        .with_state(|s| s.sync_files(&["stack"]))
+        .expect("sync");
 
     let text = std::fs::read_to_string(&compose).unwrap();
     assert!(text.starts_with("# keep this header\n\n"), "{text}");
@@ -472,6 +493,9 @@ fn a_v4_stack_yaml_keeps_its_compose_section() {
     std::fs::create_dir_all(&paths.config_dir).unwrap();
     std::fs::write(paths.config_dir.join("stack.yaml"), &stack_yaml).unwrap();
 
+    // Without Grafana's service: a stack with it leaves the compose file to `mrsm stack`.
+    drop(config);
+    let config = registry_with(root.path(), true, &[WITHOUT_GRAFANA]);
     config
         .with_state(|s| s.sync_files(&["stack"]))
         .expect("sync");

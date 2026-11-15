@@ -328,27 +328,9 @@ default_stack_config['filetype'] = 'yaml'
 ### check if configs are in sync
 
 def _sync_stack_files():
-    from meerschaum.config._sync import sync_yaml_configs
-    sync_yaml_configs(
-        paths.CONFIG_DIR_PATH / 'stack.yaml',
-        ['stack', paths.STACK_COMPOSE_FILENAME],
-        paths.STACK_COMPOSE_PATH,
-        substitute = True,
-    )
-    sync_yaml_configs(
-        paths.CONFIG_DIR_PATH / 'stack.yaml',
-        ['stack', 'grafana', 'datasource'],
-        paths.GRAFANA_DATASOURCE_PATH,
-        substitute = True,
-    )
-    sync_yaml_configs(
-        paths.CONFIG_DIR_PATH / 'stack.yaml',
-        ['stack', 'grafana', 'dashboard'],
-        paths.GRAFANA_DASHBOARD_PATH,
-        substitute = True,
-    )
-
-    _write_initdb()
+    """Write the stack's files through the one native writer (see `write_stack()`)."""
+    from meerschaum.config._sync import sync_files
+    sync_files(['stack'])
 
 def _write_initdb():
     """Write the database setup script when it is absent (a customized file is kept)."""
@@ -378,10 +360,15 @@ def get_necessary_files():
 def write_stack(
     debug: bool = False 
 ):
-    """Write Docker Compose configuration files."""
-    from meerschaum.config._edit import general_write_yaml_config
+    """
+    Write Docker Compose configuration files.
+
+    The files are written by the one native writer (`sync_files(['stack'])`): the provisioned data
+    source never holds `sql:main`'s credentials, and a compose file `mrsm stack` hardens (a stack
+    with Grafana) is left to `mrsm stack`, never written here in a form Grafana could be started
+    from without it.
+    """
     from meerschaum.config._sync import sync_files
-    general_write_yaml_config(get_necessary_files(), debug=debug)
     return sync_files(['stack'])
    
 

@@ -1651,3 +1651,91 @@ mod grafana_tests {
         assert!(patched_api_patch(None, "pw").is_some());
     }
 }
+
+#[cfg(test)]
+mod compose_writer_tests {
+    use super::*;
+    use meerschaum_core::config::{Config, ConfigOptions};
+
+    fn compose_after(
+        root: &std::path::Path,
+        env: &[(&str, &str)],
+        stack_first: bool,
+    ) -> (String, String) {
+        let mut vars: Vec<(String, String)> =
+            vec![("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned())];
+        vars.extend(env.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        let mut opts = ConfigOptions::with_env(vars);
+        opts.allow_writes = true;
+        opts.home = root.to_path_buf();
+        let mut out = Vec::new();
+        let mut rt = Runtime::new(
+            crate::types::DateContext::system(),
+            80,
+            &mut out,
+            |_: &str| None,
+        );
+        rt.err = Box::new(std::io::sink());
+        rt.config = Some(Config::new(opts).unwrap());
+        let path = rt.config().paths().path("STACK_COMPOSE_PATH");
+        let read = |path: &std::path::Path| std::fs::read_to_string(path).unwrap_or_default();
+        let core = |rt: &mut Runtime<'_>| {
+            rt.config()
+                .with_state(|s| s.sync_files(&["stack"]))
+                .unwrap();
+        };
+        if stack_first {
+            write_stack(&mut rt).unwrap();
+            let by_stack = read(&path);
+            core(&mut rt);
+            (by_stack, read(&path))
+        } else {
+            core(&mut rt);
+            let by_core = read(&path);
+            write_stack(&mut rt).unwrap();
+            (read(&path), by_core)
+        }
+    }
+
+    /// `mrsm stack` writes the hardened compose file, and the core `sync_files` (Python's first
+    /// read of the `stack` config) never downgrades it: one result on disk.
+    #[test]
+    fn the_core_sync_never_downgrades_the_stacks_compose_file() {
+        for env in [
+            vec![],
+            vec![("MRSM_CONFIG", r#"{"api": {"grafana": {"enabled": true}}}"#)],
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (by_stack, after_core) = compose_after(dir.path(), &env, true);
+            assert!(by_stack.contains("grafana_readonly"), "{by_stack}");
+            if !env.is_empty() {
+                assert!(by_stack.contains(GRAFANA_PROXY_NETWORK), "{by_stack}");
+                assert!(by_stack.contains("GF_AUTH_PROXY_ENABLED"), "{by_stack}");
+            }
+            assert_eq!(
+                after_core, by_stack,
+                "the core sync rewrote the compose file"
+            );
+
+            // The core sync first: it leaves the compose file to `mrsm stack`.
+            let dir = tempfile::tempdir().unwrap();
+            let (by_stack, by_core) = compose_after(dir.path(), &env, false);
+            assert!(
+                by_core.is_empty() || by_core == by_stack,
+                "the core sync wrote an unhardened compose file:\n{by_core}"
+            );
+        }
+    }
+
+    /// A stack without a `grafana` service is still written by the core sync (nothing to harden).
+    #[test]
+    fn the_core_sync_writes_a_compose_file_without_grafana() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("config")).unwrap();
+        let patch = r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null}}}}"#;
+        let (by_stack, by_core) = compose_after(dir.path(), &[("MRSM_CONFIG", patch)], false);
+        assert!(!by_core.is_empty());
+        assert!(!by_core.contains("grafana_readonly"), "{by_core}");
+        assert!(by_stack.contains("services:"), "{by_stack}");
+    }
+}

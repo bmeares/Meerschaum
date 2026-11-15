@@ -153,3 +153,49 @@ print(json.dumps(get_config('stack', 'docker-compose.yaml', 'services', 'db', 'h
         )
         assert 'start_period' not in healthcheck, (case['name'], healthcheck)
         assert ('retries' in healthcheck) == (case['name'] != 'edited'), healthcheck
+
+
+def test_python_never_writes_an_unhardened_compose_file(tmp_path):
+    """
+    5.1: the compose file of a stack with Grafana is written by `mrsm stack` only (with the
+    read-only role's setup service and, with `api:grafana`, the auth proxy). Python's first read
+    of `stack`, `sync_files` and `write_stack()` leave it alone; the data source file never holds
+    `sql:main`'s user. A stack without Grafana still gets its compose file from Python.
+    """
+    result = run_python(
+        """
+import json, os
+import meerschaum.config.paths as paths
+from meerschaum.config import get_config
+from meerschaum.config.stack import write_stack
+from meerschaum import _core
+get_config('stack', 'docker-compose.yaml')
+_core.sync_files(['stack'])
+write_stack()
+print(json.dumps({
+    'compose': os.path.exists(paths.STACK_COMPOSE_PATH),
+    'datasource': paths.GRAFANA_DATASOURCE_PATH.read_text(encoding='utf-8'),
+}))
+""",
+        tmp_path / 'with_grafana',
+    )
+    assert result['compose'] is False, result
+    assert 'user: mrsm__main_ro' in result['datasource'], result['datasource']
+
+    without = tmp_path / 'without_grafana'
+    (without / 'config').mkdir(parents=True)
+    (without / 'config' / 'stack.yaml').write_text(
+        "docker-compose.yaml:\n  services:\n    db:\n      image: postgres:18\n"
+    )
+    result = run_python(
+        """
+import json
+import meerschaum.config.paths as paths
+from meerschaum.config.stack import write_stack
+write_stack()
+print(json.dumps(paths.STACK_COMPOSE_PATH.read_text(encoding='utf-8')))
+""",
+        without,
+    )
+    assert 'image: postgres:18' in result, result
+    assert 'grafana' not in result, result

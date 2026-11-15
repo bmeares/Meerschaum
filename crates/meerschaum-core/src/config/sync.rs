@@ -4,6 +4,8 @@
 //! The first time the `stack` key is loaded (and whenever the stack actions ask), the Docker
 //! Compose file and the two Grafana files are rewritten from the config, keeping the comment
 //! header of the file already on disk, and the PostgreSQL extensions script is created once.
+//! The compose file of a stack `mrsm stack` hardens (one with Grafana, 5.1) is left to `mrsm
+//! stack` ([`ConfigState::stack_compose_hardened`]).
 //! The built-in Grafana dashboards are installed next to the provider file, and the ones an
 //! earlier release shipped are removed when Meerschaum still manages them.
 
@@ -328,8 +330,48 @@ impl ConfigState {
         }
     }
 
+    /// Whether `mrsm stack` hardens the stack's compose file (5.1): the stack has a `grafana`
+    /// service, and its "Meerschaum Main" data source is switched to the read-only role (`mrsm
+    /// stack` adds the one-shot `grafana_readonly` service Grafana waits for) or
+    /// `api:grafana:enabled` is set (the auth proxy, its network and the administrator password).
+    /// That transformation lives in `meerschaum-cli` (`os_sql_stack`), which writes the file
+    /// before every `docker compose` command.
+    pub fn stack_compose_hardened(&mut self, compose_name: &str) -> bool {
+        let opts = GetOptions {
+            patch: true,
+            substitute: true,
+            write_missing: false,
+            warn: false,
+        };
+        let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+        let (_, compose) = self.get_config_lossless(&keys(&["stack", compose_name]), opts);
+        let has_grafana = compose
+            .to_value()
+            .get("services")
+            .and_then(|services| services.get("grafana"))
+            .is_some_and(|grafana| grafana.as_map().is_some());
+        if !has_grafana {
+            return false;
+        }
+        let (_, enabled) = self.get_config_lossless(&keys(&["api", "grafana", "enabled"]), opts);
+        if enabled.truthy() {
+            return true;
+        }
+        let (_, datasource) =
+            self.get_config_lossless(&keys(&["stack", "grafana", "datasource"]), opts);
+        let mut datasource = datasource.to_value();
+        matches!(
+            self.main_readonly_datasource(&mut datasource).0,
+            super::grafana_readonly::MainSource::Switched { .. }
+        )
+    }
+
     /// `sync_files(keys)`: only the `stack` key has derivative files. Does nothing when writes
     /// are disabled (`_allow_write_missing`), as v4's callers check before calling.
+    ///
+    /// 5.1: the compose file is left to `mrsm stack` when it hardens it
+    /// ([`stack_compose_hardened`](Self::stack_compose_hardened)): this sync never rewrites it in
+    /// a form Grafana could be started from without the hardening.
     pub fn sync_files(&mut self, keys: &[&str]) -> Result<(), String> {
         if !self.allow_writes() || !keys.contains(&"stack") {
             return Ok(());
@@ -337,11 +379,13 @@ impl ConfigState {
         let paths = self.paths().clone();
         let compose_name = paths.path("STACK_COMPOSE_FILENAME");
         let compose_name = compose_name.to_string_lossy().into_owned();
-        self.sync_yaml_config(
-            &["stack", compose_name.as_str()],
-            &paths.path("STACK_COMPOSE_PATH"),
-            COMPOSE_REPLACEMENTS,
-        )?;
+        if !self.stack_compose_hardened(&compose_name) {
+            self.sync_yaml_config(
+                &["stack", compose_name.as_str()],
+                &paths.path("STACK_COMPOSE_PATH"),
+                COMPOSE_REPLACEMENTS,
+            )?;
+        }
         self.sync_yaml_config(
             &["stack", "grafana", "datasource"],
             &paths.path("GRAFANA_DATASOURCE_PATH"),
