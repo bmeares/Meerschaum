@@ -421,3 +421,57 @@ print('JSON:' + json.dumps(out, default=str))
     assert out['recreated'][0] is True, out
     assert out['renamed'][0] is True, out
     assert out['moved_teams'] == ['ti-moved']
+
+
+def test_a_team_connector_is_the_only_change_to_the_configuration_file(sandbox):
+    """
+    New team's connector (and a rename's reservations) are written to `meerschaum.yaml` as the
+    file holds them: references stay references, and `sql:main` from `MRSM_SQL_MAIN` or an
+    `MRSM_CONFIG` patch is never written. The file holding the team's password is owner-only.
+    """
+    import os
+    import stat
+    root, plugins = sandbox
+    config_dir = root / 'config'
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / 'meerschaum.yaml'
+    path.write_text(
+        "connectors:\n"
+        "  sql:\n"
+        "    shared:\n"
+        "      flavor: sqlite\n"
+        "      database: MRSM{meerschaum:connectors:sql:local:database}\n"
+        "  api:\n"
+        "    upstream:\n"
+        "      host: api.example.com\n"
+    )
+    os.chmod(path, 0o644)
+    out = _json(run_python(root, plugins, SEED + '''
+from meerschaum.config._read_config import read_config
+from meerschaum.config import get_config
+out = {}
+out['main_live'] = get_config('meerschaum', 'connectors', 'sql', 'main', 'uri')
+out['written'] = team_setup.write_connector(
+    'sql:wetlands', {'flavor': 'sqlite', 'database': 'w.db', 'password': 'team-generated-pw',
+                     'teams': ['ti-cfg']},
+)
+team('ti-cfg')
+out['renamed'] = access.rename_team('ti-cfg', 'ti-cfg2')
+print('JSON:' + json.dumps(out, default=str))
+''', extra_env={
+        'MRSM_SQL_MAIN': 'timescaledb://mrsm:env-only-pw-4242@127.0.0.1:1/meerschaum',
+        'MRSM_CONFIG': json.dumps({'meerschaum': {'connectors': {'api': {'upstream': {
+            'password': 'patch-only-k3y-31337',
+        }}}}}),
+    }))
+    assert 'env-only-pw-4242' in out['main_live'], out
+    assert out['written'][0] is True, out
+    assert out['renamed'][0] is True, out
+    text = path.read_text()
+    assert 'env-only-pw-4242' not in text, text
+    assert 'patch-only-k3y-31337' not in text, text
+    assert 'MRSM{meerschaum:connectors:sql:local:database}' in text, text
+    assert 'team-generated-pw' in text, text
+    assert '- ti-cfg2' in text, text
+    assert 'main:' not in text, text
+    assert stat.S_IMODE(os.stat(path).st_mode) & 0o077 == 0, oct(os.stat(path).st_mode)

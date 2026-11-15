@@ -236,6 +236,10 @@ def write_connector(keys: str, attributes: Dict[str, Any]) -> SuccessTuple:
         labels[label] = copy.deepcopy(attributes)
         if not write_config({'meerschaum': section}):
             return False, f"The connector '{keys}' could not be written to the configuration."
+        ### The connector holds a generated password: the file is readable by its owner only.
+        made_private = _owner_only(_connectors_file())
+        if made_private is not None:
+            return False, made_private
         live = get_config('meerschaum', 'connectors', warn=False)
         if isinstance(live, dict):
             live.setdefault(typ, {})[label] = copy.deepcopy(attributes)
@@ -334,6 +338,19 @@ def _connectors_file() -> Optional[str]:
                 return path
     except Exception:
         pass
+    return None
+
+
+def _owner_only(path: Optional[str]) -> Optional[str]:
+    """Clear the group and other permission bits of `path` (POSIX); why it failed, or `None`."""
+    if not path or os.name != 'posix':
+        return None
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+        if mode & 0o077:
+            os.chmod(path, mode & 0o7700)
+    except OSError as e:
+        return f"The connector was written, but '{path}' could not be made private: {e}"
     return None
 
 

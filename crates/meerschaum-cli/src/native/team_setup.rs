@@ -428,29 +428,21 @@ pub fn bootstrap_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         for note in &made.notes {
             warn(rt, note);
         }
-        let mut section = super::connectors::meerschaum_section(rt);
-        let attributes = Value::Map(made.connector_attributes(&name));
-        let connectors = section
-            .entry("connectors".to_string())
-            .or_insert_with(|| Value::Map(Map::new()));
-        if let Value::Map(connectors) = connectors {
-            let sql = connectors
-                .entry("sql".to_string())
-                .or_insert_with(|| Value::Map(Map::new()));
-            if let Value::Map(sql) = sql {
-                sql.insert(label.clone(), attributes);
-            }
-        }
-        if !super::connectors::write_meerschaum(rt, section) {
+        // Only this connector is added to the file, as written: never the substituted section
+        // (references, environment connectors and patches stay out of it).
+        let added = rt
+            .config()
+            .add_connector("sql", &label, &made.connector_attributes(&name));
+        super::connectors::flush_config_warnings(rt);
+        if let Err(e) = added {
             return fail(format!(
                 "The {} '{}' and the role '{}' were created, but the connector 'sql:{label}' \
-                 could not be written to the configuration.",
+                 could not be written to the configuration: {e}",
                 kind.name(),
                 options.name.clone().unwrap_or_else(|| label.clone()),
                 made.role
             ));
         }
-        rt.config().refresh_connectors();
         provisioned = Some((format!("sql:{label}"), base, made));
     }
 

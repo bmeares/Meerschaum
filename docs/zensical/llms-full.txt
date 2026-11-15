@@ -7488,7 +7488,7 @@ When a request names no instance, the console, the pipe routes and the MCP tools
 - a login role `mrsm_<team>` with a generated password. It owns the team's database (or schema) and is not a superuser;
 - a read-only login role `mrsm_<team>_ro` for dashboards, which may only `SELECT` what the team's role creates;
 - the database (TimescaleDB and PostGIS are installed in it when the base server has them), which nobody else may connect to, or the schema, which becomes the roles' `search_path`. Nothing on it is granted to `PUBLIC`, nor to the stack's read-only Grafana role (`mrsm__main_ro`, see [the stack's main data source](#the-stacks-main-data-source)), also when that role already exists;
-- a connector `sql:<team>` in your configuration, reserved for the team, which becomes the team's default instance. The team's pipes are registered there.
+- a connector `sql:<team>` in your configuration, reserved for the team, which becomes the team's default instance. The team's pipes are registered there. Only that connector is added to `config/meerschaum.yaml`, with the role's password: the rest of the file is kept as it is written (references such as `MRSM{...}` stay), connectors and patches from environment variables (`MRSM_SQL_MAIN`, `MRSM_CONFIG`, ...) are never written to it, and the file is made readable by you only.
 
 It also takes `CONNECT` on the base database away from `PUBLIC`, so a team's role cannot open it. Every login role that could connect before keeps an explicit grant.
 

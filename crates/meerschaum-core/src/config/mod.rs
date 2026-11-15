@@ -604,6 +604,93 @@ impl Config {
         self.lock().write_config(config, directory)
     }
 
+    /// Add the connector `typ:label` with `attributes` to the configuration file, as written, and
+    /// to memory (5.1: a team's connector). Nothing else in the file changes: `MRSM{...}`
+    /// references stay references, and what only the environment holds (`MRSM_<TYPE>_<LABEL>`
+    /// connectors, `MRSM_CONFIG` / `MRSM_PATCH` patches) is never written. The attributes hold a
+    /// generated password, so the file is left readable by its owner only. `Err` when the
+    /// connector is already in the file, or the file could not be read or written.
+    pub fn add_connector(&self, typ: &str, label: &str, attributes: &Map) -> Result<(), String> {
+        let keys = format!("{typ}:{label}");
+        self.with_state(|s| {
+            let key = "meerschaum".to_string();
+            let (disk, _) = s
+                .read_config_lossless(None, Some(std::slice::from_ref(&key)), false, false, true)
+                .map_err(|e| format!("The configuration could not be read: {e:?}"))?;
+            let mut section = disk
+                .get(&key)
+                .and_then(ConfigValue::as_map)
+                .cloned()
+                .unwrap_or_default();
+            let value = ConfigValue::from_value(&Value::Map(attributes.clone()));
+            let connectors = section
+                .entry("connectors".to_string())
+                .or_insert_with(ConfigValue::new_map);
+            if connectors.as_map().is_none() {
+                *connectors = ConfigValue::new_map();
+            }
+            let labels = connectors
+                .as_map_mut()
+                .expect("a map")
+                .entry(typ.to_string())
+                .or_insert_with(ConfigValue::new_map);
+            if labels.as_map().is_none() {
+                *labels = ConfigValue::new_map();
+            }
+            let labels = labels.as_map_mut().expect("a map");
+            if labels.get(label).is_some_and(ConfigValue::truthy) {
+                return Err(format!("The connector '{keys}' already exists."));
+            }
+            labels.insert(label.to_string(), value.clone());
+            let mut config = ConfigMap::new();
+            config.insert(key.clone(), ConfigValue::Map(section));
+            if !s.write_config_lossless(Some(&config), None) {
+                let reason = s
+                    .take_write_error()
+                    .map(|(_, message)| format!(": {message}"))
+                    .unwrap_or_else(|| ".".into());
+                return Err(format!(
+                    "The connector '{keys}' could not be written to the configuration{reason}"
+                ));
+            }
+            #[cfg(unix)]
+            if let Some(path) = s.get_keyfile_path(&key, false, None) {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    let mode = meta.permissions().mode() & 0o7777;
+                    if mode & 0o077 != 0 {
+                        std::fs::set_permissions(
+                            &path,
+                            std::fs::Permissions::from_mode(mode & 0o7700),
+                        )
+                        .map_err(|e| {
+                            format!(
+                                "The connector '{keys}' was written, but '{}' could not be made \
+                                 readable by its owner only: {e}",
+                                path.display()
+                            )
+                        })?;
+                    }
+                }
+            }
+            // In memory (when the section is loaded; else its first read loads the file).
+            if let Some(section) = s.config.get_mut(&key).and_then(|m| m.as_map_mut()) {
+                let connectors = section
+                    .entry("connectors".to_string())
+                    .or_insert_with(ConfigValue::new_map);
+                if let Some(connectors) = connectors.as_map_mut() {
+                    let labels = connectors
+                        .entry(typ.to_string())
+                        .or_insert_with(ConfigValue::new_map);
+                    if let Some(labels) = labels.as_map_mut() {
+                        labels.insert(label.to_string(), value);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
     /// Move the connector reservations of team `from` to `to` (5.1,
     /// [`crate::access::move_reservations`]) in the configuration file, as written (references
     /// are kept), and in memory. The connectors changed (`type:label`); `Err` when the file could

@@ -151,3 +151,83 @@ fn reservations_are_rewritten_in_the_configuration_file() {
             .is_empty()
     );
 }
+
+#[test]
+fn a_team_connector_is_added_to_the_file_as_written() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("config").join("meerschaum.yaml");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let written = "connectors:\n  sql:\n    shared:\n      flavor: sqlite\n      \
+                   database: MRSM{meerschaum:connectors:sql:local:database}\n";
+    std::fs::write(&file, written).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let env = vec![
+        (
+            "MRSM_ROOT_DIR".into(),
+            root.path().to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_SQL_MAIN".into(),
+            "postgresql://mrsm:env-only-pw-4242@db.example.com:5432/meerschaum".into(),
+        ),
+        (
+            "MRSM_CONFIG".into(),
+            r#"{"meerschaum": {"connectors": {"api": {"up": {"password": "patch-only-31337"}}}}}"#
+                .into(),
+        ),
+    ];
+    let mut opts = ConfigOptions::with_env(env);
+    opts.allow_writes = true;
+    let config = Config::new(opts).unwrap();
+    // The environment connector is in memory.
+    assert!(
+        config
+            .get(&["meerschaum", "connectors", "sql", "main", "uri"])
+            .unwrap()
+            .py_str()
+            .contains("env-only-pw-4242")
+    );
+    let attributes = Value::from_json_str(
+        r#"{"flavor": "postgresql", "host": "db.example.com", "username": "mrsm_wetlands",
+            "password": "generated-pw", "database": "wetlands", "teams": ["Wetlands"]}"#,
+    )
+    .unwrap()
+    .to_map();
+    config
+        .add_connector("sql", "wetlands", &attributes)
+        .unwrap();
+
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(!text.contains("env-only-pw-4242"), "{text}");
+    assert!(!text.contains("patch-only-31337"), "{text}");
+    assert!(!text.contains("main:"), "{text}");
+    assert!(
+        text.contains("MRSM{meerschaum:connectors:sql:local:database}"),
+        "{text}"
+    );
+    assert!(text.contains("generated-pw"), "{text}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{mode:o}");
+    }
+    // In memory too, beside the environment connector.
+    let live = config.get(&["meerschaum", "connectors", "sql"]).unwrap();
+    assert_eq!(
+        live.get("wetlands")
+            .unwrap()
+            .get("username")
+            .unwrap()
+            .py_str(),
+        "mrsm_wetlands"
+    );
+    assert!(live.get("main").unwrap().get("uri").is_some());
+    // A connector already in the file is refused, and the file is not touched.
+    assert!(config.add_connector("sql", "shared", &attributes).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+}
