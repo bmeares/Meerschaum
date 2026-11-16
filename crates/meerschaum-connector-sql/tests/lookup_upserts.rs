@@ -567,6 +567,12 @@ flavor_tests!(
         let source_table = c.conn.pipe_table_name(&c.conn.sql_pipe(&source).unwrap());
         let mut destination_params = params;
         destination_params["sql"] = serde_json::json!(format!("SELECT * FROM {source_table}"));
+        if matches!(c.flavor, "postgresql" | "postgis") {
+            // Unpartitioned: the plan check below fills the table with rows by plain SQL, which
+            // a natively partitioned table (an in-place sync makes one, as a frame sync does)
+            // has no partitions for.
+            destination_params["hypertable"] = serde_json::json!(false);
+        }
         let destination = c.pipe(
             &c.conn.keys(),
             "lookup_result",

@@ -11,6 +11,7 @@ use crate::driver::{SqlTransaction, SqlValue};
 use crate::dtypes::{cast_dtype, get_db_type_from_pd_type};
 use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::sql_item_name;
+use crate::pipe::SqlPipe;
 use crate::queries::metadef::{Bound, SQLITE_STORED_DATETIME_GLOB, sqlite_canonical_datetime};
 use crate::queries::table::{
     ColumnTypeRow, CreateTableOptions, QueryOrDtypes, cols_types_from_rows,
@@ -165,6 +166,52 @@ impl SqlConnector {
             }
         }
         cols_types_from_rows(&rows, self.flavor, schema, database, &geometry)
+    }
+
+    /// Create the native range partitions (PostgreSQL, PostGIS) that the rows of `staged` (a
+    /// table this transaction staged, so read in it) need in the pipe's partitioned table.
+    /// The partitions are created on their own connection and kept, as the frame path creates
+    /// them (`create_missing_partitions`): creating them in this transaction would hold the
+    /// parent's lock while later catalog reads on other connections wait for it. Nothing when
+    /// the table is not partitioned (an older table, `hypertable: false`) or `staged` has no
+    /// datetimes.
+    async fn create_partitions_for_staged(
+        &self,
+        tx: &mut Option<SqlTransaction>,
+        sp: &SqlPipe,
+        staged: &str,
+        dt_col: &str,
+    ) -> Result<(), String> {
+        let flavor = self.flavor;
+        let Some(t) = tx.as_mut() else {
+            return Err("The session was rolled back.".into());
+        };
+        let partitioned = t
+            .read_frame(&crate::queries::partition::get_pg_is_partitioned_query(
+                &self.ctx(),
+                sp,
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
+        if partitioned.height() == 0 {
+            return Ok(());
+        }
+        let dt = sql_item_name(dt_col, flavor, None);
+        let bounds = t
+            .read_frame(&format!(
+                "SELECT {dt} FROM (SELECT MIN({dt}) AS {dt} FROM {staged} UNION ALL \
+                 SELECT MAX({dt}) FROM {staged}) AS {} WHERE {dt} IS NOT NULL",
+                sql_item_name("bounds", flavor, None)
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
+        let ranges = self.partition_ranges_for_frame(sp, &bounds);
+        let queries =
+            crate::queries::partition::get_pg_partition_creation_queries(&self.ctx(), sp, &ranges);
+        if !queries.is_empty() && !self.exec_queries_all(&queries, true, true).await {
+            return Err(format!("Failed to create partitions for {}.", sp.pipe()));
+        }
+        Ok(())
     }
 
     /// `sync_pipe_inplace(pipe, params, begin, end, check_existing)`: sync a pipe whose SQL
@@ -598,6 +645,156 @@ impl SqlConnector {
             ));
         }
 
+        if !state.exists
+            && flavor.pg_partition()
+            && self.should_partition(&sp)
+            && let Some(dt) = dt_col.as_deref()
+        {
+            // Boxed: the in-place sync's future stays small (a debug build's 2 MiB worker
+            // stack, see `sync_pipe_inplace_forgetting`).
+            return Box::pin(async {
+            // The frame path partitions this pipe's table by its datetime column (`CREATE
+            // TABLE ... PARTITION BY RANGE`, the datetime column folded into the primary key):
+            // `CREATE TABLE ... AS` cannot. Stage the definition's rows, create the table
+            // with the staged columns' own types, its partitions, then copy the rows.
+            let schema = self.get_pipe_schema(&sp);
+            let staged = &temp_tables["new"];
+            let staged_name = &names["new"];
+            let mut stage =
+                get_create_schema_if_not_exists_queries(isch, flavor).unwrap_or_default();
+            match get_create_table_queries(
+                &QueryOrDtypes::Query(metadef.clone()),
+                staged,
+                flavor,
+                &CreateTableOptions {
+                    schema: internal_schema.clone(),
+                    ..Default::default()
+                },
+            ) {
+                Ok(q) => stage.extend(q),
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            }
+            if !self.exec_queries_all(&stage, false, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not stage new data for {pipe} from its SQL query definition."
+                ));
+            }
+            if let Some(o) = observer {
+                let query = format!("SELECT {observed_col} FROM {staged_name}");
+                let observed = match self.driver().read_frame(&query).await {
+                    Ok(delta) => o.before_merge(&delta).await,
+                    Err(e) => Err(e.to_string()),
+                };
+                if let Err(e) = observed {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e);
+                }
+            }
+            // The staged columns' types as the catalog formats them for DDL (`integer[]`, an
+            // enum's name, `numeric(10,2)`), not `information_schema`'s placeholders.
+            let types_query = format!(
+                "SELECT a.attname AS \"column\", pg_catalog.format_type(a.atttypid, a.atttypmod) AS \"type\" \
+                 FROM pg_catalog.pg_attribute a WHERE a.attrelid = '{}'::regclass \
+                 AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
+                staged_name.replace('\'', "''")
+            );
+            let db_types: IndexMap<String, String> = match self.read_catalog(&types_query).await {
+                Ok(df) => frame_docs(&df)
+                    .iter()
+                    .filter_map(|d| Some((kv_str(d.get("column"))?, kv_str(d.get("type"))?)))
+                    .collect(),
+                Err(e) => {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e.to_string());
+                }
+            };
+            let mut queries = match get_create_table_queries(
+                &QueryOrDtypes::Dtypes(db_types.clone()),
+                &target,
+                flavor,
+                &CreateTableOptions {
+                    schema: schema.clone(),
+                    primary_key: primary_key.clone(),
+                    primary_key_db_type: primary_key
+                        .as_ref()
+                        .and_then(|pk| db_types.get(pk))
+                        .cloned()
+                        .or(primary_key_db_type.clone()),
+                    autoincrement,
+                    datetime_column: dt_col.clone(),
+                    partition_by_column: Some(dt.to_string()),
+                    parse_dtypes: false,
+                    ..Default::default()
+                },
+            ) {
+                Ok(q) => q,
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            };
+            if let Some(s) = schema.as_deref().filter(|s| !s.is_empty())
+                && let Ok(mut q) = get_create_schema_if_not_exists_queries(Some(s), flavor)
+            {
+                q.extend(queries);
+                queries = q;
+            }
+            if !self.exec_queries_all(&queries, false, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not insert new data into {pipe} from its SQL query definition."
+                ));
+            }
+            let dt_name = sql_item_name(dt, flavor, None);
+            let bounds = match self
+                .driver()
+                .read_frame(&format!(
+                    "SELECT {dt_name} FROM (SELECT MIN({dt_name}) AS {dt_name} FROM {staged_name} \
+                     UNION ALL SELECT MAX({dt_name}) FROM {staged_name}) AS {} WHERE {dt_name} IS NOT NULL",
+                    sql_item_name("bounds", flavor, None)
+                ))
+                .await
+            {
+                Ok(df) => df,
+                Err(e) => {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e.to_string());
+                }
+            };
+            let partitions = self.create_missing_partitions(&sp, &bounds).await;
+            if !partitions.success {
+                clean_up(false).await;
+                return partitions;
+            }
+            let cols = db_types
+                .keys()
+                .map(|c| sql_item_name(c, flavor, None))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let insert =
+                format!("INSERT INTO {pipe_name} ({cols})\nSELECT {cols}\nFROM {staged_name}");
+            if !self.exec_queries_all(&[insert], false, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not insert new data into {pipe} from its SQL query definition."
+                ));
+            }
+            if !self.create_indices_sp(&sp, None, None, None).await {
+                tracing::warn!("Failed to create indices for {pipe}. Continuing...");
+            }
+            let rowcount = self
+                .get_pipe_rowcount(pipe, &DataQuery::default())
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            clean_up(true).await;
+            SuccessTuple::ok(format!(
+                "Inserted {}, updated 0 rows.",
+                fmt_thousands(rowcount)
+            ))
+            })
+            .await;
+        }
+
         if !state.exists {
             let schema = self.get_pipe_schema(&sp);
             let opts = CreateTableOptions {
@@ -1010,6 +1207,19 @@ impl SqlConnector {
             };
         }
 
+        // Native range partitions (PostgreSQL, PostGIS) for the staged rows, as the frame path
+        // creates them before it writes: in this transaction (the staged table is visible only
+        // here), after the columns were added on their own connection.
+        if flavor.pg_partition()
+            && self.should_partition(&sp)
+            && let Some(dt) = dt_col.as_deref()
+            && let Err(e) =
+                Box::pin(self.create_partitions_for_staged(&mut tx, &sp, &names[new_root], dt))
+                    .await
+        {
+            fail!(e);
+        }
+
         // The window a replacing sync deletes (`[begin, end)`, the sync time minus the backtrack
         // for the default `begin`).
         let replace_window = if replace {
@@ -1332,6 +1542,26 @@ impl SqlConnector {
                 .collect(),
             Some(pk) => {
                 let mut m = IndexMap::new();
+                // An upsert conflicts on the table's own unique key. A partitioned table (a
+                // hypertable, native partitions) folds the datetime column into its primary
+                // key, so `(pk)` alone matches no unique index there: use `(dt, pk)` when that
+                // is the key, as the frame path does (`sync.rs`, `partition_upsert`).
+                if upsert
+                    && flavor.driver_family() == DriverFamily::Postgres
+                    && let Some(dt) = dt_col.as_ref().filter(|dt| {
+                        *dt != pk
+                            && backtrack_cols_types.contains_key(*dt)
+                            && new_cols.contains_key(*dt)
+                    })
+                    && Box::pin(self.upsert_conflict_target(&sp, std::slice::from_ref(pk)))
+                        .await
+                        .is_none()
+                    && Box::pin(self.upsert_conflict_target(&sp, &[dt.clone(), pk.clone()]))
+                        .await
+                        .is_some()
+                {
+                    m.insert(dt.clone(), new_cols.get(dt).cloned().unwrap_or_default());
+                }
                 m.insert(pk.clone(), new_cols.get(pk).cloned().unwrap_or_default());
                 m
             }

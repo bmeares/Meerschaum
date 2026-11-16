@@ -1273,8 +1273,7 @@ flavor_tests!(expression_conflict_target_upserts, |c: Ctx| async move {
 
 /// A partitioned target (native partitions on PostgreSQL and PostGIS, a hypertable on
 /// TimescaleDB) keyed by its primary column: the datetime column is folded into the key. Frame
-/// syncs only: an in-place sync creates an unpartitioned table and conflicts on the primary
-/// column alone, which a partitioned table's key does not match (with or without the guard).
+/// syncs, then in-place syncs into the same table, which conflict on its own key.
 async fn partitioned(c: Ctx, changed_only: bool) {
     if !pg_family(&c) {
         return;
@@ -1320,6 +1319,40 @@ async fn partitioned(c: Ctx, changed_only: bool) {
         last = now;
     }
     assert_eq!(stored(&c, &table, "v::text").await, "1;2;30;4");
+
+    // In place, into the same table.
+    let source = format!("{}_src", c.prefix);
+    exec_all(
+        &c,
+        &[
+            format!("CREATE TABLE \"{source}\" (ts timestamptz NOT NULL, id bigint NOT NULL, v bigint)"),
+            format!(
+                "INSERT INTO \"{source}\" SELECT '2024-01-01'::timestamptz + ((id - 1) || ' days')::interval, \
+                 id, CASE WHEN id = 3 THEN 30 ELSE id END FROM generate_series(1, 4) AS id"
+            ),
+        ],
+    )
+    .await;
+    let inplace_params = serde_json::json!({
+        "columns": {"datetime": "ts", "primary": "id"},
+        "upsert": true,
+        "upsert_changed_only": changed_only,
+        "verify": {"chunk_minutes": 1440},
+        "sql": format!("SELECT ts, id, v FROM \"{source}\""),
+    })
+    .to_string();
+    let inplace_pipe = c.pipe("ucs", "partitioned", None, &inplace_params);
+    inplace_steps(
+        &c,
+        &inplace_pipe,
+        &source,
+        &table,
+        true,
+        &[("", vec![]), ("v = 31 WHERE id = 3", vec![3])],
+    )
+    .await;
+    assert_eq!(stored(&c, &table, "v::text").await, "1;2;31;4");
+    exec_all(&c, &[format!("DROP TABLE \"{source}\"")]).await;
     c.delete(&pipe).await;
 }
 
