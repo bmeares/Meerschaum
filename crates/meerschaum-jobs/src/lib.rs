@@ -11,6 +11,7 @@
 //!                                env, restart, owner, team (see [`ownership`]), ...
 //! jobs/<name>/process.pid        the PID of the process doing the work (flock'ed while it runs)
 //! jobs/<name>/input.stdin        FIFO (0600) feeding the job's stdin; input.stdin.block while waiting
+//!                                (kept by the supervisor, see [`stdin_watch`])
 //! jobs/<name>/.stop.json         {"stop_time": ..., "action": "quit" | "kill" | "pause"}
 //! jobs/<name>/prompt_kwargs.json, .externally-managed, pickle.pkl (Python only)
 //! jobs/<name>/laps.json          lap heartbeats of a looping job (v5, see [`health`])
@@ -25,7 +26,8 @@
 //! - [`executor`] / [`systemd`] / [`remote`]: the executor interface (`local`, `systemd` over a
 //!   replaceable [`runner::ProcessRunner`], `api:<label>` over an injected [`remote::RemoteJobs`]
 //!   client); [`systemd_job`] is what runs inside a unit;
-//! - [`rotating`], [`stdin`], [`properties`]: the file formats;
+//! - [`rotating`], [`stdin`], [`properties`]: the file formats; [`stdin_watch`]: whether a job
+//!   waits for input;
 //! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop; [`scheduler`]: per-root schedule
 //!   and debounce state; [`health`]: the lap heartbeats of a job and the health computed from them;
 //! - [`summary`]: every job of a root with its state in one pass (one batched `systemctl show`
@@ -63,6 +65,7 @@ pub mod scheduler;
 pub mod shlex;
 pub mod startup;
 pub mod stdin;
+pub mod stdin_watch;
 pub mod summary;
 pub mod supervisor;
 pub mod systemd;

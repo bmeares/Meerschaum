@@ -23,6 +23,12 @@ Jobs keep running after your terminal closes. Their [executor](executors.md) det
 
 The console's [Jobs page](../api-instance/web-console.md#jobs) offers the same controls. It also shows when the job last ran and its [health](health.md).
 
+## Answer a job's prompts
+
+A job that asks a question waits until someone answers. `mrsm show jobs` says **waiting for input**, and `mrsm attach job <name>` shows the question and sends the line you type; a remote client gets the same through the job log websocket. Nobody needs to be attached when the job asks: it waits.
+
+On Linux this works for anything in the job that reads its input: Meerschaum's own prompts, a plugin's `input()` or `prompt()`, a shell `read`, a program the job started. On macOS only Meerschaum's own prompts (the Rust prompts and `meerschaum.utils.prompt.prompt()`) are seen as waiting; anything else still gets the line you send with `attach`, which waits for the job to ask first. A job that asks before it prints anything is answered too.
+
 ## Choose what happens next
 
 | Need | Guide |

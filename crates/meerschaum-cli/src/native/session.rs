@@ -617,7 +617,8 @@ impl Session {
                 {
                     settings.worker.python = python.into();
                 }
-                settings.worker.inherit_stdin = std::io::stdin().is_terminal();
+                settings.worker.inherit_stdin =
+                    std::io::stdin().is_terminal() || stdin_is_a_jobs_input();
                 WorkerPool::new(settings)
             })
             .clone()
@@ -1397,5 +1398,25 @@ mod registration_tests {
             inst.conn().pipe_exists(&pipe).await
         });
         assert!(matches!(exists, Ok(false)));
+    }
+}
+
+/// Whether this process runs as a job and reads the job's input FIFO: its Python workers read it
+/// too, so that a plugin's `input()` or `prompt()` is answered through `attach` like in v4 (where
+/// the action ran inside the daemon). Elsewhere a piped standard input stays the action's own.
+fn stdin_is_a_jobs_input() -> bool {
+    let sc = meerschaum_core::static_config::static_config();
+    if std::env::var_os(&sc.environment.daemon_id).is_none_or(|v| v.is_empty()) {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        rustix::fs::fstat(std::io::stdin()).is_ok_and(|st| {
+            rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Fifo
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        false
     }
 }

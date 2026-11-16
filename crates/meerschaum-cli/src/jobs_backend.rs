@@ -337,6 +337,9 @@ impl JobsBackend for LocalJobsBackend {
             let Some(mut job) = open_job(&ctx, &name, None) else {
                 return;
             };
+            // Asks whether the job still waits while the client has not answered: a job which
+            // ended (or was answered by another client) is not waited for.
+            let mut probe = open_job(&ctx, &name, None);
             let line_tx = events_tx.clone();
             let stdin_tx = events_tx.clone();
             let stop_tx = events_tx;
@@ -356,7 +359,21 @@ impl JobsBackend for LocalJobsBackend {
                     stop: Some(stop),
                     input: Some(Box::new(move || {
                         stdin_tx.blocking_send(LogEvent::StdinRequested).ok()?;
-                        input_rx.blocking_recv()
+                        let mut last_check = std::time::Instant::now();
+                        loop {
+                            match input_rx.try_recv() {
+                                Ok(text) => return Some(text),
+                                Err(mpsc::error::TryRecvError::Disconnected) => return None,
+                                Err(mpsc::error::TryRecvError::Empty) => {}
+                            }
+                            if last_check.elapsed() >= std::time::Duration::from_millis(250) {
+                                last_check = std::time::Instant::now();
+                                if !probe.as_mut().is_some_and(|j| j.is_blocking_on_stdin()) {
+                                    return None;
+                                }
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(25));
+                        }
                     })),
                     on_stop: Some(Box::new(move |result: &SuccessTuple| {
                         let _ = stop_tx.blocking_send(LogEvent::Stopped(result.clone()));

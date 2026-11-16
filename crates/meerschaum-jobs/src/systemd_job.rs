@@ -325,6 +325,13 @@ mod imp {
             });
         }
 
+        // `<service>.stdin.block` while the job waits for input (see `crate::stdin_watch`).
+        let stdin_watch = job.stdin_path.as_ref().map(|fifo| {
+            let mut marker = fifo.clone().into_os_string();
+            marker.push(".block");
+            crate::stdin_watch::StdinWatch::spawn(fifo, std::path::Path::new(&marker), pid)
+        });
+        let nudger = stdin_watch.as_ref().map(|w| w.nudger());
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         let readers: Vec<Box<dyn Read + Send>> = vec![
             Box::new(child.stdout.take().expect("piped stdout")),
@@ -335,6 +342,7 @@ mod imp {
             let log = log.clone();
             let tx = tx.clone();
             let reset = reset.clone();
+            let nudger = nudger.clone();
             std::thread::spawn(move || {
                 let mut interceptor = Interceptor::new();
                 let mut buf = vec![0u8; 1024];
@@ -350,6 +358,10 @@ mod imp {
                     let prefix = l.get_timestamp_prefix_str();
                     let data = interceptor.transform(&buf[..n], &prefix);
                     let _ = l.write_raw(&data);
+                    drop(l);
+                    if let Some(n) = &nudger {
+                        n.nudge();
+                    }
                 }
                 let _ = tx.send(());
             });
@@ -358,6 +370,9 @@ mod imp {
 
         let status = child.wait();
         exited.store(true, Ordering::SeqCst);
+        if let Some(w) = &stdin_watch {
+            w.halt();
+        }
         if let Some(file) = &release_file {
             let _ = fs::remove_file(file);
         }
