@@ -427,7 +427,7 @@ fn prepare_writes_the_spec_and_points_the_environment_at_it() {
 const CHILD_VAR: &str = "MRSM_TEST_SANDBOX_CHILD";
 
 #[cfg(target_os = "linux")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct ChildPlan {
     spec: Spec,
     extra: Vec<Rule>,
@@ -444,10 +444,29 @@ struct ChildPlan {
     /// FIFOs to open for reading and writing without blocking (a job's stdin): (label, path).
     #[serde(default)]
     fifo: Vec<(String, PathBuf)>,
+    /// 5.1, the Unix-socket filter: programs to run (label, argv), their exit status recorded.
+    #[serde(default)]
+    run: Vec<(String, Vec<String>)>,
+    /// Create stream, seqpacket and datagram socket pairs.
+    #[serde(default)]
+    socketpairs: bool,
+    /// A connected socket inherited from the parent (its descriptor): send `ping`, expect `pong`.
+    #[serde(default)]
+    inherited: Option<i32>,
+    /// Ask for a Unix socket through the x32 numbers and set up an io_uring.
+    #[serde(default)]
+    raw_syscalls: bool,
+    /// Ask for a Unix socket through the 32-bit `int 0x80` entry (the process is killed).
+    #[serde(default)]
+    int80: bool,
+    /// Time round trips over the inherited channel, then (with the filter) 30 more installs.
+    #[serde(default)]
+    bench: bool,
 }
 
 #[cfg(target_os = "linux")]
 #[test]
+#[allow(unsafe_code)]
 fn sandboxed_child() {
     let Ok(plan) = std::env::var(CHILD_VAR) else {
         return;
@@ -459,7 +478,8 @@ fn sandboxed_child() {
         match r {
             Ok(()) => "ok".to_string(),
             Err(e) => match e.raw_os_error() {
-                Some(13) | Some(1) => "denied".to_string(),
+                // EAFNOSUPPORT: the seccomp filter refused to create a Unix socket.
+                Some(13) | Some(1) | Some(97) => "denied".to_string(),
                 _ => format!("error: {e}"),
             },
         }
@@ -516,12 +536,184 @@ fn sandboxed_child() {
             .and_then(|pid| rustix::process::test_kill_process(pid).map_err(Into::into));
         results.insert("signal".into(), outcome(r).into());
     }
+    for (label, argv) in &plan.run {
+        let r = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output();
+        let text = match r {
+            Ok(out) if out.status.success() && label == "extra command" => {
+                format!("ok: {}", String::from_utf8_lossy(&out.stdout).trim())
+            }
+            Ok(out) if out.status.success() => "ok".to_string(),
+            Ok(out) => format!(
+                "failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+                    .trim()
+                    .replace('\n', " ")
+            ),
+            Err(e) => format!("error: {e}"),
+        };
+        results.insert(label.clone(), text.into());
+    }
+    if plan.socketpairs {
+        use std::os::unix::net::{UnixDatagram, UnixStream};
+        results.insert(
+            "stream pair".into(),
+            outcome(UnixStream::pair().map(|_| ())).into(),
+        );
+        results.insert(
+            "datagram pair".into(),
+            outcome(UnixDatagram::pair().map(|_| ())).into(),
+        );
+        let mut fds = [-1i32; 2];
+        // SAFETY: `socketpair` writes two descriptors into `fds` (leaked in this short-lived
+        // child).
+        let rc = unsafe {
+            libc::socketpair(
+                libc::AF_UNIX,
+                libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC,
+                0,
+                fds.as_mut_ptr(),
+            )
+        };
+        let seqpacket = if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        };
+        results.insert("seqpacket pair".into(), outcome(seqpacket).into());
+    }
+    if let (true, Some(fd)) = (plan.bench, plan.inherited) {
+        use std::io::{Read, Write};
+        use std::os::fd::FromRawFd;
+        // SAFETY: as below: the parent passed this descriptor for this purpose.
+        let mut stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
+        let mut batches = Vec::new();
+        let mut buf = [0u8; 64];
+        for _ in 0..5 {
+            let begin = std::time::Instant::now();
+            for _ in 0..20_000 {
+                stream.write_all(&buf).unwrap();
+                stream.read_exact(&mut buf).unwrap();
+            }
+            batches.push(begin.elapsed().as_nanos() as f64 / 20_000.0);
+        }
+        batches.sort_by(f64::total_cmp);
+        results.insert("round trip ns".into(), format!("{:.0}", batches[2]).into());
+        if report.unix_sockets == SOCKETS_BY_SECCOMP {
+            let mut installs = Vec::new();
+            for _ in 0..30 {
+                let begin = std::time::Instant::now();
+                let (sockets, uring) = imp::unix_socket_programs().unwrap();
+                seccompiler::apply_filter_all_threads(&uring).unwrap();
+                seccompiler::apply_filter_all_threads(&sockets).unwrap();
+                installs.push(begin.elapsed().as_nanos() as f64 / 1000.0);
+            }
+            installs.sort_by(f64::total_cmp);
+            results.insert(
+                "filter install us".into(),
+                format!(
+                    "median {:.0}, min {:.0}, max {:.0}",
+                    installs[15], installs[0], installs[29]
+                )
+                .into(),
+            );
+        }
+    } else if let Some(fd) = plan.inherited {
+        use std::io::{Read, Write};
+        use std::os::fd::FromRawFd;
+        // SAFETY: the parent passed this descriptor (one end of a socket pair, not close-on-
+        // exec) for this purpose; nothing else in the child owns it.
+        let mut stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
+        let mut answer = [0u8; 4];
+        let r = stream
+            .write_all(b"ping")
+            .and_then(|()| stream.read_exact(&mut answer))
+            .and_then(|()| {
+                (&answer == b"pong")
+                    .then_some(())
+                    .ok_or_else(|| std::io::Error::other("no pong"))
+            });
+        results.insert("inherited channel".into(), outcome(r).into());
+    }
+    if plan.raw_syscalls {
+        let errno = |r: libc::c_long| {
+            if r >= 0 {
+                "ok".to_string()
+            } else {
+                match std::io::Error::last_os_error().raw_os_error() {
+                    Some(97) => "denied (EAFNOSUPPORT)".to_string(),
+                    Some(1) => "denied (EPERM)".to_string(),
+                    Some(38) => "ENOSYS".to_string(),
+                    other => format!("errno {other:?}"),
+                }
+            }
+        };
+        #[cfg(target_arch = "x86_64")]
+        {
+            // SAFETY: `socket(AF_UNIX, SOCK_STREAM, 0)` through its x32 number takes no pointer;
+            // a descriptor it might return is leaked in this short-lived child.
+            let r = unsafe {
+                libc::syscall(
+                    0x4000_0000 | libc::SYS_socket,
+                    libc::AF_UNIX,
+                    libc::SOCK_STREAM,
+                    0,
+                )
+            };
+            results.insert("x32 socket".into(), errno(r).into());
+        }
+        let mut params = [0u8; 120];
+        // SAFETY: `io_uring_setup(1, &params)` reads and writes the 120-byte, zeroed
+        // `struct io_uring_params` this buffer holds; a ring it might return is leaked here.
+        let r = unsafe { libc::syscall(libc::SYS_io_uring_setup, 1u32, params.as_mut_ptr()) };
+        results.insert("io_uring_setup".into(), errno(r).into());
+    }
+    #[cfg(target_arch = "x86_64")]
+    if plan.int80 {
+        println!("SANDBOX-RESULT-INT80 before");
+        let ret: i64;
+        // SAFETY: the i386 entry with `socket` (359): AF_UNIX, SOCK_STREAM, 0 in registers, no
+        // memory touched. The filter's architecture check kills this process here.
+        unsafe {
+            std::arch::asm!(
+                "xchg {b}, rbx",
+                "int 0x80",
+                "xchg {b}, rbx",
+                b = inout(reg) libc::AF_UNIX as i64 => _,
+                inlateout("rax") 359i64 => ret,
+                in("rcx") libc::SOCK_STREAM as i64,
+                in("rdx") 0i64,
+            );
+        }
+        results.insert("int80 socket".into(), format!("returned {ret}").into());
+    }
     let r = std::fs::read_to_string("/proc/self/status").map(|_| ());
     results.insert("own /proc".into(), outcome(r).into());
     println!(
         "SANDBOX-RESULT {}",
         serde_json::json!({"report": report, "results": results})
     );
+}
+
+/// Run `plan` in a child (the test binary again, which applies the sandbox there: never in
+/// this process).
+#[cfg(target_os = "linux")]
+fn child_output(plan: &ChildPlan) -> std::process::Output {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "team_scope::sandbox::tests::sandboxed_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD_VAR, serde_json::to_string(plan).unwrap())
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output()
+        .unwrap()
 }
 
 /// Run `plan` in a sandboxed child; `None` (with the reason printed) where Landlock is
@@ -532,16 +724,7 @@ fn run_child(plan: &ChildPlan) -> Option<(Report, serde_json::Map<String, serde_
         eprintln!("skipped: this system cannot run Landlock ({reason})");
         return None;
     }
-    let out = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "team_scope::sandbox::tests::sandboxed_child",
-            "--nocapture",
-            "--test-threads=1",
-        ])
-        .env(CHILD_VAR, serde_json::to_string(plan).unwrap())
-        .output()
-        .unwrap();
+    let out = child_output(plan);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let line = stdout
         .lines()
@@ -561,16 +744,30 @@ fn run_child(plan: &ChildPlan) -> Option<(Report, serde_json::Map<String, serde_
 #[cfg(target_os = "linux")]
 #[test]
 fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
+    // At the kernel's level, then (5.1) forced to "filesystem only", where the seccomp filter
+    // denies Unix sockets: the acceptance list holds under the filter too.
+    for max_abi in [None, Some(8)] {
+        reaches_its_own_paths_and_nothing_else(max_abi);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn reaches_its_own_paths_and_nothing_else(max_abi: Option<u32>) {
     use std::os::linux::net::SocketAddrExt;
     let l = layout();
-    let spec = spec_of(&l, Mode::Require, &["mine", "single"]);
+    let mut spec = spec_of(&l, Mode::Require, &["mine", "single"]);
+    spec.max_abi = max_abi;
     // A pathname socket and an abstract socket held by this (unsandboxed) process.
     let sockets = tempfile::tempdir().unwrap();
     let outside = sockets.path().join("outside.sock");
     let _listener = std::os::unix::net::UnixListener::bind(&outside).unwrap();
     let inside = l.tmp.join("inside.sock");
     let _inside = std::os::unix::net::UnixListener::bind(&inside).unwrap();
-    let name = format!("mrsm-test-sandbox-{}", std::process::id());
+    let name = format!(
+        "mrsm-test-sandbox-{}-{}",
+        std::process::id(),
+        max_abi.unwrap_or(0)
+    );
     let addr = std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes()).unwrap();
     let _abstract = std::os::unix::net::UnixListener::bind_addr(&addr).unwrap();
     let s = |v: &str| v.to_string();
@@ -642,6 +839,7 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
         connect_abstract: vec![(s("abstract socket"), name.clone())],
         signal: Some(std::process::id() as i32),
         fifo: Vec::new(),
+        ..ChildPlan::default()
     };
     let Some((report, results)) = run_child(&plan) else {
         return;
@@ -650,6 +848,7 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
     assert_eq!(report.canary, Canary::Denied, "{report:?}");
     assert!(report.verdict().is_ok());
     let support = kernel_support();
+    let abi = max_abi.unwrap_or(NEWEST_ABI).min(support.abi());
     let get = |label: &str| results[label].as_str().unwrap().to_string();
     for label in [
         "server config",
@@ -687,11 +886,10 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
         "write own venv",
         "write /dev/null",
         "own /proc",
-        "inside socket",
     ] {
         assert_eq!(get(label), "ok", "{label}: {results:?}");
     }
-    if support.abi() >= 6 {
+    if abi >= 6 {
         assert_eq!(get("signal"), "denied", "{results:?}");
         assert_eq!(get("abstract socket"), "denied", "{results:?}");
     } else {
@@ -700,14 +898,18 @@ fn a_sandboxed_process_reaches_its_own_paths_and_nothing_else() {
             support.abi()
         );
     }
-    if support.abi() >= 9 {
-        assert_eq!(get("outside socket"), "denied", "{results:?}");
+    // Unix sockets: Landlock denies those outside the rules (the team's own still work); the
+    // seccomp filter, below ABI 9, refuses to create any.
+    assert_eq!(get("outside socket"), "denied", "ABI {abi}: {results:?}");
+    assert!(report.denies_unix_sockets(), "{report:?}");
+    if abi >= SOCKETS_ABI {
+        assert_eq!(report.unix_sockets, SOCKETS_BY_LANDLOCK, "{report:?}");
+        assert_eq!(get("inside socket"), "ok", "{results:?}");
         assert!(report.features.contains(&"resolve_unix".to_string()));
     } else {
-        eprintln!(
-            "ABI {}: connecting to pathname Unix sockets is not restricted",
-            support.abi()
-        );
+        assert_eq!(report.unix_sockets, SOCKETS_BY_SECCOMP, "{report:?}");
+        assert_eq!(report.socket_probe, SocketProbe::Denied, "{report:?}");
+        assert_eq!(get("inside socket"), "denied", "{results:?}");
     }
 }
 
@@ -732,6 +934,7 @@ fn an_interpreter_path_covering_the_root_is_dropped_in_the_child() {
         connect_abstract: Vec::new(),
         signal: None,
         fifo: Vec::new(),
+        ..ChildPlan::default()
     };
     let Some((report, results)) = run_child(&plan) else {
         return;
@@ -796,6 +999,7 @@ fn a_team_process_writes_nothing_that_others_load() {
         connect_abstract: Vec::new(),
         signal: None,
         fifo: Vec::new(),
+        ..ChildPlan::default()
     };
     let mut plan = plan;
     plan.write
@@ -921,6 +1125,7 @@ fn teams_granted_one_plugin_get_their_own_copies_of_its_environment() {
             connect_abstract: Vec::new(),
             signal: None,
             fifo: Vec::new(),
+            ..ChildPlan::default()
         };
         if let Some((report, results)) = run_child(&plan) {
             assert!(report.enforced, "{report:?}");
@@ -965,6 +1170,7 @@ fn a_team_process_cannot_write_to_a_jobs_stdin() {
             ("another job's stdin".into(), other.clone()),
             ("its own job's stdin".into(), own.clone()),
         ],
+        ..ChildPlan::default()
     };
     let Some((report, results)) = run_child(&plan) else {
         return;
@@ -1017,10 +1223,42 @@ fn the_level_follows_the_abi_and_require_sockets_asks_for_the_stronger_one() {
     assert!(report(Mode::Auto, 8).verdict().is_ok());
     let refused = report(Mode::RequireSockets, 8).verdict().unwrap_err();
     assert!(
-        refused.contains("require_sockets") && refused.contains(LEVEL_FILESYSTEM),
+        refused.contains("require_sockets") && refused.contains("Unix sockets are not denied"),
         "{refused}"
     );
     assert!(report(Mode::RequireSockets, 9).verdict().is_ok());
+    // 5.1: below ABI 9 the seccomp filter denies Unix sockets: `require_sockets` accepts it
+    // where Landlock scopes signals (ABI 6), and any mode refuses a filter that did not hold.
+    let filtered = |mode: Mode, abi: u32, probe: SocketProbe| Report {
+        unix_sockets: SOCKETS_BY_SECCOMP.to_string(),
+        socket_probe: probe,
+        ..report(mode, abi)
+    };
+    assert!(
+        filtered(Mode::RequireSockets, 8, SocketProbe::Denied)
+            .verdict()
+            .is_ok()
+    );
+    let unscoped = filtered(Mode::RequireSockets, 5, SocketProbe::Denied)
+        .verdict()
+        .unwrap_err();
+    assert!(unscoped.contains("cannot scope signals"), "{unscoped}");
+    for mode in [Mode::Auto, Mode::Require] {
+        let held = filtered(mode, 8, SocketProbe::Created)
+            .verdict()
+            .unwrap_err();
+        assert!(held.contains("could still create one"), "{held}");
+    }
+    assert!(
+        filtered(Mode::Auto, 8, SocketProbe::Denied)
+            .describe()
+            .contains("Unix sockets are denied to team code by a seccomp filter")
+    );
+    assert!(
+        report(Mode::Auto, 9)
+            .describe()
+            .contains("Unix sockets are denied to team code by Landlock")
+    );
     assert!(
         Report::not_enforced(Mode::RequireSockets, "no Landlock")
             .verdict()
@@ -1050,7 +1288,7 @@ fn the_level_follows_the_abi_and_require_sockets_asks_for_the_stronger_one() {
 /// does neither. The filesystem rules (a job's stdin FIFO included) hold at every level.
 #[cfg(target_os = "linux")]
 #[test]
-fn a_filesystem_only_sandbox_reaches_unix_sockets_and_the_stronger_level_does_not() {
+fn unix_sockets_are_denied_at_every_level_by_landlock_or_the_filter() {
     let l = layout();
     let sockets = tempfile::tempdir().unwrap();
     let outside = sockets.path().join("outside.sock");
@@ -1073,6 +1311,7 @@ fn a_filesystem_only_sandbox_reaches_unix_sockets_and_the_stronger_level_does_no
             connect_abstract: Vec::new(),
             signal: Some(std::process::id() as i32),
             fifo: vec![("another job's stdin".into(), fifo.clone())],
+            ..ChildPlan::default()
         };
         let Some((report, results)) = run_child(&plan) else {
             return;
@@ -1086,15 +1325,202 @@ fn a_filesystem_only_sandbox_reaches_unix_sockets_and_the_stronger_level_does_no
             results["another job's stdin"], "denied",
             "ABI {abi}: {results:?}"
         );
-        let connect = results["outside socket"].as_str().unwrap();
-        let signal = results["signal"].as_str().unwrap();
-        if abi >= SOCKETS_ABI {
-            assert_eq!((connect, signal), ("denied", "denied"), "ABI {abi}");
+        // 5.1: below ABI 9 the seccomp filter refuses the socket; from ABI 9 Landlock refuses
+        // the connection.
+        assert_eq!(
+            results["outside socket"], "denied",
+            "ABI {abi}: {results:?}"
+        );
+        assert!(report.denies_unix_sockets(), "{report:?}");
+        assert!(report.verdict().is_ok(), "{report:?}");
+        let expected = if abi >= SOCKETS_ABI {
+            SOCKETS_BY_LANDLOCK
         } else {
-            assert_eq!(connect, "ok", "ABI {abi}: {results:?}");
-            assert_eq!(signal, if abi >= 6 { "denied" } else { "ok" }, "ABI {abi}");
+            SOCKETS_BY_SECCOMP
+        };
+        assert_eq!(report.unix_sockets, expected, "{report:?}");
+        let signal = results["signal"].as_str().unwrap();
+        assert_eq!(signal, if abi >= 6 { "denied" } else { "ok" }, "ABI {abi}");
+        // `require_sockets` wants the signal scope too (ABI 6).
+        let strict = Report {
+            mode: Mode::RequireSockets,
+            ..report.clone()
+        };
+        assert_eq!(strict.verdict().is_ok(), abi >= 6, "ABI {abi}: {strict:?}");
+    }
+}
+
+/// A private tmux server on a scratch socket (`-S`, never the default one), killed on drop.
+#[cfg(target_os = "linux")]
+struct ScratchTmux(PathBuf);
+
+#[cfg(target_os = "linux")]
+impl ScratchTmux {
+    fn start(socket: &Path) -> Option<ScratchTmux> {
+        let ok = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(socket)
+            .args([
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-s",
+                "scratch",
+                "sleep 600",
+            ])
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .status()
+            .is_ok_and(|s| s.success());
+        ok.then(|| ScratchTmux(socket.to_path_buf()))
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ScratchTmux {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&self.0)
+            .arg("kill-server")
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .status();
+    }
+}
+
+/// 5.1: forced to "filesystem only" (Landlock ABI 8), a team process cannot create a Unix
+/// socket: not to a scratch tmux server (whose `run-shell` would run commands outside the
+/// sandbox), the session bus or Docker's socket (attempted only), nor through the x32 numbers;
+/// io_uring cannot be set up; the stream and seqpacket socket pairs asyncio and
+/// `multiprocessing` use still work, a datagram pair does not, and a connected socket inherited
+/// from the parent (the worker's channel) keeps working.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(unsafe_code)]
+fn the_filter_denies_unix_sockets_and_keeps_pairs_and_inherited_channels() {
+    use std::io::{Read, Write};
+    let support = kernel_support();
+    if !support.available() {
+        eprintln!("skipped: no Landlock here");
+        return;
+    }
+    let l = layout();
+    let tmux_dir = tempfile::Builder::new()
+        .prefix("mt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let tmux_socket = tmux_dir.path().join("s");
+    let tmux = ScratchTmux::start(&tmux_socket);
+    let planted = l.tmp.join("planted-by-tmux");
+    let uid = rustix::process::getuid().as_raw();
+    let mut connect = Vec::new();
+    for (label, path) in [
+        ("tmux", tmux_socket.clone()),
+        ("session bus", PathBuf::from(format!("/run/user/{uid}/bus"))),
+        ("docker", PathBuf::from("/var/run/docker.sock")),
+    ] {
+        if path.exists() {
+            connect.push((label.to_string(), path));
         }
     }
+    let mut run = Vec::new();
+    if tmux.is_some() {
+        run.push((
+            "tmux run-shell".to_string(),
+            vec![
+                "tmux".to_string(),
+                "-S".to_string(),
+                tmux_socket.display().to_string(),
+                "run-shell".to_string(),
+                format!("touch '{}'", planted.display()),
+            ],
+        ));
+    }
+    let (parent_end, child_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    use std::os::fd::AsRawFd;
+    let child_fd = child_end.as_raw_fd();
+    // SAFETY: clears close-on-exec on a descriptor this test owns, so the child inherits it.
+    assert_eq!(unsafe { libc::fcntl(child_fd, libc::F_SETFD, 0) }, 0);
+    let answerer = std::thread::spawn(move || {
+        let mut parent_end = parent_end;
+        let mut ping = [0u8; 4];
+        if parent_end.read_exact(&mut ping).is_ok() && &ping == b"ping" {
+            let _ = parent_end.write_all(b"pong");
+        }
+    });
+    let mut spec = spec_of(&l, Mode::Auto, &[]);
+    spec.max_abi = Some(8);
+    let plan = ChildPlan {
+        spec,
+        connect,
+        run,
+        socketpairs: true,
+        inherited: Some(child_fd),
+        raw_syscalls: true,
+        ..ChildPlan::default()
+    };
+    let (report, results) = run_child(&plan).unwrap();
+    drop(child_end);
+    let _ = answerer.join();
+    assert_eq!(report.unix_sockets, SOCKETS_BY_SECCOMP, "{report:?}");
+    assert_eq!(report.socket_probe, SocketProbe::Denied, "{report:?}");
+    let get = |label: &str| results[label].as_str().unwrap().to_string();
+    for (label, _) in &plan.connect {
+        assert_eq!(get(label), "denied", "{label}: {results:?}");
+    }
+    if tmux.is_some() {
+        assert!(get("tmux run-shell").starts_with("failed"), "{results:?}");
+        assert!(
+            !planted.exists(),
+            "tmux ran a command for the sandboxed process"
+        );
+    } else {
+        eprintln!("no tmux here: its socket is not checked");
+    }
+    assert_eq!(get("stream pair"), "ok", "{results:?}");
+    assert_eq!(get("seqpacket pair"), "ok", "{results:?}");
+    assert_eq!(get("datagram pair"), "denied", "{results:?}");
+    assert_eq!(get("inherited channel"), "ok", "{results:?}");
+    #[cfg(target_arch = "x86_64")]
+    assert_eq!(get("x32 socket"), "denied (EAFNOSUPPORT)", "{results:?}");
+    assert_eq!(get("io_uring_setup"), "denied (EPERM)", "{results:?}");
+    // Without the filter, the same scratch tmux server does run the command (why it matters).
+    if tmux.is_some() {
+        let out = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&tmux_socket)
+            .args(["run-shell", &format!("touch '{}'", planted.display())])
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap();
+        assert!(out.status.success() && planted.exists());
+    }
+}
+
+/// 5.1: the 32-bit entry (`int 0x80`, where `socketcall` and the i386 `socket` live) is another
+/// architecture to the filter, which kills the process instead of running the call.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn the_filter_kills_a_process_that_uses_the_32_bit_entry() {
+    use std::os::unix::process::ExitStatusExt;
+    if !kernel_support().available() {
+        return;
+    }
+    let l = layout();
+    let mut spec = spec_of(&l, Mode::Auto, &[]);
+    spec.max_abi = Some(8);
+    let out = child_output(&ChildPlan {
+        spec,
+        int80: true,
+        ..ChildPlan::default()
+    });
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("SANDBOX-RESULT-INT80 before"), "{stdout}");
+    assert!(!stdout.contains("SANDBOX-RESULT {"), "{stdout}");
+    assert_eq!(out.status.signal(), Some(libc::SIGSYS), "{:?}", out.status);
 }
 
 /// 5.1 (run by hand on a host with a session bus and Docker, `MRSM_TEST_HOST_SOCKETS=1`, with
@@ -1127,10 +1553,159 @@ fn host_sockets_at_each_level() {
             connect_abstract: Vec::new(),
             signal: None,
             fifo: Vec::new(),
+            ..ChildPlan::default()
         };
         let Some((report, results)) = run_child(&plan) else {
             return;
         };
         println!("HOST-SOCKETS {} {results:?}", report.level());
+    }
+}
+
+/// 5.1 (run by hand, `MRSM_TEST_FILTER_FALLBACKS=1` with `--ignored --nocapture`): what common
+/// programs do under the Unix-socket filter (Landlock forced to ABI 8): glibc name resolution
+/// (nss-resolve's varlink socket, nscd's), Python's DNS, TLS, asyncio, threads, subprocess and
+/// `multiprocessing` start methods, and syslog. Prints one line per program.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore]
+fn filter_fallbacks() {
+    if std::env::var_os("MRSM_TEST_FILTER_FALLBACKS").is_none() {
+        return;
+    }
+    let l = layout();
+    let mut spec = spec_of(&l, Mode::Auto, &[]);
+    spec.max_abi = Some(8);
+    let python = std::env::var("MRSM_TEST_FILTER_PYTHON").unwrap_or_else(|_| "python3".into());
+    let py = |label: &str, code: &str| {
+        (
+            label.to_string(),
+            vec![
+                python.clone(),
+                "-I".to_string(),
+                "-c".to_string(),
+                code.to_string(),
+            ],
+        )
+    };
+    let mp = |method: &str| {
+        format!(
+            "import multiprocessing as m\nif __name__ == '__main__':\n    \
+             m.set_start_method('{method}')\n    \
+             with m.Pool(2) as p: assert p.map(abs, [-1, -2]) == [1, 2]"
+        )
+    };
+    // Extra readable prefixes (`:`-separated) and one more command (`\x1f`-separated argv).
+    let extra = std::env::var("MRSM_TEST_FILTER_PREFIX")
+        .unwrap_or_else(|_| "/usr".into())
+        .split(':')
+        .filter(|p| !p.is_empty())
+        .map(|p| Rule::new(p, Access::ReadExec, "the interpreter"))
+        .collect();
+    let mut more: Vec<(String, Vec<String>)> = Vec::new();
+    if let Ok(command) = std::env::var("MRSM_TEST_FILTER_COMMAND") {
+        // `{tmp}` is the team's temporary directory (also its `TMPDIR`).
+        let tmp = l.tmp.display().to_string();
+        let mut argv = vec!["env".to_string(), format!("TMPDIR={tmp}")];
+        argv.extend(command.split('\x1f').map(|a| a.replace("{tmp}", &tmp)));
+        more.push(("extra command".into(), argv));
+    }
+    let plan = ChildPlan {
+        spec,
+        extra,
+        run: vec![
+            (
+                "getent localhost".into(),
+                vec!["getent".into(), "hosts".into(), "localhost".into()],
+            ),
+            (
+                "getent pypi.org".into(),
+                vec!["getent".into(), "ahosts".into(), "pypi.org".into()],
+            ),
+            (
+                "logger".into(),
+                vec!["logger".into(), "-t".into(), "mrsm-test".into(), "filter".into()],
+            ),
+            py(
+                "python dns",
+                "import socket; socket.getaddrinfo('pypi.org', 443)",
+            ),
+            py(
+                "python tls",
+                "import urllib.request; urllib.request.urlopen('https://pypi.org/simple/', timeout=20).read(1)",
+            ),
+            py("python asyncio", "import asyncio; asyncio.run(asyncio.sleep(0))"),
+            py(
+                "python threads+subprocess",
+                "import threading, subprocess; t = threading.Thread(target=lambda: None); t.start(); t.join(); subprocess.run(['true'], check=True)",
+            ),
+            py("python mp spawn", &mp("spawn")),
+            py("python mp fork", &mp("fork")),
+            py("python mp forkserver", &mp("forkserver")),
+            py(
+                "python unix socket",
+                "import socket; socket.socket(socket.AF_UNIX)",
+            ),
+        ]
+        .into_iter()
+        .chain(more)
+        .collect(),
+        ..ChildPlan::default()
+    };
+    let Some((report, results)) = run_child(&plan) else {
+        return;
+    };
+    println!("FILTER {} {}", report.unix_sockets, report.describe());
+    for (label, outcome) in &results {
+        println!("FILTER {label}: {outcome}");
+    }
+}
+
+/// 5.1 (run by hand, `MRSM_TEST_FILTER_COST=1` with `--ignored --nocapture`): the cost of the
+/// Unix-socket filter in a sandboxed child: the median of 30 installs (building both programs and
+/// installing them on all threads), and the round trip of 64 bytes each way over an inherited
+/// socket pair (the shape of a worker's channel to the server), median of five batches of 20,000,
+/// with Landlock only (the kernel's level) and with Landlock plus the filter (ABI 8).
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore]
+#[allow(unsafe_code)]
+fn filter_cost() {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    if std::env::var_os("MRSM_TEST_FILTER_COST").is_none() || !kernel_support().available() {
+        return;
+    }
+    let l = layout();
+    for max_abi in [None, Some(8)] {
+        let (parent_end, child_end) = std::os::unix::net::UnixStream::pair().unwrap();
+        let child_fd = child_end.as_raw_fd();
+        // SAFETY: clears close-on-exec on a descriptor this test owns, for the child.
+        assert_eq!(unsafe { libc::fcntl(child_fd, libc::F_SETFD, 0) }, 0);
+        let echo = std::thread::spawn(move || {
+            let mut parent_end = parent_end;
+            let mut buf = [0u8; 64];
+            while parent_end.read_exact(&mut buf).is_ok() {
+                if parent_end.write_all(&buf).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut spec = spec_of(&l, Mode::Auto, &[]);
+        spec.max_abi = max_abi;
+        let (report, results) = run_child(&ChildPlan {
+            spec,
+            inherited: Some(child_fd),
+            bench: true,
+            ..ChildPlan::default()
+        })
+        .unwrap();
+        drop(child_end);
+        let _ = echo.join();
+        println!(
+            "COST unix_sockets={} {}",
+            report.unix_sockets,
+            serde_json::Value::Object(results)
+        );
     }
 }

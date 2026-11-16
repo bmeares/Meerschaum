@@ -90,6 +90,11 @@ pub struct TeamScope {
     /// The team is no longer isolated: its jobs get the server's configuration again.
     #[serde(default)]
     pub open: bool,
+    /// Its members may install, edit and upload plugins (`attributes['plugins_write']`), so the
+    /// team's processes run code the team chose (5.1: what decides whether the web terminal may
+    /// use tmux). `None` in a record written before the field: taken as `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugins_write: Option<bool>,
 }
 
 impl TeamScope {
@@ -109,6 +114,7 @@ impl TeamScope {
             instance,
             deleted: false,
             open: false,
+            plugins_write: Some(team.may_write_plugins()),
         }
     }
 
@@ -649,6 +655,24 @@ pub fn isolated_teams_recorded(root: &Path) -> bool {
         .ok()
         .and_then(|text| serde_json::from_str::<BTreeMap<String, String>>(&text).ok())
         .is_some_and(|index| !index.is_empty())
+}
+
+/// The isolated teams recorded under `root` whose members may install their own plugins
+/// ([`TeamScope::plugins_write`]; a record that predates the field counts), by name: the teams
+/// whose processes run code the team itself chose.
+pub fn plugin_installing_isolated_teams(root: &Path) -> Vec<String> {
+    let Some(index) = std::fs::read_to_string(root.join(SCOPES_DIR).join(INDEX_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str::<BTreeMap<String, String>>(&text).ok())
+    else {
+        return Vec::new();
+    };
+    index
+        .values()
+        .filter_map(|key| read_scope_record(root, key))
+        .filter(|scope| !scope.open && !scope.deleted && scope.plugins_write.unwrap_or(true))
+        .map(|scope| scope.team)
+        .collect()
 }
 
 /// The scope key recorded under `root` for the team named `team` (any case).

@@ -176,6 +176,7 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule], max_abi: Option<u32>) -> Repo
         rules: added,
         dropped: Vec::new(),
         level: String::new(),
+        ..Report::default()
     }
 }
 
@@ -200,4 +201,143 @@ pub(super) fn private_tmp_dir(name: &str) -> std::io::Result<PathBuf> {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
     }
     Ok(dir)
+}
+
+/// The errno of `socket(AF_UNIX, ...)` under the filter: what a kernel without Unix sockets
+/// answers, which glibc (nscd, nss-resolve), Python and common libraries take as "not available
+/// here" and fall back from.
+pub(super) const UNIX_SOCKET_ERRNO: i32 = libc::EAFNOSUPPORT;
+
+/// The errno of `io_uring_setup` under the filter (what `kernel.io_uring_disabled` and Docker's
+/// default profile answer).
+pub(super) const IO_URING_ERRNO: i32 = libc::EPERM;
+
+/// The architecture the filter is built for (`None`: no filter on this one).
+fn filter_arch() -> Option<seccompiler::TargetArch> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        Some(seccompiler::TargetArch::x86_64)
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        Some(seccompiler::TargetArch::aarch64)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        None
+    }
+}
+
+/// The x32 ABI's numbers on x86-64: the same calls with bit 30 set, under the x86-64 audit
+/// architecture (so the architecture check alone does not catch them).
+#[cfg(target_arch = "x86_64")]
+const X32_SYSCALL_BIT: i64 = 0x4000_0000;
+
+/// `nr` and, on x86-64, its x32 twin.
+fn numbers(nr: libc::c_long) -> Vec<i64> {
+    // `c_long` is `i32` on 32-bit targets.
+    #[allow(clippy::useless_conversion)]
+    let nr = i64::from(nr);
+    #[cfg(target_arch = "x86_64")]
+    {
+        vec![nr, nr | X32_SYSCALL_BIT]
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        vec![nr]
+    }
+}
+
+/// The two programs of the filter: Unix sockets (`.0`, [`UNIX_SOCKET_ERRNO`]) and io_uring
+/// (`.1`, [`IO_URING_ERRNO`]). Each first checks the system call's architecture and kills the
+/// process on another one (the 32-bit `int 0x80` / `socketcall` path on x86-64, AArch32 on
+/// AArch64); everything not named is allowed.
+///
+/// - `socket(AF_UNIX, ...)`: refused, whatever the type;
+/// - `socketpair(AF_UNIX, SOCK_DGRAM, ...)`: refused (a datagram socket of a pair can be
+///   re-connected, or `sendto()` a name, and so reach another process's datagram socket); the
+///   stream and seqpacket pairs that asyncio and `multiprocessing` use stay allowed: they are
+///   connected to each other and cannot be pointed at anyone else;
+/// - `io_uring_setup`: refused (io_uring can create sockets without `socket()`).
+pub(super) fn unix_socket_programs()
+-> Result<(seccompiler::BpfProgram, seccompiler::BpfProgram), String> {
+    use seccompiler::{
+        SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule,
+    };
+    use std::collections::BTreeMap;
+    let arch = filter_arch().ok_or("no seccomp filter is built for this architecture")?;
+    let err = |e: seccompiler::BackendError| e.to_string();
+    let unix = SeccompCondition::new(
+        0,
+        SeccompCmpArgLen::Dword,
+        SeccompCmpOp::Eq,
+        libc::AF_UNIX as u64,
+    )
+    .map_err(err)?;
+    let datagram = SeccompCondition::new(
+        1,
+        SeccompCmpArgLen::Dword,
+        SeccompCmpOp::MaskedEq(0xf),
+        libc::SOCK_DGRAM as u64,
+    )
+    .map_err(err)?;
+    let mut sockets: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
+    for nr in numbers(libc::SYS_socket) {
+        sockets.insert(nr, vec![SeccompRule::new(vec![unix.clone()]).map_err(err)?]);
+    }
+    for nr in numbers(libc::SYS_socketpair) {
+        sockets.insert(
+            nr,
+            vec![SeccompRule::new(vec![unix.clone(), datagram.clone()]).map_err(err)?],
+        );
+    }
+    let mut uring: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
+    for nr in numbers(libc::SYS_io_uring_setup) {
+        uring.insert(nr, Vec::new());
+    }
+    let build = |rules, errno: i32| -> Result<seccompiler::BpfProgram, String> {
+        let filter = SeccompFilter::new(
+            rules,
+            SeccompAction::Allow,
+            SeccompAction::Errno(errno as u32),
+            arch,
+        )
+        .map_err(err)?;
+        filter
+            .try_into()
+            .map_err(|e: seccompiler::BackendError| e.to_string())
+    };
+    Ok((
+        build(sockets, UNIX_SOCKET_ERRNO)?,
+        build(uring, IO_URING_ERRNO)?,
+    ))
+}
+
+/// Install the Unix-socket filter on every thread of this process (inherited by everything it
+/// starts, irreversible), then try to create a Unix socket: the report says whether it was
+/// refused. `no_new_privs` is already set by Landlock.
+pub(super) fn deny_unix_sockets(report: &mut Report) {
+    use super::{SOCKETS_BY_SECCOMP, SocketProbe};
+    let (sockets, uring) = match unix_socket_programs() {
+        Ok(programs) => programs,
+        Err(why) => {
+            report.sockets_reason = Some(why);
+            return;
+        }
+    };
+    for program in [&uring, &sockets] {
+        if let Err(e) = seccompiler::apply_filter_all_threads(program) {
+            report.sockets_reason = Some(format!(
+                "the seccomp filter could not be installed ({e}): a container runtime's seccomp \
+                 profile?"
+            ));
+            return;
+        }
+    }
+    report.unix_sockets = SOCKETS_BY_SECCOMP.to_string();
+    report.socket_probe = match std::os::unix::net::UnixDatagram::unbound() {
+        Ok(_) => SocketProbe::Created,
+        Err(e) if e.raw_os_error() == Some(UNIX_SOCKET_ERRNO) => SocketProbe::Denied,
+        Err(e) => SocketProbe::Error(e.to_string()),
+    };
 }
