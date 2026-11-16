@@ -71,6 +71,176 @@ pub fn get_null_replacement(typ: &str, flavor: Option<Flavor>) -> String {
     )
 }
 
+/// Whether [`get_null_replacement`]`(typ, flavor)` can stand in for `NULL` in a column of
+/// `typ` (a catalog type name) that is compared with `=` (`COALESCE(a, r) = COALESCE(b, r)`,
+/// `CASE WHEN x != r ...`): the database accepts the literal as a value of that type and the
+/// type has an equality operator. Where it cannot, the comparison fails with an error
+/// (`invalid input value for enum`, `COALESCE types interval and integer cannot be matched`,
+/// `operator does not exist: xml = xml`), and the callers compare with
+/// [`null_safe_equals`] instead.
+///
+/// Established against each database (the stand-in is v4's, `get_null_replacement`):
+/// - PostgreSQL family: `USER-DEFINED` (enums, `hstore`, composite types; also `citext`, which
+///   takes the literal but cannot be told apart in the catalog), `ARRAY`, ranges and
+///   multiranges, `point`, `line`, `lseg`, `box`, `path`, `polygon`, `circle`, `interval`,
+///   `inet`, `cidr`, `macaddr(8)`, `bit`, `bit varying`, `time` and `timetz`, `pg_lsn`, and
+///   `xml` and `json` (no `=`).
+/// - MariaDB: `point`, `linestring`, `multipoint`, `multilinestring`, `inet4`, `inet6`
+///   (MySQL accepts all of v4's stand-ins).
+/// - SQL Server: `xml`, `geography`, `geometry`, `text`, `ntext`, `image` (no `=`) and
+///   `hierarchyid`.
+/// - DuckDB: `interval`, lists and arrays, `struct`, `map`, `bit`, `geometry`, and a `decimal`
+///   with fewer than ten integer digits.
+///
+/// SQLite (dynamic types) and Oracle keep the stand-in for every type, as does a flavor of
+/// `None` (old SQLite).
+pub fn null_replacement_applies(typ: &str, flavor: Option<Flavor>) -> bool {
+    let Some(flavor) = flavor else {
+        return true;
+    };
+    let upper = typ.trim().to_uppercase();
+    let element = upper.split('(').next().unwrap_or_default().trim();
+    match flavor.driver_family() {
+        DriverFamily::Postgres => {
+            let array = upper.ends_with(']') || upper.starts_with('_');
+            let range = element.ends_with("RANGE");
+            let time = element == "TIME" || element == "TIMETZ" || element.starts_with("TIME ");
+            !(array
+                || range
+                || time
+                || element.starts_with("INTERVAL")
+                || matches!(
+                    element,
+                    "USER-DEFINED"
+                        | "ARRAY"
+                        | "POINT"
+                        | "LINE"
+                        | "LSEG"
+                        | "BOX"
+                        | "PATH"
+                        | "POLYGON"
+                        | "CIRCLE"
+                        | "INET"
+                        | "CIDR"
+                        | "MACADDR"
+                        | "MACADDR8"
+                        | "BIT"
+                        | "BIT VARYING"
+                        | "VARBIT"
+                        | "PG_LSN"
+                        | "XML"
+                        | "JSON"
+                ))
+        }
+        DriverFamily::Mysql => {
+            flavor != Flavor::Mariadb
+                || !matches!(
+                    element,
+                    "POINT" | "LINESTRING" | "MULTIPOINT" | "MULTILINESTRING" | "INET4" | "INET6"
+                )
+        }
+        DriverFamily::Mssql => !matches!(
+            element,
+            "XML" | "GEOGRAPHY" | "GEOMETRY" | "HIERARCHYID" | "TEXT" | "NTEXT" | "IMAGE"
+        ),
+        DriverFamily::Duckdb => {
+            let narrow_decimal = matches!(element, "DECIMAL" | "NUMERIC")
+                && upper
+                    .split_once('(')
+                    .and_then(|(_, args)| {
+                        let mut parts = args.trim_end_matches(')').split(',');
+                        let precision: i64 = parts.next()?.trim().parse().ok()?;
+                        let scale: i64 = parts.next().unwrap_or("0").trim().parse().ok()?;
+                        Some(precision - scale < 10)
+                    })
+                    .unwrap_or(false);
+            !(upper.ends_with(']')
+                || narrow_decimal
+                || element.starts_with("INTERVAL")
+                || matches!(element, "STRUCT" | "MAP" | "BIT" | "BITSTRING" | "GEOMETRY"))
+        }
+        DriverFamily::Sqlite | DriverFamily::Oracle => true,
+    }
+}
+
+/// `left` (a value of `left_type`) and `right` (of `right_type`) are equal or both `NULL`, for
+/// a column whose type cannot take v4's `NULL` stand-in ([`null_replacement_applies`]): exact
+/// for the type (a stored value and a new one compare as interchangeable or not).
+///
+/// - PostgreSQL family: `IS NOT DISTINCT FROM` over the values as the `upsert_changed_only`
+///   guard compares them (`changed_only_comparable`: their text for types without an exact
+///   equality, such as enums, `interval` (`'1 day'` is not `'24 hours'`), `xml`, `json`,
+///   geometric types and extension types). When one side compares as text, both do.
+/// - MySQL / MariaDB: `<=>`.
+/// - SQL Server: `=` or both `NULL`, over the value's text (`xml`, `text`, `ntext`) or bytes
+///   (`geography`, `geometry`, `hierarchyid`, `image`).
+/// - DuckDB: `IS NOT DISTINCT FROM`, over the text of an `interval`.
+/// - SQLite: `IS`; others: `=` or both `NULL`.
+pub fn null_safe_equals(
+    left: &str,
+    right: &str,
+    left_type: &str,
+    right_type: &str,
+    flavor: Option<Flavor>,
+) -> String {
+    let element = |typ: &str| {
+        typ.trim()
+            .to_uppercase()
+            .split('(')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    let either_or_both_null =
+        |l: &str, r: &str| format!("({l} = {r} OR ({left} IS NULL AND {right} IS NULL))");
+    let Some(flavor) = flavor else {
+        return either_or_both_null(left, right);
+    };
+    match flavor.driver_family() {
+        DriverFamily::Postgres => {
+            let (mut l, mut r) = (
+                changed_only_comparable(left, left_type),
+                changed_only_comparable(right, right_type),
+            );
+            let as_text = |e: &str| format!("CAST({e} AS TEXT)");
+            if l == as_text(left) && r != as_text(right) {
+                r = as_text(right);
+            } else if r == as_text(right) && l != as_text(left) {
+                l = as_text(left);
+            }
+            format!("{l} IS NOT DISTINCT FROM {r}")
+        }
+        DriverFamily::Mysql => format!("{left} <=> {right}"),
+        DriverFamily::Mssql => {
+            let comparable = |e: &str, typ: &str| match element(typ).as_str() {
+                "XML" | "TEXT" | "NTEXT" => format!("CAST({e} AS NVARCHAR(MAX))"),
+                "GEOGRAPHY" | "GEOMETRY" | "HIERARCHYID" | "IMAGE" => {
+                    format!("CAST({e} AS VARBINARY(MAX))")
+                }
+                _ => e.to_string(),
+            };
+            either_or_both_null(&comparable(left, left_type), &comparable(right, right_type))
+        }
+        DriverFamily::Duckdb => {
+            let comparable = |e: &str, typ: &str| {
+                if element(typ).starts_with("INTERVAL") {
+                    format!("CAST({e} AS VARCHAR)")
+                } else {
+                    e.to_string()
+                }
+            };
+            format!(
+                "{} IS NOT DISTINCT FROM {}",
+                comparable(left, left_type),
+                comparable(right, right_type)
+            )
+        }
+        DriverFamily::Sqlite => format!("{left} IS {right}"),
+        DriverFamily::Oracle => either_or_both_null(left, right),
+    }
+}
+
 /// Whether `db_type` is one of the placeholders the PostgreSQL catalog
 /// (`information_schema.columns.data_type`) reports instead of a type name: `ARRAY` for every
 /// array and `USER-DEFINED` for extension, enum and composite types (`citext`, `hstore`,
@@ -435,11 +605,38 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
         format!("({}) IS DISTINCT FROM ({})", old.join(", "), new.join(", "))
     };
 
+    // Whether v4's NULL stand-in can be compared for key column `c_name` (of `c_type`, the
+    // target's type after `cast_dtype`): the target's and the patch's own types must take it
+    // too.
+    let stand_in_applies = |c_name: &str, c_type: &str| -> bool {
+        null_replacement_applies(c_type, flavor)
+            && target_table_columns
+                .get(c_name)
+                .is_none_or(|t| null_replacement_applies(t, flavor))
+            && patch_table_columns
+                .get(c_name)
+                .is_none_or(|t| null_replacement_applies(t, flavor))
+    };
     let and_subquery = |l_prefix: &str, r_prefix: &str| -> String {
         join_cols_types
             .iter()
             .map(|(c_name, c_type)| {
-                if args.null_indices {
+                if args.null_indices && !stand_in_applies(c_name, c_type) {
+                    let target_type = target_table_columns.get(c_name).map_or(c_type.as_str(), String::as_str);
+                    let patch_type = patch_table_columns.get(c_name).map_or(c_type.as_str(), String::as_str);
+                    let (l_type, r_type) = if l_prefix == "p." {
+                        (patch_type, target_type)
+                    } else {
+                        (target_type, patch_type)
+                    };
+                    null_safe_equals(
+                        &format!("{l_prefix}{}", q(c_name)),
+                        &format!("{r_prefix}{}", q(c_name)),
+                        l_type,
+                        r_type,
+                        flavor,
+                    )
+                } else if args.null_indices {
                     let null = get_null_replacement(c_type, flavor);
                     format!(
                         "COALESCE({l_prefix}{}, {null})\n                =\n                COALESCE({r_prefix}{}, {null})",
@@ -610,6 +807,16 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
                     format!("f.{} = p.{}", q(c_name), q(c_name))
                 } else if sqlite {
                     format!("f.{} IS p.{}", q(c_name), q(c_name))
+                } else if !stand_in_applies(c_name, c_type) {
+                    null_safe_equals(
+                        &format!("f.{}", q(c_name)),
+                        &format!("p.{}", q(c_name)),
+                        c_type,
+                        patch_table_columns
+                            .get(c_name)
+                            .map_or(c_type.as_str(), String::as_str),
+                        flavor,
+                    )
                 } else {
                     let null = get_null_replacement(c_type, flavor);
                     format!(
@@ -834,6 +1041,181 @@ mod tests {
                 "INSERT INTO \"t\" (\"id\", \"v\")\nSELECT \"id\", \"v\"\nFROM \"p\"\nON CONFLICT (\"id\") DO UPDATE SET \"v\" = CAST(EXCLUDED.\"v\" AS TEXT)"
             ]
         );
+    }
+
+    #[test]
+    fn null_stand_in_applies_only_where_the_type_takes_it() {
+        let pg = Some(Flavor::Postgresql);
+        for typ in [
+            "BIGINT",
+            "INTEGER",
+            "NUMERIC",
+            "NUMERIC(10,2)",
+            "TEXT",
+            "CHARACTER VARYING",
+            "BOOLEAN",
+            "UUID",
+            "BYTEA",
+            "JSONB",
+            "DATE",
+            "TIMESTAMP WITH TIME ZONE",
+            "TIMESTAMP WITHOUT TIME ZONE",
+            "DOUBLE PRECISION",
+            "MONEY",
+            "TSVECTOR",
+            "GEOMETRY(POINT, 4326)",
+            "GEOGRAPHY",
+        ] {
+            assert!(null_replacement_applies(typ, pg), "{typ}");
+        }
+        for typ in [
+            "USER-DEFINED",
+            "ARRAY",
+            "INTEGER[]",
+            "_INT4",
+            "INT4RANGE",
+            "TSTZRANGE",
+            "INT4MULTIRANGE",
+            "POINT",
+            "POLYGON",
+            "CIRCLE",
+            "INTERVAL",
+            "INET",
+            "MACADDR",
+            "BIT",
+            "BIT VARYING",
+            "TIME WITHOUT TIME ZONE",
+            "TIME WITH TIME ZONE",
+            "PG_LSN",
+            "XML",
+            "JSON",
+        ] {
+            assert!(!null_replacement_applies(typ, pg), "{typ}");
+            assert!(
+                !null_replacement_applies(typ, Some(Flavor::Timescaledb)),
+                "{typ}"
+            );
+        }
+        assert!(!null_replacement_applies("POINT", Some(Flavor::Mariadb)));
+        assert!(!null_replacement_applies("INET6", Some(Flavor::Mariadb)));
+        assert!(null_replacement_applies("POINT", Some(Flavor::Mysql)));
+        assert!(null_replacement_applies("ENUM", Some(Flavor::Mariadb)));
+        assert!(!null_replacement_applies("XML", Some(Flavor::Mssql)));
+        assert!(!null_replacement_applies("GEOGRAPHY", Some(Flavor::Mssql)));
+        assert!(null_replacement_applies(
+            "NVARCHAR(MAX)",
+            Some(Flavor::Mssql)
+        ));
+        assert!(!null_replacement_applies("INTERVAL", Some(Flavor::Duckdb)));
+        assert!(!null_replacement_applies("INTEGER[]", Some(Flavor::Duckdb)));
+        assert!(!null_replacement_applies(
+            "DECIMAL(10,2)",
+            Some(Flavor::Duckdb)
+        ));
+        assert!(null_replacement_applies(
+            "DECIMAL(18,2)",
+            Some(Flavor::Duckdb)
+        ));
+        assert!(null_replacement_applies(
+            "ENUM('A', 'B')",
+            Some(Flavor::Duckdb)
+        ));
+        assert!(null_replacement_applies(
+            "USER-DEFINED",
+            Some(Flavor::Sqlite)
+        ));
+        assert!(null_replacement_applies("CLOB", Some(Flavor::Oracle)));
+        assert!(null_replacement_applies("USER-DEFINED", None));
+    }
+
+    #[test]
+    fn null_safe_equals_by_flavor() {
+        let pg = Some(Flavor::Postgresql);
+        assert_eq!(
+            null_safe_equals("a.m", "b.m", "USER-DEFINED", "USER-DEFINED", pg),
+            "CAST(a.m AS TEXT) IS NOT DISTINCT FROM CAST(b.m AS TEXT)"
+        );
+        assert_eq!(
+            null_safe_equals("a.m", "b.m", "USER-DEFINED", "TEXT", pg),
+            "CAST(a.m AS TEXT) IS NOT DISTINCT FROM CAST(b.m AS TEXT)"
+        );
+        assert_eq!(
+            null_safe_equals("a.i", "b.i", "INET", "INET", pg),
+            "a.i IS NOT DISTINCT FROM b.i"
+        );
+        assert_eq!(
+            null_safe_equals("a.p", "b.p", "POINT", "POINT", Some(Flavor::Mariadb)),
+            "a.p <=> b.p"
+        );
+        assert_eq!(
+            null_safe_equals("a.x", "b.x", "XML", "XML", Some(Flavor::Mssql)),
+            "(CAST(a.x AS NVARCHAR(MAX)) = CAST(b.x AS NVARCHAR(MAX)) OR (a.x IS NULL AND b.x IS NULL))"
+        );
+        assert_eq!(
+            null_safe_equals("a.g", "b.g", "GEOGRAPHY", "GEOGRAPHY", Some(Flavor::Mssql)),
+            "(CAST(a.g AS VARBINARY(MAX)) = CAST(b.g AS VARBINARY(MAX)) OR (a.g IS NULL AND b.g IS NULL))"
+        );
+        assert_eq!(
+            null_safe_equals("a.v", "b.v", "INTERVAL", "INTERVAL", Some(Flavor::Duckdb)),
+            "CAST(a.v AS VARCHAR) IS NOT DISTINCT FROM CAST(b.v AS VARCHAR)"
+        );
+        assert_eq!(
+            null_safe_equals("a.l", "b.l", "INTEGER[]", "INTEGER[]", Some(Flavor::Duckdb)),
+            "a.l IS NOT DISTINCT FROM b.l"
+        );
+    }
+
+    #[test]
+    fn keys_without_a_null_stand_in_compare_null_safely() {
+        let mut args =
+            UpdateQueriesArgs::new("t", "p", vec!["ts".into(), "m".into()], Flavor::Postgresql);
+        args.datetime_col = Some("ts");
+        args.target_cols_types = [("ts", "TIMESTAMP"), ("m", "USER-DEFINED"), ("v", "TEXT")]
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        args.patch_cols_types = args.target_cols_types.clone();
+        let qs = get_update_queries(&args);
+        assert!(
+            qs[0].contains(
+                "COALESCE(p.\"ts\", CAST('1900-01-01' AS TIMESTAMP))\n        =\n        COALESCE(f.\"ts\", CAST('1900-01-01' AS TIMESTAMP))"
+            ),
+            "{}",
+            qs[0]
+        );
+        assert!(
+            qs[0].contains("CAST(p.\"m\" AS TEXT) IS NOT DISTINCT FROM CAST(f.\"m\" AS TEXT)"),
+            "{}",
+            qs[0]
+        );
+        assert!(!qs[0].contains("'-987654321'"), "{}", qs[0]);
+
+        // A key whose type takes the stand-in keeps v4's statement byte for byte.
+        let mut text = args.clone();
+        for types in [&mut text.target_cols_types, &mut text.patch_cols_types] {
+            types.insert("m".into(), "TEXT".into());
+        }
+        let qs = get_update_queries(&text);
+        assert!(
+            qs[0].contains(
+                "COALESCE(p.\"m\", '-987654321')\n        =\n        COALESCE(f.\"m\", '-987654321')"
+            ),
+            "{}",
+            qs[0]
+        );
+
+        // NULL-safe upserts compare NULL keys of such a type without the stand-in as well.
+        let mut upsert = args.clone();
+        upsert.upsert = true;
+        upsert.null_safe_upsert = true;
+        let qs = get_update_queries(&upsert);
+        assert!(
+            qs.iter()
+                .any(|q| q
+                    .contains("CAST(f.\"m\" AS TEXT) IS NOT DISTINCT FROM CAST(p.\"m\" AS TEXT)")),
+            "{qs:?}"
+        );
+        assert!(qs.iter().all(|q| !q.contains("'-987654321'")), "{qs:?}");
     }
 
     #[test]

@@ -19,7 +19,7 @@ use crate::queries::table::{
 use crate::queries::templates::has_update_query;
 use crate::queries::update::{
     UpdateQueriesArgs, changed_only_comparable, changed_only_new_value, get_null_replacement,
-    get_update_queries,
+    get_update_queries, null_replacement_applies, null_safe_equals,
 };
 use meerschaum_connector::DataQuery;
 
@@ -1351,7 +1351,12 @@ impl SqlConnector {
             new_cols
                 .keys()
                 .map(|col| {
-                    if upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only() {
+                    let typ = get_col_typ(col, &new_cols_types);
+                    if (upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only())
+                        || !null_replacement_applies(&typ, Some(flavor))
+                    {
+                        // A type the stand-in is not a value of keeps its NULLs (the
+                        // comparisons below are NULL-safe for it).
                         format!("{a_new}.{} AS {}", q(col), q(col))
                     } else {
                         format!(
@@ -1403,6 +1408,17 @@ impl SqlConnector {
                         upsert_comparable_value(&old, &target_type, &target_type, flavor);
                     // Value columns compare as the guard does (key columns match as above);
                     // the new value is converted to the stored type as its assignment does.
+                    let source_type = get_col_typ(c, &new_cols_types);
+                    if !null_replacement_applies(&target_type, Some(flavor))
+                        || !null_replacement_applies(&source_type, Some(flavor))
+                    {
+                        // A type without an exact `=` (`point`, `xml`) or compared exactly by
+                        // its text (an enum, `interval`).
+                        return format!(
+                            "({})",
+                            null_safe_equals(&new, &old, &source_type, &target_type, Some(flavor))
+                        );
+                    }
                     if sp.upsert_changed_only()
                         && flavor.supports_upsert_changed_only()
                         && !on_cols.contains_key(c)
@@ -1419,12 +1435,30 @@ impl SqlConnector {
                         "({new_value} = {old_value} OR ({new} IS NULL AND {old} IS NULL))"
                     );
                 }
+                let (new_type, old_type) = (
+                    get_col_typ(c, &new_cols_types),
+                    get_col_typ(c, &backtrack_cols_types),
+                );
+                if !null_replacement_applies(&new_type, Some(flavor))
+                    || !null_replacement_applies(&old_type, Some(flavor))
+                {
+                    return format!(
+                        "    {} ",
+                        null_safe_equals(
+                            &format!("{a_new}.{}", q(c)),
+                            &format!("{a_bt}.{}", q(c)),
+                            &new_type,
+                            &old_type,
+                            Some(flavor),
+                        )
+                    );
+                }
                 format!(
                     "    COALESCE({a_new}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {}) ",
                     q(c),
-                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
+                    get_null_replacement(&new_type, Some(flavor)),
                     q(c),
-                    get_null_replacement(&get_col_typ(c, &backtrack_cols_types), Some(flavor)),
+                    get_null_replacement(&old_type, Some(flavor)),
                 )
             })
             .collect::<Vec<_>>()
@@ -1498,13 +1532,28 @@ impl SqlConnector {
             names["backtrack"],
             on_cols
                 .keys()
-                .map(|c| format!(
-                    "    COALESCE({a_delta}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {})",
-                    q(c),
-                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
-                    q(c),
-                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
-                ))
+                .map(|c| {
+                    let typ = get_col_typ(c, &new_cols_types);
+                    if !null_replacement_applies(&typ, Some(flavor)) {
+                        return format!(
+                            "    {}",
+                            null_safe_equals(
+                                &format!("{a_delta}.{}", q(c)),
+                                &format!("{a_bt}.{}", q(c)),
+                                &typ,
+                                &get_col_typ(c, &backtrack_cols_types),
+                                Some(flavor),
+                            )
+                        );
+                    }
+                    format!(
+                        "    COALESCE({a_delta}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {})",
+                        q(c),
+                        get_null_replacement(&typ, Some(flavor)),
+                        q(c),
+                        get_null_replacement(&typ, Some(flavor)),
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n    AND\n    "),
         );
@@ -1522,10 +1571,15 @@ impl SqlConnector {
         let case_cols = delta_cols
             .keys()
             .map(|c| {
+                let typ = get_col_typ(c, &delta_cols_types);
+                if !null_replacement_applies(&typ, Some(flavor)) {
+                    // Its NULLs were kept (no stand-in to turn back into NULL).
+                    return format!("{} AS {}", q(&format!("{c}_delta")), q(c));
+                }
                 format!(
                     "CASE\n        WHEN {} != {} THEN {}\n        ELSE NULL\n    END AS {}",
                     q(&format!("{c}_delta")),
-                    get_null_replacement(&get_col_typ(c, &delta_cols_types), Some(flavor)),
+                    get_null_replacement(&typ, Some(flavor)),
                     q(&format!("{c}_delta")),
                     q(c)
                 )

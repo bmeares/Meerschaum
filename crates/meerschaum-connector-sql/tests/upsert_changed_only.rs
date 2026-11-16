@@ -738,7 +738,8 @@ async fn user_defined_values(c: Ctx, changed_only: bool) {
         ("ci = 'ABC' WHERE id = 3", vec![3]),
         ("m = m, ci = ci WHERE id = 3", vec![]),
     ];
-    inplace_steps(&c, &pipe, &source, &table, changed_only, &steps).await;
+    // Observed (as a pipe with children is), so the change-observation query runs too.
+    inplace_steps(&c, &pipe, &source, &table, true, &steps).await;
     assert_eq!(
         stored(&c, &table, "arr::text || '|' || m::text || '|' || ci::text").await,
         "{b,a}|happy|Abc;{a,b}|sad|Abc;{a,b}|happy|ABC",
@@ -808,7 +809,7 @@ async fn user_defined_keys(c: Ctx, changed_only: bool) {
         &pipe,
         &source,
         &table,
-        changed_only,
+        true,
         &[
             ("", vec![]),
             ("v = v + 1 WHERE id = 2", vec![2]),
@@ -836,8 +837,8 @@ flavor_tests!(user_defined_keys_upsert_in_place, |c: Ctx| async move {
     user_defined_keys(c, true).await;
 });
 
-// Without the guard (and without an observer: the NULL stand-in literal of an observed upsert
-// is not a valid enum value).
+// Without the guard (observed: the change-observation query compares the enum key without
+// v4's NULL stand-in, which is not a valid enum value).
 flavor_tests!(
     user_defined_keys_upsert_in_place_by_default,
     |c: Ctx| async move {
