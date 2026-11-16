@@ -1266,6 +1266,22 @@ pub fn attach_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         Ok(true) => {}
     }
     install_stop_handler(&super::session(rt));
+    // The question of a Python `prompt()` inside the job: it writes `prompt_kwargs.json` and
+    // prints nothing, and v4's `attach` asked it here (with the job's styling and icon).
+    let question_templates = [
+        super::question_text(rt, ATTACH_QUESTION_SLOT, false),
+        super::question_text(rt, ATTACH_QUESTION_SLOT, true),
+    ];
+    let mut probe = Job::new(
+        &name,
+        None,
+        JobOptions {
+            executor_keys: executor_keys(args),
+            ..Default::default()
+        },
+        &ctx,
+    )
+    .ok();
     let result = std::cell::RefCell::new(SuccessTuple::ok("Success"));
     let out = std::cell::RefCell::new(&mut *rt.out);
     let stop = stop_requested_flag();
@@ -1274,11 +1290,31 @@ pub fn attach_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         strip_timestamps: true,
         accept_input: true,
         stop: Some(stop),
-        input: Some(Box::new(|| {
-            let mut line = String::new();
-            match std::io::stdin().read_line(&mut line) {
-                Ok(0) | Err(_) => None,
-                Ok(_) => Some(line),
+        input: Some(Box::new(move || {
+            let kwargs = probe
+                .as_mut()
+                .map(|j| j.get_prompt_kwargs())
+                .unwrap_or_default();
+            let question = attach_question(&kwargs, &question_templates);
+            if let Some((question, true)) = &question
+                && std::io::IsTerminal::is_terminal(&std::io::stdin())
+            {
+                return crate::native::terminal::read_secret(question).map(|a| a + "\n");
+            }
+            if let Some((question, _)) = &question {
+                print!("{question}");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
+            // Wait for the answer while the job waits for it: a job which ended (or was
+            // answered elsewhere) is not waited for.
+            loop {
+                if let Some(line) = crate::native::terminal::timed_input(Duration::from_millis(250))
+                {
+                    return Some(line + "\n");
+                }
+                if !probe.as_mut().is_some_and(|j| j.is_blocking_on_stdin()) {
+                    return None;
+                }
             }
         })),
         on_stop: Some(Box::new(|r: &SuccessTuple| {
@@ -1296,6 +1332,40 @@ pub fn attach_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         opts,
     );
     Ok(result.into_inner())
+}
+
+/// Stands for the question in the templates `attach_question` fills.
+const ATTACH_QUESTION_SLOT: &str = "\u{1}MRSM_QUESTION\u{1}";
+
+/// The question of `prompt_kwargs.json` (written by Python's `prompt()` inside a job) as the
+/// job's own prompt would show it, and whether the answer is a password (v4's `prompt(**kwargs)`
+/// in `attach`). `None` without a question to show (no file, or `silent`).
+fn attach_question(
+    kwargs: &meerschaum_core::value::Map,
+    templates: &[String; 2],
+) -> Option<(String, bool)> {
+    let question = kwargs.get("question")?.as_str()?.to_string();
+    if kwargs.get("silent").is_some_and(Value::truthy) {
+        return None;
+    }
+    let mut text = question;
+    match kwargs.get("default") {
+        Some(Value::List(items)) if items.len() > 1 => {
+            text.push_str(&format!(
+                " (default: {} [{}])",
+                items[0].py_str(),
+                items[1].py_str()
+            ));
+        }
+        Some(Value::Null) | None => {}
+        Some(other) => text.push_str(&format!(" (default: {})", other.py_str())),
+    }
+    let detect = kwargs.get("detect_password").is_none_or(Value::truthy);
+    let password = kwargs.get("is_password").is_some_and(Value::truthy)
+        || (detect && text.to_lowercase().contains("password"));
+    let icon = kwargs.get("icon").is_none_or(Value::truthy);
+    let template = &templates[usize::from(icon)];
+    Some((template.replace(ATTACH_QUESTION_SLOT, &text), password))
 }
 
 /// `edit jobs`: show each job's arguments, read the edited text, and recreate the job.

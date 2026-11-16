@@ -246,6 +246,13 @@ async fn a_closed_port_exhausts_the_attempts() {
         "{lines:?}"
     );
     assert!(!lines.iter().any(|l| l.contains(PASSWORD)), "{lines:?}");
+    // Each failed attempt says why, on standard output (v4 printed the request's exception).
+    let cause = format!("out: api:retry: cannot connect to 127.0.0.1:{port} (connection refused)");
+    assert_eq!(
+        lines.iter().filter(|l| l.starts_with(&cause)).count(),
+        2,
+        "{lines:?}"
+    );
 }
 
 #[tokio::test]

@@ -73,8 +73,14 @@ impl APIConnector {
             "Failed to log into '{self}'{login_scheme_msg}.\n    Please verify login details for connector '{self}'."
         );
         let response = match response {
-            Ok(r) => r,
-            Err(e) => return SuccessTuple::fail(format!("{failure}\n{e}")),
+            Ok(r) => {
+                self.auth.lock().await.login_unreachable = false;
+                r
+            }
+            Err(e) => {
+                self.auth.lock().await.login_unreachable = true;
+                return SuccessTuple::fail(format!("{failure}\n{e}"));
+            }
         };
         if !response.ok() {
             let mut auth = self.auth.lock().await;
@@ -133,7 +139,9 @@ impl APIConnector {
         let res = self.login().await;
         let mut auth = self.auth.lock().await;
         auth.login_failed_at = (!res.success).then(std::time::Instant::now);
-        if !res.success && !auth.emitted_warning {
+        // PARITY: v4's `login()` raised when the server could not be reached (the request which
+        // needed the token then failed with the cause): only a login the server refused warns.
+        if !res.success && !auth.emitted_warning && !auth.login_unreachable {
             super::warnings::warn(&res.message);
             auth.emitted_warning = true;
         }

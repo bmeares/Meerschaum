@@ -174,10 +174,18 @@ def prompt(
             print(STATIC_CONFIG['jobs']['flush_token'], end='', flush=True)
             printed_question = True
 
+        ### On Linux the job's supervisor sees the wait; elsewhere announce it for `attach`.
+        announced = _announce_wait(daemon) if not noask else None
         try:
             answer = input() if not noask else ''
         except EOFError:
             answer = ''
+        finally:
+            if announced is not None:
+                try:
+                    announced.unlink()
+                except OSError:
+                    pass
 
     if noask and not silent and not printed_question:
         print(question)
@@ -186,6 +194,22 @@ def prompt(
         return default_answer
 
     return answer
+
+
+def _announce_wait(daemon) -> Optional[pathlib.Path]:
+    """
+    Create the job's `input.stdin.block` marker before reading its input on systems where the
+    job's supervisor cannot observe the wait (anything but Linux). Return the marker to remove.
+    """
+    import sys
+    if sys.platform.startswith('linux') or daemon is None:
+        return None
+    try:
+        marker = daemon.blocking_stdin_file_path
+        marker.touch()
+        return marker
+    except Exception:
+        return None
 
 
 def yes_no(

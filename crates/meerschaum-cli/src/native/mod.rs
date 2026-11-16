@@ -369,7 +369,11 @@ pub fn prompt(rt: &mut Runtime<'_>, question: &str, icon: bool, noask: bool) -> 
     }
     let q = question_text(rt, question, icon);
     crate::format::progress::suspend();
+    // Inside a job on a system where the supervisor cannot see the wait (not Linux), the
+    // prompt announces it (`input.stdin.block`) for `attach`.
+    let announced = meerschaum_jobs::stdin_watch::announce_wait();
     let answer = rt.host.read_line_interruptible(&q);
+    drop(announced);
     crate::format::progress::resume(true);
     if terminal::take_interrupt() {
         std::panic::resume_unwind(Box::new(crate::shell::interrupt::Interrupted));

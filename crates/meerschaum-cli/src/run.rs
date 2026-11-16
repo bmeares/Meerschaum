@@ -26,6 +26,11 @@ pub fn run(sysargs: &[String]) -> i32 {
     if let Some(rc) = crate::completions::print_script_if_requested(sysargs) {
         return rc;
     }
+    // 5.1: the API server's sandbox probe (what a team process would enforce here) restricts
+    // the process started for it and prints its report.
+    if let Some(rc) = meerschaum_core::team_scope::sandbox::probe_if_requested(sysargs) {
+        return rc;
+    }
     meerschaum_jobs::supervisor::run_if_requested_with(sysargs);
     meerschaum_jobs::systemd_job::run_if_requested_with(sysargs);
     // 5.1: an isolated team's job restricts itself to the team's filesystem sandbox before its

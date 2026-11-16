@@ -1938,14 +1938,7 @@ fn team_sandbox_checks(config: &Config) -> Vec<Check> {
                 mode.as_str()
             ),
         ),
-        (Mode::RequireSockets, true) if support.abi() < sandbox::SOCKETS_ABI => (
-            false,
-            format!(
-                "require_sockets, but this kernel gives \"{}\": isolated teams' code will not \
-                 run here",
-                sandbox::LEVEL_FILESYSTEM
-            ),
-        ),
+
         (mode, true) => (
             true,
             format!(
@@ -1969,24 +1962,63 @@ fn team_sandbox_checks(config: &Config) -> Vec<Check> {
             "teams",
             "sandbox",
             detail,
-            "Run the API server on Linux 5.13 or newer with Landlock enabled (Linux 7.1 or newer \
-             also restricts Unix sockets), and set `system.engine.python_team_sandbox` to `auto` \
-             or `require`.",
+            "Run the API server on Linux 5.13 or newer with Landlock enabled, and set \
+             `system.engine.python_team_sandbox` to `auto` or `require`.",
         ));
     }
-    if isolated && enforced && support.abi() < sandbox::SOCKETS_ABI {
+    // 5.1: whether Unix sockets are denied to team code (Landlock from Linux 7.1, else the
+    // seccomp filter: a probe process applies the sandbox as a team process would), and what
+    // that means for web terminals.
+    let denied = if isolated {
+        let (denied, words) = crate::team_sandbox::team_sockets(mode, &root);
+        if denied {
+            out.push(Check::pass("teams", "unix sockets", words));
+        } else {
+            out.push(Check::warn(
+                "teams",
+                "unix sockets",
+                words,
+                if mode == Mode::Off {
+                    "Turn the sandbox on: `system.engine.python_team_sandbox: auto`."
+                } else {
+                    "Let the server install seccomp filters (a container runtime's seccomp \
+                     profile must allow `seccomp()`), or run it on Linux 7.1 or newer."
+                },
+            ));
+        }
+        let (refused, words) = crate::team_sandbox::terminals_words(&root, denied);
+        if refused {
+            out.push(Check::warn(
+                "teams",
+                "terminals",
+                words,
+                "Deny Unix sockets to team code (above), or turn off plugin installs for the \
+                 isolated teams named.",
+            ));
+        } else {
+            out.push(Check::pass("teams", "terminals", words));
+        }
+        denied
+    } else {
+        false
+    };
+    if isolated && enforced && support.abi() < sandbox::SOCKETS_ABI && !denied {
+        let reason = sandbox::cached_probe(mode, &root).sockets_reason;
         out.push(Check::warn(
             "teams",
             "sandbox level",
             crate::team_sandbox::filesystem_only_warning(
                 support.abi(),
+                reason.as_deref(),
                 &crate::team_sandbox::sockets_of_concern(),
             ),
-            "Run the API server in a container or as a service without a session bus, run it on \
-             Linux 7.1 or newer, or set `system.engine.python_team_sandbox: require_sockets`.",
+            "Let the server install seccomp filters, run it on Linux 7.1 or newer, run it in a \
+             container or as a service without a session bus, or set \
+             `system.engine.python_team_sandbox: require_sockets`.",
         ));
     } else if isolated
         && !enforced
+        && !denied
         && let Some(socket) = crate::team_sandbox::container_socket_reachable()
     {
         out.push(Check::warn(

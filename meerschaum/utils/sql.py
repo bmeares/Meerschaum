@@ -656,30 +656,39 @@ def test_connection(
     Parameters
     ----------
     **kw:
+        The keyword arguments are passed to `meerschaum.connectors.poll.retry_connect`:
         `max_retries` (default `1`), `retry_wait` seconds between attempts (default `0`)
-        and `warn` (print the error of a failed attempt, default `False`).
+        and `warn` (say why an attempt failed, default `False`).
 
     Returns
     -------
-    `True` if a connection is made, otherwise `False`.
+    `True` if a connection is made, otherwise `False` or `None` in case of failure.
 
     """
-    import time
-    max_retries = max(int(kw.get('max_retries', 1)), 1)
-    retry_wait = kw.get('retry_wait', 0)
-    warn = kw.get('warn', False)
-    for attempt in range(max_retries):
+    import warnings
+    from meerschaum.connectors.poll import retry_connect, _native_target
+    from meerschaum.utils.misc import filter_keywords
+    _default_kw = {'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self}
+    _default_kw.update(kw)
+    ### `SELECT 1` through the Rust connector (no SQLAlchemy engine), in this process: a failed
+    ### attempt prints the cause the driver gave (`cannot connect to localhost:5432 (connection
+    ### refused)`, `authentication failed for user ...`) as v4's `retry_connect()` did.
+    if _native_target(self) is None:
+        ### No usable Rust driver here: say why rather than retry in a child process which
+        ### could not connect either.
+        if _default_kw.get('warn', False):
+            from meerschaum.utils.warnings import warn as _warn
+            try:
+                self._core_connector(discover_schema=False)
+            except Exception as e:
+                _warn(f"Connection to '{self}' failed: {e}", stack=False)
+        return False
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', 'Could not')
         try:
-            ### The Rust connector's `SELECT 1`: no SQLAlchemy engine, so the base wheel
-            ### can check a reachable database.
-            if self._core_connector().test_connection():
-                return True
-        except Exception as e:
-            if warn:
-                print(e)
-        if attempt + 1 < max_retries and retry_wait:
-            time.sleep(retry_wait)
-    return False
+            return retry_connect(**filter_keywords(retry_connect, **_default_kw))
+        except Exception:
+            return False
 
 
 def get_distinct_col_count(

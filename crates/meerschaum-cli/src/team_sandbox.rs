@@ -255,9 +255,14 @@ pub fn sockets_of_concern() -> Vec<SocketOfConcern> {
     out
 }
 
-/// One warning about a sandbox that covers the filesystem only (5.1), naming the reachable
-/// `sockets` and what the administrator can do.
-pub fn filesystem_only_warning(abi: u32, sockets: &[SocketOfConcern]) -> String {
+/// One warning about a sandbox under which Unix sockets are not denied to team code (5.1): the
+/// Landlock level is "filesystem only" (`abi`) and the seccomp filter could not be installed
+/// (`reason`). Names the reachable `sockets` and what the administrator can do.
+pub fn filesystem_only_warning(
+    abi: u32,
+    reason: Option<&str>,
+    sockets: &[SocketOfConcern],
+) -> String {
     use sandbox::{LEVEL_FILESYSTEM, LEVEL_SOCKETS, SOCKETS_ABI};
     let reach = if sockets.is_empty() {
         "This server's user can connect to none of the sockets Meerschaum checks (the D-Bus \
@@ -274,13 +279,77 @@ pub fn filesystem_only_warning(abi: u32, sockets: &[SocketOfConcern]) -> String 
                 .join(", ")
         )
     };
+    let why = reason
+        .filter(|r| !r.is_empty())
+        .map(|r| format!(" ({r})"))
+        .unwrap_or_default();
     format!(
-        "Isolated teams' sandbox is \"{LEVEL_FILESYSTEM}\" on this kernel (Landlock ABI {abi}): \
-         their code can connect to any Unix socket this server's operating-system user can \
-         (\"{LEVEL_SOCKETS}\" needs ABI {SOCKETS_ABI}, Linux 7.1). {reach} Run the API server in a \
-         container or as a service without a session bus, upgrade the kernel, or set \
-         `system.engine.python_team_sandbox: require_sockets` to run teams' code only where \
-         Unix sockets are covered."
+        "Isolated teams' sandbox is \"{LEVEL_FILESYSTEM}\" on this kernel (Landlock ABI {abi}) and \
+         the seccomp filter that denies Unix sockets before \"{LEVEL_SOCKETS}\" (ABI \
+         {SOCKETS_ABI}, Linux 7.1) is not in force{why}: their code can connect to any Unix socket \
+         this server's operating-system user can. {reach} Let the server install seccomp filters \
+         (a container runtime's seccomp profile must allow `seccomp()`), upgrade the kernel, run \
+         the API server in a container or as a service without a session bus, or set \
+         `system.engine.python_team_sandbox: require_sockets` to run teams' code only where Unix \
+         sockets are denied."
+    )
+}
+
+/// Whether Unix sockets are denied to isolated teams' code on this server, and the words that
+/// say so ([`sandbox::unix_sockets_words`]), from the cached probe
+/// ([`sandbox::cached_probe`]: a process that applies the sandbox as a team process would).
+pub fn team_sockets(mode: sandbox::Mode, root: &Path) -> (bool, String) {
+    if mode == sandbox::Mode::Off {
+        return (
+            false,
+            sandbox::unix_sockets_words("", Some("the sandbox is off")),
+        );
+    }
+    let report = sandbox::cached_probe(mode, root);
+    (report.denies_unix_sockets(), report.sockets_words())
+}
+
+/// Whether web terminals keep tmux on this server and why, in the words the start-up log and
+/// `mrsm doctor` use (`.0`: `true` when tmux is refused). tmux is refused only while an isolated
+/// team whose members may install plugins exists and Unix sockets are not denied to team code
+/// (`sockets_denied`).
+pub fn terminals_words(root: &Path, sockets_denied: bool) -> (bool, String) {
+    let teams = meerschaum_core::team_scope::plugin_installing_isolated_teams(root);
+    if teams.is_empty() {
+        return (
+            false,
+            "Web terminals keep tmux (they survive a reload or a dropped connection): no \
+             isolated team may install its own plugins, so no code a team chose runs here."
+                .to_string(),
+        );
+    }
+    let names = teams
+        .iter()
+        .map(|t| format!("'{t}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if sockets_denied {
+        return (
+            false,
+            format!(
+                "Web terminals keep tmux (they survive a reload or a dropped connection): the \
+                 isolated team{} {names} may install {} own plugins, but Unix sockets are denied \
+                 to team code, so that code cannot reach tmux's socket.",
+                if teams.len() == 1 { "" } else { "s" },
+                if teams.len() == 1 { "its" } else { "their" },
+            ),
+        );
+    }
+    (
+        true,
+        format!(
+            "Web terminals run without tmux: the isolated team{} {names} may install {} own \
+             plugins and Unix sockets are not denied to team code here, so that code could drive \
+             tmux's socket. A terminal ends when its tab closes or its connection drops, and \
+             whatever runs in its foreground ends with it: run long work as a job.",
+            if teams.len() == 1 { "" } else { "s" },
+            if teams.len() == 1 { "its" } else { "their" },
+        ),
     )
 }
 
@@ -323,16 +392,16 @@ pub fn server_status(config: &meerschaum_core::Config, root: &Path) -> Vec<(bool
             ),
         )),
         (Mode::RequireSockets, Support::Available { .. })
-            if support.abi() < sandbox::SOCKETS_ABI =>
+            if support.abi() < sandbox::SOCKETS_ABI
+                && !sandbox::cached_probe(mode, root).covers_sockets_and_signals() =>
         {
             lines.push((
                 true,
                 format!(
-                    "Isolated teams' code will not run: their sandbox must be \"{}\" \
-                     (`system.engine.python_team_sandbox: require_sockets`), but this kernel \
-                     gives \"{}\" ({}).",
-                    sandbox::LEVEL_SOCKETS,
-                    sandbox::LEVEL_FILESYSTEM,
+                    "Isolated teams' code will not run: their sandbox must deny Unix sockets and \
+                     signals (`system.engine.python_team_sandbox: require_sockets`), but here {} \
+                     ({}).",
+                    sandbox::cached_probe(mode, root).sockets_words(),
                     support.describe()
                 ),
             ))
@@ -347,16 +416,23 @@ pub fn server_status(config: &meerschaum_core::Config, root: &Path) -> Vec<(bool
             ),
         )),
     }
+    // Unix sockets (Landlock from Linux 7.1, else the seccomp filter, as the probe found) and
+    // what that means for web terminals.
+    let (denied, words) = team_sockets(mode, root);
+    lines.push((!denied, format!("{words}.")));
+    lines.push(terminals_words(root, denied));
     let filesystem_only = mode != Mode::Off
         && mode != Mode::RequireSockets
         && support.available()
         && support.abi() < sandbox::SOCKETS_ABI;
-    if filesystem_only {
+    if filesystem_only && !denied {
+        let reason = sandbox::cached_probe(mode, root).sockets_reason;
         lines.push((
             true,
-            filesystem_only_warning(support.abi(), &sockets_of_concern()),
+            filesystem_only_warning(support.abi(), reason.as_deref(), &sockets_of_concern()),
         ));
-    } else if (mode == Mode::Off || !support.available())
+    } else if !denied
+        && (mode == Mode::Off || !support.available())
         && let Some(socket) = container_socket_reachable()
     {
         lines.push((
@@ -388,19 +464,61 @@ mod tests {
                 path: PathBuf::from("/var/run/docker.sock"),
             },
         ];
-        let text = filesystem_only_warning(8, &sockets);
+        let text = filesystem_only_warning(
+            8,
+            Some("the seccomp filter could not be installed"),
+            &sockets,
+        );
         for part in [
             "\"filesystem only\"",
             "Landlock ABI 8",
-            "\"filesystem and sockets\" needs ABI 9, Linux 7.1",
+            "(ABI 9, Linux 7.1) is not in force (the seccomp filter could not be installed)",
             "the D-Bus session bus `/run/user/1000/bus`",
             "a container runtime's socket `/var/run/docker.sock`",
+            "seccomp profile must allow `seccomp()`",
             "in a container",
             "upgrade the kernel",
             "require_sockets",
         ] {
             assert!(text.contains(part), "{part}: {text}");
         }
-        assert!(filesystem_only_warning(5, &[]).contains("none of the sockets"));
+        assert!(filesystem_only_warning(5, None, &[]).contains("none of the sockets"));
+    }
+
+    #[test]
+    fn terminals_keep_tmux_unless_a_plugin_installing_team_could_reach_it() {
+        use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+        let root = tempfile::tempdir().unwrap();
+        let (refused, text) = terminals_words(root.path(), false);
+        assert!(!refused && text.contains("keep tmux"), "{text}");
+        let mut scope = TeamScope {
+            team: "reviewers".into(),
+            team_id: Some("id-r".into()),
+            plugins_write: Some(false),
+            ..TeamScope::default()
+        };
+        write_scope_record(root.path(), &scope).unwrap();
+        let (refused, text) = terminals_words(root.path(), false);
+        assert!(
+            !refused && text.contains("no isolated team may install"),
+            "{text}"
+        );
+        scope.plugins_write = Some(true);
+        write_scope_record(root.path(), &scope).unwrap();
+        let (refused, text) = terminals_words(root.path(), true);
+        assert!(
+            !refused && text.contains("Unix sockets are denied"),
+            "{text}"
+        );
+        let (refused, text) = terminals_words(root.path(), false);
+        assert!(refused, "{text}");
+        for part in [
+            "run without tmux",
+            "'reviewers' may install its own plugins",
+            "ends when its tab closes or its connection drops",
+            "run long work as a job",
+        ] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
     }
 }

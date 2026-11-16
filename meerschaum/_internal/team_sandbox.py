@@ -19,6 +19,12 @@ Only the standard library may be imported here, and nothing at module level.
 
 SPEC_VAR = 'MRSM_TEAM_SANDBOX'
 
+FORKSERVER_REFUSED = (
+    "The 'forkserver' start method of `multiprocessing` needs a Unix socket, and Unix sockets "
+    "are denied to isolated teams' code on this server (a seccomp filter: this kernel's Landlock "
+    "cannot deny them more finely). Use 'spawn', the default here, or 'fork'."
+)
+
 
 def _spec_mode(path):
     """The mode of the spec at `path` (`require` when it cannot be read: a sandbox was asked)."""
@@ -107,7 +113,51 @@ def boot(socket=None):
     except Exception as e:
         report = _not_enforced(spec_path, f"the sandbox could not be applied: {e}")
     sys._mrsm_team_sandbox = report
+    if isinstance(report, dict) and report.get('unix_sockets') == 'seccomp':
+        restrict_multiprocessing()
     return report
+
+
+def restrict_multiprocessing():
+    """
+    Under the seccomp filter that denies Unix sockets (5.1), keep `multiprocessing` to what still
+    works, before any plugin code runs: the default start method is 'spawn' (Python 3.14's
+    default, 'forkserver', listens on a Unix socket), asking for 'forkserver' raises a
+    `ValueError` naming the cause, and a `Manager()` without an address listens on loopback TCP
+    (still authenticated by its key) instead of a Unix socket. Pools, queues, pipes and
+    `concurrent.futures.ProcessPoolExecutor` use pipes and socket pairs, which work.
+    """
+    import multiprocessing.context as context
+    import multiprocessing.managers as managers
+    if getattr(context, '_mrsm_restricted', False):
+        return
+    base_get_context = context.BaseContext.get_context
+
+    def get_context(self, method=None):
+        if method == 'forkserver':
+            raise ValueError(FORKSERVER_REFUSED)
+        return base_get_context(self, method)
+
+    default_set_start_method = context.DefaultContext.set_start_method
+
+    def set_start_method(self, method, force=False):
+        if method == 'forkserver':
+            raise ValueError(FORKSERVER_REFUSED)
+        return default_set_start_method(self, method, force=force)
+
+    context.BaseContext.get_context = get_context
+    context.DefaultContext.set_start_method = set_start_method
+    context._default_context.set_start_method('spawn', force=True)
+
+    manager_init = managers.BaseManager.__init__
+
+    def __init__(self, address=None, *args, **kwargs):
+        if address is None:
+            address = ('127.0.0.1', 0)
+        manager_init(self, address, *args, **kwargs)
+
+    managers.BaseManager.__init__ = __init__
+    context._mrsm_restricted = True
 
 
 def report():

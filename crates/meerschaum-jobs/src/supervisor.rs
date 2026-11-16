@@ -835,6 +835,13 @@ mod imp {
         props.set("result", Value::Null);
         props.capture("began");
 
+        // `input.stdin.block` while the worker (or any of its descendants) waits for input:
+        // see `crate::stdin_watch`.
+        let stdin_watch = opts.capture_stdin.then(|| {
+            crate::stdin_watch::StdinWatch::spawn(&dpaths.stdin, &dpaths.stdin_block, pid)
+        });
+        let nudger = stdin_watch.as_ref().map(|w| w.nudger());
+
         // A signal which arrived while the worker was being started is forwarded now.
         if let Ok(mut state) = signals.lock() {
             state.0 = pid;
@@ -898,6 +905,7 @@ mod imp {
             let log = log.clone();
             let tx = tx.clone();
             let write_timestamps = opts.write_timestamps;
+            let nudger = nudger.clone();
             std::thread::spawn(move || {
                 let mut file = File::from(fd);
                 let mut interceptor = Interceptor::new();
@@ -920,6 +928,10 @@ mod imp {
                         buf[..n].to_vec()
                     };
                     let _ = l.write_raw(&data);
+                    drop(l);
+                    if let Some(n) = &nudger {
+                        n.nudge();
+                    }
                 }
                 let _ = tx.send(());
             });
@@ -928,6 +940,10 @@ mod imp {
 
         let status = child.wait();
         exited.store(true, Ordering::SeqCst);
+        // A job which ended while it waited for input waits no more.
+        if let Some(w) = &stdin_watch {
+            w.halt();
+        }
         if let Some(file) = &release_file {
             let _ = fs::remove_file(file);
         }
@@ -966,6 +982,7 @@ mod imp {
         // supervisor (a status read which found the job without its PID file wrote it back).
         remove_pid_file_naming(&dpaths, &[pid, own_pid]);
         drop(pid_lock);
+        drop(stdin_watch);
         let _ = fs::remove_file(&dpaths.stdin_block);
         0
     }

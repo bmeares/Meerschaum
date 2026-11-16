@@ -44,17 +44,29 @@
 //! socket scopes (6: team code can neither signal nor attach to processes outside its sandbox),
 //! `all_threads` (8) and `resolve_unix` (9: connecting to a pathname Unix socket such as Docker's
 //! is denied too). Each is used when the kernel has it and reported as unavailable otherwise.
-//! Outbound TCP is never restricted: a team reaches its databases and the network.
+//! Outbound TCP and UDP are never restricted: a team reaches its databases and the network.
 //!
-//! **Levels** ([`level_of`]): where the sandbox is enforced, it covers either the filesystem only
-//! ([`LEVEL_FILESYSTEM`], Landlock ABI 1 to 8: a team's code can still connect to any pathname
-//! Unix socket the server's user can, and before ABI 6 signal its processes) or the filesystem
-//! plus Unix-socket and signal scoping ([`LEVEL_SOCKETS`], ABI 9, Linux 7.1). Every report, log
-//! line and `doctor` check names the level with these words.
+//! **Levels** ([`level_of`]): where the sandbox is enforced, Landlock covers either the filesystem
+//! only ([`LEVEL_FILESYSTEM`], Landlock ABI 1 to 8; before ABI 6 a team's code can still signal
+//! its processes) or the filesystem plus Unix-socket and signal scoping ([`LEVEL_SOCKETS`], ABI 9,
+//! Linux 7.1). Every report, log line and `doctor` check names the level with these words.
+//!
+//! **Unix sockets** ([`Report::unix_sockets`], [`unix_sockets_words`]): at [`LEVEL_SOCKETS`]
+//! Landlock denies those outside the rules ([`SOCKETS_BY_LANDLOCK`]). Below it, [`enforce`]
+//! installs a seccomp filter right after Landlock ([`SOCKETS_BY_SECCOMP`], x86-64 and AArch64):
+//! `socket(AF_UNIX, ...)` and datagram `socketpair`s fail with `EAFNOSUPPORT`, `io_uring_setup`
+//! with `EPERM` (x32 numbers included), and another architecture's system calls kill the process
+//! (the 32-bit `socketcall` entry on x86-64). Connected stream and seqpacket pairs and sockets the
+//! process already holds keep working. The process then tries to create a Unix socket
+//! ([`SocketProbe`]); a host stops one that reports the filter but could. Where neither holds
+//! (another architecture, a container runtime that refuses `seccomp()`), team code can connect to
+//! any Unix socket the server's user can, and the reports say so. The API server learns which
+//! case it is in from a probe process ([`probe_team_process`], [`cached_probe`]).
 //!
 //! **Modes** ([`MODE_KEY`]): `auto` (enforce where the kernel supports it, else run without and
 //! warn), `require` (never run a team's code without the filesystem rules), `require_sockets`
-//! (never run it unless Unix-socket and signal scoping are enforced too), `off`.
+//! (never run it unless Unix sockets are denied, by Landlock or the seccomp filter, and signals
+//! are scoped), `off`.
 //!
 //! **Proof** ([`Report`]): after restricting itself, a process tries to open a canary file the
 //! rules deny ([`CANARY_FILE`]) and reports the result with the ABI and features in use; the
@@ -100,8 +112,8 @@ pub enum Mode {
     Auto,
     /// Never run a team's code unless the sandbox's filesystem rules are enforced.
     Require,
-    /// Never run a team's code unless the sandbox is enforced at [`LEVEL_SOCKETS`]: the
-    /// filesystem rules plus Unix-socket and signal scoping (Landlock ABI 9, Linux 7.1).
+    /// Never run a team's code unless Unix sockets are denied to it (Landlock at
+    /// [`LEVEL_SOCKETS`], or the seccomp filter) and its signals are scoped (Landlock ABI 6).
     #[serde(rename = "require_sockets")]
     RequireSockets,
     /// No sandbox.
@@ -114,6 +126,52 @@ pub const LEVEL_FILESYSTEM: &str = "filesystem only";
 pub const LEVEL_SOCKETS: &str = "filesystem and sockets";
 /// The first Landlock ABI at [`LEVEL_SOCKETS`].
 pub const SOCKETS_ABI: u32 = 9;
+
+/// [`Report::unix_sockets`] when Landlock denies Unix sockets outside the rules (ABI 9).
+pub const SOCKETS_BY_LANDLOCK: &str = "landlock";
+/// [`Report::unix_sockets`] when the seccomp filter refuses to create Unix sockets (a Landlock
+/// that cannot deny them, before Linux 7.1).
+pub const SOCKETS_BY_SECCOMP: &str = "seccomp";
+
+/// Whether, and how, Unix sockets are denied to isolated teams' code, in the words every status
+/// uses (the server's start-up log, `mrsm doctor`, a worker's handshake report, a team job's
+/// first log line): `mechanism` is [`SOCKETS_BY_LANDLOCK`], [`SOCKETS_BY_SECCOMP`] or anything
+/// else for "not denied", with `reason` saying why not.
+pub fn unix_sockets_words(mechanism: &str, reason: Option<&str>) -> String {
+    match mechanism {
+        SOCKETS_BY_LANDLOCK => "Unix sockets are denied to team code by Landlock \
+                                (Linux 7.1 or newer)"
+            .to_string(),
+        SOCKETS_BY_SECCOMP => "Unix sockets are denied to team code by a seccomp filter \
+                               (this kernel's Landlock cannot deny them)"
+            .to_string(),
+        _ => {
+            let mut text = "Unix sockets are not denied to team code: it can connect to any Unix \
+                            socket this server's user can"
+                .to_string();
+            if let Some(reason) = reason.filter(|r| !r.is_empty()) {
+                text.push_str(&format!(" ({reason})"));
+            }
+            text
+        }
+    }
+}
+
+/// What a process found when it tried to create a Unix socket after installing the seccomp
+/// filter (the proof of [`SOCKETS_BY_SECCOMP`], as the canary is of the filesystem rules).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SocketProbe {
+    /// Refused (the proof).
+    Denied,
+    /// Created: the filter does not hold.
+    Created,
+    /// Not tried (no filter).
+    #[default]
+    NotChecked,
+    /// Another error (no proof).
+    Error(String),
+}
 
 /// The level an enforced sandbox of Landlock ABI `abi` reaches ([`LEVEL_FILESYSTEM`] or
 /// [`LEVEL_SOCKETS`]).
@@ -378,7 +436,7 @@ pub const SYSTEM_RULES: &[(&str, Access, &str)] = &[
 ];
 
 /// The rules a team process is started with.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Spec {
     /// The mode it was written for.
     pub mode: Mode,
@@ -799,11 +857,11 @@ impl Support {
     }
 }
 
-/// Whether isolated teams' sandboxed processes are refused connections to pathname Unix sockets
-/// outside their rules (5.1): the sandbox is not off and the kernel has Landlock ABI 9
-/// (`resolve_unix`, Linux 7.1). Elsewhere a team's code can connect to any Unix socket the
-/// server's operating-system user can.
-pub fn stops_unix_sockets(mode: Mode, support: &Support) -> bool {
+/// Whether Landlock itself refuses isolated teams' sandboxed processes connections to pathname
+/// Unix sockets outside their rules (5.1): the sandbox is not off and the kernel has Landlock ABI
+/// 9 (`resolve_unix`, Linux 7.1). Before, the seccomp filter may deny Unix sockets instead, which
+/// only a process that applies it can tell ([`probe_team_process`], [`cached_probe`]).
+pub fn landlock_stops_unix_sockets(mode: Mode, support: &Support) -> bool {
     mode != Mode::Off && support.abi() >= 9
 }
 
@@ -881,6 +939,17 @@ pub struct Report {
     /// The level in force ([`LEVEL_FILESYSTEM`] or [`LEVEL_SOCKETS`]; empty when not enforced).
     #[serde(default)]
     pub level: String,
+    /// How Unix sockets are denied to the process: [`SOCKETS_BY_LANDLOCK`],
+    /// [`SOCKETS_BY_SECCOMP`], or empty (not denied; [`Report::sockets_reason`] says why).
+    #[serde(default)]
+    pub unix_sockets: String,
+    /// The proof of [`SOCKETS_BY_SECCOMP`]: creating a Unix socket after the filter.
+    #[serde(default)]
+    pub socket_probe: SocketProbe,
+    /// Why Unix sockets are not denied (no filter for this architecture, a container runtime
+    /// refused it).
+    #[serde(default)]
+    pub sockets_reason: Option<String>,
 }
 
 impl Report {
@@ -906,13 +975,34 @@ impl Report {
                 mode.as_str(),
                 self.reason.as_deref().unwrap_or("no reason given")
             )),
-            Mode::RequireSockets if self.level() != LEVEL_SOCKETS => Err(format!(
-                "the sandbox must cover Unix sockets and signals \
-                 (`system.engine.python_team_sandbox: require_sockets`), but this kernel's \
-                 Landlock ABI {} gives \"{}\": that needs ABI {SOCKETS_ABI} (Linux 7.1)",
-                self.abi,
-                self.level()
+            Mode::RequireSockets if !self.covers_sockets_and_signals() => Err(format!(
+                "the sandbox must deny Unix sockets and signals to team code \
+                 (`system.engine.python_team_sandbox: require_sockets`), but here: {}{}",
+                self.sockets_words(),
+                if self.denies_unix_sockets() {
+                    format!(
+                        " and this kernel's Landlock ABI {} cannot scope signals (that needs \
+                         ABI 6, Linux 6.12)",
+                        self.abi
+                    )
+                } else {
+                    String::new()
+                }
             )),
+            _ if self.unix_sockets == SOCKETS_BY_SECCOMP
+                && self.socket_probe != SocketProbe::Denied =>
+            {
+                Err(format!(
+                    "the sandbox reports Unix sockets denied by its seccomp filter, but the \
+                     process could still create one ({})",
+                    match &self.socket_probe {
+                        SocketProbe::Created => "it was created".to_string(),
+                        SocketProbe::NotChecked => "not checked".to_string(),
+                        SocketProbe::Error(e) => e.clone(),
+                        SocketProbe::Denied => String::new(),
+                    }
+                ))
+            }
             _ => match &self.canary {
                 Canary::Denied => Ok(()),
                 Canary::Readable => Err(
@@ -933,6 +1023,38 @@ impl Report {
                 )),
             },
         }
+    }
+
+    /// Whether Unix sockets are denied to the process (by Landlock or the seccomp filter).
+    pub fn denies_unix_sockets(&self) -> bool {
+        self.enforced
+            && (self.unix_sockets == SOCKETS_BY_LANDLOCK
+                || self.unix_sockets == SOCKETS_BY_SECCOMP
+                || (self.unix_sockets.is_empty() && self.level() == LEVEL_SOCKETS))
+    }
+
+    /// What `require_sockets` asks for: Unix sockets denied (either mechanism) and signals
+    /// scoped (Landlock ABI 6).
+    pub fn covers_sockets_and_signals(&self) -> bool {
+        self.denies_unix_sockets()
+            && (self.level() == LEVEL_SOCKETS || self.features.iter().any(|f| f == "scope_signal"))
+    }
+
+    /// [`unix_sockets_words`] for this report.
+    pub fn sockets_words(&self) -> String {
+        let mechanism = if self.denies_unix_sockets() && self.unix_sockets.is_empty() {
+            SOCKETS_BY_LANDLOCK
+        } else if self.enforced {
+            self.unix_sockets.as_str()
+        } else {
+            ""
+        };
+        let reason = if self.enforced {
+            self.sockets_reason.as_deref()
+        } else {
+            Some("the sandbox is not enforced")
+        };
+        unix_sockets_words(mechanism, reason)
     }
 
     /// The level in force: [`Report::level`] as recorded, else from the features (a report of an
@@ -956,9 +1078,10 @@ impl Report {
     pub fn describe(&self) -> String {
         if !self.enforced {
             return format!(
-                "not enforced ({}): {}",
+                "not enforced ({}): {}; {}",
                 self.mode.as_str(),
-                self.reason.as_deref().unwrap_or("off")
+                self.reason.as_deref().unwrap_or("off"),
+                self.sockets_words()
             );
         }
         let kernel = if self.kernel_abi != self.abi {
@@ -982,6 +1105,7 @@ impl Report {
             Canary::Readable => "; CANARY READABLE",
             _ => "; canary not proven",
         });
+        text.push_str(&format!("; {}", self.sockets_words()));
         if let Some(reason) = &self.reason {
             text.push_str(&format!("; {reason}"));
         }
@@ -1020,6 +1144,14 @@ pub fn enforce(spec: &Spec, extra: &[Rule]) -> Report {
         if report.enforced {
             report.canary = probe_canary(&spec.canary);
             report.level = level_of(report.abi).to_string();
+            // Unix sockets: Landlock denies those outside the rules from ABI 9; before, a
+            // seccomp filter refuses to create any (installed after Landlock, which set
+            // `no_new_privs`, and before any of the team's code runs).
+            if report.abi >= SOCKETS_ABI {
+                report.unix_sockets = SOCKETS_BY_LANDLOCK.to_string();
+            } else {
+                imp::deny_unix_sockets(&mut report);
+            }
         }
         report
     };
@@ -1050,6 +1182,133 @@ pub fn enforce_from_env(extra: &[Rule]) -> Option<Report> {
                 .clone(),
         ),
     }
+}
+
+/// The first argument of the sandbox probe: this program started as
+/// `<program> __mrsm_team_sandbox_probe__ <mode> <canary> [<max ABI>]` applies a team process's
+/// sandbox to itself and prints its [`Report`] as JSON (see [`probe_team_process`]).
+pub const PROBE_ARG: &str = "__mrsm_team_sandbox_probe__";
+
+/// The probe's side ([`PROBE_ARG`]): `Some(exit code)` when `args` asks for it. Restricts this
+/// process (irreversibly: hosts call it first thing, in the process started for it) with no
+/// rules but `canary`, as a team process would at `mode` (and at most `max ABI`), then prints the
+/// report on one line.
+pub fn probe_if_requested(args: &[String]) -> Option<i32> {
+    if args.first().map(String::as_str) != Some(PROBE_ARG) {
+        return None;
+    }
+    let mode = args
+        .get(1)
+        .and_then(|m| Mode::parse(m))
+        .unwrap_or(Mode::Require);
+    let Some(canary) = args.get(2) else {
+        eprintln!("The sandbox probe needs a canary file.");
+        return Some(2);
+    };
+    let spec = Spec {
+        mode,
+        team: "probe".into(),
+        canary: PathBuf::from(canary),
+        max_abi: args.get(3).and_then(|a| a.parse().ok()),
+        ..Spec::default()
+    };
+    let report = enforce(&spec, &[]);
+    println!("{}", serde_json::to_string(&report).unwrap_or_default());
+    Some(0)
+}
+
+/// What a team process would enforce here, found by starting this program as the probe
+/// ([`PROBE_ARG`], [`crate::self_exe::self_command`]) with a fresh canary file: the server asks
+/// before it lets the web terminal use tmux (an isolated team that may install plugins, on a
+/// system where neither Landlock nor the seccomp filter denies Unix sockets, could drive it).
+/// `max_abi` caps Landlock's ABI (tests). `Err` when the probe could not run or answer.
+pub fn probe_team_process(mode: Mode, max_abi: Option<u32>) -> Result<Report, String> {
+    if mode == Mode::Off {
+        return Ok(Report::not_enforced(Mode::Off, "off"));
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let canary =
+        std::env::temp_dir().join(format!("mrsm-sandbox-probe-{}-{nanos}", std::process::id()));
+    std::fs::write(&canary, b"canary").map_err(|e| format!("cannot write the canary: {e}"))?;
+    let result = (|| {
+        let command = crate::self_exe::self_command();
+        let (program, leading) = command
+            .split_first()
+            .ok_or_else(|| "this program's command is unknown".to_string())?;
+        let mut cmd = std::process::Command::new(program);
+        cmd.args(leading)
+            .arg(PROBE_ARG)
+            .arg(mode.as_str())
+            .arg(&canary)
+            .env_remove(SPEC_VAR)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(abi) = max_abi {
+            cmd.arg(abi.to_string());
+        }
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("cannot start `{program}`: {e}"))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("the probe did not answer in 20 s".to_string());
+                }
+            }
+        }
+        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        stdout
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str::<Report>(line.trim()).ok())
+            .ok_or_else(|| {
+                format!(
+                    "the probe gave no report ({}): {}",
+                    out.status,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )
+            })
+    })();
+    let _ = std::fs::remove_file(&canary);
+    result
+}
+
+/// [`probe_team_process`] once per mode and state of the isolated teams recorded under `root`
+/// (the probe runs again after a team change): a failed probe counts as a sandbox that denies
+/// nothing.
+pub fn cached_probe(mode: Mode, root: &Path) -> Report {
+    type Cached = (Mode, PathBuf, Option<std::time::SystemTime>, Report);
+    static CACHE: std::sync::Mutex<Option<Cached>> = std::sync::Mutex::new(None);
+    let stamp = std::fs::metadata(root.join(super::SCOPES_DIR).join(super::INDEX_FILE))
+        .and_then(|m| m.modified())
+        .ok();
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((m, r, t, report)) = cache.as_ref()
+        && *m == mode
+        && r == root
+        && *t == stamp
+    {
+        return report.clone();
+    }
+    let report = probe_team_process(mode, None).unwrap_or_else(|why| {
+        Report::not_enforced(mode, format!("the sandbox probe failed: {why}"))
+    });
+    *cache = Some((mode, root.to_path_buf(), stamp, report.clone()));
+    report
 }
 
 /// The mode of the spec [`SPEC_VAR`] names, without enforcing it (`None`: not a sandboxed team
@@ -1432,6 +1691,10 @@ mod imp {
 
     pub(super) fn restrict(mode: Mode, _rules: &[Rule], _max_abi: Option<u32>) -> Report {
         Report::not_enforced(mode, "Landlock exists on Linux only")
+    }
+
+    pub(super) fn deny_unix_sockets(report: &mut Report) {
+        report.sockets_reason = Some("seccomp exists on Linux only".to_string());
     }
 
     pub(super) fn private_tmp_dir(name: &str) -> std::io::Result<PathBuf> {

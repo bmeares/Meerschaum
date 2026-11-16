@@ -981,7 +981,10 @@ pub fn monitor_log_stream(
             }
             break;
         }
-        if opts.accept_input && emitted_text && src.is_blocking_on_stdin() {
+        // v4 also waited until the job had printed something (`emitted_text`), so a job whose
+        // first act was a silent read was never answered; the latest lines have been emitted
+        // above, which is all that wait was for.
+        if opts.accept_input && src.is_blocking_on_stdin() {
             if emit(&mut log, &mut emitted_text, &mut opts) {
                 return SuccessTuple::success();
             }

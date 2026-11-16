@@ -29,11 +29,13 @@
 //!   terminal attaches to a server that already runs) or the file `api:webterm:tmux:config`
 //!   names. A server this process started is stopped with the API ([`stop_owned_servers`]); its
 //!   owner is recorded next to the socket ([`tmux_owner_path`]), so the next API on the root
-//!   takes over (and later stops) a server whose API was killed before it could. While isolated
-//!   teams are recorded on the root and their sandbox does not refuse connections to pathname
-//!   Unix sockets (before Linux 7.1, [`WebtermConfig::tmux_refused`]), terminals run without
-//!   tmux and the server's tmux server is stopped: tmux's socket runs commands for any process of
-//!   the server's user that connects, isolated teams' code included, and cannot ask for a secret.
+//!   takes over (and later stops) a server whose API was killed before it could. tmux's socket
+//!   runs commands for any process of the server's user that connects, and tmux cannot ask for
+//!   a secret, so terminals run without tmux (and the server's tmux server is stopped) only
+//!   while code a team chose could connect to it ([`WebtermConfig::tmux_refused`]): an isolated
+//!   team whose members may install plugins exists, and Unix sockets are not denied to team code
+//!   on this server (neither Landlock, Linux 7.1, nor the seccomp filter of older kernels; the
+//!   server asks a probe process, [`meerschaum_core::team_scope::sandbox::cached_probe`]).
 //! - **The shell** is `<this binary> -i <instance>` (the `mrsm` shell on the server's instance)
 //!   started with the server's connection/config environment. Job execution context (including
 //!   `MRSM_NONINTERACTIVE`, which every job's environment sets) and `COLUMNS`/`LINES`/`TMUX` are
@@ -274,12 +276,15 @@ pub struct WebtermConfig {
     pub shell: ShellCommand,
     /// `Some` runs the shell inside a tmux session (unless [`WebtermConfig::tmux_refused`]).
     pub tmux: Option<TmuxSettings>,
-    /// The server's root (5.1): while isolated teams are recorded there and their sandbox does
-    /// not refuse connections to pathname Unix sockets, terminals run without tmux.
+    /// The server's root (5.1): while an isolated team that may install plugins is recorded
+    /// there and Unix sockets are not denied to team code, terminals run without tmux.
     pub teams_root: Option<PathBuf>,
-    /// Whether isolated teams' sandbox refuses connections to pathname Unix sockets here
-    /// ([`meerschaum_core::team_scope::sandbox::stops_unix_sockets`]).
-    pub sandbox_stops_sockets: bool,
+    /// Whether Unix sockets are denied to isolated teams' code here (by Landlock or the seccomp
+    /// filter); `None` asks the server's cached sandbox probe
+    /// ([`meerschaum_core::team_scope::sandbox::cached_probe`]), tests fix it.
+    pub sandbox_stops_sockets: Option<bool>,
+    /// `system.engine.python_team_sandbox`: the mode the probe applies.
+    pub team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode,
     /// How often an open terminal authorizes its session again ([`REAUTHORIZE_EVERY`]).
     pub reauthorize_every: Duration,
 }
@@ -319,35 +324,67 @@ impl WebtermConfig {
         } else {
             None
         };
-        let sandbox_stops_sockets = meerschaum_core::team_scope::sandbox::stops_unix_sockets(
-            state.config.team_sandbox_mode,
-            &meerschaum_core::team_scope::sandbox::kernel_support(),
-        );
-        WebtermConfig {
+        let config = WebtermConfig {
             sessions,
             page,
             shell,
             tmux,
             teams_root: Some(state.config.root_dir.clone()),
-            sandbox_stops_sockets,
+            sandbox_stops_sockets: None,
+            team_sandbox_mode: state.config.team_sandbox_mode,
             reauthorize_every: REAUTHORIZE_EVERY,
-        }
+        };
+        // The probe runs at start-up when it matters (and again after a team change).
+        let _ = config.tmux_refused();
+        config
     }
 
-    /// Why terminals run without tmux now, though it is configured (5.1): isolated teams are
-    /// recorded and their sandbox does not refuse connections to pathname Unix sockets. Any
-    /// process of the server's user that connects to tmux's socket can run commands outside
-    /// every sandbox, and tmux cannot require a secret; a terminal without tmux listens on
-    /// nothing. `None`: tmux may be used.
-    pub fn tmux_refused(&self) -> Option<&'static str> {
+    /// Why terminals run without tmux now, though it is configured (5.1): an isolated team
+    /// whose members may install plugins is recorded (its processes run code the team chose),
+    /// and Unix sockets are not denied to team code here (neither Landlock nor the seccomp
+    /// filter, as the probe found). Any process of the server's user that connects to tmux's
+    /// socket can run commands outside every sandbox, and tmux cannot require a secret; a
+    /// terminal without tmux listens on nothing. `None`: tmux may be used (no such team, or
+    /// sockets are denied).
+    pub fn tmux_refused(&self) -> Option<String> {
+        use meerschaum_core::team_scope::{plugin_installing_isolated_teams, sandbox};
         self.tmux.as_ref()?;
         let root = self.teams_root.as_deref()?;
-        (!self.sandbox_stops_sockets && meerschaum_core::team_scope::isolated_teams_recorded(root))
-            .then_some(
-                "isolated teams exist and their sandbox does not refuse connections to Unix \
-                 sockets on this system (Landlock ABI 9, Linux 7.1), so tmux's socket would let \
-                 their code run commands outside it",
+        let teams = plugin_installing_isolated_teams(root);
+        if teams.is_empty() {
+            return None;
+        }
+        let (denied, words) = match self.sandbox_stops_sockets {
+            Some(denied) => (
+                denied,
+                sandbox::unix_sockets_words(
+                    if denied {
+                        sandbox::SOCKETS_BY_SECCOMP
+                    } else {
+                        ""
+                    },
+                    None,
+                ),
+            ),
+            None => {
+                let report = sandbox::cached_probe(self.team_sandbox_mode, root);
+                (report.denies_unix_sockets(), report.sockets_words())
+            }
+        };
+        (!denied).then(|| {
+            format!(
+                "the isolated team{} {} may install {} own plugins, and on this server {}; \
+                 tmux's socket would let that code run commands outside its sandbox",
+                if teams.len() == 1 { "" } else { "s" },
+                teams
+                    .iter()
+                    .map(|t| format!("'{t}'"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if teams.len() == 1 { "its" } else { "their" },
+                words
             )
+        })
     }
 
     /// The tmux settings a terminal uses now: [`WebtermConfig::tmux`] unless

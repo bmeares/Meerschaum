@@ -440,9 +440,8 @@ pub struct ServerConfig {
     /// `WEBTERM_INTERNAL_RESOURCES_PATH`: where the tmux path keeps the shell's environment file.
     pub webterm_resources_path: PathBuf,
     /// `system.engine.python_team_sandbox` (5.1): how isolated teams' processes are sandboxed.
-    /// The web terminal runs without tmux while isolated teams exist and their sandbox does not
-    /// refuse connections to pathname Unix sockets (tmux's socket runs commands for whoever
-    /// connects).
+    /// The web terminal runs without tmux only while an isolated team that may install plugins
+    /// exists and Unix sockets are not denied to team code (the probe applies this mode).
     pub team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode,
     /// The private key and certificate of HTTPS (`--keyfile` / `--certfile`,
     /// `api:server:ssl_keyfile` / `ssl_certfile`, 4.1's `api:uvicorn:ssl_*`); none: plain HTTP.
