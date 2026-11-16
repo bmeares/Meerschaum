@@ -46,8 +46,15 @@
 //! is denied too). Each is used when the kernel has it and reported as unavailable otherwise.
 //! Outbound TCP is never restricted: a team reaches its databases and the network.
 //!
+//! **Levels** ([`level_of`]): where the sandbox is enforced, it covers either the filesystem only
+//! ([`LEVEL_FILESYSTEM`], Landlock ABI 1 to 8: a team's code can still connect to any pathname
+//! Unix socket the server's user can, and before ABI 6 signal its processes) or the filesystem
+//! plus Unix-socket and signal scoping ([`LEVEL_SOCKETS`], ABI 9, Linux 7.1). Every report, log
+//! line and `doctor` check names the level with these words.
+//!
 //! **Modes** ([`MODE_KEY`]): `auto` (enforce where the kernel supports it, else run without and
-//! warn), `require` (never run a team's code without it), `off`.
+//! warn), `require` (never run a team's code without the filesystem rules), `require_sockets`
+//! (never run it unless Unix-socket and signal scoping are enforced too), `off`.
 //!
 //! **Proof** ([`Report`]): after restricting itself, a process tries to open a canary file the
 //! rules deny ([`CANARY_FILE`]) and reports the result with the ABI and features in use; the
@@ -61,7 +68,7 @@ use serde::{Deserialize, Serialize};
 use super::{ScopeFiles, TeamScope};
 use crate::config::Config;
 
-/// `system.engine.python_team_sandbox` (5.1): `auto`, `require` or `off`.
+/// `system.engine.python_team_sandbox` (5.1): `auto`, `require`, `require_sockets` or `off`.
 pub const MODE_KEY: [&str; 3] = ["system", "engine", "python_team_sandbox"];
 /// Names the spec file of a team process. Set by the server, never inherited from it.
 pub const SPEC_VAR: &str = "MRSM_TEAM_SANDBOX";
@@ -91,19 +98,41 @@ pub enum Mode {
     /// Enforce where the kernel supports it; elsewhere run unsandboxed and warn.
     #[default]
     Auto,
-    /// Never run a team's code unless the sandbox is enforced.
+    /// Never run a team's code unless the sandbox's filesystem rules are enforced.
     Require,
+    /// Never run a team's code unless the sandbox is enforced at [`LEVEL_SOCKETS`]: the
+    /// filesystem rules plus Unix-socket and signal scoping (Landlock ABI 9, Linux 7.1).
+    #[serde(rename = "require_sockets")]
+    RequireSockets,
     /// No sandbox.
     Off,
 }
 
+/// The level of a sandbox that covers the filesystem only (Landlock ABI 1 to 8).
+pub const LEVEL_FILESYSTEM: &str = "filesystem only";
+/// The level of a sandbox that also scopes Unix sockets and signals (Landlock ABI 9).
+pub const LEVEL_SOCKETS: &str = "filesystem and sockets";
+/// The first Landlock ABI at [`LEVEL_SOCKETS`].
+pub const SOCKETS_ABI: u32 = 9;
+
+/// The level an enforced sandbox of Landlock ABI `abi` reaches ([`LEVEL_FILESYSTEM`] or
+/// [`LEVEL_SOCKETS`]).
+pub fn level_of(abi: u32) -> &'static str {
+    if abi >= SOCKETS_ABI {
+        LEVEL_SOCKETS
+    } else {
+        LEVEL_FILESYSTEM
+    }
+}
+
 impl Mode {
-    /// `auto`, `require` or `off` (any case; `true` / `false` and `on` read as `require` /
-    /// `off`).
+    /// `auto`, `require`, `require_sockets` or `off` (any case; `true` / `false` and `on` read
+    /// as `require` / `off`).
     pub fn parse(text: &str) -> Option<Mode> {
         match text.trim().to_ascii_lowercase().as_str() {
             "auto" | "" => Some(Mode::Auto),
             "require" | "required" | "on" | "true" | "enforce" => Some(Mode::Require),
+            "require_sockets" | "require-sockets" => Some(Mode::RequireSockets),
             "off" | "false" | "none" | "disabled" => Some(Mode::Off),
             _ => None,
         }
@@ -125,14 +154,15 @@ impl Mode {
             Some(Value::Str(text)) => Mode::parse(&text).unwrap_or_else(|| {
                 warn_once(&format!(
                     "`system.engine.python_team_sandbox` is `{text}`, which is not `auto`, \
-                     `require` or `off`: isolated teams' processes run as with `require`."
+                     `require`, `require_sockets` or `off`: isolated teams' processes run as with \
+                     `require`."
                 ));
                 Mode::Require
             }),
             Some(other) => {
                 warn_once(&format!(
-                    "`system.engine.python_team_sandbox` is `{}`, which is not `auto`, `require` \
-                     or `off`: isolated teams' processes run as with `require`.",
+                    "`system.engine.python_team_sandbox` is `{}`, which is not `auto`, `require`, \
+                     `require_sockets` or `off`: isolated teams' processes run as with `require`.",
                     other.py_str()
                 ));
                 Mode::Require
@@ -140,12 +170,33 @@ impl Mode {
         }
     }
 
-    /// `auto`, `require` or `off`.
+    /// `auto`, `require`, `require_sockets` or `off`.
     pub fn as_str(self) -> &'static str {
         match self {
             Mode::Auto => "auto",
             Mode::Require => "require",
+            Mode::RequireSockets => "require_sockets",
             Mode::Off => "off",
+        }
+    }
+
+    /// Whether this mode refuses to run a team's code without an enforced sandbox.
+    pub fn requires(self) -> bool {
+        matches!(self, Mode::Require | Mode::RequireSockets)
+    }
+
+    /// The stricter of two modes (`off` < `auto` < `require` < `require_sockets`).
+    pub fn stricter(self, other: Mode) -> Mode {
+        let rank = |m: Mode| match m {
+            Mode::Off => 0,
+            Mode::Auto => 1,
+            Mode::Require => 2,
+            Mode::RequireSockets => 3,
+        };
+        if rank(other) > rank(self) {
+            other
+        } else {
+            self
         }
     }
 }
@@ -341,6 +392,10 @@ pub struct Spec {
     pub protected: Vec<PathBuf>,
     /// The file the process must fail to open.
     pub canary: PathBuf,
+    /// The newest Landlock ABI to use (`None`: the kernel's, up to [`NEWEST_ABI`]). Meerschaum
+    /// never sets it; tests use it to run a process at an older kernel's level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_abi: Option<u32>,
 }
 
 /// What [`build_spec`] needs.
@@ -482,6 +537,7 @@ pub fn build_spec(inputs: &SpecInputs<'_>) -> Spec {
         rules,
         protected,
         canary: canary_path(root),
+        max_abi: None,
     };
     spec.rules = spec.allowed(spec.rules.clone()).0;
     spec
@@ -715,6 +771,11 @@ impl Support {
         matches!(self, Support::Available { .. })
     }
 
+    /// The level a sandbox enforced here reaches ([`level_of`]); `None` when unsupported.
+    pub fn level(&self) -> Option<&'static str> {
+        self.available().then(|| level_of(self.abi()))
+    }
+
     /// One line: `Landlock ABI 9 (kernel 11): filesystem, refer, ...; unavailable: ...`, or why
     /// it is unsupported.
     pub fn describe(&self) -> String {
@@ -817,6 +878,9 @@ pub struct Report {
     /// Rules dropped because they would cover a protected path.
     #[serde(default)]
     pub dropped: Vec<String>,
+    /// The level in force ([`LEVEL_FILESYSTEM`] or [`LEVEL_SOCKETS`]; empty when not enforced).
+    #[serde(default)]
+    pub level: String,
 }
 
 impl Report {
@@ -836,10 +900,18 @@ impl Report {
         match self.mode {
             Mode::Off => Ok(()),
             Mode::Auto if !self.enforced => Ok(()),
-            Mode::Require if !self.enforced => Err(format!(
-                "the filesystem sandbox is required (`system.engine.python_team_sandbox: \
-                 require`) but is not enforced: {}",
+            mode if mode.requires() && !self.enforced => Err(format!(
+                "the filesystem sandbox is required (`system.engine.python_team_sandbox: {}`) \
+                 but is not enforced: {}",
+                mode.as_str(),
                 self.reason.as_deref().unwrap_or("no reason given")
+            )),
+            Mode::RequireSockets if self.level() != LEVEL_SOCKETS => Err(format!(
+                "the sandbox must cover Unix sockets and signals \
+                 (`system.engine.python_team_sandbox: require_sockets`), but this kernel's \
+                 Landlock ABI {} gives \"{}\": that needs ABI {SOCKETS_ABI} (Linux 7.1)",
+                self.abi,
+                self.level()
             )),
             _ => match &self.canary {
                 Canary::Denied => Ok(()),
@@ -863,6 +935,23 @@ impl Report {
         }
     }
 
+    /// The level in force: [`Report::level`] as recorded, else from the features (a report of an
+    /// older package); empty when not enforced.
+    pub fn level(&self) -> &str {
+        if !self.enforced {
+            return "";
+        }
+        if !self.level.is_empty() {
+            return &self.level;
+        }
+        let has = |f: &str| self.features.iter().any(|x| x == f);
+        if has("resolve_unix") && has("scope_signal") && has("scope_abstract_unix") {
+            LEVEL_SOCKETS
+        } else {
+            LEVEL_FILESYSTEM
+        }
+    }
+
     /// One line for logs and `doctor`.
     pub fn describe(&self) -> String {
         if !self.enforced {
@@ -878,7 +967,8 @@ impl Report {
             String::new()
         };
         let mut text = format!(
-            "enforced ({}): Landlock ABI {}{kernel}, {} rules: {}",
+            "enforced, {} ({}): Landlock ABI {}{kernel}, {} rules: {}",
+            self.level(),
             self.mode.as_str(),
             self.abi,
             self.rules,
@@ -922,13 +1012,14 @@ pub fn enforce(spec: &Spec, extra: &[Rule]) -> Report {
         let mut rules = spec.rules.clone();
         rules.extend(extra.iter().cloned());
         let (rules, dropped) = spec.allowed(rules);
-        let mut report = imp::restrict(spec.mode, &rules);
+        let mut report = imp::restrict(spec.mode, &rules, spec.max_abi);
         report.dropped = dropped
             .iter()
             .map(|r| r.path.display().to_string())
             .collect();
         if report.enforced {
             report.canary = probe_canary(&spec.canary);
+            report.level = level_of(report.abi).to_string();
         }
         report
     };
@@ -1034,14 +1125,26 @@ pub fn prepare(
         let _ = std::fs::remove_file(spec_file);
         return Ok(None);
     }
-    if mode == Mode::Require
-        && let Support::Unsupported { reason } = kernel_support()
+    let support = kernel_support();
+    if mode.requires()
+        && let Support::Unsupported { reason } = &support
     {
         return Err(std::io::Error::other(format!(
             "The isolated team '{}' cannot run: its processes must be sandboxed \
-             (`system.engine.python_team_sandbox: require`), but Landlock is unavailable here: \
+             (`system.engine.python_team_sandbox: {}`), but Landlock is unavailable here: \
              {reason}.",
-            scope.team
+            scope.team,
+            mode.as_str()
+        )));
+    }
+    if mode == Mode::RequireSockets && support.abi() < SOCKETS_ABI {
+        return Err(std::io::Error::other(format!(
+            "The isolated team '{}' cannot run: its sandbox must cover Unix sockets and signals \
+             (`system.engine.python_team_sandbox: require_sockets`), but this kernel's Landlock \
+             ABI {} covers the filesystem only (\"{LEVEL_FILESYSTEM}\"); that needs ABI \
+             {SOCKETS_ABI}, Linux 7.1.",
+            scope.team,
+            support.abi()
         )));
     }
     let paths = config.paths();
@@ -1327,7 +1430,7 @@ mod imp {
         }
     }
 
-    pub(super) fn restrict(mode: Mode, _rules: &[Rule]) -> Report {
+    pub(super) fn restrict(mode: Mode, _rules: &[Rule], _max_abi: Option<u32>) -> Report {
         Report::not_enforced(mode, "Landlock exists on Linux only")
     }
 

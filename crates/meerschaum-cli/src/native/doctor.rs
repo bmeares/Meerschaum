@@ -1895,8 +1895,9 @@ fn disk_fact(_path: &Path) -> Option<DiskFact> {
     None
 }
 
-/// 5.1: isolated teams' filesystem sandbox: the mode, what this system enforces (Landlock ABI and
-/// features), and a container socket the sandbox does not stop.
+/// 5.1: isolated teams' filesystem sandbox: the mode, the level and what this system enforces
+/// (Landlock ABI and features), and the sockets of concern a "filesystem only" sandbox does not
+/// stop.
 fn team_sandbox_checks(config: &Config) -> Vec<Check> {
     use meerschaum_core::team_scope::sandbox::{self, Mode};
     let root = config.paths().root_dir;
@@ -1914,11 +1915,29 @@ fn team_sandbox_checks(config: &Config) -> Vec<Check> {
             false,
             "auto, not enforced: isolated teams' processes run unsandboxed here".to_string(),
         ),
-        (Mode::Require, false) => (
+        (mode, false) => (
             false,
-            "require, unavailable: isolated teams' code will not run here".to_string(),
+            format!(
+                "{}, unavailable: isolated teams' code will not run here",
+                mode.as_str()
+            ),
         ),
-        (mode, true) => (true, format!("{}, enforced", mode.as_str())),
+        (Mode::RequireSockets, true) if support.abi() < sandbox::SOCKETS_ABI => (
+            false,
+            format!(
+                "require_sockets, but this kernel gives \"{}\": isolated teams' code will not \
+                 run here",
+                sandbox::LEVEL_FILESYSTEM
+            ),
+        ),
+        (mode, true) => (
+            true,
+            format!(
+                "{}, enforced, {}",
+                mode.as_str(),
+                support.level().unwrap_or_default()
+            ),
+        ),
     };
     let detail = format!("{state} ({system})");
     if !isolated {
@@ -1939,8 +1958,19 @@ fn team_sandbox_checks(config: &Config) -> Vec<Check> {
              or `require`.",
         ));
     }
-    if isolated
-        && !(mode != Mode::Off && support.abi() >= 9)
+    if isolated && enforced && support.abi() < sandbox::SOCKETS_ABI {
+        out.push(Check::warn(
+            "teams",
+            "sandbox level",
+            crate::team_sandbox::filesystem_only_warning(
+                support.abi(),
+                &crate::team_sandbox::sockets_of_concern(),
+            ),
+            "Run the API server in a container or as a service without a session bus, run it on \
+             Linux 7.1 or newer, or set `system.engine.python_team_sandbox: require_sockets`.",
+        ));
+    } else if isolated
+        && !enforced
         && let Some(socket) = crate::team_sandbox::container_socket_reachable()
     {
         out.push(Check::warn(

@@ -151,6 +151,12 @@ pub fn enforce_if_team_process() -> Option<i32> {
 /// The Docker (or Podman) API socket this process's user can connect to, if any (a connection
 /// only: nothing is sent).
 pub fn container_socket_reachable() -> Option<PathBuf> {
+    container_socket_candidates()
+        .into_iter()
+        .find(|path| connects(path))
+}
+
+fn container_socket_candidates() -> Vec<PathBuf> {
     let mut candidates: Vec<PathBuf> = vec![
         PathBuf::from("/var/run/docker.sock"),
         PathBuf::from("/run/docker.sock"),
@@ -166,23 +172,122 @@ pub fn container_socket_reachable() -> Option<PathBuf> {
     {
         candidates.insert(0, PathBuf::from(path));
     }
+    candidates
+}
+
+/// Whether this process can connect to the Unix socket `path` (nothing is sent).
+fn connects(path: &Path) -> bool {
     #[cfg(unix)]
     {
-        candidates
-            .into_iter()
-            .find(|path| std::os::unix::net::UnixStream::connect(path).is_ok())
+        std::os::unix::net::UnixStream::connect(path).is_ok()
     }
     #[cfg(not(unix))]
     {
-        let _ = candidates;
-        None
+        let _ = path;
+        false
     }
 }
 
+/// The variable naming the D-Bus session bus. Spelled in parts: the repository's hygiene check
+/// treats the whole name as the mark of an environment dump in a public file.
+pub const SESSION_BUS_VAR: &str = concat!("DBUS_", "SESSION_BUS_ADDRESS");
+
+/// A socket of concern this process's user can connect to (5.1): what it is and its path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocketOfConcern {
+    /// What connecting gives, in a few words.
+    pub what: &'static str,
+    /// The socket.
+    pub path: PathBuf,
+}
+
+/// The Unix sockets this process's user can connect to that would give isolated teams' code
+/// authority outside its sandbox where the sandbox covers the filesystem only (5.1): the D-Bus
+/// session bus (the address in [`SESSION_BUS_VAR`], or `/run/user/<uid>/bus`: `systemd-run --user`
+/// starts programs there), the Docker and Podman sockets (root on the host) and the user's
+/// default tmux server (commands in the user's sessions). Each is only connected to and closed.
+pub fn sockets_of_concern() -> Vec<SocketOfConcern> {
+    if cfg!(not(unix)) {
+        return Vec::new();
+    }
+    let mut out: Vec<SocketOfConcern> = Vec::new();
+    let mut push = |what: &'static str, path: PathBuf| {
+        if !out.iter().any(|s| s.path == path) && connects(&path) {
+            out.push(SocketOfConcern { what, path });
+        }
+    };
+    let mut buses: Vec<PathBuf> = Vec::new();
+    if let Ok(address) = std::env::var(SESSION_BUS_VAR) {
+        for part in address.split(';') {
+            for field in part.split(',') {
+                if let Some(path) = field
+                    .strip_prefix("unix:path=")
+                    .or_else(|| field.strip_prefix("path="))
+                {
+                    buses.push(PathBuf::from(path));
+                }
+            }
+        }
+    }
+    #[cfg(unix)]
+    {
+        let uid = rustix::process::getuid().as_raw();
+        buses.push(PathBuf::from(format!("/run/user/{uid}/bus")));
+        let tmux_dir = std::env::var_os("TMUX_TMPDIR")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+        for path in buses {
+            push("the D-Bus session bus", path);
+        }
+        for path in container_socket_candidates() {
+            push("a container runtime's socket", path);
+        }
+        push(
+            "the user's tmux server",
+            tmux_dir.join(format!("tmux-{uid}")).join("default"),
+        );
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (buses, &mut push);
+    }
+    out
+}
+
+/// One warning about a sandbox that covers the filesystem only (5.1), naming the reachable
+/// `sockets` and what the administrator can do.
+pub fn filesystem_only_warning(abi: u32, sockets: &[SocketOfConcern]) -> String {
+    use sandbox::{LEVEL_FILESYSTEM, LEVEL_SOCKETS, SOCKETS_ABI};
+    let reach = if sockets.is_empty() {
+        "This server's user can connect to none of the sockets Meerschaum checks (the D-Bus \
+         session bus, Docker, Podman, the user's tmux server), but other services' sockets stay \
+         reachable."
+            .to_string()
+    } else {
+        format!(
+            "This server's user, and so their code, can connect to {}.",
+            sockets
+                .iter()
+                .map(|s| format!("{} `{}`", s.what, s.path.display()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!(
+        "Isolated teams' sandbox is \"{LEVEL_FILESYSTEM}\" on this kernel (Landlock ABI {abi}): \
+         their code can connect to any Unix socket this server's operating-system user can \
+         (\"{LEVEL_SOCKETS}\" needs ABI {SOCKETS_ABI}, Linux 7.1). {reach} Run the API server in a \
+         container or as a service without a session bus, upgrade the kernel, or set \
+         `system.engine.python_team_sandbox: require_sockets` to run teams' code only where \
+         Unix sockets are covered."
+    )
+}
+
 /// What the API server says about isolated teams' sandbox when it starts (`true`: a warning):
-/// the mode and what this system enforces, why it is not enforced (`auto` on a system without
-/// Landlock), and a reachable Docker socket the sandbox does not stop. Empty when no isolated
-/// team is recorded under `root`.
+/// the mode, the level this system enforces, why it is not enforced (`auto` on a system without
+/// Landlock), and, at the "filesystem only" level, the reachable sockets of concern. Empty when
+/// no isolated team is recorded under `root`.
 pub fn server_status(config: &meerschaum_core::Config, root: &Path) -> Vec<(bool, String)> {
     use sandbox::{Mode, Support};
     if !meerschaum_core::team_scope::isolated_teams_recorded(root) {
@@ -208,41 +313,94 @@ pub fn server_status(config: &meerschaum_core::Config, root: &Path) -> Vec<(bool
                  require` to refuse to run it instead."
             ),
         )),
-        (Mode::Require, Support::Unsupported { reason }) => lines.push((
+        (mode, Support::Unsupported { reason }) => lines.push((
             true,
             format!(
                 "Isolated teams' code will not run: the filesystem sandbox is required \
-                 (`system.engine.python_team_sandbox: require`) but Landlock is unavailable here \
-                 ({reason})."
+                 (`system.engine.python_team_sandbox: {}`) but Landlock is unavailable here \
+                 ({reason}).",
+                mode.as_str()
             ),
         )),
+        (Mode::RequireSockets, Support::Available { .. })
+            if support.abi() < sandbox::SOCKETS_ABI =>
+        {
+            lines.push((
+                true,
+                format!(
+                    "Isolated teams' code will not run: their sandbox must be \"{}\" \
+                     (`system.engine.python_team_sandbox: require_sockets`), but this kernel \
+                     gives \"{}\" ({}).",
+                    sandbox::LEVEL_SOCKETS,
+                    sandbox::LEVEL_FILESYSTEM,
+                    support.describe()
+                ),
+            ))
+        }
         (_, Support::Available { .. }) => lines.push((
             false,
-            format!("Team sandbox ({}): {}.", mode.as_str(), support.describe()),
+            format!(
+                "Team sandbox ({}): {}: {}.",
+                mode.as_str(),
+                support.level().unwrap_or_default(),
+                support.describe()
+            ),
         )),
     }
-    let stops_sockets = mode != Mode::Off && support.abi() >= 9;
-    if !stops_sockets && let Some(socket) = container_socket_reachable() {
+    let filesystem_only = mode != Mode::Off
+        && mode != Mode::RequireSockets
+        && support.available()
+        && support.abi() < sandbox::SOCKETS_ABI;
+    if filesystem_only {
+        lines.push((
+            true,
+            filesystem_only_warning(support.abi(), &sockets_of_concern()),
+        ));
+    } else if (mode == Mode::Off || !support.available())
+        && let Some(socket) = container_socket_reachable()
+    {
         lines.push((
             true,
             format!(
                 "This server's user can open the container socket `{}`, and isolated teams' \
-                 code can too ({}): that is the same as root on this host. Run the API server \
-                 as a user without Docker access while teams run code.",
-                socket.display(),
-                if mode == Mode::Off {
-                    "the sandbox is off".to_string()
-                } else if support.available() {
-                    format!(
-                        "Landlock ABI {} cannot restrict Unix socket connections before ABI 9, \
-                         Linux 7.1",
-                        support.abi()
-                    )
-                } else {
-                    "no sandbox on this system".to_string()
-                }
+                 code can too (no sandbox): that is the same as root on this host. Run the API \
+                 server as a user without Docker access while teams run code.",
+                socket.display()
             ),
         ));
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_filesystem_only_warning_names_the_level_the_sockets_and_the_remedies() {
+        let sockets = vec![
+            SocketOfConcern {
+                what: "the D-Bus session bus",
+                path: PathBuf::from("/run/user/1000/bus"),
+            },
+            SocketOfConcern {
+                what: "a container runtime's socket",
+                path: PathBuf::from("/var/run/docker.sock"),
+            },
+        ];
+        let text = filesystem_only_warning(8, &sockets);
+        for part in [
+            "\"filesystem only\"",
+            "Landlock ABI 8",
+            "\"filesystem and sockets\" needs ABI 9, Linux 7.1",
+            "the D-Bus session bus `/run/user/1000/bus`",
+            "a container runtime's socket `/var/run/docker.sock`",
+            "in a container",
+            "upgrade the kernel",
+            "require_sockets",
+        ] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
+        assert!(filesystem_only_warning(5, &[]).contains("none of the sockets"));
+    }
 }

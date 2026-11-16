@@ -108,7 +108,7 @@ Python code that runs for an isolated team (its plugins' connectors, fetches, ho
 | `python_team_workers` | the shared pool's size (CPUs, 1 to 4) | The most live workers of all isolated teams together. A team that needs one more stops another team's idle worker, else waits for one to finish |
 | `python_worker_team_idle_seconds` | `60` | Stop an isolated team's idle worker after this long (`0`: never) |
 | `python_team_env_passthrough` | `[]` | Further variables of the server's environment, by name, that isolated teams' workers and jobs receive (never Meerschaum's configuration, patch or connector variables) |
-| `python_team_sandbox` | `auto` | The [filesystem sandbox](#the-filesystem-sandbox) of isolated teams' workers and jobs: `auto`, `require` or `off` |
+| `python_team_sandbox` | `auto` | The [filesystem sandbox](#the-filesystem-sandbox) of isolated teams' workers and jobs: `auto`, `require`, `require_sockets` or `off` |
 
 A team's workers otherwise follow `python_workers`, `python_worker_max_calls` and `python_worker_max_memory_mb`. The shared pool is not affected. Each live team worker is a Python interpreter: measured on one Linux host (Python 3.14), an idle one held about 59 MiB resident (27 MiB of it private), a team's first call after its workers stopped took about 0.45 s instead of 0.07 s (the interpreter starts), and later calls about 0.07 s, as in the shared pool. Ten teams syncing at once with `python_team_workers: 10` kept ten workers (about 590 MiB resident); with the default limit (4 on that host) they shared four, and calls waited up to about a second.
 
@@ -168,23 +168,37 @@ Nothing else: not the root's `config/` directory, its secret files (the API's se
 | 8 | 7.0 | The restriction covers threads that already existed (`all_threads`) |
 | 9 | 7.1 | Connecting to a pathname Unix socket outside the rules, such as Docker's or a database's, is refused (`resolve_unix`) |
 
-A kernel with ABI 1 to 8 still enforces the filesystem rules. A kernel without Landlock, one where it is not enabled at boot, and a container runtime whose seccomp profile refuses its system calls count as unsupported. macOS and Windows have no sandbox.
+A kernel without Landlock, one where it is not enabled at boot, and a container runtime whose seccomp profile refuses its system calls count as unsupported. macOS and Windows have no sandbox.
+
+#### How much the sandbox covers
+
+Where it is enforced, the sandbox reaches one of two levels, named the same way in the server's start-up log, `mrsm doctor`, a team worker's handshake report and the first line of a team job's log:
+
+| Level | Landlock ABI | Linux | What it adds |
+|---|---|---|---|
+| **filesystem only** | 1 to 8 | 5.13 to 7.0 | The filesystem rules above. A team's code can still connect to any pathname Unix socket the server's operating-system user can (and before ABI 6, Linux 6.12, signal its processes) |
+| **filesystem and sockets** | 9 or newer | 7.1 or newer | Also refuses connecting to pathname Unix sockets outside the rules, signalling processes outside the sandbox and connecting to their abstract Unix sockets |
+
+At **filesystem only**, while isolated teams exist, the server warns once when it starts, and `mrsm doctor` warns too (**teams**, `sandbox level`), naming each socket of concern its user can connect to: the D-Bus session bus (the one the server's environment names, or `/run/user/<uid>/bus`), the Docker and Podman sockets and the user's default tmux server. To close that gap, run the API server in a container or as a service without a session bus, run it on Linux 7.1 or newer, or set `require_sockets` below.
 
 **Modes.** `system.engine.python_team_sandbox` (`mrsm edit config system`):
 
 - `auto` (the default): sandbox wherever the kernel supports it. Where it does not, teams' code runs without it and the API server warns once when it starts, naming the reason.
-- `require`: never run a team's code without the sandbox. On a kernel or platform without it, team calls and team jobs fail with the reason.
+- `require`: never run a team's code without the sandbox's filesystem rules. On a kernel or platform without them, team calls and team jobs fail with the reason.
+- `require_sockets`: never run a team's code unless the sandbox is at **filesystem and sockets** (Linux 7.1 or newer). Elsewhere team calls and team jobs fail with the reason.
 - `off`: no sandbox.
 
-**Proof.** After restricting itself, a team's process tries to open a canary file the rules must deny (`<root>/team_scopes/.sandbox_canary`). A team worker reports the result in its handshake with the Landlock ABI and the parts in force; the server stops a worker that claims the sandbox but could read the canary, and in `require` mode one that does not report the sandbox at all (a `meerschaum` package older than 5.1.0 included), before it runs any of the team's code. A team job checks the same before it runs its command, writes `Team sandbox: enforced (auto): Landlock ABI 9 ...` at the top of its log, and in `require` mode stops with the reason instead.
+Any other value counts as `require`, with a warning.
 
-**Where to see it.** `mrsm doctor` lists the mode and what this system enforces under **teams** (`sandbox`), and warns when isolated teams run unsandboxed. The API server logs the same line when it starts with isolated teams recorded, for example `Team sandbox (auto): Landlock ABI 9 (the kernel offers ABI 11): filesystem, refer, truncate, ioctl_dev, scope_signal, scope_abstract_unix, all_threads, resolve_unix.`
+**Proof.** After restricting itself, a team's process tries to open a canary file the rules must deny (`<root>/team_scopes/.sandbox_canary`). A team worker reports the result in its handshake with the Landlock ABI and the parts in force; the server stops a worker that claims the sandbox but could read the canary, in `require` and `require_sockets` mode one that does not report the sandbox at all (a `meerschaum` package older than 5.1.0 included), and in `require_sockets` mode one whose sandbox is at **filesystem only**, before it runs any of the team's code. A team job checks the same before it runs its command, writes `Team sandbox: enforced, filesystem and sockets (auto): Landlock ABI 9 ...` at the top of its log, and in those modes stops with the reason instead.
+
+**Where to see it.** `mrsm doctor` lists the mode, the level and what this system enforces under **teams** (`sandbox`), and warns when isolated teams run unsandboxed or at **filesystem only**. The API server logs the same line when it starts with isolated teams recorded, for example `Team sandbox (auto): filesystem and sockets: Landlock ABI 9 (the kernel offers ABI 11): filesystem, refer, truncate, ioctl_dev, scope_signal, scope_abstract_unix, all_threads, resolve_unix.`
 
 **What it changes for a team's code.** Its temporary files go to the team's temporary directory, and an in-memory SQLite connector keeps its file there instead of `/dev/shm`. Its virtual environments are its own (see above): the first time its processes start with a plugin, the server copies its environment of that plugin, which takes about as long as copying the files (measured on one Linux host with XFS: 0.2 to 0.3 s more for a plugin environment of 88 MB with pandas and numpy; on a file system without shared blocks, each team's copy takes the disk space of the environment again). A plugin whose server environment is missing gets an empty one when the team's code first installs into it. It cannot write files outside its own directories (a team worker's working directory is the team's temporary directory, so relative paths land there). Files of the team's own SQLite connectors can be written, but SQLite cannot create a rollback journal next to a database outside the rules: such a database should use WAL mode or be written through the server. The memory of a team job's own workers is not measured (`python_worker_max_memory_mb` does not recycle them), since the job cannot read their `/proc` entries. Measured on one Linux host (Python 3.14, Landlock ABI 11): applying the sandbox took about 15 ms in a worker (median of 30, loading the extension included), and a worker process finished about 7 ms later than without it; a team's warm calls were unchanged within noise (median 0.094 s with the sandbox, 0.083 to 0.093 s without), and its first call after its workers stopped took about 0.78 s instead of 0.64 s. Changing `python_team_sandbox` takes effect when the server restarts.
 
 ### Local sockets
 
-A team's process connects to the network as the server does, and, on kernels where the sandbox does not cover pathname Unix sockets (before Linux 7.1, see [The filesystem sandbox](#the-filesystem-sandbox)), to any Unix socket the server's operating-system user can. Meerschaum's own channels between its processes do not trust a process for being of the same user:
+A team's process connects to the network as the server does, and, on kernels where the sandbox does not cover pathname Unix sockets (before Linux 7.1, see [How much the sandbox covers](#how-much-the-sandbox-covers)), to any Unix socket the server's operating-system user can. Meerschaum's own channels between its processes do not trust a process for being of the same user:
 
 | Channel | Who listens, who connects | What protects it |
 |---|---|---|
@@ -197,7 +211,8 @@ A team's process connects to the network as the server does, and, on kernels whe
 
 - **Network reach.** A team's code connects anywhere the server can: databases, internal services, cloud metadata endpoints (`169.254.169.254`, which can hand out the machine's cloud credentials). Restrict those with a firewall or the cloud's metadata settings.
 - **CPU, memory and disk use.** A team's code can use as much as the server's user may; `python_team_workers` and `python_worker_max_memory_mb` bound the pool, not the code.
-- **The Docker socket on older kernels.** A user who can open `/var/run/docker.sock` is root on the host. Before Landlock ABI 9 (Linux 7.1) the sandbox does not restrict Unix socket connections, so a team's code can use the socket whenever the server's user can. Run the API server as a user without Docker access while teams run code; the server and `mrsm doctor` warn when its user can open a container socket that the sandbox does not cover.
+- **Other services' Unix sockets at "filesystem only".** Before Linux 7.1 a team's code can connect to any Unix socket the server's user can. Tested on one host by running a team's process at Landlock ABI 8: it connected to the user's D-Bus session bus, where `systemd-run --user` would start a program outside the sandbox, and to the Docker socket, which answered its requests (a user who can open the Docker socket is root on the host); at **filesystem and sockets** both connections were refused. See [How much the sandbox covers](#how-much-the-sandbox-covers) for what to do.
+- **Unix sockets at every level.** The sandbox adds no system-call filter (seccomp): refusing Unix sockets wholesale would break Python's default `multiprocessing` start method, which teams' code uses. Connections to the sockets inside its rules (name resolution, the team's own temporary directory) are allowed at every level.
 - **Shared memory by name.** A team's code cannot list `/dev/shm`, but can open an object there whose name it knows.
 - **Kernel bugs** and anything the server's user may do that Landlock does not cover.
 - **The shared processes.** The Python API host (plugin routes, pages and console callbacks of every team) and the shared workers run with the server's configuration and without a sandbox: a request of an isolated team's member there is a guard rail, not a wall (see [Team-scoped workers](#team-scoped-workers)).

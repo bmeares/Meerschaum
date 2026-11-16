@@ -401,10 +401,10 @@ impl TeamExpectation {
             });
             // The server's mode decides, whatever the worker says it ran in.
             let judged = Report {
-                mode: if mode == Mode::Require || sandbox.mode == Mode::Require {
-                    Mode::Require
-                } else {
+                mode: if mode == Mode::Off {
                     mode
+                } else {
+                    mode.stricter(sandbox.mode)
                 },
                 ..sandbox.clone()
             };

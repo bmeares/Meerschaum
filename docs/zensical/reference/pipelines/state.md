@@ -175,7 +175,7 @@ All keys live under `system.engine` in your configuration (`mrsm edit config sys
 | `python_team_workers` | `python_workers`' default | The most live Python workers of all [isolated teams' pools](/reference/api-instance/teams/#team-scoped-workers) together (not counting the shared pool) |
 | `python_worker_team_idle_seconds` | `60` | Stop an isolated team's idle Python worker after this long (`0`: never) |
 | `python_team_env_passthrough` | `[]` | Further environment variables, by name, passed to [isolated teams' workers and jobs](/reference/api-instance/teams/#the-environment-of-a-teams-processes) (never Meerschaum's configuration, patch or connector variables) |
-| `python_team_sandbox` | `auto` | The [filesystem sandbox](/reference/api-instance/teams/#the-filesystem-sandbox) of isolated teams' workers and jobs on Linux: `auto` (where the kernel supports Landlock), `require` (refuse to run a team's code without it) or `off` |
+| `python_team_sandbox` | `auto` | The [filesystem sandbox](/reference/api-instance/teams/#the-filesystem-sandbox) of isolated teams' workers and jobs on Linux: `auto` (where the kernel supports Landlock), `require` (refuse to run a team's code without it), `require_sockets` (refuse unless it also covers Unix sockets and signals, Linux 7.1) or `off` |
 | `implicit_edges` | `true` | Treat `{{ Pipe() }}` references as edges |
 | `auto_rebuild` | `false` | Rebuild changed definitions without confirmation |
 | `inclusive_cap` | `true` | Cap children at the parents' watermark plus one unit (`false`: half-open) |

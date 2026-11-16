@@ -119,7 +119,18 @@ fn the_modes_parse_and_unknown_values_require_the_sandbox() {
     assert_eq!(Mode::parse("auto"), Some(Mode::Auto));
     assert_eq!(Mode::parse(" REQUIRE "), Some(Mode::Require));
     assert_eq!(Mode::parse("off"), Some(Mode::Off));
+    assert_eq!(Mode::parse("require_sockets"), Some(Mode::RequireSockets));
+    assert_eq!(Mode::parse("Require-Sockets"), Some(Mode::RequireSockets));
     assert_eq!(Mode::parse("sometimes"), None);
+    assert_eq!(
+        serde_json::to_string(&Mode::RequireSockets).unwrap(),
+        "\"require_sockets\""
+    );
+    assert_eq!(
+        Mode::Auto.stricter(Mode::RequireSockets),
+        Mode::RequireSockets
+    );
+    assert_eq!(Mode::Require.stricter(Mode::Auto), Mode::Require);
     let config = |text: &str| {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("config")).unwrap();
@@ -465,8 +476,22 @@ fn sandboxed_child() {
         results.insert(label.clone(), outcome(std::fs::write(path, b"x")).into());
     }
     for (label, path) in &plan.connect {
-        let r = std::os::unix::net::UnixStream::connect(path).map(|_| ());
-        results.insert(label.clone(), outcome(r).into());
+        let r = std::os::unix::net::UnixStream::connect(path);
+        if label == "docker"
+            && let Ok(stream) = &r
+        {
+            // Read-only: Docker's health route.
+            use std::io::{Read, Write};
+            let mut stream = stream;
+            let _ = stream.write_all(b"GET /_ping HTTP/1.0\r\nHost: docker\r\n\r\n");
+            let mut answer = String::new();
+            let _ = stream.read_to_string(&mut answer);
+            results.insert(
+                "docker ping".into(),
+                answer.lines().last().unwrap_or_default().into(),
+            );
+        }
+        results.insert(label.clone(), outcome(r.map(|_| ())).into());
     }
     for (label, name) in &plan.connect_abstract {
         use std::os::linux::net::SocketAddrExt;
@@ -958,4 +983,154 @@ fn nix_mkfifo(path: &Path) {
         .status()
         .unwrap();
     assert!(status.success(), "mkfifo {}", path.display());
+}
+
+/// 5.1: the two levels and the mode that asks for the stronger one.
+#[test]
+fn the_level_follows_the_abi_and_require_sockets_asks_for_the_stronger_one() {
+    assert_eq!(level_of(1), LEVEL_FILESYSTEM);
+    assert_eq!(level_of(8), LEVEL_FILESYSTEM);
+    assert_eq!(level_of(9), LEVEL_SOCKETS);
+    assert_eq!(
+        Support::Available { kernel_abi: 11 }.level(),
+        Some(LEVEL_SOCKETS)
+    );
+    assert_eq!(
+        Support::Available { kernel_abi: 6 }.level(),
+        Some(LEVEL_FILESYSTEM)
+    );
+    let report = |mode: Mode, abi: u32| {
+        let (features, unavailable) = features_of(abi);
+        Report {
+            mode,
+            enforced: true,
+            abi,
+            kernel_abi: abi,
+            features,
+            unavailable,
+            canary: Canary::Denied,
+            level: level_of(abi).to_string(),
+            ..Report::default()
+        }
+    };
+    assert!(report(Mode::Require, 8).verdict().is_ok());
+    assert!(report(Mode::Auto, 8).verdict().is_ok());
+    let refused = report(Mode::RequireSockets, 8).verdict().unwrap_err();
+    assert!(
+        refused.contains("require_sockets") && refused.contains(LEVEL_FILESYSTEM),
+        "{refused}"
+    );
+    assert!(report(Mode::RequireSockets, 9).verdict().is_ok());
+    assert!(
+        Report::not_enforced(Mode::RequireSockets, "no Landlock")
+            .verdict()
+            .is_err()
+    );
+    // The level is in every description, and read from the features of an older report.
+    assert!(
+        report(Mode::Auto, 8)
+            .describe()
+            .starts_with("enforced, filesystem only (auto)")
+    );
+    assert!(
+        report(Mode::Auto, 9)
+            .describe()
+            .starts_with("enforced, filesystem and sockets (auto)")
+    );
+    let older = Report {
+        level: String::new(),
+        ..report(Mode::Auto, 9)
+    };
+    assert_eq!(older.level(), LEVEL_SOCKETS);
+}
+
+/// 5.1: what each level allows, on this kernel, by running a process at an older kernel's
+/// Landlock ABI: at "filesystem only" a team's process connects to a pathname Unix socket
+/// outside its rules (and before ABI 6 signals another process); at "filesystem and sockets" it
+/// does neither. The filesystem rules (a job's stdin FIFO included) hold at every level.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_filesystem_only_sandbox_reaches_unix_sockets_and_the_stronger_level_does_not() {
+    let l = layout();
+    let sockets = tempfile::tempdir().unwrap();
+    let outside = sockets.path().join("outside.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&outside).unwrap();
+    let fifo = l.other_job.join("b-job.stdin");
+    nix_mkfifo(&fifo);
+    let support = kernel_support();
+    for max_abi in [Some(5), Some(8), None] {
+        let mut spec = spec_of(&l, Mode::Auto, &["mine"]);
+        spec.max_abi = max_abi;
+        let plan = ChildPlan {
+            spec,
+            extra: Vec::new(),
+            read: vec![(
+                "server config".into(),
+                l.root.join("config/meerschaum.yaml"),
+            )],
+            write: Vec::new(),
+            connect: vec![("outside socket".into(), outside.clone())],
+            connect_abstract: Vec::new(),
+            signal: Some(std::process::id() as i32),
+            fifo: vec![("another job's stdin".into(), fifo.clone())],
+        };
+        let Some((report, results)) = run_child(&plan) else {
+            return;
+        };
+        let abi = max_abi.unwrap_or(NEWEST_ABI).min(support.abi());
+        assert!(report.enforced, "{report:?}");
+        assert_eq!(report.abi, abi, "{report:?}");
+        assert_eq!(report.level(), level_of(abi), "{report:?}");
+        assert_eq!(results["server config"], "denied", "ABI {abi}: {results:?}");
+        assert_eq!(
+            results["another job's stdin"], "denied",
+            "ABI {abi}: {results:?}"
+        );
+        let connect = results["outside socket"].as_str().unwrap();
+        let signal = results["signal"].as_str().unwrap();
+        if abi >= SOCKETS_ABI {
+            assert_eq!((connect, signal), ("denied", "denied"), "ABI {abi}");
+        } else {
+            assert_eq!(connect, "ok", "ABI {abi}: {results:?}");
+            assert_eq!(signal, if abi >= 6 { "denied" } else { "ok" }, "ABI {abi}");
+        }
+    }
+}
+
+/// 5.1 (run by hand on a host with a session bus and Docker, `MRSM_TEST_HOST_SOCKETS=1`, with
+/// `--ignored`): at "filesystem only" a team's process can connect to the D-Bus session bus and
+/// to the Docker socket (and Docker answers its read-only `GET /_ping`); at "filesystem and
+/// sockets" it can connect to neither. Nothing is sent to the bus.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore]
+fn host_sockets_at_each_level() {
+    if std::env::var_os("MRSM_TEST_HOST_SOCKETS").is_none() {
+        return;
+    }
+    let l = layout();
+    let uid = rustix::process::getuid().as_raw();
+    let bus = PathBuf::from(format!("/run/user/{uid}/bus"));
+    let docker = PathBuf::from("/var/run/docker.sock");
+    for max_abi in [Some(8), None] {
+        let mut spec = spec_of(&l, Mode::Auto, &[]);
+        spec.max_abi = max_abi;
+        let plan = ChildPlan {
+            spec,
+            extra: Vec::new(),
+            read: Vec::new(),
+            write: Vec::new(),
+            connect: vec![
+                ("bus".into(), bus.clone()),
+                ("docker".into(), docker.clone()),
+            ],
+            connect_abstract: Vec::new(),
+            signal: None,
+            fifo: Vec::new(),
+        };
+        let Some((report, results)) = run_child(&plan) else {
+            return;
+        };
+        println!("HOST-SOCKETS {} {results:?}", report.level());
+    }
 }

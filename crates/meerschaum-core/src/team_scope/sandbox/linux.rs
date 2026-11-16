@@ -77,7 +77,22 @@ fn threads() -> Option<usize> {
     std::fs::read_dir("/proc/self/task").ok().map(|d| d.count())
 }
 
-pub(super) fn restrict(mode: Mode, rules: &[Rule]) -> Report {
+/// The `landlock` crate's ABI of number `abi` (at most [`ABI_USED`]).
+fn abi_of(abi: u32) -> ABI {
+    match abi {
+        0 | 1 => ABI::V1,
+        2 => ABI::V2,
+        3 => ABI::V3,
+        4 => ABI::V4,
+        5 => ABI::V5,
+        6 => ABI::V6,
+        7 => ABI::V7,
+        8 => ABI::V8,
+        _ => ABI_USED,
+    }
+}
+
+pub(super) fn restrict(mode: Mode, rules: &[Rule], max_abi: Option<u32>) -> Report {
     let support = kernel_support();
     let kernel_abi = match &support {
         Support::Available { kernel_abi } => *kernel_abi,
@@ -85,12 +100,16 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule]) -> Report {
     };
     let threads_before = threads();
     let mut added = 0usize;
+    let used = abi_of(max_abi.unwrap_or(NEWEST_ABI).min(NEWEST_ABI));
     let result = (|| -> Result<landlock::RestrictionStatus, landlock::RulesetError> {
-        let handled = AccessFs::from_all(ABI_USED);
-        let mut ruleset = Ruleset::default()
-            .handle_access(handled)?
-            .scope(Scope::from_all(ABI_USED))?
-            .create()?;
+        let handled = AccessFs::from_all(used);
+        let mut ruleset = Ruleset::default().handle_access(handled)?;
+        // Scopes exist from ABI 6 (an older ABI asked for in tests has none).
+        let scopes = Scope::from_all(used);
+        if !scopes.is_empty() {
+            ruleset = ruleset.scope(scopes)?;
+        }
+        let mut ruleset = ruleset.create()?;
         for rule in rules {
             let path: &Path = &rule.path;
             let Ok(metadata) = std::fs::metadata(path) else {
@@ -101,7 +120,7 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule]) -> Report {
             };
             let mut access = rights(rule.access) & handled;
             if !metadata.is_dir() {
-                access &= AccessFs::from_file(ABI_USED);
+                access &= AccessFs::from_file(used);
             }
             if access.is_empty() {
                 continue;
@@ -128,7 +147,8 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule]) -> Report {
     let abi = match status.landlock {
         LandlockStatus::Available { effective_abi, .. } => effective_abi as u32,
         _ => kernel_abi.min(NEWEST_ABI),
-    };
+    }
+    .min(max_abi.unwrap_or(NEWEST_ABI));
     let (mut features, mut unavailable) = features_of(abi);
     let mut reason = None;
     if !status.all_threads {
@@ -155,6 +175,7 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule]) -> Report {
         reason,
         rules: added,
         dropped: Vec::new(),
+        level: String::new(),
     }
 }
 
