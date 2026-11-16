@@ -10,6 +10,7 @@ from __future__ import annotations
 from tests._ports import service_port
 
 import datetime
+import json
 import decimal
 import math
 import os
@@ -728,3 +729,176 @@ def test_polars_to_sql_on_every_flavor(pair):
         assert native.value(f'SELECT COUNT(*) FROM {name}') == 4
     finally:
         native.exec(f'DROP TABLE {name}', silent=True)
+
+
+### Lists, tuples and dicts as bound parameters: what Meerschaum 4's drivers did with them.
+### psycopg2 (PostgreSQL family) wrote a list as `ARRAY[...]` (`'{}'` when empty) and a tuple
+### as a row; PyMySQL expanded either into `(?, ?)`; the `duckdb` package bound a list as a
+### `LIST` and a dict as a `STRUCT`. SQLite and SQL Server drivers refused them.
+@pytest.mark.parametrize('flavor, params, expected', [
+    ('postgresql', {'x': [1, 2, 3]}, ("SELECT :x", ("SELECT ARRAY[1,2,3]", []))),
+    ('postgresql', {'x': ['a', "b'c"]}, ("SELECT :x", ("SELECT ARRAY[$mrsm$a$mrsm$,$mrsm$b'c$mrsm$]", []))),
+    ('postgresql', {'x': []}, ("SELECT :x", ("SELECT '{}'", []))),
+    ('postgresql', {'x': [None, None]}, ("SELECT :x", ("SELECT '{NULL,NULL}'", []))),
+    ('postgresql', {'x': [1, None, -2.5]}, ("SELECT :x", ("SELECT ARRAY[1,NULL, -2.5]", []))),
+    ('postgresql', {'x': [[1, 2], [3, 4]]}, ("SELECT :x", ("SELECT ARRAY[[1,2],[3,4]]", []))),
+    ('postgresql', {'x': (1, 'a')}, ("SELECT :x", ("SELECT (1, $mrsm$a$mrsm$)", []))),
+    ('postgresql', {'x': [datetime.date(2024, 1, 2), b'\x00']},
+     ("SELECT :x", ("SELECT ARRAY['2024-01-02'::date,'\\x00'::bytea]", []))),
+    ('postgresql', {'x': [float('nan'), decimal.Decimal('1.5')]},
+     ("SELECT :x", ("SELECT ARRAY['NaN'::float,1.5]", []))),
+    ('postgresql', {'x': [{'a': 1}], 'y': {'b': 2}},
+     ("SELECT :x, :y", ("SELECT $1, $2", [[{'a': 1}], {'b': 2}]))),
+    ('postgresql', {'x': {1, 2}}, ("SELECT :x", ("SELECT $1", [{1, 2}]))),
+    ('mariadb', {'x': [1, 'a'], 'y': 5}, ("SELECT :y WHERE a IN :x", ("SELECT ? WHERE a IN (?,?)", [5, 1, 'a']))),
+    ('mysql', {'x': (1,)}, ("SELECT * FROM t WHERE a = :x", ("SELECT * FROM t WHERE a = (?)", [1]))),
+    ('duckdb', {'x': [1, [2]], 'y': {'k': 'v'}},
+     ("SELECT :x, :y", ("SELECT [$1, [$2]], {'k': $3}", [1, 2, 'v']))),
+    ('duckdb', {'x': {1, 2}}, ("SELECT :x", ("SELECT $1", [{1, 2}]))),
+    ('sqlite', {'x': [1, 2]}, ("SELECT :x", ("SELECT ?", [[1, 2]]))),
+    ('mssql', {'x': [1, 2]}, ("SELECT :x", ("SELECT @P1", [[1, 2]]))),
+])
+def test_list_parameters_prepare_as_the_4x_drivers_wrote_them(flavor, params, expected):
+    from meerschaum.connectors.sql._native import prepare
+    query, (sql, values) = expected
+    statement = prepare(_Flavored(flavor), query, params)
+    assert (statement.sql, statement.params) == (sql, values)
+
+
+def test_executemany_with_list_values_prepares_one_statement_per_set():
+    from meerschaum.connectors.sql._native import prepare
+    statement = prepare(_Flavored('mysql'), "SELECT * FROM t WHERE a IN :a", [{'a': [1]}, {'a': [1, 2]}])
+    assert statement.many and statement.params is None
+    assert statement.sql == [
+        ("SELECT * FROM t WHERE a IN (?)", [1]), ("SELECT * FROM t WHERE a IN (?,?)", [1, 2]),
+    ]
+
+
+_PG_KEYS = ('timescaledb', 'timescaledb_ha', 'postgis')
+
+
+@pytest.fixture(params=[flavor for flavor in FLAVORS if flavor in _PG_KEYS] or ['none'])
+def pg_native(request):
+    """A native connector to a PostgreSQL-family test database."""
+    if request.param == 'none':
+        pytest.skip('No PostgreSQL-family flavor selected (MRSM_TEST_FLAVORS).')
+    attrs = SERVERS[request.param]
+    if not _reachable(attrs['port']):
+        pytest.skip(f"No {request.param} test database on port {attrs['port']}.")
+    from meerschaum.connectors import SQLConnector
+    yield SQLConnector(label=f'lp_{request.param}_{uuid.uuid4().hex[:8]}', **attrs)
+
+
+#: `pg_typeof(:x)` and the text of `:x` for each list Meerschaum 4 bound (recorded with 4.1.4).
+_PG_LIST_TYPES = [
+    ([1, 2, 3], 'integer[] {1,2,3}'),
+    ([1, 3000000000], 'bigint[] {1,3000000000}'),
+    (['a', 'b'], 'text[] {a,b}'),
+    ([1.5, 2.5], 'numeric[] {1.5,2.5}'),
+    ([True, False], 'boolean[] {t,f}'),
+    ([1, 2.5], 'numeric[] {1,2.5}'),
+    ([1, None, 3], 'integer[] {1,NULL,3}'),
+    ([datetime.datetime(2024, 1, 1, 12, 0)], 'timestamp without time zone[] {"2024-01-01 12:00:00"}'),
+    ([datetime.date(2024, 1, 1)], 'date[] {2024-01-01}'),
+    ([datetime.time(1, 2, 3)], 'time without time zone[] {01:02:03}'),
+    ([datetime.timedelta(days=1)], 'interval[] {"1 day"}'),
+    ([decimal.Decimal('1.5'), decimal.Decimal('2')], 'numeric[] {1.5,2}'),
+    ([uuid.UUID('12345678-1234-5678-1234-567812345678')], 'uuid[] {12345678-1234-5678-1234-567812345678}'),
+    ([b'\x00\x01'], 'bytea[] {"\\\\x0001"}'),
+    ([], 'unknown {}'),
+    ([None], 'unknown {NULL}'),
+    ([[1, 2], [3, 4]], 'integer[] {{1,2},{3,4}}'),
+    ((1, 2, 3), 'record (1,2,3)'),
+    ({1, 2}, 'text {1, 2}'),
+    ([{'a': 1}], 'jsonb [{"a": 1}]'),
+    ({'a': 1}, 'jsonb {"a": 1}'),
+]
+
+
+def test_list_parameters_bind_as_postgresql_arrays(pg_native):
+    conn = pg_native
+    query = "SELECT pg_typeof(:x)::text || ' ' || CAST(:x AS text)"
+    for value, expected in _PG_LIST_TYPES:
+        assert conn.value(query, {'x': value}) == expected, value
+        assert conn.read(query, params={'x': value}).iloc[0, 0] == expected, value
+        assert conn.exec(query, {'x': value}).scalar() == expected, value
+
+
+def test_list_parameters_work_with_any_in_and_array_columns(pg_native):
+    conn = pg_native
+    table = f"_mrsm_lp_{uuid.uuid4().hex[:10]}"
+    assert conn.exec(f"CREATE TABLE {table} (id BIGINT, s TEXT, arr INT[], sarr TEXT[], jb JSONB)")
+    try:
+        conn.exec(f"INSERT INTO {table} (id, s) VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+        count = f"SELECT COUNT(*) FROM {table} WHERE "
+        assert conn.value(count + "id = ANY(:ids)", {'ids': [1, 2]}) == 2
+        assert conn.value(count + "s = ANY(:ids)", {'ids': ['a', 'c']}) == 2
+        assert conn.value(count + "id = ANY(:ids)", {'ids': []}) == 0
+        assert conn.value(count + "s = ANY(:ids)", {'ids': []}) == 0
+        assert conn.value(count + "id <> ALL(:ids)", {'ids': [1]}) == 2
+        assert conn.value(count + "id IN :ids", {'ids': (1, 2)}) == 2
+        assert conn.read(count + "id = ANY(:ids)", params={'ids': [3]}).iloc[0, 0] == 1
+        assert conn.read(count + "id = ANY(%s)", params=[[1, 3]]).iloc[0, 0] == 2
+
+        conn.exec(f"INSERT INTO {table} (id, arr, sarr) VALUES (10, :a, :s)", {'a': [1, 2], 's': ['x', 'y']})
+        conn.exec(f"INSERT INTO {table} (id, arr) VALUES (11, :a)", {'a': []})
+        conn.exec(
+            f"INSERT INTO {table} (id, arr) VALUES (:id, :a)",
+            [{'id': 12, 'a': [5]}, {'id': 13, 'a': [6, 7]}],
+        )
+        stored = conn.read(
+            f"SELECT id, arr::text AS arr, sarr::text AS sarr FROM {table} WHERE id >= 10 ORDER BY id"
+        )
+        assert stored['arr'].tolist() == ['{1,2}', '{}', '{5}', '{6,7}']
+        assert stored['sarr'].tolist()[0] == '{x,y}'
+
+        ### A dict or a list of dicts still binds as JSON (4.x refused them).
+        conn.exec(f"INSERT INTO {table} (id, jb) VALUES (20, :d), (21, :l)", {'d': {'a': 1}, 'l': [{'b': 2}]})
+        assert conn.value(f"SELECT jb::text FROM {table} WHERE id = 20") == '{"a": 1}'
+        assert conn.value(f"SELECT jb::text FROM {table} WHERE id = 21") == '[{"b": 2}]'
+        ### A list of scalars is an array, as in 4.x, so JSON text goes through `json.dumps`.
+        conn.exec(f"INSERT INTO {table} (id, jb) VALUES (22, :x)", {'x': json.dumps([1, 2])})
+        assert conn.value(f"SELECT jb::text FROM {table} WHERE id = 22") == '[1, 2]'
+    finally:
+        conn.exec(f"DROP TABLE {table}", silent=True)
+
+
+@pytest.fixture(params=[flavor for flavor in FLAVORS if flavor in ('mysql', 'mariadb')] or ['none'])
+def mysql_native(request):
+    """A native connector to a MySQL or MariaDB test database."""
+    if request.param == 'none':
+        pytest.skip('No MySQL-family flavor selected (MRSM_TEST_FLAVORS).')
+    attrs = SERVERS[request.param]
+    if not _reachable(attrs['port']):
+        pytest.skip(f"No {request.param} test database on port {attrs['port']}.")
+    from meerschaum.connectors import SQLConnector
+    yield SQLConnector(label=f'lp_{request.param}_{uuid.uuid4().hex[:8]}', **attrs)
+
+
+def test_list_parameters_expand_in_mysql_in_lists(mysql_native):
+    conn = mysql_native
+    table = f"_mrsm_lp_{uuid.uuid4().hex[:10]}"
+    assert conn.exec(f"CREATE TABLE {table} (id BIGINT, s VARCHAR(10))")
+    try:
+        conn.exec(f"INSERT INTO {table} (id, s) VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+        count = f"SELECT COUNT(*) FROM {table} WHERE "
+        assert conn.value(count + "id IN :ids", {'ids': [1, 2]}) == 2
+        assert conn.value(count + "id IN :ids", {'ids': (1, 2)}) == 2
+        assert conn.value(count + "s IN :ids", {'ids': ['a', 'c']}) == 2
+        assert conn.value(count + "id = :ids", {'ids': [3]}) == 1
+        assert conn.read(count + "id IN :ids", params={'ids': [1, 2, 3]}).iloc[0, 0] == 3
+    finally:
+        conn.exec(f"DROP TABLE {table}", silent=True)
+
+
+def test_list_parameters_bind_as_duckdb_lists(tmp_path):
+    pytest.importorskip('pandas')
+    from meerschaum.connectors import SQLConnector
+    conn = SQLConnector(label=f'lp_duck_{uuid.uuid4().hex[:8]}', flavor='duckdb', database=str(tmp_path / 'lp.duckdb'))
+    assert conn.exec("CREATE TABLE t (id BIGINT, s VARCHAR)")
+    conn.exec("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+    assert conn.value("SELECT COUNT(*) FROM t WHERE id IN :ids", {'ids': [1, 2]}) == 2
+    assert conn.value("SELECT COUNT(*) FROM t WHERE id IN :ids", {'ids': (1, 2)}) == 2
+    assert conn.value("SELECT COUNT(*) FROM t WHERE id IN :ids", {'ids': []}) == 0
+    assert conn.value("SELECT len(:x)", {'x': [1, 2, 3]}) == 3
+    assert conn.value("SELECT (:x).a", {'x': {'a': 5}}) == 5
