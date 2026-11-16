@@ -51,10 +51,15 @@ impl RetryProbe for ApiRetryProbe {
         let keys = &self.keys;
         // If the remote instance does not allow chaining, don't even try logging in.
         if self.chaining.is_none() {
-            match self.connector.get_chaining_status().await {
-                // No answer (unreachable, an error status, not a boolean): try again later.
-                None => return Attempt::Failed,
-                Some(false) => {
+            match self.connector.try_get_chaining_status().await {
+                // Unreachable: say why (v4 printed the request's exception), try again later.
+                Err(cause) => {
+                    cx.detail(&cause);
+                    return Attempt::Failed;
+                }
+                // An error status, not a boolean: try again later.
+                Ok(None) => return Attempt::Failed,
+                Ok(Some(false)) => {
                     if self.enforce_chaining {
                         cx.warn_user(&format!(
                             "Meerschaum instance '{keys}' does not allow chaining and cannot \
@@ -65,7 +70,7 @@ impl RetryProbe for ApiRetryProbe {
                     // Allow is the option to ignore the chaining status.
                     self.chaining = Some(true);
                 }
-                Some(true) => self.chaining = Some(true),
+                Ok(Some(true)) => self.chaining = Some(true),
             }
         }
 

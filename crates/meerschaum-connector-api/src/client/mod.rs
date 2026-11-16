@@ -70,6 +70,10 @@ pub(crate) struct AuthState {
     /// [`RELOGIN_INTERVAL`] (stored credentials that no longer work never cause a login per
     /// request). An explicit `login()` always tries.
     pub(crate) login_failed_at: Option<std::time::Instant>,
+    /// The last login never reached the server (connection refused, timed out): the request
+    /// that needed the token fails with the same cause, so `token()` does not warn about the
+    /// credentials (v4's `login()` raised there and printed nothing).
+    pub(crate) login_unreachable: bool,
 }
 
 /// The least time between two fresh logins forced by refused JWTs: concurrent `401`s, or a
