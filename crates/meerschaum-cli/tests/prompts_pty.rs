@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+mod python_support;
+
 const BIN: &str = env!("CARGO_BIN_EXE_mrsm-cli");
 const SLOW_VIEW: &str = "CREATE VIEW slowv AS WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL \
 SELECT x+1 FROM c WHERE x<300000000) SELECT x AS id FROM c";
@@ -37,6 +39,10 @@ fn env_for(base: &Path) -> Vec<(String, String)> {
         ("MRSM_PLUGINS_DIR".into(), p(&plugins)),
         ("MRSM_NO_AUTO_INSTALL".into(), "1".into()),
         ("MRSM_NO_UPDATE_CHECK".into(), "1".into()),
+        (
+            "MRSM_SQL_MAIN".into(),
+            format!("sqlite:///{}", base.join("main.db").display()),
+        ),
         (
             "MRSM_CONFIG".into(),
             r#"{"meerschaum":{"instance":"sql:w18sh"},"shell":{"updates":{"check_remote":false}}}"#
@@ -248,6 +254,19 @@ impl Term {
         self.writer.flush().unwrap();
     }
 
+    fn resize(&mut self, cols: u16) {
+        self._master
+            .resize(PtySize {
+                rows: 30,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        self.parser.screen_mut().set_size(30, cols);
+        self.pump(Duration::from_millis(600));
+    }
+
     fn screen(&self) -> String {
         self.parser.screen().contents()
     }
@@ -402,6 +421,164 @@ fn assert_prompt_cursor(term: &Term, question: &str, input: &str) {
         (row as u16, expected.width() as u16),
         "cursor should follow {expected:?}:\n{screen}"
     );
+}
+
+/// Python's register hook must redraw in place even when the shell forwards its output.
+#[test]
+fn plugin_register_prompts_keep_their_layout_in_the_shell_and_direct_cli() {
+    if std::env::var("MRSM_TEST_NO_CORE").is_ok_and(|v| v == "1") {
+        eprintln!("skipping: MRSM_TEST_NO_CORE=1");
+        return;
+    }
+    let Some(python) = python_support::current("MRSM_PYTHON") else {
+        eprintln!("skipping: Python is unavailable");
+        return;
+    };
+    let mut setup = Setup::new("plugin-register-layout");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    setup.env.extend([
+        ("MRSM_PYTHON".into(), python.display().to_string()),
+        ("PYTHONPATH".into(), repo.display().to_string()),
+    ]);
+    let mut probe = Command::new(&python);
+    probe.env_clear().args(["-c", "import prompt_toolkit"]);
+    for (k, v) in &setup.env {
+        probe.env(k, v);
+    }
+    let output = probe.output().unwrap();
+    if !output.status.success() {
+        eprintln!(
+            "skipping: prompt_toolkit is required: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    // A broken SDK is a failure, not an optional dependency.
+    let mut sdk = Command::new(&python);
+    sdk.env_clear().args(["-c", "import meerschaum"]);
+    for (k, v) in &setup.env {
+        sdk.env(k, v);
+    }
+    let output = sdk.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Empty environments prevent any dependency installation; prompt_toolkit comes from the
+    // selected interpreter. Neither fixture environment links the owner's installation.
+    for name in ["mrsm", "prompt_layout"] {
+        let mut command = Command::new(&python);
+        command.env_clear().args(["-m", "venv", "--without-pip"]);
+        command.arg(setup.base.join("root/venvs").join(name));
+        for (k, v) in &setup.env {
+            command.env(k, v);
+        }
+        assert!(command.status().unwrap().success());
+    }
+    std::fs::write(
+        setup.base.join("plugins/prompt_layout.py"),
+        r#"def fetch(pipe, **kw):
+    return []
+
+def register(pipe):
+    import contextlib, io, os, sys
+    from meerschaum.utils.formatting import ansi_allowed
+    from meerschaum.utils.prompt import prompt
+    assert not any(k.startswith('_MRSM_FORWARDED_') for k in os.environ)
+    # Redirecting Python streams or their underlying fd must not keep terminal styles.
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert not ansi_allowed()
+    output = sys.stdout
+    saved = os.dup(output.fileno())
+    try:
+        with open(os.path.join(os.environ['MRSM_ROOT_DIR'], 'redirected.txt'), 'w') as target:
+            os.dup2(target.fileno(), output.fileno())
+            assert not ansi_allowed()
+    finally:
+        os.dup2(saved, output.fileno())
+        os.close(saved)
+    print('PLUGIN_STDERR_TTY=' + str(sys.stderr.isatty()), flush=True)
+    print('Choose weather stations.\nOne station per answer.', flush=True)
+    station = prompt('Enter station ID or state abbreviation, empty to stop: ', icon=False)
+    name = prompt('Station name:', icon=False, default='weather')
+    print('PLUGIN_ANSWERS=' + repr((station, name)), flush=True)
+    try:
+        prompt('Cancel this prompt: ' + 'x' * 80, icon=False)
+    except KeyboardInterrupt:
+        print('PLUGIN_CANCELLED', flush=True)
+    return {'columns': {'datetime': 'ts'}}
+"#,
+    )
+    .unwrap();
+    const QUESTION: &str = "Enter station ID or state abbreviation, empty to stop:";
+    let cancel_question = format!("Cancel this prompt: {}", "x".repeat(80));
+    let args = [
+        "bootstrap",
+        "pipes",
+        "-c",
+        "plugin:prompt_layout",
+        "-m",
+        "layout",
+        "-i",
+        "sql:w18sh",
+        "-y",
+    ];
+    for shell in [false, true] {
+        let mut term = Term::spawn(&setup.env, &setup.base, if shell { &[] } else { &args });
+        if shell {
+            term.wait_screen("the shell", 60, |s| s.contains("@sql:w18sh ]"));
+            term.send(&(args.join(" ") + "\r"));
+        }
+        term.wait_screen("the Python register question", 60, |s| s.contains(QUESTION));
+        // The direct invocation is the control; without forwarding terminal capabilities,
+        // the shell renders this cursor on a later row and adds spaces on every keystroke.
+        assert_prompt_cursor(&term, QUESTION, "");
+        assert!(
+            term.screen().contains(&format!(
+                "PLUGIN_STDERR_TTY={}",
+                if shell { "False" } else { "True" }
+            )),
+            "{}",
+            term.screen()
+        );
+        term.send("CAx");
+        term.pump(Duration::from_millis(400));
+        assert_prompt_cursor(&term, QUESTION, "CAx");
+        term.send("\x7f");
+        term.pump(Duration::from_millis(400));
+        assert_prompt_cursor(&term, QUESTION, "CA");
+        term.send("\r");
+        term.wait_screen("the default question", 15, |s| s.contains("Station name:"));
+        assert_prompt_cursor(&term, "Station name: (default: weather)", "");
+        term.send("\r");
+        term.wait_screen("the returned answers", 15, |s| {
+            s.contains("PLUGIN_ANSWERS=('CA', 'weather')") && s.contains("Cancel this prompt:")
+        });
+        assert_prompt_cursor(&term, &cancel_question, "");
+        let (row, col) = term.parser.screen().cursor_position();
+        assert!(col > 80, "the prompt must use the full 120-column terminal");
+        term.resize(80);
+        assert_eq!(
+            term.parser.screen().cursor_position(),
+            (row + 1, col - 80),
+            "{}",
+            term.screen()
+        );
+        term.resize(120);
+        assert_prompt_cursor(&term, &cancel_question, "");
+        term.send("\x03");
+        term.wait_raw("PLUGIN_CANCELLED", 15);
+        term.wait_screen("the native target question", 15, |s| {
+            s.contains("Target table name for")
+        });
+        term.send("\x03");
+        term.wait_raw("Finished bootstrapping", 15);
+        if shell {
+            term.send("exit\r");
+        }
+        term.wait_exit(30);
+    }
 }
 
 #[test]

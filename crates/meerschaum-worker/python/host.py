@@ -9,6 +9,18 @@ import json
 import os
 import sys
 
+# The shell's output pipes end at a real terminal. Keep their identity on the original
+# stream, rather than inheritable environment hints or a false fileno()/isatty() result.
+# Captures, replaced streams and redirected file descriptors must still render plain text.
+for _stream_name in ('stdout', 'stderr'):
+    if os.environ.pop('_MRSM_FORWARDED_' + _stream_name.upper() + '_TTY', '') == '1':
+        _stream = getattr(sys, _stream_name)
+        try:
+            _stat = os.fstat(_stream.fileno())
+            _stream._mrsm_forwarded_terminal = (_stat.st_dev, _stat.st_ino)
+        except (OSError, ValueError, AttributeError):
+            pass  # A startup hook may have replaced the standard stream with a capture.
+
 # Worker diagnostics must never share an MCP host's protocol stdout.
 sys.stdout = sys.stderr
 

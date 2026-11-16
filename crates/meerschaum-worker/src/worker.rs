@@ -9,6 +9,7 @@
 //! process dies, every pending call fails with [`WorkerError::Crashed`] and nothing else.
 
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -861,6 +862,24 @@ impl Worker {
             }
         }
         cmd.envs(opts.env.iter().map(|(k, v)| (k, v)));
+        // The shell forwards these pipes verbatim to its terminal, around live progress.
+        // Tell the embedded host where they end so SDK prompts can still move the cursor.
+        // Set this after the caller's environment, and consume it before importing plugins.
+        for (name, terminal) in [
+            (
+                "_MRSM_FORWARDED_STDOUT_TTY",
+                std::io::stdout().is_terminal(),
+            ),
+            (
+                "_MRSM_FORWARDED_STDERR_TTY",
+                std::io::stderr().is_terminal(),
+            ),
+        ] {
+            cmd.env_remove(name);
+            if OUTPUT_HOOK.get().is_some() && !opts.quiet && terminal {
+                cmd.env(name, "1");
+            }
+        }
         if let Some(dir) = &opts.current_dir {
             cmd.current_dir(dir);
         }
