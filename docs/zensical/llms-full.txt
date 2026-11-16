@@ -15863,6 +15863,31 @@ scripts. Bringing the stack up without pulling uses the images already on the ho
 installation fails or is cancelled, nothing is pulled or started; when only the pull fails, the
 installation's result is reported first and the stack is left as it was.
 
+**Where a Python installation is upgraded.** Meerschaum is upgraded where the interpreter
+imports it from today, never somewhere else: a virtual environment as before, a user-site
+installation (`pip install --user`) with `pip install --user` (uv has no user scheme), and a
+system location only when the current user can write it. Otherwise nothing is changed and the
+message names the location and the command to run instead (with `sudo`, or the system package
+manager for a copy it installed). An interpreter marked externally managed (PEP 668, as on
+Debian and Ubuntu) is refused for both the system and the user site, since pip refuses both, and
+the message gives the `--break-system-packages` command; passing
+`-A --break-system-packages` is consent to proceed. Editable (development) installations and
+copies installed by a package manager (an RPM, a Debian package, conda) are refused with how
+they are upgraded instead. After installing, the copy the interpreter imports must be the new
+one: if an older copy elsewhere shadows it (a stale `~/.local` copy in front of a system one),
+the message names both paths, and `mrsm doctor` reports the same condition.
+
+!!! warning "Upgrading a user-site installation from 5.0.x"
+    The upgrade code that runs is the installed one, so 5.0.x still has the bug fixed in 5.1.0:
+    when `uv` is installed, `mrsm upgrade mrsm` in a `pip install --user` installation tries to
+    install into the system site (for example `/usr/local/lib64/python3.15/site-packages/` on
+    Fedora) and fails with a permission error. Upgrade that installation to 5.1.0 with pip
+    instead (on Debian and Ubuntu add `--break-system-packages`, as for the first install):
+
+    ```bash
+    python3 -m pip install --user --upgrade meerschaum
+    ```
+
 </details>
 
 ## ⚙️ Configuration
@@ -17117,6 +17142,7 @@ Several teams can now share one instance, each behind its own wall. See [Teams o
 - A schedule with a time zone abbreviation after `starting` works again as in 4.x (`--schedule 'daily starting 21:00 EDT'` failed with `Unknown string format`). Either abbreviation of the host's own time zone (`EST` or `EDT` in `America/New_York`) is the host's zone, so the time follows that zone's offset on the date; `UTC`, `GMT` and `Z` are UTC; any other abbreviation (`PDT` on that host) is accepted with a warning in the job's log and the time is read as UTC, so give such a time as an offset (`21:00 -07:00`). Lowercase names (`edt`, `utc`) are an error, as in 4.x. Such a schedule keeps its wall-clock time across daylight-saving changes, as in 4.x (`daily starting 21:00 EST` runs at 21:00 EST in winter and 21:00 EDT in summer). At the change itself it no longer copies 4.x's slips: a time inside the skipped hour runs once just after it (4.x ran it an hour early, or skipped that day or month), `hourly` no longer runs twice at one instant in spring nor skips the repeated hour in autumn, and a cron time in the repeated hour runs once.
 - Schedules take a time zone: end one with `tz <zone>` (`local`, `utc`, or an IANA name) to read its times and cron fields on that zone's clock and keep its wall-clock time across daylight-saving changes, e.g. `--schedule 'daily starting 21:00 tz local'` or `--schedule '0 21 * * mon-fri tz America/New_York'`. It works with `jitter` (`... tz local jitter 5 minutes`), in pipe and compose `schedule:` values and in `meerschaum.utils.schedule.parse_schedule()`, and `show schedules` prints fire times with the zone's offset. See [Time zones](../reference/background-jobs/schedules.md#time-zones). `jitter 0` forces exact times when a default jitter is configured.
 - **`upgrade meerschaum` asks first, then works.** "Upgrade this installation?", "Pull the stack's new Docker images?" (default yes) and "Bring up the stack after upgrading?" (default no) are all asked before anything is downloaded or installed, and the stack questions only when Docker is available and the root has a stack; the installation, the pull and `stack up -d` then run without asking. The new `--no-pull` flag skips the pull without asking. Bringing the stack up without pulling says it uses the images already on the host, and a failed pull is reported after the installation's own result and leaves the stack as it was. See [Upgrading an installation](../reference/migrating-to-v5.md#upgrading-an-installation).
+- **`upgrade meerschaum` upgrades a Python installation where it lives (upgrading from 5.0.x, read this).** A `pip install --user` installation was upgraded with `uv pip` into the interpreter's system site whenever `uv` was installed, which failed with a permission error (`/usr/local/lib64/python3.15/site-packages/` on Fedora). The upgrade now asks the interpreter where its `meerschaum` lives and installs there: the user site with `pip install --user`, a virtual environment as before, and a system location only when it is writable; otherwise, and for an interpreter marked externally managed (PEP 668, Debian and Ubuntu), an editable installation or a package manager's copy, it stops before changing anything and prints the command to run. After installing it checks that the new copy is the one imported, and names the path of an older copy that shadows it; `mrsm doctor` names the copies an older one shadows too. 5.0.x still runs its own upgrade code, so upgrade a user-site installation from 5.0.x with `python3 -m pip install --user --upgrade meerschaum`.
 
 ## 5.0.2
 

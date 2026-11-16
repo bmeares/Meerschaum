@@ -29,6 +29,7 @@ pub mod editor;
 pub mod engine_views;
 pub mod extensions;
 pub mod gui;
+pub mod install_target;
 pub mod jobs;
 pub mod jobs_laps;
 pub mod lifecycle;

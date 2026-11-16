@@ -1,6 +1,7 @@
 //! One release plan, with installation ownership independent of the Python extension host.
 use super::{
     flag, info,
+    install_target::{self, HostInstall},
     pip::{PipEnv, PipInstall, pip_install},
     words, yes_no,
 };
@@ -245,11 +246,13 @@ pub enum Planned {
 /// An approved installation: everything [`execute`] needs, decided and confirmed by [`plan`].
 pub struct Job {
     origin: Installation,
+    /// How the owning Python environment is upgraded (for [`Installation::Python`]).
+    origin_plan: Option<PythonPlan>,
     release: Release,
     request: Request,
     extras: String,
-    /// The selected Python host to align too.
-    host: Option<PathBuf>,
+    /// The selected Python host to align too, and how.
+    host: Option<(PathBuf, PythonPlan)>,
     cli_current: bool,
     debug: bool,
     /// The downloaded binary's lock, held until the job is done.
@@ -369,6 +372,17 @@ fn plan_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<Planned, String> {
     if cli_current && selected_host.is_none() {
         return already();
     }
+    // Where the owning Python environment installs is decided (and a refusal given) before the
+    // question, so a "yes" is never followed by "this cannot be upgraded here".
+    let origin_plan = match owner {
+        Some(python) if !cli_current => Some(plan_python(
+            python,
+            &release.version,
+            &extras,
+            &request.installer_args,
+        )?),
+        _ => None,
+    };
     if !yes_no(
         rt,
         "Upgrade this installation?",
@@ -420,7 +434,13 @@ fn plan_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<Planned, String> {
                     )
                     .map_err(|e| e.message)?;
                 if align {
-                    host = Some(PathBuf::from(python));
+                    let python = PathBuf::from(python);
+                    let plan =
+                        plan_python(&python, &release.version, &extras, &request.installer_args)
+                            .map_err(|e| {
+                                format!("The selected Python host cannot be aligned: {e}")
+                            })?;
+                    host = Some((python, plan));
                 } else if incompatible {
                     return Err("The selected Python host is incompatible with the planned release. Align it or select a compatible host before upgrading.".into());
                 }
@@ -437,6 +457,7 @@ fn plan_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<Planned, String> {
     }
     Ok(Planned::Ready(Box::new(Job {
         origin,
+        origin_plan,
         release,
         request,
         extras,
@@ -450,6 +471,7 @@ fn plan_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<Planned, String> {
 fn execute_inner(job: Job, rt: &mut Runtime<'_>) -> Result<SuccessTuple, String> {
     let Job {
         origin,
+        origin_plan,
         release,
         request,
         extras,
@@ -467,10 +489,11 @@ fn execute_inner(job: Job, rt: &mut Runtime<'_>) -> Result<SuccessTuple, String>
     } else {
         None
     };
-    if let Some(python) = &host {
+    if let Some((python, plan)) = &host {
         install_python(
             rt,
             python,
+            plan,
             &release.version,
             &extras,
             &request.installer_args,
@@ -482,6 +505,7 @@ fn execute_inner(job: Job, rt: &mut Runtime<'_>) -> Result<SuccessTuple, String>
         Installation::Python(python) => install_python(
             rt,
             python,
+            origin_plan.as_ref().expect("planned Python installation"),
             &release.version,
             &extras,
             &request.installer_args,
@@ -548,25 +572,39 @@ fn run_command(command: &mut Command) -> Result<(), String> {
         .ok_or_else(|| format!("Installer exited with {status}."))
 }
 
-pub(super) fn install_python(
-    rt: &mut Runtime<'_>,
+/// How a Python environment's `meerschaum` is upgraded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PythonPlan {
+    /// A pipx environment: `pipx upgrade` with its home.
+    Pipx {
+        home: PathBuf,
+        name: std::ffi::OsString,
+    },
+    /// A uv tool environment: `uv tool upgrade` with its tool directory.
+    UvTool { tools: PathBuf },
+    /// The interpreter's own installer, in the location the distribution already lives in.
+    Host(HostInstall),
+}
+
+/// `meerschaum[extras]==version`.
+fn package_spec(version: &str, extras: &str) -> String {
+    if extras.is_empty() {
+        format!("meerschaum=={version}")
+    } else {
+        format!("meerschaum[{extras}]=={version}")
+    }
+}
+
+/// Decide how `python`'s `meerschaum` is upgraded (pipx, a uv tool, or the interpreter's
+/// installer where the distribution lives), or refuse before anything changes.
+pub(super) fn plan_python(
     python: &Path,
     version: &str,
     extras: &str,
     passthrough: &[String],
-    debug: bool,
-) -> Result<(), String> {
+) -> Result<PythonPlan, String> {
     let environment = python.parent().and_then(Path::parent).unwrap_or(python);
-    let package = format!(
-        "meerschaum{}=={version}",
-        if extras.is_empty() {
-            String::new()
-        } else {
-            format!("[{extras}]")
-        }
-    );
     if environment.join("pipx_metadata.json").is_file() {
-        use std::io::Write;
         let home = environment
             .parent()
             .filter(|p| p.file_name().is_some_and(|n| n == "venvs"))
@@ -575,55 +613,93 @@ pub(super) fn install_python(
         let name = environment
             .file_name()
             .ok_or("pipx environment has no name")?;
-        let mut constraint = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
-        writeln!(constraint, "meerschaum=={version}").map_err(|e| e.to_string())?;
-        let mut pip_args = vec![
-            "--constraint".into(),
-            constraint.path().to_string_lossy().into_owned(),
-        ];
-        pip_args.extend_from_slice(passthrough);
-        if !extras.is_empty() {
-            pip_args.push(package.clone());
-        }
-        let quote = |s: &String| format!("'{}'", s.replace('\'', "'\\''"));
-        run_command(
-            meerschaum_core::child_env::scrubbed(Command::new("pipx"))
-                .arg("upgrade")
-                .arg(name)
-                .arg("--pip-args")
-                .arg(pip_args.iter().map(quote).collect::<Vec<_>>().join(" "))
-                .env("PIPX_HOME", home),
-        )?;
-    } else if environment.join("uv-receipt.toml").is_file() {
+        return Ok(PythonPlan::Pipx {
+            home: home.into(),
+            name: name.into(),
+        });
+    }
+    if environment.join("uv-receipt.toml").is_file() {
         let tools = environment
             .parent()
             .ok_or("Cannot locate the owning uv tool directory")?;
-        run_command(
-            meerschaum_core::child_env::scrubbed(Command::new("uv"))
-                .args(["tool", "upgrade", &package])
-                .env("UV_TOOL_DIR", tools)
-                .args(passthrough),
-        )?;
-    } else {
-        let mut env = PipEnv::new(rt);
-        env.python = python.to_string_lossy().into_owned();
-        let mut arguments = vec!["--upgrade".into()];
-        arguments.extend_from_slice(passthrough);
-        if !pip_install(
-            &env,
-            rt,
-            &PipInstall {
-                names: vec![package],
-                args: Some(arguments),
-                host: true,
-                debug,
-                ..Default::default()
-            },
-        ) {
-            return Err(format!(
-                "Failed to upgrade Meerschaum in {}.",
-                python.display()
-            ));
+        return Ok(PythonPlan::UvTool {
+            tools: tools.into(),
+        });
+    }
+    let facts = install_target::probe(python)?;
+    install_target::decide(&facts, &package_spec(version, extras), passthrough)
+        .map(PythonPlan::Host)
+}
+
+pub(super) fn install_python(
+    rt: &mut Runtime<'_>,
+    python: &Path,
+    plan: &PythonPlan,
+    version: &str,
+    extras: &str,
+    passthrough: &[String],
+    debug: bool,
+) -> Result<(), String> {
+    let package = package_spec(version, extras);
+    match plan {
+        PythonPlan::Pipx { home, name } => {
+            use std::io::Write;
+            let mut constraint = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+            writeln!(constraint, "meerschaum=={version}").map_err(|e| e.to_string())?;
+            let mut pip_args = vec![
+                "--constraint".into(),
+                constraint.path().to_string_lossy().into_owned(),
+            ];
+            pip_args.extend_from_slice(passthrough);
+            if !extras.is_empty() {
+                pip_args.push(package.clone());
+            }
+            let quote = |s: &String| format!("'{}'", s.replace('\'', "'\\''"));
+            run_command(
+                meerschaum_core::child_env::scrubbed(Command::new("pipx"))
+                    .arg("upgrade")
+                    .arg(name)
+                    .arg("--pip-args")
+                    .arg(pip_args.iter().map(quote).collect::<Vec<_>>().join(" "))
+                    .env("PIPX_HOME", home),
+            )?;
+        }
+        PythonPlan::UvTool { tools } => {
+            run_command(
+                meerschaum_core::child_env::scrubbed(Command::new("uv"))
+                    .args(["tool", "upgrade", &package])
+                    .env("UV_TOOL_DIR", tools)
+                    .args(passthrough),
+            )?;
+        }
+        PythonPlan::Host(target) => {
+            let mut env = PipEnv::new(rt);
+            env.python = python.to_string_lossy().into_owned();
+            let mut arguments = vec!["--upgrade".into()];
+            arguments.extend_from_slice(passthrough);
+            if !pip_install(
+                &env,
+                rt,
+                &PipInstall {
+                    names: vec![package],
+                    args: Some(arguments),
+                    host: true,
+                    user: target.user(),
+                    debug,
+                    ..Default::default()
+                },
+            ) {
+                return Err(format!(
+                    "Failed to upgrade Meerschaum in {} ({}).",
+                    python.display(),
+                    target.site.display()
+                ));
+            }
+            // The copy that will be imported must be the one just installed.
+            let after = install_target::probe(python)?;
+            if let Some(note) = install_target::verify_location(&after, target, version)? {
+                info(rt, &note);
+            }
         }
     }
     let output = meerschaum_core::child_env::scrubbed(Command::new(python))

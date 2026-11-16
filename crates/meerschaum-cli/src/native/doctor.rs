@@ -759,6 +759,22 @@ pub fn judge_package(
         .as_deref()
         .is_some_and(|u| !u.is_empty() && dir.starts_with(u));
     let site = if in_user_site { " (the user site)" } else { "" };
+    // The copies behind the one imported (a stale `~/.local` copy in front of a newer system or
+    // environment copy is the usual case): named, so the fix is to remove the one in front.
+    let others: Vec<String> = m
+        .copies
+        .iter()
+        .filter(|c| Some(&c.dir) != m.dir.as_ref())
+        .map(|c| match &c.version {
+            Some(v) => format!("{} ({v})", c.dir),
+            None => c.dir.clone(),
+        })
+        .collect();
+    let shadows = if others.is_empty() {
+        String::new()
+    } else {
+        format!("; it shadows {}", others.join(", "))
+    };
     match verdict {
         python_guard::Verdict::Refuse(reason) => {
             let why = match reason {
@@ -774,7 +790,7 @@ pub fn judge_package(
                 ),
             };
             let detail = format!(
-                "{} imports `meerschaum` {shown} from {dir}{site}: {why}; the worker host refuses it",
+                "{} imports `meerschaum` {shown} from {dir}{site}{shadows}: {why}; the worker host refuses it",
                 p.executable
             );
             // Another copy behind it: uninstall this one. The only copy: install the matching one.
@@ -790,6 +806,15 @@ pub fn judge_package(
             };
             needs_python(detail, fix, python_plugins)
         }
+        python_guard::Verdict::OtherRelease if !others.is_empty() => Verdict::warn(
+            format!(
+                "`meerschaum` {shown} loads from {dir}{site}{shadows}, and this program is {binary_version}"
+            ),
+            format!(
+                "remove the copy in {dir} that shadows the others (`{} -m pip uninstall meerschaum` removes the copy found first), then check again",
+                p.executable
+            ),
+        ),
         python_guard::Verdict::OtherRelease => Verdict::warn(
             format!(
                 "`meerschaum` {shown} loads from {dir}{site} and this program is {binary_version}: the same major version and worker protocol, so the worker starts (and warns once)"
@@ -797,15 +822,6 @@ pub fn judge_package(
             format!("align them: {install_matching}, or upgrade this program to {shown}"),
         ),
         python_guard::Verdict::Match => {
-            let others: Vec<String> = m
-                .copies
-                .iter()
-                .filter(|c| Some(&c.dir) != m.dir.as_ref())
-                .map(|c| match &c.version {
-                    Some(v) => format!("{} ({v})", c.dir),
-                    None => c.dir.clone(),
-                })
-                .collect();
             if !others.is_empty() {
                 return Verdict::warn(
                     format!(
@@ -3489,6 +3505,33 @@ mod tests {
         assert!(
             fix.starts_with("uninstall this copy (delete /site/meerschaum"),
             "{fix}"
+        );
+    }
+
+    #[test]
+    fn an_older_copy_in_front_names_the_copies_it_shadows() {
+        let stale = OK_PROBE
+            .replace(
+                "\"found\": true, \"dir\": \"/site/meerschaum\", \"version\": \"5.0.0rc1\",",
+                "\"found\": true, \"dir\": \"/home/u/.local/lib/python3.15/site-packages/meerschaum\", \"version\": \"5.0.0rc1\",",
+            )
+            .replace(
+                "\"copies\": [{\"dir\": \"/site/meerschaum\", \"version\": \"5.0.0rc1\"}]",
+                "\"copies\": [{\"dir\": \"/home/u/.local/lib/python3.15/site-packages/meerschaum\", \"version\": \"5.0.0rc1\"}, {\"dir\": \"/usr/local/lib64/python3.15/site-packages/meerschaum\", \"version\": \"5.0.0rc2\"}]",
+            );
+        let v = judge_package(&probe(&stale), "5.0.0rc2", 1, 0);
+        assert_eq!(v.status, Status::Warn);
+        assert!(
+            v.detail.contains(
+                "; it shadows /usr/local/lib64/python3.15/site-packages/meerschaum (5.0.0rc2)"
+            ),
+            "{}",
+            v.detail
+        );
+        assert!(
+            v.fix
+                .unwrap()
+                .starts_with("remove the copy in /home/u/.local")
         );
     }
 

@@ -1484,6 +1484,10 @@ is available and this root has a stack, "Pull the stack's new Docker images?"
 (default yes) and "Bring up the stack after upgrading?" (default no).
 Then it installs, pulls and brings the stack up without asking again.
 
+A Python installation is upgraded where it lives (a virtual environment,
+the user site with `pip --user`, or a system location this user can write);
+otherwise nothing is changed and the command to run is printed.
+
 Options:
     - `--yes`: answer yes to every question.
     - `--noask`: take every default (upgrade, pull, do not bring up).
