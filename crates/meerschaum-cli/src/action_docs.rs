@@ -1479,9 +1479,22 @@ Remove installed plugins. Does not affect repository registrations.
 Upgrade the current Meerschaum instance.
 Optionally specify dependency groups.
 
+Every question comes first: "Upgrade this installation?", then, when Docker
+is available and this root has a stack, "Pull the stack's new Docker images?"
+(default yes) and "Bring up the stack after upgrading?" (default no).
+Then it installs, pulls and brings the stack up without asking again.
+
+Options:
+    - `--yes`: answer yes to every question.
+    - `--noask`: take every default (upgrade, pull, do not bring up).
+    - `--force`: bring up the stack without asking; also reinstalls the
+      current release or downgrades.
+    - `--no-pull`: do not pull the stack's images (and do not ask).
+
 Examples:
     - `upgrade meerschaum`
     - `upgrade meerschaum full`
+    - `upgrade meerschaum --yes --no-pull`
 
 "##
         }

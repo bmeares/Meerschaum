@@ -303,6 +303,7 @@ mod tests {
             ("children", &["sync", "pipes", "--children=0", "-m", "x"]),
             ("chunk_pipelining", &["sync", "pipes", "--chunk-pipelining"]),
             ("no_stagger", &["start", "jobs", "a", "--no-stagger"]),
+            ("no_pull", &["upgrade", "mrsm", "--no-pull"]),
             (
                 "startup_jitter",
                 &["start", "jobs", "a", "--startup-jitter", "5s"],

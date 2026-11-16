@@ -6448,7 +6448,7 @@ Source: https://meerschaum.io/reference/stack/upgrades/
 
 # ⬆️ Upgrading the Stack
 
-Pulling newer images (`mrsm stack pull`, or `mrsm upgrade mrsm`) updates the stack's software, but
+Pulling newer images (`mrsm stack pull`, or `mrsm upgrade mrsm` when you answer yes to pulling) updates the stack's software, but
 not everything inside its database volume. This page covers what an upgrade leaves behind and the
 commands that finish the job. See [the stack page](index.md) for how the stack's database is set
 up in the first place.
@@ -15852,6 +15852,17 @@ After verification, an interactive shell restarts with the updated engine. Other
 processes must be restarted separately. Containers are upgraded by replacing their image;
 see [Docker variants](stack/index.md#docker-images).
 
+**Questions first.** `mrsm upgrade mrsm` asks everything before it downloads or installs
+anything: "Upgrade this installation?", then, when Docker is available and the root has a stack
+(`mrsm stack` has written `stack/docker-compose.yaml`), "Pull the stack's new Docker images?"
+(default yes, as 4.x always pulled) and "Bring up the stack after upgrading?" (default no). The
+rest runs without asking again: the installation, the pull, then `stack up -d`. `--yes` answers
+yes to all three, `--noask` takes the defaults (upgrade, pull, do not bring up), `--force` brings
+the stack up without asking (as in 4.x), and `--no-pull` skips the pull without asking, for
+scripts. Bringing the stack up without pulling uses the images already on the host. When the
+installation fails or is cancelled, nothing is pulled or started; when only the pull fails, the
+installation's result is reported first and the stack is left as it was.
+
 </details>
 
 ## ⚙️ Configuration
@@ -17105,6 +17116,7 @@ Several teams can now share one instance, each behind its own wall. See [Teams o
 - An `upsert` pipe on the PostgreSQL family whose table has an array column (`text[]`, `integer[]`, ...) or an extension, enum or composite type column (`citext`, `hstore`, an enum, ...) upserts again: the update used to cast those values to the catalog's placeholder names (`CAST(... AS ARRAY)`, `CAST(... AS USER-DEFINED)`), a syntax error. The values are now assigned without a cast, as the column converts them.
 - A schedule with a time zone abbreviation after `starting` works again as in 4.x (`--schedule 'daily starting 21:00 EDT'` failed with `Unknown string format`). Either abbreviation of the host's own time zone (`EST` or `EDT` in `America/New_York`) is the host's zone, so the time follows that zone's offset on the date; `UTC`, `GMT` and `Z` are UTC; any other abbreviation (`PDT` on that host) is accepted with a warning in the job's log and the time is read as UTC, so give such a time as an offset (`21:00 -07:00`). Lowercase names (`edt`, `utc`) are an error, as in 4.x. Such a schedule keeps its wall-clock time across daylight-saving changes, as in 4.x (`daily starting 21:00 EST` runs at 21:00 EST in winter and 21:00 EDT in summer). At the change itself it no longer copies 4.x's slips: a time inside the skipped hour runs once just after it (4.x ran it an hour early, or skipped that day or month), `hourly` no longer runs twice at one instant in spring nor skips the repeated hour in autumn, and a cron time in the repeated hour runs once.
 - Schedules take a time zone: end one with `tz <zone>` (`local`, `utc`, or an IANA name) to read its times and cron fields on that zone's clock and keep its wall-clock time across daylight-saving changes, e.g. `--schedule 'daily starting 21:00 tz local'` or `--schedule '0 21 * * mon-fri tz America/New_York'`. It works with `jitter` (`... tz local jitter 5 minutes`), in pipe and compose `schedule:` values and in `meerschaum.utils.schedule.parse_schedule()`, and `show schedules` prints fire times with the zone's offset. See [Time zones](../reference/background-jobs/schedules.md#time-zones). `jitter 0` forces exact times when a default jitter is configured.
+- **`upgrade meerschaum` asks first, then works.** "Upgrade this installation?", "Pull the stack's new Docker images?" (default yes) and "Bring up the stack after upgrading?" (default no) are all asked before anything is downloaded or installed, and the stack questions only when Docker is available and the root has a stack; the installation, the pull and `stack up -d` then run without asking. The new `--no-pull` flag skips the pull without asking. Bringing the stack up without pulling says it uses the images already on the host, and a failed pull is reported after the installation's own result and leaves the stack as it was. See [Upgrading an installation](../reference/migrating-to-v5.md#upgrading-an-installation).
 
 ## 5.0.2
 

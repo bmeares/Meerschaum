@@ -461,6 +461,13 @@ pub const EXTRA_OPTIONS: &[ExtraOption] = &[
         group: "Jobs options",
     },
     ExtraOption {
+        dest: "no_pull",
+        invocation: "--no-pull",
+        help: "With `upgrade meerschaum`, do not pull the stack's new Docker images (and do not \
+               ask).",
+        group: "Packages options",
+    },
+    ExtraOption {
         dest: "startup_jitter",
         invocation: "--startup-jitter DURATION",
         help: "Bound a new job's random startup delay, e.g. `30s`.",

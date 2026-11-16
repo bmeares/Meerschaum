@@ -167,6 +167,17 @@ After verification, an interactive shell restarts with the updated engine. Other
 processes must be restarted separately. Containers are upgraded by replacing their image;
 see [Docker variants](stack/index.md#docker-images).
 
+**Questions first.** `mrsm upgrade mrsm` asks everything before it downloads or installs
+anything: "Upgrade this installation?", then, when Docker is available and the root has a stack
+(`mrsm stack` has written `stack/docker-compose.yaml`), "Pull the stack's new Docker images?"
+(default yes, as 4.x always pulled) and "Bring up the stack after upgrading?" (default no). The
+rest runs without asking again: the installation, the pull, then `stack up -d`. `--yes` answers
+yes to all three, `--noask` takes the defaults (upgrade, pull, do not bring up), `--force` brings
+the stack up without asking (as in 4.x), and `--no-pull` skips the pull without asking, for
+scripts. Bringing the stack up without pulling uses the images already on the host. When the
+installation fails or is cancelled, nothing is pulled or started; when only the pull fails, the
+installation's result is reported first and the stack is left as it was.
+
 </details>
 
 ## ⚙️ Configuration

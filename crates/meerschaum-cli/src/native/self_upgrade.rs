@@ -4,7 +4,7 @@ use super::{
     pip::{PipEnv, PipInstall, pip_install},
     words, yes_no,
 };
-use crate::{builtin::ActionResult, dispatch::Runtime, value::ArgsMap};
+use crate::{dispatch::Runtime, value::ArgsMap};
 use meerschaum_core::{SuccessTuple, python_guard, self_exe, version::parse_version};
 use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
@@ -232,20 +232,54 @@ pub fn current_installation(rt: &Runtime<'_>) -> Installation {
     )
 }
 
-/// The public upgrade action is shared by the wheel and the standalone executable.
-pub fn upgrade(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    match upgrade_inner(args, rt) {
-        Ok(result) => Ok(result),
-        Err(message) => Ok(SuccessTuple::fail(message)),
+/// What [`plan`] decided, before anything slow or irreversible ran.
+pub enum Planned {
+    /// Refused or cancelled: nothing was changed and nothing follows.
+    Stop(SuccessTuple),
+    /// The planned release is already installed: there is nothing to install.
+    Current(SuccessTuple),
+    /// An installation to run with [`execute`].
+    Ready(Box<Job>),
+}
+
+/// An approved installation: everything [`execute`] needs, decided and confirmed by [`plan`].
+pub struct Job {
+    origin: Installation,
+    release: Release,
+    request: Request,
+    extras: String,
+    /// The selected Python host to align too.
+    host: Option<PathBuf>,
+    cli_current: bool,
+    debug: bool,
+    /// The downloaded binary's lock, held until the job is done.
+    _lock: Option<std::fs::File>,
+}
+
+/// Decide what `upgrade meerschaum` does and ask its questions ("Upgrade this installation?",
+/// then whether to align a selected Python host), without downloading or installing anything
+/// (only the release list is read).
+pub fn plan(args: &ArgsMap, rt: &mut Runtime<'_>) -> Planned {
+    match plan_inner(args, rt) {
+        Ok(planned) => planned,
+        Err(message) => Planned::Stop(SuccessTuple::fail(message)),
     }
 }
 
-fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, String> {
+/// Run an approved installation: stage, install and verify.
+pub fn execute(job: Job, rt: &mut Runtime<'_>) -> SuccessTuple {
+    match execute_inner(job, rt) {
+        Ok(result) => result,
+        Err(message) => SuccessTuple::fail(message),
+    }
+}
+
+fn plan_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<Planned, String> {
     let origin = current_installation(rt);
     if let Installation::Managed(manager) = &origin {
         return Err(format!("This installation is managed by {manager}."));
     }
-    let _installation_lock = if let Installation::Binary(executable) = &origin {
+    let lock = if let Installation::Binary(executable) = &origin {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -275,8 +309,6 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
             "Installer arguments are not supported when replacing a downloaded binary.".into(),
         );
     }
-    let session = super::session(rt);
-    let http = client()?;
     let release = if let Some(version) = &request.version {
         let version = parse_version(version)
             .map_err(|e| e.to_string())?
@@ -287,6 +319,8 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
             assets: Vec::new(),
         }
     } else {
+        let session = super::session(rt);
+        let http = client()?;
         let document: Json = session
             .block_on(async {
                 http.get(RELEASES)
@@ -326,11 +360,14 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
     let selected_host = (rt.env)("MRSM_PYTHON")
         .filter(|s| !s.is_empty())
         .filter(|python| owner.is_none_or(|p| p != Path::new(python)));
-    if cli_current && selected_host.is_none() {
-        return Ok(SuccessTuple::ok(format!(
+    let already = || {
+        Ok(Planned::Current(SuccessTuple::ok(format!(
             "Meerschaum {} is already installed.",
             release.version
-        )));
+        ))))
+    };
+    if cli_current && selected_host.is_none() {
+        return already();
     }
     if !yes_no(
         rt,
@@ -341,7 +378,7 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
     )
     .map_err(|e| e.message)?
     {
-        return Ok(SuccessTuple::fail("Upgrade cancelled."));
+        return Ok(Planned::Stop(SuccessTuple::fail("Upgrade cancelled.")));
     }
 
     // Only an explicitly selected host is considered for coordinated upgrades. An unused
@@ -396,16 +433,37 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
     }
 
     if cli_current && host.is_none() {
-        return Ok(SuccessTuple::ok(format!(
-            "Meerschaum {} is already installed.",
-            release.version
-        )));
+        return already();
     }
+    Ok(Planned::Ready(Box::new(Job {
+        origin,
+        release,
+        request,
+        extras,
+        host,
+        cli_current,
+        debug: flag(args, "debug"),
+        _lock: lock,
+    })))
+}
+
+fn execute_inner(job: Job, rt: &mut Runtime<'_>) -> Result<SuccessTuple, String> {
+    let Job {
+        origin,
+        release,
+        request,
+        extras,
+        host,
+        cli_current,
+        debug,
+        _lock,
+    } = job;
     // Download, checksum, and execute the staged binary before changing any installation.
     let staged = if cli_current {
         None
     } else if let Installation::Binary(executable) = &origin {
-        Some(stage_binary(&session, &http, &release, executable)?)
+        let session = super::session(rt);
+        Some(stage_binary(&session, &client()?, &release, executable)?)
     } else {
         None
     };
@@ -416,7 +474,7 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
             &release.version,
             &extras,
             &request.installer_args,
-            flag(args, "debug"),
+            debug,
         )?;
     }
     let installed = match &origin {
@@ -427,7 +485,7 @@ fn upgrade_inner(args: &ArgsMap, rt: &mut Runtime<'_>) -> Result<SuccessTuple, S
             &release.version,
             &extras,
             &request.installer_args,
-            flag(args, "debug"),
+            debug,
         ),
         Installation::Cargo { executable, prefix } => (|| {
             let version = cargo_version(&release.version)?;
