@@ -160,6 +160,7 @@ impl SqlConnector {
         });
         if spatial
             && self.flavor.driver_family() == DriverFamily::Postgres
+            && self.postgis_catalog(None).await
             && let Ok(q) =
                 crate::queries::table::get_postgis_geo_columns_types_query(&sp.target, schema)
             && let Ok(gdf) = self.read(&q).await

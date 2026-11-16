@@ -45,9 +45,9 @@ use meerschaum_core::{Config, Pipe, static_config};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::value::Value as KValue;
 
-use crate::driver::{SqlDriver, SqlParam, SqlValue};
+use crate::driver::{SqlDriver, SqlParam, SqlTransaction, SqlValue};
 use crate::error::{Result, SqlError};
-use crate::flavor::Flavor;
+use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::sql_item_name;
 use crate::pipe::SqlPipe;
 use crate::queries::ConnectorCtx;
@@ -206,6 +206,8 @@ struct State {
     synced_columns: HashMap<String, IndexMap<String, String>>,
     /// `db_version`.
     db_version: Option<String>,
+    /// Whether the PostGIS catalog views exist (`SqlConnector::postgis_catalog`).
+    postgis_catalog: Option<bool>,
     /// Executed statements, when the query log is enabled (tests record emitted DDL).
     query_log: Option<Vec<String>>,
     /// `_compress_upsert_warned_pipes`.
@@ -954,6 +956,37 @@ impl SqlConnector {
         // PARITY: `get_db_version` returns the server's version string as is.
         self.state.lock().expect("state").db_version = Some(v.clone());
         Some(v)
+    }
+
+    /// Whether the PostGIS geometry lookup
+    /// ([`get_postgis_geo_columns_types_query`](crate::queries::table::get_postgis_geo_columns_types_query))
+    /// can run here: asked once per connector
+    /// ([`POSTGIS_CATALOG_QUERY`](crate::queries::table::POSTGIS_CATALOG_QUERY)) and remembered.
+    /// `false` outside the PostgreSQL family and while the database cannot answer (not
+    /// remembered then). With `tx`, the question is asked in that transaction (it cannot fail
+    /// there), so no second connection is taken while the transaction holds one.
+    pub(crate) async fn postgis_catalog(&self, tx: Option<&mut SqlTransaction>) -> bool {
+        if self.flavor.driver_family() != DriverFamily::Postgres {
+            return false;
+        }
+        if let Some(known) = self.state.lock().expect("state").postgis_catalog {
+            return known;
+        }
+        let query = crate::queries::table::POSTGIS_CATALOG_QUERY;
+        let frame = match tx {
+            Some(t) => t.read_frame(query).await,
+            None => self.driver.read_frame_catalog(query).await,
+        };
+        let Some(exists) = frame.ok().and_then(|df| {
+            frame_docs(&df)
+                .first()
+                .and_then(|d| kv_int(d.get("exists")))
+        }) else {
+            return false;
+        };
+        let exists = exists == 1;
+        self.state.lock().expect("state").postgis_catalog = Some(exists);
+        exists
     }
 
     /// `self.get_temporary_target(target, transact_id, label)`.

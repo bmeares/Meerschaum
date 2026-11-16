@@ -695,20 +695,14 @@ async fn inplace_steps(
     }
 }
 
-/// Whether an in-place sync can read `USER-DEFINED` columns here. Without PostGIS, the geometry
-/// lookup that such a column triggers fails inside the sync's transaction and aborts it (with or
-/// without `upsert_changed_only`), so those columns are tested where PostGIS is installed.
-async fn user_defined_inplace(c: &Ctx) -> bool {
-    has_extension(c, "postgis").await
-}
-
 /// Array, enum and `citext` value columns upsert in place with `enforce` on: the catalog names
-/// their types `ARRAY` and `USER-DEFINED`, which are not types to cast to.
+/// their types `ARRAY` and `USER-DEFINED`, which are not types to cast to. With or without
+/// PostGIS: the geometry lookup a `USER-DEFINED` column calls for is skipped where PostGIS is
+/// not installed, never sent inside the sync's transaction to fail there.
 async fn user_defined_values(c: Ctx, changed_only: bool) {
     if !pg_family(&c) {
         return;
     }
-    let user_defined = user_defined_inplace(&c).await;
     let ci_type = if citext(&c).await { "citext" } else { "text" };
     let mood = mood_type(&c).await;
     let source = format!("{}_src", c.prefix);
@@ -730,43 +724,27 @@ async fn user_defined_values(c: Ctx, changed_only: bool) {
         "columns": {"datetime": "ts", "id": "id"},
         "upsert": true,
         "upsert_changed_only": changed_only,
-        "sql": format!(
-            "SELECT ts, id, arr, {} v FROM \"{source}\"",
-            if user_defined { "m, ci," } else { "" }
-        ),
+        "sql": format!("SELECT ts, id, arr, m, ci, v FROM \"{source}\""),
     })
     .to_string();
     let pipe = c.pipe(&c.conn.keys(), "udvalues", None, &params);
     inplace_sync(&c, &pipe).await;
     let table = c.conn.pipe_table_name(&c.conn.sql_pipe(&pipe).unwrap());
-    let mut steps = vec![
+    let steps = vec![
         ("", vec![]),
         ("arr = '{b,a}' WHERE id = 1", vec![1]),
         ("v = v, arr = arr WHERE id = 1", vec![]),
+        ("m = 'sad' WHERE id = 2", vec![2]),
+        ("ci = 'ABC' WHERE id = 3", vec![3]),
+        ("m = m, ci = ci WHERE id = 3", vec![]),
     ];
-    if user_defined {
-        steps.extend([
-            ("m = 'sad' WHERE id = 2", vec![2]),
-            ("ci = 'ABC' WHERE id = 3", vec![3]),
-            ("m = m, ci = ci WHERE id = 3", vec![]),
-        ]);
-    }
     inplace_steps(&c, &pipe, &source, &table, changed_only, &steps).await;
-    if user_defined {
-        assert_eq!(
-            stored(&c, &table, "arr::text || '|' || m::text || '|' || ci::text").await,
-            "{b,a}|happy|Abc;{a,b}|sad|Abc;{a,b}|happy|ABC",
-            "{}",
-            c.flavor
-        );
-    } else {
-        assert_eq!(
-            stored(&c, &table, "arr::text").await,
-            "{b,a};{a,b};{a,b}",
-            "{}",
-            c.flavor
-        );
-    }
+    assert_eq!(
+        stored(&c, &table, "arr::text || '|' || m::text || '|' || ci::text").await,
+        "{b,a}|happy|Abc;{a,b}|sad|Abc;{a,b}|happy|ABC",
+        "{}",
+        c.flavor
+    );
     c.delete(&pipe).await;
     // `CASCADE`: an observed sync leaves its staged tables for a later sync to drop.
     exec_all(
@@ -793,7 +771,7 @@ flavor_tests!(
 /// `citext` and enum KEY columns: the guard compares them as the upsert's keys match, never by
 /// casting to their catalog type (`USER-DEFINED`).
 async fn user_defined_keys(c: Ctx, changed_only: bool) {
-    if !pg_family(&c) || !user_defined_inplace(&c).await {
+    if !pg_family(&c) {
         return;
     }
     let ci_type = if citext(&c).await { "citext" } else { "text" };

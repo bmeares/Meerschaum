@@ -136,10 +136,12 @@ impl SqlConnector {
             Flavor::Sqlite | Flavor::Geopackage | Flavor::Duckdb | Flavor::Oracle => None,
             _ => self.database(),
         };
-        // NOTE: Check for PostGIS GEOMETRY columns.
+        // NOTE: Check for PostGIS GEOMETRY columns. Only where PostGIS is installed: the lookup
+        // fails without its views, and a failed statement aborts the sync's transaction.
         let mut geometry = IndexMap::new();
         if self.flavor.driver_family() == DriverFamily::Postgres
             && crate::queries::table::needs_postgis_lookup(&rows)
+            && Box::pin(self.postgis_catalog(tx.as_mut())).await
         {
             let ischema = crate::queries::table::introspection_schema(self.flavor, schema);
             if let Ok(q) = crate::queries::table::get_postgis_geo_columns_types_query(
