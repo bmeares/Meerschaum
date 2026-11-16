@@ -14,19 +14,12 @@ import pytest
 from meerschaum import Pipe
 from tests.connectors import conns, get_flavors
 
-PG_FLAVORS = [
-    flavor for flavor in get_flavors()
-    if flavor in ('timescaledb', 'timescaledb-ha', 'timescaledb_ha', 'postgis', 'postgresql')
-    and flavor in conns
-]
-
-
-@pytest.fixture(params=PG_FLAVORS or ['none'])
-def pg_conn(request):
+@pytest.fixture
+def pg_conn(flavor):
     """A PostgreSQL-family instance and a source table prefix of this test's own."""
-    if request.param == 'none':
-        pytest.skip('No PostgreSQL-family flavor selected (MRSM_TEST_FLAVORS).')
-    conn = conns[request.param]
+    if flavor not in ('timescaledb', 'timescaledb-ha', 'timescaledb_ha', 'postgis', 'postgresql'):
+        pytest.skip('PostgreSQL-family in-place sync')
+    conn = conns[flavor]
     prefix = f"_mrsm_ipt_{uuid.uuid4().hex[:8]}"
     yield conn, prefix
     conn.exec(f'DROP TABLE IF EXISTS "{prefix}_src"', silent=True)
@@ -62,6 +55,7 @@ def _pipe(conn, prefix: str, name: str, source: str, **parameters) -> Pipe:
     )
 
 
+@pytest.mark.parametrize('flavor', [flavor for flavor in get_flavors() if flavor in conns])
 @pytest.mark.parametrize('columns, upsert', [
     ({'datetime': 'ts', 'id': 'id'}, False),
     ({'datetime': 'ts', 'id': 'id'}, True),

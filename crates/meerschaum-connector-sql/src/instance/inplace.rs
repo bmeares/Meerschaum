@@ -357,7 +357,9 @@ impl SqlConnector {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
-        let state = self.pipe_state(&sp).await;
+        // These catalog futures are large in debug builds. Keep them out of the deeply
+        // nested engine poll stack, which otherwise exhausts Tokio's default 2 MiB stack.
+        let state = Box::pin(self.pipe_state(&sp)).await;
         if let Some(o) = observer {
             o.pipe_dtypes(&self.dtypes_ctx(&sp, &state));
         }
@@ -475,7 +477,9 @@ impl SqlConnector {
             } else {
                 vec![temp_tables["update"].clone()]
             };
-            async move {
+            // Every exit awaits cleanup. Returning a boxed future also keeps its state
+            // out of each of those await sites in this large state machine's poll method.
+            Box::pin(async move {
                 let (ok, msg) = self
                     .log_temporary_tables_creation(&tables, ready_to_drop, !pipe.temporary)
                     .await;
@@ -486,7 +490,7 @@ impl SqlConnector {
                 if !ok {
                     tracing::warn!("{msg}");
                 }
-            }
+            })
         };
 
         if !state.exists && sqlite_family {
@@ -560,7 +564,7 @@ impl SqlConnector {
                         "Could not insert new data into {pipe} from its SQL query definition."
                     ));
                 }
-                if !self.create_indices_sp(&sp, None, None, None).await {
+                if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
                     tracing::warn!("Failed to create indices for {pipe}. Continuing...");
                 }
                 let rowcount = self
@@ -635,7 +639,7 @@ impl SqlConnector {
                 clean_up(false).await;
                 return SuccessTuple::fail(e.to_string());
             }
-            if !self.create_indices_sp(&sp, None, None, None).await {
+            if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
             clean_up(true).await;
@@ -777,7 +781,7 @@ impl SqlConnector {
                     "Could not insert new data into {pipe} from its SQL query definition."
                 ));
             }
-            if !self.create_indices_sp(&sp, None, None, None).await {
+            if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
             let rowcount = self
@@ -875,7 +879,7 @@ impl SqlConnector {
                     "Could not insert new data into {pipe} from its SQL query definition."
                 ));
             }
-            if !self.create_indices_sp(&sp, None, None, None).await {
+            if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
             let rowcount = self
@@ -1126,7 +1130,7 @@ impl SqlConnector {
             table_cols_types = self
                 .get_table_cols_types(&target, pipe_schema.as_deref())
                 .await;
-            state = self.pipe_state(&sp).await;
+            state = Box::pin(self.pipe_state(&sp)).await;
         }
         // PostgreSQL can store integer, floating and decimal SQL expressions in an existing
         // unbounded NUMERIC column. A CASE expression may promote NUMERIC to DOUBLE PRECISION;
@@ -1188,7 +1192,7 @@ impl SqlConnector {
         // The table is read again only after it was altered; new explicit dtypes only change
         // how its columns are typed.
         let state = if altered {
-            self.pipe_state(&sp).await
+            Box::pin(self.pipe_state(&sp)).await
         } else {
             super::data::PipeState {
                 exists: state.exists,
@@ -2185,6 +2189,65 @@ fn storage_classes_query<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Engine calls nest these futures on Tokio's default 2 MiB worker stack. The large
+    /// in-place state machine must stay boxed rather than embedded in every caller.
+    #[tokio::test]
+    async fn inplace_futures_stay_small() {
+        let spec = crate::uri::ConnectionSpec::from_attributes(&crate::uri::ConnectorAttributes {
+            flavor: Some(Flavor::Sqlite),
+            database: Some(":memory:".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let conn = SqlConnector::connect_lazy(
+            "future_size",
+            spec,
+            super::super::InstanceSettings::defaults(Flavor::Sqlite),
+        )
+        .unwrap();
+        let pipe = Pipe::builder("sql:future_size", "inplace").build().unwrap();
+        let sizes = [
+            (
+                "sync_pipe_inplace",
+                std::mem::size_of_val(&conn.sync_pipe_inplace(
+                    &pipe,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                )),
+            ),
+            (
+                "sync_pipe_inplace_replacing",
+                std::mem::size_of_val(&conn.sync_pipe_inplace_replacing(
+                    &pipe,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                    true,
+                    None,
+                )),
+            ),
+            (
+                "sync_pipe_inplace_forgetting",
+                std::mem::size_of_val(&conn.sync_pipe_inplace_forgetting(
+                    &pipe,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                    false,
+                    None,
+                )),
+            ),
+        ];
+        eprintln!("in-place future sizes: {sizes:?}");
+        for (name, size) in sizes {
+            assert!(size <= 1024, "{name} future is {size} bytes");
+        }
+    }
 
     #[test]
     fn storage_classes_type_untyped_columns() {

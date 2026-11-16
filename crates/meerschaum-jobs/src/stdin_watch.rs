@@ -534,7 +534,21 @@ mod linux {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use std::os::unix::process::CommandExt;
         use std::time::Duration;
+
+        /// The shell and every descendant must release the test runner's output pipes,
+        /// including when an assertion unwinds before the fixture has finished.
+        struct ProcessGroup(std::process::Child);
+
+        impl Drop for ProcessGroup {
+            fn drop(&mut self) {
+                use nix::sys::signal::{Signal, killpg};
+                use nix::unistd::Pid;
+                let _ = killpg(Pid::from_raw(self.0.id() as i32), Signal::SIGKILL);
+                let _ = self.0.wait();
+            }
+        }
 
         #[test]
         fn the_state_comes_after_the_command_name() {
@@ -551,12 +565,17 @@ mod linux {
             crate::stdin::ensure_fifo(&fifo).unwrap();
             let check = |script: &str, expected: bool| {
                 let f = crate::stdin::open_fifo_for_daemon(&fifo).unwrap();
-                let mut child = std::process::Command::new("/bin/sh")
-                    .args(["-c", script])
-                    .stdin(f)
-                    .spawn()
-                    .unwrap();
-                let pid = child.id() as i32;
+                let child = ProcessGroup(
+                    std::process::Command::new("/bin/sh")
+                        .args(["-c", script])
+                        .env_remove("TMUX")
+                        .env_remove("TMUX_PANE")
+                        .process_group(0)
+                        .stdin(f)
+                        .spawn()
+                        .unwrap(),
+                );
+                let pid = child.0.id() as i32;
                 // A reader is seen within 5 s; a non-reader is never seen in 1.5 s.
                 let deadline =
                     Instant::now() + Duration::from_millis(if expected { 5000 } else { 1500 });
@@ -568,8 +587,7 @@ mod linux {
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                let _ = child.kill();
-                let _ = child.wait();
+                drop(child);
                 assert_eq!(seen, expected, "{script}");
             };
             check("read x", true);
@@ -577,6 +595,8 @@ mod linux {
             check("sleep 5", false);
             check("sleep 5 | cat", false);
             if std::process::Command::new("python3")
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
                 .arg("-c")
                 .arg("pass")
                 .status()
