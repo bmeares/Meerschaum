@@ -82,6 +82,22 @@ impl Home {
         }
     }
 
+    fn config(callback: Option<u16>) -> Value {
+        let mut config = json!({
+            "meerschaum": {"instance": "sql:local"},
+            "formatting": {"ansi": false, "unicode": false},
+            "shell": {"clear_screen": false, "bottom_toolbar": {"enabled": false}},
+            "api": {"permissions": {"actions": {"non_admin": true}}},
+            "system": {"api": {"permissions": {"actions": {"non_admin": true}}}},
+            "jobs": {"startup": {"enabled": false}},
+        });
+        if let Some(port) = callback {
+            config["api"]["execution"] =
+                json!({"callback_url": format!("http://127.0.0.1:{port}")});
+        }
+        config
+    }
+
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
         command
@@ -95,18 +111,10 @@ impl Home {
             .env("MRSM_NO_UPDATE_CHECK", "1")
             .env("MRSM_NO_AUTO_INSTALL", "1")
             .env("MRSM_NOASK", "true")
-            .env(
-                "MRSM_CONFIG",
-                json!({
-                    "meerschaum": {"instance": "sql:local"},
-                    "formatting": {"ansi": false, "unicode": false},
-                    "shell": {"clear_screen": false, "bottom_toolbar": {"enabled": false}},
-                    "api": {"permissions": {"actions": {"non_admin": true}}},
-                    "system": {"api": {"permissions": {"actions": {"non_admin": true}}}},
-                    "jobs": {"startup": {"enabled": false}},
-                })
-                .to_string(),
-            );
+            .env("MRSM_CONFIG", Self::config(None).to_string());
+        if let Some(temp) = std::env::var_os("TMPDIR") {
+            command.env("TMPDIR", temp);
+        }
         if let Some(python) = std::env::var_os("MRSM_PYTHON") {
             command.env("MRSM_PYTHON", python);
         }
@@ -238,6 +246,7 @@ fn serve(home: &Home) -> Server {
     }
     // The console's own routes (the terminal) are served without `--no-dash`.
     let child = command
+        .env("MRSM_CONFIG", Home::config(Some(port)).to_string())
         .args([
             "start",
             "api",
@@ -640,18 +649,17 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
         bob.out
     );
     // The restricted session lives on its own tmux server, with no key bindings.
+    let restricted_sessions = sessions_on(&restricted_socket);
     assert!(
-        sessions_on(&restricted_socket)
-            .iter()
-            .any(|s| s.starts_with("bob")),
+        matches!(restricted_sessions.as_slice(), [name] if name.starts_with("host-api-terminal-")),
         "{:?} {}",
-        sessions_on(&restricted_socket),
+        restricted_sessions,
         server.log()
     );
     assert!(
         !sessions_on(&admin_socket)
             .iter()
-            .any(|s| s.starts_with("bob")),
+            .any(|s| s.starts_with("bob") || restricted_sessions.contains(s)),
         "{:?}",
         sessions_on(&admin_socket)
     );
@@ -769,15 +777,32 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
             &bob.out[before..]
         );
     }
-    // A job bob may not see over the job routes is no job to him in the terminal either, and a
-    // command that names no job (every job) is refused while such a job exists.
+    // List jobs only through the caller's visible job catalog. Named mutations still require
+    // a visible job and its matching permission.
+    for line in ["show jobs execute-tpr-hidden", "show jobs"] {
+        let before = bob.out.len();
+        bob.line(line).await;
+        assert!(
+            bob.wait_for(
+                |out| out[before.min(out.len())..]
+                    .split_once('\n')
+                    .is_some_and(|(_, response)| response.contains("➤")),
+                Duration::from_secs(20),
+            )
+            .await,
+            "{line}: {}",
+            &bob.out[before..]
+        );
+        let (_, response) = bob.out[before..].split_once('\n').unwrap();
+        assert!(
+            !response.replace(line, "").contains("execute-tpr-hidden"),
+            "{response}"
+        );
+    }
     for line in [
-        "show jobs execute-tpr-hidden",
         "attach logs execute-tpr-hidden",
         "delete jobs execute-tpr-hidden -y",
         "stop jobs execute-tpr-hidden -y",
-        "show version -d --name execute-tpr-hidden",
-        "show jobs",
     ] {
         let before = bob.out.len();
         bob.line(line).await;
@@ -797,6 +822,24 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
         );
     }
     assert!(hidden_job.exists(), "bob deleted the administrator's job");
+    let before = bob.out.len();
+    bob.line("show version -d --name execute-tpr-hidden").await;
+    assert!(
+        bob.wait_for(
+            |out| out[before.min(out.len())..]
+                .split_once('\n')
+                .is_some_and(|(_, response)| response.contains("➤")),
+            Duration::from_secs(20)
+        )
+        .await,
+        "{}",
+        &bob.out[before..]
+    );
+    let properties: Value = serde_json::from_slice(
+        &std::fs::read(hidden_job.join("properties.json")).expect("administrator's job persists"),
+    )
+    .unwrap();
+    assert_eq!(properties["owner"], "root", "job ownership changed");
 
     // The editor of an action the routes allow (`edit pipes`) never starts, and the terminal
     // says what to do instead.
@@ -874,9 +917,12 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
     )
     .into_owned();
     assert!(
-        panes
-            .lines()
-            .all(|l| l.starts_with("bob") && !l.ends_with(" sh") && !l.ends_with(" bash")),
+        !panes.is_empty()
+            && panes.lines().all(|line| {
+                line.split_once(' ').is_some_and(|(name, command)| {
+                    name == restricted_sessions[0] && !matches!(command, "sh" | "bash")
+                })
+            }),
         "{panes}"
     );
 
@@ -1033,7 +1079,7 @@ async fn a_demoted_administrator_loses_the_unrestricted_terminal_at_once() {
     assert!(
         sessions_on(&restricted_socket)
             .iter()
-            .any(|s| s.starts_with("dave"))
+            .any(|s| s.starts_with("host-api-terminal-"))
     );
     tokio::time::sleep(Duration::from_secs(25)).await;
     assert!(!home.mark("after").exists());
