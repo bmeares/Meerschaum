@@ -673,9 +673,6 @@
   },
   "stack": {
     "project_name": "mrsm",
-    "executor": {
-      "image": "bmeares/meerschaum:{__MRSM_VERSION__}-full"
-    },
     "docker-compose.yaml": {
       "services": {
         "db": {

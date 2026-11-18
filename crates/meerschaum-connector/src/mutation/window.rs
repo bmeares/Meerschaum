@@ -497,8 +497,11 @@ mod tests {
     #[test]
     fn main_no_predicate_allows_nullable_axis_but_range_union_never_mints_that_authority() {
         let mut pipe = pipe();
-        pipe.set_columns(meerschaum_core::Value::from_json_str(r#"{"datetime":"id"}"#).unwrap())
-            .unwrap();
+        pipe.set_parameters(
+            CoreValue::from_json_str(r#"{"columns":{"datetime":"id"},"dtypes":{"id":"int64"}}"#)
+                .unwrap()
+                .to_map(),
+        );
         let rows = vec![DataSpan {
             begin: None,
             end: None,

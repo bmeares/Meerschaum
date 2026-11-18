@@ -923,7 +923,13 @@ pub static ARGUMENTS: &[ArgSpec] = &[
 ];
 
 /// The arguments added since v4.1 (absent from the v4 parser fixture `tests/fixtures/parser.json`).
-pub const V5_ONLY_DESTS: &[&str] = &["replace", "public", "allow_protected", "plugin_manifest"];
+pub const V5_ONLY_DESTS: &[&str] = &[
+    "replace",
+    "public",
+    "allow_protected",
+    "plugin_manifest",
+    "control_root",
+];
 
 /// Find an argument by `dest`.
 pub fn by_dest(dest: &str) -> Option<&'static ArgSpec> {

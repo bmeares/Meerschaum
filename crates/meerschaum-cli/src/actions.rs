@@ -82,6 +82,7 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("watch", "runs"),
     ("verify", "schemas"),
     ("start", "pipelines"),
+    ("start", "executor"),
     ("stop", "pipelines"),
     // rc15 wave 2 (AC10): teams and pipe locks.
     ("show", "teams"),

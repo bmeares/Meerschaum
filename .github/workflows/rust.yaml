@@ -132,7 +132,7 @@ jobs:
     concurrency:
       group: mrsm-rust-test
       cancel-in-progress: false
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
@@ -142,6 +142,13 @@ jobs:
         run: scripts/rust/ci.sh setup
       - name: Disk guard (drops the release/ci layers, then cargo clean, below 10 GB free)
         run: scripts/rust/ci.sh disk-guard
+      - name: Prepare the native API test interpreter
+        run: |
+          native_test_env="$(mktemp -d "$RUNNER_TEMP/mrsm-native-python.XXXXXX")"
+          python3 -m venv "$native_test_env"
+          "$native_test_env/bin/python" -m pip install -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt
+          echo "PYTHON_BIN=$native_test_env/bin/python" >> "$GITHUB_ENV"
+          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Build the native Python extension
         # Since D14 several cargo tests start real Python workers that import `meerschaum`, which
         # requires the extension. A debug build, so it reuses the dependencies `cargo nextest` /

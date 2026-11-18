@@ -6,7 +6,7 @@ use crate::executor_client::completed_result;
 #[test]
 fn completed_result_uses_one_finished_properties_snapshot_instead_of_an_earlier_placeholder() {
     let mut body = serde_json::json!({"status":"stopped", "result":[false,"No result available."],
-        "daemon":{"properties":{"process":{"ended":"2026-11-17T08:00:00Z"},
+        "daemon":{"properties":{"process":{"ended":"2026-11-17T08:00:00"},
             "result":[true,"Committed worker result"]}}});
     assert_eq!(
         completed_result(&body),
@@ -19,7 +19,7 @@ fn completed_result_uses_one_finished_properties_snapshot_instead_of_an_earlier_
     body["status"] = "stopped".into();
     body["daemon"]["properties"]["process"]["ended"] = serde_json::Value::Null;
     assert_eq!(completed_result(&body), None);
-    body["daemon"]["properties"]["process"]["ended"] = "2026-11-17T08:00:00Z".into();
+    body["daemon"]["properties"]["process"]["ended"] = "2026-11-17T08:00:00".into();
     body["daemon"]["properties"]["result"] = serde_json::Value::Null;
     assert_eq!(completed_result(&body), None);
 }
