@@ -176,7 +176,11 @@ fn began(root: &Path, name: &str) -> Option<String> {
     .map(str::to_string)
 }
 
-async fn running_identity(root: &Path, name: &str) -> (i32, chrono::NaiveDateTime, String) {
+async fn running_identity(
+    root: &Path,
+    name: &str,
+    previous_began: Option<&str>,
+) -> (i32, chrono::NaiveDateTime, String) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let pid = std::fs::read_to_string(root.join("jobs").join(name).join("process.pid"))
@@ -185,6 +189,7 @@ async fn running_identity(root: &Path, name: &str) -> (i32, chrono::NaiveDateTim
         if let Some(pid) = pid
             && let Some(birth) = meerschaum_jobs::process::process_start_time(pid)
             && let Some(began) = began(root, name)
+            && previous_began != Some(began.as_str())
             && meerschaum_jobs::process::proc_state(pid)
                 == meerschaum_jobs::process::ProcState::Alive
         {
@@ -219,6 +224,9 @@ fn launch(root: &Path, control: &Path, bootstrap: &Path, port: u16) -> Process {
         .stderr(log);
     if let Some(python) = std::env::var_os("MRSM_PYTHON") {
         command.env("MRSM_PYTHON", python);
+    }
+    if let Some(temp) = std::env::var_os("TMPDIR") {
+        command.env("TMPDIR", temp);
     }
     command.args([
         "start",
@@ -608,7 +616,7 @@ async fn explicit_start_recreates_only_the_canonical_command_under_its_original_
     let rebuilding = catalog.get("rebuild-source-scope").unwrap().unwrap();
     let active_api = controller.prepare(&team).await.unwrap();
     status(&active_api, &rebuilding.remote_name, "running").await;
-    let old_process = running_identity(control.path(), &rebuilding.remote_name).await;
+    let old_process = running_identity(control.path(), &rebuilding.remote_name, None).await;
     let files = grant_files(main_root.path());
     let original_attributes = original.attributes.clone();
     let mut scoped_edit = original.clone();
@@ -742,7 +750,12 @@ async fn explicit_start_recreates_only_the_canonical_command_under_its_original_
     );
     assert_ne!(explicitly_restarted.callback, rebuilding.callback);
     status(&rebuilt_api, &rebuilding.remote_name, "running").await;
-    let new_process = running_identity(control.path(), &rebuilding.remote_name).await;
+    let new_process = running_identity(
+        control.path(),
+        &rebuilding.remote_name,
+        Some(&old_process.2),
+    )
+    .await;
     assert_ne!(
         (new_process.0, new_process.1),
         (old_process.0, old_process.1)

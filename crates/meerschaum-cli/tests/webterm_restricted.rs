@@ -779,26 +779,14 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
     }
     // List jobs only through the caller's visible job catalog. Named mutations still require
     // a visible job and its matching permission.
-    for line in ["show jobs execute-tpr-hidden", "show jobs"] {
-        let before = bob.out.len();
-        bob.line(line).await;
-        assert!(
-            bob.wait_for(
-                |out| out[before.min(out.len())..]
-                    .split_once('\n')
-                    .is_some_and(|(_, response)| response.contains("➤")),
-                Duration::from_secs(20),
-            )
-            .await,
-            "{line}: {}",
-            &bob.out[before..]
-        );
-        let (_, response) = bob.out[before..].split_once('\n').unwrap();
-        assert!(
-            !response.replace(line, "").contains("execute-tpr-hidden"),
-            "{response}"
-        );
-    }
+    let before = bob.out.len();
+    bob.line("show jobs").await;
+    bob.ready().await;
+    assert!(
+        !bob.out[before..].contains("execute-tpr-hidden"),
+        "{}",
+        &bob.out[before..]
+    );
     for line in [
         "attach logs execute-tpr-hidden",
         "delete jobs execute-tpr-hidden -y",

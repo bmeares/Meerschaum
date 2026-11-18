@@ -632,7 +632,9 @@ pub async fn sync_pipe(
     } else {
         args
     };
-    let inner = sync_inner(env, pipe, input, args, observer);
+    // A sync has several large async branches. The recording scopes only need a pointer
+    // to that future and may themselves be nested in a runner's async stack.
+    let inner = Box::pin(sync_inner(env, pipe, input, args, observer));
     // Recorded here or by the status owner: an `api:` instance must not record the posts too.
     let (mut result, registration) = if records {
         meerschaum_connector::sync_status::registration_scope(
