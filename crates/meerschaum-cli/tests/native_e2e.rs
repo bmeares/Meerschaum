@@ -8,33 +8,13 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 mod python_support;
 
-fn library(name: &str) -> PathBuf {
-    static BUILT: OnceLock<()> = OnceLock::new();
-    BUILT.get_or_init(|| {
-        let root = tempfile::tempdir().unwrap();
-        let plugins = tempfile::tempdir().unwrap();
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "-p", "meerschaum-plugin", "--examples"])
-            .env("MRSM_ROOT_DIR", root.path())
-            .env("MRSM_PLUGINS_DIR", plugins.path())
-            .status()
-            .unwrap();
-        assert!(status.success());
-    });
-    // The examples land in the shared target directory next to this test's executable.
-    let executable = std::env::current_exe().unwrap();
-    let profile = executable.parent().unwrap().parent().unwrap();
-    profile.join("examples").join(format!(
-        "{}{name}.{}",
-        std::env::consts::DLL_PREFIX,
-        std::env::consts::DLL_EXTENSION
-    ))
-}
+#[path = "common/native_examples.rs"]
+mod native_examples;
+use native_examples::library;
 
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -492,7 +472,7 @@ fn native_routes_are_served_with_the_core_apis_credentials() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"n\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
+        .write_all(b"y\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
         .unwrap();
     let registered = registering.wait_with_output().unwrap();
     assert!(
