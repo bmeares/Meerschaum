@@ -965,11 +965,11 @@ def test_no_auth_console_needs_no_login(noauth_server, context):
     tab = Tab(context.new_page(), noauth_server.base_url)
     ### The Overview opens without a login, and so does the Terminal page.
     tab.goto('/dash', '#overview-page')
-    tab.goto('/dash/terminal', '#go-button')
+    tab.goto('/dash/terminal', '#main-div')
     tab.wait_for_dashboard()
-    ### Everything the login gates is open, including the pages that list and run things.
-    tab.page.click('#go-button')
-    _wait_text(tab.page, '#terminal-exec-status', 'Terminal is unavailable', timeout=60000)
+    ### No-auth keeps the console open and disables the web terminal.
+    assert not tab.page.locator('#go-button').is_visible()
+    assert tab.page.locator('#webterm-iframe').count() == 0
     for path in ('/dash/pipes', '/dash/jobs', '/dash/tokens', '/dash/pipelines'):
         tab.goto(path)
         assert tab.page.locator('#username-input').count() == 0, path

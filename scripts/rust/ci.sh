@@ -262,6 +262,10 @@ step_test()   {
     "$REPO/scripts/parity/setup_reference.sh"
   fi
   if ci_have_nextest; then
+    # These executables are also native launchers for their confined child processes.
+    # Run them directly so their coverage does not depend on libtest discovery.
+    cargo test --locked -p meerschaum-cli --test team_sessions \
+      --test host_api_terminals --test host_plugin_discovery --no-fail-fast
     # nextest runs every test in its own process (and does not run doc tests: those follow).
     log "cargo nextest run --workspace --no-fail-fast (DuckDB library: $MRSM_DUCKDB_LIB)"
     cargo nextest run --workspace --no-fail-fast
