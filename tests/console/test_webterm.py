@@ -53,7 +53,8 @@ def _webterm_tmux_socket(server: Server) -> str:
     import hashlib
     webterm_dir = pathlib.Path(server.root) / '.internal' / 'webterm'
     preferred = webterm_dir / 'tmux.sock'
-    if len(os.fsencode(str(preferred))) <= 100:
+    # Rust reserves two bytes for the adjacent restricted socket (`tmux-r.sock`).
+    if len(os.fsencode(str(preferred))) + 2 <= 100:
         return str(preferred)
     digest = hashlib.sha256(str(webterm_dir).encode()).hexdigest()[:16]
     user = ''.join(

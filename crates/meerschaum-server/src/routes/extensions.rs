@@ -356,9 +356,12 @@ async fn page_fallback(state: &AppState, request: Request) -> ControlFlow<Respon
 /// never falls through to one after missing metadata, authorization or invocation failure.
 pub async fn api_fallback(state: AppState, request: Request) -> ControlFlow<Response, Request> {
     let request = page_fallback(&state, request).await?;
+    let path = super::decoded_path(request.uri().path());
     // Core console, assets and disabled route groups keep their own native guards.
     // Only plugin-owned API paths belong to this adapter.
     if crate::web::is_console_path(request.uri().path())
+        || path == "/static"
+        || path.starts_with("/static/")
         || super::route_group_of(request.uri().path()) != "other"
         || !super::is_proxyable(&state.config, request.uri().path())
     {
