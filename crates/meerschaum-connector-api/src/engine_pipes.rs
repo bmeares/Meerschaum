@@ -38,8 +38,10 @@ pub fn rebind_pipeline_definition(definition: &mut Map, from: &str, to: &str) {
 /// Whether `metric_key` names one of the engine's state pipes (`engine_state`, `engine_ledger`,
 /// `engine_cursors`, `engine_runs`, `engine_nodes`, `engine_events`).
 pub fn is_engine_metric(metric_key: &str) -> bool {
-    !matches!(metric_key, "engine_metrics" | "engine_sync_status")
-        && engine_state_parameters(metric_key).is_some()
+    !matches!(
+        metric_key,
+        "engine_metrics" | "engine_sync_status" | "engine_sync_corrections"
+    ) && engine_state_parameters(metric_key).is_some()
 }
 
 /// Whether `pipe` is an engine state pipe (`mrsm:engine_*`).

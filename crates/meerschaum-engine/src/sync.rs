@@ -20,8 +20,14 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+#[path = "sync/cpi.rs"]
+mod cpi;
 #[path = "sync/source_replace.rs"]
 mod source_replace;
+#[path = "sync/strategy.rs"]
+mod strategy;
+
+use strategy::Strategy;
 
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -393,6 +399,30 @@ pub async fn determine_begin(
     end: Option<&DateBound>,
     check_existing: bool,
 ) -> Result<Option<DateBound>, ConnectorError> {
+    determine_begin_for_strategy(
+        env,
+        instance,
+        pipe,
+        dtypes,
+        begin,
+        end,
+        check_existing,
+        (Strategy::Backtrack, None),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn determine_begin_for_strategy(
+    env: &SyncEnv<'_>,
+    instance: &dyn InstanceConnector,
+    pipe: &Pipe,
+    dtypes: &IndexMap<String, String>,
+    begin: &SyncBegin,
+    end: Option<&DateBound>,
+    check_existing: bool,
+    strategy_scope: (Strategy, Option<&Map>),
+) -> Result<Option<DateBound>, ConnectorError> {
     match begin {
         SyncBegin::At(b) => return Ok(Some(b.clone())),
         SyncBegin::Unbounded => return Ok(None),
@@ -403,11 +433,23 @@ pub async fn determine_begin(
     if end.is_some() {
         return Ok(None);
     }
-    let Some(sync_time) = instance.get_sync_time(pipe, None, true).await? else {
+    let (strategy, params) = strategy_scope;
+    if strategy == Strategy::Naive {
+        return Ok(None);
+    }
+    let scoped_params = if strategy == Strategy::Simple {
+        params
+    } else {
+        None
+    };
+    let Some(sync_time) = instance.get_sync_time(pipe, scoped_params, true).await? else {
         return Ok(None);
     };
     let sync_time =
         parse_date_bound(env, pipe, dtypes, sync_time).map_err(ConnectorError::Invalid)?;
+    if strategy == Strategy::Simple {
+        return Ok(Some(sync_time));
+    }
     let backtrack = pipe
         .get_backtrack_interval(check_existing, env.default_backtrack_minutes, env.defaults)
         .map_err(|e| ConnectorError::Invalid(e.to_string()))?;
@@ -432,6 +474,25 @@ pub async fn determine_begin(
             st
         }
     }))
+}
+
+fn fetch_strategy(
+    pipe: &Pipe,
+    replacing: bool,
+    env: &SyncEnv<'_>,
+    args: &SyncArgs,
+) -> Result<Strategy, String> {
+    let strategy = Strategy::read(pipe).map_err(|error| error.to_string())?;
+    if strategy != Strategy::Backtrack && replacing {
+        return Err("An immutable sync strategy cannot use fetch replacement.".into());
+    }
+    if strategy != Strategy::Backtrack && strategy::automatic(args) && !args.check_existing {
+        return Err("An immutable sync strategy requires checking existing rows.".into());
+    }
+    if strategy != Strategy::Backtrack && env.delivery.is_some() && strategy::automatic(args) {
+        return Err("An automatic immutable sync strategy requires a direct sync. Use an explicit window for delegated execution.".into());
+    }
+    Ok(strategy)
 }
 
 /// Parse row counts out of v4's `sync_pipe` messages (`"Inserted 1,234, updated 5 rows."`,
@@ -699,6 +760,12 @@ async fn sync_inner(
     }
 
     if input.is_none()
+        && let Err(error) = fetch_strategy(&pipe, replacing, env, args)
+    {
+        return fail(error);
+    }
+
+    if input.is_none()
         && replacing
         && let Ok(Some(source)) = env.registry.source_for_sync(pipe.connector_keys(), args)
     {
@@ -742,6 +809,11 @@ async fn sync_inner(
                         crate::ConnectorRegister::Undefined => {}
                     }
                 }
+                if input.is_none()
+                    && let Err(error) = fetch_strategy(&pipe, replacing, env, args)
+                {
+                    return fail(error);
+                }
                 let reg = instance.register_pipe(&pipe).await;
                 if !reg.success && !reg.message.contains("already") {
                     return reg.into();
@@ -767,8 +839,17 @@ async fn sync_inner(
     let input = match input {
         Some(i) => i,
         None => {
+            let strategy = match fetch_strategy(&pipe, replacing, env, args) {
+                Ok(strategy) => strategy,
+                Err(error) => return fail(error),
+            };
             if let Some(ps) = env.registry.plugin_sync(pipe.connector_keys()) {
-                return ps.sync_native(&pipe, args, env, observer).await;
+                if strategy == Strategy::Backtrack || !strategy::automatic(args) {
+                    return ps.sync_native(&pipe, args, env, observer).await;
+                }
+                if !ps.is_fetch_optimization() {
+                    return fail("An automatic sync.strategy requires a connector-managed fetch.");
+                }
             }
             let source = match env.registry.source_for_sync(pipe.connector_keys(), args) {
                 Ok(Some(s)) => s,
@@ -780,6 +861,9 @@ async fn sync_inner(
                 }
                 Err(e) => return fail(unavailable_message(&pipe, &e)),
             };
+            if strategy.is_planned() && strategy::automatic(args) {
+                return strategy::run(strategy, env, &pipe, source, instance, args, observer).await;
+            }
             // `begin, end = self.parse_date_bounds(begin, end)` (`core/Pipe/_fetch.py:78`).
             let dtypes = match pipe_ops::get_dtypes(instance, &pipe, pipe.parameters(), true).await
             {
@@ -798,7 +882,7 @@ async fn sync_inner(
                 },
                 other => other.clone(),
             };
-            let begin = match determine_begin(
+            let begin = match determine_begin_for_strategy(
                 env,
                 instance,
                 &pipe,
@@ -806,6 +890,7 @@ async fn sync_inner(
                 &begin_arg,
                 end.as_ref(),
                 args.check_existing,
+                (strategy, args.params.as_ref()),
             )
             .await
             {

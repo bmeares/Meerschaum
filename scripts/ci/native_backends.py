@@ -26,6 +26,7 @@ TESTS = {
     'instance_has_rows': 'meerschaum-connector-sql',
     'instance_pipe_data': 'meerschaum-connector-sql',
     'registered_pg_source': 'meerschaum-cli',
+    'immutable_sync': 'meerschaum-engine',
     'graph_window_sql_http': 'meerschaum-server',
     'valkey_first_user': 'meerschaum-connector-valkey',
     'valkey_misc': 'meerschaum-connector-valkey',
@@ -38,6 +39,7 @@ TESTS = {
 FILTERS = {
     'instance_pipe_data': 'test_selected_columns_do_not_reintroduce_omitted_columns',
     'registered_pg_source': 'registered_same_store_table_fetch_and_paging',
+    'immutable_sync': 'postgres_watermarks_and_sparse_cpi',
     'graph_window_sql_http': 'self_api_restricted_graph_commits_innodb_append',
 }
 SOURCE_PG_URI = 'MEERSCHAUM_TEST_REGISTERED_SOURCE_PG_URI'

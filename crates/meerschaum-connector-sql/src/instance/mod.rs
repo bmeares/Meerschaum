@@ -16,6 +16,7 @@ pub mod data;
 pub mod env_provider;
 pub mod fetch;
 pub mod geopackage;
+mod immutable_sync;
 pub mod indices;
 mod inference;
 pub mod inplace;

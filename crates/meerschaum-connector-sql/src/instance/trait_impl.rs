@@ -90,6 +90,75 @@ impl Connector for SqlConnector {
         SqlConnector::fetch(self, pipe, &args).await
     }
 
+    async fn get_sync_time_remote(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        newest: bool,
+    ) -> ConnectorResult<Option<DateBound>> {
+        self.require_schema().await?;
+        let query = DataQuery {
+            params: params.cloned(),
+            ..Default::default()
+        };
+        self.immutable_remote_bound(pipe, &fetch_args(&query), newest)
+            .await
+    }
+
+    async fn get_rowcount_remote(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        self.require_schema().await?;
+        self.immutable_remote_count(pipe, &fetch_args(query)).await
+    }
+
+    async fn immutable_sync_remote_daily_counts(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        self.require_schema().await?;
+        let source = self.fetch_query(pipe, &fetch_args(query)).await?;
+        self.immutable_daily_counts(pipe, &source).await
+    }
+
+    async fn immutable_sync_fetch_by_id(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        watermarks: &[(String, DateBound)],
+        joined: bool,
+    ) -> ConnectorResult<Option<Frame>> {
+        self.require_schema().await?;
+        self.immutable_fetch_by_id(pipe, &fetch_args(query), watermarks, joined)
+            .await
+    }
+
+    async fn immutable_sync_remote_cpi(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        points: i64,
+    ) -> ConnectorResult<meerschaum_connector::CpiSeries> {
+        self.require_schema().await?;
+        let source = self.fetch_query(pipe, &fetch_args(query)).await?;
+        self.immutable_cpi_samples(pipe, query, &source, points)
+            .await
+    }
+
+    async fn immutable_sync_fetch_cpi(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        polynomials: &meerschaum_connector::CpiPolynomials,
+    ) -> ConnectorResult<Frame> {
+        self.require_schema().await?;
+        self.immutable_fetch_cpi(pipe, query, &fetch_args(query), polynomials)
+            .await
+    }
+
     async fn fetch_stream(
         &self,
         pipe: &Pipe,
@@ -357,6 +426,37 @@ impl InstanceConnector for SqlConnector {
         self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_rowcount(self, pipe, query).await
+    }
+
+    async fn immutable_sync_watermarks(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Vec<(String, DateBound)>> {
+        self.require_schema().await?;
+        self.immutable_target_watermarks(pipe, query).await
+    }
+
+    async fn immutable_sync_daily_counts(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        self.require_schema().await?;
+        let target = self.immutable_target_query(pipe, query).await?;
+        self.immutable_daily_counts(pipe, &target).await
+    }
+
+    async fn immutable_sync_target_cpi(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        points: i64,
+    ) -> ConnectorResult<meerschaum_connector::CpiSeries> {
+        self.require_schema().await?;
+        let target = self.immutable_target_query(pipe, query).await?;
+        self.immutable_cpi_samples(pipe, query, &target, points)
+            .await
     }
 
     async fn get_pipe_rowcount_estimate(

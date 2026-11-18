@@ -409,6 +409,10 @@ struct Inplace(Arc<SqlConnector>);
 
 #[meerschaum_connector::async_trait]
 impl PluginSync for Inplace {
+    fn is_fetch_optimization(&self) -> bool {
+        true
+    }
+
     async fn sync(&self, pipe: &Pipe, args: &SyncArgs) -> meerschaum_core::success::SyncResult {
         use meerschaum_connector_sql::instance::fetch::metadef_bound;
         use meerschaum_connector_sql::queries::metadef::Bound;

@@ -171,6 +171,76 @@ You can modify the backtrack interval under the key `fetch:backtrack_minutes`:
     )
     ```
 
+## Immutable synchronization strategies
+
+Use `sync.immutable: true` to declare that each row's key and values are permanent after insertion. New rows may arrive late. For a time series, configure a non-null `datetime` column and a stable unique row key. For several series, configure `id` and use a key that distinguishes rows from each series. The destination must contain a subset of the source rows in the queried scope.
+
+Set the strategy in the Pipe parameters, for example with `mrsm edit pipes`:
+
+```yaml
+columns:
+  datetime: ts
+  id: sensor_id
+sync:
+  immutable: true
+  strategy: unbounded-simple
+```
+
+`backtrack` is the default and works for mutable pipes. Every other strategy requires the explicit immutability declaration. The declaration enables source query planning. You are responsible for keeping the source rows immutable. A normal sync still deduplicates by the configured row key, and the strategies do not delete rows.
+
+The names and diagrams in [Chapter 3 of the thesis](https://meerschaum.io/files/pdf/thesis.pdf#page=52) distinguish incremental **syncs** from historical **verification syncs**. A target watermark is a timestamp already present in the destination. The diagram shows a row that arrives behind the watermark and a verification window that can recover it.
+
+```mermaid
+flowchart LR
+    Old["Old history"] --> Late["Newly visible late row"]
+    Late --> Mark["Target watermark"]
+    Mark --> New["Newer rows"]
+    Backtrack["Backtrack starts before the watermark"] -.-> Mark
+    Repair["Verification revisits a historical day"] -.-> Late
+```
+
+### Incremental strategies
+
+| Strategy | Rows requested |
+| --- | --- |
+| `backtrack` | Starts at the newest target timestamp minus `fetch.backtrack_minutes`. |
+| `simple` | Starts at the newest target timestamp, including its boundary. Late rows older than that watermark need a verification sync. |
+| `naive` | Reads the entire source query and merges by row key. |
+| `slow-id` | Starts at the oldest of the per-ID target watermarks for known IDs. A stalled series can widen the read for every known ID. |
+| `append` | Builds one SQL `UNION ALL` of per-ID queries using each ID's own target watermark. |
+| `join` | Left-joins the source query to a bound SQL `VALUES` table of target watermarks and filters each known ID at its own watermark. |
+
+The three per-ID strategies include all source rows for IDs absent from the destination. They require direct PostgreSQL-compatible source and destination connectors and support at most 256 known IDs per scope. Use consistently typed text or integer IDs on both sides. They materialize the selected source rows before chunking the writes. As with `simple`, older arrivals within a known ID can still require historical verification.
+
+### Historical verification
+
+| Strategy | How it selects data |
+| --- | --- |
+| `iterative-simple` | Compares exact source and target row counts for each UTC day and fetches days with gaps. |
+| `daily-row-count` | Gets the UTC day counts with a grouped query on each side. Fetches days with gaps. |
+| `binary-search` | Counts a whole window first. Bisects unequal ranges until it isolates the missing data. |
+| `iterative-cpisync` | Finds mismatching days and uses characteristic polynomial interpolation to request missing timestamps by series when the difference is sparse. |
+
+By default these strategies include up to 30 UTC days ending on the latest source day. Set `sync.lookback_days` to change the horizon. Add the `unbounded-` prefix to use the complete source timestamp extent. `unbounded-simple` is an alias for `unbounded-iterative-simple`. If stray rows in the 1970s extend an otherwise recent series by decades, unbounded iterative sync prunes equal-count ranges instead of probing every intervening day. When the query budget is exhausted it fetches the remaining ranges.
+
+Count-based strategies assume unique rows and a target that is a subset of the source. Equal counts can hide changed values or a deletion offset by an insertion. Continue using `backtrack` for mutable values. Use [window replacement](#replacing-a-window) for an authoritative source that can remove rows, and choose a window that covers the changes.
+
+Daily Row Count requires PostgreSQL, SQLite, or DuckDB on both sides. Iterative CPISync uses PostgreSQL-compatible connectors and a unique timestamp per ID at microsecond precision. For each day, both databases evaluate their characteristic polynomials at points outside the timestamp domain. Dividing the samples cancels the timestamps already in the target. Meerschaum fetches only source rows at roots of the remaining polynomial. Days above 1,024 source rows or 16 missing rows, duplicate timestamps within a series, or inconsistent samples fall back to an ordinary window fetch. [Characteristic polynomials and Iterative CPISync](https://meerschaum.io/files/pdf/thesis.pdf#page=66)
+
+### Monthly correction
+
+The monthly strategies do a simple incremental sync on ordinary runs and a historical verification on the first automatic run of each UTC calendar month. A successful correction records a checkpoint in the destination instance. If a correction fails, the next run retries it.
+
+- `simple-monthly-naive`
+- `simple-monthly-iterative-simple`
+- `simple-monthly-daily-row-count`
+- `simple-monthly-binary-search`
+- `simple-monthly-iterative-cpisync`
+
+The verification covers all available history. Monthly strategies require a registered pipe on a direct SQL instance and an unfiltered sync. They follow the same database requirements as their verification strategy. [Corrective syncs in the thesis](https://meerschaum.io/files/pdf/thesis.pdf#page=69)
+
+Strategies apply to automatic source reads through `Pipe.sync()` and `mrsm sync pipes`. Explicit begin or end bounds keep their original meaning. The advanced strategies require a connector-managed fetch. Delegated execution uses a window authorized by Main. An automatic immutable strategy cannot be combined with fetch replacement or with existing-row checks disabled.
+
 ## Replacing a window
 
 A sync normally merges: new rows are inserted, changed rows updated, and rows missing from the

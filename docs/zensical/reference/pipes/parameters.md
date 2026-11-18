@@ -750,6 +750,14 @@ parameters:
     max_bytes: 8388608
 ```
 
+## `sync`
+
+- `sync.strategy` selects how an automatically synced pipe reads its source. The default is `backtrack`.
+- `sync.immutable: true` declares permanent row keys and values and enables the other strategies.
+- `sync.lookback_days` sets the number of UTC days checked by bounded corrective strategies. The default is 30.
+
+See [Immutable synchronization strategies](syncing.md#immutable-synchronization-strategies) for supported strategy names and connector requirements.
+
 ## `tags`
 
 A list of a pipe's [tags](/reference/pipes/tags/), e.g.:

@@ -59,7 +59,8 @@ pub use policy::{
 pub use schema::{SchemaChange, SchemaChangeKind, SchemaPlan};
 pub use template::{InstanceProvider, SnapshotResolver, resolve_pipe};
 pub use traits::{
-    ChunkStream, ChunkedFetch, ColumnIndexInfo, Connector, ConnectorError, ConnectorResult,
-    DataQuery, DateBound, FetchedKind, InstanceConnector, PipeId, PipeKeysEntry, PipesKeys,
-    PipesKeysQuery, PluginRecord, SyncOptions,
+    CPI_FIRST_POINT, CPI_PRIME, ChunkStream, ChunkedFetch, ColumnIndexInfo, Connector,
+    ConnectorError, ConnectorResult, CpiPolynomials, CpiSamples, CpiSeries, DataQuery, DateBound,
+    FetchedKind, InstanceConnector, PipeId, PipeKeysEntry, PipesKeys, PipesKeysQuery, PluginRecord,
+    SyncOptions,
 };

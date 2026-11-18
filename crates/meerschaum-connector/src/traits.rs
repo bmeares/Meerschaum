@@ -197,6 +197,25 @@ pub struct DataQuery {
     pub remote: bool,
 }
 
+/// Characteristic-polynomial samples for one (possibly unnamed) immutable series.
+#[derive(Debug)]
+pub struct CpiSamples {
+    pub rows: i64,
+    pub distinct_timestamps: i64,
+    pub values: Vec<i64>,
+}
+
+/// Polynomial samples keyed by series ID.
+pub type CpiSeries = std::collections::BTreeMap<Option<String>, CpiSamples>;
+
+/// One missing-timestamp polynomial per series, with coefficients in ascending order.
+pub type CpiPolynomials = Vec<(Option<String>, Vec<i64>)>;
+
+/// The modulus used by both the SQL-side CPISync samples and the engine's solver.
+pub const CPI_PRIME: i64 = (1 << 61) - 1;
+/// The first evaluation point lies outside the range of UTC day offsets in microseconds.
+pub const CPI_FIRST_POINT: i64 = 86_400_000_001;
+
 /// Keyword arguments for `sync_pipe`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncOptions {
@@ -441,6 +460,54 @@ pub trait Connector: Send + Sync {
             "Connectors of type '{}' do not implement `get_pipe_rowcount()`.",
             self.connector_type()
         )))
+    }
+
+    /// Group an immutable source query by UTC calendar day. Keys are Unix days.
+    async fn immutable_sync_remote_daily_counts(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support daily row counts for immutable sync.".into(),
+        ))
+    }
+
+    /// Fetch by target-side per-ID watermarks, preserving all rows for unseen IDs.
+    async fn immutable_sync_fetch_by_id(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _watermarks: &[(String, DateBound)],
+        _joined: bool,
+    ) -> ConnectorResult<Option<Frame>> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support per-ID immutable sync.".into(),
+        ))
+    }
+
+    /// Evaluate a source partition's characteristic polynomials at consecutive points.
+    async fn immutable_sync_remote_cpi(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _points: i64,
+    ) -> ConnectorResult<CpiSeries> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support Iterative CPISync.".into(),
+        ))
+    }
+
+    /// Fetch rows whose timestamp is a root of a recovered polynomial for their series.
+    async fn immutable_sync_fetch_cpi(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _polynomials: &CpiPolynomials,
+    ) -> ConnectorResult<Frame> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support Iterative CPISync.".into(),
+        ))
     }
 
     /// Pair optional registered-source replacement only with a logical alias of the same
@@ -910,6 +977,40 @@ pub trait InstanceConnector: Connector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>>;
+
+    /// Get the newest target timestamp or integer axis value for each distinct ID.
+    async fn immutable_sync_watermarks(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+    ) -> ConnectorResult<Vec<(String, DateBound)>> {
+        Err(ConnectorError::NotImplemented(
+            "The instance does not support per-ID immutable sync.".into(),
+        ))
+    }
+
+    /// Group the target table by UTC calendar day. Keys are Unix days.
+    async fn immutable_sync_daily_counts(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        Err(ConnectorError::NotImplemented(
+            "The instance does not support daily row counts for immutable sync.".into(),
+        ))
+    }
+
+    /// Evaluate a target partition's characteristic polynomials at consecutive points.
+    async fn immutable_sync_target_cpi(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _points: i64,
+    ) -> ConnectorResult<CpiSeries> {
+        Err(ConnectorError::NotImplemented(
+            "The instance does not support Iterative CPISync.".into(),
+        ))
+    }
 
     /// `Pipe.get_rowcount(estimate=True)`: the database's estimate of the number of rows in the
     /// pipe's table (catalog statistics, no table scan), falling back to the exact count where
