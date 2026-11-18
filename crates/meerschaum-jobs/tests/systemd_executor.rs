@@ -1189,6 +1189,12 @@ fn a_run_without_a_result_reports_how_systemd_saw_it_end() {
 #[test]
 fn a_team_jobs_unit_holds_an_allowlisted_environment() {
     use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+    // This fixture renders the unit without starting the launcher.
+    meerschaum_core::self_exe::register_native_current_executable().unwrap();
+    let native = meerschaum_core::self_exe::native_executable()
+        .unwrap()
+        .display()
+        .to_string();
     let r = Roots::new();
     let root = r.root("teams/root");
     std::fs::create_dir_all(root.join("config")).unwrap();
@@ -1212,7 +1218,14 @@ fn a_team_jobs_unit_holds_an_allowlisted_environment() {
         },
     )
     .unwrap();
-    let ex = SystemdExecutor::new(r.ctx("teams/root")).with_process_env(vec![
+    let ctx = r.ctx("teams/root").with_launcher(Launcher {
+        supervisor: vec![
+            native.clone(),
+            meerschaum_jobs::supervisor::SUPERVISOR_ARG.into(),
+        ],
+        program: vec![native],
+    });
+    let ex = SystemdExecutor::new(ctx).with_process_env(vec![
         ("PATH".to_string(), "/usr/bin:/bin".to_string()),
         ("MRSM_ROOT_DIR".to_string(), root.to_string_lossy().into()),
         (

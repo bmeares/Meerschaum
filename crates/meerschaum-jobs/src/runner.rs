@@ -252,6 +252,7 @@ impl ProcessRunner for FakeSystemctl {
             return Ok(CommandOutput::failed(format!("fake failure of `{sub}`")));
         }
         match sub {
+            "--version" => Ok(CommandOutput::ok("systemd 255\n")),
             "daemon-reload" => Ok(CommandOutput::ok("")),
             "enable" | "disable" => {
                 let enable = sub == "enable";
