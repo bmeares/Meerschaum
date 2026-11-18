@@ -5,7 +5,7 @@
 //!   message;
 //! - the prompt (`shell.<charset>.prompt` with `{username}`, `{instance}`, `{compose}` and
 //!   `{executor_keys}`; every literal character colored with `shell.ansi.prompt`, the values
-//!   truncated to a quarter of the console width, including v4's truncation of colored values);
+//!   truncated to a quarter of the console width before applying color);
 //! - `precmd`: `?` help, `exit`/`quit`/`EOF`, `--help`, `:` pipeline flags and `+` chains passed
 //!   through as one command line, a leading `mrsm` stripped, unknown actions run with `sh`
 //!   (`!` escapes too), the shell's instance / repository / executor added to each step when they
@@ -107,8 +107,7 @@ pub fn instance_username(f: &Formatter<'_>, instance: &str) -> String {
     none
 }
 
-/// `truncate_text_for_display(text, max_length, suffix)` (lengths in code points, ANSI codes
-/// included).
+/// Truncate plain prompt text by code points before adding any terminal escape sequences.
 pub fn truncate_text_for_display(text: &str, max_length: usize, suffix: &str) -> String {
     let len = text.chars().count();
     if len <= max_length {
@@ -159,22 +158,23 @@ pub fn render_prompt(f: &Formatter<'_>, state: &PromptState) -> String {
     let max_length = f.console().width / 4;
     let mut mask: String = template.clone();
     let blank = |name: &str| "\0".repeat(name.chars().count());
+    let field = |text: &str, style_key: &str| {
+        let text = truncate_text_for_display(text, max_length, suffix);
+        if ansi {
+            f.colored(&text, &style(style_key))
+        } else {
+            text
+        }
+    };
 
     let mut instance = String::new();
     if template.contains("{instance}") {
-        instance = state.instance.clone();
-        if ansi {
-            instance = f.colored(&instance, &style("instance"));
-        }
+        instance = field(&state.instance, "instance");
         mask = mask.replace("{instance}", &blank("{instance}"));
     }
     let mut username = String::new();
     if template.contains("{username}") {
-        username = if ansi {
-            f.colored(&state.username, &style("username"))
-        } else {
-            state.username.clone()
-        };
+        username = field(&state.username, "username");
         mask = mask.replace("{username}", &blank("{username}"));
     }
     let mut compose = String::new();
@@ -196,11 +196,12 @@ pub fn render_prompt(f: &Formatter<'_>, state: &PromptState) -> String {
     }
     let mut executor = String::new();
     if template.contains("{executor_keys}") {
-        executor = if ansi {
-            f.colored(&remove_ansi(&state.executor_keys), &style("executor"))
+        let keys = if ansi {
+            remove_ansi(&state.executor_keys)
         } else {
             state.executor_keys.clone()
         };
+        executor = field(&keys, "executor");
         mask = mask.replace("{executor_keys}", &blank("{executor_keys}"));
     }
     let mut remainder: Vec<String> = template.chars().map(|c| c.to_string()).collect();
@@ -218,18 +219,9 @@ pub fn render_prompt(f: &Formatter<'_>, state: &PromptState) -> String {
     remainder
         .concat()
         .replace("{compose}", &compose)
-        .replace(
-            "{username}",
-            &truncate_text_for_display(&username, max_length, suffix),
-        )
-        .replace(
-            "{instance}",
-            &truncate_text_for_display(&instance, max_length, suffix),
-        )
-        .replace(
-            "{executor_keys}",
-            &truncate_text_for_display(&executor, max_length, suffix),
-        )
+        .replace("{username}", &username)
+        .replace("{instance}", &instance)
+        .replace("{executor_keys}", &executor)
 }
 
 /// `get_env_project_name()`: the Compose project this process runs in.

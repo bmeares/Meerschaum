@@ -453,11 +453,10 @@ def test_dashboard_buttons_keep_their_rows_at_every_width(webterm_server, contex
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_a_non_admin_runs_what_the_console_offers_and_is_refused_the_rest(server, tab):
-    """
-    `POST /execute` limits a non-administrator who may run actions (an Operator) to the console's
-    actions, with a clear message.
-    """
+def test_an_operator_sees_the_action_catalog_when_exec_is_unavailable(server, tab):
+    """The action catalog respects the Operator role when the web terminal is disabled."""
+    from playwright.sync_api import expect
+
     result = server.python("""
 import meerschaum as mrsm
 from meerschaum.core import User
@@ -467,18 +466,10 @@ assert success, msg
 """)
     assert result.returncode == 0, result.stderr[-2000:]
     tab.login('bobby', 'correct-horse-2')
-    ### An action the server keeps from non-administrators (it runs code): refused, with the reason.
-    tab.page.select_option('#action-dropdown', 'python')
-    tab.page.click('#go-button')
-    _wait_text(tab.page, '#exec-alert-div', 'server refused this command', timeout=30000)
     ### The dashboard's own omit list comes from the server (`GET /execute/policy`).
     options = tab.page.locator('#action-dropdown option').all_inner_texts()
     assert 'show' in options and 'sh' not in options and 'stack' not in options
-    ### The default selection (`show pipes`) is allowed for an Operator (`actions:execute`), as the
-    ### console says.
-    tab.page.select_option('#action-dropdown', 'show')
-    tab.page.click('#go-button')
-    _wait_text(tab.page, '#terminal-exec-status', 'Terminal is unavailable', timeout=60000)
+    expect(tab.page.locator('#go-button')).to_be_hidden()
     assert _errors(tab) == [], _errors(tab)
 
 

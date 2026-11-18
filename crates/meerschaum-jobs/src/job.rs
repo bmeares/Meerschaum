@@ -965,12 +965,14 @@ pub fn monitor_log_stream(
             break;
         }
         if opts.stop_on_exit && src.status() == Status::Stopped {
+            // A follower may close its stream as soon as it receives the result.
+            // Send the job's final output first, including writes after the last poll.
+            if emit(&mut log, &mut emitted_text, &mut opts) {
+                return SuccessTuple::success();
+            }
             if !emitted_text && opts.wait_if_stopped && stopped_sleep < 0.2 {
                 std::thread::sleep(Duration::from_secs_f64(stopped_sleep));
                 stopped_sleep = (stopped_sleep * 1.1 * 1000.0).round() / 1000.0;
-                if emit(&mut log, &mut emitted_text, &mut opts) {
-                    return SuccessTuple::success();
-                }
                 continue;
             }
             if emitted_text || !opts.wait_if_stopped {
@@ -979,7 +981,7 @@ pub fn monitor_log_stream(
                     on_stop(&result);
                 }
             }
-            break;
+            return SuccessTuple::success();
         }
         // v4 also waited until the job had printed something (`emitted_text`), so a job whose
         // first act was a silent read was never answered; the latest lines have been emitted
@@ -1160,6 +1162,59 @@ mod tests {
         assert_eq!(slice_start(5, 0), 0);
         assert_eq!(slice_start(5, -2), 2);
         assert_eq!(slice_start(5, -9), 5);
+    }
+
+    #[test]
+    fn a_stopped_job_emits_its_final_line_before_the_result() {
+        use std::cell::RefCell;
+
+        struct FinishingJob(std::path::PathBuf);
+
+        impl MonitorSource for FinishingJob {
+            fn rotating_log(&mut self) -> Option<RotatingFile> {
+                RotatingFile::new(&self.0, Default::default()).ok()
+            }
+            fn lines_to_show(&mut self) -> i64 {
+                0
+            }
+            fn timestamp_format(&self) -> String {
+                String::new()
+            }
+            fn refresh_seconds(&self) -> Seconds {
+                Seconds::Int(1)
+            }
+            fn status(&mut self) -> Status {
+                self.rotating_log().unwrap().write("final line\n").unwrap();
+                Status::Stopped
+            }
+            fn result(&mut self) -> SuccessTuple {
+                SuccessTuple::success()
+            }
+            fn is_blocking_on_stdin(&mut self) -> bool {
+                false
+            }
+            fn write_stdin(&mut self, _data: &str) -> std::io::Result<()> {
+                unreachable!("the fixture never requests input")
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut job = FinishingJob(dir.path().join("job.log"));
+        job.rotating_log().unwrap().write("first line\n").unwrap();
+        let events = RefCell::new(Vec::new());
+        monitor_log_stream(
+            &mut job,
+            |line| {
+                events.borrow_mut().push(line.trim_end().to_owned());
+                MonitorControl::Continue
+            },
+            MonitorOptions {
+                stop_on_exit: true,
+                on_stop: Some(Box::new(|_| events.borrow_mut().push("stopped".into()))),
+                ..Default::default()
+            },
+        );
+        assert_eq!(events.into_inner(), ["first line", "final line", "stopped"]);
     }
 
     #[test]
