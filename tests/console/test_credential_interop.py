@@ -18,10 +18,12 @@ from meerschaum.plugins import api_plugin
 @api_plugin
 def routes(app):
     from meerschaum.api import ScopedAuth
+    from meerschaum.core import Token, User
 
     @app.get('/credential-interop/who')
     def who(principal=fastapi.Depends(ScopedAuth(['pipes:read']))):
-        return {'kind': type(principal).__name__,
+        kind = 'Token' if isinstance(principal, Token) else 'User' if isinstance(principal, User) else None
+        return {'kind': kind,
                 'name': str(getattr(principal, 'username', None) or principal.id)}
 '''
 
@@ -29,6 +31,9 @@ def routes(app):
 @pytest.fixture
 def auth_server():
     server = Server('credential-interop', args=['--private'], native=False)
+    config = json.loads(server.env['MRSM_CONFIG'])
+    config['api'] = {'execution': {'callback_url': server.base_url}}
+    server.env['MRSM_CONFIG'] = json.dumps(config)
     plugin = server.plugins / 'credential_interop'
     plugin.mkdir()
     (plugin / '__init__.py').write_text(PLUGIN)
@@ -117,7 +122,7 @@ def test_uuid_username_and_token_jwts_keep_their_principal_and_current_scopes(au
     server = auth_server
     issued = python_json(server, '''
 owner = User('alice', instance=conn)
-token = Token(label='interop-key', user=owner, scopes=['pipes:read'], instance=conn)
+token = Token(label='interop-key', user=owner, scopes=['pipes:read', 'plugins:read'], instance=conn)
 assert token.register()[0]
 twin = User(str(token.id), 'twin-password', instance=conn)
 assert conn.register_user(twin)[0]
@@ -125,7 +130,7 @@ print('INTEROP:' + json.dumps({
     'id': str(token.id), 'key': token.get_api_key(),
     'user_jwt': manager.create_access_token(data={'sub': twin.username}, scopes=['*']),
     'token_jwt': manager.create_access_token(
-        data={'sub': str(token.id), 'mrsm_principal': 'token'}, scopes=['pipes:read']),
+        data={'sub': str(token.id), 'mrsm_principal': 'token'}, scopes=['pipes:read', 'plugins:read']),
 }))
 ''')
     assert_user(server, issued['user_jwt'], issued['id'])
