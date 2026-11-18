@@ -14,7 +14,7 @@ pub(crate) enum Operation {
     Maintenance { schema: bool },
 }
 
-pub(super) fn direct_administrator(caller: &Access) -> bool {
+pub(crate) fn direct_administrator(caller: &Access) -> bool {
     caller.full_admin() && !matches!(caller.auth, Some(crate::auth::Principal::Execution(_)))
 }
 

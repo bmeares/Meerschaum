@@ -17,7 +17,7 @@ use crate::{
     access::{self, Access},
     auth::Principal,
     error::ApiError,
-    routes::Ctx,
+    routes::{Ctx, pipes::mutation::direct_administrator},
 };
 
 #[derive(Clone, PartialEq)]
@@ -190,6 +190,7 @@ impl Proof {
 struct Authority {
     ctx: Ctx,
     selected: SelectedEngine,
+    direct_administrator: bool,
     original: Subject,
     held: BTreeSet<String>,
     proof: Proof,
@@ -325,6 +326,12 @@ impl Authority {
         if subject(&caller)? != self.original {
             return Err(ApiError::invalid_credentials());
         }
+        if self.direct_administrator && !direct_administrator(&caller) {
+            return Err(ApiError::new(
+                403,
+                "The caller's administrator authority changed.",
+            ));
+        }
         caller
             .principal
             .permissions
@@ -368,6 +375,10 @@ impl Authority {
 }
 #[async_trait::async_trait]
 impl MutationCheck for Authority {
+    fn direct_administrator(&self) -> bool {
+        self.direct_administrator
+    }
+
     fn rollback_completed(&self, succeeded: bool) {
         if self
             .refusal
@@ -417,9 +428,12 @@ pub(super) async fn run<F: Future>(
     future: F,
 ) -> Result<F::Output, ApiError> {
     proof.bounded()?;
+    let selected = ctx.selected_engine(caller)?;
+    let direct_administrator = !selected.is_native_alias() && direct_administrator(caller);
     let authority = Arc::new(Authority {
         ctx: ctx.clone(),
-        selected: ctx.selected_engine(caller)?,
+        selected,
+        direct_administrator,
         original: subject(caller)?,
         held: caller.principal.permissions.clone(),
         proof,
