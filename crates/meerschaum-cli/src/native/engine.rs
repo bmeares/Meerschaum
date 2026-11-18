@@ -289,6 +289,10 @@ fn unavailable_reason(plugins_dirs: &[std::path::PathBuf], keys: &str) -> Option
 struct Inplace(Arc<meerschaum_connector_sql::SqlConnector>);
 #[meerschaum_connector::async_trait]
 impl meerschaum_engine::PluginSync for Inplace {
+    fn is_fetch_optimization(&self) -> bool {
+        true
+    }
+
     async fn sync_native(
         &self,
         pipe: &meerschaum_core::Pipe,

@@ -77,7 +77,12 @@ impl Env {
 fn run_in(root: &Path, plugins: &Path, config: &str, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
     for (key, _) in std::env::vars() {
-        if key.starts_with("MRSM_") || matches!(key.as_str(), "RUST_LOG" | "NO_COLOR" | "TERM") {
+        if key.starts_with("MRSM_")
+            || matches!(
+                key.as_str(),
+                "RUST_LOG" | "NO_COLOR" | "TERM" | "TMUX" | "TMUX_PANE"
+            )
+        {
             command.env_remove(key);
         }
     }
@@ -210,4 +215,48 @@ fn unrelated_sources_are_never_connected() {
     // The tripwire works: selecting the unrelated pipe does contact its source.
     let _ = env.run(&["sync", "pipes", "-m", "elsewhere", "--yes"]);
     assert!(tripwire.hits() > 0, "the tripwire saw no connection");
+}
+
+#[test]
+fn immutable_strategy_uses_the_cli_fetch_path_on_its_own_sql_instance() {
+    let tripwire = Tripwire::start();
+    let env = setup(&tripwire);
+    let params = serde_json::json!({
+        "target": "immutable_target",
+        "columns": {"datetime": "ts", "id": "site"},
+        "dtypes": {"ts": "datetime64[ns, UTC]"},
+        "fetch": {"definition": "SELECT ts, site, temp FROM readings"},
+        "sync": {"immutable": true, "strategy": "unbounded-simple"},
+    })
+    .to_string();
+    env.ok(&[
+        "register",
+        "pipes",
+        "-c",
+        "sql:local",
+        "-m",
+        "immutable_cli",
+        "--params",
+        &params,
+    ]);
+    env.ok(&["sync", "pipes", "-c", "sql:local", "-m", "immutable_cli"]);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let sqlite = format!(
+        "sqlite:///{}",
+        env.root.join("sqlite/mrsm_local.db").display()
+    );
+    runtime.block_on(async {
+        let conn = SqlConnector::from_uri("local", &sqlite).await.unwrap();
+        conn.exec("INSERT INTO readings VALUES ('1972-01-01 00:00:00', 'a', 5.0)")
+            .await
+            .unwrap();
+        env.ok(&["sync", "pipes", "-c", "sql:local", "-m", "immutable_cli"]);
+        assert_eq!(
+            conn.value("SELECT COUNT(*) FROM immutable_target")
+                .await
+                .unwrap()
+                .as_i64(),
+            Some(3)
+        );
+    });
 }
