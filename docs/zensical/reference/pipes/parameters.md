@@ -753,7 +753,7 @@ parameters:
 ## `sync`
 
 - `sync.strategy` selects how an automatically synced pipe reads its source. The default is `backtrack`.
-- `sync.immutable: true` declares permanent row keys and values and enables the other strategies.
+- `sync.immutable: true` declares permanent row keys and values and enables the strategies that rely on immutability. Both `backtrack` and `naive` also support mutable pipes.
 - `sync.lookback_days` sets the number of UTC days checked by bounded corrective strategies. The default is 30.
 
 See [Immutable synchronization strategies](syncing.md#immutable-synchronization-strategies) for supported strategy names and connector requirements.

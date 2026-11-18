@@ -42,6 +42,40 @@ async fn target_count(env: &Env, pipe: &Pipe) -> i64 {
 }
 
 #[tokio::test]
+async fn mutable_naive_sync_merges_an_old_edit_without_schema_changes() {
+    let env = env("mutable_sync").await;
+    env.exec("CREATE TABLE upstream (ts TEXT NOT NULL, sensor INTEGER NOT NULL, reading INTEGER NOT NULL)")
+        .await;
+    env.exec("INSERT INTO upstream VALUES ('2024-05-25 12:00:00', 1, 10), ('2024-05-29 12:00:00', 1, 20)")
+        .await;
+    let pipe = env.pipe(
+        "readings",
+        &serde_json::json!({
+            "columns": {"datetime": "ts", "id": "sensor"},
+            "dtypes": {"ts": "datetime64[ns, UTC]", "sensor": "int", "reading": "int"},
+            "fetch": {"definition": "SELECT ts, sensor, reading FROM upstream"},
+            "sync": {"immutable": false, "strategy": "naive"},
+        }),
+    );
+    sync_at(&env, &pipe, 1).await;
+    let query = DataQuery::default();
+    let read = || env.conn.get_pipe_data(&pipe, &query);
+    let before = read().await.unwrap().unwrap();
+
+    env.exec("UPDATE upstream SET reading = 99 WHERE reading = 10")
+        .await;
+    sync_at(&env, &pipe, 1).await;
+    let after = read().await.unwrap().unwrap();
+    assert_eq!(before.dtypes(), after.dtypes());
+    assert_eq!(after.height(), 2);
+    assert!(
+        meerschaum_connector::pipe_ops::frame_to_docs(&after)
+            .iter()
+            .any(|row| { row["reading"] == meerschaum_kernel::value::Value::Int(99) })
+    );
+}
+
+#[tokio::test]
 async fn unbounded_iterative_sync_recovers_sparse_old_rows() {
     let (env, pipe) = fixture("unbounded-simple").await;
     sync_at(&env, &pipe, 1).await;

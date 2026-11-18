@@ -480,14 +480,17 @@ def _runner_labels(job):
 
 def test_linux_self_hosted_jobs_never_land_on_another_self_hosted_platform(rust, pytest_workflow):
     """A bare `self-hosted` also matches the self-hosted Mac: Linux jobs name Linux and X64."""
-    checked = 0
-    for workflow in (rust, pytest_workflow):
+    for workflow, required in (
+        (rust, {'clippy', 'test', 'frontcrate', 'package'}),
+        (pytest_workflow, {'artifacts', 'tests'}),
+    ):
+        checked = set()
         for name, job in workflow['jobs'].items():
             labels = _runner_labels(job)
             if 'self-hosted' in labels:
-                checked += 1
+                checked.add(name)
                 assert {'Linux', 'X64'} <= set(labels), (name, labels)
-    assert checked >= 7
+        assert required <= checked
 
 
 def test_fork_prs_cannot_run_any_self_hosted_job(rust, pytest_workflow):

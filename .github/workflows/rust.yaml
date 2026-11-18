@@ -149,7 +149,7 @@ jobs:
           scripts/parity/setup_reference.sh
           native_uv="$(command -v uv || printf '%s\n' "$HOME/.local/bin/uv")"
           python3 -m venv --without-pip "$native_test_env"
-          "$native_uv" pip install --python "$native_test_env/bin/python" pip -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt
+          "$native_uv" pip install --python "$native_test_env/bin/python" pip -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt -r requirements/polars.txt
           echo "PYTHON_BIN=$native_test_env/bin/python" >> "$GITHUB_ENV"
           echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Build the native Python extension

@@ -376,9 +376,9 @@ def test_exec_preserves_input_typed_while_readiness_is_in_flight(webterm_server,
 
 def test_exec_refuses_what_the_dashboard_does_not_offer(server, tab):
     tab.login()
-    tab.page.click('#go-button')
-    _wait_text(tab.page, '#terminal-exec-status', 'Terminal is unavailable')
-    ### The server applies the action's permissions itself: a non-admin user is refused.
+    from playwright.sync_api import expect
+    expect(tab.page.locator('#go-button')).to_be_hidden()
+    ### The server also requires authentication for direct action requests.
     anonymous = tab.page.request.post(
         f"{server.base_url}/execute", data=json.dumps({'sysargs': ['show', 'version']}),
         headers={'content-type': 'application/json'},
@@ -387,8 +387,9 @@ def test_exec_refuses_what_the_dashboard_does_not_offer(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_exec_sends_the_subaction_the_dashboard_shows(server, tab):
+def test_exec_sends_the_subaction_the_dashboard_shows(webterm_server, context):
     """`show pipes` -> `watch` shows `jobs` (`watch` has no `pipes`): Exec sends `watch jobs`."""
+    tab = Tab(context.new_page(), webterm_server.base_url)
     tab.login()
     page = tab.page
     page.select_option('#action-dropdown', 'watch')
@@ -418,10 +419,12 @@ def test_exec_sends_the_subaction_the_dashboard_shows(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_dashboard_buttons_keep_their_rows_at_every_width(server, tab):
+def test_dashboard_buttons_keep_their_rows_at_every_width(webterm_server, context):
     """No label wraps or clips and the terminal button stays beside Exec, at every width."""
+    tab = Tab(context.new_page(), webterm_server.base_url)
     tab.login()
     page = tab.page
+    page.wait_for_selector('#go-button')
     measure = """() => {
         const box = id => document.getElementById(id).getBoundingClientRect();
         const ids = ['go-button', 'show-webterm-button', 'get-pipes-button', 'get-jobs-button',
@@ -1107,7 +1110,7 @@ def test_without_the_terminal_the_dashboard_shows_the_banner(server, tab):
     tab.page.wait_for_selector('#console-pre')
     assert 'v' in tab.page.inner_text('#console-pre')
     assert tab.page.locator('#webterm-iframe').count() == 0
-    tab.goto('/dash/webterm', '#go-button')
+    tab.goto('/dash/webterm', '#action-dropdown')
     assert tab.page.locator('#webterm-iframe').count() == 0
     assert _errors(tab) == [], _errors(tab)
 

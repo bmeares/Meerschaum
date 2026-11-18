@@ -215,17 +215,20 @@ def test_vendored_xterm_is_served_locally(webterm_server, context):
 
 def test_without_the_flag_there_is_no_terminal(server, context):
     """The shared `server` runs `--no-webterm`: neither route is served, nor proxied to the host."""
+    from playwright.sync_api import expect
+
     tab = Tab(context.new_page(), server.base_url)
     tab.login()
     page = tab.page
     cookie = [c for c in context.cookies() if c['name'] == 'mrsm-session-id'][0]['value']
     assert page.request.get(f"{server.base_url}/webterm/{cookie}").status == 404
     assert page.request.get(f"{server.base_url}/websocket/{cookie}").status == 404
-    tab.goto('/dash/webterm', '#go-button')
+    tab.goto('/dash/webterm', '#action-dropdown')
     assert page.locator('#webterm-iframe').count() == 0
     ### v4's banner takes the terminal's place on the Terminal page, which the navigation leaves out.
-    tab.goto('/dash/terminal', '#go-button')
+    tab.goto('/dash/terminal', '#action-dropdown')
     assert page.locator('#webterm-iframe').count() == 0
+    expect(page.locator('#go-button')).to_be_hidden()
     assert page.locator('#console-nav-terminal').count() == 0
 
 

@@ -952,8 +952,8 @@ class Tab:
             self.page.wait_for_selector('#pages-navbar-div', timeout=30000)
 
     def wait_for_dashboard(self) -> None:
-        """The Terminal page is ready when its action form has its default (`show pipes`)."""
-        self.page.wait_for_selector('#go-button', timeout=30000)
+        """Wait for the signed-in Terminal page and its default action."""
+        self.page.wait_for_selector('#console-nav-user', state='attached', timeout=30000)
         self.page.wait_for_function(
             "document.getElementById('action-dropdown') && "
             "document.getElementById('action-dropdown').value === 'show'",
@@ -962,7 +962,7 @@ class Tab:
 
     def goto_terminal(self) -> None:
         """Open the Terminal page (`/dash/terminal`) and wait for its action form."""
-        self.goto('/dash/terminal', '#go-button')
+        self.goto('/dash/terminal', '#action-dropdown')
         self.wait_for_dashboard()
 
     def sign_out(self) -> None:

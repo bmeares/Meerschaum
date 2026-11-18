@@ -1,4 +1,4 @@
-//! Source query planning for immutable time-series pipes.
+//! Source query planning for time-series pipes.
 
 use std::sync::Arc;
 
@@ -87,7 +87,8 @@ impl Strategy {
             "simple-monthly-iterative-cpisync" => Self::Monthly(Correction::IterativeCpi),
             _ => return Err(invalid(format!("Unknown sync.strategy '{name}'."))),
         };
-        if strategy != Self::Backtrack && !matches!(sync.get("immutable"), Some(Value::Bool(true)))
+        if !matches!(strategy, Self::Backtrack | Self::Naive)
+            && !matches!(sync.get("immutable"), Some(Value::Bool(true)))
         {
             return Err(invalid(format!(
                 "sync.strategy '{name}' requires sync.immutable: true."

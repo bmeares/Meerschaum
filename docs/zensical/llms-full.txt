@@ -1053,7 +1053,7 @@ sync:
   strategy: unbounded-simple
 ```
 
-`backtrack` is the default and works for mutable pipes. Every other strategy requires the explicit immutability declaration. The declaration enables source query planning. You are responsible for keeping the source rows immutable. A normal sync still deduplicates by the configured row key, and the strategies do not delete rows.
+`backtrack` is the default and works for mutable pipes. `naive` also works with `sync.immutable: false`. The other strategies require an explicit immutability declaration. The declaration enables source query planning. You are responsible for keeping the source rows immutable. A normal sync still deduplicates by the configured row key, and the strategies do not delete rows.
 
 The names and diagrams in [Chapter 3 of the thesis](https://meerschaum.io/files/pdf/thesis.pdf#page=52) distinguish incremental **syncs** from historical **verification syncs**. A target watermark is a timestamp already present in the destination. The diagram shows a row that arrives behind the watermark and a verification window that can recover it.
 
@@ -1072,7 +1072,7 @@ flowchart LR
 | --- | --- |
 | `backtrack` | Starts at the newest target timestamp minus `fetch.backtrack_minutes`. |
 | `simple` | Starts at the newest target timestamp, including its boundary. Late rows older than that watermark need a verification sync. |
-| `naive` | Reads the entire source query and merges by row key. |
+| `naive` | Reads the entire source query and merges by row key. It picks up edits anywhere in the source history and needs no change-tracking columns in the target. |
 | `slow-id` | Starts at the oldest of the per-ID target watermarks for known IDs. A stalled series can widen the read for every known ID. |
 | `append` | Builds one SQL `UNION ALL` of per-ID queries using each ID's own target watermark. |
 | `join` | Left-joins the source query to a bound SQL `VALUES` table of target watermarks and filters each known ID at its own watermark. |
@@ -1090,7 +1090,7 @@ The three per-ID strategies include all source rows for IDs absent from the dest
 
 By default these strategies include up to 30 UTC days ending on the latest source day. Set `sync.lookback_days` to change the horizon. Add the `unbounded-` prefix to use the complete source timestamp extent. `unbounded-simple` is an alias for `unbounded-iterative-simple`. If stray rows in the 1970s extend an otherwise recent series by decades, unbounded iterative sync prunes equal-count ranges instead of probing every intervening day. When the query budget is exhausted it fetches the remaining ranges.
 
-Count-based strategies assume unique rows and a target that is a subset of the source. Equal counts can hide changed values or a deletion offset by an insertion. Continue using `backtrack` for mutable values. Use [window replacement](#replacing-a-window) for an authoritative source that can remove rows, and choose a window that covers the changes.
+Count-based strategies assume unique rows and a target that is a subset of the source. Equal counts can hide changed values or a deletion offset by an insertion. For mutable values, use `backtrack` for edits within a known recent horizon or `naive` to scan the full source history. Use [window replacement](#replacing-a-window) for an authoritative source that can remove rows, and choose a window that covers the changes.
 
 Daily Row Count requires PostgreSQL, SQLite, or DuckDB on both sides. Iterative CPISync uses PostgreSQL-compatible connectors and a unique timestamp per ID at microsecond precision. For each day, both databases evaluate their characteristic polynomials at points outside the timestamp domain. Dividing the samples cancels the timestamps already in the target. Meerschaum fetches only source rows at roots of the remaining polynomial. Days above 1,024 source rows or 16 missing rows, duplicate timestamps within a series, or inconsistent samples fall back to an ordinary window fetch. [Characteristic polynomials and Iterative CPISync](https://meerschaum.io/files/pdf/thesis.pdf#page=57)
 
@@ -1106,7 +1106,7 @@ The monthly strategies do a simple incremental sync on ordinary runs and a histo
 
 The verification covers all available history. Monthly strategies require a registered pipe on a direct SQL instance and an unfiltered sync. They follow the same database requirements as their verification strategy. [Corrective syncs in the thesis](https://meerschaum.io/files/pdf/thesis.pdf#page=61)
 
-Strategies apply to automatic source reads through `Pipe.sync()` and `mrsm sync pipes`. Explicit begin or end bounds keep their original meaning. The advanced strategies require a connector-managed fetch. Delegated execution uses a window authorized by Main. An automatic immutable strategy cannot be combined with fetch replacement or with existing-row checks disabled.
+Strategies apply to automatic source reads through `Pipe.sync()` and `mrsm sync pipes`. Explicit begin or end bounds keep their original meaning. The advanced strategies require a connector-managed fetch. Delegated execution uses a window authorized by Main. Automatic strategies other than `backtrack` require merge mode and existing-row checks.
 
 ## Replacing a window
 
@@ -2398,7 +2398,7 @@ parameters:
 ## `sync`
 
 - `sync.strategy` selects how an automatically synced pipe reads its source. The default is `backtrack`.
-- `sync.immutable: true` declares permanent row keys and values and enables the other strategies.
+- `sync.immutable: true` declares permanent row keys and values and enables the strategies that rely on immutability. Both `backtrack` and `naive` also support mutable pipes.
 - `sync.lookback_days` sets the number of UTC days checked by bounded corrective strategies. The default is 30.
 
 See [Immutable synchronization strategies](syncing.md#immutable-synchronization-strategies) for supported strategy names and connector requirements.

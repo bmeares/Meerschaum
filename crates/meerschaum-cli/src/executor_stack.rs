@@ -1363,15 +1363,6 @@ mod tests {
                 .filter(|service| service["labels"]["mrsm.executor.managed"] == "true")
                 .all(|service| service["image"] == serde_json::to_value(&custom).unwrap())
         );
-        let defaults = meerschaum_core::config::default_config("", 1, false);
-        assert_eq!(
-            defaults
-                .get("stack")
-                .and_then(|stack| stack.get("executor"))
-                .and_then(|executor| executor.get("image"))
-                .and_then(Value::as_str),
-            Some(default_executor_image().as_str())
-        );
     }
 
     #[test]

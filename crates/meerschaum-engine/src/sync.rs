@@ -484,13 +484,13 @@ fn fetch_strategy(
 ) -> Result<Strategy, String> {
     let strategy = Strategy::read(pipe).map_err(|error| error.to_string())?;
     if strategy != Strategy::Backtrack && replacing {
-        return Err("An immutable sync strategy cannot use fetch replacement.".into());
+        return Err("The selected sync strategy cannot use fetch replacement.".into());
     }
     if strategy != Strategy::Backtrack && strategy::automatic(args) && !args.check_existing {
-        return Err("An immutable sync strategy requires checking existing rows.".into());
+        return Err("The selected sync strategy requires checking existing rows.".into());
     }
     if strategy != Strategy::Backtrack && env.delivery.is_some() && strategy::automatic(args) {
-        return Err("An automatic immutable sync strategy requires a direct sync. Use an explicit window for delegated execution.".into());
+        return Err("The selected automatic sync strategy requires a direct sync. Use an explicit window for delegated execution.".into());
     }
     Ok(strategy)
 }
