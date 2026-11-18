@@ -456,6 +456,7 @@ impl ChunkStream for WindowStream {
                 if let Some(chunk) = stream.next_chunk().await? {
                     return Ok(Some(chunk));
                 }
+                stream.finish().await?;
                 self.stream = None;
             }
             let Some(FetchWindow { query, cpi }) = self.windows.next() else {
@@ -490,6 +491,9 @@ impl ChunkStream for WindowStream {
                 self.stream = Some(Box::new(FrameChunks::new(frame, size)));
             }
         }
+    }
+    async fn finish(&mut self) -> ConnectorResult<FetchedKind> {
+        Ok(FetchedKind::Data { generator: true })
     }
 }
 

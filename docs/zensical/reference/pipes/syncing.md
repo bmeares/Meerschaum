@@ -225,7 +225,7 @@ By default these strategies include up to 30 UTC days ending on the latest sourc
 
 Count-based strategies assume unique rows and a target that is a subset of the source. Equal counts can hide changed values or a deletion offset by an insertion. Continue using `backtrack` for mutable values. Use [window replacement](#replacing-a-window) for an authoritative source that can remove rows, and choose a window that covers the changes.
 
-Daily Row Count requires PostgreSQL, SQLite, or DuckDB on both sides. Iterative CPISync uses PostgreSQL-compatible connectors and a unique timestamp per ID at microsecond precision. For each day, both databases evaluate their characteristic polynomials at points outside the timestamp domain. Dividing the samples cancels the timestamps already in the target. Meerschaum fetches only source rows at roots of the remaining polynomial. Days above 1,024 source rows or 16 missing rows, duplicate timestamps within a series, or inconsistent samples fall back to an ordinary window fetch. [Characteristic polynomials and Iterative CPISync](https://meerschaum.io/files/pdf/thesis.pdf#page=66)
+Daily Row Count requires PostgreSQL, SQLite, or DuckDB on both sides. Iterative CPISync uses PostgreSQL-compatible connectors and a unique timestamp per ID at microsecond precision. For each day, both databases evaluate their characteristic polynomials at points outside the timestamp domain. Dividing the samples cancels the timestamps already in the target. Meerschaum fetches only source rows at roots of the remaining polynomial. Days above 1,024 source rows or 16 missing rows, duplicate timestamps within a series, or inconsistent samples fall back to an ordinary window fetch. [Characteristic polynomials and Iterative CPISync](https://meerschaum.io/files/pdf/thesis.pdf#page=57)
 
 ### Monthly correction
 
@@ -237,7 +237,7 @@ The monthly strategies do a simple incremental sync on ordinary runs and a histo
 - `simple-monthly-binary-search`
 - `simple-monthly-iterative-cpisync`
 
-The verification covers all available history. Monthly strategies require a registered pipe on a direct SQL instance and an unfiltered sync. They follow the same database requirements as their verification strategy. [Corrective syncs in the thesis](https://meerschaum.io/files/pdf/thesis.pdf#page=69)
+The verification covers all available history. Monthly strategies require a registered pipe on a direct SQL instance and an unfiltered sync. They follow the same database requirements as their verification strategy. [Corrective syncs in the thesis](https://meerschaum.io/files/pdf/thesis.pdf#page=61)
 
 Strategies apply to automatic source reads through `Pipe.sync()` and `mrsm sync pipes`. Explicit begin or end bounds keep their original meaning. The advanced strategies require a connector-managed fetch. Delegated execution uses a window authorized by Main. An automatic immutable strategy cannot be combined with fetch replacement or with existing-row checks disabled.
 
