@@ -63,7 +63,7 @@ pub(crate) fn legacy_sqlite_id_index(
     if ctx.flavor != Flavor::Sqlite {
         return Ok(None);
     }
-    let mut historical = index_queries(ctx, pipe, state, Some("None"))?;
+    let mut historical = index_queries(ctx, pipe, state, Some("None"), false)?;
     Ok(historical
         .shift_remove(&id)
         .into_iter()
@@ -151,7 +151,18 @@ pub fn get_create_index_queries(
     pipe: &SqlPipe,
     state: &IndexState,
 ) -> Result<IndexMap<String, Vec<String>>> {
-    index_queries(ctx, pipe, state, None)
+    index_queries(ctx, pipe, state, None, false)
+}
+
+/// Internal history authorization reads the table from a separate connection while
+/// the write holds its locks. A unique index supplies the same upsert key while
+/// permitting those reads.
+pub(crate) fn get_scoped_pg_history_index_queries(
+    ctx: &ConnectorCtx,
+    pipe: &SqlPipe,
+    state: &IndexState,
+) -> Result<IndexMap<String, Vec<String>>> {
+    index_queries(ctx, pipe, state, None, true)
 }
 
 fn index_queries(
@@ -159,6 +170,7 @@ fn index_queries(
     pipe: &SqlPipe,
     state: &IndexState,
     missing_id_name: Option<&str>,
+    pg_allow_history_reads: bool,
 ) -> Result<IndexMap<String, Vec<String>>> {
     let flavor = ctx.flavor;
     // NOTE: Due to recent breaking changes in DuckDB, indices don't behave properly.
@@ -525,7 +537,16 @@ fn index_queries(
     };
     let create_unique_index_query =
         format!("CREATE UNIQUE INDEX {unique_index_name} ON {pipe_name} ({unique_index_cols_str})");
-    let mut constraint_queries = if nulls_not_distinct {
+    let mut constraint_queries = if pg_allow_history_reads {
+        let nulls = if nulls_not_distinct {
+            " NULLS NOT DISTINCT"
+        } else {
+            ""
+        };
+        vec![format!(
+            "CREATE UNIQUE INDEX {unique_index_name} ON {pipe_name} ({indices_cols_str}){nulls}"
+        )]
+    } else if nulls_not_distinct {
         vec![format!(
             "ALTER TABLE {pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE NULLS NOT DISTINCT ({indices_cols_str})"
         )]

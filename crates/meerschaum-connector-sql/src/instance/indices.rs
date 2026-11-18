@@ -13,7 +13,7 @@ use crate::pipe::SqlPipe;
 use crate::queries::ConnectorCtx;
 use crate::queries::index::{
     DropIndexState, IndexState, get_create_index_queries, get_drop_index_queries,
-    get_pipe_index_names,
+    get_pipe_index_names, get_scoped_pg_history_index_queries,
 };
 
 use super::{SqlConnector, be, geopackage};
@@ -249,11 +249,21 @@ impl SqlConnector {
             nulls_not_distinct: crate::queries::index::null_safe_unique_index(self.flavor, sp)
                 && self.supports_nulls_not_distinct().await,
         };
-        let mut queries = get_create_index_queries(&self.ctx(), sp, &state).map_err(be)?;
+        let internal = sp.pipe().temporary && sp.pipe().connector_keys() == "mrsm";
+        let mut queries = if internal
+            && self.flavor.pg_partition()
+            && meerschaum_connector::mutation::current()
+                .is_some_and(|authority| authority.direct_administrator())
+        {
+            get_scoped_pg_history_index_queries(&self.ctx(), sp, &state)
+        } else {
+            get_create_index_queries(&self.ctx(), sp, &state)
+        }
+        .map_err(be)?;
         // The v4 renderer always emits datetime/id DDL, even for existing indices.
         // Cold internal readiness checks run against already initialized tables too;
         // skip those ordinary indices at runtime while retaining missing unique keys.
-        if sp.pipe().temporary && sp.pipe().connector_keys() == "mrsm" {
+        if internal {
             let names = get_pipe_index_names(&self.ctx(), sp);
             for role in ["datetime", "id"] {
                 if role == "datetime" && self.flavor.is_timescaledb() && sp.hypertable() {

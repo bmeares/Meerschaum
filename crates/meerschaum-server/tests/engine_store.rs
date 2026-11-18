@@ -86,6 +86,35 @@ async fn direct_admin_engine_writes_on_postgres() {
     )
     .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    for (period, started) in [
+        ("first", "2026-01-01T00:00:00Z"),
+        ("second", "2026-06-01T00:00:00Z"),
+    ] {
+        let run_id = format!("engine-{nonce}-{period}");
+        for (path, rows) in [
+            (
+                "/engine/runs",
+                json!([{"run_id": run_id, "started": started, "status": "running"}]),
+            ),
+            (
+                "/engine/pipes/engine_nodes/write",
+                json!([{"run_id": run_id, "started": started, "pipe_ref": reference,
+                        "status": "succeeded", "action": "incremental", "inserted": 1}]),
+            ),
+        ] {
+            let r = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                send(&app, req("POST", path, Some(&admin), body(rows))),
+            )
+            .await
+            .expect(
+                "PostgreSQL history authorization must be able to read while creating a partition",
+            );
+            assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.text());
+            assert_eq!(r.json()["success"], json!(true), "{path}: {}", r.text());
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
