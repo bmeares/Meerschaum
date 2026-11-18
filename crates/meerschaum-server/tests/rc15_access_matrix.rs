@@ -1433,7 +1433,7 @@ async fn a_credential_never_holds_more_than_its_owner() {
     .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
     assert_eq!(message(&r), "Missing required scope: 'actions:execute'");
-    // An administrator's narrow key holds its scopes only (and sees every pipe).
+    // The narrow key has pipes:read and can list pipes visible to Everyone.
     let r = call(
         &f,
         "POST",
@@ -1443,7 +1443,10 @@ async fn a_credential_never_holds_more_than_its_owner() {
     )
     .await;
     let ro = format!("Bearer {}", r.json()["api_key"].as_str().unwrap());
-    assert_eq!(listed(&get(&f, &ro, "/pipes/keys").await).len(), 5);
+    assert_eq!(
+        listed(&get(&f, &ro, "/pipes/keys").await),
+        names(&[PUBLIC, LEGACY])
+    );
     let r = call(
         &f,
         "PATCH",
