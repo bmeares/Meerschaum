@@ -407,7 +407,12 @@ async fn submitted_pipeline_and_node_proofs_are_stripped_or_validated_on_both_wr
             ),
         )
         .await;
-        assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+        assert_eq!(
+            response.status,
+            StatusCode::NOT_FOUND,
+            "{route}: {}",
+            response.text()
+        );
         let stored = fixture
             .state
             .engine
@@ -417,11 +422,7 @@ async fn submitted_pipeline_and_node_proofs_are_stripped_or_validated_on_both_wr
             })
             .await
             .unwrap();
-        assert!(
-            !serde_json::to_string(&stored)
-                .unwrap()
-                .contains("registration_registry")
-        );
+        assert!(stored.is_empty(), "{route} persisted a forged run");
         assert_eq!(
             send(
                 &fixture.app,
