@@ -14,7 +14,10 @@ pub const MIN_EXECUTOR_DOCKER_MAJOR: u64 = 28;
 
 /// Executors use the same-release native full image independently of the API's image variant.
 pub fn default_executor_image() -> String {
-    format!("bmeares/meerschaum:{}-full", crate::VERSION)
+    format!(
+        "bmeares/meerschaum:{}-full",
+        meerschaum_core::python_guard::expected_version()
+    )
 }
 
 fn executor_image(setting: Option<&Value>) -> Result<Value, String> {
@@ -1312,6 +1315,7 @@ mod tests {
 
     #[test]
     fn executor_images_are_native_full_by_default_independent_of_the_api_variant() {
+        assert!(!default_executor_image().contains("-rc."));
         let (root, desired) = fixture();
         let mut model = compose().to_map();
         let services = map_entry(&mut model, "services").unwrap();
