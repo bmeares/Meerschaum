@@ -981,7 +981,8 @@ pub fn monitor_log_stream(
                     on_stop(&result);
                 }
             }
-            return SuccessTuple::success();
+            // A deferred publisher may finish writing while the callback waits.
+            break;
         }
         // v4 also waited until the job had printed something (`emitted_text`), so a job whose
         // first act was a silent read was never answered; the latest lines have been emitted

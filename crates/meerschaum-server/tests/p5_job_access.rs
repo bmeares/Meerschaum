@@ -653,7 +653,7 @@ async fn a_client_never_chooses_a_jobs_team_scope() {
 }
 
 #[tokio::test]
-async fn renaming_or_deleting_a_team_moves_its_jobs() {
+async fn renaming_and_deleting_a_team_updates_job_labels_and_preserves_history_access() {
     let f = fixture(false).await;
     let (admin, alice, bob, gina) = (
         token(&f, "admin").await,
@@ -698,8 +698,10 @@ async fn renaming_or_deleting_a_team_moves_its_jobs() {
         f.jobs.properties("data-job").get("team"),
         Some(&Value::Null)
     );
-    // Everyone's now.
-    assert_eq!(names(&get(&f, &gina, "/jobs").await), ["data-job"]);
+    // Retagging clears the display name. Retained history still identifies its
+    // original Team and registered owner.
+    assert_eq!(names(&get(&f, &gina, "/jobs").await), Vec::<String>::new());
+    assert_eq!(names(&get(&f, &alice, "/jobs").await), ["data-job"]);
     assert_eq!(
         *f.jobs.retagged.lock().unwrap(),
         [

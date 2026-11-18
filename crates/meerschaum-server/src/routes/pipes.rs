@@ -1101,37 +1101,6 @@ impl DataAdmission {
             .map_err(|e| ApiError::exception("Failed to load a pipe's attributes", e))?;
         let registered = !attributes.is_empty();
         let stored_parameters = crate::state::parameters_of(&attributes);
-        if registered {
-            let mut expected = self
-                .parameters
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if expected.is_some() && *expected != stored_parameters {
-                return Err(ApiError::new(
-                    409,
-                    "The pipe definition changed during this data request; retry with fresh metadata.",
-                ));
-            }
-            *expected = stored_parameters.clone();
-        }
-        let registration = attributes
-            .get("pipe_id")
-            .and_then(|identity| match identity {
-                Value::Int(_) | Value::Str(_) => Some(identity.py_str()),
-                _ => None,
-            });
-        {
-            let mut expected = self.registration.lock().unwrap_or_else(|e| e.into_inner());
-            if expected.is_some() && *expected != registration {
-                return Err(ApiError::new(
-                    409,
-                    "The pipe's registration changed during the sync; retry the request.",
-                ));
-            }
-            if registered {
-                *expected = registration;
-            }
-        }
         // The hidden-target index and source permissions may have changed while metadata
         // was prepared. Refresh both; a failed read is not default public access.
         let dict = self
@@ -1144,7 +1113,7 @@ impl DataAdmission {
         let mut pipe = requested.clone();
         pipe.temporary = false;
         pipe.set_parameters(if registered {
-            crate::state::parameters_of(&attributes).ok_or_else(|| {
+            stored_parameters.clone().ok_or_else(|| {
                 ApiError::new(503, "The pipe's registered parameters are unavailable.")
             })?
         } else {
@@ -1197,6 +1166,38 @@ impl DataAdmission {
             &pipe,
             &index.hidden_targets(&caller),
         )?;
+        // Check metadata drift only after verifying the current caller can see the target.
+        if registered {
+            let mut expected = self
+                .parameters
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if expected.is_some() && *expected != stored_parameters {
+                return Err(ApiError::new(
+                    409,
+                    "The pipe definition changed during this data request; retry with fresh metadata.",
+                ));
+            }
+            *expected = stored_parameters.clone();
+        }
+        let registration = attributes
+            .get("pipe_id")
+            .and_then(|identity| match identity {
+                Value::Int(_) | Value::Str(_) => Some(identity.py_str()),
+                _ => None,
+            });
+        {
+            let mut expected = self.registration.lock().unwrap_or_else(|e| e.into_inner());
+            if expected.is_some() && *expected != registration {
+                return Err(ApiError::new(
+                    409,
+                    "The pipe's registration changed during the sync; retry the request.",
+                ));
+            }
+            if registered {
+                *expected = registration;
+            }
+        }
         Ok(pipe)
     }
 }

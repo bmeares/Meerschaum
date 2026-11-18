@@ -13,6 +13,7 @@ use meerschaum_connector::{
     Connector, ConnectorError, ConnectorResult, DataQuery, DateBound, InstanceConnector, PipeId,
     PipesKeys, PipesKeysQuery, SyncOptions,
 };
+use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::access::{Team, TeamRole};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
@@ -33,7 +34,7 @@ fn pipe(connector: &str, metric: &str) -> Pipe {
 }
 
 struct PausedData {
-    inner: common::MemoryInstance,
+    inner: Arc<dyn InstanceConnector>,
     pause: AtomicBool,
     entered: Notify,
     release: Notify,
@@ -42,9 +43,9 @@ struct PausedData {
 }
 
 impl PausedData {
-    fn new() -> Self {
+    fn new(inner: Arc<dyn InstanceConnector>) -> Self {
         Self {
-            inner: common::MemoryInstance::new("data"),
+            inner,
             pause: AtomicBool::new(false),
             entered: Notify::new(),
             release: Notify::new(),
@@ -164,7 +165,11 @@ async fn fixture(tweak: impl FnOnce(&mut ServerConfig)) -> Fixture {
     let mut team = Team::new("Data");
     team.members.insert("alice".into(), TeamRole::Member);
     assert!(auth.register_team(&mut team).await.success);
-    let data = Arc::new(PausedData::new());
+    let database = root.path().join("data.db");
+    let connector = SqlConnector::from_uri("data", &format!("sqlite:///{}", database.display()))
+        .await
+        .unwrap();
+    let data = Arc::new(PausedData::new(Arc::new(connector)));
     let mut config = common::config(root.path());
     config.allow_multiple_instances = true;
     config.allowed_instance_keys = vec!["sql:*".into()];

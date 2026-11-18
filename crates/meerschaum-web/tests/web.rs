@@ -358,6 +358,22 @@ struct ScriptedJobs {
     held: Mutex<Vec<tokio::sync::mpsc::Sender<LogEvent>>>,
     /// Properties of particular jobs (the others were started by `bob`).
     properties: Mutex<Vec<(String, Json)>>,
+    default_properties: Json,
+}
+
+fn job_history(owner: &str, user_id: i64, team: Option<(&str, &str)>) -> Json {
+    use meerschaum_core::job_access::{OWNER_BINDING_KEY, TEAM_ID_KEY};
+    use meerschaum_server::executor::callbacks::OwnerBinding;
+
+    json!({
+        "owner": owner,
+        "team": team.map(|(name, _)| name),
+        (TEAM_ID_KEY): team.map(|(_, id)| id),
+        (OWNER_BINDING_KEY): OwnerBinding::User {
+            username: owner.into(),
+            user_id: meerschaum_core::Value::Int(user_id),
+        },
+    })
 }
 
 impl ScriptedJobs {
@@ -393,7 +409,9 @@ impl JobsBackend for ScriptedJobs {
             .iter()
             .find(|(n, _)| n == name)
             .map(|(_, p)| p.clone());
-        Some(json!({"daemon": {"properties": own.unwrap_or_else(|| json!({"mrsm_owner": "bob"}))}}))
+        Some(
+            json!({"daemon": {"properties": own.unwrap_or_else(|| self.default_properties.clone())}}),
+        )
     }
     async fn exists(&self, name: &str) -> bool {
         self.scripts.lock().unwrap().iter().any(|(n, _)| n == name)
@@ -463,9 +481,12 @@ fn stream_app(
 ) -> (Router, WebConfig, Arc<ScriptedJobs>, AppState) {
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     instance.seed_user("admin", "pass", Some("admin"));
-    instance.seed_user("bob", "pw", None);
+    let bob_id = instance.seed_user("bob", "pw", None);
     instance.seed_user("eve", "pw", None);
-    let jobs = Arc::new(ScriptedJobs::default());
+    let jobs = Arc::new(ScriptedJobs {
+        default_properties: job_history("bob", bob_id, None),
+        ..Default::default()
+    });
     let state = AppState::builder(cfg, instance)
         .secret(common::SECRET.to_vec())
         .jobs(jobs.clone())
@@ -684,19 +705,28 @@ async fn the_job_log_stream_is_its_team_s() {
     let root = tempfile::tempdir().unwrap();
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     instance.seed_user("admin", "pass", Some("admin"));
-    for user in ["alice", "bob", "dave"] {
+    let alice_id = instance.seed_user("alice", "pw", None);
+    for user in ["bob", "dave"] {
         instance.seed_user(user, "pw", None);
     }
+    let mut data_id = None;
     for (team, member) in [("Data", "bob"), ("Ops", "dave")] {
         let mut t = meerschaum_core::access::Team::new(team);
         t.add_member(member, meerschaum_core::access::TeamRole::Member);
         assert!(instance.register_team(&mut t).await.success);
+        if team == "Data" {
+            data_id = t.id;
+        }
     }
     let jobs = Arc::new(ScriptedJobs::default());
     jobs.add_with(
         "nightly",
         script(),
-        json!({"owner": "alice", "team": "Data"}),
+        job_history(
+            "alice",
+            alice_id,
+            Some(("Data", data_id.as_deref().unwrap())),
+        ),
     );
     let state = AppState::builder(config(root.path()), instance)
         .secret(common::SECRET.to_vec())
