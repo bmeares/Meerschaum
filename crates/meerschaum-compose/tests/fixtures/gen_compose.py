@@ -56,6 +56,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import venv
 
 HERE = pathlib.Path(__file__).resolve().parent
 PROJECTS = HERE / 'projects'
@@ -532,6 +533,9 @@ def generate(project_name):
             (tmp / sub).mkdir()
         for name, text in (case.get('host_plugins') or {}).items():
             (tmp / 'host-plugins' / name).write_text(text, encoding='utf-8')
+            # These synthetic plugins have no dependencies. Prepare their environments before
+            # the v4 reference imports them, so parity is independent of ensurepip and uv seeding.
+            venv.EnvBuilder(with_pip=False, symlinks=True).create(tmp / 'venvs' / pathlib.Path(name).stem)
         ### `envyaml` is imported with `attempt_import(..., venv='compose')`; the reference venv
         ### ships it, a working-tree interpreter may not (then use the test root's venv).
         import importlib.util
