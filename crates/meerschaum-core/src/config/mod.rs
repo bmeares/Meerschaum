@@ -809,6 +809,11 @@ static URI_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 /// registers a connector type whose name happens to match one of these exact markers.
 /// Keep in sync with config/environment.py; do not reserve an entire connector prefix.
 pub const NATIVE_EXECUTION_ENV_VARS: &[&str] = &[
+    "MRSM_API_HOST",
+    "MRSM_API_HOST_CONFIG",
+    "MRSM_API_HOST_PARENT_PIPE",
+    "MRSM_API_HOST_PROXY_TOKEN",
+    "MRSM_API_HOST_TRANSPORT",
     "MRSM_API_EXECUTION",
     "MRSM_METADATA_EXECUTION",
     "MRSM_NATIVE_JOB_LIFECYCLE",
@@ -2283,6 +2288,8 @@ mod tests {
             ("MRSM_ROOT_DIR", "/x"),
             ("MRSM_SQL_A.B", "x"),
             ("MRSM_API_MY-LABEL", "http://x"),
+            ("MRSM_API_HOST_PROXY_TOKEN", "synthetic-internal-token"),
+            ("MRSM_API_HOSTED", "http://x"),
             ("HOME", "/home"),
         ]
         .iter()
@@ -2290,7 +2297,7 @@ mod tests {
         .collect();
         assert_eq!(
             get_connector_env_vars(&env),
-            vec!["MRSM_SQL_FOO".to_string(), "MRSM_API_MY-LABEL".to_string()]
+            vec!["MRSM_SQL_FOO", "MRSM_API_MY-LABEL", "MRSM_API_HOSTED"]
         );
         assert_eq!(
             parse_connector_env_var("MRSM_SQL_MY_DB"),
