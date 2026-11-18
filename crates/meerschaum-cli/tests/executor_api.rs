@@ -849,6 +849,7 @@ async fn signed_executor_runs_and_streams_jobs_without_creating_host_jobs_or_tru
     command
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("TMPDIR", std::env::temp_dir())
         .env("HOME", executor_root.path())
         .env("MRSM_ROOT_DIR", executor_root.path())
         .env("MRSM_PLUGINS_DIR", executor_root.path().join("plugins"))

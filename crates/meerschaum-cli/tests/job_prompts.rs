@@ -484,6 +484,7 @@ fn a_sandboxed_team_jobs_prompt_is_seen_and_answered() {
     let started = home
         .command()
         .env_remove("MRSM_PYTHON")
+        .env("TMPDIR", std::env::temp_dir())
         .args([
             "start",
             "jobs",
