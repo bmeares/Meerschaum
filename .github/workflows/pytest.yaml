@@ -180,7 +180,10 @@ jobs:
         if: ${{ matrix.shard == 'core' }}
         run: python scripts/ci/services.py validate --root "$RUNNER_TEMP/mrsm-collection-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
       - name: Run this shard with its own roots, ports, databases and cleanup
-        run: python scripts/ci/services.py run --shard "${{ matrix.shard }}" --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}" --workers "${{ matrix.workers }}" -- -o faulthandler_timeout=300
+        run: |
+          shard_tmp="$(mktemp -d "$RUNNER_TEMP/t.XXXXXX")"
+          trap 'rm -rf -- "$shard_tmp"' EXIT
+          TMPDIR="$shard_tmp" python scripts/ci/services.py run --shard "${{ matrix.shard }}" --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}" --workers "${{ matrix.workers }}" -- -o faulthandler_timeout=300
       - name: Clean up only this shard's owned services after failure or cancellation
         if: ${{ always() }}
         run: python scripts/ci/services.py cleanup --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}"

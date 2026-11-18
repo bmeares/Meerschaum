@@ -222,8 +222,10 @@ step_duckdb_lib() { log "DuckDB shared library"; scripts/rust/duckdb_lib.sh; }
 step_test()   {
   # Test processes need an isolated root; ordinary cargo commands use normal runtime paths.
   local test_scratch
-  test_scratch="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mrsm-rust-tests.XXXXXX")"
+  test_scratch="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mrsm.XXXXXX")"
   trap "rm -rf '$test_scratch'" EXIT
+  # Keep temporary SQLite databases and sockets in the job's owned scratch directory.
+  export TMPDIR="$test_scratch"
   if [ -z "${MRSM_ROOT_DIR+x}" ]; then
     mkdir -p "$test_scratch/root"
     export MRSM_ROOT_DIR="$test_scratch/root"
