@@ -430,10 +430,10 @@ impl Term {
     }
 
     async fn send_json(&mut self, value: Value) {
-        let _ = self
-            .socket
+        self.socket
             .send(Message::Text(value.to_string().into()))
-            .await;
+            .await
+            .expect("send the terminal input");
     }
 
     async fn send(&mut self, text: &str) {
@@ -491,7 +491,7 @@ impl Term {
         self.line("show version").await;
         assert!(
             self.wait_for(
-                |out| out[before.min(out.len())..].contains("Meerschaum v"),
+                |out| prompt_follows(&out[before..], |response| response.contains("Meerschaum v")),
                 Duration::from_secs(90)
             )
             .await,
@@ -499,6 +499,15 @@ impl Term {
             self.out
         );
     }
+}
+
+/// A command finishes when its response is visible and the line editor is ready again.
+fn prompt_follows(text: &str, response: impl FnOnce(&str) -> bool) -> bool {
+    [" ] ➤", " ] >"]
+        .into_iter()
+        .filter_map(|prompt| text.rfind(prompt))
+        .max()
+        .is_some_and(|start| response(&text[..start]))
 }
 
 /// Whether terminal output says a line was refused (by the server's decision, or because the
@@ -641,7 +650,7 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
     bob.line("show pipes").await;
     assert!(
         bob.wait_for(
-            |out| out[before.min(out.len())..].contains("tpr_edit"),
+            |out| prompt_follows(&out[before..], |response| response.contains("tpr_edit")),
             Duration::from_secs(60)
         )
         .await,
@@ -764,18 +773,22 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
     for (name, line) in &attempts {
         let before = bob.out.len();
         bob.line(line).await;
-        // Each refusal is answered before the next line.
+        // Submit the next line once the denial has been followed by the new prompt.
         let answered = bob
             .wait_for(
-                |out| refused(&out[before.min(out.len())..]),
+                |out| prompt_follows(&out[before..], refused),
                 Duration::from_secs(60),
             )
             .await;
         assert!(
             answered,
-            "{name}: no refusal for {line:?}:\n{}",
-            &bob.out[before..]
+            "{name}: no refusal for {line:?}:\n{}\nServer log:\n{}",
+            &bob.out[before..],
+            server.log()
         );
+        // Give tmux a different screen before the next refusal. Consecutive commands can
+        // draw the same denial, which its incremental redraw may leave untouched.
+        bob.ready().await;
     }
     // List jobs only through the caller's visible job catalog. Named mutations still require
     // a visible job and its matching permission.

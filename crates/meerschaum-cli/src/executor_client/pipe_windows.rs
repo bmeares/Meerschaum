@@ -91,7 +91,7 @@ impl Proof<'_> {
             );
         }
         let launch = super::launch(self.record)?;
-        let identity = meerschaum_server::executor::admission::typed_api_identity(
+        let mut identity = meerschaum_server::executor::admission::typed_api_identity(
             &state,
             self.grant,
             launch,
@@ -121,6 +121,13 @@ impl Proof<'_> {
         )
         .await
         .map_err(|error| error.detail_text())?;
+        // The supervisor may renew this same live grant during a state read. Its
+        // lease can only extend here. Every authority and launch field must still agree.
+        if identity.grant.lease_until > chrono::Utc::now().timestamp()
+            && current.grant.lease_until > identity.grant.lease_until
+        {
+            identity.grant.lease_until = current.grant.lease_until;
+        }
         if identity != current {
             return Err(unavailable());
         }
