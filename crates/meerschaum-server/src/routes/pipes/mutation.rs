@@ -14,6 +14,10 @@ pub(crate) enum Operation {
     Maintenance { schema: bool },
 }
 
+pub(super) fn direct_administrator(caller: &Access) -> bool {
+    caller.full_admin() && !matches!(caller.auth, Some(crate::auth::Principal::Execution(_)))
+}
+
 struct Authority {
     state: AppState,
     source: Source,
@@ -73,6 +77,12 @@ impl Authority {
         };
         // Bypass the request's cached JWT and role resolution on every native check.
         let caller = self.fresh(permissions).await?;
+        if self.direct_administrator() && !direct_administrator(&caller) {
+            return Err(ApiError::new(
+                403,
+                "The original administrator authority changed.",
+            ));
+        }
         let graph_source = match &self.source {
             Source::Headers(_) => caller.clone(),
             Source::Callback { grant, launch, .. } => {
@@ -252,6 +262,10 @@ impl Authority {
 
 #[async_trait::async_trait]
 impl MutationCheck for Authority {
+    fn direct_administrator(&self) -> bool {
+        matches!(self.source, Source::Headers(_)) && direct_administrator(&self.original)
+    }
+
     async fn check(&self) -> Result<(), String> {
         self.check_current()
             .await

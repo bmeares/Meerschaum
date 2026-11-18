@@ -15,6 +15,10 @@ struct Compare {
 }
 #[meerschaum_connector::async_trait]
 impl MutationCheck for Compare {
+    fn direct_administrator(&self) -> bool {
+        self.parent.direct_administrator()
+    }
+
     fn rollback_completed(&self, succeeded: bool) {
         self.parent.rollback_completed(succeeded);
     }

@@ -917,6 +917,7 @@ struct DataAdmission {
     logical_reference: String,
     native_alias: Option<super::engine::selection::SelectedEngine>,
     innodb_user_service: bool,
+    direct_administrator: bool,
     graph_target: std::sync::Mutex<
         Option<(
             crate::executor::pipe_operation::CallbackBinding,
@@ -963,6 +964,7 @@ fn captured_data_admission(
         logical_reference: pipe.pipe_ref(),
         native_alias: None,
         innodb_user_service: false,
+        direct_administrator: false,
         graph_target: Default::default(),
         parameters: Default::default(),
         inference_failure: Default::default(),
@@ -996,6 +998,16 @@ pub(crate) fn check_data_destination(
 }
 
 impl DataAdmission {
+    fn check_administrator(&self, caller: &Access) -> Result<(), ApiError> {
+        if self.direct_administrator && !mutation::direct_administrator(caller) {
+            return Err(ApiError::new(
+                403,
+                "The original administrator authority changed.",
+            ));
+        }
+        Ok(())
+    }
+
     async fn canonical(
         &self,
         conn: &Arc<dyn InstanceConnector>,
@@ -1127,6 +1139,7 @@ impl DataAdmission {
             .pipes(Some(requested.instance_keys()), true)
             .await?;
         let caller = access::require_fresh(&self.state, &self.headers, PIPES_WRITE).await?;
+        self.check_administrator(&caller)?;
         access::guard::check_connector_teams(&self.state, &caller, requested.instance_keys())?;
         let mut pipe = requested.clone();
         pipe.temporary = false;
@@ -1160,6 +1173,7 @@ impl DataAdmission {
         }
         // Resolve authority again after parameter/template checks, which can themselves await.
         let caller = access::require_fresh(&self.state, &self.headers, PIPES_WRITE).await?;
+        self.check_administrator(&caller)?;
         access::guard::check_connector_teams(&self.state, &caller, pipe.instance_keys())?;
         if !registered {
             caller.require(&["pipes:register"], &[])?;
@@ -1189,6 +1203,10 @@ impl DataAdmission {
 
 #[async_trait::async_trait]
 impl pipe_methods::SyncAdmission for DataAdmission {
+    fn direct_administrator(&self) -> bool {
+        self.direct_administrator
+    }
+
     fn native_batch(&self) -> Option<meerschaum_connector::mutation::NativeBatch> {
         self.batch.as_ref().map(|batch| batch.native.clone())
     }
@@ -1609,6 +1627,10 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
             .is_some_and(|alias| alias.has_password_service())
             && matches!(&caller.auth,
                 Some(crate::auth::Principal::Execution(identity)) if identity.is_user_bound()),
+        direct_administrator: !graph
+            && batch.is_none()
+            && native_alias.is_none()
+            && mutation::direct_administrator(&caller),
         native_alias,
         graph_target: Default::default(),
         parameters: Default::default(),

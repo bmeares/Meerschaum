@@ -446,6 +446,9 @@ pub async fn sync(
 /// Implementations must load stored access rather than trust the passed Pipe's parameters.
 #[async_trait::async_trait]
 pub(crate) trait SyncAdmission: Send + Sync {
+    fn direct_administrator(&self) -> bool {
+        false
+    }
     fn native_batch(&self) -> Option<meerschaum_connector::mutation::NativeBatch> {
         None
     }
@@ -543,6 +546,10 @@ struct DriverAdmission {
 
 #[async_trait::async_trait]
 impl meerschaum_connector::mutation::MutationCheck for DriverAdmission {
+    fn direct_administrator(&self) -> bool {
+        self.authority.direct_administrator()
+    }
+
     fn native_batch(&self) -> Option<meerschaum_connector::mutation::NativeBatch> {
         self.authority.native_batch()
     }

@@ -105,6 +105,13 @@ pub trait MutationCheck: Send + Sync {
         false
     }
 
+    /// Whether the original request is an ordinary full administrator operation.
+    /// Backend compatibility for this request does not grant an execution credential or
+    /// a restricted caller the native write path.
+    fn direct_administrator(&self) -> bool {
+        false
+    }
+
     /// A failure refuses the write. A driver must roll back a transaction it has already opened.
     async fn check(&self) -> Result<(), String>;
 }

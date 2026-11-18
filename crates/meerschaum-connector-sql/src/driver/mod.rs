@@ -600,6 +600,9 @@ pub struct SqlDriver {
     /// One lazy writer slot for scoped SQLite transactions. Canonical authorization reads
     /// retain the ordinary pool, including on installations with only one read slot.
     scoped_sqlite_pool: Option<sqlx::SqlitePool>,
+    /// A separate slot lets an administrator's late recheck read the canonical
+    /// catalog even when its normal PostgreSQL pool has only one connection.
+    admin_postgres_pool: Option<sqlx::PgPool>,
     /// Dedicated read-only source pool with one-row native prefetch.
     snapshot_sqlite_pool: Option<sqlx::SqlitePool>,
     /// The fail-fast gate of the first connection (network flavors only; see [`connect`]).
@@ -908,6 +911,14 @@ impl SqlDriver {
             ),
             _ => None,
         };
+        let admin_postgres_pool = match &pool {
+            Pool::Postgres(readers) => Some(
+                ping_idle_connections(sqlx::postgres::PgPoolOptions::new().max_connections(1))
+                    .acquire_timeout(readers.options().get_acquire_timeout())
+                    .connect_lazy_with((*readers.connect_options()).clone()),
+            ),
+            _ => None,
+        };
         let snapshot_sqlite_pool = match &pool {
             Pool::Sqlite(_) => source_snapshot::pool(spec),
             _ => None,
@@ -918,6 +929,7 @@ impl SqlDriver {
             flavor: spec.flavor,
             pool,
             scoped_sqlite_pool,
+            admin_postgres_pool,
             snapshot_sqlite_pool,
             gate: networked.then(|| {
                 std::sync::Arc::new(ConnectGate {
@@ -1192,6 +1204,27 @@ impl SqlDriver {
         &self,
         check: std::sync::Arc<dyn meerschaum_connector::mutation::MutationCheck>,
     ) -> Result<SqlTransaction> {
+        if check.direct_administrator()
+            && let Some(pool) = &self.admin_postgres_pool
+        {
+            self.ready().await?;
+            // The administrator's native transaction checks the original authority
+            // before writing and again after the statements, while their SQL locks
+            // are held. Delegated calls still use the explicit backend adapters.
+            let mut transaction = SqlTransaction {
+                authorization_pin: None,
+                authorization_read: None,
+                inner: TxInner::Postgres(pool.begin().await?),
+                mutation_check: Some(check),
+                write_lock: true,
+                refused: false,
+            };
+            if let Err(error) = transaction.check_write().await {
+                Box::pin(transaction.rollback()).await?;
+                return Err(error);
+            }
+            return Ok(transaction);
+        }
         let pool = self
             .scoped_sqlite_pool
             .as_ref()
@@ -1759,6 +1792,9 @@ impl SqlDriver {
         }
         self.close_source_snapshots().await;
         if let Some(pool) = &self.scoped_sqlite_pool {
+            pool.close().await;
+        }
+        if let Some(pool) = &self.admin_postgres_pool {
             pool.close().await;
         }
         match &self.pool {
