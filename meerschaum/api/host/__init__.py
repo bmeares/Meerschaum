@@ -107,16 +107,16 @@ def console_available() -> bool:
 
 def build_app(load_plugins: bool = True, debug: bool = False):
     """
-    Build the host's FastAPI app: run the API plugins, mount the Dash console (the one app plugin pages register into), and add
-    the internal MCP routes. Requires host mode (`MRSM_API_HOST=1` before `meerschaum.api` is
-    imported).
+    Build the standalone FastAPI host for embedding and plugin tests. The app runs API plugins,
+    mounts the Dash console and registers the internal MCP routes. Set `MRSM_API_HOST=1` before
+    importing `meerschaum.api`.
 
     Returns
     -------
     The FastAPI app (`meerschaum.api.app`).
     """
     from meerschaum.api.host._app import build_app as _build_app
-    return _build_app(load_plugins=load_plugins, debug=debug)
+    return _build_app(load_plugins=load_plugins, debug=debug, supervised=False)
 
 
 def run(socket_path: str, debug: bool = False) -> None:

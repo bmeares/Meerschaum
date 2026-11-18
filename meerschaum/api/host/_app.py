@@ -124,7 +124,7 @@ def probe_plugin_cache() -> Optional[threading.Thread]:
     return thread
 
 
-def build_app(load_plugins: bool = True, debug: bool = False):
+def build_app(load_plugins: bool = True, debug: bool = False, *, supervised: bool = True):
     """
     Build the host app once: install the user loader, import the plugins, run the API plugins,
     mount the web console (the one Dash app, with the plugins' pages) and add the internal routes.
@@ -152,7 +152,7 @@ def build_app(load_plugins: bool = True, debug: bool = False):
     ### PARITY: v4's `--no-dash` serves no console and no plugin pages (no Dash app is mounted).
     if dash_enabled():
         with _keep_venv_order():
-            if host_dash.mount_console(app, debug=debug):
+            if host_dash.mount_console(app, debug=debug, supervised=supervised):
                 host_dash.mount_page_contract_routes(app, debug=debug)
                 host_dash.mount_native_page_routes(app)
 

@@ -12,7 +12,7 @@ def remote_layout(pathname, location_href=None):
     import json
     import urllib.parse
     import urllib.request
-    from flask import request
+    from flask import current_app, request
     from dash import html
     from meerschaum.api.dash.sessions import (
         get_session_id_from_request, get_username_from_session, get_session_data,
@@ -23,13 +23,16 @@ def remote_layout(pathname, location_href=None):
     if no_auth:
         return False, None
     from meerschaum.api.dash.execute import server_url
+    base = server_url()
+    if not base and not current_app.config.get('MRSM_SUPERVISED_HOST', True):
+        # The in-process plugin SDK builds a standalone host with its own page registry.
+        return False, None
 
     session_id = get_session_id_from_request(request)
     username = get_username_from_session(session_id) if session_id else None
     if not username:
         return False, None
     viewer = viewer_for(username)
-    base = server_url()
     from datetime import timedelta
     from meerschaum.api._oauth2 import manager, CREDENTIAL_CLAIM, PRINCIPAL_CLAIM
     current = get_session_data(session_id, use_cache=False)

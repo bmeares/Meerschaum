@@ -456,7 +456,7 @@ class ConsoleApp:
         await self.wsgi_app(scope, receive, send)
 
 
-def mount_console(fastapi_app, debug: bool = False) -> bool:
+def mount_console(fastapi_app, debug: bool = False, *, supervised: bool = True) -> bool:
     """
     Build the Dash console and mount it at `/dash` (with the plugins' functions and pages).
 
@@ -503,6 +503,7 @@ def mount_console(fastapi_app, debug: bool = False) -> bool:
     ### head tags (`_page_heads`). Both before the first request, when Dash registers the callbacks.
     from meerschaum.api.host._callbacks import secure_console
     from meerschaum.api.host._page_heads import install_page_heads
+    dash_app.server.config['MRSM_SUPERVISED_HOST'] = supervised
     secure_console(dash_app)
     install_page_heads(dash_app)
 
