@@ -257,9 +257,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ---------------------------------------------------------------- hosted (compile only)
+  # ---------------------------------------------------------------- hosted
   # ubuntu-latest keeps compile errors visible when the self-hosted runner is down.
-  # windows/macos are allowed to fail until the §15 Windows/macOS work lands.
+  # Full runs also start the native CLI on Windows and macOS with a fresh SQLite instance.
   # macOS legs run on the self-hosted Mac (labels self-hosted/macOS/ARM64/mrsm-mac) when the repository
   # variable MACOS_RUNNER is `self-hosted`, except for pull requests, which always use hosted
   # `macos-latest` (fork code never reaches the Mac). `gh variable set MACOS_RUNNER --body hosted`
@@ -297,6 +297,26 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo check --workspace
         run: scripts/rust/ci.sh check
+      - name: Smoke ordinary standalone CLI and SQLite
+        if: ${{ matrix.os != 'ubuntu-latest' }}
+        run: |
+          cargo build --locked -p meerschaum --bin mrsm
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          from tempfile import TemporaryDirectory
+
+          binary = Path('target/debug') / ('mrsm.exe' if os.name == 'nt' else 'mrsm')
+          env = {key: value for key, value in os.environ.items()
+                 if not key.startswith('MRSM_') and key not in ('TMUX', 'TMUX_PANE')}
+          with TemporaryDirectory(prefix='mrsm-platform-', dir=os.environ['RUNNER_TEMP']) as root:
+              env.update(MRSM_ROOT_DIR=root, MRSM_PLUGINS_DIR=str(Path(root) / 'plugins'),
+                         MRSM_NO_AUTO_INSTALL='1', MRSM_NO_UPDATE_CHECK='1')
+              for args in (('show', 'version'), ('show', 'pipes', '-i', 'sql:local')):
+                  subprocess.run([binary.resolve(), *args, '--nopretty'], env=env,
+                                 cwd=root, check=True, timeout=120)
+          PY
 
   # DuckDB is not compiled in: `mrsm` and the extension load DuckDB's own `libduckdb`, downloaded from
   # the pinned release (SHA-256 in crates/meerschaum-connector-sql/src/duckdb_lib/install.rs). The
