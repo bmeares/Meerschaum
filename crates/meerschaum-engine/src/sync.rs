@@ -14,10 +14,14 @@
 //! The engine adds one step for the dirty-range ledger (§5.4): when a [`DeltaObserver`] is
 //! given, the delta `filter_existing` computes is handed to it **before** the data commit
 //! (the ledger write), and only that delta is passed to `sync_pipe`. Without an observer the
-//! flow is exactly v4's (a bare `pipe.sync()`, R1).
+//! flow is exactly v4's (a bare `pipe.sync()`, R1). Execution-only transports keep filtering
+//! on their trusted server and hand the observer a conservative superset of dirty cells.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+#[path = "sync/source_replace.rs"]
+mod source_replace;
 
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -141,6 +145,22 @@ pub trait DeltaObserver: Send + Sync {
         self.before_commit(pipe, delta).await
     }
 
+    /// Whether this observer can consume an immutable source replacement summary without
+    /// receiving a full-result delta Frame. Unknown/custom observers explicitly opt in.
+    fn supports_source_replace_summary(&self) -> bool {
+        false
+    }
+
+    /// A prepared source replacement is about to commit atomically. The summary contains
+    /// the actual filtered row extent and whole replacement window, not a fabricated delta.
+    async fn before_source_replace(
+        &self,
+        _pipe: &Pipe,
+        _summary: &meerschaum_connector::source_replace::SourceReplaceSummary,
+    ) -> Result<(), String> {
+        Err("This observer does not support bounded source replacement summaries.".into())
+    }
+
     /// Called after a successful data commit. An error turns the result into a failure (the
     /// data stays committed).
     async fn after_commit(&self, pipe: &Pipe, result: &SyncResult) -> Result<(), String> {
@@ -183,6 +203,8 @@ pub struct FetchChunk {
 /// What the native flow needs besides the pipe: connectors and configuration.
 #[derive(Clone)]
 pub struct SyncEnv<'a> {
+    /// Continuation of this admitted node, shared only by its destination writes.
+    pub delivery: Option<meerschaum_connector::batch_delivery::NodeDelivery>,
     /// Connector lookup.
     pub registry: &'a dyn ConnectorRegistry,
     /// Configuration defaults for pipes.
@@ -193,6 +215,14 @@ pub struct SyncEnv<'a> {
     pub filter_params_index_limit: usize,
     /// Registered parameters of known pipes, for resolving `{{ Pipe(...) }}` without a query.
     pub known: Option<&'a HashMap<PipeRef, Map>>,
+}
+
+impl SyncEnv<'_> {
+    fn issued_batch(&self) -> bool {
+        self.delivery
+            .as_ref()
+            .is_some_and(|owner| owner.has_issued())
+    }
 }
 
 impl std::fmt::Debug for SyncEnv<'_> {
@@ -557,6 +587,9 @@ pub async fn sync_pipe(
     } else {
         (inner.await, None)
     };
+    if let Some(owner) = &env.delivery {
+        owner.finish(&mut result);
+    }
     result.duration.get_or_insert(start.elapsed());
     // The sync's frames are gone: return their pages (see `crate::memory`).
     crate::memory::release_free_memory_throttled(TRIM_INTERVAL);
@@ -584,6 +617,17 @@ async fn sync_inner(
         Err(e) => return fail(e),
     };
     let instance = instance.as_ref();
+    if let Some(owner) = &env.delivery {
+        if let Err(error) = owner.check_available() {
+            return fail(error.to_string());
+        }
+        if owner.reference() != pipe.pipe_ref() {
+            return fail("The registered destination differs from the Main-issued node.");
+        }
+        if let Err(error) = instance.require_node_delivery(pipe) {
+            return fail(error.to_string());
+        }
+    }
     // A protected instance refuses the sync before anything is fetched (its write would be
     // refused after the fetch otherwise).
     if let Some(refused) = meerschaum_connector::protected_refusal(instance, pipe, "sync") {
@@ -652,6 +696,30 @@ async fn sync_inner(
     };
     for w in warnings {
         tracing::warn!("{w}");
+    }
+
+    if input.is_none()
+        && replacing
+        && let Ok(Some(source)) = env.registry.source_for_sync(pipe.connector_keys(), args)
+    {
+        if source.source_replace_transport().is_some() {
+            return Box::pin(source_replace::run(
+                env,
+                &pipe,
+                instance,
+                source.as_ref(),
+                args,
+                observer,
+            ))
+            .await;
+        }
+        if let Some(reason) = source.fetch_replace_refusal() {
+            return fetch_failed(
+                &pipe,
+                pipe.connector_keys(),
+                &ConnectorError::NotImplemented(reason.into()),
+            );
+        }
     }
 
     // Ensure that the pipe is registered.
@@ -926,7 +994,10 @@ async fn sync_inner(
     // The ledger hook: compute the delta and hand it over before the data commit. A replacing
     // sync writes every row of its window, so the delta is the whole frame.
     if let Some(obs) = observer {
-        let delta = if check_existing && replace_window.is_none() {
+        let delta = if check_existing
+            && replace_window.is_none()
+            && !instance.server_filters_existing_rows()
+        {
             match filter_existing_frame(env, instance, &pipe, &ctx, df).await {
                 Ok((_, _, delta)) => delta,
                 Err(e) => return fail(e),
@@ -987,14 +1058,18 @@ async fn sync_inner(
         } else {
             input.take().expect("final sync attempt owns its input")
         };
-        let res = instance.sync_pipe_with_counts(&pipe, write_df, &opts).await;
+        let res = meerschaum_connector::batch_delivery::destination_write(
+            env.delivery.as_ref(),
+            instance.sync_pipe_with_counts(&pipe, write_df, &opts),
+        )
+        .await;
         meerschaum_core::dprint!(
             "Wrote {pipe} in {:?}: {}",
             write_started.elapsed(),
             res.message
         );
         attempt += 1;
-        if res.success || !args.force || attempt > args.retries {
+        if res.success || env.issued_batch() || !args.force || attempt > args.retries {
             if !res.success && args.force && attempt > args.retries {
                 tracing::warn!(
                     "Unable to sync {pipe} within {} attempt{}!",
@@ -1010,6 +1085,11 @@ async fn sync_inner(
         && let Some(obs) = observer
         && let Err(e) = obs.after_commit(&pipe, &result).await
     {
+        if env.issued_batch() {
+            result.success = false;
+            result.message = e;
+            return result;
+        }
         return fail(e);
     }
     result.end = args.end.as_ref().and_then(date_bound_to_bound);
@@ -1080,6 +1160,9 @@ fn replace_window(
 async fn collect_chunks(pipe: &Pipe, chunked: ChunkedFetch) -> Result<PipeInput, Box<SyncResult>> {
     let mut chunks = chunked.chunks;
     let failed = |e: ConnectorError| Box::new(fetch_failed(pipe, pipe.connector_keys(), &e));
+    if let Some(reason) = chunks.collection_refusal() {
+        return Err(failed(ConnectorError::NotImplemented(reason.into())));
+    }
     let mut inputs: Vec<PipeInput> = Vec::new();
     loop {
         match chunks.next_chunk().await {
@@ -1370,6 +1453,11 @@ async fn sync_fetched_chunks(
         let message = if results.is_empty() {
             let msg = format!("\n{label}\n{}", result.message);
             if !result.success {
+                if env.issued_batch() {
+                    let mut partial = result;
+                    partial.message = format!("Unable to sync initial chunk for {pipe}:\n{msg}");
+                    return partial;
+                }
                 return fail(format!("Unable to sync initial chunk for {pipe}:\n{msg}"));
             }
             msg
@@ -1395,6 +1483,9 @@ async fn sync_fetched_chunks(
         aggregate.end = result.end;
         aggregate.changed_intervals.extend(result.changed_intervals);
         results.push((result.success, message));
+        if !result.success && env.delivery.is_some() {
+            break;
+        }
     }
     // PARITY: v4 sorts the `(success, message)` tuples, putting failed chunks first.
     summarize_chunk_results(pipe, results, aggregate)
@@ -1543,7 +1634,7 @@ async fn sync_generator_chunks(
             loop {
                 let result =
                     Box::pin(sync_inner(env, pipe, Some(input.clone()), args, observer)).await;
-                if result.success {
+                if result.success || env.issued_batch() {
                     break result;
                 }
                 attempts += 1;
@@ -1567,6 +1658,11 @@ async fn sync_generator_chunks(
         let message = if index == 0 {
             let msg = format!("\n{label}\n{}", result.message);
             if !result.success {
+                if env.issued_batch() {
+                    let mut partial = result;
+                    partial.message = format!("Unable to sync initial chunk for {pipe}:\n{msg}");
+                    return partial;
+                }
                 return fail(format!("Unable to sync initial chunk for {pipe}:\n{msg}"));
             }
             msg
@@ -1592,6 +1688,9 @@ async fn sync_generator_chunks(
         aggregate.end = result.end;
         aggregate.changed_intervals.extend(result.changed_intervals);
         results.push((result.success, message));
+        if !result.success && env.delivery.is_some() {
+            break;
+        }
         current = match upcoming.take() {
             Some(next) => Some(next),
             None => match chunks.next_chunk().await {

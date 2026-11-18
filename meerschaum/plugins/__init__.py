@@ -964,7 +964,8 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
 
     ### 5.1: an isolated team's sandboxed process may only read the plugins' symlinks (the server
     ### and every other process keep them); it never rewrites the directory other teams share.
-    if os.environ.get('MRSM_TEAM_SANDBOX'):
+    import meerschaum.config._paths as native_paths
+    if os.environ.get('MRSM_TEAM_SANDBOX') or native_paths._TEAM_SOURCE_NAMESPACE is not None:
         with _locks['__path__']:
             if str(paths.PLUGINS_RESOURCES_PATH.parent) not in __path__:
                 __path__.append(str(paths.PLUGINS_RESOURCES_PATH.parent))
@@ -1126,6 +1127,9 @@ def import_plugins(
         Otherwise import the entire plugins module. May be a string, list, or `None`.
         Defaults to `None`.
 
+    warn: bool, default True
+        Print import errors. A named plugin's error is also available on `Plugin.import_error`.
+
     Returns
     -------
     A module of list of modules, depening on the number of plugins provided.
@@ -1133,6 +1137,7 @@ def import_plugins(
     """
     import sys
     import importlib
+    import meerschaum.config._paths as native_paths
     import meerschaum.config.paths as paths
     from meerschaum.utils.misc import flatten_list
     from meerschaum.utils.venv import (
@@ -1164,17 +1169,21 @@ def import_plugins(
             sys.path.insert(0, str(paths.PLUGINS_RESOURCES_PATH.parent))
 
         if not plugins_to_import:
-            for plugin_name in plugins_names:
+            # The launcher creates an empty package for these sources. Its individual
+            # plugins activate their own dependencies when they are imported.
+            package_venvs = plugins_names if native_paths._TEAM_SOURCE_NAMESPACE is None else ()
+            for plugin_name in package_venvs:
                 activate_venv(plugin_name)
             try:
                 with plugin_import_guard():
                     imported_plugins = importlib.import_module(paths.PLUGINS_RESOURCES_PATH.stem)
             except ImportError as e:
-                _warn(f"Failed to import the plugins module:\n    {e}")
-                import traceback
-                traceback.print_exc()
+                if warn:
+                    _warn(f"Failed to import the plugins module:\n    {e}")
+                    import traceback
+                    traceback.print_exc()
                 imported_plugins = None
-            for plugin_name in plugins_names:
+            for plugin_name in package_venvs:
                 if plugin_name in already_active_venvs:
                     continue
                 deactivate_venv(plugin_name)
@@ -1193,20 +1202,29 @@ def import_plugins(
                     _ = _plugins_import_errors.pop(plugin_name, None)
                 except Exception as e:
                     _plugins_import_errors[plugin_name] = e
+                    imported_plugins.append(None)
+                    if not warn:
+                        continue
+                    native_team_source = native_paths._TEAM_SOURCE_NAMESPACE is not None
                     _warn(
                         f"Failed to import plugin '{plugin_name}':\n    "
                         + f"{e}\n\nHere's a stacktrace:",
                         stack = False,
+                        color = not native_team_source,
                     )
-                    from meerschaum.utils.formatting import print_exception
-                    print_exception(
-                        suppress = [
-                            'meerschaum/plugins/__init__.py',
-                            importlib,
-                            importlib._bootstrap,
-                        ]
-                    )
-                    imported_plugins.append(None)
+                    if native_team_source:
+                        # Reporting a failed import does not need any additional packages.
+                        import traceback
+                        traceback.print_exc()
+                    else:
+                        from meerschaum.utils.formatting import print_exception
+                        print_exception(
+                            suppress = [
+                                'meerschaum/plugins/__init__.py',
+                                importlib,
+                                importlib._bootstrap,
+                            ]
+                        )
 
         if imported_plugins is None and warn:
             _warn("Failed to import plugins.", stacklevel=3)
@@ -1331,17 +1349,25 @@ def load_plugins(
         return
 
     from inspect import isfunction, getmembers
+    from meerschaum.config._paths import _TEAM_SOURCE_NAMESPACE
     import meerschaum.config.paths as paths
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
 
     with plugin_import_guard():
-        _plugins_names, plugins_modules = get_modules_from_package(
-            import_plugins(),
-            names = True,
-            recursive = True,
-            modules_venvs = True
-        )
+        if _TEAM_SOURCE_NAMESPACE is not None:
+            # Load each granted source with the same environment checks as a named import.
+            plugins_modules = [
+                module for name in _TEAM_SOURCE_NAMESPACE['names']
+                if (module := import_plugins(name)) is not None
+            ]
+        else:
+            _plugins_names, plugins_modules = get_modules_from_package(
+                import_plugins(),
+                names = True,
+                recursive = True,
+                modules_venvs = True
+            )
 
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
@@ -1614,6 +1640,21 @@ def sandboxed_plugins_names() -> Union[List[str], None]:
     process cannot read. `None` in any other process.
     """
     import os
+    import meerschaum.config._paths as native_paths
+    namespace = native_paths._TEAM_SOURCE_NAMESPACE
+    if namespace is not None:
+        return sorted(namespace['names'])
+    executor_grants = os.environ.get('MRSM_EXECUTOR_PLUGINS')
+    if executor_grants is not None:
+        import json
+        names = json.loads(executor_grants)
+        if not isinstance(names, list) or not all(
+            isinstance(name, str) and name and len(name) <= 128
+            and all(c.isascii() and (c.isalnum() or c in '_-') for c in name)
+            for name in names
+        ):
+            raise ValueError('Invalid executor plugin grants.')
+        return sorted(set(names))
     if not os.environ.get('MRSM_TEAM_SANDBOX'):
         return None
     import meerschaum.config.paths as paths

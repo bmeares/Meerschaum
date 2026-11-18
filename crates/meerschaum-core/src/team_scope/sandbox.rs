@@ -80,6 +80,9 @@ use serde::{Deserialize, Serialize};
 use super::{ScopeFiles, TeamScope};
 use crate::config::Config;
 
+#[path = "runtime.rs"]
+pub mod runtime;
+
 /// `system.engine.python_team_sandbox` (5.1): `auto`, `require`, `require_sockets` or `off`.
 pub const MODE_KEY: [&str; 3] = ["system", "engine", "python_team_sandbox"];
 /// Names the spec file of a team process. Set by the server, never inherited from it.
@@ -383,8 +386,18 @@ pub const SYSTEM_RULES: &[(&str, Access, &str)] = &[
     ("/etc/group", Access::Read, "group names"),
     ("/etc/localtime", Access::Read, "the time zone"),
     ("/etc/timezone", Access::Read, "the time zone"),
-    ("/etc/ssl", Access::Read, "certificates"),
-    ("/etc/pki", Access::Read, "certificates"),
+    // Public trust stores only. Their parents also contain service private keys and
+    // NSS key databases, which a team worker must never inherit from the server UID.
+    ("/etc/ssl/certs", Access::Read, "certificates"),
+    ("/etc/ssl/cert.pem", Access::Read, "certificates"),
+    ("/etc/pki/ca-trust/extracted", Access::Read, "certificates"),
+    (
+        "/etc/pki/ca-trust/source/anchors",
+        Access::Read,
+        "certificates",
+    ),
+    ("/etc/pki/tls/certs", Access::Read, "certificates"),
+    ("/etc/pki/tls/cert.pem", Access::Read, "certificates"),
     ("/etc/ca-certificates", Access::Read, "certificates"),
     ("/etc/ca-certificates.conf", Access::Read, "certificates"),
     ("/etc/crypto-policies", Access::Read, "TLS settings"),
@@ -454,6 +467,9 @@ pub struct Spec {
     /// never sets it; tests use it to run a process at an older kernel's level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_abi: Option<u32>,
+    /// Host-selected native bootstrap and runtime environment; never a persisted job override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<runtime::Runtime>,
 }
 
 /// What [`build_spec`] needs.
@@ -596,6 +612,7 @@ pub fn build_spec(inputs: &SpecInputs<'_>) -> Spec {
         protected,
         canary: canary_path(root),
         max_abi: None,
+        runtime: None,
     };
     spec.rules = spec.allowed(spec.rules.clone()).0;
     spec
@@ -791,6 +808,48 @@ pub const FEATURES: &[Feature] = &[
 /// The newest Landlock ABI Meerschaum knows.
 pub const NEWEST_ABI: u32 = 9;
 
+/// The Docker (or Podman) API sockets a process may find (5.1): `DOCKER_HOST`'s, the system's
+/// and the user's runtime directory's.
+pub fn container_socket_candidates() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = vec![
+        PathBuf::from("/var/run/docker.sock"),
+        PathBuf::from("/run/docker.sock"),
+        PathBuf::from("/run/podman/podman.sock"),
+    ];
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
+        let runtime = PathBuf::from(runtime);
+        candidates.push(runtime.join("docker.sock"));
+        candidates.push(runtime.join("podman").join("podman.sock"));
+    }
+    if let Ok(host) = std::env::var("DOCKER_HOST")
+        && let Some(path) = host.strip_prefix("unix://")
+    {
+        candidates.insert(0, PathBuf::from(path));
+    }
+    candidates
+}
+
+/// Whether this process can connect to the Unix socket `path` (nothing is sent).
+pub fn connects(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::net::UnixStream::connect(path).is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// The Docker (or Podman) API socket this process's user can connect to, if any (a connection
+/// only: nothing is sent).
+pub fn container_socket_reachable() -> Option<PathBuf> {
+    container_socket_candidates()
+        .into_iter()
+        .find(|path| connects(path))
+}
+
 /// The features of ABI `abi` (`.0`) and those it lacks (`.1`).
 pub fn features_of(abi: u32) -> (Vec<String>, Vec<String>) {
     let (have, lack): (Vec<&Feature>, Vec<&Feature>) = FEATURES.iter().partition(|f| f.abi <= abi);
@@ -953,6 +1012,14 @@ pub struct Report {
 }
 
 impl Report {
+    /// Judge an active report against mandatory filesystem, Unix-socket and signal protection,
+    /// regardless of the mode recorded in an older spec or inherited process report.
+    pub fn require_sockets_verdict(&self) -> Result<(), String> {
+        let mut required = self.clone();
+        required.mode = Mode::RequireSockets;
+        required.verdict()
+    }
+
     /// A process that was not sandboxed, and why.
     pub fn not_enforced(mode: Mode, reason: impl Into<String>) -> Report {
         Report {
@@ -1113,12 +1180,78 @@ impl Report {
     }
 }
 
-/// The report of this process's sandbox, once [`enforce`] ran.
-static ENFORCED: std::sync::OnceLock<Report> = std::sync::OnceLock::new();
+/// Report and native profile captured together by the first irreversible enforcement.
+struct Enforcement {
+    report: Report,
+    native_api: bool,
+    // Not serialized or exposed through Python. This is selected once, before site hooks.
+    api_transport: Option<Result<super::api_execution::Alias, String>>,
+}
+static ENFORCED: std::sync::OnceLock<Enforcement> = std::sync::OnceLock::new();
 
 /// This process's report (`None` until it enforced its spec).
 pub fn current() -> Option<Report> {
-    ENFORCED.get().cloned()
+    ENFORCED.get().map(|enforced| enforced.report.clone())
+}
+
+/// Sticky native API provenance; removing environment variables cannot restore ambient
+/// compiler policy after this process enforced its protected host runtime.
+pub fn is_native_api() -> bool {
+    ENFORCED.get().is_some_and(|enforced| enforced.native_api)
+}
+
+/// Build a native per-launch transport from the first mandatory enforcement.
+/// Later configuration/environment changes and repeated enforcement cannot select another
+/// callback or turn an ordinary Team process into API execution. No bearer is retained here.
+pub fn with_api_transport<T>(
+    build: impl FnOnce(&super::api_execution::Alias) -> Result<T, String>,
+) -> Result<Option<T>, String> {
+    let Some(enforced) = ENFORCED.get().filter(|enforced| enforced.native_api) else {
+        return Ok(None);
+    };
+    enforced.report.require_sockets_verdict()?;
+    let alias = enforced
+        .api_transport
+        .as_ref()
+        .ok_or("The native API runtime has no immutable host-prepared graph transport.")?
+        .as_ref()
+        .map_err(|error| error.clone())?;
+    build(alias).map(Some)
+}
+
+/// Irreversibly deny new network connections on every thread and descendant of an already
+/// confined native process. Reserved for credential-free metadata discovery. Connected Unix
+/// stream/seqpacket pairs remain available for the worker protocol; the launcher must pass no
+/// other connected network descriptors. Unsupported platforms refuse before discovery.
+pub fn deny_network() -> Result<(), String> {
+    current()
+        .ok_or("Network denial requires an active native sandbox.")?
+        .require_sockets_verdict()?;
+    #[cfg(target_os = "linux")]
+    {
+        imp::deny_network()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("Credential-free network denial requires supported Linux seccomp.".into())
+    }
+}
+
+/// Deny inbound listeners in an API-only process on every thread and descendant. Outbound
+/// connections and connected Unix worker pairs remain available. A successful native
+/// filesystem/socket/signal sandbox must already be active.
+pub fn deny_inbound_network() -> Result<(), String> {
+    current()
+        .ok_or("Inbound network denial requires an active native sandbox.")?
+        .require_sockets_verdict()?;
+    #[cfg(target_os = "linux")]
+    {
+        imp::deny_inbound_network()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("API-only listener denial requires supported Linux seccomp.".into())
+    }
 }
 
 /// Restrict this process (and everything it starts) to `spec`'s rules plus `extra` (the
@@ -1127,9 +1260,14 @@ pub fn current() -> Option<Report> {
 /// a second call returns the first report. Never fails: a sandbox that could not be applied
 /// is a report that is not enforced, which [`Report::verdict`] judges by mode.
 pub fn enforce(spec: &Spec, extra: &[Rule]) -> Report {
-    if let Some(report) = ENFORCED.get() {
-        return report.clone();
+    if let Some(enforced) = ENFORCED.get() {
+        return enforced.report.clone();
     }
+    let native_api = spec
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.api_only)
+        || std::env::var(super::api_execution::PROFILE_VAR).as_deref() == Ok("1");
     let report = if spec.mode == Mode::Off {
         Report::not_enforced(Mode::Off, "off")
     } else {
@@ -1155,30 +1293,45 @@ pub fn enforce(spec: &Spec, extra: &[Rule]) -> Report {
         }
         report
     };
-    ENFORCED.get_or_init(|| report).clone()
+    let api_transport = native_api.then(|| {
+        report.require_sockets_verdict()?;
+        super::api_execution::transport_capture::from_spec(spec, extra)
+    });
+    ENFORCED
+        .get_or_init(|| Enforcement {
+            report,
+            native_api,
+            api_transport,
+        })
+        .report
+        .clone()
 }
 
 /// [`enforce`] the spec [`SPEC_VAR`] names; `None` when it is unset (not a sandboxed team
 /// process). A spec that cannot be read is a report that is not enforced, in `require` mode
 /// (the server asked for a sandbox).
 pub fn enforce_from_env(extra: &[Rule]) -> Option<Report> {
-    if let Some(report) = ENFORCED.get() {
-        return Some(report.clone());
+    if let Some(enforced) = ENFORCED.get() {
+        return Some(enforced.report.clone());
     }
     let path = std::env::var_os(SPEC_VAR).filter(|v| !v.is_empty())?;
     match Spec::read(Path::new(&path)) {
         Ok(spec) => Some(enforce(&spec, extra)),
         Err(e) => Some(
             ENFORCED
-                .get_or_init(|| {
-                    Report::not_enforced(
+                .get_or_init(|| Enforcement {
+                    api_transport: None,
+                    native_api: std::env::var(super::api_execution::PROFILE_VAR).as_deref()
+                        == Ok("1"),
+                    report: Report::not_enforced(
                         Mode::Require,
                         format!(
                             "the sandbox's rules `{}` could not be read: {e}",
                             Path::new(&path).display()
                         ),
-                    )
+                    ),
                 })
+                .report
                 .clone(),
         ),
     }
@@ -1234,13 +1387,10 @@ pub fn probe_team_process(mode: Mode, max_abi: Option<u32>) -> Result<Report, St
         std::env::temp_dir().join(format!("mrsm-sandbox-probe-{}-{nanos}", std::process::id()));
     std::fs::write(&canary, b"canary").map_err(|e| format!("cannot write the canary: {e}"))?;
     let result = (|| {
-        let command = crate::self_exe::self_command();
-        let (program, leading) = command
-            .split_first()
-            .ok_or_else(|| "this program's command is unknown".to_string())?;
-        let mut cmd = std::process::Command::new(program);
-        cmd.args(leading)
-            .arg(PROBE_ARG)
+        let program = crate::self_exe::native_executable()
+            .ok_or_else(|| "A sandbox probe needs the registered native mrsm host; Python embedding cannot establish pre-startup confinement.".to_string())?;
+        let mut cmd = std::process::Command::new(&program);
+        cmd.arg(PROBE_ARG)
             .arg(mode.as_str())
             .arg(&canary)
             .env_remove(SPEC_VAR)
@@ -1252,9 +1402,10 @@ pub fn probe_team_process(mode: Mode, max_abi: Option<u32>) -> Result<Report, St
         if let Some(abi) = max_abi {
             cmd.arg(abi.to_string());
         }
+        runtime::sanitize_command(&mut cmd);
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("cannot start `{program}`: {e}"))?;
+            .map_err(|e| format!("cannot start `{}`: {e}", program.display()))?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             match child.try_wait() {
@@ -1379,7 +1530,33 @@ pub fn prepare(
     job_dir: Option<&Path>,
     spec_file: &Path,
 ) -> std::io::Result<Option<Prepared>> {
-    let mode = Mode::from_config(config);
+    prepare_with(config, scope, files, job_dir, spec_file, false)
+}
+
+/// [`prepare`] for a process of team execution (5.1, `required`): a command, job or terminal a
+/// member of a team that runs code started, which must never run outside the sandbox at
+/// [`LEVEL_SOCKETS`]. Its mode is [`Mode::RequireSockets`] whatever the setting says, and `off`
+/// is an error.
+pub fn prepare_with(
+    config: &Config,
+    scope: &TeamScope,
+    files: &ScopeFiles,
+    job_dir: Option<&Path>,
+    spec_file: &Path,
+    required: bool,
+) -> std::io::Result<Option<Prepared>> {
+    let mut mode = Mode::from_config(config);
+    if required {
+        if mode == Mode::Off {
+            return Err(std::io::Error::other(format!(
+                "This process of the isolated team '{}' runs a member's command, which needs the \
+                 sandbox at \"{LEVEL_SOCKETS}\", but `system.engine.python_team_sandbox` is \
+                 `off`.",
+                scope.team
+            )));
+        }
+        mode = Mode::RequireSockets;
+    }
     if mode == Mode::Off {
         let _ = std::fs::remove_file(spec_file);
         return Ok(None);
@@ -1396,15 +1573,17 @@ pub fn prepare(
             mode.as_str()
         )));
     }
-    if mode == Mode::RequireSockets && support.abi() < SOCKETS_ABI {
-        return Err(std::io::Error::other(format!(
-            "The isolated team '{}' cannot run: its sandbox must cover Unix sockets and signals \
-             (`system.engine.python_team_sandbox: require_sockets`), but this kernel's Landlock \
-             ABI {} covers the filesystem only (\"{LEVEL_FILESYSTEM}\"); that needs ABI \
-             {SOCKETS_ABI}, Linux 7.1.",
-            scope.team,
-            support.abi()
-        )));
+    if mode == Mode::RequireSockets {
+        // ABI 6 can scope signals, with the seccomp filter supplying pathname socket denial.
+        // ABI alone proves neither that a container permits installing that filter nor that
+        // its canary/socket probes hold. Use a fresh child, and recheck in the actual launch.
+        let proof = probe_team_process(mode, None).map_err(std::io::Error::other)?;
+        proof.require_sockets_verdict().map_err(|why| {
+            std::io::Error::other(format!(
+                "The isolated team '{}' cannot run: {why}.",
+                scope.team
+            ))
+        })?;
     }
     let paths = config.paths();
     let root = paths.root_dir.clone();
@@ -1474,6 +1653,10 @@ pub fn prepare(
         job_dirs: &job_dirs,
         work_dir: work_dir.as_deref(),
     });
+    spec.runtime = Some(runtime::Runtime::prepare(
+        &mut spec,
+        &crate::process_env::vars(),
+    )?);
     let mut extra = team_database_files(config, scope);
     // `uv` (outside the interpreter's prefix, as `~/.local/bin/uv` often is): a team's plugin code
     // installs missing requirements into its plugins' environments with it, as it always could.
@@ -1614,6 +1797,8 @@ fn team_database_files(config: &Config, scope: &TeamScope) -> Vec<Rule> {
 /// (its own plugins directory, [`PLUGINS_VIEW_DIR`]) and `MRSM_VENVS_DIR` (its own virtual
 /// environments, [`VENVS_DIR`]).
 pub fn apply_env(env: &mut Vec<(String, String)>, prepared: &Prepared) {
+    // The native bootstrap must reach confinement before any loader or Python hook can run.
+    env.retain(|(name, _)| !runtime::injection_name(name));
     let venvs = prepared.venvs_dir.to_string_lossy().into_owned();
     let tmp = prepared.tmp_dir.to_string_lossy().into_owned();
     let cache = prepared.cache_dir.to_string_lossy().into_owned();

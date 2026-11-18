@@ -1303,6 +1303,19 @@ Options:
           (`-s 'every 5 minutes jitter 30 seconds'` is the same).
 "##
         }
+        "_start_executor" => {
+            r##"
+Start one team's API executor behind signed main-API control.
+
+Usage:
+    `start executor --host 0.0.0.0 --port 8989`
+
+Set MRSM_EXECUTOR_BOOTSTRAP to the public verifier file provisioned by the
+administrator. The executor waits for signed team configuration before opening an
+instance or loading plugins. It serves no public login or team administration.
+`mrsm stack up` provisions container executors selected in team settings.
+"##
+        }
         "_start_mcp" => {
             r##"
 Start an MCP (Model Context Protocol) server on stdin and stdout.

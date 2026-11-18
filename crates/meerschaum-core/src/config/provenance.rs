@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use super::lossless::{ConfigMap, ConfigValue, apply_patch_maps};
+use super::lossless::{ConfigMap, ConfigValue};
 use super::{ConfigState, GetOptions, revert_symlinks_lossless, secrets};
 
 /// One layer applied over the config files, as the registry applied it.
@@ -169,7 +169,9 @@ impl ConfigState {
                 self.apply_environment_uris(env, true);
             }
             EnvLayer::Patches(texts) => self.apply_patch_texts(texts),
-            EnvLayer::PatchDir(patch) => self.config = apply_patch_maps(&self.config, patch),
+            EnvLayer::PatchDir(patch) => {
+                self.config = super::apply_config_patch(&self.config, patch)
+            }
         }
     }
 

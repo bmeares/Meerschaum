@@ -1,6 +1,39 @@
 use super::*;
 use crate::config::ConfigOptions;
 
+#[test]
+fn host_execution_respects_remote_selection_and_the_administrator_requirement() {
+    let root = tempfile::tempdir().unwrap();
+    let config = Config::new(ConfigOptions::with_env(vec![(
+        "MRSM_ROOT_DIR".into(),
+        root.path().display().to_string(),
+    )]))
+    .unwrap();
+    let mut scope = TeamScope {
+        team: "Wetlands".into(),
+        plugins_write: Some(true),
+        ..Default::default()
+    };
+    assert!(scope.check_host_execution(&config).is_ok());
+    config.set_config(
+        Value::from_json_str(r#"{"api":{"execution":{"require_team_executor":true}}}"#)
+            .unwrap()
+            .to_map(),
+    );
+    assert!(scope.check_host_execution(&config).is_err());
+    scope.plugins_write = Some(false);
+    assert!(scope.check_host_execution(&config).is_ok());
+    scope.executor = Some("api:team".into());
+    assert!(scope.check_host_execution(&config).is_err());
+    scope.executor = None;
+    config.set_config(
+        Value::from_json_str(r#"{"api":{"execution":{"require_team_executor":"false"}}}"#)
+            .unwrap()
+            .to_map(),
+    );
+    assert!(scope.check_host_execution(&config).is_err());
+}
+
 struct Root {
     root: tempfile::TempDir,
     _plugins: tempfile::TempDir,

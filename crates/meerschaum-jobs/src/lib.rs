@@ -55,6 +55,7 @@ pub mod monitor;
 pub mod names;
 pub mod ownership;
 pub mod process;
+pub mod process_children;
 pub mod properties;
 pub mod pytime;
 pub mod remote;
@@ -70,6 +71,7 @@ pub mod summary;
 pub mod supervisor;
 pub mod systemd;
 pub mod systemd_job;
+mod untrusted_file;
 pub mod v4_pickle;
 pub mod zoned;
 

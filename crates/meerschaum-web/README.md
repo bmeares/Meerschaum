@@ -10,7 +10,7 @@ the v4 paths (`/dash`, `/dash/pipes`, ...). The server proxies `/dash` and `/das
 the host reports that it mounted the console (`GET /_mrsm/host/status`), and shows a static pointer
 page ("The web console comes with the Python package: `pip install meerschaum[dash]`") otherwise:
 that logic is `meerschaum_server::web::console_entry`, so the standalone binary (`cargo install
-meerschaum`, the `minimal` Docker image) serves it too. This crate keeps three things.
+meerschaum`, the `minimal` Docker image) serves it too.
 
 ## The web terminal
 
@@ -48,6 +48,11 @@ A native (Rust source) plugin's `web_pages` are served as HTML fragments for the
 secret, the same token the server uses for the host's registry). Paths are exact; wildcards, `..`
 and duplicates are refused when the router is built.
 
+With the `plugins` route group enabled, the console can also display a declared page from an
+isolated team's plugin in a sandboxed iframe. The page loads its Plotly renderer from
+`/plugins/extensions/assets/plotly.js`. Both the renderer and the frame script ship with this
+crate, so displaying a figure does not require a browser connection to a CDN.
+
 ## Sessions
 
 `InstanceSessions` and `ValkeySessions` implement the protocol `meerschaum/api/dash/sessions.py`
@@ -67,6 +72,10 @@ inflated file otherwise, with `Vary: Accept-Encoding`, an exact `Content-Length`
 no-cache` and a strong `ETag` per representation; `If-None-Match` gets a 304. To update an asset,
 replace the file, update `versions.json` (xterm.js 6.0.0, addon-fit 0.11.0, addon-unicode11 0.9.0,
 each checked against the npm tarball's `dist.integrity`) and rebuild. There are no CDN fetches.
+
+For a Plotly upgrade, also update `plotly.LICENSE` and `src/extension_plotly.json`. The latter
+records the Plotly.js version, matching Python distribution, SHA-256 digest and byte count of
+the vendored file.
 
 ## Verification
 

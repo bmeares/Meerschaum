@@ -1,0 +1,21 @@
+[package]
+name = "mrsm_native_source"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+
+[profile.release]
+panic = "unwind"
+opt-level = 0
+debug = false
+strip = "debuginfo"

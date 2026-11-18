@@ -26,6 +26,9 @@ use crate::value::{ArgsMap, PyValue};
 
 /// Where the native manifest is cached (separate from the Python worker manifest).
 pub fn cache_path(root_dir: &std::path::Path) -> std::path::PathBuf {
+    if let Some(namespace) = meerschaum_core::team_scope::source_namespace::for_root(root_dir) {
+        return namespace.cache.join("native_plugins_manifest.json");
+    }
     // 5.1: a sandboxed team process keeps its own.
     if let Some(dir) = meerschaum_core::team_scope::sandbox::private_cache_dir() {
         return dir.join("native_plugins_manifest.json");
@@ -153,7 +156,7 @@ pub fn run_action_in(
 /// explicit one, never the process's default root behind its back). The config is shared with
 /// the host calls for the call, so a `write_plugin_config` updates it as Python's does, and it is
 /// handed back to the runtime after. `instance` is the default instance of `host::pipe(...)`.
-fn with_command_host<R>(
+pub(crate) fn with_command_host<R>(
     rt: &mut crate::dispatch::Runtime<'_>,
     natives: &Arc<NativePlugins>,
     instance: Option<String>,
@@ -1448,6 +1451,15 @@ impl PluginHost {
             use meerschaum_server::auth::{Principal, Scopes};
             // Reloaded as the kind it already is, never re-classified by the look of its name.
             let reloaded = match principal {
+                Principal::Execution(identity) => {
+                    meerschaum_server::executor::callbacks::load_identity(
+                        &api.state,
+                        identity.grant.id,
+                        identity.grant.launch_id,
+                    )
+                    .await
+                    .map(|identity| Some(Principal::Execution(Box::new(identity))))
+                }
                 Principal::User(user) => {
                     meerschaum_server::auth::load_user(&api.state, &user.username).await
                 }
@@ -1484,6 +1496,7 @@ impl PluginHost {
         } else {
             Access {
                 auth: None,
+                credential: None,
                 principal: rules::Principal::new(
                     "",
                     false,
@@ -1494,6 +1507,7 @@ impl PluginHost {
                 attributes: None,
                 no_auth: false,
                 team_records: Vec::new(),
+                api_execution: meerschaum_server::backends::ApiExecution::Unavailable,
             }
         };
         // Reading the process config requires the caller's own full administrator rights;

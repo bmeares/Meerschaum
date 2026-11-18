@@ -132,13 +132,6 @@ def get_connector(
     if isinstance(type, str) and not label and ':' in type:
         type, label = type.split(':', maxsplit=1)
 
-    if _load_plugins:
-        with _locks['_loaded_plugin_connectors']:
-            if not _loaded_plugin_connectors:
-                load_plugin_connectors()
-                _load_builtin_custom_connectors()
-                _loaded_plugin_connectors = True
-
     if type is None and label is None:
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
         ### recursive call to get_connector
@@ -151,6 +144,36 @@ def get_connector(
     ### Work the API server runs for an isolated team may use only that team's connectors (5.1).
     from meerschaum._internal.team_scope import check_connector
     check_connector(type, label)
+
+    ### Resolve a logical API alias before discovering plugins or creating a native client.
+    ### Its exact configured descriptor takes precedence over cached/ad hoc DB attributes.
+    configured = get_config('meerschaum', 'connectors', patch=True) or {}
+    attributes = (configured.get(type, {}) or {}).get(label, {}) or {}
+    if 'mrsm_api_alias' in attributes or 'mrsm_api_alias' in kw:
+        from meerschaum.connectors.api._execution import APIExecutionConnector
+        alias_attributes = dict(attributes)
+        alias_attributes.update(kw)
+        if kw and alias_attributes != attributes:
+            raise ValueError('API execution connector attributes cannot be overridden.')
+        keys = f'{type}:{label}'
+        with _locks['connectors']:
+            cached = connectors.setdefault(type, {}).get(label)
+            if (
+                not refresh
+                and isinstance(cached, APIExecutionConnector)
+                and cached.__dict__.get('_attributes') == alias_attributes
+            ):
+                return cached
+            conn = APIExecutionConnector(keys, alias_attributes)
+            connectors[type][label] = conn
+            return conn
+
+    if _load_plugins:
+        with _locks['_loaded_plugin_connectors']:
+            if not _loaded_plugin_connectors:
+                load_plugin_connectors()
+                _load_builtin_custom_connectors()
+                _loaded_plugin_connectors = True
 
     ### A type declared by a native (Rust) plugin is registered on first use.
     if type not in connectors and _load_plugins and isinstance(type, str):

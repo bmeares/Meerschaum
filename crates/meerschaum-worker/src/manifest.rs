@@ -233,6 +233,15 @@ pub struct McpPromptManifest {
     pub name: String,
     /// The description.
     pub description: Option<String>,
+    /// Declared argument names, descriptions and required flags.
+    #[serde(default)]
+    pub arguments: Vec<serde_json::Value>,
+    /// Required scopes, retained independently from the original caller's ceiling.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Optional client-facing title.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 /// A custom connector type declared with `@make_connector`.
@@ -494,6 +503,9 @@ impl Manifest {
 /// A sandboxed team process keeps its own (5.1,
 /// `meerschaum_core::team_scope::sandbox::private_cache_dir`).
 pub fn manifest_path(root_dir: &Path) -> PathBuf {
+    if let Some(namespace) = meerschaum_core::team_scope::source_namespace::for_root(root_dir) {
+        return namespace.cache.join(MANIFEST_FILE_NAME);
+    }
     if let Some(dir) = meerschaum_core::team_scope::sandbox::private_cache_dir() {
         return dir.join(MANIFEST_FILE_NAME);
     }

@@ -93,6 +93,7 @@ impl TeamScopes {
             .get_teams()
             .await
             .map_err(|e| format!("The teams could not be read: {e}"))?;
+        crate::executor_registry::Registry::new(&self.root).reconcile(&teams)?;
         let config = (self.config)().ok_or("The configuration could not be read.")?;
         config.refresh_connectors();
         let connectors = config

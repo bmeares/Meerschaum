@@ -163,6 +163,8 @@ class Viewer:
     principal: Any = None
     #: What the viewer's teams grant and withhold (`meerschaum.core.access.team_grants`).
     grants: Dict[str, Any] = field(default_factory=dict)
+    #: Fresh Main-only execution projection; never retained in the base Viewer cache.
+    native_execution: Any = None
 
     @property
     def is_isolated(self) -> bool:
@@ -428,7 +430,7 @@ def make_viewer(
     else:
         names = frozenset(role_permissions(role or default_role()))
     if not admin and (grants or {}).get('isolated', False):
-        names = names - frozenset(core().ISOLATED_WITHHELD)
+        names = names - frozenset(core().withheld_permissions(grants))
     team_roles: Dict[str, str] = {EVERYONE: 'member'}
     for team, team_role in (teams or {}).items():
         name = EVERYONE if core().is_everyone(str(team)) else str(team)
@@ -506,8 +508,9 @@ def viewer_for(username: Optional[str]) -> Viewer:
         user, user_type, attributes,
     )
     if not is_admin and grants.get('isolated', False):
-        ### Actions and the terminal run with the server's credentials, outside the team's wall.
-        permissions = permissions - frozenset(core().ISOLATED_WITHHELD)
+        ### Actions and the terminal run with the server's credentials, outside the team's wall
+        ### (5.1: a team that runs code keeps them, as its own sandboxed processes).
+        permissions = permissions - frozenset(core().withheld_permissions(grants))
     viewer = Viewer(
         username=str(username),
         signed_in=True,
@@ -524,7 +527,8 @@ def viewer_for(username: Optional[str]) -> Viewer:
 def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Viewer:
     """
     The viewer of a console session (`session_data` is the `session-store`'s data; by default the
-    current request's session). Cached for `VIEWER_TTL_SECONDS` per session.
+    current request's session). The base record is cached for `VIEWER_TTL_SECONDS`; an
+    API-only execution projection is refreshed from Main on every call.
     """
     from meerschaum.api import no_auth
     if no_auth:
@@ -540,7 +544,8 @@ def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Option
     with _viewer_lock:
         entry = _viewer_cache.get(session_id, None)
     if entry is not None and now - entry[0] < VIEWER_TTL_SECONDS:
-        return entry[1]
+        from meerschaum.api.dash._native_execution import project
+        return project(entry[1], session_id)
     from meerschaum.api.dash.sessions import get_username_from_session
     username = get_username_from_session(session_id)
     viewer = viewer_for(username) if username else ANONYMOUS
@@ -548,7 +553,8 @@ def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Option
         if len(_viewer_cache) > 4096:
             _viewer_cache.clear()
         _viewer_cache[session_id] = (now, viewer)
-    return viewer
+    from meerschaum.api.dash._native_execution import project
+    return project(viewer, session_id)
 
 
 def current_viewer() -> Viewer:

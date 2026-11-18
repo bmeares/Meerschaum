@@ -28,16 +28,19 @@ impl APIConnector {
         let scheme = self.login_scheme();
         if scheme == "api_key" {
             let api_key = self.attr("api_key").unwrap_or_default();
-            let res = self
-                .post(
+            let res = super::request::authentication_handshake(
+                self,
+                "/tokens/validate",
+                self.post(
                     &format!("{}/validate", routes::TOKENS),
                     RequestOptions {
                         headers: vec![("Authorization".into(), format!("Bearer {api_key}"))],
                         use_token: false,
                         ..Default::default()
                     },
-                )
-                .await;
+                ),
+            )
+            .await;
             return match res {
                 Ok(r) if r.ok() => SuccessTuple::ok("API key is valid."),
                 _ => SuccessTuple::fail("API key is not valid."),
@@ -59,16 +62,19 @@ impl APIConnector {
         // PARITY: the scheme is compared with `'username'`, never true, so the message never
         // names the user; the success message keeps v4's stray quote (`_login.py:55`).
         let login_scheme_msg = "";
-        let response = self
-            .post(
+        let response = super::request::authentication_handshake(
+            self,
+            routes::LOGIN,
+            self.post(
                 routes::LOGIN,
                 RequestOptions {
                     body: Body::Form(login_data),
                     use_token: false,
                     ..Default::default()
                 },
-            )
-            .await;
+            ),
+        )
+        .await;
         let failure = format!(
             "Failed to log into '{self}'{login_scheme_msg}.\n    Please verify login details for connector '{self}'."
         );

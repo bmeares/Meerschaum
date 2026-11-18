@@ -48,6 +48,7 @@ const OWN_LOOP: &[&str] = &[
     "_show_logs",
     // Long-running or interactive by nature.
     "_start_api",
+    "_start_executor",
     "_start_mcp",
     "_start_webterm",
     "_start_worker",

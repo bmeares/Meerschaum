@@ -19,8 +19,9 @@ use meerschaum_core::pyfmt::PyDateTime;
 use meerschaum_core::value::{Map, Value};
 use meerschaum_jobs::executor::get_jobs_for;
 use meerschaum_jobs::{Job, JobOptions, JobsContext, MonitorControl, MonitorOptions};
+use meerschaum_server::access::Access;
 use meerschaum_server::backends::{CreateJob, JobsBackend, LogEvent, LogMonitor};
-use serde_json::Value as Json;
+use serde_json::{Value as Json, json};
 use tokio::sync::mpsc;
 
 /// The jobs of the server's root.
@@ -62,10 +63,130 @@ fn to_json(value: &Value) -> Json {
     serde_json::to_value(value).unwrap_or(Json::Null)
 }
 
-/// `{sysargs, result, restart, status, daemon: {status, pid, properties}}`.
-fn metadata(job: &mut Job) -> Json {
-    let status = job.status().as_str().to_string();
-    let result = job.result();
+/// Ordinary result publication from one current-launch properties document. This is not
+/// a native attestation, data EOF or graph-readiness assertion.
+pub(crate) fn committed_result(properties: &Map) -> Option<SuccessTuple> {
+    if !meerschaum_jobs::detached::Timestamps::from_properties(properties).is_completed() {
+        return None;
+    }
+    let values = properties.get("result")?.as_list()?;
+    let [Value::Bool(success), Value::Str(message)] = values.as_slice() else {
+        return None;
+    };
+    Some(SuccessTuple {
+        success: *success,
+        message: message.clone(),
+    })
+}
+
+/// A monitor keeps the launch token it attached to, even if the name is restarted.
+struct ResultPublication {
+    launch: Option<String>,
+    signed: Option<uuid::Uuid>,
+}
+
+impl ResultPublication {
+    fn launch(properties: &Map) -> Option<&str> {
+        properties
+            .get("process")?
+            .get(meerschaum_jobs::supervisor::LAUNCH_ID_KEY)?
+            .as_str()
+    }
+
+    fn for_job(ctx: &JobsContext, name: &str, properties: &Map) -> Option<Self> {
+        let resolver = ctx.launch_resolver.as_ref()?;
+        let signed = if resolver.authoritative(name, properties) {
+            Some(
+                name.strip_prefix("mrsm-")
+                    .and_then(|value| uuid::Uuid::parse_str(value).ok())
+                    .filter(|id| !id.is_nil() && name == format!("mrsm-{}", id.simple()))?,
+            )
+        } else if resolver.tracks_unattributed_publication() {
+            None
+        } else {
+            return None;
+        };
+        Some(Self {
+            launch: Self::launch(properties).map(str::to_owned),
+            signed,
+        })
+    }
+
+    fn matches(&self, properties: &Map) -> bool {
+        let marker = properties.get(meerschaum_server::executor::environment::JOB_CONTEXT_PROPERTY);
+        self.launch.is_some()
+            && self.launch.as_deref() == Self::launch(properties)
+            && match self.signed {
+                Some(id) => {
+                    marker
+                        .and_then(Value::as_str)
+                        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+                        == Some(id)
+                }
+                None => marker.is_none(),
+            }
+    }
+
+    fn pending(&self, ctx: &JobsContext, name: &str, properties: &Map) -> bool {
+        if !self.matches(properties) {
+            return false;
+        }
+        if self.signed.is_some() {
+            return ctx
+                .launch_resolver
+                .as_ref()
+                .and_then(|resolver| {
+                    resolver
+                        .retained_generation(name, properties)
+                        .ok()
+                        .flatten()
+                })
+                .is_some_and(|generation| generation.finalization_pending().unwrap_or(false));
+        }
+        self.launch.as_deref().is_some_and(|launch| {
+            meerschaum_jobs::supervisor::FactoryPublication::pending(
+                &ctx.paths.daemon_dir(name),
+                launch,
+            )
+        })
+    }
+
+    fn result(&self, properties: &Map) -> Option<SuccessTuple> {
+        if !self.matches(properties) {
+            return None;
+        }
+        committed_result(properties)
+    }
+}
+
+fn metadata(job: &mut Job, ctx: &JobsContext) -> Json {
+    let mut status = job.status().as_str().to_string();
+    let mut properties = job.properties();
+    let publication = ResultPublication::for_job(ctx, &job.name, &properties);
+    let mut completion_pending = false;
+    let mut completion_unavailable = false;
+    let result = if let Some(publication) = &publication {
+        if status != "stopped" {
+            Json::Null
+        } else {
+            let pending = publication.pending(ctx, &job.name, &properties);
+            properties = job.daemon().read_properties().unwrap_or_default();
+            match publication.result(&properties) {
+                Some(result) => json!([result.success, result.message]),
+                None => {
+                    completion_pending = pending && publication.matches(&properties);
+                    completion_unavailable = !completion_pending;
+                    if completion_unavailable {
+                        status = "unavailable".into();
+                    }
+                    Json::Null
+                }
+            }
+        }
+    } else {
+        let result = job.result();
+        json!([result.success, result.message])
+    };
     let mut daemon = serde_json::Map::new();
     daemon.insert("status".into(), Json::String(status.clone()));
     daemon.insert(
@@ -74,25 +195,37 @@ fn metadata(job: &mut Job) -> Json {
             .map(|p| Json::from(p as i64))
             .unwrap_or(Json::Null),
     );
-    daemon.insert("properties".into(), to_json(&Value::Map(job.properties())));
+    daemon.insert("properties".into(), to_json(&Value::Map(properties)));
     let mut meta = serde_json::Map::new();
     meta.insert(
         "sysargs".into(),
         Json::Array(job.sysargs().into_iter().map(Json::String).collect()),
     );
-    meta.insert(
-        "result".into(),
-        Json::Array(vec![
-            Json::Bool(result.success),
-            Json::String(result.message),
-        ]),
-    );
+    meta.insert("result".into(), result);
+    if publication.is_some() {
+        meta.insert("completion_pending".into(), completion_pending.into());
+        meta.insert(
+            "completion_unavailable".into(),
+            completion_unavailable.into(),
+        );
+    }
     meta.insert("restart".into(), Json::Bool(job.restarts()));
     meta.insert("status".into(), Json::String(status));
     meta.insert("daemon".into(), Json::Object(daemon));
     // v5: the job's health (`job.health`), so `api:` executors report it like local ones.
-    meta.insert("health".into(), job.health().to_json());
+    let health = if completion_unavailable {
+        json!({"state": "unknown", "message": "The native job's final result is unavailable."})
+    } else {
+        job.health().to_json()
+    };
+    meta.insert("health".into(), health);
     Json::Object(meta)
+}
+
+fn visible(caller: Option<&Access>, name: &str, job: &mut Job, ctx: &JobsContext) -> bool {
+    caller.is_none_or(|caller| {
+        meerschaum_server::routes::jobs::can_see(caller, name, Some(&metadata(job, ctx)))
+    })
 }
 
 fn utc(dt: PyDateTime) -> DateTime<Utc> {
@@ -132,7 +265,7 @@ impl JobsBackend for LocalJobsBackend {
             let ctx = meerschaum_jobs::summary::listing_context(&ctx, Some("local"), true);
             if let Ok(listing) = get_jobs_for(&ctx, Some("local"), false, true) {
                 for (name, mut job) in listing.jobs {
-                    out.insert(name, metadata(&mut job));
+                    out.insert(name, metadata(&mut job, &ctx));
                 }
             }
             out
@@ -163,7 +296,7 @@ impl JobsBackend for LocalJobsBackend {
         let (ctx, name) = (self.ctx.clone(), name.to_string());
         blocking(move || {
             let mut job = open_job(&ctx, &name, None)?;
-            job.exists().then(|| metadata(&mut job))
+            job.exists().then(|| metadata(&mut job, &ctx))
         })
         .await
         .flatten()
@@ -177,6 +310,15 @@ impl JobsBackend for LocalJobsBackend {
     }
 
     async fn create(&self, name: &str, sysargs: Vec<String>, properties: Option<Map>) -> CreateJob {
+        // Tokio task locals do not enter spawn_blocking. Capture the accepted registration
+        // now, and never let a client's serialized marker choose this job's historical owner.
+        let mut properties = properties;
+        if let Some(caller) = meerschaum_server::executor::context::current() {
+            meerschaum_server::routes::jobs::stamp_registration(
+                properties.get_or_insert_with(Map::new),
+                &caller,
+            );
+        }
         let (ctx, name) = (self.ctx.clone(), name.to_string());
         blocking(move || {
             // The job runs with the server's environment (v4: `env={NONINTERACTIVE: '1',
@@ -194,10 +336,10 @@ impl JobsBackend for LocalJobsBackend {
                     .clone(),
                 "1".to_string(),
             );
-            env.extend(
-                std::env::vars_os()
-                    .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
-            );
+            match ctx.environment_for(&name, &properties.clone().unwrap_or_default()) {
+                Ok(environment) => env.extend(environment),
+                Err(error) => return CreateJob::Unavailable(error.to_string()),
+            }
             let stamps = &meerschaum_core::static_config::static_config().environment;
             if let Some(Value::Map(client_env)) = properties.as_ref().and_then(|p| p.get("env")) {
                 for stamp in [&stamps.compose_project, &stamps.compose_root] {
@@ -271,23 +413,39 @@ impl JobsBackend for LocalJobsBackend {
     }
 
     async fn logs(&self, name: &str) -> Option<String> {
-        let (ctx, name) = (self.ctx.clone(), name.to_string());
-        blocking(move || open_job(&ctx, &name, None)?.get_logs())
-            .await
-            .flatten()
-    }
-
-    async fn stop_time(&self, name: &str) -> Option<DateTime<Utc>> {
-        let (ctx, name) = (self.ctx.clone(), name.to_string());
-        blocking(move || open_job(&ctx, &name, None)?.stop_time().map(utc))
-            .await
-            .flatten()
-    }
-
-    async fn completion_time(&self, name: &str) -> Option<DateTime<Utc>> {
+        let caller = meerschaum_server::executor::context::current();
         let (ctx, name) = (self.ctx.clone(), name.to_string());
         blocking(move || {
             let mut job = open_job(&ctx, &name, None)?;
+            visible(caller.as_deref(), &name, &mut job, &ctx)
+                .then(|| job.get_logs())
+                .flatten()
+        })
+        .await
+        .flatten()
+    }
+
+    async fn stop_time(&self, name: &str) -> Option<DateTime<Utc>> {
+        let caller = meerschaum_server::executor::context::current();
+        let (ctx, name) = (self.ctx.clone(), name.to_string());
+        blocking(move || {
+            let mut job = open_job(&ctx, &name, None)?;
+            visible(caller.as_deref(), &name, &mut job, &ctx)
+                .then(|| job.stop_time().map(utc))
+                .flatten()
+        })
+        .await
+        .flatten()
+    }
+
+    async fn completion_time(&self, name: &str) -> Option<DateTime<Utc>> {
+        let caller = meerschaum_server::executor::context::current();
+        let (ctx, name) = (self.ctx.clone(), name.to_string());
+        blocking(move || {
+            let mut job = open_job(&ctx, &name, None)?;
+            if !visible(caller.as_deref(), &name, &mut job, &ctx) {
+                return None;
+            }
             job.ended().or_else(|| job.stop_time()).map(utc)
         })
         .await
@@ -295,17 +453,26 @@ impl JobsBackend for LocalJobsBackend {
     }
 
     async fn is_blocking_on_stdin(&self, name: &str) -> bool {
+        let caller = meerschaum_server::executor::context::current();
         let (ctx, name) = (self.ctx.clone(), name.to_string());
-        blocking(move || open_job(&ctx, &name, None).is_some_and(|mut j| j.is_blocking_on_stdin()))
-            .await
-            .unwrap_or(false)
+        blocking(move || {
+            open_job(&ctx, &name, None).is_some_and(|mut job| {
+                visible(caller.as_deref(), &name, &mut job, &ctx) && job.is_blocking_on_stdin()
+            })
+        })
+        .await
+        .unwrap_or(false)
     }
 
     async fn prompt_kwargs(&self, name: &str) -> Map {
+        let caller = meerschaum_server::executor::context::current();
         let (ctx, name) = (self.ctx.clone(), name.to_string());
         blocking(move || {
             open_job(&ctx, &name, None)
-                .map(|mut j| j.get_prompt_kwargs())
+                .and_then(|mut job| {
+                    visible(caller.as_deref(), &name, &mut job, &ctx)
+                        .then(|| job.get_prompt_kwargs())
+                })
                 .unwrap_or_default()
         })
         .await
@@ -313,6 +480,19 @@ impl JobsBackend for LocalJobsBackend {
     }
 
     async fn monitor_logs(&self, name: &str) -> Option<LogMonitor> {
+        let caller = meerschaum_server::executor::context::current();
+        let (check_ctx, check_name, check_caller) =
+            (self.ctx.clone(), name.to_string(), caller.clone());
+        if !blocking(move || {
+            open_job(&check_ctx, &check_name, None).is_some_and(|mut job| {
+                visible(check_caller.as_deref(), &check_name, &mut job, &check_ctx)
+            })
+        })
+        .await
+        .unwrap_or(false)
+        {
+            return None;
+        }
         let (events_tx, events_rx) = mpsc::channel::<LogEvent>(256);
         let (input_tx, mut input_rx) = mpsc::channel::<String>(16);
         let stop = Arc::new(AtomicBool::new(false));
@@ -337,12 +517,23 @@ impl JobsBackend for LocalJobsBackend {
             let Some(mut job) = open_job(&ctx, &name, None) else {
                 return;
             };
+            if !visible(caller.as_deref(), &name, &mut job, &ctx) {
+                return;
+            }
             // Asks whether the job still waits while the client has not answered: a job which
             // ended (or was answered by another client) is not waited for.
             let mut probe = open_job(&ctx, &name, None);
             let line_tx = events_tx.clone();
             let stdin_tx = events_tx.clone();
             let stop_tx = events_tx;
+            let publication = ResultPublication::for_job(
+                &ctx,
+                &name,
+                &job.daemon().read_properties().unwrap_or_default(),
+            );
+            let properties_path = job.daemon().paths().properties.clone();
+            let result_stop = stop.clone();
+            let mut stopped_result = None;
             let _ = job.monitor_logs(
                 |line: &str| {
                     if line_tx
@@ -356,6 +547,7 @@ impl JobsBackend for LocalJobsBackend {
                 MonitorOptions {
                     stop_on_exit: true,
                     accept_input: true,
+                    wait_if_stopped: publication.is_none(),
                     stop: Some(stop),
                     input: Some(Box::new(move || {
                         stdin_tx.blocking_send(LogEvent::StdinRequested).ok()?;
@@ -375,12 +567,38 @@ impl JobsBackend for LocalJobsBackend {
                             std::thread::sleep(std::time::Duration::from_millis(25));
                         }
                     })),
-                    on_stop: Some(Box::new(move |result: &SuccessTuple| {
-                        let _ = stop_tx.blocking_send(LogEvent::Stopped(result.clone()));
+                    on_stop: Some(Box::new(|result: &SuccessTuple| {
+                        let Some(publication) = &publication else {
+                            stopped_result = Some(result.clone());
+                            return;
+                        };
+                        while !result_stop.load(Ordering::Acquire) {
+                            let properties =
+                                meerschaum_jobs::properties::read_properties(&properties_path)
+                                    .unwrap_or_default();
+                            let pending = publication.pending(&ctx, &name, &properties);
+                            // The publisher may have exited after its atomic result write.
+                            let latest =
+                                meerschaum_jobs::properties::read_properties(&properties_path)
+                                    .unwrap_or_default();
+                            if let Some(result) = publication.result(&latest) {
+                                stopped_result = Some(result);
+                                break;
+                            }
+                            if !pending || !publication.matches(&latest) {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(25));
+                        }
                     })),
                     ..Default::default()
                 },
             );
+            // monitor_logs reads the final log bytes after its on_stop callback returns.
+            // A websocket closes on Stopped, so enqueue it only after that read.
+            if let Some(result) = stopped_result {
+                let _ = stop_tx.blocking_send(LogEvent::Stopped(result));
+            }
         });
         Some(LogMonitor {
             events: events_rx,
@@ -415,9 +633,16 @@ impl LocalJobsBackend {
         name: &str,
         f: impl FnOnce(&mut Job) -> SuccessTuple + Send + 'static,
     ) -> SuccessTuple {
+        let caller = meerschaum_server::executor::context::current();
         let (ctx, name) = (self.ctx.clone(), name.to_string());
         blocking(move || match open_job(&ctx, &name, None) {
-            Some(mut job) => f(&mut job),
+            Some(mut job) => {
+                if visible(caller.as_deref(), &name, &mut job, &ctx) {
+                    f(&mut job)
+                } else {
+                    SuccessTuple::fail(format!("Invalid job name '{name}'."))
+                }
+            }
             None => SuccessTuple::fail(format!("Invalid job name '{name}'.")),
         })
         .await
@@ -428,6 +653,127 @@ impl LocalJobsBackend {
 #[cfg(test)]
 mod rc6_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn factory_log_monitor_emits_the_published_tuple_and_closes_when_its_supervisor_dies() {
+        #[derive(Debug)]
+        struct Factory;
+        impl meerschaum_jobs::daemon::LaunchEnvironment for Factory {
+            fn authoritative(&self, _: &str, _: &Map) -> bool {
+                false
+            }
+            fn tracks_unattributed_publication(&self) -> bool {
+                true
+            }
+            fn environment(
+                &self,
+                _: &str,
+                _: &Map,
+                _: &[(String, String)],
+            ) -> std::io::Result<Vec<(String, String)>> {
+                unreachable!("a read-only log monitor cannot launch a job")
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let ctx = JobsContext::for_root(root.path())
+            .with_process_runner(Arc::new(meerschaum_jobs::FakeSystemctl::new()))
+            .with_launch_resolver(Arc::new(Factory));
+        let backend = LocalJobsBackend::new(ctx.clone());
+        for (name, publishes) in [("published", true), ("dead", false)] {
+            let properties = Value::from_json_str(
+                r#"{"process":{"launch_id":"first","began":"2026-01-01T00:00:00"},"result":null}"#,
+            )
+            .unwrap()
+            .to_map();
+            let mut job = Job::new(
+                name,
+                Some(vec!["show".into(), "version".into()]),
+                JobOptions {
+                    executor_keys: Some("local".into()),
+                    properties: Some(properties.clone()),
+                    ..Default::default()
+                },
+                &ctx,
+            )
+            .unwrap();
+            assert!(job.daemon().write_properties().success);
+            let paths = job.daemon().paths().clone();
+            std::fs::create_dir_all(&ctx.paths.logs_dir).unwrap();
+            job.daemon()
+                .rotating_log()
+                .unwrap()
+                .write_raw(b"worker exited\n")
+                .unwrap();
+            // Hold the kernel lock just as the native supervisor does after worker exit.
+            let publication = paths.dir.join(".factory-publication");
+            std::fs::write(&publication, "first").unwrap();
+            let supervisor = std::fs::File::options()
+                .write(true)
+                .open(publication)
+                .unwrap();
+            supervisor.try_lock().unwrap();
+            let pending = backend.try_get(name).await.unwrap().unwrap();
+            assert_eq!(pending["completion_pending"], true);
+            let mut monitor = backend.monitor_logs(name).await.unwrap();
+            let line =
+                tokio::time::timeout(std::time::Duration::from_secs(5), monitor.events.recv())
+                    .await
+                    .unwrap();
+            assert!(matches!(line, Some(LogEvent::Line(line)) if line.contains("worker exited")));
+            if publishes {
+                job.daemon()
+                    .rotating_log()
+                    .unwrap()
+                    .write_raw(b"final worker output\n")
+                    .unwrap();
+                let mut finished = properties.clone();
+                finished
+                    .get_mut("process")
+                    .unwrap()
+                    .as_map_mut()
+                    .unwrap()
+                    .insert("ended".into(), "2026-01-01T00:00:01".into());
+                finished.insert(
+                    "result".into(),
+                    Value::List(vec![false.into(), "worker verdict".into()]),
+                );
+                assert!(
+                    meerschaum_jobs::properties::write_existing_properties(
+                        &paths.properties,
+                        &finished
+                    )
+                    .success
+                );
+            }
+            drop(supervisor);
+            if publishes {
+                let line =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), monitor.events.recv())
+                        .await
+                        .unwrap();
+                assert!(
+                    matches!(line, Some(LogEvent::Line(line)) if line == "final worker output\n")
+                );
+            }
+            let event =
+                tokio::time::timeout(std::time::Duration::from_secs(5), monitor.events.recv())
+                    .await
+                    .unwrap();
+            if publishes {
+                assert!(
+                    matches!(event, Some(LogEvent::Stopped(result)) if !result.success && result.message == "worker verdict")
+                );
+            } else {
+                assert!(event.is_none());
+                assert_eq!(
+                    backend.try_get(name).await.unwrap().unwrap()["completion_unavailable"],
+                    true
+                );
+            }
+        }
+    }
 
     /// `GET /jobs` reads every `systemd` job's status, PID and times from one `systemctl show`
     /// (rc28; a few calls per job before), and lists exactly what each job's getters read.
@@ -483,7 +829,7 @@ mod rc6_tests {
         assert_eq!(queries.len(), 1, "{queries:?}");
         let mut expected = IndexMap::new();
         for (name, mut job) in get_jobs_for(&ctx, Some("local"), false, true).unwrap().jobs {
-            expected.insert(name, metadata(&mut job));
+            expected.insert(name, metadata(&mut job, &ctx));
         }
         assert_eq!(listed, expected);
         assert_eq!(listed["one"]["status"], "running");
@@ -546,6 +892,7 @@ mod rc6_tests {
         match backend.create("nightly", sysargs, Some(props)).await {
             CreateJob::Started(started) => assert!(started.success, "{started}"),
             CreateJob::Exists => panic!("the job existed"),
+            CreateJob::Unavailable(error) => panic!("{error}"),
         }
         let meta = backend.get("nightly").await.unwrap();
         assert_eq!(meta["daemon"]["properties"]["owner"], "alice");

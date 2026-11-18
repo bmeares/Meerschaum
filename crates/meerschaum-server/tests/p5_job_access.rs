@@ -232,6 +232,7 @@ async fn fixture_with(tweak: impl FnOnce(&mut meerschaum_server::ServerConfig)) 
     let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
         .jobs(jobs.clone())
+        .actions(Arc::new(ListedActions))
         .build()
         .unwrap();
     Fixture {
@@ -240,6 +241,24 @@ async fn fixture_with(tweak: impl FnOnce(&mut meerschaum_server::ServerConfig)) 
         jobs,
         instance,
         _dir: dir,
+    }
+}
+
+/// The actions the jobs here run (a non-administrator's step must name one, 5.1).
+struct ListedActions;
+
+#[async_trait::async_trait]
+impl meerschaum_server::backends::ActionsBackend for ListedActions {
+    fn list(&self) -> Vec<String> {
+        [
+            "sync", "show", "attach", "watch", "stop", "pause", "restart", "delete",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect()
+    }
+    async fn execute(&self, _action: &str, _keywords: Map) -> meerschaum_core::SuccessTuple {
+        meerschaum_core::SuccessTuple::success()
     }
 }
 
@@ -803,4 +822,236 @@ async fn a_pipeline_s_jobs_of_other_teams_are_only_counted() {
         "{}",
         r.text()
     );
+}
+
+/// 5.1: a job's input is its program's. A caller who may not run system commands answers only
+/// the prompts of a job whose own command they could run (`POST /execute`'s decision); an
+/// administrator answers any.
+#[tokio::test]
+async fn only_a_caller_who_could_run_a_jobs_command_answers_its_prompts() {
+    let f = fixture(false).await;
+    for (name, sysargs) in [
+        ("tpr-sync", vec!["sync", "pipes"]),
+        ("tpr-shell", vec!["sh", "read", "line"]),
+        ("tpr-word", vec!["touch", "/tmp/tpr-x"]),
+        ("tpr-python", vec!["python"]),
+    ] {
+        f.jobs.jobs.lock().unwrap().insert(
+            name.into(),
+            (sysargs.into_iter().map(String::from).collect(), Map::new()),
+        );
+    }
+    let access_of = |user: &str| {
+        let state = f.state.clone();
+        let user = meerschaum_core::users::User::new(user, None);
+        async move {
+            meerschaum_server::access::access_of_fresh(
+                &state,
+                meerschaum_server::auth::Principal::User(user),
+                &meerschaum_server::auth::Scopes::List(vec!["*".into()]),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let bob = access_of("bob").await;
+    let admin = access_of("admin").await;
+    let allowed = |access: meerschaum_server::access::Access, name: &'static str| {
+        let state = f.state.clone();
+        async move {
+            meerschaum_server::routes::jobs::job_input_allowed(&state, &access, name)
+                .await
+                .is_ok()
+        }
+    };
+    assert!(allowed(bob.clone(), "tpr-sync").await);
+    for name in ["tpr-shell", "tpr-word", "tpr-python", "tpr-missing"] {
+        assert!(!allowed(bob.clone(), name).await, "{name}");
+    }
+    for name in ["tpr-sync", "tpr-shell", "tpr-word", "tpr-python"] {
+        assert!(allowed(admin.clone(), name).await, "{name}");
+    }
+}
+
+/// 5.1: a non-administrator cannot make a job's stored command (or where it runs and writes)
+/// something the policy would refuse: re-registering a name answers 409 and keeps the stored
+/// command, a refused command is refused, `edit job` is refused, and the properties that choose
+/// the working directory, the log file and the command are dropped (an administrator's are kept).
+#[tokio::test]
+async fn a_non_administrator_cannot_change_what_a_job_runs_or_where() {
+    let f = fixture(false).await;
+    let bob = token(&f, "bob").await;
+    let admin = token(&f, "admin").await;
+    // An administrator's shell job, visible to everyone (created locally).
+    f.jobs.jobs.lock().unwrap().insert(
+        "tpr-admin".into(),
+        (vec!["sh".into(), "backup.sh".into()], Map::new()),
+    );
+    let stored = |name: &str| f.jobs.jobs.lock().unwrap().get(name).map(|j| j.0.clone());
+
+    // Re-registering the name (with an allowed command) neither replaces nor starts it.
+    let r = post(
+        &f,
+        &bob,
+        "/jobs/tpr-admin",
+        Some(json!({"sysargs": ["sync", "pipes"], "properties": {}})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text());
+    assert_eq!(stored("tpr-admin").unwrap(), ["sh", "backup.sh"]);
+    // A refused command is never stored, and `edit job` never runs.
+    let r = post(
+        &f,
+        &bob,
+        "/jobs/tpr-new",
+        Some(json!({"sysargs": ["touch", "/tmp/tpr-x"], "properties": {}})),
+    )
+    .await;
+    assert_eq!(r.json()[0], false, "{}", r.text());
+    assert!(stored("tpr-new").is_none());
+    for sysargs in [json!(["edit", "job", "tpr-admin"]), json!(["edit", "jobs"])] {
+        let r = post(
+            &f,
+            &bob,
+            "/execute",
+            Some(json!({"sysargs": sysargs, "name": "execute-tpr"})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{sysargs}: {}", r.text());
+    }
+
+    // The properties that choose where it runs and writes are the server's.
+    let chosen = json!({
+        "cwd": "/tmp/tpr-elsewhere",
+        "logs": {"path": "/tmp/tpr-elsewhere/plugin.py", "write_timestamps": false},
+        "target": {"args": [["sh", "touch", "/tmp/tpr-x"]]},
+        "restart": true,
+    });
+    let r = post(
+        &f,
+        &bob,
+        "/jobs/tpr-bob",
+        Some(json!({"sysargs": ["sync", "pipes"], "properties": chosen})),
+    )
+    .await;
+    assert_eq!(r.json()[0], true, "{}", r.text());
+    let properties = f.jobs.properties("tpr-bob");
+    for key in ["cwd", "logs", "target"] {
+        assert!(!properties.contains_key(key), "{key}: {properties:?}");
+    }
+    assert_eq!(properties.get("restart"), Some(&Value::Bool(true)));
+    assert_eq!(stored("tpr-bob").unwrap(), ["sync", "pipes"]);
+    let r = post(
+        &f,
+        &admin,
+        "/jobs/tpr-root",
+        Some(json!({"sysargs": ["sync", "pipes"], "properties": chosen})),
+    )
+    .await;
+    assert_eq!(r.json()[0], true, "{}", r.text());
+    let properties = f.jobs.properties("tpr-root");
+    assert!(properties.contains_key("cwd") && properties.contains_key("logs"));
+}
+
+/// 5.1: a command line that names a job (`show jobs`, `attach logs`, `stop jobs`, `delete jobs`,
+/// `-d --name <existing job>`) runs for a non-administrator only on jobs they may act on over the
+/// job routes, with the same permissions; one that names none acts on every job, so every job
+/// must pass. Asked through `POST /execute/validate`, the decision the restricted web terminal
+/// and `POST /execute` share.
+#[tokio::test]
+async fn a_command_naming_jobs_is_held_to_the_job_routes() {
+    let f = fixture(false).await;
+    let alice = token(&f, "alice").await;
+    let bob = token(&f, "bob").await;
+    let dave = token(&f, "dave").await;
+    let erin = token(&f, "erin").await;
+    let admin = token(&f, "admin").await;
+    assert_eq!(
+        create(&f, &alice, "data-job", json!({})).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        create(&f, &dave, "ops-job", json!({})).await.status,
+        StatusCode::OK
+    );
+    let validate = |auth: String, sysargs: &'static [&'static str]| {
+        let f = &f;
+        async move {
+            post(
+                f,
+                &auth,
+                "/execute/validate",
+                Some(json!({"sysargs": sysargs})),
+            )
+            .await
+            .status
+        }
+    };
+    // bob (Data) acts on Data's job, never on Ops's (which answers as missing).
+    for sysargs in [
+        &["show", "jobs", "data-job"][..],
+        &["attach", "logs", "data-job"],
+        &["stop", "jobs", "data-job", "-y"],
+        &["delete", "jobs", "data-job", "-y"],
+        &["show", "version", "-d", "--name", "a-new-job"],
+    ] {
+        assert_eq!(
+            validate(bob.clone(), sysargs).await,
+            StatusCode::OK,
+            "{sysargs:?}"
+        );
+    }
+    for sysargs in [
+        &["show", "jobs", "ops-job"][..],
+        &["show", "daemons", "ops-job"],
+        &["attach", "jobs", "ops-job"],
+        &["attach", "logs", "ops-job"],
+        &["watch", "logs", "ops-job"],
+        &["stop", "jobs", "data-job", "ops-job", "-y"],
+        &["pause", "jobs", "ops-job"],
+        &["restart", "jobs", "ops-job"],
+        &["delete", "jobs", "ops-job", "-y"],
+        &["show", "version", "-d", "--name", "ops-job"],
+        &["show", "version", "--daemon", "--name=ops-job"],
+        &["show", "version", "+", "delete", "jobs", "ops-job", "-y"],
+    ] {
+        assert_eq!(
+            validate(bob.clone(), sysargs).await,
+            StatusCode::NOT_FOUND,
+            "{sysargs:?}"
+        );
+    }
+    // Naming no job is every job: bob may not see Ops's.
+    for sysargs in [
+        &["show", "jobs"][..],
+        &["stop", "jobs", "-y"],
+        &["watch", "jobs"],
+    ] {
+        assert_eq!(
+            validate(bob.clone(), sysargs).await,
+            StatusCode::FORBIDDEN,
+            "{sysargs:?}"
+        );
+    }
+    // The permissions of the job routes: a viewer reads but does not stop.
+    let erin_stop = validate(erin.clone(), &["stop", "jobs", "data-job", "-y"]).await;
+    assert_eq!(erin_stop, StatusCode::FORBIDDEN);
+    // Administrators are unaffected.
+    for sysargs in [&["show", "jobs"][..], &["delete", "jobs", "ops-job", "-y"]] {
+        assert_eq!(
+            validate(admin.clone(), sysargs).await,
+            StatusCode::OK,
+            "{sysargs:?}"
+        );
+    }
+    // `POST /execute` decides the same.
+    let r = post(
+        &f,
+        &bob,
+        "/execute",
+        Some(json!({"sysargs": ["delete", "jobs", "ops-job", "-y"], "name": "execute-tpr"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text());
+    assert!(f.jobs.jobs.lock().unwrap().contains_key("ops-job"));
 }

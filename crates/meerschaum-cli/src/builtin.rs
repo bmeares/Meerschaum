@@ -333,6 +333,30 @@ pub fn installed_plugin_listing(
 
 /// `show plugins` (installed plugins only; `all` and `<username>` need a repository).
 pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    if words(args, "action") == [meerschaum_server::executor::extensions::ACTION] {
+        let bytes = crate::executor_extensions::run(rt)
+            .map_err(|message| ActionError::new("PermissionError", message))?;
+        return Ok(SuccessTuple::ok(String::from_utf8(bytes).map_err(
+            |_| ActionError::new("ValueError", "Invalid confined extension result."),
+        )?));
+    }
+    if words(args, "action") == [meerschaum_server::executor::registration::ACTION] {
+        let bytes = crate::executor_registration::run(rt)
+            .map_err(|message| ActionError::new("PermissionError", message))?;
+        return Ok(SuccessTuple::ok(String::from_utf8(bytes).map_err(
+            |_| ActionError::new("ValueError", "Invalid confined registration result."),
+        )?));
+    }
+    if flag(args, "plugin_manifest") {
+        let bytes = crate::executor_plugin_producer::from_runtime(rt)
+            .map_err(|message| ActionError::new("PermissionError", message))?;
+        return Ok(SuccessTuple {
+            success: true,
+            message: String::from_utf8(bytes).map_err(|_| {
+                ActionError::new("ValueError", "Invalid confined plugin metadata encoding.")
+            })?,
+        });
+    }
     // `parse_repo_keys(repository)` raises for non-API repositories.
     crate::native::show::repo_keys(args, rt)?;
     let action = words(args, "action");

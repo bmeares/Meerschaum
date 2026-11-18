@@ -212,8 +212,8 @@ pub fn laps_path(jobs_dir: &Path, name: &str) -> PathBuf {
 
 /// Read a heartbeat file (`None` when it is missing or unreadable).
 pub fn read_record(path: &Path) -> Option<LapRecord> {
-    let text = std::fs::read_to_string(path).ok()?;
-    LapRecord::from_json(&serde_json::from_str(&text).ok()?)
+    let bytes = crate::untrusted_file::read_regular(path, 1024 * 1024, false).ok()??;
+    LapRecord::from_json(&serde_json::from_slice(&bytes).ok()?)
 }
 
 /// Write a heartbeat file atomically (a temporary file renamed over it). The directory must

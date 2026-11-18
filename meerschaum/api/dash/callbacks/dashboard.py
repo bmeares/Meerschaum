@@ -119,6 +119,8 @@ _paths = {
         '/dash/performance': pages.performance.route,
     } if _console_pages_allowed else {}),
 }
+# The confined source adapter may shadow a plugin-owned page, never a Core console page.
+_core_paths = frozenset(_paths)
 _required_login = {
     '', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes',
     '/dash/pipelines', '/dash/runs', '/dash/terminal', '/dash/webterm', '/dash/connectors',
@@ -235,6 +237,12 @@ def update_page_layout_div(
         pathname.rstrip('/') + '/'
     ).rstrip('/')
 
+    source_page = None
+    source_page_handled = False
+    if complete_path not in _core_paths and base_path not in _core_paths:
+        from meerschaum.api.dash._extension_pages import remote_layout
+        source_page_handled, source_page = remote_layout(complete_path, location_href)
+
     if complete_path in _paths:
         path_str = complete_path
     elif base_path in _paths:
@@ -250,7 +258,12 @@ def update_page_layout_div(
             else '/dash/login'
         )
     )
-    layout = _paths.get(path, pages.error.layout)
+    if source_page_handled:
+        path = complete_path
+        from meerschaum.api.dash.components import build_pages_navbar
+        layout = [build_pages_navbar(), source_page]
+    else:
+        layout = _paths.get(path, pages.error.layout)
     permission = _required_permission.get(path, None)
     if permission and not no_auth and path != '/dash/login':
         from meerschaum.api.dash.access import get_viewer

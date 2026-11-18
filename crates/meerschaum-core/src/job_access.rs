@@ -50,8 +50,22 @@ pub use crate::access::EVERYONE;
 /// The property naming the user who started a job through the API server or the console.
 pub const OWNER_KEY: &str = "owner";
 
+/// Private server registration evidence for retained job ownership; never a public property.
+pub const OWNER_BINDING_KEY: &str = "_mrsm_owner_binding";
+
+/// Private original team UUID (`null`: Everyone; absent: legacy provenance is unknown).
+pub const TEAM_ID_KEY: &str = "_mrsm_team_id";
+
 /// The property naming the job's team (absent or `null`: Everyone).
 pub const TEAM_KEY: &str = "team";
+
+/// The property that marks a job a member of a team that runs code started (5.1, team
+/// execution): its launch sandboxes it at the "filesystem and sockets" level
+/// (`require_sockets`, whatever `python_team_sandbox` says) and never runs it without its team's
+/// scope. The API server and the console write it. It is not one of the [`SERVER_ONLY_KEYS`]: a
+/// job's creator who sets it only makes that job stricter, and the server's own job creation
+/// must keep it.
+pub const TEAM_EXECUTION_KEY: &str = "mrsm_team_execution";
 
 /// The property in which console runs recorded their creator before 5.0.0rc15 (still written,
 /// so an older console or server sharing the root keeps its rule).
@@ -190,6 +204,9 @@ impl JobAccess {
 
 /// Whether `principal` may see the job `job` describes (see the module documentation).
 pub fn can_see_job(principal: &Principal, job: &JobAccess) -> bool {
+    if !principal.permits_team(job.team.as_deref()) {
+        return false;
+    }
     if principal.is_admin || job.is_owner(&principal.username) {
         return true;
     }

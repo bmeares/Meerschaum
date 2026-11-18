@@ -5,5 +5,7 @@
   "addon-fit.js": "https://unpkg.com/@xterm/addon-fit@0.11.0/lib/addon-fit.js",
   "addon-fit.LICENSE": "https://unpkg.com/@xterm/addon-fit@0.11.0/LICENSE",
   "addon-unicode11.js": "https://unpkg.com/@xterm/addon-unicode11@0.9.0/lib/addon-unicode11.js",
-  "addon-unicode11.LICENSE": "https://unpkg.com/@xterm/addon-unicode11@0.9.0/LICENSE"
+  "addon-unicode11.LICENSE": "https://unpkg.com/@xterm/addon-unicode11@0.9.0/LICENSE",
+  "plotly.js": "https://cdn.plot.ly/plotly-4.1.1.min.js",
+  "plotly.LICENSE": "https://raw.githubusercontent.com/plotly/plotly.js/v4.1.1/LICENSE"
 }

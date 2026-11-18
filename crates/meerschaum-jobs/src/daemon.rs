@@ -24,6 +24,86 @@ pub const TARGET_MODULE: &str = "meerschaum._internal.entry";
 /// See [`TARGET_MODULE`].
 pub const TARGET_NAME: &str = "entry";
 
+/// A host-owned source of a job's complete launch environment. The jobs crate never opens
+/// credentials or chooses an execution profile itself; the injecting host owns that policy.
+pub trait LaunchEnvironment: std::fmt::Debug + Send + Sync {
+    /// Whether this exact launch replaces persisted job environment with host authority.
+    /// A resolver shared with legacy jobs may opt those jobs out without bypassing lookup.
+    fn authoritative(&self, _name: &str, _properties: &Map) -> bool {
+        true
+    }
+
+    /// Resolve the current environment on every actual launch, including automatic restarts.
+    fn environment(
+        &self,
+        name: &str,
+        properties: &Map,
+        base: &[(String, String)],
+    ) -> std::io::Result<Vec<(String, String)>>;
+
+    /// Prepare a callback-free Team command only at actual launch. Reading a job's
+    /// properties never allocates its workspace. Other hosts keep ordinary job behavior.
+    fn unattributed_team_environment(
+        &self,
+        _name: &str,
+        _properties: &Map,
+    ) -> std::io::Result<Option<Vec<(String, String)>>> {
+        Ok(None)
+    }
+
+    /// This Factory also owns callback-free Team job directories and their native publishers.
+    fn tracks_unattributed_publication(&self) -> bool {
+        false
+    }
+
+    /// Optional host-selected process which owns a detached launch. Never derive this from
+    /// persisted job fields, environment variables, or caller-selected paths.
+    fn owner_guard(
+        &self,
+        _name: &str,
+        _properties: &Map,
+    ) -> std::io::Result<Option<crate::supervisor::LifecycleOwner>> {
+        Ok(None)
+    }
+
+    /// Immutable pure-compute lifetime, selected by a trusted Metadata launch only.
+    fn compute_deadline(
+        &self,
+        _name: &str,
+        _properties: &Map,
+    ) -> std::io::Result<Option<crate::supervisor::ComputeDeadline>> {
+        Ok(None)
+    }
+
+    /// A larger encoded Metadata result is selected only from the host's signed context.
+    fn result_protocol(
+        &self,
+        _name: &str,
+        _properties: &Map,
+    ) -> std::io::Result<crate::supervisor::ResultProtocol> {
+        Ok(crate::supervisor::ResultProtocol::Ordinary)
+    }
+
+    /// Resolve an API job's sealed native lifecycle binding from the trusted host only.
+    fn job_generation(
+        &self,
+        _name: &str,
+        _properties: &Map,
+    ) -> std::io::Result<Option<crate::supervisor::JobGeneration>> {
+        Ok(None)
+    }
+
+    /// Read the host's retained generation without preparing a launch or invalidating its
+    /// completion. Status/GET callers must never use the launch-mutating job_generation.
+    fn retained_generation(
+        &self,
+        _name: &str,
+        _properties: &Map,
+    ) -> std::io::Result<Option<crate::supervisor::JobGeneration>> {
+        Ok(None)
+    }
+}
+
 /// Where jobs live and how they run: paths, configuration and launcher.
 #[derive(Debug, Clone)]
 pub struct JobsContext {
@@ -43,6 +123,11 @@ pub struct JobsContext {
     pub executors: Option<Arc<dyn crate::executor::CustomExecutors>>,
     /// The environment a `systemd` unit is written from (`None`: this process's). Tests pin it.
     pub process_env: Option<Vec<(String, String)>>,
+    /// Complete environment for local supervisors and workers; `None` inherits this process.
+    /// Executor roles use this to launch only with their filtered private configuration.
+    pub launch_environment: Option<Vec<(String, String)>>,
+    /// Optional host policy for a particular canonical job; errors refuse a launch.
+    pub launch_resolver: Option<Arc<dyn LaunchEnvironment>>,
     /// Reads the children of a process ([`process::children`]); tests inject a reader.
     pub children: fn(i32) -> Option<Vec<i32>>,
 }
@@ -58,6 +143,8 @@ impl JobsContext {
             remote: None,
             executors: None,
             process_env: None,
+            launch_environment: None,
+            launch_resolver: None,
             children: process::children,
         }
     }
@@ -99,6 +186,34 @@ impl JobsContext {
         self
     }
 
+    /// Start local processes from this complete environment, without changing the host.
+    pub fn with_launch_environment(mut self, env: Vec<(String, String)>) -> JobsContext {
+        self.launch_environment = Some(env);
+        self
+    }
+
+    /// Resolve a canonical job's environment through the injecting host on every launch.
+    pub fn with_launch_resolver(mut self, resolver: Arc<dyn LaunchEnvironment>) -> Self {
+        self.launch_resolver = Some(resolver);
+        self
+    }
+
+    /// The complete current environment, before the jobs crate adds its own runtime stamps.
+    pub fn environment_for(
+        &self,
+        name: &str,
+        properties: &Map,
+    ) -> std::io::Result<Vec<(String, String)>> {
+        let base = self
+            .launch_environment
+            .clone()
+            .unwrap_or_else(crate::config_files::process_env);
+        match &self.launch_resolver {
+            Some(resolver) => resolver.environment(name, properties, &base),
+            None => Ok(base),
+        }
+    }
+
     /// Read the children of a process with `reader` (tests simulate a kernel without them).
     pub fn with_children_reader(mut self, reader: fn(i32) -> Option<Vec<i32>>) -> JobsContext {
         self.children = reader;
@@ -119,6 +234,57 @@ impl JobsContext {
         self.remote = Some(resolver);
         self
     }
+}
+
+/// Marked launches enter the registered native CLI before any interpreter or wrapper runs.
+/// A supervisor itself remains trusted native lifecycle code outside the command's sandbox.
+pub(crate) fn validate_native_command(
+    environment: &[(String, String)],
+    command: &[String],
+    supervisor: bool,
+) -> std::io::Result<bool> {
+    use meerschaum_core::team_scope::{api_execution, sandbox};
+    let Some(path) = environment
+        .iter()
+        .rev()
+        .find(|(name, value)| name == sandbox::SPEC_VAR && !value.is_empty())
+        .map(|(_, value)| value)
+    else {
+        if environment
+            .iter()
+            .any(|(name, _)| name == api_execution::PROFILE_VAR)
+        {
+            return Err(std::io::Error::other(
+                "API execution cannot start without its mandatory sandbox.",
+            ));
+        }
+        return Ok(false);
+    };
+    let spec = sandbox::Spec::read(std::path::Path::new(path))?;
+    let runtime = spec.runtime.ok_or_else(|| {
+        std::io::Error::other("The isolated job has no host-prepared native runtime.")
+    })?;
+    if meerschaum_core::self_exe::native_executable().as_ref() != Some(&runtime.launcher) {
+        return Err(std::io::Error::other(
+            "The isolated job's native runtime does not belong to this host.",
+        ));
+    }
+    let valid_arguments = if supervisor {
+        command.len() == 2 && command[1] == crate::supervisor::SUPERVISOR_ARG
+    } else {
+        command.len() == 1
+    };
+    let actual = command
+        .first()
+        .map(std::path::Path::new)
+        .filter(|path| path.is_absolute())
+        .and_then(|path| std::fs::canonicalize(path).ok());
+    if !valid_arguments || actual.as_ref() != Some(&runtime.launcher) {
+        return Err(std::io::Error::other(
+            "An isolated job and its supervisor must use the host's canonical native mrsm launcher; interpreter or wrapper overrides cannot run before confinement.",
+        ));
+    }
+    Ok(true)
 }
 
 /// `Daemon.status`.
@@ -833,6 +999,7 @@ impl Daemon {
         let mut command = self.ctx.launcher.program.clone();
         command.extend(self.target_args.iter().cloned());
         SupervisorOptions {
+            compute_deadline: None,
             daemon_id: self.daemon_id.clone(),
             jobs_dir: self.ctx.paths.jobs_dir.clone(),
             log_path: self.log_path(),
@@ -849,6 +1016,9 @@ impl Daemon {
             command,
             startup: self.startup_policy(self.start_kind),
             launch_id: None,
+            lifecycle_owner: None,
+            job_generation: None,
+            result_protocol: crate::supervisor::ResultProtocol::Ordinary,
         }
     }
 
@@ -867,9 +1037,29 @@ impl Daemon {
             (sc.environment.daemon_id.clone(), self.daemon_id.clone()),
             ("PYTHONUNBUFFERED".to_string(), "1".to_string()),
         ];
+        let properties = self.properties();
+        let authoritative = self.ctx.launch_environment.is_some()
+            || self
+                .ctx
+                .launch_resolver
+                .as_ref()
+                .is_some_and(|resolver| resolver.authoritative(&self.daemon_id, &properties));
         // Allow the user to override environment variables.
-        if let Some(Value::Map(user_env)) = self.properties().get("env") {
+        if let Some(Value::Map(user_env)) = properties.get("env") {
             for (k, v) in user_env {
+                // A complete runtime environment is authoritative on *every* restart. In
+                // particular, a persisted executor job cannot restore old plugin grants,
+                // configuration paths or credentials after signed reconfiguration.
+                if authoritative
+                    && ![
+                        &sc.environment.noninteractive,
+                        &sc.environment.compose_project,
+                        &sc.environment.compose_root,
+                    ]
+                    .contains(&k)
+                {
+                    continue;
+                }
                 env.push((k.clone(), v.py_str()));
             }
         }
@@ -879,31 +1069,157 @@ impl Daemon {
     fn launch(&mut self, keep_output: bool, launch_id: Option<String>) -> std::io::Result<()> {
         let mut opts = self.supervisor_options(keep_output);
         opts.launch_id = launch_id;
+        let properties = self.properties();
+        if let Some(resolver) = &self.ctx.launch_resolver {
+            opts.lifecycle_owner = resolver.owner_guard(&self.daemon_id, &properties)?;
+            opts.result_protocol = resolver.result_protocol(&self.daemon_id, &properties)?;
+            opts.compute_deadline = resolver.compute_deadline(&self.daemon_id, &properties)?;
+        }
         let launcher = &self.ctx.launcher;
         let Some((program, leading)) = launcher.supervisor.split_first() else {
             return Err(std::io::Error::other("No supervisor command."));
         };
         let mut cmd = std::process::Command::new(program);
-        cmd.args(leading).args(opts.to_args());
+        cmd.args(leading);
+        let resolver = self.ctx.launch_resolver.as_ref();
+        let unattributed = resolver
+            .map(|resolver| resolver.unattributed_team_environment(&self.daemon_id, &properties))
+            .transpose()?
+            .flatten();
+        let unattributed_team = unattributed.is_some();
+        let process_env = match unattributed {
+            Some(environment) => environment,
+            None => self.ctx.environment_for(&self.daemon_id, &properties)?,
+        };
+        // API-only selection is host authority, never a persisted worker environment stamp.
+        let authoritative =
+            resolver.filter(|resolver| resolver.authoritative(&self.daemon_id, &properties));
+        let api_only = authoritative.is_some()
+            && process_env.iter().any(|(key, value)| {
+                key == meerschaum_core::team_scope::api_execution::PROFILE_VAR && value == "1"
+            });
+        let team_descriptor = (authoritative.is_some() || unattributed_team)
+            .then(|| {
+                process_env
+                    .iter()
+                    .rev()
+                    .find(|(key, _)| key == meerschaum_core::team_scope::source_namespace::ENV)
+                    .map(|(_, value)| std::path::Path::new(value))
+            })
+            .flatten();
+        if unattributed_team && team_descriptor.is_none() {
+            return Err(std::io::Error::other(
+                "The Factory Team command lost its source descriptor.",
+            ));
+        }
+        if api_only || team_descriptor.is_some() {
+            if !validate_native_command(&process_env, &self.ctx.launcher.program, false)? {
+                return Err(std::io::Error::other(
+                    "The launch needs its prepared native runtime.",
+                ));
+            }
+            validate_native_command(&process_env, &self.ctx.launcher.supervisor, true)?;
+            let spec = process_env
+                .iter()
+                .rev()
+                .find(|(key, _)| key == meerschaum_core::team_scope::sandbox::SPEC_VAR)
+                .map(|(_, value)| std::path::Path::new(value))
+                .ok_or_else(|| std::io::Error::other("The confinement spec is unavailable."))?;
+            if let Some(descriptor) = team_descriptor {
+                let launch =
+                    meerschaum_core::team_scope::source_namespace::Launch::read(descriptor)
+                        .map_err(std::io::Error::other)?;
+                if spec.parent() != descriptor.parent()
+                    || meerschaum_core::team_scope::sandbox::Spec::read(spec)? != launch.sandbox
+                {
+                    return Err(std::io::Error::other(
+                        "The Team launch has another confinement spec.",
+                    ));
+                }
+                opts.cwd = launch.namespace.root;
+            }
+            if let Some(resolver) = authoritative {
+                let generation = resolver
+                    .job_generation(&self.daemon_id, &properties)?
+                    .ok_or_else(|| {
+                        std::io::Error::other("The launch has no sealed lifecycle binding.")
+                    })?;
+                generation.validate(&self.daemon_id)?;
+                if spec.parent() != Some(generation.directory.as_path()) {
+                    return Err(std::io::Error::other(
+                        "The generation differs from its actual runtime.",
+                    ));
+                }
+                opts.job_generation = Some(generation);
+            }
+        }
+        if api_only {
+            opts.cwd = process_env
+                .iter()
+                .rev()
+                .find(|(key, _)| key == "MRSM_ROOT_DIR")
+                .map(|(_, value)| PathBuf::from(value))
+                .ok_or_else(|| {
+                    std::io::Error::other("API execution has no private working directory.")
+                })?;
+        }
+        cmd.args(opts.to_args());
+        // A lifecycle owner is selected only by the trusted host resolver. Persisted env or
+        // a public job property cannot make an unmarked job select this native exec barrier.
+        if opts.lifecycle_owner.is_some() {
+            crate::supervisor::seal_native_command(&mut cmd)?;
+        }
+        if self.ctx.launch_environment.is_some() || self.ctx.launch_resolver.is_some() {
+            cmd.env_clear().envs(process_env.iter().cloned());
+        }
         let sc = meerschaum_core::static_config::static_config();
         cmd.env_remove(&sc.environment.systemd_stdin_path);
         let worker_env = self.worker_env();
         for (k, v) in &worker_env {
             cmd.env(k, v);
         }
+        if api_only || team_descriptor.is_some() {
+            // The resolver already supplied the exact sealed launch configuration.
+            meerschaum_core::team_scope::sandbox::runtime::sanitize_command(&mut cmd);
+            cmd.env(
+                meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR,
+                "supervisor",
+            );
+            return crate::supervisor::spawn_detached(&mut cmd);
+        }
         // 5.1: `MRSM_CONFIG` / `MRSM_PATCH` reach the job in owner-only files in its directory
         // (`config_files`). A file that cannot be written leaves the environment as it is.
-        let process_env = crate::config_files::process_env();
         // 5.1: a job of an isolated team gets that team's configuration and an allowlisted
         // environment only, or does not start.
         if let Some(changes) = self.team_environment(&process_env, &worker_env)? {
+            let mut environment = process_env.clone();
+            environment.extend(worker_env.iter().cloned());
+            let environment = changes.apply(&environment);
+            validate_native_command(&environment, &self.ctx.launcher.program, false)?;
+            validate_native_command(&environment, &self.ctx.launcher.supervisor, true)?;
             changes.apply_to(&mut cmd);
+            meerschaum_core::team_scope::sandbox::runtime::sanitize_command(&mut cmd);
+            cmd.env(
+                meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR,
+                "supervisor",
+            );
             return crate::supervisor::spawn_detached(&mut cmd);
         }
         let mut launching = process_env;
         launching.extend(worker_env);
+        let marked = validate_native_command(&launching, &self.ctx.launcher.program, false)?;
+        if marked {
+            validate_native_command(&launching, &self.ctx.launcher.supervisor, true)?;
+        }
         if let Ok(changes) = crate::config_files::externalize(&self.paths.dir, &launching) {
             changes.apply_to(&mut cmd);
+        }
+        if marked {
+            meerschaum_core::team_scope::sandbox::runtime::sanitize_command(&mut cmd);
+            cmd.env(
+                meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR,
+                "supervisor",
+            );
         }
         crate::supervisor::spawn_detached(&mut cmd)
     }
@@ -921,10 +1237,18 @@ impl Daemon {
         job_env: &[(String, String)],
     ) -> std::io::Result<Option<crate::config_files::JobEnvironment>> {
         use crate::config_files::{
-            TEAM_SCOPE_PROPERTY, externalize_team, job_team_scope, may_be_team_job, strip_team_env,
+            TEAM_SCOPE_PROPERTY, externalize_team_with, job_team_scope, may_be_team_job,
+            requires_team_execution, strip_team_env,
         };
         let props = self.properties();
+        let required = requires_team_execution(&props);
         if !may_be_team_job(&props) {
+            if required {
+                return Err(std::io::Error::other(
+                    "This job runs a team member's command but names no isolated team, so it \
+                     does not start.",
+                ));
+            }
             return Ok(None);
         }
         // The job's own variables win (a registry reads the first of a name).
@@ -940,9 +1264,24 @@ impl Daemon {
         .map_err(std::io::Error::other)?;
         let paths = config.paths();
         let Some((key, scope)) = job_team_scope(&paths.root_dir, &props) else {
+            // 5.1: a team member's command never runs with the server's configuration.
+            if required {
+                return Err(std::io::Error::other(
+                    "This job runs a team member's command, but its team's scope is not \
+                     recorded (the team is no longer isolated, or the API server has not \
+                     recorded it), so it does not start.",
+                ));
+            }
             return Ok(None);
         };
-        let changes = externalize_team(&self.paths.dir, process_env, job_env, &config, &scope)?;
+        let changes = externalize_team_with(
+            &self.paths.dir,
+            process_env,
+            job_env,
+            &config,
+            &scope,
+            required,
+        )?;
         let passthrough = meerschaum_core::team_scope::Passthrough::from_config(&config);
         let mut patch = Map::new();
         patch.insert(TEAM_SCOPE_PROPERTY.into(), Value::Str(key));
@@ -1197,6 +1536,15 @@ impl Daemon {
             }
             Status::Paused => {}
         }
+        // A signed execution context can rotate to narrower grants while this process is
+        // paused. Its existing kernel boundary cannot be replaced by rewriting the spec or
+        // bearer file. Keep it paused; only an explicit stop and fresh start apply new scope.
+        // This protocol marker is shared with executor::environment::JOB_CONTEXT_PROPERTY.
+        if self.properties().contains_key("mrsm_launch_context") {
+            return SuccessTuple::fail(
+                "This signed job is paused. Stop it, then start it again to apply its current source permissions; its existing process cannot safely resume.",
+            );
+        }
         let _ = properties::remove_stop_file(&self.paths.stop);
         let Some(pid) = self.process() else {
             return SuccessTuple::fail(format!("Cannot resume daemon '{}'.", self.daemon_id));
@@ -1316,6 +1664,189 @@ pub fn get_daemon_ids(paths: &JobPaths) -> Vec<String> {
 mod team_launch_tests {
     use super::*;
 
+    #[derive(Debug, Default)]
+    struct CurrentLaunch(std::sync::atomic::AtomicBool);
+    impl LaunchEnvironment for CurrentLaunch {
+        fn environment(
+            &self,
+            _: &str,
+            _: &Map,
+            base: &[(String, String)],
+        ) -> std::io::Result<Vec<(String, String)>> {
+            if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(std::io::Error::other("The canonical launch was revoked."));
+            }
+            let mut environment = base.to_vec();
+            environment.push(("TPR_CURRENT_CONTEXT".into(), "fresh".into()));
+            Ok(environment)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_the_host_resolver_selects_a_supervisor_lifecycle_owner() {
+        #[derive(Debug)]
+        struct GuardedLaunch;
+        impl LaunchEnvironment for GuardedLaunch {
+            fn environment(
+                &self,
+                _: &str,
+                _: &Map,
+                base: &[(String, String)],
+            ) -> std::io::Result<Vec<(String, String)>> {
+                Ok(base.to_vec())
+            }
+            fn owner_guard(
+                &self,
+                _: &str,
+                _: &Map,
+            ) -> std::io::Result<Option<crate::supervisor::LifecycleOwner>> {
+                crate::supervisor::LifecycleOwner::current().map(Some)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("supervisor-argv");
+        let temporary = output.with_extension("tmp");
+        let quoted_output = crate::shlex::join(&[output.display().to_string()]);
+        let quoted_temporary = crate::shlex::join(&[temporary.display().to_string()]);
+        let script = format!(
+            "printf '%s\\n' \"$@\" > {quoted_temporary} && mv {quoted_temporary} {quoted_output}"
+        );
+        let ctx = JobsContext::for_root(root.path())
+            .with_launcher(Launcher {
+                supervisor: vec!["/bin/sh".into(), "-c".into(), script],
+                program: vec!["unused".into()],
+            })
+            .with_launch_environment(vec![("PATH".into(), "/bin:/usr/bin".into())])
+            .with_launch_resolver(Arc::new(GuardedLaunch));
+        let properties = Map::from_iter([
+            (
+                "lifecycle_owner".into(),
+                Value::from_json_str(r#"{"pid":1,"started_at":"2000-01-01T00:00:00"}"#).unwrap(),
+            ),
+            (
+                "env".into(),
+                Value::Map(Map::from_iter([(
+                    "MRSM_LIFECYCLE_OWNER".into(),
+                    "untrusted".into(),
+                )])),
+            ),
+        ]);
+        let mut daemon = Daemon::new(
+            "guarded",
+            vec!["show".into(), "version".into()],
+            None,
+            properties,
+            &ctx,
+        );
+        assert!(daemon.write_properties().success);
+        assert!(daemon.supervisor_options(true).lifecycle_owner.is_none());
+        daemon.launch(true, None).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !output.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "Owned supervisor fixture wrote no arguments."
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let arguments = std::fs::read_to_string(output)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let options = SupervisorOptions::from_args(arguments).unwrap();
+        let owner = options.lifecycle_owner.unwrap();
+        assert!(owner.alive());
+        assert_eq!(
+            serde_json::to_value(owner).unwrap()["pid"],
+            std::process::id()
+        );
+    }
+
+    #[test]
+    fn a_restarted_executor_job_cannot_restore_its_recorded_grants_or_environment() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("observed-env");
+        let policy = Arc::new(CurrentLaunch::default());
+        let ctx = JobsContext::for_root(root.path())
+            .with_launcher(Launcher {
+                supervisor: vec![
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    format!("env > '{}.tmp' && mv '{0}.tmp' '{0}'", output.display()),
+                ],
+                program: vec!["unused".into()],
+            })
+            .with_launch_environment(vec![
+                ("PATH".into(), "/bin:/usr/bin".into()),
+                ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+                ("MRSM_EXECUTOR_PLUGINS".into(), "[]".into()),
+                (
+                    "MRSM_PLUGINS_DIR".into(),
+                    root.path().join("current-view").display().to_string(),
+                ),
+            ])
+            .with_launch_resolver(policy.clone());
+        let mut props = Map::new();
+        props.insert(
+            "env".into(),
+            Value::Map(Map::from_iter([
+                ("MRSM_EXECUTOR_PLUGINS".into(), "[\"revoked\"]".into()),
+                ("MRSM_PLUGINS_DIR".into(), "/old/grants".into()),
+                ("MRSM_ROOT_DIR".into(), "/old/root".into()),
+                ("TPR_OLD_CREDENTIAL".into(), "synthetic-old-key".into()),
+                ("TPR_CURRENT_CONTEXT".into(), "stale".into()),
+            ])),
+        );
+        let mut daemon = Daemon::new(
+            "restarted",
+            vec!["show".into(), "version".into()],
+            None,
+            props,
+            &ctx,
+        );
+        assert!(daemon.write_properties().success);
+        daemon = Daemon::open("restarted", &ctx).unwrap();
+        daemon.launch(false, None).unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while !output.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "The owned launch did not write its environment."
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let environment = std::fs::read_to_string(&output).unwrap();
+        assert!(
+            environment
+                .lines()
+                .any(|line| line == "MRSM_EXECUTOR_PLUGINS=[]")
+        );
+        assert!(
+            environment
+                .lines()
+                .any(|line| line
+                    == format!("MRSM_PLUGINS_DIR={}/current-view", root.path().display()))
+        );
+        for old in ["revoked", "/old/grants", "/old/root", "TPR_OLD_CREDENTIAL"] {
+            assert!(!environment.contains(old), "{old}");
+        }
+        assert!(
+            environment
+                .lines()
+                .any(|line| line == "TPR_CURRENT_CONTEXT=fresh")
+        );
+        policy.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_file(&output).unwrap();
+        daemon = Daemon::open("restarted", &ctx).unwrap();
+        assert!(daemon.launch(false, None).is_err());
+        assert!(
+            !output.exists(),
+            "A revoked resolver still started its recorded environment."
+        );
+    }
+
     /// 5.1: an isolated team's job is launched from an empty environment with the allowlist only:
     /// neither the launching process's other variables nor those its recorded `env` holds (an API
     /// server records its whole environment), except the names passed on; a relaunch (the restart
@@ -1323,6 +1854,10 @@ mod team_launch_tests {
     #[test]
     fn a_team_jobs_process_gets_the_allowlisted_environment_at_every_launch() {
         use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+        // This unit models preparation in its actual native Rust host; it never runs a fake
+        // interpreter/supervisor as if it had established the mandatory boundary. The CLI
+        // team_runtime integration covers the real native and SDK launch paths.
+        let _ = meerschaum_core::self_exe::register_native_current_executable();
         let root = tempfile::tempdir().unwrap();
         let root = root.path().canonicalize().unwrap();
         std::fs::create_dir_all(root.join("config")).unwrap();
@@ -1347,7 +1882,7 @@ mod team_launch_tests {
         )
         .unwrap();
         let out = root.join("seen-env");
-        // The "supervisor" writes the environment it was started with.
+        // A shell can never be the trusted lifecycle launcher of a marked team process.
         let ctx = JobsContext::for_root(&root).with_launcher(Launcher {
             supervisor: vec![
                 "/bin/sh".into(),
@@ -1373,21 +1908,25 @@ mod team_launch_tests {
         assert!(daemon.write_properties().success);
         let seen = |daemon: &mut Daemon| -> Vec<(String, String)> {
             let _ = std::fs::remove_file(&out);
-            daemon.launch(false, None).unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-            while !out.exists() {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "the launch wrote nothing"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            std::fs::read_to_string(&out)
+            let properties = daemon.properties();
+            let process_env = daemon
+                .ctx
+                .environment_for(&daemon.daemon_id, &properties)
+                .unwrap();
+            let worker_env = daemon.worker_env();
+            let prepared = daemon
+                .team_environment(&process_env, &worker_env)
                 .unwrap()
-                .lines()
-                .filter_map(|l| l.split_once('='))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect()
+                .unwrap();
+            let mut full = process_env;
+            full.extend(worker_env);
+            let environment = prepared.apply(&full);
+            assert!(daemon.launch(false, None).is_err());
+            assert!(
+                !out.exists(),
+                "A fake supervisor ran before the native boundary."
+            );
+            environment
         };
         for launch in 0..2 {
             let env = seen(&mut daemon);

@@ -222,6 +222,20 @@ paths = {
     'SYSTEMD_LOGS_RESOURCES_PATH'    : ('{SYSTEMD_ROOT_RESOURCES_PATH}', 'logs'),
 }
 
+# A credentialed Team keeps its durable root and resource paths. Only source discovery uses
+# the namespace captured by its native launcher before interpreter site hooks. This is a
+# fixed projection, not an environment-selected path or additional API authorization.
+from meerschaum import _core as _paths_native_core
+_team_source_json = getattr(_paths_native_core, 'team_sources_namespace', lambda: None)()
+_TEAM_SOURCE_NAMESPACE = json.loads(_team_source_json) if _team_source_json else None
+if _TEAM_SOURCE_NAMESPACE is not None:
+    PLUGINS_DIR_PATHS = [Path(_TEAM_SOURCE_NAMESPACE['view'])]
+    _team_source_package = Path(_TEAM_SOURCE_NAMESPACE['package'])
+    _team_source_cache = Path(_TEAM_SOURCE_NAMESPACE['cache'])
+    paths['PLUGINS_RESOURCES_PATH'] = _team_source_package.as_posix()
+    paths['PLUGINS_INTERNAL_LOCK_PATH'] = (_team_source_package.parent / 'plugins.lock').as_posix()
+    paths['PLUGINS_PACKAGES_INTERNAL_PATH'] = (_team_source_cache / 'packaged_plugins').as_posix()
+
 def set_root(root: Union[Path, str]):
     """Modify the value of `ROOT_DIR_PATH`."""
     paths['ROOT_DIR_PATH'] = Path(root).resolve().as_posix()
@@ -240,6 +254,11 @@ def set_plugins_dir_paths(plugins_dir_paths: Union[List[Path], Path, str]):
         plugins_dir_paths = [Path(_path).resolve() for _path in plugins_dir_paths]
     if isinstance(plugins_dir_paths, Path):
         plugins_dir_paths = [plugins_dir_paths.resolve()]
+
+    if _TEAM_SOURCE_NAMESPACE is not None:
+        selected = [Path(_TEAM_SOURCE_NAMESPACE['view'])]
+        if list(plugins_dir_paths) != selected:
+            raise PermissionError('A Team source namespace cannot be replaced by later paths.')
 
     PLUGINS_DIR_PATHS = plugins_dir_paths
     _process_plugins_dir_paths(plugins_dir_paths)

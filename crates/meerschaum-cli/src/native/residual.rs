@@ -198,6 +198,7 @@ pub const MAINS: &[(&str, &[(&str, &str)])] = &[
         "start",
         &[
             ("api", "_start_api"),
+            ("executor", "_start_executor"),
             ("jobs", "_start_jobs"),
             ("gui", "_start_gui"),
             ("webterm", "_start_webterm"),

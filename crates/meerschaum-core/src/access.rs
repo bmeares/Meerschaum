@@ -983,14 +983,38 @@ impl Team {
     }
 }
 
-/// The permissions a walled-off principal never holds, whatever their role: running arbitrary
-/// actions, the web terminal and chaining instances all act with the server's own credentials,
+/// The permissions a walled-off principal does not hold, whatever their role: running arbitrary
+/// actions, the web terminal and chaining instances act with the server's own credentials,
 /// outside the team's wall. Syncing and verifying the pipes they may edit needs none of them.
+/// A member of a team that runs code ([`TeamGrants::runs_code`]) keeps
+/// [`TEAM_EXECUTION_PERMISSIONS`] (5.1): the server then runs their commands and terminal only
+/// as the team's own sandboxed processes, never with its credentials. `instance:chain` is always
+/// withheld ([`withheld_permissions`]).
 pub const ISOLATED_WITHHELD: [&str; 3] = [
     Permission::ACTIONS_EXECUTE,
     Permission::WEBTERM_USE,
     Permission::INSTANCE_CHAIN,
 ];
+
+/// The withheld permissions a walled-off member of a team that runs code keeps (5.1): what lets
+/// them run commands and open the terminal, which the API server runs only as their team's
+/// sandboxed processes (team execution) and refuses where it cannot.
+pub const TEAM_EXECUTION_PERMISSIONS: [&str; 2] =
+    [Permission::ACTIONS_EXECUTE, Permission::WEBTERM_USE];
+
+/// The permissions a principal with `grants` does not hold ([`ISOLATED_WITHHELD`] for a
+/// walled-off principal, less [`TEAM_EXECUTION_PERMISSIONS`] when their team runs code; nothing
+/// otherwise).
+pub fn withheld_permissions(grants: &TeamGrants) -> Vec<&'static str> {
+    if !grants.isolated {
+        return Vec::new();
+    }
+    ISOLATED_WITHHELD
+        .iter()
+        .copied()
+        .filter(|p| !(grants.runs_code && TEAM_EXECUTION_PERMISSIONS.contains(p)))
+        .collect()
+}
 
 /// What a principal's teams grant and withhold: computed from the attributes of the teams the
 /// user is in ([`TeamGrants::of`]). The default grants nothing extra and withholds nothing, which
@@ -1014,6 +1038,12 @@ pub struct TeamGrants {
     /// The default instance of their primary team (else of the first of their teams with one).
     #[serde(default)]
     pub instance: Option<String>,
+    /// 5.1: the principal is walled off and the team they act for (their primary team, else the
+    /// first of their teams) lets its members install, edit and upload plugins: its members can
+    /// already run code in the team's processes, so they may run commands there too (team
+    /// execution, decided by the API server for each request).
+    #[serde(default)]
+    pub runs_code: bool,
 }
 
 impl TeamGrants {
@@ -1041,6 +1071,13 @@ impl TeamGrants {
             .find(|team| same_team(Some(&team.name), primary))
             .and_then(|team| team.default_instance())
             .or_else(|| own.iter().find_map(|team| team.default_instance()));
+        // The team new work runs for (`team_scope::acting_team` without an object).
+        grants.runs_code = grants.isolated
+            && own
+                .iter()
+                .find(|team| same_team(Some(&team.name), primary))
+                .or_else(|| own.first())
+                .is_some_and(|team| team.may_write_plugins());
         grants
     }
 }
@@ -1917,6 +1954,10 @@ pub struct Principal {
     /// What those teams grant and withhold ([`TeamGrants`]; the default changes nothing).
     #[serde(default)]
     pub grants: TeamGrants,
+    /// An execution capability may restrict even ownership and membership to one current team.
+    /// The server resolves its immutable team UUID before setting this display-name boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_boundary: Option<String>,
 }
 
 impl Principal {
@@ -1937,30 +1978,57 @@ impl Principal {
             },
             teams,
             grants: TeamGrants::default(),
+            team_boundary: None,
         }
     }
 
     /// The same principal with `grants` (an administrator is never walled off). A walled-off
-    /// principal loses [`ISOLATED_WITHHELD`]: actions and the terminal run on the server with its
-    /// own credentials, which reach every team's data.
+    /// principal loses [`withheld_permissions`]: actions and the terminal run on the server with
+    /// its own credentials, which reach every team's data, except as their team's sandboxed
+    /// processes for a member of a team that runs code ([`TeamGrants::runs_code`]).
     pub fn with_grants(mut self, grants: TeamGrants) -> Principal {
         self.grants = grants;
         if self.is_admin {
             self.grants.isolated = false;
+            self.grants.runs_code = false;
         } else if self.grants.isolated {
             if self.permissions.contains(ALL_SCOPE) {
                 self.permissions = all_permissions();
             }
-            for permission in ISOLATED_WITHHELD {
+            for permission in withheld_permissions(&self.grants) {
                 self.permissions.remove(permission);
             }
+        } else {
+            self.grants.runs_code = false;
         }
         self
     }
 
     /// Whether the principal is walled off from Everyone ([`TeamGrants::isolated`]).
     pub fn is_isolated(&self) -> bool {
-        !self.is_admin && self.grants.isolated
+        self.team_boundary.is_some() || (!self.is_admin && self.grants.isolated)
+    }
+
+    /// Restrict an execution principal to one team. It is never a global administrator.
+    pub fn within_team(mut self, team: &str) -> Self {
+        self.team_boundary = Some(team.trim().to_string());
+        self.is_admin = false;
+        // Existing grants may combine several teams. A host may attach freshly resolved
+        // grants for this one team with `with_grants` after imposing the boundary.
+        self.grants = TeamGrants::default();
+        if self.permissions.remove(ALL_SCOPE) {
+            self.permissions.extend(all_permissions());
+        }
+        self.teams
+            .retain(|(name, _)| same_team(Some(name), Some(team)));
+        self
+    }
+
+    /// Whether an object belongs to the capability's team (`None` for unrestricted callers).
+    pub fn permits_team(&self, team: Option<&str>) -> bool {
+        self.team_boundary
+            .as_deref()
+            .is_none_or(|boundary| same_team(Some(boundary), team))
     }
 
     /// An administrator (every permission).
@@ -1975,13 +2043,16 @@ impl Principal {
 
     /// Whether the principal holds `permission` (administrators hold all; `*` is all).
     pub fn has(&self, permission: &str) -> bool {
-        self.is_admin
+        (self.is_admin && self.team_boundary.is_none())
             || self.permissions.contains(permission)
             || self.permissions.contains(ALL_SCOPE)
     }
 
     /// The principal's role in `team` (`None` is Everyone, where every user is a member).
     pub fn team_role(&self, team: Option<&str>) -> Option<TeamRole> {
+        if !self.permits_team(team) {
+            return None;
+        }
         let listed = self
             .teams
             .iter()
@@ -1989,7 +2060,7 @@ impl Principal {
             .map(|(_, role)| *role)
             .max();
         // A walled-off principal is not in Everyone (a manager appointed there still is).
-        if is_everyone(team) && self.is_isolated() {
+        if is_everyone(team) && self.is_isolated() && self.team_boundary.is_none() {
             return listed.filter(|role| *role == TeamRole::Manager);
         }
         match listed {
@@ -2017,6 +2088,9 @@ impl Principal {
             out.push(EVERYONE.to_string());
         }
         for (name, _) in &self.teams {
+            if !self.permits_team(Some(name)) {
+                continue;
+            }
             if is_everyone(Some(name)) {
                 continue;
             }
@@ -2032,6 +2106,9 @@ impl Principal {
 /// visibility `everyone`: every user; `team`: the team's members; `private`: the team's
 /// managers.
 pub fn can_see(principal: &Principal, access: &PipeAccess) -> bool {
+    if !principal.permits_team(access.team.as_deref()) {
+        return false;
+    }
     if principal.is_admin || access.is_owner(&principal.username) {
         return true;
     }
@@ -2061,9 +2138,10 @@ pub fn can_edit(principal: &Principal, access: &PipeAccess) -> bool {
 /// Whether `principal` may change a pipe's `access`: its owner, its team's managers and
 /// administrators.
 pub fn can_manage_access(principal: &Principal, access: &PipeAccess) -> bool {
-    principal.is_admin
-        || access.is_owner(&principal.username)
-        || principal.is_manager(access.team.as_deref())
+    principal.permits_team(access.team.as_deref())
+        && (principal.is_admin
+            || access.is_owner(&principal.username)
+            || principal.is_manager(access.team.as_deref()))
 }
 
 /// Whether `principal` may lock or unlock a pipe through the API or the console: its owner,
@@ -2077,7 +2155,7 @@ pub fn can_lock(principal: &Principal, access: &PipeAccess) -> bool {
 /// Everyone, so its managers see every address). A user always sees their own
 /// ([`can_see_email_of`]).
 pub fn can_see_email(viewer: &Principal, target_user_teams: &[(String, TeamRole)]) -> bool {
-    viewer.is_admin
+    (viewer.is_admin && viewer.team_boundary.is_none())
         || viewer.is_manager(Some(EVERYONE))
         || target_user_teams
             .iter()
@@ -2097,12 +2175,12 @@ pub fn can_see_email_of(
 /// Whether `principal` may add and remove members of `team` (and change their roles): its
 /// managers and administrators.
 pub fn can_manage_team(principal: &Principal, team: &str) -> bool {
-    principal.is_admin || principal.is_manager(Some(team))
+    principal.permits_team(Some(team)) && (principal.is_admin || principal.is_manager(Some(team)))
 }
 
 /// Whether `principal` may create, rename and delete teams: administrators.
 pub fn can_administer_teams(principal: &Principal) -> bool {
-    principal.is_admin
+    principal.team_boundary.is_none() && principal.is_admin
 }
 
 /// How a deleted team's connector reservations (`teams: [<name>]`) are rewritten: a name no team
@@ -2200,7 +2278,7 @@ pub fn move_reservations(connectors: &mut Map, from: &str, to: &str) -> Vec<Stri
 /// which a walled-off principal may not use).
 pub fn can_use_connector(principal: &Principal, teams: Option<&[String]>) -> bool {
     match teams {
-        _ if principal.is_admin => true,
+        _ if principal.is_admin && principal.team_boundary.is_none() => true,
         Some(teams) => teams.iter().any(|team| principal.is_member(Some(team))),
         None => !principal.is_isolated(),
     }
@@ -2229,7 +2307,9 @@ pub fn can_name_connector(
     configured: bool,
 ) -> bool {
     let keys = connector_keys.trim();
-    if principal.is_admin || principal.grants.connectors.contains(keys) {
+    if (principal.is_admin && principal.team_boundary.is_none())
+        || principal.grants.connectors.contains(keys)
+    {
         return true;
     }
     if let Some(plugin) = keys.strip_prefix("plugin:") {
@@ -2251,7 +2331,7 @@ pub fn can_use_plugin(principal: &Principal, name: &str) -> bool {
 /// Whether a principal may install, edit, upload and uninstall plugins on the server:
 /// administrators, and the members of a team with `plugins_write`.
 pub fn can_write_plugins(principal: &Principal) -> bool {
-    principal.is_admin || principal.grants.plugins_write
+    (principal.is_admin && principal.team_boundary.is_none()) || principal.grants.plugins_write
 }
 
 /// Whether `viewer` may see that `team` exists and who is in it: every team, unless they are
@@ -2305,6 +2385,9 @@ pub fn check_access_change(
     old: &PipeAccess,
     new: &PipeAccess,
 ) -> Result<(), String> {
+    if !principal.permits_team(new.team.as_deref()) {
+        return Err("An execution capability cannot move a pipe outside its team.".into());
+    }
     if !can_manage_access(principal, old) {
         return Err(
             "Only the pipe's owner, its team's managers and administrators may change its access."

@@ -171,6 +171,8 @@ pub enum Principal {
     User(User),
     /// A token (client-credentials login or an API key).
     Token(TokenModel),
+    /// One main-owned execution capability; never treated as an ordinary user or admin token.
+    Execution(Box<crate::executor::callbacks::Identity>),
 }
 
 impl Principal {
@@ -180,6 +182,7 @@ impl Principal {
         match self {
             Principal::User(u) => Some(&u.username),
             Principal::Token(_) => None,
+            Principal::Execution(identity) => identity.current.username(),
         }
     }
 
@@ -189,6 +192,7 @@ impl Principal {
         match self {
             Principal::User(u) => Some(u),
             Principal::Token(_) => None,
+            Principal::Execution(_) => None,
         }
     }
 }
@@ -394,6 +398,18 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// JWT, decoded and loaded; a bad credential is `401 Invalid credentials`, an instance that
 /// cannot be read `503`.
 pub async fn manager(state: &AppState, headers: &HeaderMap) -> Result<Principal, ApiError> {
+    if let Some(access) = crate::executor::callbacks::current(headers) {
+        return access.auth.ok_or_else(ApiError::invalid_credentials);
+    }
+    manager_fresh(state, headers).await
+}
+
+/// Revalidate the presented bearer itself after a wait, including its expiration. The
+/// per-request execution cache is appropriate for route dispatch, not a later native write.
+pub(crate) async fn manager_fresh(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Principal, ApiError> {
     let auth = authorization(headers).unwrap_or_default();
     let (scheme, _, token) = partition(&auth, ' ');
     if auth.is_empty() || !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
@@ -405,10 +421,31 @@ pub async fn manager(state: &AppState, headers: &HeaderMap) -> Result<Principal,
         return Err(ApiError::invalid_credentials());
     };
     let kind = payload.get(PRINCIPAL_CLAIM).and_then(Json::as_str);
+    if kind == Some("execution") {
+        return crate::executor::callbacks::principal(state, &payload).await;
+    }
     let credential = payload.get(CREDENTIAL_CLAIM).and_then(Json::as_str);
     load_from_bound_subject(state, sub, kind, credential)
         .await?
         .ok_or_else(ApiError::invalid_credentials)
+}
+
+/// The already verified request's password binding, for preserving identity through a launch.
+pub(crate) fn bound_credential(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    let authorization = authorization(headers)?;
+    let (scheme, _, token) = partition(&authorization, ' ');
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let payload = jwt_decode(token, state.secret(), Utc::now()).ok()?;
+    (payload.get(PRINCIPAL_CLAIM).and_then(Json::as_str) == Some("user"))
+        .then(|| {
+            payload
+                .get(CREDENTIAL_CLAIM)
+                .and_then(Json::as_str)
+                .map(str::to_string)
+        })
+        .flatten()
 }
 
 /// Python's `str.partition(sep)`.
@@ -487,6 +524,21 @@ pub async fn load_user_or_token(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<Principal, ApiError> {
+    load_user_or_token_with(state, headers, false).await
+}
+
+pub(crate) async fn load_user_or_token_fresh(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Principal, ApiError> {
+    load_user_or_token_with(state, headers, true).await
+}
+
+async fn load_user_or_token_with(
+    state: &AppState,
+    headers: &HeaderMap,
+    fresh: bool,
+) -> Result<Principal, ApiError> {
     let auth = authorization(headers).unwrap_or_default();
     if auth.is_empty() {
         return Err(ApiError::unauthorized("Not authenticated.", None));
@@ -494,7 +546,11 @@ pub async fn load_user_or_token(
     // PARITY: every occurrence of the scheme names is removed (`str.replace`).
     let stripped = auth.replace("Basic ", "").replace("Bearer ", "");
     if !stripped.starts_with("mrsm-key:") {
-        return manager(state, headers).await;
+        return if fresh {
+            manager_fresh(state, headers).await
+        } else {
+            manager(state, headers).await
+        };
     }
     token_from_authorization(state, &stripped)
         .await
@@ -510,9 +566,13 @@ pub fn scopes_unavailable(error: impl std::fmt::Display) -> ApiError {
 
 /// The scopes stored with a credential: a token's scopes (`token.get_scopes(refresh=True)`), or
 /// `['*']` for a user (whose permissions are [`principal_scopes`]).
-async fn stored_scopes(state: &AppState, principal: &Principal) -> Result<Vec<String>, ApiError> {
+pub(crate) async fn stored_scopes(
+    state: &AppState,
+    principal: &Principal,
+) -> Result<Vec<String>, ApiError> {
     match principal {
         Principal::User(_) => Ok(vec!["*".into()]),
+        Principal::Execution(identity) => Ok(identity.grant.permissions.iter().cloned().collect()),
         Principal::Token(t) => match t.id {
             Some(id) => state
                 .instance()
@@ -556,19 +616,7 @@ pub async fn granted_scopes(
     if auth.contains("mrsm-key:") {
         return Ok(Scopes::List(stored_scopes(state, principal).await?));
     }
-    if auth.is_empty() {
-        return Err(ApiError::unauthorized("Not authenticated.", None));
-    }
-    let (scheme, _, token) = partition(&auth, ' ');
-    if token.is_empty() || !scheme.eq_ignore_ascii_case("bearer") {
-        return Err(ApiError::unauthorized(
-            "Unsupported authentication scheme.",
-            None,
-        ));
-    }
-    let payload = jwt_decode(token, state.secret(), Utc::now())
-        .map_err(|_| ApiError::unauthorized("Invalid access token.", Some("Bearer")))?;
-    let claimed = Scopes::from_claim(payload.get("scopes"));
+    let claimed = bearer_scopes(state, headers)?;
     // A JWT minted from an API token keeps no more than the token holds now: narrowing the
     // token's scopes reaches the JWTs already issued for it (as invalidation and expiry do).
     if let Principal::Token(_) = principal {
@@ -581,6 +629,25 @@ pub async fn granted_scopes(
     Ok(claimed)
 }
 
+/// Decode the presented bearer and its scopes without database or cache access. Calling
+/// this after a fresh execution-identity load also checks expiration after that awaited work.
+pub(crate) fn bearer_scopes(state: &AppState, headers: &HeaderMap) -> Result<Scopes, ApiError> {
+    let auth = authorization(headers).unwrap_or_default();
+    if auth.is_empty() {
+        return Err(ApiError::unauthorized("Not authenticated.", None));
+    }
+    let (scheme, _, token) = partition(&auth, ' ');
+    if token.is_empty() || !scheme.eq_ignore_ascii_case("bearer") {
+        return Err(ApiError::unauthorized(
+            "Unsupported authentication scheme.",
+            None,
+        ));
+    }
+    let payload = jwt_decode(token, state.secret(), Utc::now())
+        .map_err(|_| ApiError::unauthorized("Invalid access token.", Some("Bearer")))?;
+    Ok(Scopes::from_claim(payload.get("scopes")))
+}
+
 /// The scopes a principal may hand to a token it registers or edits: `None` when it may grant
 /// anything (an administrator, a holder of `*`, or `--no-auth`), else the scopes it holds. A
 /// failed read of the principal's type or scopes is an error, never a wider grant.
@@ -590,6 +657,12 @@ pub async fn grantable_scopes(
     state: &AppState,
     principal: Option<&Principal>,
 ) -> Result<Option<Vec<String>>, ApiError> {
+    if matches!(principal, Some(Principal::Execution(_))) {
+        return Err(ApiError::new(
+            403,
+            "Execution credentials cannot mint reusable credentials.",
+        ));
+    }
     let Some(principal) = principal else {
         return Ok(None);
     };
@@ -720,6 +793,7 @@ pub async fn is_admin(state: &AppState, principal: Option<&Principal>) -> bool {
                 == "admin"
         }
         Principal::Token(_) => false,
+        Principal::Execution(_) => false,
     }
 }
 
@@ -738,6 +812,21 @@ pub async fn is_user_allowed_to_execute(
     is_user_allowed_to_execute_with(state, principal, state.config.actions_non_admin).await
 }
 
+/// Synchronous action endpoints require their action permission; internal job tracking does
+/// not turn the endpoint into public job creation authority.
+pub async fn is_user_allowed_to_execute_action(
+    state: &AppState,
+    principal: Option<&Principal>,
+) -> SuccessTuple {
+    is_user_allowed_to_execute_scopes(
+        state,
+        principal,
+        state.config.actions_non_admin,
+        &["actions:execute"],
+    )
+    .await
+}
+
 /// The web console's `POST /execute` and job-log stream: the same rule as
 /// [`is_user_allowed_to_execute`] (kept as its own name for the callers that ask it).
 pub async fn is_user_allowed_to_execute_console(
@@ -754,6 +843,15 @@ pub async fn is_user_allowed_to_execute_with(
     state: &AppState,
     principal: Option<&Principal>,
     allow_non_admin: bool,
+) -> SuccessTuple {
+    is_user_allowed_to_execute_scopes(state, principal, allow_non_admin, NECESSARY_SCOPES).await
+}
+
+async fn is_user_allowed_to_execute_scopes(
+    state: &AppState,
+    principal: Option<&Principal>,
+    allow_non_admin: bool,
+    required: &[&str],
 ) -> SuccessTuple {
     let Some(principal) = principal else {
         return SuccessTuple::success();
@@ -783,7 +881,7 @@ pub async fn is_user_allowed_to_execute_with(
     if scopes.iter().any(|s| s == "*") {
         return SuccessTuple::success();
     }
-    for scope in NECESSARY_SCOPES {
+    for scope in required {
         if !scopes.iter().any(|s| s == scope) {
             return SuccessTuple::fail(format!(
                 "Missing permission '{scope}': running actions needs the role 'operator' (or \

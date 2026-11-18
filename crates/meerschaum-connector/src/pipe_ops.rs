@@ -236,7 +236,11 @@ pub async fn persist_new_special_columns<C: InstanceConnector + ?Sized>(
     let mut patch = Map::new();
     patch.insert("dtypes".into(), Value::Map(merged));
     pipe.update_parameters(patch);
-    if registered && !pipe.temporary {
+    // A confined execution transport carries data to Main. Main infers and persists
+    // metadata from that data under its captured mutation authority; a worker's PATCH
+    // cannot stand in for that native transition. Keep the local dtype hints for
+    // serialization, without rewriting the accepted definition from this process.
+    if registered && !pipe.temporary && !conn.server_filters_existing_rows() {
         let res = conn.edit_pipe(pipe, false).await;
         // A `parameters` lock keeps the parameters as they are; the sync goes on.
         if !res.success && !crate::locks::refused_by_lock(&res) {

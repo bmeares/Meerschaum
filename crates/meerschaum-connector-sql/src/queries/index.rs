@@ -50,6 +50,27 @@ pub fn get_pipe_index_names(ctx: &ConnectorCtx, pipe: &SqlPipe) -> IndexMap<Stri
         .collect()
 }
 
+/// The earlier SQLite builder emitted this exact plain index when another column role
+/// had already claimed the ID's generated name. Existing targets may still carry it.
+pub(crate) fn legacy_sqlite_id_index(
+    ctx: &ConnectorCtx,
+    pipe: &SqlPipe,
+    state: &IndexState,
+) -> Result<Option<String>> {
+    let Some(id) = pipe.column("id") else {
+        return Ok(None);
+    };
+    if ctx.flavor != Flavor::Sqlite {
+        return Ok(None);
+    }
+    let mut historical = index_queries(ctx, pipe, state, Some("None"))?;
+    Ok(historical
+        .shift_remove(&id)
+        .into_iter()
+        .flatten()
+        .find(|sql| sql.starts_with("CREATE INDEX None ON ")))
+}
+
 /// Whether an upsert pipe's unique key may treat NULL keys as equal (`null_indices`, the
 /// default) on this flavor: PostgreSQL, PostGIS and TimescaleDB (HA) declare v4's own `UQ_`
 /// constraint `UNIQUE NULLS NOT DISTINCT` when the server accepts it (PostgreSQL 15+,
@@ -129,6 +150,15 @@ pub fn get_create_index_queries(
     ctx: &ConnectorCtx,
     pipe: &SqlPipe,
     state: &IndexState,
+) -> Result<IndexMap<String, Vec<String>>> {
+    index_queries(ctx, pipe, state, None)
+}
+
+fn index_queries(
+    ctx: &ConnectorCtx,
+    pipe: &SqlPipe,
+    state: &IndexState,
+    missing_id_name: Option<&str>,
 ) -> Result<IndexMap<String, Vec<String>>> {
     let flavor = ctx.flavor;
     // NOTE: Due to recent breaking changes in DuckDB, indices don't behave properly.
@@ -219,12 +249,11 @@ pub fn get_create_index_queries(
     } else {
         String::new()
     };
-    // PARITY: a missing `id` index name renders as `None` (`_pipes.py:687`).
     let id_index_name = index_names
         .get("id")
         .filter(|n| !n.is_empty())
         .map(|n| q(n))
-        .unwrap_or_else(|| "None".to_string());
+        .or_else(|| missing_id_name.map(str::to_owned));
     let pipe_schema = ctx.get_pipe_schema(pipe);
     let pipe_name = sql_item_name(&pipe.target, flavor, pipe_schema.as_deref());
     let create_space_partition = state.space_partition;
@@ -374,7 +403,7 @@ pub fn get_create_index_queries(
     }
 
     // The `id` index.
-    if let (Some(id), Some(id_name)) = (&id, &id_name) {
+    if let (Some(id), Some(id_name), Some(id_index_name)) = (&id, &id_name, &id_index_name) {
         let id_query = if flavor.is_timescaledb() {
             if create_space_partition {
                 None
@@ -705,6 +734,38 @@ mod tests {
                 .collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn datetime_and_id_on_one_column_keep_the_targets_own_index() {
+        let pipe = Pipe::builder("sql:main", "ticks")
+            .parameters(
+                Value::from_json_str(r#"{"columns":{"datetime":"tick","id":"tick"}}"#)
+                    .unwrap()
+                    .to_map(),
+            )
+            .build()
+            .unwrap();
+        let pipe = SqlPipe::with_target(pipe, "t");
+        let ctx = ConnectorCtx::new(Flavor::Sqlite);
+        let queries =
+            get_create_index_queries(&ctx, &pipe, &state(&[("tick", "INTEGER")])).unwrap();
+        assert_eq!(
+            queries["tick"],
+            [r#"CREATE INDEX "IX_t_tick" ON "t" ("tick")"#]
+        );
+        assert_eq!(
+            legacy_sqlite_id_index(&ctx, &pipe, &state(&[("tick", "INTEGER")]))
+                .unwrap()
+                .as_deref(),
+            Some(r#"CREATE INDEX None ON "t" ("tick")"#)
+        );
+        let upsert = upsert_pipe(true, &[("datetime", "tick"), ("id", "tick")]);
+        assert!(
+            legacy_sqlite_id_index(&ctx, &upsert, &state(&[("tick", "INTEGER")]))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

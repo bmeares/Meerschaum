@@ -69,6 +69,8 @@ __all__ = (
     'DEFAULT_ROLE',
     'EVERYONE',
     'ISOLATED_WITHHELD',
+    'TEAM_EXECUTION_PERMISSIONS',
+    'withheld_permissions',
     'TEAM_ROLES',
     'VISIBILITIES',
     'EDIT_MODES',
@@ -181,6 +183,23 @@ LOCK_OPS: Tuple[str, ...] = (
 #: The permissions a walled-off principal (every team of theirs is isolated) never holds: actions,
 #: the web terminal and instance chaining act with the server's own credentials.
 ISOLATED_WITHHELD: Tuple[str, ...] = ('actions:execute', 'webterm:use', 'instance:chain')
+#: What a walled-off member of a team that runs code (`grants['runs_code']`: the team they act for
+#: lets its members install plugins) keeps of `ISOLATED_WITHHELD` (5.1): the API server runs their
+#: commands and terminal only as their team's sandboxed processes.
+TEAM_EXECUTION_PERMISSIONS: Tuple[str, ...] = ('actions:execute', 'webterm:use')
+
+
+def withheld_permissions(grants: Optional[Dict[str, Any]]) -> Tuple[str, ...]:
+    """
+    The permissions a principal with `grants` does not hold: `ISOLATED_WITHHELD` when walled
+    off, less `TEAM_EXECUTION_PERMISSIONS` when their team runs code; nothing otherwise.
+    """
+    grants = grants or {}
+    if not grants.get('isolated', False):
+        return ()
+    if grants.get('runs_code', False):
+        return tuple(p for p in ISOLATED_WITHHELD if p not in TEAM_EXECUTION_PERMISSIONS)
+    return ISOLATED_WITHHELD
 ACCESS_KEY: str = 'access'
 LOCKS_KEY: str = 'locks'
 _ACCESS_FIELDS = {'owner', 'team', 'visibility', 'edit', 'edit_mode'}
@@ -211,7 +230,8 @@ class Principal:
     permissions: List[str] = field(default_factory=list)
     teams: List[Tuple[str, str]] = field(default_factory=list)
     #: What the user's teams grant and withhold (`team_grants()`): `isolated`, `connectors`,
-    #: `plugins`, `plugins_write`, `instance`. Empty: nothing extra, nothing withheld.
+    #: `plugins`, `plugins_write`, `instance`, `runs_code`. Empty: nothing extra, nothing
+    #: withheld.
     grants: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -225,11 +245,11 @@ class Principal:
     def has(self, permission: str) -> bool:
         """
         Whether the principal holds `permission` (administrators hold all; a walled-off
-        principal never holds `ISOLATED_WITHHELD`).
+        principal never holds `withheld_permissions(grants)`).
         """
         if self.is_admin:
             return True
-        if self.is_isolated and permission in ISOLATED_WITHHELD:
+        if self.is_isolated and permission in withheld_permissions(self.grants):
             return False
         return permission in self.permissions or '*' in self.permissions
 
@@ -624,7 +644,8 @@ def team_grants(user_teams, teams, primary: Optional[str] = None) -> Dict[str, A
     Returns
     -------
     A dictionary: `isolated` (every team of the user other than Everyone is isolated),
-    `connectors`, `plugins`, `plugins_write` and `instance`.
+    `connectors`, `plugins`, `plugins_write`, `instance` and `runs_code` (5.1: walled off, and the
+    team they act for lets its members install plugins).
     """
     records = [
         (team.to_dict() if hasattr(team, 'to_dict') else team)

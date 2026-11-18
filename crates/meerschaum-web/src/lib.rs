@@ -21,6 +21,7 @@
 #![deny(unsafe_code)]
 mod assets;
 mod engine_auth;
+mod extension_pages;
 pub mod grafana;
 pub mod native_pages;
 pub mod sessions;
@@ -118,6 +119,9 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
     }
     router = native_pages::routes(router, &config.pages)?;
     router = grafana::routes(router, &state);
+    if state.server.config.route_group_is_allowed("plugins") {
+        router = extension_pages::routes(router);
+    }
     let mut router = router.with_state(state);
     // The terminal's own routes (`/webterm/{session_id}`, `/websocket/{session_id}`) and its
     // assets, independent of the `dash` route group (as in v4).

@@ -924,9 +924,12 @@ pub fn take_start_hint(dir: &Path, job: &str) -> Option<StartKind> {
         .ok()
         .and_then(|m| m.elapsed().ok())
         .is_some_and(|age| age < HINT_MAX_AGE);
-    let text = fs::read_to_string(&path).ok();
-    let _ = fs::remove_file(&path);
-    text.filter(|_| fresh).and_then(|t| StartKind::parse(&t))
+    let bytes = crate::untrusted_file::read_regular(&path, 64, true)
+        .ok()
+        .flatten();
+    bytes
+        .filter(|_| fresh)
+        .and_then(|bytes| std::str::from_utf8(&bytes).ok().and_then(StartKind::parse))
 }
 
 #[cfg(test)]

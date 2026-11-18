@@ -951,6 +951,7 @@ class Plugin:
         A bool indicating success.
         """
         import meerschaum.config.paths as paths
+        from meerschaum.config._paths import _TEAM_SOURCE_NAMESPACE
         from meerschaum.utils.venv import venv_target_path
         from meerschaum.utils.packages import activate_venv
         from meerschaum.utils.misc import make_symlink, is_symlink
@@ -958,6 +959,14 @@ class Plugin:
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
                 plugin.activate_venv(debug=debug, init_if_not_exists=init_if_not_exists, **kw)
+
+        if _TEAM_SOURCE_NAMESPACE is not None and self.name in _TEAM_SOURCE_NAMESPACE['names']:
+            # A freshly granted Team source can import from its sealed view before it has
+            # a private environment. Let normal activation handle any existing environment.
+            try:
+                (paths.VIRTENV_RESOURCES_PATH / self.name).lstat()
+            except FileNotFoundError:
+                return False
 
         vtp = venv_target_path(self.name, debug=debug, allow_nonexistent=True)
         venv_meerschaum_path = vtp / 'meerschaum'

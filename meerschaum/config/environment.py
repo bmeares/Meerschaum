@@ -18,6 +18,17 @@ from meerschaum.utils.typing import List, Union, Dict, Any, Optional
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum import _core
 
+# Exact native controls, never MRSM_<TYPE>_<LABEL> connector declarations. Keep in sync
+# with meerschaum_core::config::NATIVE_EXECUTION_ENV_VARS (no prefix-wide exclusions).
+_NATIVE_EXECUTION_ENV_VARS = frozenset({
+    'MRSM_API_EXECUTION', 'MRSM_METADATA_EXECUTION', 'MRSM_NATIVE_JOB_LIFECYCLE',
+    'MRSM_TEAM_SCOPE', 'MRSM_TEAM_SANDBOX', 'MRSM_TEAM_FINGERPRINT', 'MRSM_TEAM_PROBE',
+    'MRSM_EXECUTOR_PLUGINS', 'MRSM_TERMINAL_LAUNCH', 'MRSM_WEBTERM_STATE_DIR',
+    'MRSM_BIN_EXEC', 'MRSM_JOB_RESULT_PATH', 'MRSM_JOB_SUPERVISOR', 'MRSM_JOB_PROGRAM',
+    'MRSM_JOB_STARTUP_RELEASE', 'MRSM_JOB_START_KIND', 'MRSM_JOB_LAPS_PATH',
+    'MRSM_JOB_LAPS_PARENT', 'MRSM_SYSTEMD_JOB_CHILD',
+})
+
 ### Serialize the process-global swap of `os.environ` and `meerschaum.config.paths`
 ### globals performed by `replace_env`. A daemon process runs several threads
 ### concurrently (the job target plus the `check-jobs` `RepeatTimer`), so two
@@ -131,7 +142,7 @@ def get_connector_env_vars(env: Optional[Dict[str, Any]] = None) -> List[str]:
         matched = re.match(uri_regex, env_var)
         if matched is None:
             continue
-        if env_var in STATIC_CONFIG['environment'].values():
+        if env_var in STATIC_CONFIG['environment'].values() or env_var in _NATIVE_EXECUTION_ENV_VARS:
             continue
         env_vars.append(env_var)
 

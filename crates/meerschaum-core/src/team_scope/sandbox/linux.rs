@@ -341,3 +341,106 @@ pub(super) fn deny_unix_sockets(report: &mut Report) {
         Err(e) => SocketProbe::Error(e.to_string()),
     };
 }
+
+/// A separate filter for credential-free discovery. Ordinary Api and Team execution do not
+/// install this filter: their explicitly admitted networking retains its existing behavior.
+pub(super) fn deny_network() -> Result<(), String> {
+    use seccompiler::{
+        SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule,
+    };
+    use std::collections::BTreeMap;
+
+    let arch = filter_arch().ok_or("Network denial is unavailable on this architecture.")?;
+    let error = |e: seccompiler::BackendError| e.to_string();
+    let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
+    for syscall in [
+        libc::SYS_socket,
+        libc::SYS_connect,
+        libc::SYS_bind,
+        libc::SYS_listen,
+        libc::SYS_accept,
+        libc::SYS_accept4,
+        libc::SYS_io_uring_setup,
+    ] {
+        for number in numbers(syscall) {
+            rules.insert(number, Vec::new());
+        }
+    }
+    let non_unix = SeccompCondition::new(
+        0,
+        SeccompCmpArgLen::Dword,
+        SeccompCmpOp::Ne,
+        libc::AF_UNIX as u64,
+    )
+    .map_err(error)?;
+    // Only the connected Unix stream/seqpacket forms and their supported type flags remain.
+    let mut invalid_type = Vec::new();
+    for kind in [libc::SOCK_STREAM, libc::SOCK_SEQPACKET] {
+        for flags in [
+            0,
+            libc::SOCK_CLOEXEC,
+            libc::SOCK_NONBLOCK,
+            libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+        ] {
+            invalid_type.push(
+                SeccompCondition::new(
+                    1,
+                    SeccompCmpArgLen::Dword,
+                    SeccompCmpOp::Ne,
+                    (kind | flags) as u64,
+                )
+                .map_err(error)?,
+            );
+        }
+    }
+    for number in numbers(libc::SYS_socketpair) {
+        rules.insert(
+            number,
+            vec![
+                SeccompRule::new(vec![non_unix.clone()]).map_err(error)?,
+                SeccompRule::new(invalid_type.clone()).map_err(error)?,
+            ],
+        );
+    }
+    let program: seccompiler::BpfProgram = SeccompFilter::new(
+        rules,
+        SeccompAction::Allow,
+        SeccompAction::Errno(libc::EPERM as u32),
+        arch,
+    )
+    .map_err(error)?
+    .try_into()
+    .map_err(error)?;
+    seccompiler::apply_filter_all_threads(&program)
+        .map_err(|e| format!("Could not install credential-free network denial: {e}"))
+}
+
+pub(super) fn deny_inbound_network() -> Result<(), String> {
+    use seccompiler::{SeccompAction, SeccompFilter, SeccompRule};
+    use std::collections::BTreeMap;
+    let arch =
+        filter_arch().ok_or("Inbound network denial is unavailable on this architecture.")?;
+    let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
+    for syscall in [
+        libc::SYS_bind,
+        libc::SYS_listen,
+        libc::SYS_accept,
+        libc::SYS_accept4,
+        libc::SYS_io_uring_setup,
+    ] {
+        for number in numbers(syscall) {
+            rules.insert(number, Vec::new());
+        }
+    }
+    let program: seccompiler::BpfProgram = SeccompFilter::new(
+        rules,
+        SeccompAction::Allow,
+        SeccompAction::Errno(libc::EPERM as u32),
+        arch,
+    )
+    .map_err(|e| e.to_string())?
+    .try_into()
+    .map_err(|e: seccompiler::BackendError| e.to_string())?;
+    seccompiler::apply_filter_all_threads(&program)
+        .map_err(|e| format!("Could not install API-only listener denial: {e}"))
+}

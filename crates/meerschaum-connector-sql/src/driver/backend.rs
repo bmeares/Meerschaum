@@ -93,12 +93,12 @@ fn rows_to_cells<B: Backend>(
         .collect()
 }
 
-struct StreamState {
+pub(super) struct StreamState {
     schema: SchemaRef,
     plans: Vec<ColumnPlan>,
 }
 
-fn make_batch<B: Backend>(
+pub(super) fn make_batch<B: Backend>(
     rows: &[<B::DB as Database>::Row],
     state: &mut Option<StreamState>,
 ) -> Result<RecordBatch> {
@@ -406,7 +406,7 @@ where
     B::cell(&row, 0, &plans[0]).map(Some)
 }
 
-fn bound<'q, B: Backend>(
+pub(super) fn bound<'q, B: Backend>(
     sql: &'q str,
     params: &[SqlParam],
 ) -> sqlx::query::Query<'q, B::DB, <B::DB as Database>::Arguments>
@@ -697,3 +697,135 @@ macro_rules! tx_ops {
 tx_ops!(pg_tx, crate::driver::postgres::PgBackend);
 tx_ops!(mysql_tx, crate::driver::mysql::MySqlBackend);
 tx_ops!(sqlite_tx, crate::driver::sqlite::SqliteBackend);
+
+/// Read only host authorization metadata, on the same verified read connection, before
+/// the writer mutates anything. The dedicated source pool limits native row prefetch/size.
+pub(super) async fn authorization_read(
+    connection: &mut sqlx::SqliteConnection,
+    sql: &str,
+    params: &[SqlParam],
+    mode: super::authorization_reads::Mode,
+) -> Result<(super::authorization_reads::Output, usize)> {
+    use super::authorization_reads::{MAX_BYTES, MAX_ROWS, Mode, Output};
+    use sqlx::{Column, TypeInfo, ValueRef};
+    super::authorization_reads::read_only_statement(connection, sql).await?;
+    let mut rows = Vec::new();
+    let mut bytes = 0usize;
+    let mut stream = bound::<super::sqlite::SqliteBackend>(sql, params).fetch(connection);
+    while let Some(row) = stream.next().await {
+        let row = row?;
+        bytes = bytes.saturating_add(super::source_snapshot::row_bytes(&row)?);
+        if rows.len() >= MAX_ROWS || bytes > MAX_BYTES {
+            return Err(SqlError::InvalidArgument(
+                "Database authorization metadata exceeds its bound.".into(),
+            ));
+        }
+        rows.push(row);
+        if mode == Mode::Value {
+            break;
+        }
+    }
+    drop(stream);
+    let output = match mode {
+        Mode::Value => {
+            let value = match rows.first() {
+                Some(row) if !row.columns().is_empty() => {
+                    let plans = super::sqlite::SqliteBackend::plan(row.columns());
+                    Some(super::sqlite::SqliteBackend::cell(row, 0, &plans[0])?)
+                }
+                _ => None,
+            };
+            Output::Value(value)
+        }
+        Mode::Batches => {
+            let mut state = None;
+            let batches = if rows.is_empty() {
+                vec![RecordBatch::new_empty(SchemaRef::new(Schema::empty()))]
+            } else {
+                vec![make_batch::<super::sqlite::SqliteBackend>(
+                    &rows, &mut state,
+                )?]
+            };
+            Output::Batches(batches)
+        }
+        Mode::Docs => {
+            use meerschaum_kernel::value::Value;
+            let mut columns: Vec<(String, Vec<Value>)> = rows
+                .first()
+                .map(|row| {
+                    row.columns()
+                        .iter()
+                        .map(|column| (column.name().into(), Vec::new()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for row in rows {
+                for (index, (_, values)) in columns.iter_mut().enumerate() {
+                    let raw = row.try_get_raw(index)?;
+                    values.push(if raw.is_null() {
+                        Value::Null
+                    } else {
+                        match raw.type_info().name() {
+                            "INTEGER" => Value::Int(row.try_get_unchecked(index)?),
+                            "REAL" => Value::Float(row.try_get_unchecked(index)?),
+                            "BLOB" => Value::Bytes(row.try_get_unchecked(index)?),
+                            _ => Value::Str(row.try_get_unchecked(index)?),
+                        }
+                    });
+                }
+            }
+            Output::Docs(meerschaum_kernel::Frame::from_object_columns(columns)?)
+        }
+    };
+    Ok((output, bytes))
+}
+
+/// Consume one SQLite statement inside its caller-owned transaction in bounded batches.
+/// No pool checkout, query restart or independent snapshot is introduced between batches.
+pub(super) async fn for_each_sqlite_batch<F>(
+    transaction: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
+    sql: &str,
+    chunksize: usize,
+    max_bytes: usize,
+    mut accept: F,
+) -> Result<()>
+where
+    F: FnMut(meerschaum_kernel::Frame) -> Result<()>,
+{
+    let mut state = None;
+    let mut buffered = Vec::with_capacity(chunksize.min(4096));
+    let mut buffered_bytes = 0usize;
+    {
+        let mut rows = sqlx::query::<sqlx::Sqlite>(AssertSqlSafe(sql))
+            .persistent(false)
+            .fetch(&mut **transaction);
+        while let Some(row) = rows.next().await {
+            let row = row?;
+            let row_bytes = super::source_snapshot::row_bytes(&row)?;
+            if row_bytes > max_bytes {
+                return Err(SqlError::InvalidArgument(
+                    "Source snapshot row exceeds its byte bound.".into(),
+                ));
+            }
+            if !buffered.is_empty() && buffered_bytes.saturating_add(row_bytes) > max_bytes {
+                let batch = make_batch::<super::sqlite::SqliteBackend>(&buffered, &mut state)?;
+                buffered.clear();
+                buffered_bytes = 0;
+                accept(super::batches_to_frame(&[batch])?)?;
+            }
+            buffered.push(row);
+            buffered_bytes += row_bytes;
+            if buffered.len() >= chunksize {
+                let batch = make_batch::<super::sqlite::SqliteBackend>(&buffered, &mut state)?;
+                buffered.clear();
+                buffered_bytes = 0;
+                accept(super::batches_to_frame(&[batch])?)?;
+            }
+        }
+    }
+    if !buffered.is_empty() {
+        let batch = make_batch::<super::sqlite::SqliteBackend>(&buffered, &mut state)?;
+        accept(super::batches_to_frame(&[batch])?)?;
+    }
+    Ok(())
+}

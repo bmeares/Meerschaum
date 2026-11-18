@@ -839,7 +839,7 @@ pub fn sync_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     sync_pipes_with(args, rt, method)
 }
 
-pub(in crate::native) fn depth(args: &ArgsMap, key: &str) -> Option<meerschaum_engine::Depth> {
+pub(crate) fn depth(args: &ArgsMap, key: &str) -> Option<meerschaum_engine::Depth> {
     match args.get(key) {
         Some(crate::value::PyValue::Int(n)) if *n > 0 => Some(meerschaum_engine::Depth::N(
             u32::try_from(*n).unwrap_or(u32::MAX),

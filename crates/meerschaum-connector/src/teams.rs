@@ -219,6 +219,9 @@ pub async fn default_register_team<C: InstanceConnector + ?Sized>(
         Err(e) => return SuccessTuple::fail(e.to_string()),
     }
     let team_id = Uuid::new_v4();
+    if let Err(error) = meerschaum_core::execution::Settings::for_registration(team) {
+        return SuccessTuple::fail(error.to_string());
+    }
     let pipe = conn.get_teams_pipe();
     let res = pipe_ops::sync_docs(conn, &pipe, vec![doc_of_team(team, team_id)], false).await;
     if !res.success {
@@ -281,6 +284,9 @@ pub async fn default_edit_team<C: InstanceConnector + ?Sized>(
         members: team.members.clone(),
         attributes: team.attributes.clone(),
     };
+    if let Err(error) = record.execution() {
+        return SuccessTuple::fail(error.to_string());
+    }
     let pipe = conn.get_teams_pipe();
     let res = pipe_ops::sync_docs(conn, &pipe, vec![doc_of_team(&record, team_id)], true).await;
     if !res.success {

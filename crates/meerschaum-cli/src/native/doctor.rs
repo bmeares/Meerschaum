@@ -2032,6 +2032,25 @@ fn team_sandbox_checks(config: &Config) -> Vec<Check> {
             "Run the API server as a user without Docker access while isolated teams run code.",
         ));
     }
+    // 5.1: per team that runs code, whether its members' commands may run here.
+    for team in crate::team_execution::code_running_teams(config) {
+        let label = format!("team execution ({team})");
+        match crate::team_execution::team_status(config, &team) {
+            Ok(()) => out.push(Check::pass(
+                "teams",
+                &label,
+                "available: its members' commands and terminal run as its sandboxed processes",
+            )),
+            Err(why) => out.push(Check::warn(
+                "teams",
+                &label,
+                format!("not available: {why}"),
+                "Its members keep the commands every non-administrator may run. Team execution \
+                 needs `system.engine.python_team_sandbox` other than `off`, Linux 7.1 or newer \
+                 (Landlock ABI 9) and a Python `meerschaum` 5.1.0 or newer.",
+            )),
+        }
+    }
     out
 }
 

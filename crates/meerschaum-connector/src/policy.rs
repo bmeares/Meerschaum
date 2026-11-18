@@ -26,12 +26,16 @@ pub fn is_internal_pipe(pipe: &Pipe) -> bool {
 
 /// The refusal a write to `pipe` through `conn` gets (`Some`) when `conn` is protected, writes
 /// are not allowed ([`meerschaum_core::protected::allowed`]) and `pipe` is not an internal pipe.
+/// Connector-owned reserved targets are refused first, independently of protection bypasses.
 /// `op` is the verb phrase of the refusal (`"sync"`, `"clear"`, ...); the pipe is named after it.
 pub fn protected_refusal<C: Connector + ?Sized>(
     conn: &C,
     pipe: &Pipe,
     op: &str,
 ) -> Option<SuccessTuple> {
+    if let Some(reason) = conn.pipe_target_refusal(pipe) {
+        return Some(SuccessTuple::fail(reason));
+    }
     if is_internal_pipe(pipe) || !conn.is_protected() {
         return None;
     }

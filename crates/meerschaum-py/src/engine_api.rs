@@ -358,8 +358,16 @@ fn build(py: Python<'_>, session: &Session, request: &Json) -> PyResult<Built> {
         })
         .map_err(|e| runtime_err(e.message))?;
     config.home_instance = home.keys();
+    let engine = py
+        .detach(|| {
+            session.block_on(meerschaum_cli::native::graph_plan::attach(Engine::new(
+                registry.clone(),
+                config.clone(),
+            )))
+        })
+        .map_err(runtime_err)?;
     Ok(Built {
-        engine: Engine::new(registry.clone(), config.clone()),
+        engine,
         registry,
         config,
         instance_keys,

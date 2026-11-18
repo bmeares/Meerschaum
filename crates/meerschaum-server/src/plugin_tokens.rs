@@ -116,6 +116,9 @@ async fn owner(
     };
     // Reloaded as the kind it already is (a revoked token or deleted user stops here).
     let reloaded = match caller {
+        Principal::Execution(_) => {
+            return Err("Execution credentials cannot mint or revoke reusable credentials.".into());
+        }
         Principal::User(user) => load_user(state, &user.username).await,
         Principal::Token(token) => {
             let id = token.id.map(|id| id.to_string()).unwrap_or_default();
@@ -125,6 +128,9 @@ async fn owner(
     .map_err(|e| e.detail_text())?
     .ok_or_else(|| "Invalid or revoked credentials.".to_string())?;
     let user = match &reloaded {
+        Principal::Execution(_) => {
+            return Err("Execution credentials cannot mint or revoke reusable credentials.".into());
+        }
         Principal::User(user) => user.clone(),
         Principal::Token(token) => {
             let no_owner = || format!("The calling token has no owner, so it may not {what}.");

@@ -87,6 +87,11 @@ def activate_venv(
     thread_id = get_ident()
     import sys
     import os
+    # API-only execution uses host-prepared private sites. Import activation must never
+    # verify/recreate interpreters or implicitly launch an installer. Explicit installation
+    # remains a separate operation subject to the process's existing confinement.
+    if os.environ.get('MRSM_API_EXECUTION') == '1':
+        init_if_not_exists = False
     ### 5.1: an isolated team's sandboxed process has virtual environments of its own
     ### (`MRSM_VENVS_DIR`, seeded from the server's): a missing one is not created merely to be
     ### activated (there is nothing in it); installing into it creates it.
@@ -126,14 +131,6 @@ def activate_venv(
                 raise
             base_fallback = True
 
-        if thread_id not in threads_active_venvs:
-            threads_active_venvs[thread_id] = {}
-        active_venvs.add(venv)
-        if venv not in threads_active_venvs[thread_id]:
-            threads_active_venvs[thread_id][venv] = 1
-        else:
-            threads_active_venvs[thread_id][venv] += 1
-
         if (
             not target_path.exists()
             and venv is not None
@@ -146,6 +143,14 @@ def activate_venv(
             if init_if_not_exists:
                 return False
             raise EnvironmentError(f"Could not activate virtual environment '{venv}'.")
+
+        if thread_id not in threads_active_venvs:
+            threads_active_venvs[thread_id] = {}
+        active_venvs.add(venv)
+        if venv not in threads_active_venvs[thread_id]:
+            threads_active_venvs[thread_id][venv] = 1
+        else:
+            threads_active_venvs[thread_id][venv] += 1
 
         target = target_path.as_posix()
         if (

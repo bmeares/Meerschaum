@@ -1456,6 +1456,47 @@ def run_python_package(
     return to_return
 
 
+
+def _prepared_execution_import(names, lazy, precheck, warn):
+    """Import from native-prepared private sites without managing an environment.
+
+    Api and Metadata processes already have their complete import path selected by the native
+    launcher. Activating a named venv here can attempt recovery/installation even with
+    install=False. Standard import machinery is the only lookup needed in these processes.
+    The marker removes side effects; it never grants access or substitutes for confinement.
+    """
+    import importlib.util
+    import sys
+    import warnings
+    if names == ('meerschaum',):
+        # Match the ordinary helper's recursion guard while the SDK is initializing.
+        return _import_module('meerschaum')
+    modules = []
+    for name in names:
+        try:
+            module = sys.modules.get(name)
+            if module is not None and not getattr(getattr(module, '__spec__', None), '_initializing', False):
+                modules.append(module)
+                continue
+            if lazy:
+                # This is Python's current-path lookup, with no venv/package management.
+                # Preserve lazy imports and return None for an unavailable dependency.
+                if precheck and importlib.util.find_spec(name) is None:
+                    raise ModuleNotFoundError(name=name)
+                module = lazy_import(name, precheck=False, install=False, warn=warn)
+            else:
+                module = _import_module(name)
+        except Exception:
+            if warn:
+                warnings.warn(
+                    f"Module '{name}' is unavailable in the prepared private interpreter.",
+                    ImportWarning, stacklevel=3,
+                )
+            module = None
+        modules.append(module)
+    return modules[0] if len(modules) == 1 else tuple(modules)
+
+
 def attempt_import(
     *names: str,
     lazy: bool = True,
@@ -1535,6 +1576,9 @@ def attempt_import(
     """
 
     import importlib.util
+
+    if os.environ.get('MRSM_API_EXECUTION') == '1':
+        return _prepared_execution_import(names, lazy=lazy, precheck=precheck, warn=warn)
 
     global emitted_auto_install_warning
     no_auto_install_env_var = NO_AUTO_INSTALL_ENV_VAR

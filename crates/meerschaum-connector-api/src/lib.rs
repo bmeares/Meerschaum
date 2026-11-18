@@ -10,6 +10,8 @@
 //! - [`routes`]: endpoint paths and path builders.
 //! - [`wire`]: Python-compatible query/form encoding and the pandas `to_json` port.
 //! - [`engine_pipes`]: the engine state pipes over `/engine/pipes/{metric}/*` (shared wire).
+//! - [`graph_plan`] and [`graph_batch`]: the graph instructions and batch delivery receipts
+//!   exchanged by the main API and an executor.
 //! - [`client`] (feature `client`, default): the `APIConnector` over `reqwest`, speaking every
 //!   route of §7.1 with the same paths, query parameters and bodies as the v4 Python client.
 //!
@@ -17,8 +19,12 @@
 #![deny(unsafe_code)]
 
 pub mod engine_pipes;
+pub mod graph_batch;
+pub mod graph_plan;
 pub mod models;
 pub mod routes;
+pub mod source_fetch;
+pub mod source_replace;
 pub mod wire;
 
 pub use meerschaum_connector::{pipe_ops, traits};

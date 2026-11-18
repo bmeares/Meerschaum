@@ -606,6 +606,22 @@ impl PyApiConnector {
         Ok(PyApiConnector { inner: conn })
     }
 
+    /// Build a logical connector without constructing a native SQL or Valkey client.
+    #[staticmethod]
+    fn from_execution_alias(keys: &str, attributes: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let attrs = py_to_core(attributes.as_any())?.to_map();
+        let alias =
+            meerschaum_core::team_scope::api_execution::Alias::from_attributes(&attrs, keys)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err("Missing API execution alias.")
+                })?;
+        let conn = RsApiConnector::from_execution_alias(&alias).map_err(conn_err)?;
+        Ok(Self {
+            inner: Arc::new(conn),
+        })
+    }
+
     fn __repr__(&self) -> String {
         format!("_core.ApiConnector('{}')", self.inner)
     }
@@ -953,6 +969,50 @@ impl PyApiConnector {
         let res = block_on(py, async move { c.delete_pipe(&p).await });
         c2.invalidate_pipe_cache(&p2);
         success_to_py(py, &res)
+    }
+
+    /// Read only the main server's canonical registered source definition.
+    #[pyo3(signature = (
+        pipe, select_columns=None, omit_columns=None, begin=None, end=None, params=None,
+        order=None, limit=None, **_kw
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn fetch_registered_source<'py>(
+        &self,
+        py: Python<'py>,
+        pipe: &Bound<'py, PyAny>,
+        select_columns: Option<&Bound<'py, PyAny>>,
+        omit_columns: Option<&Bound<'py, PyAny>>,
+        begin: Option<&Bound<'py, PyAny>>,
+        end: Option<&Bound<'py, PyAny>>,
+        params: Option<&Bound<'py, PyAny>>,
+        order: Option<String>,
+        limit: Option<i64>,
+        _kw: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let ctx = PyCtx::scalars(py)?;
+        // Source SQL, hooks and local parameters cannot influence the broker request.
+        let p = core_pipe(pipe, ParamsView::Keys)?;
+        let query = data_query(
+            &ctx,
+            select_columns,
+            omit_columns,
+            begin,
+            end,
+            params,
+            limit,
+            order,
+        )?;
+        let c = self.conn();
+        match block_on(
+            py,
+            async move { c.fetch_registered_source(&p, &query).await },
+        )
+        .map_err(conn_err)?
+        {
+            Some(frame) => frame_out(py, &frame),
+            None => Ok(py.None().into_bound(py)),
+        }
     }
 
     /// `get_pipe_data(...)`: a pandas DataFrame, `None` when the request failed, or the tuple

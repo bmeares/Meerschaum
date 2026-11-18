@@ -35,7 +35,7 @@ pub struct PipeHandle {
 }
 
 impl PipeHandle {
-    fn new(pipe: Pipe) -> PipeHandle {
+    pub(crate) fn new(pipe: Pipe) -> PipeHandle {
         PipeHandle {
             pipe,
             created: Instant::now(),
@@ -79,10 +79,14 @@ pub struct Inner {
     secret: Vec<u8>,
     /// `/actions` dispatch.
     pub actions: Arc<dyn ActionsBackend>,
+    /// Guarded canonical native SQL source reads; absent by default.
+    pub source_fetch: Arc<dyn crate::backends::SourceFetchBackend>,
     /// `/jobs/*`.
     pub jobs: Arc<dyn JobsBackend>,
     /// `/engine/*`.
     pub engine: Arc<dyn EngineBackend>,
+    pub(crate) selected_engines: crate::routes::engine::selection::EngineCache,
+    pub(crate) self_api_bindings: crate::routes::engine::selection::SelfApiBindings,
     /// Plans of saved Pipelines (`POST /pipelines/{name}/plan`).
     pub pipelines: Arc<dyn PipelinesBackend>,
     /// The live side of `GET /engine/runs/{run_id}/events/stream`.
@@ -107,6 +111,8 @@ pub struct Inner {
     pub(crate) first_user: tokio::sync::Mutex<()>,
     /// Starting, serving or draining ([`crate::lifecycle`]).
     pub lifecycle: Arc<crate::lifecycle::Lifecycle>,
+    /// 5.1: the probes of isolated teams' processes ([`crate::team_execution`]).
+    pub team_execution_probes: crate::team_execution::ProbeCache,
 }
 
 impl Deref for AppState {
@@ -122,15 +128,32 @@ pub struct AppStateBuilder {
     instance: Arc<dyn InstanceConnector>,
     secret: Option<Vec<u8>>,
     actions: Arc<dyn ActionsBackend>,
+    source_fetch: Arc<dyn crate::backends::SourceFetchBackend>,
     jobs: Arc<dyn JobsBackend>,
     engine: Arc<dyn EngineBackend>,
     pipelines: Arc<dyn PipelinesBackend>,
     resolver: Arc<dyn InstanceResolver>,
     team_events: Arc<dyn crate::backends::TeamEvents>,
     host: Option<Arc<HostProxy>>,
+    native_self_api_engines: bool,
 }
 
 impl AppStateBuilder {
+    /// Native host constructor only: bind actual configured self-API transports to this
+    /// exact native Main. The request selector never creates this capability.
+    pub fn native_self_api_engines(mut self) -> Self {
+        self.native_self_api_engines = true;
+        self
+    }
+    /// The native-only canonical source broker. No default connector/client fallback exists.
+    pub fn source_fetch(
+        mut self,
+        source_fetch: Arc<dyn crate::backends::SourceFetchBackend>,
+    ) -> Self {
+        self.source_fetch = source_fetch;
+        self
+    }
+
     /// Use this secret instead of the secret key file.
     pub fn secret(mut self, secret: Vec<u8>) -> Self {
         self.secret = Some(secret);
@@ -203,13 +226,26 @@ impl AppStateBuilder {
             )
         });
         let rate_limiter = RateLimiter::new(&self.config);
+        let (self_api_bindings, instances) = if self.native_self_api_engines {
+            crate::routes::engine::selection::SelfApiBindings::from_native(
+                &self.config,
+                self.resolver.as_ref(),
+                self.instance.clone(),
+            )
+            .map_err(|reason| std::io::Error::new(std::io::ErrorKind::InvalidInput, reason))?
+        } else {
+            (Default::default(), HashMap::new())
+        };
         Ok(AppState(Arc::new(Inner {
             config: Arc::new(self.config),
             instance: self.instance,
             secret,
             actions: self.actions,
+            source_fetch: self.source_fetch,
             jobs: self.jobs,
             engine: self.engine,
+            selected_engines: Default::default(),
+            self_api_bindings,
             pipelines: self.pipelines,
             engine_streams: Default::default(),
             log_stream: std::sync::atomic::AtomicBool::new(false),
@@ -219,10 +255,11 @@ impl AppStateBuilder {
             rate_limiter,
             execution_maintenance: tokio::sync::Mutex::new(()),
             pipes: tokio::sync::Mutex::new(HashMap::new()),
-            instances: Mutex::new(HashMap::new()),
+            instances: Mutex::new(instances),
             access_cache: Default::default(),
             first_user: tokio::sync::Mutex::new(()),
             lifecycle,
+            team_execution_probes: Default::default(),
         })))
     }
 }
@@ -237,7 +274,7 @@ pub fn normalize_location(location_key: Option<&str>) -> Option<String> {
 
 impl AppState {
     /// Weak handle for background maintenance; does not keep a stopped server alive.
-    pub(crate) fn weak_upgrade(&self) -> impl Fn() -> Option<Self> + Send + Sync + 'static {
+    pub fn weak_upgrade(&self) -> impl Fn() -> Option<Self> + Send + Sync + 'static {
         let weak = Arc::downgrade(&self.0);
         move || weak.upgrade().map(Self)
     }
@@ -249,12 +286,14 @@ impl AppState {
             instance,
             secret: None,
             actions: Arc::new(NoActions),
+            source_fetch: Arc::new(crate::backends::NoSourceFetch),
             jobs: Arc::new(NoJobs),
             engine: Arc::new(MemoryEngine::default()),
             pipelines: Arc::new(NoPipelines),
             resolver: Arc::new(NoInstances),
             team_events: Arc::new(crate::backends::NoTeamEvents),
             host: None,
+            native_self_api_engines: false,
         }
     }
 
@@ -370,10 +409,15 @@ impl AppState {
     ) -> Result<Arc<PipesDict>, ApiError> {
         let conn = self.get_api_connector(instance_keys)?;
         let key = conn.connector_keys();
-        let mut guard = self.pipes.lock().await;
-        if !refresh && let Some(d) = guard.get(&key) {
-            return Ok(d.clone());
+        if !refresh {
+            let guard = self.pipes.lock().await;
+            if let Some(d) = guard.get(&key) {
+                return Ok(d.clone());
+            }
         }
+        // A configured API connector may call back into this Main's native instance.
+        // Its catalog and hydration requests need this same cache; never hold the
+        // global cache lock across connector I/O.
         let keys = conn
             .registered_pipes(&PipesKeysQuery::default())
             .await
@@ -409,8 +453,20 @@ impl AppState {
                 .insert(lk, Arc::new(PipeHandle::new(pipe)));
         }
         let dict = Arc::new(dict);
-        guard.insert(key, dict.clone());
-        Ok(dict)
+        let mut guard = self.pipes.lock().await;
+        if !Arc::ptr_eq(&conn, &self.get_api_connector(instance_keys)?) {
+            return Err(ApiError::new(
+                503,
+                "The selected instance changed while loading its pipe catalog.",
+            ));
+        }
+        if refresh {
+            guard.insert(key, dict.clone());
+            Ok(dict)
+        } else {
+            // Concurrent first readers share the already published handles.
+            Ok(guard.entry(key).or_insert(dict).clone())
+        }
     }
 
     /// `get_pipe(connector_keys, metric_key, location_key, instance_keys, refresh)`.

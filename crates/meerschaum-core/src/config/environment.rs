@@ -14,7 +14,7 @@
 
 use super::ConfigState;
 use super::GetOptions;
-use super::lossless::{ConfigValue, apply_patch_maps};
+use super::lossless::ConfigValue;
 use crate::pyfmt::string_to_dict;
 use crate::static_config::static_config;
 
@@ -97,7 +97,7 @@ impl ConfigState {
                 };
                 let _ = self.get_config_lossless(std::slice::from_ref(key), opts);
             }
-            self.config = apply_patch_maps(&self.config, &patch);
+            self.config = super::apply_config_patch(&self.config, &patch);
         }
     }
 }

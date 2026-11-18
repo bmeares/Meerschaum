@@ -2,6 +2,61 @@
 
 use super::*;
 
+#[test]
+fn execution_team_boundary_precedes_ownership_membership_and_administration() {
+    let mut caller = Principal::new(
+        "alice",
+        false,
+        all_permissions(),
+        vec![
+            ("Harbor".into(), TeamRole::Member),
+            ("Forest".into(), TeamRole::Manager),
+            (EVERYONE.into(), TeamRole::Manager),
+        ],
+    )
+    .within_team("harbor");
+    let local = PipeAccess::parse(
+        &map(r#"{"owner":"alice","team":"Harbor","visibility":"private"}"#).into(),
+    )
+    .unwrap();
+    let mut foreign = local.clone();
+    foreign.team = Some("Forest".into());
+    assert!(can_see(&caller, &local));
+    assert!(can_edit(&caller, &local));
+    assert!(!can_see(&caller, &foreign));
+    assert!(!can_edit(&caller, &foreign));
+    assert!(!can_manage_access(&caller, &foreign));
+    assert!(!can_lock(&caller, &foreign));
+    assert!(check_access_change(&caller, &local, &foreign).is_err());
+    assert!(!caller.is_member(Some("Forest")));
+    assert!(!caller.is_member(None));
+    let job = crate::job_access::JobAccess {
+        owner: Some("alice".into()),
+        team: Some("Forest".into()),
+        private: true,
+    };
+    assert!(!crate::job_access::can_see_job(&caller, &job));
+    // Even a mismatched raw administrator flag cannot bypass the object boundary.
+    caller.is_admin = true;
+    assert!(!can_see(&caller, &foreign));
+    assert!(!crate::job_access::can_see_job(&caller, &job));
+    assert!(!can_manage_team(&caller, "Forest"));
+    assert!(!can_administer_teams(&caller));
+    assert!(check_access_change(&caller, &local, &foreign).is_err());
+    assert!(!can_use_connector(&caller, Some(&["Forest".into()])));
+    let scoped_admin = Principal::admin("admin").within_team("Harbor");
+    assert!(!scoped_admin.is_admin);
+    let everyone = Principal::new(
+        "alice",
+        false,
+        Default::default(),
+        vec![(EVERYONE.into(), TeamRole::Member)],
+    )
+    .within_team(EVERYONE);
+    assert!(everyone.is_member(None));
+    assert!(!everyone.is_member(Some("Harbor")));
+}
+
 fn set(names: &[&str]) -> Permissions {
     names.iter().map(|n| n.to_string()).collect()
 }

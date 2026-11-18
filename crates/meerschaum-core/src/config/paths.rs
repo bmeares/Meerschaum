@@ -469,9 +469,17 @@ impl Paths {
             None => root_dir.join("config"),
         };
 
-        let plugins_dirs = match env("MRSM_PLUGINS_DIR") {
-            Some(v) => parse_plugins_dirs(&v)?,
-            None => vec![root_dir.join("plugins")],
+        let plugins_dirs = if let Some(launch) = crate::team_scope::source_namespace::launch()
+            .map_err(|_| ConfigError::InvalidPath {
+                var: crate::team_scope::source_namespace::ENV.into(),
+                path: String::new(),
+            })? {
+            vec![launch.namespace.view.clone()]
+        } else {
+            match env("MRSM_PLUGINS_DIR") {
+                Some(v) => parse_plugins_dirs(&v)?,
+                None => vec![root_dir.join("plugins")],
+            }
         };
 
         let venvs_dir = match env("MRSM_VENVS_DIR") {

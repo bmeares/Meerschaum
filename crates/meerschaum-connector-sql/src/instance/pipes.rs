@@ -13,6 +13,7 @@ use meerschaum_kernel::value::Value as KValue;
 use crate::driver::SqlParam;
 use crate::driver::params::{placeholder, placeholders};
 use crate::flavor::Flavor;
+use crate::queries::table::get_table_exists_query;
 use crate::where_clause::negation_prefix;
 
 use super::{SqlConnector, be, frame_docs, kv_int, kv_str};
@@ -29,7 +30,7 @@ pub fn pipe_metadata_epoch() -> u64 {
     METADATA_WRITES.load(std::sync::atomic::Ordering::Acquire)
 }
 
-fn bump_metadata_epoch(res: SuccessTuple) -> SuccessTuple {
+pub(crate) fn bump_metadata_epoch(res: SuccessTuple) -> SuccessTuple {
     if res.success {
         METADATA_WRITES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
@@ -170,7 +171,8 @@ impl SqlConnector {
         if pipe.temporary {
             return Ok(None);
         }
-        if !self.tables_ready()
+        if !crate::driver::mysql_authority::active()
+            && !self.tables_ready()
             && !self
                 .table_exists("mrsm_pipes", self.instance_schema())
                 .await
@@ -195,7 +197,12 @@ impl SqlConnector {
             placeholder(f, 1),
             placeholder(f, 2)
         );
-        let v = self.value_params_catalog(&query, &params).await?;
+        let v = crate::driver::mysql_authority::approve(
+            &query,
+            &params,
+            self.value_params_catalog(&query, &params),
+        )
+        .await?;
         let identity = v.and_then(|v| v.as_i64());
         pipe.set_registration_id(identity.map(|identity| identity.to_string()));
         Ok(identity)
@@ -208,7 +215,8 @@ impl SqlConnector {
     /// without the instance tables, have no row.
     pub async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
         if pipe.temporary
-            || (!self.tables_ready()
+            || (!crate::driver::mysql_authority::active()
+                && !self.tables_ready()
                 && !self
                     .table_exists("mrsm_pipes", self.instance_schema())
                     .await)
@@ -233,14 +241,17 @@ impl SqlConnector {
             placeholder(f, 1),
             placeholder(f, 2)
         );
-        let df = self
-            .read_params_catalog(&query, &params)
-            .await
-            .map_err(|e| {
-                be(format!(
-                    "Failed to read metadata for {pipe} from {self}.\n{e}"
-                ))
-            })?;
+        let df = crate::driver::mysql_authority::approve(
+            &query,
+            &params,
+            self.read_params_catalog(&query, &params),
+        )
+        .await
+        .map_err(|e| {
+            be(format!(
+                "Failed to read metadata for {pipe} from {self}.\n{e}"
+            ))
+        })?;
         let docs = frame_docs(&df);
         let Some(doc) = docs.first() else {
             return Ok(Map::new());
@@ -308,6 +319,13 @@ impl SqlConnector {
             placeholder(f, 2)
         );
         let params = vec![self.json_param(&parameters), SqlParam::Int(id)];
+        if let Some(authority) = meerschaum_connector::mutation::current()
+            .filter(|authority| authority.tracks_metadata_inference())
+        {
+            return self
+                .edit_inferred_metadata(pipe, id, parameters, &query, &params, authority)
+                .await;
+        }
         bump_metadata_epoch(match self.exec_params(&query, &params).await {
             Some(_) => SuccessTuple::ok(format!("Successfully edited {pipe}.")),
             None => SuccessTuple::fail(format!("Failed to edit {pipe}.")),
@@ -538,10 +556,18 @@ impl SqlConnector {
     pub async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
         let f = self.flavor;
         let table = self.instance_table_name("mrsm_pipes");
-        if !self
-            .table_exists("mrsm_pipes", self.instance_schema())
-            .await
-        {
+        let schema = self.instance_schema();
+        let exists = if meerschaum_connector::mutation::rechecking() {
+            // A warm catalog hit would skip pinning this query under the SQLite
+            // writer. A later eviction would then require an unproven read.
+            let sql = get_table_exists_query("mrsm_pipes", f, schema);
+            crate::driver::mysql_authority::approve(&sql, &[], self.value_catalog_checked(&sql))
+                .await?
+                .is_some()
+        } else {
+            self.table_exists_checked("mrsm_pipes", schema).await?
+        };
+        if !exists {
             return Ok(PipesKeys::Dict(IndexMap::new()));
         }
         let location_keys: Vec<String> = query
@@ -731,7 +757,10 @@ impl SqlConnector {
         let sql = format!(
             "SELECT {table}.pipe_id, {table}.connector_keys, {table}.metric_key, {table}.location_key, {table}.parameters \nFROM {table} \nWHERE {where_str} ORDER BY {table}.connector_keys ASC, {table}.metric_key ASC, {loc_order}"
         );
-        let df = self.read_params(&sql, &binds).await.map_err(be)?;
+        let df =
+            crate::driver::mysql_authority::approve(&sql, &binds, self.read_params(&sql, &binds))
+                .await
+                .map_err(be)?;
         let mut out: IndexMap<PipeId, PipeKeysEntry> = IndexMap::new();
         for doc in frame_docs(&df) {
             let Some(id) = kv_int(doc.get("pipe_id")) else {

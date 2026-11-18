@@ -23,6 +23,17 @@ use crate::keys::{
 };
 use crate::pyjson::{dumps_doc, loads_doc, serialize_document};
 
+/// A client-side check before a queued Valkey command cannot revoke that command after a
+/// server wait. Keep authenticated scoped mutations unavailable until the backend has an
+/// atomic original-authority condition; ordinary local connector use is unchanged.
+fn scoped_mutation_refusal() -> Option<SuccessTuple> {
+    meerschaum_connector::mutation::current().map(|_| {
+        SuccessTuple::fail(
+            "Authorized Valkey writes after server lock acquisition are not yet supported.",
+        )
+    })
+}
+
 /// `pipe.target` on a Valkey instance (no per-flavor truncation).
 pub fn pipe_target(pipe: &Pipe) -> String {
     pipe.target(None).unwrap_or_else(|_| pipe.target_legacy())
@@ -136,6 +147,9 @@ impl ValkeyConnector {
         expected: &Map,
         parameters: &Map,
     ) -> ConnectorResult<bool> {
+        if let Some(refused) = scoped_mutation_refusal() {
+            return Err(ConnectorError::Invalid(refused.message));
+        }
         if source.connector_keys() != "mrsm"
             || source.metric_key() != "pipeline"
             || source.location_key().is_none()
@@ -289,6 +303,9 @@ impl ValkeyConnector {
 
     /// Insert the pipe's attributes into the internal `pipes` table.
     pub async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = scoped_mutation_refusal() {
+            return refused;
+        }
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "register") {
             return refused;
         }
@@ -418,6 +435,9 @@ impl ValkeyConnector {
 
     /// Persist the pipe's in-memory parameters.
     pub async fn edit_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = scoped_mutation_refusal() {
+            return refused;
+        }
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "edit") {
             return refused;
         }
@@ -448,6 +468,9 @@ impl ValkeyConnector {
 
     /// Drop a pipe's documents, its table and the stored dtypes.
     pub async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = scoped_mutation_refusal() {
+            return refused;
+        }
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "drop") {
             return refused;
         }
@@ -534,6 +557,9 @@ impl ValkeyConnector {
 
     /// Drop the pipe and delete its registration.
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Some(refused) = scoped_mutation_refusal() {
+            return refused;
+        }
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "delete") {
             return refused;
         }
@@ -775,6 +801,9 @@ impl ValkeyConnector {
     /// `filter_existing`; new rows are inserted and changed rows merged into their stored
     /// documents. Returns `Inserted {n}, updated {m} rows.` (`Upserted {m} rows.` for upserts).
     pub async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
+        if let Some(refused) = scoped_mutation_refusal() {
+            return refused;
+        }
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "sync") {
             return refused;
         }
@@ -1105,6 +1134,9 @@ impl ValkeyConnector {
     /// sorted set keeps stale entries (`_pipes.py`, `clear_pipe`). Reads skip them; the
     /// unfiltered rowcount still counts them.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if let Some(refused) = scoped_mutation_refusal() {
+            return refused;
+        }
         if let Some(refused) = meerschaum_connector::protected_refusal(self, pipe, "clear") {
             return refused;
         }

@@ -79,7 +79,7 @@ The first account on an empty instance is an administrator, even when user regis
 
 An administrator may set a role or an explicit permission list for a user. Explicit permissions replace the role; an empty list grants no permissions. A token's scopes are intersected with its owner's current permissions, so reducing the user's rights also reduces existing tokens. Lists made before the new scopes existed keep their earlier meanings: `pipes:write` also registers and defines pipes, and `actions:execute` also opens the terminal. New lists can use `pipes:register`, `pipes:define_sql` and `webterm:use` independently. See [token scopes](/reference/api-instance/tokens/#scopes).
 
-Every user belongs to the built-in team **Everyone**, which cannot be left, renamed or deleted. Administrators create additional teams, appoint managers and choose memberships. Managers add and remove members of their own teams and manage those teams' pipe access. A user's primary team supplies the team for the pipes and jobs they create. Renaming a team updates its pipes and jobs; deleting it moves them to Everyone.
+Every user belongs to the built-in team **Everyone**, which cannot be left, renamed or deleted. Administrators create additional teams, appoint managers and choose memberships. Managers add and remove members of their own teams and manage those teams' pipe access. A user's primary team supplies the team for the pipes and jobs they create. Renaming a team updates its pipes and job display names. Deleting it moves pipes and legacy jobs to Everyone; registered private job history retains its original identity as an owner/admin archive. A replacement team or account with the same name does not inherit that history; see [job access](../background-jobs/access.md).
 
 Pipes without access settings belong to Everyone and remain shared. A pipe's `access` parameters choose its owner, team, visibility (**team**, **private**, or **everyone**) and who may edit it (**team** or **owner**). Only its owner, team managers and administrators may change its access or locks. The server stamps new pipes with the caller as owner; a caller cannot impersonate another owner when registering. [Pipe access and locks](/reference/pipes/access-and-locks/) describes the settings and Python API.
 
@@ -93,7 +93,37 @@ A connector's `teams: [Data, Operations]` attribute restricts who may use it thr
 
 Actions need `actions:execute` and the terminal needs `webterm:use` (Operator and administrators by default). Pipe Sync and Verify controls need `pipes:write` and edit rights on each selected pipe; they do not require arbitrary action execution. Pipeline sync checks every member it would change; a sync-locked member is skipped using its existing data. Remote action selections may not include pipes the caller cannot see or change.
 
-Remote actions run on this server. Nonadministrators cannot redirect them to another executor or inspect server configuration with `show connectors`; use the console's Connectors page for the details your account may see. For Pipe registration and sensitive parameter edits, use the console or dedicated Pipe endpoints. Restricted API keys keep these limits even when their owner is an administrator.
+Remote actions run on this server. A nonadministrator's command (`POST /execute`, `POST /jobs/{name}`, `POST /actions/{action}`, the console's Execute box and MCP's `execute_action`) runs only Meerschaum actions, core or from a plugin they may use, never `sh`, `os`, `python` and the like: a word that names no action, which the command line runs as a shell command, is refused, in every step of a chain. The web terminal follows the same rule: a nonadministrator's terminal is the `mrsm` shell in restricted mode, which asks the server before it runs each command and runs it only if `POST /execute` would allow that user to (with the same permissions, on the same pipes). It never runs a shell command, `!command`, `python` or anything else that is not a Meerschaum action, starts no other program (an action that would open an editor or a SQL client says so instead), offers tmux nothing to act on, keeps its history to itself and forwards input only to jobs the user could have started (the same holds for answering a job's prompts over the API). A job a nonadministrator creates through `POST /jobs/{name}` keeps the server's working directory and log file: its `cwd`, `logs` and `target` properties are ignored. A command that names jobs (`show jobs`, `attach logs`, `stop jobs`, `delete jobs`, `-d --name` with an existing job's name), from the terminal, `POST /execute` or any other action route, acts only on jobs the user may see and with the permissions the job routes require; one that names no job acts on every job, so it is refused while any job is hidden from the user. The server decides the mode from the user's role when the terminal opens and checks it again while it is open: a promotion or a demotion closes the terminal, and the next one opens in the new mode. Administrators get the full shell, as before. One exception: a member of an isolated team whose members may install plugins runs commands as the team's own sandboxed processes where the server can hold them there (team execution: `POST /execute` and `POST /jobs/{name}` start the team's jobs, the terminal is a team terminal, and `POST /actions/{action}` and MCP's `execute_action` refuse them), and any program the sandbox lets them reach is then theirs to run; see [Commands of a team that runs code](teams.md#commands-of-a-team-that-runs-code). Members of other isolated teams get no terminal at all.
+
+### What a nonadministrator may run
+
+The shared non-administrator command policy permits the following commands through the terminal, `POST /execute`, `POST /jobs/{name}`, `POST /actions/{action}` and MCP's `execute_action`, and only on the objects the matching API route would let them act on, with that route's permission: every pipe a command selects must be readable (`show`) or changeable (the others, with `pipes:delete` or `pipes:drop` where the route needs it); Pipelines and jobs must be named and visible to them; `show tokens` lists only their own tokens. Any other command is refused, and so is a command added to Meerschaum later until it is added here. A plugin's actions follow the plugin's grants instead: a granted plugin's action runs with the server's credentials and is not scoped to the user.
+
+The native API-only executor also supports filtered graph and run reads, named job logs, explicit pipe copies and noninteractive Pipeline registration and editing. [Commands under the caller’s identity](../team-executors.md#commands-under-the-callers-identity).
+
+<!-- non-admin-commands:start -->
+| Action | Subactions |
+|---|---|
+| `help` | (none) |
+| `show` | `version`, `help`, `actions`, `arguments`, `schedules`, `pipes`, `data`, `columns`, `rowcounts`, `sizes`, `partitions`, `targets`, `tags`, `pipelines`, `jobs`, `daemons`, `tokens` |
+| `sync` | `pipes`, `pipelines` |
+| `verify` | `pipes`, `rowcounts`, `schemas` |
+| `deduplicate` | `pipes` |
+| `clear` | `pipes`, `pipelines` |
+| `drop` | `pipes`, `pipelines` |
+| `delete` | `pipes`, `pipelines`, `jobs` |
+| `lock` | `pipes` |
+| `unlock` | `pipes` |
+| `edit` | `pipes` |
+| `partition` | `pipes` |
+| `tag` | `pipes` |
+| `attach` | `jobs`, `logs` |
+| `watch` | `jobs`, `logs` |
+| `stop` | `jobs`, `daemons` |
+| `pause` | `jobs` |
+| `restart` | `jobs`, `daemons` |
+<!-- non-admin-commands:end -->
+ Nonadministrators cannot redirect them to another executor or inspect server configuration with `show connectors`; use the console's Connectors page for the details your account may see. For Pipe registration and sensitive parameter edits, use the console or dedicated Pipe endpoints. Restricted API keys keep these limits even when their owner is an administrator.
 
 `api:permissions:actions:non_admin: false` (`start api --secure`) further restricts actions, terminals and console mutations to administrators. Meerschaum 4's explicit `actions:non_admin: true` maps the default role to Operator for compatibility, unless `default_role` is set explicitly. The shipped configuration leaves that compatibility key unset and uses Editor.
 

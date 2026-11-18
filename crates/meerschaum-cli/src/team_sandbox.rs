@@ -3,133 +3,155 @@
 //! The API server launches an isolated team's job with `MRSM_TEAM_SANDBOX` naming the rules it
 //! wrote ([`meerschaum_core::team_scope::sandbox`]). The job's command (this program, started by
 //! the job's supervisor) applies them first thing, before it runs the command, so the command
-//! and every worker or program it starts inherit them. The interpreters its workers use are
-//! asked for their prefixes and import path first (read and execute). In `require` mode, a
+//! and every worker or program it starts inherit them. The host prepares runtime paths without starting Python, and every interpreter starts
+//! only after the native launcher has installed the boundary. In `require` mode, a
 //! process whose sandbox is not enforced, or whose canary read succeeded, runs nothing.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use meerschaum_core::team_scope::sandbox::{self, Access, Rule};
 
-/// Prints the prefixes and import path of the interpreter that runs it (standard library only,
-/// imports nothing of Meerschaum's).
-const PROBE: &str = r#"
-import json, os, sys, importlib.util
-paths = {sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix}
-paths.update(p for p in sys.path if p and os.path.isabs(p))
-if sys.executable:
-    paths.add(os.path.dirname(os.path.realpath(sys.executable)))
-spec = importlib.util.find_spec('meerschaum')
-if spec is not None and spec.origin:
-    package = os.path.dirname(spec.origin)
-    paths.add(package)
-    launcher = os.path.join(os.path.dirname(package), '_meerschaum_mrsm.py')
-    if os.path.exists(launcher):
-        paths.add(launcher)
-print(json.dumps(sorted(p for p in paths if p)))
-"#;
+#[path = "executor_compiler_startup.rs"]
+mod compiler;
+#[path = "team_python.rs"]
+mod python;
+#[path = "team_source_python.rs"]
+mod source_python;
 
-/// `program` found on `PATH` when it has no directory.
-fn which(program: &Path) -> Option<PathBuf> {
-    if program.components().count() > 1 {
-        return Some(program.to_path_buf());
-    }
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|dir| dir.join(program))
-            .find(|candidate| candidate.is_file())
-    })
+/// Only the native startup capture can attach a compiler. API/Python sessions without
+/// that capture remain explicitly confined with no source compiler.
+pub(crate) fn source_compiler_policy() -> Option<meerschaum_plugin::source::compiler::CompilerPolicy>
+{
+    compiler::policy()
 }
 
-/// The paths `python` reads and executes (empty when it cannot be asked).
-fn interpreter_paths(python: &Path) -> Vec<PathBuf> {
-    let Ok(mut child) = std::process::Command::new(python)
-        .args([
-            meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
-            "-c",
-            PROBE,
-        ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-    else {
-        return Vec::new();
-    };
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Vec::new();
-            }
-        }
+/// Run the native interpreter trampoline only after the caller installed its mandatory
+/// sandbox. It never accepts an unmarked process as trusted management or preparation.
+pub fn exec_python_if_requested(arguments: &[String]) -> Option<i32> {
+    python::exec_if_requested(arguments).or_else(|| source_python::exec_if_requested(arguments))
+}
+
+/// Start an interpreter through the same native boundary and host import mapping as workers.
+pub fn confined_python_command(python: &Path) -> Result<std::process::Command, String> {
+    let path = std::env::var_os(sandbox::SPEC_VAR).ok_or("The team sandbox spec is missing.")?;
+    let spec = sandbox::Spec::read(Path::new(&path))
+        .map_err(|_| "The team sandbox spec is unavailable.")?;
+    let runtime = spec
+        .runtime
+        .ok_or("The team has no host-prepared native runtime.")?;
+    if !runtime.launcher.is_absolute()
+        || std::fs::canonicalize(&runtime.launcher).ok().as_ref() != Some(&runtime.launcher)
+    {
+        return Err("The team runtime has no canonical native launcher.".into());
     }
-    let Ok(out) = child.wait_with_output() else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .last()
-        .and_then(|line| serde_json::from_str::<Vec<String>>(line).ok())
-        .unwrap_or_default()
+    let mut command = std::process::Command::new(runtime.launcher);
+    command.arg(sandbox::runtime::PYTHON_CHILD).arg(python);
+    sandbox::runtime::sanitize_command(&mut command);
+    Ok(command)
+}
+
+/// Runtime paths are prepared by the host without executing Python. The child may add only
+/// its already-running executable; no user-selected MRSM_BIN/interpreter/import path is a grant.
+fn process_rules() -> Vec<Rule> {
+    std::env::current_exe()
+        .ok()
+        .map(|path| Rule::new(path, Access::ReadExec, "this program"))
         .into_iter()
-        .map(PathBuf::from)
         .collect()
 }
 
-/// The interpreter-and-program rules of this process: this program itself and every
-/// interpreter its workers may use (`MRSM_PYTHON`, else `python3`; this interpreter when the
-/// command line runs inside Python).
-fn process_rules() -> Vec<Rule> {
-    let mut rules = Vec::new();
-    let mut interpreters: Vec<PathBuf> = Vec::new();
-    if let Some(python) = which(&meerschaum_worker::worker::default_python()) {
-        interpreters.push(python);
+/// Apply the team's sandbox [`sandbox::SPEC_VAR`] names now (with this process's interpreter
+/// rules) and return its report; `None` outside a team process.
+pub fn enforce_now() -> Option<sandbox::Report> {
+    if std::env::var_os(meerschaum_core::team_scope::api_execution::PROFILE_VAR).is_some() {
+        let report = enforce_api_now();
+        return Some(
+            match report
+                .require_sockets_verdict()
+                .and_then(|()| metadata_network())
+                .and_then(|()| compiler::verdict())
+            {
+                Ok(()) => report,
+                Err(why) => sandbox::Report::not_enforced(sandbox::Mode::RequireSockets, why),
+            },
+        );
     }
-    if let Ok(exe) = std::env::current_exe() {
-        let is_python = exe
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with("python"));
-        if is_python {
-            interpreters.push(exe.clone());
+    sandbox::enforce_from_env(&process_rules())
+}
+
+/// A metadata launch cannot turn an inherited descriptor into data-plane authority.
+/// This filter is installed before Session construction or any interpreter site hooks.
+fn metadata_network() -> Result<(), String> {
+    if std::env::var(meerschaum_server::executor::environment::METADATA_VAR).as_deref() == Ok("1") {
+        sandbox::deny_network()?;
+    } else {
+        // API-only children may connect to their callback, but can never impersonate a
+        // crashed control server by listening on its just-freed port before owner cleanup.
+        sandbox::deny_inbound_network()?;
+    }
+    Ok(())
+}
+
+/// No interpreter is started here: Python site hooks and native discovery are untrusted code.
+/// Their paths must have been chosen by the host and written into the mandatory launch spec.
+fn enforce_api_now() -> sandbox::Report {
+    if let Some(report) = sandbox::current() {
+        compiler::inherit_without_compiler();
+        return report;
+    }
+    let Some(path) = std::env::var_os(sandbox::SPEC_VAR).filter(|p| !p.is_empty()) else {
+        return sandbox::Report::not_enforced(
+            sandbox::Mode::RequireSockets,
+            "API execution has no sandbox spec",
+        );
+    };
+    let spec = match sandbox::Spec::read(Path::new(&path)) {
+        Ok(spec) if spec.mode == sandbox::Mode::RequireSockets => spec,
+        Ok(_) => {
+            return sandbox::Report::not_enforced(
+                sandbox::Mode::RequireSockets,
+                "API execution requires a mandatory socket and signal sandbox",
+            );
         }
-        rules.push(Rule::new(exe, Access::ReadExec, "this program"));
-    }
-    if let Some(bin) = std::env::var_os("MRSM_BIN").filter(|b| !b.is_empty()) {
-        rules.push(Rule::new(
-            PathBuf::from(bin),
-            Access::ReadExec,
-            "this program",
-        ));
-    }
-    let mut seen: Vec<PathBuf> = Vec::new();
-    for python in interpreters {
-        let real = std::fs::canonicalize(&python).unwrap_or(python.clone());
-        if seen.contains(&real) {
-            continue;
+        Err(_) => {
+            return sandbox::Report::not_enforced(
+                sandbox::Mode::RequireSockets,
+                "API execution sandbox spec is unavailable",
+            );
         }
-        seen.push(real);
-        for path in interpreter_paths(&python) {
-            rules.push(Rule::new(path, Access::ReadExec, "the interpreter"));
-        }
+    };
+    let captured = compiler::read(Path::new(&path), &spec);
+    let report = sandbox::enforce(&spec, &[]);
+    if report.require_sockets_verdict().is_ok() {
+        compiler::install(captured);
     }
-    rules
+    report
 }
 
 /// Apply the team's sandbox when this process was started for a team job
 /// ([`sandbox::SPEC_VAR`]); `Some(exit code)` when the command must not run. A no-op in any
 /// other process, and when this process already applied it.
 pub fn enforce_if_team_process() -> Option<i32> {
-    std::env::var_os(sandbox::SPEC_VAR).filter(|v| !v.is_empty())?;
+    if std::env::var_os(meerschaum_core::team_scope::api_execution::PROFILE_VAR).is_some() {
+        let report = enforce_api_now();
+        if let Err(why) = report
+            .require_sockets_verdict()
+            .and_then(|()| metadata_network())
+            .and_then(|()| compiler::verdict())
+        {
+            eprintln!("API execution stopped before running its command: {why}.");
+            return Some(1);
+        }
+        return capture_source_namespace();
+    }
+    if std::env::var_os(sandbox::SPEC_VAR)
+        .filter(|v| !v.is_empty())
+        .is_none()
+    {
+        return capture_source_namespace();
+    }
     if sandbox::current().is_some() {
-        return None;
+        return capture_source_namespace();
     }
     let report = sandbox::enforce_from_env(&process_rules())?;
     let in_job = std::env::var_os(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some();
@@ -137,10 +159,13 @@ pub fn enforce_if_team_process() -> Option<i32> {
         eprintln!("Team sandbox: {}", report.describe());
     }
     let Err(why) = report.verdict() else {
-        return None;
+        return capture_source_namespace();
     };
-    let message =
-        format!("This job of the isolated team was stopped before running its command: {why}.");
+    let message = if in_job {
+        format!("This job of the isolated team was stopped before running its command: {why}.")
+    } else {
+        format!("This process of the isolated team was stopped before running anything: {why}.")
+    };
     eprintln!("{message}");
     if let Some(path) = std::env::var_os(meerschaum_jobs::supervisor::RESULT_PATH_ENV) {
         let _ = std::fs::write(path, serde_json::json!([false, message]).to_string());
@@ -148,44 +173,20 @@ pub fn enforce_if_team_process() -> Option<i32> {
     Some(1)
 }
 
-/// The Docker (or Podman) API socket this process's user can connect to, if any (a connection
-/// only: nothing is sent).
+fn capture_source_namespace() -> Option<i32> {
+    match meerschaum_core::team_scope::source_namespace::capture_native() {
+        Ok(()) => None,
+        Err(why) => {
+            eprintln!("The Team source launch was refused before discovery: {why}");
+            Some(1)
+        }
+    }
+}
+
+/// The Docker (or Podman) API socket this process's user can connect to, if any
+/// ([`sandbox::container_socket_reachable`]).
 pub fn container_socket_reachable() -> Option<PathBuf> {
-    container_socket_candidates()
-        .into_iter()
-        .find(|path| connects(path))
-}
-
-fn container_socket_candidates() -> Vec<PathBuf> {
-    let mut candidates: Vec<PathBuf> = vec![
-        PathBuf::from("/var/run/docker.sock"),
-        PathBuf::from("/run/docker.sock"),
-        PathBuf::from("/run/podman/podman.sock"),
-    ];
-    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
-        let runtime = PathBuf::from(runtime);
-        candidates.push(runtime.join("docker.sock"));
-        candidates.push(runtime.join("podman").join("podman.sock"));
-    }
-    if let Ok(host) = std::env::var("DOCKER_HOST")
-        && let Some(path) = host.strip_prefix("unix://")
-    {
-        candidates.insert(0, PathBuf::from(path));
-    }
-    candidates
-}
-
-/// Whether this process can connect to the Unix socket `path` (nothing is sent).
-fn connects(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        std::os::unix::net::UnixStream::connect(path).is_ok()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        false
-    }
+    sandbox::container_socket_reachable()
 }
 
 /// The variable naming the D-Bus session bus. Spelled in parts: the repository's hygiene check
@@ -212,7 +213,7 @@ pub fn sockets_of_concern() -> Vec<SocketOfConcern> {
     }
     let mut out: Vec<SocketOfConcern> = Vec::new();
     let mut push = |what: &'static str, path: PathBuf| {
-        if !out.iter().any(|s| s.path == path) && connects(&path) {
+        if !out.iter().any(|s| s.path == path) && sandbox::connects(&path) {
             out.push(SocketOfConcern { what, path });
         }
     };
@@ -240,7 +241,7 @@ pub fn sockets_of_concern() -> Vec<SocketOfConcern> {
         for path in buses {
             push("the D-Bus session bus", path);
         }
-        for path in container_socket_candidates() {
+        for path in sandbox::container_socket_candidates() {
             push("a container runtime's socket", path);
         }
         push(

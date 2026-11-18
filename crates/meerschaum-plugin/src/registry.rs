@@ -26,10 +26,27 @@ impl NativePlugins {
     /// Discover native plugins and read or rebuild the manifest cached at `cache`.
     /// A cache hit loads no code. Directories without native plugins yield an empty set.
     pub fn open(directories: &[PathBuf], cache: &Path) -> Result<Self> {
+        Self::open_with_policy(
+            directories,
+            cache,
+            &crate::source::compiler::CompilerPolicy::Ambient,
+        )
+    }
+
+    /// Open only with the host's explicitly selected compilation policy. The policy is
+    /// attached afresh to discovery and is never restored from cached manifest data.
+    pub fn open_with_policy(
+        directories: &[PathBuf],
+        cache: &Path,
+        policy: &crate::source::compiler::CompilerPolicy,
+    ) -> Result<Self> {
         // Source plugins (Cargo crates) are built here when their library is missing or stale;
         // a current build, and a manifest cache hit, load no code and run no cargo.
-        let mut discovery =
-            discovery::discover_report_in(directories, &discovery::build_dir_for_cache(cache));
+        let mut discovery = discovery::discover_report_in_with_policy(
+            directories,
+            &discovery::build_dir_for_cache(cache),
+            policy,
+        );
         discovery.build_pending();
         for warning in discovery
             .candidates

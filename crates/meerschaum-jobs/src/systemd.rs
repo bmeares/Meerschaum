@@ -246,6 +246,9 @@ impl SystemdExecutor {
         process_env: &[(String, String)],
     ) -> String {
         let sc = meerschaum_core::static_config::static_config();
+        let scoped = process_env
+            .iter()
+            .any(|(key, _)| key == meerschaum_core::team_scope::sandbox::SPEC_VAR);
         let env_names: Vec<String> = meerschaum_core::static_config::static_config()
             .get(&["environment"])
             .and_then(Value::as_map)
@@ -254,7 +257,9 @@ impl SystemdExecutor {
         let mut vars: indexmap::IndexMap<String, String> = process_env
             .iter()
             .filter(|(k, _)| {
-                env_names.contains(k) || k == meerschaum_core::team_scope::TEAM_SCOPE_VAR
+                env_names.contains(k)
+                    || k == meerschaum_core::team_scope::TEAM_SCOPE_VAR
+                    || (scoped && !meerschaum_core::team_scope::sandbox::runtime::injection_name(k))
             })
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -303,6 +308,9 @@ impl SystemdExecutor {
         );
         if let Some(job) = job.as_mut() {
             for (k, v) in job.env() {
+                if scoped && meerschaum_core::team_scope::sandbox::runtime::host_runtime_name(&k) {
+                    continue;
+                }
                 vars.insert(k, v);
             }
         }
@@ -311,11 +319,39 @@ impl SystemdExecutor {
             vars.entry(sc.environment.root.clone())
                 .or_insert_with(|| posix(self.ctx.paths.root.clone()));
         }
-        let environment = vars
+        if scoped {
+            vars.retain(|key, _| {
+                !meerschaum_core::team_scope::sandbox::runtime::injection_name(key)
+            });
+            vars.insert(
+                meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR.into(),
+                "systemd".into(),
+            );
+        }
+        let mut environment = vars
             .iter()
             .map(|(k, v)| format!("Environment={k}={}", crate::shlex::quote(v)))
             .collect::<Vec<_>>()
             .join("\n");
+        if scoped {
+            let mut names: std::collections::BTreeSet<String> =
+                meerschaum_core::team_scope::sandbox::runtime::BOOTSTRAP_UNSET
+                    .iter()
+                    .map(|name| (*name).into())
+                    .collect();
+            names.extend(
+                process_env
+                    .iter()
+                    .filter(|(key, _)| {
+                        meerschaum_core::team_scope::sandbox::runtime::injection_name(key)
+                    })
+                    .map(|(key, _)| key.clone()),
+            );
+            environment.push_str(&format!(
+                "\nUnsetEnvironment={}",
+                names.into_iter().collect::<Vec<_>>().join(" ")
+            ));
+        }
         let service_name = self.get_service_name(name);
         format!(
             "[Unit]\nDescription=Run the job '{name}'\n\n[Service]\nExecStart={python} -m meerschaum {sysargs}\nKillSignal=SIGTERM\nRestart=always\nRestartSec=5\nRestartPreventExitStatus=0\nSyslogIdentifier={service_name}\n{environment}\n\n[Install]\nWantedBy=default.target\n",
@@ -912,7 +948,13 @@ impl SystemdExecutor {
         // `MRSM_CONFIG` / `MRSM_PATCH` (`config_files`); unchanged when they cannot be written.
         // 5.1: the unit of an isolated team's job carries that team's configuration only (written
         // when the unit is written), or it is not written.
+        let required = properties.is_some_and(crate::config_files::requires_team_execution);
         let team = match properties.filter(|p| crate::config_files::may_be_team_job(p)) {
+            None if required => {
+                return SuccessTuple::fail(format!(
+                    "Job '{name}' runs a team member's command but names no isolated team."
+                ));
+            }
             None => None,
             Some(props) => {
                 let config = match meerschaum_core::Config::new(
@@ -921,17 +963,26 @@ impl SystemdExecutor {
                     Ok(config) => config,
                     Err(e) => return SuccessTuple::fail(e.to_string()),
                 };
-                crate::config_files::job_team_scope(&config.paths().root_dir, props)
-                    .map(|(_, scope)| (config, scope))
+                match crate::config_files::job_team_scope(&config.paths().root_dir, props) {
+                    Some((_, scope)) => Some((config, scope)),
+                    None if required => {
+                        return SuccessTuple::fail(format!(
+                            "Job '{name}' runs a team member's command, but its team's scope is \
+                             not recorded."
+                        ));
+                    }
+                    None => None,
+                }
             }
         };
         let process_env = match team {
-            Some((config, scope)) => match crate::config_files::externalize_team(
+            Some((config, scope)) => match crate::config_files::externalize_team_with(
                 &self.get_service_job_path(name),
                 &process_env,
                 &[],
                 &config,
                 &scope,
+                required,
             ) {
                 Ok(changes) => {
                     // The unit adds the job's `env` property: reduced to the allowlist first.
@@ -963,6 +1014,33 @@ impl SystemdExecutor {
                 Err(_) => process_env,
             },
         };
+        match crate::daemon::validate_native_command(
+            &process_env,
+            &self.ctx.launcher.program,
+            false,
+        ) {
+            Ok(true) => {
+                // An older manager ignores this security-relevant directive, so absence or an
+                // unknown version refuses admission instead of silently inheriting loader code.
+                let version = self
+                    .ctx
+                    .process
+                    .run("systemctl", &["--version".into()])
+                    .ok()
+                    .filter(|out| out.success())
+                    .and_then(|out| {
+                        out.stdout
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|value| value.parse::<u32>().ok())
+                    });
+                if version.is_none_or(|version| version < 235) {
+                    return SuccessTuple::fail("Scoped systemd jobs require systemd 235 or newer with verified UnsetEnvironment support.".to_string());
+                }
+            }
+            Ok(false) => {}
+            Err(error) => return SuccessTuple::fail(error.to_string()),
+        }
         let text = self.get_service_file_text(name, sysargs, &self.exec_program(), &process_env);
         if let Err(e) = write_private(&service_file_path, &text) {
             return SuccessTuple::fail(e.to_string());

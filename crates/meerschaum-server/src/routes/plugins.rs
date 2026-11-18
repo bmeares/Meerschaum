@@ -26,7 +26,8 @@ pub const ARCHIVE_MAX_BYTES: usize = 128 * 1024 * 1024;
 
 /// Register the `plugins` route group.
 pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
-    app.route("/plugins", get(get_plugins))
+    super::extensions::mount(app)
+        .route("/plugins", get(get_plugins))
         .route(
             "/plugins/{name}",
             get(get_plugin)
@@ -64,6 +65,12 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
         manager(&state, &ctx.headers).await?
     };
     let user = match principal {
+        Principal::Execution(_) => {
+            return Err(ApiError::new(
+                403,
+                "Execution credentials cannot publish plugins on main.",
+            ));
+        }
         Principal::User(user) => user,
         Principal::Token(_) => {
             // RC30: publishing with client credentials or an API key acts as its owner,
@@ -178,6 +185,9 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
 }
 
 async fn get_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
+    if crate::executor::plugin_delivery::recognizes(&ctx.headers) {
+        return crate::executor::plugin_delivery::archive(&ctx.state, &ctx.headers, &name).await;
+    }
     scoped_auth_if_private(&ctx.state, &ctx.headers, &["plugins:read"]).await?;
     check_visible(&ctx, &name).await?;
     let path = archive_path(&ctx.state, &name);
@@ -278,6 +288,12 @@ async fn delete_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         return Ok(tuple(false, format!("Plugin '{name}' is not registered.")));
     };
     let curr_user_id = match &principal {
+        Principal::Execution(_) => {
+            return Err(ApiError::new(
+                403,
+                "Execution credentials cannot change main's plugin registry.",
+            ));
+        }
         Principal::User(u) => conn.get_user_id(u).await,
         Principal::Token(t) => match t.id {
             Some(id) => conn.get_token_user_id(&id).await,

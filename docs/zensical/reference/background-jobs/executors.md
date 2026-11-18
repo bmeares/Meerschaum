@@ -10,6 +10,11 @@ An executor runs a job. Select one with `-e` (`--executor-keys`):
 
 An installed Meerschaum uses `systemd` when a user systemd session is available, including in Compose roots. Source checkouts, development builds, and hosts without systemd use `local`. Set `meerschaum:executor` in `edit config` to change the default.
 
+For API-managed work, an administrator can also select a team's [execution environment](../team-executors.md):
+the main host, a generated Stack container, or an independently managed service. This placement
+applies after the main API authorizes the caller. Selecting `-e api:label` sends a request to that
+API; it does not override the team's placement or permissions there.
+
 ## Run a job remotely
 
 ```bash
@@ -34,6 +39,12 @@ Job metadata lives in `$MRSM_ROOT_DIR/jobs/<name>/`; logs live in `$MRSM_ROOT_DI
 ## Systemd services
 
 Jobs are enabled as user services. Logs are available through both `mrsm show logs` and `journalctl --user`.
+
+Scoped jobs in 5.1 require the trusted standalone native `mrsm` launcher. Their units require
+systemd 235 or newer and use `UnsetEnvironment=` to remove inherited loader and interpreter
+settings before startup. After upgrading, recreate existing scoped units through the job's
+original CLI or Compose definition; restarting an old unit alone does not add these rules.
+The [migration guide](../team-executors.md#migrate-an-existing-deployment) covers team runtime changes.
 
 ??? info "Unit names, environment, and login sessions"
 

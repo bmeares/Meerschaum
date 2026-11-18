@@ -163,7 +163,7 @@ async fn plugin_sync_calls_back_into_native_engine() {
     }
     std::fs::write(
         plugins.join("wiring_sync.py"),
-        "def sync(pipe, **kw):\n    return pipe.sync([{'id': 1, 'value': '3.5'}])\n",
+        "def sync(pipe, ignore_failure=False, **kw):\n    result = pipe.sync([{'id': 1, 'value': '3.5'}])\n    if ignore_failure:\n        return True, 'plugin ignored failed callback'\n    return result\n",
     )
     .unwrap();
     std::fs::write(plugins.join("wiring_fetch.py"), "def fetch(pipe, custom_value=None, **kw):\n    return [{'id': 2, 'value': custom_value}]\n").unwrap();
@@ -221,6 +221,7 @@ import_plugins()
         .unwrap();
     let config = env.config();
     let sync_env = meerschaum_engine::sync::SyncEnv {
+        delivery: None,
         registry: registry.as_ref(),
         defaults: &config.defaults,
         default_backtrack_minutes: config.default_backtrack_minutes,
@@ -288,6 +289,42 @@ import_plugins()
         .unwrap()
         .unwrap();
     assert_eq!(data.column("value").unwrap().data.get(0), KValue::Int(73));
+    // The plugin deliberately returns success after its callback encounters a
+    // lost native write response. The Python adapter must retain the callback failure.
+    use meerschaum_connector::batch_delivery::{GraphBinding, NodeDelivery};
+    let actor = || GraphBinding {
+        grant: uuid::Uuid::new_v4(),
+        launch: uuid::Uuid::new_v4(),
+        revision: 1,
+    };
+    let owner = NodeDelivery::new(actor(), actor(), pipe.pipe_ref());
+    {
+        let mut lease = owner.acquire(owner.reference()).unwrap();
+        assert!(lease.issue().unwrap().is_none());
+    }
+    let confined = meerschaum_engine::sync::SyncEnv {
+        delivery: Some(owner.clone()),
+        ..sync_env
+    };
+    let plugin = registry.plugin_sync(pipe.connector_keys()).unwrap();
+    let result = plugin
+        .sync_native(
+            &pipe,
+            &SyncArgs {
+                extra: [("ignore_failure".into(), Value::Bool(true))]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            },
+            &confined,
+            None,
+        )
+        .await;
+    assert!(
+        !result.success && result.message.contains("unresolved delivery"),
+        "{result:?}"
+    );
+    assert!(owner.acquire(owner.reference()).is_err());
     pool.shutdown().await;
 }
 

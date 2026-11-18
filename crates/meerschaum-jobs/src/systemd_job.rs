@@ -239,6 +239,7 @@ mod imp {
             let _ = fs::remove_file(path);
         }
         let mut cmd = Command::new(program);
+        cmd.env_remove(meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR);
         cmd.args(leading)
             .args(args)
             .env(CHILD_ENV, "1")

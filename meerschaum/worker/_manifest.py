@@ -425,6 +425,9 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
             manifest_plugins[plugin_name]['mcp_prompts'].append({
                 'name': prompt_name,
                 'description': getattr(prompt, 'description', None),
+                'arguments': _jsonable(prompt.arguments),
+                'scopes': list(prompt.scopes),
+                'title': prompt.title,
             })
 
     ### Custom connectors

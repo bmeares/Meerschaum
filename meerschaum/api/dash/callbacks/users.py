@@ -10,6 +10,8 @@ for administrators and the team's managers. Every change is checked again here, 
 """
 
 from __future__ import annotations
+
+import json
 from meerschaum.utils.typing import Optional, Any, Dict, List
 from meerschaum.api.dash import dash_app
 from meerschaum.api import CHECK_UPDATE
@@ -127,6 +129,20 @@ def render_users_page(
             )
         except Exception as e:
             content = alert_from_success_tuple((False, f"Failed to read the teams: {e}"))
+        from meerschaum import _core
+        sandbox_status = getattr(_core, 'team_sandbox_status', None) if _core.AVAILABLE else None
+        if sandbox_status is not None and json.loads(sandbox_status())['abi'] < 6:
+            content = html.Div([
+                dbc.Alert(
+                    'This API host cannot run isolated Team commands or terminals. '
+                    'These features require Linux with Landlock signal scoping '
+                    '(ABI 6, available since Linux 6.12). '
+                    'Ordinary Meerschaum actions remain available.',
+                    color='warning',
+                    class_name='mb-3',
+                ),
+                content,
+            ])
         return (
             content, HIDDEN, 1, 1, HIDDEN,
             not who['admin'], {}, HIDDEN, (SHOWN if who['admin'] else HIDDEN), SHOWN,

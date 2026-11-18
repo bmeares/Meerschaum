@@ -199,6 +199,24 @@ pub fn operations() -> Vec<Operation> {
         ),
         op(
             "get",
+            "/execute/capabilities",
+            "actions",
+            &["Actions"],
+            "Get Console Execution Permissions",
+            &[],
+            None,
+            Never,
+        )
+        .described(
+            "Requires a current credential-bound console session. Returns the original \
+             caller's fresh action/job/terminal permissions separately from tracked API \
+             and public API-terminal capability. A supplied bearer keeps its own scope \
+             ceiling; bearer-only, token and execution-parent requests cannot adopt a \
+             console session. Does not execute work or establish backend readiness.",
+            &[],
+        ),
+        op(
+            "get",
             "/connectors",
             "connectors",
             &["Connectors"],

@@ -1282,13 +1282,31 @@ pub fn attach_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         &ctx,
     )
     .ok();
+    // A job's input is its program's: a restricted terminal forwards it only to a job whose own
+    // command the server would let this user run (5.1).
+    let accept_input = !crate::shell::restricted::active() || {
+        let sysargs = job.sysargs();
+        match crate::shell::restricted::authorize(&sysargs) {
+            Ok(()) => true,
+            Err(message) => {
+                let text = rt.with_formatter(|f| {
+                    f.warn(&format!(
+                        "Showing the output of job '{}' without forwarding input: {message}",
+                        job.name
+                    ))
+                });
+                rt.eprint(&text);
+                false
+            }
+        }
+    };
     let result = std::cell::RefCell::new(SuccessTuple::ok("Success"));
     let out = std::cell::RefCell::new(&mut *rt.out);
     let stop = stop_requested_flag();
     let opts = MonitorOptions {
         stop_on_exit: true,
         strip_timestamps: true,
-        accept_input: true,
+        accept_input,
         stop: Some(stop),
         input: Some(Box::new(move || {
             let kwargs = probe

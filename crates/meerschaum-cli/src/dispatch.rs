@@ -82,6 +82,22 @@ pub trait Host {
         })
     }
 
+    /// Stream a finite administrator command's stdout without collecting it. The
+    /// default refuses, so a test double or alternate host cannot accidentally start
+    /// a real Docker client. Existing captured-output behavior is unchanged.
+    fn output_stream(
+        &mut self,
+        _spec: &CommandSpec,
+        _timeout: std::time::Duration,
+        _maximum_stdout: u64,
+        _consume: &mut (dyn FnMut(&mut dyn std::io::Read) -> std::io::Result<()> + Send),
+    ) -> std::io::Result<i32> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "This host has no bounded administrator output stream.",
+        ))
+    }
+
     /// A multi-line answer (`prompt(multiline=True)`: `[Esc + Enter]` submits). `None` at the end
     /// of input.
     fn read_multiline(&mut self, prompt: &str) -> Option<String> {
@@ -143,8 +159,21 @@ pub struct CommandOutput {
 #[derive(Debug, Default)]
 pub struct SystemHost;
 
+/// A restricted terminal's process starts no other program (5.1, [`crate::shell::restricted`]).
+fn check_restricted(spec: &CommandSpec) -> std::io::Result<()> {
+    if crate::shell::restricted::may_start(&spec.program) {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            crate::shell::restricted::NO_PROGRAMS,
+        ))
+    }
+}
+
 impl Host for SystemHost {
     fn run(&mut self, spec: &CommandSpec) -> std::io::Result<i32> {
+        check_restricted(spec)?;
         let mut cmd = std::process::Command::new(&spec.program);
         cmd.args(&spec.args);
         if spec.env_clear {
@@ -198,7 +227,19 @@ impl Host for SystemHost {
         spec: &CommandSpec,
         timeout: Option<std::time::Duration>,
     ) -> std::io::Result<CommandOutput> {
+        check_restricted(spec)?;
         crate::native::terminal::capture(spec, timeout)
+    }
+
+    fn output_stream(
+        &mut self,
+        spec: &CommandSpec,
+        timeout: std::time::Duration,
+        maximum_stdout: u64,
+        consume: &mut (dyn FnMut(&mut dyn std::io::Read) -> std::io::Result<()> + Send),
+    ) -> std::io::Result<i32> {
+        check_restricted(spec)?;
+        crate::executor_factory_process::stream(spec, timeout, maximum_stdout, consume)
     }
 
     fn read_line_timeout(&mut self, timeout: std::time::Duration) -> Option<String> {
@@ -581,15 +622,19 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         parse_version(sysargs, rt);
         return 0;
     }
-    let progress = crate::format::progress::Progress::start_flags(
-        rt,
-        contains(sysargs, "--nopretty"),
-        contains(sysargs, "--debug"),
-        "Loading plugins",
-    );
-    let manifest = crate::python::manifest(rt);
-    drop(progress);
-    let manifest_error = manifest.err().map(|e| e.message);
+    let manifest_error = if starts_with_executor(sysargs, &rt.dates, None).unwrap_or(true) {
+        None
+    } else {
+        let progress = crate::format::progress::Progress::start_flags(
+            rt,
+            contains(sysargs, "--nopretty"),
+            contains(sysargs, "--debug"),
+            "Loading plugins",
+        );
+        let manifest = crate::python::manifest(rt);
+        drop(progress);
+        manifest.err().map(|e| e.message)
+    };
     let nopretty = contains(sysargs, "--nopretty");
     let in_job = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some();
     if (sysargs.is_empty() || contains(sysargs, "--shell")) && !in_job {
@@ -704,6 +749,35 @@ pub fn starts_with_doctor(
         SuccessTuple::fail("")
     })?;
     Ok(doctor)
+}
+
+/// Whether the first effective step starts an executor. Bootstrap uses core argument parsing
+/// only: persisted team plugins must not load before a fresh signed configuration arrives.
+pub fn starts_with_executor(
+    sysargs: &[String],
+    dates: &DateContext,
+    patch_args: Option<&ArgsMap>,
+) -> Result<bool, PyException> {
+    let mut executor = false;
+    run_chain_inner(sysargs, dates, patch_args, false, |args| {
+        executor = is_executor_action(&action_words(&args));
+        SuccessTuple::fail("")
+    })?;
+    Ok(executor)
+}
+
+fn is_executor_action(action: &[String]) -> bool {
+    matches!(action, [first, second, ..] if first == "start" && second == "executor")
+}
+
+struct ExecutorBootstrapManifest {
+    session: native::Session,
+    was_cached: bool,
+}
+impl Drop for ExecutorBootstrapManifest {
+    fn drop(&mut self) {
+        self.session.set_cached_manifest_only(self.was_cached);
+    }
 }
 
 /// `entry_without_daemon` without the shell's executor keys and the systemd result file:
@@ -893,6 +967,93 @@ fn summarize_chain(
     }
 }
 
+/// What the dispatcher runs for the action words `action` (5.1): a native plugin's action, a
+/// Python plugin's action, a core action, or, for words that name none, the system shell (v4's
+/// fallthrough to `sh`). The dispatcher decides with this function, and the API server asks it
+/// for each step of a non-administrator's command line ([`resolve_sysargs`]), so the server
+/// refuses exactly what would reach the shell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionTarget {
+    /// A native plugin's action (`plugin`, `name`); it shadows a Python plugin's.
+    NativePlugin {
+        /// The plugin.
+        plugin: String,
+        /// The action.
+        name: String,
+    },
+    /// A Python plugin's action.
+    PythonPlugin {
+        /// The plugin that declares it (`None` when the manifest names none).
+        plugin: Option<String>,
+        /// The action.
+        name: String,
+    },
+    /// A core action.
+    Core(Resolved),
+    /// No action: the words run as a shell command.
+    Shell,
+}
+
+/// Resolve `action` as the dispatcher does: native plugin actions (when `natives` is known),
+/// then every plugin action of `manifest`, then the core actions.
+pub fn resolve_target(
+    action: &[String],
+    manifest: Option<&meerschaum_worker::manifest::Manifest>,
+    natives: Option<&meerschaum_plugin::registry::NativePlugins>,
+) -> ActionTarget {
+    if let Some(manifest) = manifest {
+        if let Some(natives) = natives
+            && let Some((plugin, name)) =
+                crate::native_plugins::action_owner(action, manifest, natives)
+        {
+            return ActionTarget::NativePlugin { plugin, name };
+        }
+        if let Some(name) = crate::python::action_name(action, manifest) {
+            let plugin = manifest
+                .plugins
+                .values()
+                .find(|p| p.actions.iter().any(|a| a.name == name))
+                .map(|p| p.name.clone());
+            return ActionTarget::PythonPlugin { plugin, name };
+        }
+    }
+    match actions::get_action(action, CORE_ACTIONS) {
+        Some(resolved) => ActionTarget::Core(resolved),
+        None => ActionTarget::Shell,
+    }
+}
+
+/// What one step of a command line (`sysargs`, without `+` or `:`) resolves to, parsed and
+/// resolved as the dispatcher would: the real argument parser, the plugins' own flags, then
+/// [`resolve_target`]. A step the parser rejects runs nothing; its leading words are resolved.
+pub fn resolve_sysargs(sysargs: &[String], rt: &mut Runtime<'_>) -> ActionTarget {
+    let dates = rt.dates.clone();
+    let mut args = match parse_arguments(sysargs, &dates) {
+        Ok(args) => args,
+        Err(_) => {
+            let leading: Vec<String> = sysargs
+                .iter()
+                .take_while(|a| !a.starts_with('-'))
+                .cloned()
+                .collect();
+            return resolve_target(&leading, None, None);
+        }
+    };
+    let manifest = crate::python::manifest(rt).ok();
+    if let Some(manifest) = manifest.as_deref() {
+        let _ = crate::python::arguments(&mut args, manifest, rt);
+    }
+    let action = action_words(&args);
+    if action.is_empty() {
+        // No action opens the interactive shell (a job refuses it).
+        return ActionTarget::Shell;
+    }
+    let natives = manifest
+        .as_ref()
+        .and_then(|_| native::session(rt).native_plugins(rt.config()).ok());
+    resolve_target(&action, manifest.as_deref(), natives.as_deref())
+}
+
 fn action_words(args: &ArgsMap) -> Vec<String> {
     args.get("action")
         .and_then(PyValue::as_list)
@@ -995,7 +1156,39 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
         return SuccessTuple::success();
     }
 
-    if let Ok(manifest) = crate::python::manifest(rt)
+    let captured_graph = match native::graph_plan::captured_dispatch(rt, &action, &sysargs) {
+        Ok(Some(authority)) => {
+            if let [command, subject, name] = action.as_slice()
+                && command == "sync"
+                && subject == "pipelines"
+            {
+                return native::pipelines::run_captured(&args, rt, name, authority)
+                    .unwrap_or_else(|error| SuccessTuple::fail(error.message));
+            }
+            true
+        }
+        Ok(None) => false,
+        Err(error) => return SuccessTuple::fail(error),
+    };
+    // Main authorizes these forms as built-in commands on the API-only profile. A plugin
+    // action with the same name cannot substitute a different operation at dispatch.
+    let bound_command =
+        (rt.env)(meerschaum_core::team_scope::api_execution::PROFILE_VAR).as_deref() == Some("1")
+            && meerschaum_server::execute_policy::bound_command_scopes(&sysargs).is_some();
+    let bootstrap = is_executor_action(&action);
+    let _bootstrap_manifest = bootstrap.then(|| {
+        let session = native::session(rt);
+        let was_cached = session.cached_manifest_only();
+        session.set_cached_manifest_only(true);
+        ExecutorBootstrapManifest {
+            session,
+            was_cached,
+        }
+    });
+    if !bootstrap
+        && !captured_graph
+        && !bound_command
+        && let Ok(manifest) = crate::python::manifest(rt)
         && let Err(e) = crate::python::arguments(&mut args, &manifest, rt)
     {
         return SuccessTuple::fail(format!("Invalid arguments:\n    {}", e.message));
@@ -1036,14 +1229,29 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
     let chain_call = !daemon && is_chain_call(&action, &args);
     // The words that name the action, for messages (`show pipes`).
     let label = action_label(&action);
-    if !chain_call
-        && !daemon
-        && let Ok(manifest) = crate::python::manifest(rt)
-        && let Ok(natives) = native::session(rt).native_plugins(rt.config())
-        && let Some((plugin, name)) =
-            crate::native_plugins::action_owner(&action, &manifest, &natives)
+    // What runs: a plugin's action, a core action, or the shell ([`resolve_target`], the one
+    // resolution the server's checks for non-administrators also use).
+    let (target, manifest, natives) =
+        if chain_call || daemon || bootstrap || captured_graph || bound_command {
+            (resolve_target(&action, None, None), None, None)
+        } else {
+            match crate::python::manifest(rt) {
+                Ok(manifest) => {
+                    let natives = native::session(rt).native_plugins(rt.config()).ok();
+                    (
+                        resolve_target(&action, Some(&manifest), natives.as_deref()),
+                        Some(manifest),
+                        natives,
+                    )
+                }
+                Err(_) => (resolve_target(&action, None, None), None, None),
+            }
+        };
+    if let ActionTarget::NativePlugin { plugin, name } = &target
+        && let Some(natives) = natives
     {
         // Native (C-ABI) plugin actions run in-process; they shadow Python plugin actions.
+        let (plugin, name) = (plugin.clone(), name.clone());
         meerschaum_core::dprint!("Action {action:?} -> native plugin action '{name}'.");
         env::apply_env_arguments(&mut args, rt.env);
         args.insert("action".into(), PyValue::str_list(&action));
@@ -1053,10 +1261,8 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
                 .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)))
         });
     }
-    if !chain_call
-        && !daemon
-        && let Ok(manifest) = crate::python::manifest(rt)
-        && crate::python::action_name(&action, &manifest).is_some()
+    if let ActionTarget::PythonPlugin { .. } = &target
+        && let Some(manifest) = manifest
     {
         meerschaum_core::dprint!("Action {action:?} -> Python plugin action.");
         env::apply_env_arguments(&mut args, rt.env);
@@ -1079,9 +1285,16 @@ fn entry_with_args_inner(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) 
             sub: None,
         }
     } else {
-        match actions::get_action(&action, CORE_ACTIONS) {
-            Some(r) => r,
-            None => {
+        match target {
+            ActionTarget::Core(r) => r,
+            // A restricted terminal never falls through to the shell, whatever it was told.
+            _ if crate::shell::restricted::active() => {
+                return SuccessTuple::fail(format!(
+                    "'{label}' is not a Meerschaum action. {}",
+                    crate::shell::restricted::NO_PROGRAMS
+                ));
+            }
+            _ => {
                 // Unknown actions run as shell commands in v4.
                 action.insert(0, "sh".into());
                 match actions::get_action(&["sh"], CORE_ACTIONS) {
@@ -1283,6 +1496,10 @@ fn run_action(
         "_start_api" => {
             meerschaum_jobs::startup::signal_first_lap_done();
             crate::server::start_api(args, rt)
+        }
+        "_start_executor" => {
+            meerschaum_jobs::startup::signal_first_lap_done();
+            crate::server::start_executor(args, rt)
         }
         "_start_mcp" => {
             meerschaum_jobs::startup::signal_first_lap_done();
@@ -2009,5 +2226,36 @@ mod doctor_entry_tests {
             PyValue::str_list(&words(&["show", "version"])),
         );
         assert!(!starts_with_doctor(&words(&["doctor"]), &dates, Some(&patch)).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::*;
+
+    fn w(words: &[&str]) -> Vec<String> {
+        words.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn words_that_name_no_action_resolve_to_the_shell() {
+        for words in [
+            &["touch", "/x"][..],
+            &["!touch", "/x"],
+            &["mrsm", "show"],
+            &[""],
+        ] {
+            assert_eq!(resolve_target(&w(words), None, None), ActionTarget::Shell);
+        }
+        for (words, name) in [
+            (&["show", "pipes"][..], "show"),
+            (&["sh", "ls"], "sh"),
+            (&["sync", "pipes"], "sync"),
+        ] {
+            match resolve_target(&w(words), None, None) {
+                ActionTarget::Core(resolved) => assert_eq!(resolved.action.name, name),
+                other => panic!("{words:?}: {other:?}"),
+            }
+        }
     }
 }

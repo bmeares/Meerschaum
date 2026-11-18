@@ -197,6 +197,7 @@ pub fn is_job_name(name: &str) -> bool {
 pub fn is_refused(name: &str) -> bool {
     let prefix = &crate::static_config::static_config().environment.prefix;
     name.is_empty()
+        || super::sandbox::runtime::injection_name(name)
         || name.contains('=')
         || name.contains('\0')
         || (name.len() >= prefix.len()
@@ -292,12 +293,16 @@ pub fn team_env(
         out.push((name.to_string(), value.to_string()));
     };
     for (name, value) in launching {
-        if is_allowed(name) || passthrough.contains(name) {
+        if !super::sandbox::runtime::injection_name(name)
+            && (is_allowed(name) || passthrough.contains(name))
+        {
             put(name, value);
         }
     }
     for (name, value) in job {
-        if is_allowed(name) || is_job_name(name) || passthrough.contains(name) {
+        if !super::sandbox::runtime::host_runtime_name(name)
+            && (is_allowed(name) || is_job_name(name) || passthrough.contains(name))
+        {
             put(name, value);
         }
     }
@@ -312,5 +317,6 @@ pub fn team_env(
 /// Whether a team process may record `name` (a job's `env` property): [`is_allowed`],
 /// [`is_job_name`] or passed through.
 pub fn may_record(name: &str, passthrough: &Passthrough) -> bool {
-    is_allowed(name) || is_job_name(name) || passthrough.contains(name)
+    !super::sandbox::runtime::host_runtime_name(name)
+        && (is_allowed(name) || is_job_name(name) || passthrough.contains(name))
 }

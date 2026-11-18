@@ -9,6 +9,11 @@ use std::path::Path;
 
 use crate::dispatch::{CommandSpec, Runtime};
 
+/// What a restricted web terminal (5.1) says instead of opening an editor.
+pub const EDITOR_UNAVAILABLE: &str = "This terminal does not open an editor. Pass the new values \
+     with `--params` / `-P` (for example `edit pipes -c sql:main -m weather -P '{\"tags\": [\"daily\"]}'`), \
+     or use the web console's editor.";
+
 /// The editor command: `$VISUAL`, else `$EDITOR` (ignoring blanks), else `vi`.
 pub fn editor_command(rt: &mut Runtime<'_>) -> (String, Vec<String>) {
     let configured = ["VISUAL", "EDITOR"]
@@ -27,6 +32,10 @@ pub fn editor_command(rt: &mut Runtime<'_>) -> (String, Vec<String>) {
 /// Open `path` in the editor and wait for it. `Ok(true)` when the editor exited with 0; `Err` with
 /// the message to show when it could not be started at all.
 pub fn edit_file(rt: &mut Runtime<'_>, path: &Path) -> Result<bool, String> {
+    // A restricted web terminal opens no editor (an editor runs commands and writes files).
+    if crate::shell::restricted::active() {
+        return Err(EDITOR_UNAVAILABLE.to_string());
+    }
     let (program, mut args) = editor_command(rt);
     args.push(path.to_string_lossy().into_owned());
     let spec = CommandSpec {

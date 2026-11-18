@@ -29,6 +29,7 @@
 
 pub mod dispatch;
 pub mod docs;
+mod extensions;
 pub mod federation;
 pub mod http;
 pub mod native;
@@ -221,6 +222,8 @@ pub enum ConnectorRegister {
     Parameters(Map),
     /// It returned something that is not a dict (`str()` of it): v4 warns and changes nothing.
     Invalid(String),
+    /// The required confined hook or its original source authority is unavailable.
+    Unavailable(String),
 }
 
 /// Operations the MCP tools need beyond the instance connector. The CLI implements them with the

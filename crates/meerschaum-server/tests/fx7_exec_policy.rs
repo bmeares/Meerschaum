@@ -43,13 +43,12 @@ struct FakeActions {
 #[async_trait]
 impl ActionsBackend for FakeActions {
     fn list(&self) -> Vec<String> {
-        vec![
-            "show".into(),
-            "chain".into(),
-            "start".into(),
-            "edit".into(),
-            "register".into(),
+        [
+            "show", "chain", "start", "edit", "register", "sync", "verify", "delete",
         ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect()
     }
 
     async fn execute(&self, action: &str, _keywords: Map) -> SuccessTuple {
@@ -322,6 +321,21 @@ async fn a_non_admin_runs_what_the_console_offers() {
     ] {
         let r = execute(&f, &bob, &sysargs).await;
         assert!(started(&r), "{sysargs:?}: {} {}", r.status, r.text());
+    }
+    // 5.1: a word the dispatcher would hand to the shell is not an action.
+    for sysargs in [
+        vec!["touch", "/x"],
+        vec!["show", "version", "+", "touch", "/x"],
+        vec!["show", "version", "++", "touch", "/x"],
+        vec!["!touch", "/x"],
+    ] {
+        let r = execute(&f, &bob, &sysargs).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{sysargs:?}: {}", r.text());
+        assert!(
+            r.text().contains("not a Meerschaum action"),
+            "{sysargs:?}: {}",
+            r.text()
+        );
     }
     // rc15: pipes on an instance this server does not serve cannot be checked against the
     // caller's rights: refused.

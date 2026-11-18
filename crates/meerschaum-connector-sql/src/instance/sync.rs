@@ -3,6 +3,10 @@
 //! `to_sql` and `psql_insert_copy`), plus the essentials of `Pipe.sync()` (dtype enforcement,
 //! autotime, capturing new special columns) for callers that hold raw rows.
 
+pub mod snapshot;
+#[path = "sync/window_guard.rs"]
+mod window_guard;
+
 use std::time::Instant;
 
 use indexmap::IndexMap;
@@ -53,6 +57,31 @@ pub struct AlterColumnsInput {
     pub new_special_cols: IndexMap<String, String>,
     /// `generate_password(3)` (the SQLite rebuild's temporary table suffix).
     pub session_id: String,
+}
+
+fn native_binary_dtype(dtype: &str) -> bool {
+    matches!(
+        dtype.split('[').next(),
+        Some("bytes" | "binary" | "large_binary" | "binary_view")
+    )
+}
+
+/// A new SQLite BLOB column already accepts the binary frame. Applying the
+/// legacy special-value conversion would cast its bytes to TEXT.
+fn retain_special_conversions(
+    special: &mut IndexMap<String, String>,
+    frame_types: &IndexMap<String, String>,
+    before: &IndexMap<String, String>,
+    after: &IndexMap<String, String>,
+) {
+    special.retain(|column, inferred| {
+        !(inferred == "bytes"
+            && !before.contains_key(column)
+            && after.get(column).is_some_and(|dtype| dtype == "BLOB")
+            && frame_types
+                .get(column)
+                .is_some_and(|dtype| native_binary_dtype(dtype)))
+    });
 }
 
 /// `_max_chunks_flavors` (`_sql.py:30`).
@@ -382,6 +411,13 @@ impl SqlConnector {
             }
         }
         // `_persist_new_special_columns`.
+        if let Some(window) = meerschaum_connector::mutation::admit_frame(pipe, &df, &opts)
+            .await
+            .map_err(be)?
+        {
+            self.preflight_window_frame(pipe, &df, &opts, &window)
+                .await?;
+        }
         let special_cols = get_special_cols(&df);
         let existing_special: Vec<&String> = state
             .dtypes
@@ -502,14 +538,67 @@ impl SqlConnector {
         opts: &SyncOptions,
         internal: InternalSync,
     ) -> ConnectorResult<SyncResult> {
-        let flavor = self.flavor;
         let sp0 = self.sql_pipe(pipe)?;
+        let window = meerschaum_connector::mutation::admit_frame(pipe, &df, opts)
+            .await
+            .map_err(be)?;
+        // Admission may re-enter Main's graph planner. Enter the larger SQL writer
+        // after authorization returns, so its poll frame stays off that call stack.
+        Box::pin(self.write_admitted_frame(pipe, sp0, df, opts, internal, window)).await
+    }
+
+    async fn write_admitted_frame(
+        &self,
+        pipe: &mut Pipe,
+        sp0: SqlPipe,
+        df: Frame,
+        opts: &SyncOptions,
+        internal: InternalSync,
+        window: Option<meerschaum_connector::mutation::DataWindow>,
+    ) -> ConnectorResult<SyncResult> {
+        let flavor = self.flavor;
+        if let Some(window) = &window {
+            if matches!(flavor, Flavor::Mysql | Flavor::Mariadb) {
+                let append = self.innodb_append_plan(pipe, &df, opts, window)?;
+                return self.execute_innodb_append(append).await;
+            }
+            self.preflight_window_frame(pipe, &df, opts, window).await?;
+            if df.height() == 0 && df.width() == 0 && !opts.replace {
+                if meerschaum_connector::mutation::current()
+                    .is_some_and(|check| check.native_batch().is_some())
+                {
+                    // A captured empty batch still needs a receipt for an actual,
+                    // guarded native commit, including when the table is absent.
+                    let state = self.pipe_state(&sp0).await;
+                    self.exec_window_batch(window_guard::WindowBatch {
+                        pipe: &sp0,
+                        state: &state,
+                        window,
+                        unseen: &df,
+                        update: None,
+                        options: opts,
+                        upsert: false,
+                        add_columns: None,
+                    })
+                    .await?;
+                }
+                return Ok(SyncResult::new(
+                    true,
+                    "Inserted 0, updated 0 rows; the admitted empty batch made no target changes.",
+                ));
+            }
+        }
         let schema = self.get_pipe_schema(&sp0);
         if let Some(message) = internal_key_length_error(&sp0, flavor, &df) {
             return Ok(SyncResult::new(false, message));
         }
 
         if !pipe.temporary && self.get_pipe_id(pipe).await?.is_none() {
+            if window.is_some() {
+                return Err(be(
+                    "The Main-admitted window requires its original registered target; registration cannot be recreated by a data batch.",
+                ));
+            }
             let reg = self.register_pipe(pipe).await;
             // A concurrent first sync of the same pipe may have registered it in between.
             if !reg.success && self.get_pipe_id(pipe).await?.is_none() {
@@ -555,7 +644,7 @@ impl SqlConnector {
             && internal.cached_state.is_none()
             && let Some(ready) = &cached
         {
-            let incoming_types = Self::df_cols_types_refined(&df);
+            let incoming_types = self.df_cols_types_refined(&df);
             let alter = AlterColumnsInput {
                 df_cols_types: df.dtypes(),
                 numeric_cols: get_numeric_cols(&df),
@@ -590,20 +679,52 @@ impl SqlConnector {
             Some(state) => state,
             None => self.pipe_state(&sp0).await,
         };
+        if let Some(window) = &window
+            && !state.exists
+        {
+            // The first target is created by the same bounded native writer that
+            // inserts its admitted rows and persists its actual commit intent.
+            return self
+                .exec_window_create(&sp0, &state, &df, opts, window)
+                .await;
+        }
+        if window.is_some() && (initializing_internal || precise_history) {
+            return Err(be(
+                "The native window target is no longer prepared; initialization and history upgrades require a separate Main-admitted schema transition.",
+            ));
+        }
         if precise_history && state.exists && !precision_ready {
             self.upgrade_history_datetime_precision(&sp0).await?;
         }
         let exists = state.exists;
         let is_new = !exists;
+        let mut add_columns = None;
         if is_new {
             check_existing = false;
         } else {
-            let incoming_types = Self::df_cols_types_refined(&df);
+            let incoming_types = self.df_cols_types_refined(&df);
+            let mut special_conversions = internal.new_special_cols.clone().unwrap_or_default();
             let add_cols_queries =
                 self.add_columns_queries_for(&sp0, &incoming_types, &state.cols_types);
-            if !add_cols_queries.is_empty() {
+            if window.is_some() && !add_cols_queries.is_empty() {
+                add_columns = Some(window_guard::AddColumns::new(
+                    self,
+                    &sp0,
+                    &state,
+                    &incoming_types,
+                )?);
+            } else if !add_cols_queries.is_empty() {
                 let added = self.exec_queries_all(&add_cols_queries, false, true).await;
+                let before = state.cols_types;
                 state = self.pipe_state(&sp0).await;
+                if flavor == Flavor::Sqlite && !special_conversions.is_empty() {
+                    retain_special_conversions(
+                        &mut special_conversions,
+                        &incoming_types,
+                        &before,
+                        &state.cols_types,
+                    );
+                }
                 if !added {
                     // A concurrent upgrader may have added the same declared columns. Ignore
                     // that race only after fresh metadata proves every planned addition exists.
@@ -619,9 +740,36 @@ impl SqlConnector {
                     }
                 }
             }
-            let alter_cols_queries = self
-                .alter_columns_with_state(pipe, &df, internal.new_special_cols.as_ref(), &state)
-                .await;
+            let alter_cols_queries = if window.is_some() {
+                // The ordinary helper may persist numeric dtypes even before executing
+                // its returned DDL. Compute its plan purely and refuse before calling it.
+                let mut input = AlterColumnsInput {
+                    df_cols_types: df.dtypes(),
+                    numeric_cols: get_numeric_cols(&df),
+                    db_cols_types: state.cols_types.clone(),
+                    pipe_dtypes: state.dtypes.clone(),
+                    explicit_dtypes: state.explicit_dtypes.clone(),
+                    new_special_cols: special_conversions,
+                    session_id: "window-read-only-plan".into(),
+                };
+                if let Some(add) = &add_columns {
+                    add.project_alter(&mut input, &incoming_types);
+                }
+                let (queries, new_dtypes) = self.alter_columns_queries_for(&sp0, &input);
+                if !queries.is_empty()
+                    || new_dtypes
+                        .as_ref()
+                        .is_some_and(|dtypes| dtypes != &state.explicit_dtypes)
+                {
+                    return Err(be(
+                        "This native window needs an explicit Main schema/inference transition; no legacy dtype mutation was admitted.",
+                    ));
+                }
+                Vec::new()
+            } else {
+                self.alter_columns_with_state(pipe, &df, Some(&special_conversions), &state)
+                    .await
+            };
             if !alter_cols_queries.is_empty()
                 && !self
                     .exec_queries_all(&alter_cols_queries, false, true)
@@ -740,7 +888,7 @@ impl SqlConnector {
                     .is_some_and(|pk| !dtypes.contains_key(pk) && !unseen_df.contains(pk)));
         // PARITY: `autoincrement not in pipe.parameters` tests the boolean against the keys, so
         // the parameter is always (re)persisted when truthy (`_pipes.py:2075`).
-        if autoincrement {
+        if autoincrement && window.is_none() {
             let mut patch = Map::new();
             patch.insert("autoincrement".into(), Value::Bool(true));
             pipe.update_parameters(patch);
@@ -766,6 +914,11 @@ impl SqlConnector {
                 .as_ref()
                 .is_some_and(|pk| unseen_df.contains(pk))
             && pk_has_values(&unseen_df);
+        if window.is_some() && (autoincrement_needs_reset || self.should_partition(&sp)) {
+            return Err(be(
+                "This native window requires a controlled sequence/partition transition; no target DML was admitted.",
+            ));
+        }
         if autoincrement && let Some(pk) = &primary_key {
             for f in [Some(&mut unseen_df), update_df.as_mut()]
                 .into_iter()
@@ -783,6 +936,11 @@ impl SqlConnector {
         }
 
         if is_new {
+            if window.is_some() {
+                return Err(be(
+                    "A window-bound data batch cannot create or replace its native target.",
+                ));
+            }
             let res = self
                 .create_pipe_table_from_df(
                     &sp,
@@ -811,8 +969,30 @@ impl SqlConnector {
         let mut success = true;
         let mut msg = String::new();
         let mut replaced_rows = 0u64;
+        let mut window_update_count = None;
         let write_start = std::time::Instant::now();
-        if unseen_df.height() > 0 || !replace_delete.is_empty() {
+        let extended_schema = add_columns.is_some();
+        if let Some(window) = &window {
+            let (deleted, updated) = self
+                .exec_window_batch(window_guard::WindowBatch {
+                    pipe: &sp,
+                    state: &state,
+                    window,
+                    unseen: &unseen_df,
+                    update: update_df.as_ref(),
+                    options: opts,
+                    upsert,
+                    add_columns,
+                })
+                .await?;
+            if extended_schema {
+                self.forget_catalog_table(&sp.target);
+                state = self.pipe_state(&sp).await;
+            }
+            replaced_rows = deleted.unwrap_or(0);
+            window_update_count = Some(updated);
+        }
+        if window.is_none() && (unseen_df.height() > 0 || !replace_delete.is_empty()) {
             let dtype = self.get_to_sql_dtype(&sp, &unseen_df, &state, true);
             let identity_insert = flavor == Flavor::Mssql
                 && autoincrement
@@ -869,8 +1049,11 @@ impl SqlConnector {
             }
         }
 
-        let mut update_count = update_df.as_ref().map_or(0, |u| u.height()) as u64;
-        if let Some(update) = update_df.as_ref().filter(|u| u.height() > 0) {
+        let mut update_count =
+            window_update_count.unwrap_or(update_df.as_ref().map_or(0, |u| u.height()) as u64);
+        if window.is_none()
+            && let Some(update) = update_df.as_ref().filter(|u| u.height() > 0)
+        {
             let (ok, m, written) = self
                 .apply_update(&sp, &state, update, upsert, autoincrement)
                 .await?;
@@ -891,7 +1074,7 @@ impl SqlConnector {
         }
         let unseen_count = unseen_df.height() as u64;
         if replace {
-            if !internal.skip_temporary_tables_check && !cache_internal {
+            if window.is_none() && !internal.skip_temporary_tables_check && !cache_internal {
                 let (ok, m) = self.drop_old_temporary_tables(false).await;
                 if !ok {
                     tracing::warn!("{m}");
@@ -920,7 +1103,7 @@ impl SqlConnector {
                 if update_count != 1 { "s" } else { "" }
             )
         };
-        if !internal.skip_temporary_tables_check && !cache_internal {
+        if window.is_none() && !internal.skip_temporary_tables_check && !cache_internal {
             let (ok, m) = self.drop_old_temporary_tables(false).await;
             if !ok {
                 tracing::warn!("{m}");
@@ -1779,7 +1962,16 @@ impl SqlConnector {
         let mut temp_pipe = builder.build().map_err(be)?;
         let temp_columns_types: IndexMap<String, String> = update_dtypes
             .iter()
-            .map(|(c, t)| (c.clone(), history_db_type(sp, flavor, t)))
+            .map(|(c, t)| {
+                // The broad pandas object/bytes equality used by the legacy mapping
+                // otherwise resolves an exact Arrow binary column to SQLite TEXT.
+                let dtype = if flavor == Flavor::Sqlite && native_binary_dtype(t) {
+                    "bytes"
+                } else {
+                    t
+                };
+                (c.clone(), history_db_type(sp, flavor, dtype))
+            })
             .collect();
         let temp_opts = SyncOptions {
             check_existing: false,
@@ -2167,20 +2359,34 @@ impl SqlConnector {
     }
 
     /// `df.dtypes` with object columns refined from their first value (`get_add_columns_queries`).
-    fn df_cols_types_refined(df: &Frame) -> IndexMap<String, String> {
+    fn df_cols_types_refined(&self, df: &Frame) -> IndexMap<String, String> {
         let mut out = df.dtypes();
-        if df.height() > 0 {
-            for (col, typ) in out.iter_mut() {
-                if typ != "object" {
+        for (col, typ) in &mut out {
+            if self.flavor == Flavor::Sqlite && native_binary_dtype(typ) {
+                // Resolve typed binary columns before SQL's generic object fallback.
+                *typ = "bytes".into();
+                continue;
+            }
+            if typ != "object" || df.height() == 0 {
+                continue;
+            }
+            let Ok(data) = df.data(col) else { continue };
+            if self.flavor == Flavor::Sqlite
+                && let meerschaum_kernel::frame::ColumnData::Object(values) = data
+            {
+                let mut present = values.iter().filter(|value| !value.is_na());
+                if matches!(present.next(), Some(KValue::Bytes(_)))
+                    && present.all(|value| matches!(value, KValue::Bytes(_)))
+                {
+                    *typ = "bytes".into();
                     continue;
                 }
-                let Ok(data) = df.data(col) else { continue };
-                match data.get(0) {
-                    KValue::Json(_) => *typ = "json".into(),
-                    KValue::Decimal(_) => *typ = "numeric".into(),
-                    KValue::Str(_) => *typ = "str".into(),
-                    _ => {}
-                }
+            }
+            match data.get(0) {
+                KValue::Json(_) => *typ = "json".into(),
+                KValue::Decimal(_) => *typ = "numeric".into(),
+                KValue::Str(_) => *typ = "str".into(),
+                _ => {}
             }
         }
         out
@@ -2196,21 +2402,19 @@ impl SqlConnector {
         {
             return Vec::new();
         }
-        let df_cols_types = Self::df_cols_types_refined(df);
+        let df_cols_types = self.df_cols_types_refined(df);
         let db_cols_types = self
             .get_table_cols_types(&sp.target, schema.as_deref())
             .await;
         self.add_columns_queries_for(sp, &df_cols_types, &db_cols_types)
     }
 
-    /// The pure part of `get_add_columns_queries`: the incoming pandas dtypes against the
-    /// table's database types.
-    pub fn add_columns_queries_for(
+    fn columns_to_add(
         &self,
         sp: &SqlPipe,
         df_cols_types: &IndexMap<String, String>,
         db_cols_types: &IndexMap<String, String>,
-    ) -> Vec<String> {
+    ) -> Vec<(String, String)> {
         if sp.is_static() && !engine_history(sp) {
             return Vec::new();
         }
@@ -2229,14 +2433,26 @@ impl SqlConnector {
         } else {
             df_cols_types
         };
-        let new_cols: Vec<(String, String)> = incoming
+        incoming
             .iter()
             .filter(|(c, t)| !db_cols_types.contains_key(*c) && !c.is_empty() && !t.is_empty())
             // Managed static history may gain new declared fields, such as selection or
             // registration provenance. Unrecognized incoming fields retain static semantics.
             .filter(|(column, _)| !sp.is_static() || declared.contains_key(*column))
             .map(|(c, t)| (c.clone(), history_db_type(sp, flavor, t)))
-            .collect();
+            .collect()
+    }
+
+    /// The pure part of `get_add_columns_queries`: the incoming pandas dtypes against the
+    /// table's database types.
+    pub fn add_columns_queries_for(
+        &self,
+        sp: &SqlPipe,
+        df_cols_types: &IndexMap<String, String>,
+        db_cols_types: &IndexMap<String, String>,
+    ) -> Vec<String> {
+        let flavor = self.flavor;
+        let new_cols = self.columns_to_add(sp, df_cols_types, db_cols_types);
         if new_cols.is_empty() {
             return Vec::new();
         }

@@ -1192,7 +1192,7 @@ pub fn run(action: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             Ok(SuccessTuple::success())
         }
         "drop" | "clear" => destructive(action, args, rt, &instance),
-        "sync" | "plan" => execute(action, args, rt, &instance),
+        "sync" | "plan" => execute(action, args, rt, &instance, None),
         _ => Err(error("Unknown Pipeline action.")),
     }
 }
@@ -1562,6 +1562,44 @@ struct PreparedRun {
     effective: ArgsMap,
 }
 
+struct CapturedPipeline {
+    definition: Definition,
+    roots: BTreeSet<String>,
+    authority: std::sync::Arc<super::graph_plan::MainGraph>,
+}
+
+/// Entered from the built-in dispatcher only after Main confirmed the exact argv.
+pub(crate) fn run_captured(
+    args: &ArgsMap,
+    rt: &mut Runtime<'_>,
+    name: &str,
+    mut authority: super::graph_plan::MainGraph,
+) -> ActionResult {
+    let instance = super::get_instance(args, rt)?;
+    let registry = instance.keys();
+    let run_id = super::string(args, "run_id")
+        .ok_or_else(|| error("The captured Pipeline requires its run ID."))?;
+    let (definition, roots) = session(rt)
+        .block_on(authority.pipeline(&registry, name, &run_id))
+        .map_err(error)?;
+    let expected =
+        meerschaum_server::executor::pipe_operation::pipeline_targets(&definition, &registry, name)
+            .map_err(|reason| error(reason.detail_text()))?;
+    let count = roots.len();
+    let roots: BTreeSet<_> = roots.into_iter().collect();
+    if roots.len() != count || roots != expected {
+        return Err(error(
+            "The issued Pipeline roots differ from its saved definition.",
+        ));
+    }
+    let captured = CapturedPipeline {
+        definition: serde_json::from_value(definition).map_err(error)?,
+        roots,
+        authority: std::sync::Arc::new(authority),
+    };
+    execute("sync", args, rt, &instance, Some(captured))
+}
+
 /// Read and resolve the Pipelines `args` name (`None`: they select no pipes). `continuous`: for
 /// the engine's continuous mode, whose stream sources get the loop's options (and `--listen`
 /// keeps v4-pattern connectors subscribed).
@@ -1571,8 +1609,16 @@ fn prepare_run(
     rt: &mut Runtime<'_>,
     instance: &Instance,
     continuous: bool,
+    captured: Option<CapturedPipeline>,
 ) -> Result<Option<PreparedRun>, ActionError> {
-    let definitions = names(rt, instance, args, true)?;
+    let (definitions, captured_roots, authority) = match captured {
+        Some(capture) => (
+            vec![capture.definition],
+            Some(capture.roots),
+            Some(capture.authority),
+        ),
+        None => (names(rt, instance, args, true)?, None, None),
+    };
     let graph = definitions[0].graph.unwrap_or(true);
     if definitions
         .iter()
@@ -1599,13 +1645,18 @@ fn prepare_run(
             )));
         }
     }
-    let mut refs = BTreeSet::new();
     let mut dependency_order = graph;
-    for definition in &definitions {
-        dependency_order |=
-            !definition_selection(definition, &effective_args(args, definition)?).is_flat();
-        refs.extend(resolve(rt, instance, definition, args)?);
-    }
+    let refs = if let Some(roots) = captured_roots {
+        roots
+    } else {
+        let mut refs = BTreeSet::new();
+        for definition in &definitions {
+            dependency_order |=
+                !definition_selection(definition, &effective_args(args, definition)?).is_flat();
+            refs.extend(resolve(rt, instance, definition, args)?);
+        }
+        refs
+    };
     if refs.is_empty() {
         return Ok(None);
     }
@@ -1626,6 +1677,10 @@ fn prepare_run(
     };
     let engine =
         super::sync::engine::build(rt, &session, instance, &pipes, true, listen, stream_kwargs)?;
+    let engine = match authority {
+        Some(authority) => engine.with_plan_authority(authority),
+        None => engine,
+    };
     let mut options = super::sync::run_options(
         &effective,
         instance,
@@ -1661,8 +1716,12 @@ fn execute(
     args: &ArgsMap,
     rt: &mut Runtime<'_>,
     instance: &Instance,
+    captured: Option<CapturedPipeline>,
 ) -> ActionResult {
     if action == "sync" && (flag(args, "loop") || flag(args, "listen")) {
+        if captured.is_some() {
+            return Err(error("The captured Pipeline was admitted for one run."));
+        }
         return execute_loop(args, rt, instance);
     }
     let Some(PreparedRun {
@@ -1670,7 +1729,7 @@ fn execute(
         engine,
         mut options,
         ..
-    }) = prepare_run(action, args, rt, instance, false)?
+    }) = prepare_run(action, args, rt, instance, false, captured)?
     else {
         return Ok(SuccessTuple::fail("Pipeline has no target Pipes."));
     };
@@ -1728,7 +1787,7 @@ fn execute_loop(args: &ArgsMap, rt: &mut Runtime<'_>, instance: &Instance) -> Ac
     let mut retries =
         meerschaum_jobs::LapPacer::new(super::float(args, "min_seconds").unwrap_or(1.0));
     loop {
-        let run = match prepare_run("sync", args, rt, instance, true) {
+        let run = match prepare_run("sync", args, rt, instance, true, None) {
             Ok(Some(run)) => run,
             Ok(None) => return Ok(SuccessTuple::fail("Pipeline has no target Pipes.")),
             // The first start fails as `sync pipes --loop` does; a reload keeps the job alive.

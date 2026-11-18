@@ -3,6 +3,11 @@
 
 The Stack uses [Docker Compose](https://docs.docker.com/compose/) to run a database, the API and console, Valkey, and Grafana together. Start it with `mrsm stack up -d`. See [upgrades and backups](upgrades.md) when maintaining an existing Stack.
 
+For a separate execution service per isolated team, see [team execution environments](../team-executors.md).
+An administrator selects each team's placement and applies the generated services with `mrsm stack up -d`.
+Each generated executor has separate volumes for team work and executor control state. The main API
+keeps authentication and routing. Grafana continues to use its assigned database credentials.
+
 ## 🐳 Services
 
 The default stack starts 4 services:

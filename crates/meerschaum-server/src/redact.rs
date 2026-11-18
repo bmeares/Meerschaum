@@ -121,6 +121,8 @@ fn mask_one_uri(uri: &str) -> String {
 pub fn redact_value(key: Option<&str>, value: &mut Json) {
     match value {
         Json::Object(map) => {
+            map.remove(meerschaum_core::job_access::OWNER_BINDING_KEY);
+            map.remove(meerschaum_core::job_access::TEAM_ID_KEY);
             for (k, v) in map.iter_mut() {
                 redact_value(Some(k), v);
             }
@@ -165,6 +167,25 @@ pub fn redact_job_meta(meta: &mut Json) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn private_job_registration_evidence_is_removed_from_objects_and_encoded_json() {
+        let mut meta = json!({"daemon": {"properties": {
+            "owner": "alice", "team": "Wetlands",
+            "_mrsm_owner_binding": {"kind": "user", "username": "alice", "user_id": 7},
+            "_mrsm_team_id": "00000000-0000-4000-8000-000000000001",
+            "nested": [{"_mrsm_owner_binding": {"hash": "private-token-evidence"}}],
+            "encoded": "{\"_mrsm_team_id\":\"private-registration\",\"ordinary\":1}"
+        }}});
+        redact_job_meta(&mut meta);
+        let rendered = meta.to_string();
+        assert!(!rendered.contains("_mrsm_owner_binding"));
+        assert!(!rendered.contains("_mrsm_team_id"));
+        assert!(!rendered.contains("private-token-evidence"));
+        assert!(!rendered.contains("private-registration"));
+        assert_eq!(meta["daemon"]["properties"]["owner"], "alice");
+        assert_eq!(meta["daemon"]["properties"]["encoded"], "{\"ordinary\":1}");
+    }
 
     #[test]
     fn uri_passwords_are_masked() {

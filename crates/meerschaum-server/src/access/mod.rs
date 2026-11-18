@@ -112,6 +112,9 @@ impl AccessCache {
 pub struct Access {
     /// The authenticated principal (`None` under `--no-auth`).
     pub auth: Option<AuthPrincipal>,
+    /// Original password-login binding, retained across a long prepare or spawned launch.
+    /// It is a fingerprint, never the password, bearer or server signing key.
+    pub credential: Option<String>,
     /// The rules' principal. Its `permissions` are the request's: an administrator's API key
     /// holds only its scopes (its `is_admin` is the owner's, for what it may see).
     pub principal: rules::Principal,
@@ -124,6 +127,8 @@ pub struct Access {
     /// The records of the caller's teams other than Everyone (their settings decide the team the
     /// caller acts for: [`Access::acting_team`]).
     pub team_records: Vec<rules::Team>,
+    /// Ephemeral trusted backend capability. Never read from user attributes, JWTs or JSON.
+    pub api_execution: crate::backends::ApiExecution,
 }
 
 impl Access {
@@ -131,11 +136,54 @@ impl Access {
     pub fn everything() -> Access {
         Access {
             auth: None,
+            credential: None,
             principal: rules::Principal::admin(""),
             primary_team: EVERYONE.to_string(),
             attributes: None,
             no_auth: true,
             team_records: Vec::new(),
+            api_execution: crate::backends::ApiExecution::Unavailable,
+        }
+    }
+
+    /// Apply the normal Core wall, retaining declared execution scopes only when Main has
+    /// its tracked API bridge. The input ceiling has already intersected role/token/parent
+    /// authority; nothing here creates a scope or grants code/instance chaining.
+    pub(crate) fn apply_grants(&mut self, grants: rules::TeamGrants) {
+        let ceiling = self.principal.permissions.clone();
+        self.principal = self.principal.clone().with_grants(grants);
+        let crate::backends::ApiExecution::Tracked { terminals } = self.api_execution else {
+            return;
+        };
+        if self.no_auth
+            || self.principal.is_admin
+            || !self.principal.grants.isolated
+            || self.principal.grants.runs_code
+        {
+            return;
+        }
+        let registered = self.team_records.iter().any(|team| {
+            rules::same_team(Some(&team.name), Some(&self.primary_team))
+                && self.principal.is_member(Some(&team.name))
+                && team
+                    .id
+                    .as_deref()
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                    .is_some_and(|id| !id.is_nil())
+                && team.execution().is_ok()
+        });
+        if !registered {
+            return;
+        }
+        for permission in [
+            rules::Permission::ACTIONS_EXECUTE,
+            rules::Permission::WEBTERM_USE,
+        ] {
+            if (permission != rules::Permission::WEBTERM_USE || terminals)
+                && (ceiling.contains(permission) || ceiling.contains(rules::ALL_SCOPE))
+            {
+                self.principal.permissions.insert(permission.into());
+            }
         }
     }
 
@@ -459,9 +507,23 @@ async fn access_of_with(
     granted: &Scopes,
     fresh: bool,
 ) -> Result<Access, ApiError> {
+    if let AuthPrincipal::Execution(identity) = &principal {
+        let identity = if fresh {
+            Box::pin(crate::executor::callbacks::load_identity(
+                state,
+                identity.grant.id,
+                identity.grant.launch_id,
+            ))
+            .await?
+        } else {
+            (**identity).clone()
+        };
+        return Ok(crate::executor::callbacks::access(&identity, granted));
+    }
     let identity = match &principal {
         AuthPrincipal::User(user) => Some(user_identity(state, &user.username, fresh).await?),
         AuthPrincipal::Token(token) => token_identity(state, token, fresh).await?,
+        AuthPrincipal::Execution(_) => unreachable!("Execution principals resolved above"),
     };
     let (username, is_admin, permissions, teams, attributes, records) = match identity {
         Some(identity) => {
@@ -499,33 +561,45 @@ async fn access_of_with(
     };
     let primary_team = rules::primary_team(attributes.as_ref(), &teams);
     let grants = rules::TeamGrants::of(&teams, &records, Some(&primary_team));
-    Ok(Access {
+    let mut access = Access {
         auth: Some(principal),
+        credential: None,
         principal: rules::Principal {
             username,
             is_admin,
             permissions,
             teams,
             grants: rules::TeamGrants::default(),
-        }
-        .with_grants(grants),
+            team_boundary: None,
+        },
         primary_team,
         attributes,
         no_auth: false,
         team_records: records,
-    })
+        api_execution: state.actions.api_execution(),
+    };
+    access.apply_grants(grants);
+    Ok(access)
 }
 
 /// Resolve the access of a request (`401` without valid credentials, `503` when they cannot be
 /// read). Under `--no-auth`: [`Access::everything`].
 pub async fn resolve(state: &AppState, headers: &HeaderMap) -> Result<Access, ApiError> {
+    if let Some(access) = crate::executor::callbacks::current(headers) {
+        return Ok(access);
+    }
     if state.config.no_auth {
         return Ok(Access::everything());
     }
     let principal = auth::load_user_or_token(state, headers).await?;
     let granted = auth::granted_scopes(state, headers, &principal).await?;
-    let access = access_of(state, principal, &granted).await?;
-    if let Some(key) = scope_key(headers) {
+    let mut access = access_of(state, principal, &granted).await?;
+    if matches!(access.auth, Some(AuthPrincipal::User(_))) {
+        access.credential = auth::bound_credential(state, headers);
+    }
+    if !matches!(access.auth, Some(AuthPrincipal::Execution(_)))
+        && let Some(key) = scope_key(headers)
+    {
         let mut scopes = state
             .access_cache()
             .scopes
@@ -553,6 +627,9 @@ fn scope_key(headers: &HeaderMap) -> Option<[u8; 32]> {
 /// This only chooses and refuses instances ([`crate::routes::Ctx::instance_keys`]); every
 /// handler still authorizes the request itself.
 pub async fn instance_scope(state: &AppState, headers: &HeaderMap) -> Option<Access> {
+    if let Some(access) = crate::executor::callbacks::current(headers) {
+        return Some(access);
+    }
     if state.config.no_auth {
         return None;
     }
@@ -593,14 +670,15 @@ pub async fn acting_team_layer(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let acting = match instance_scope(&state, req.headers()).await {
-        Some(access) => acting_for(&state, &access, None),
-        None => None,
-    };
-    if acting.is_none() {
-        return next.run(req).await;
-    }
-    meerschaum_connector::acting_team::scope(acting, next.run(req)).await
+    let caller = instance_scope(&state, req.headers()).await.map(Arc::new);
+    let acting = caller
+        .as_ref()
+        .and_then(|access| acting_for(&state, access, None));
+    crate::executor::context::scope(
+        caller,
+        meerschaum_connector::acting_team::scope(acting, next.run(req)),
+    )
+    .await
 }
 
 /// Why a request may not reach the Python API host (5.1): the host's `meerschaum` package
@@ -675,13 +753,27 @@ pub async fn require_fresh(
     headers: &HeaderMap,
     scopes: &[&str],
 ) -> Result<Access, ApiError> {
-    let caller = if state.config.no_auth {
+    let mut caller = if state.config.no_auth {
         Access::everything()
     } else {
-        let principal = auth::load_user_or_token(state, headers).await?;
-        let granted = auth::granted_scopes(state, headers, &principal).await?;
-        access_of_fresh(state, principal, &granted).await?
+        let principal = auth::load_user_or_token_fresh(state, headers).await?;
+        match principal {
+            AuthPrincipal::Execution(identity) => {
+                // The fresh loader just completed live grant/origin/team validation. Its
+                // remaining projection must not await or reuse request-local cached access.
+                // Re-decode here so a bearer expiring during that load is still refused.
+                let granted = auth::bearer_scopes(state, headers)?;
+                crate::executor::callbacks::access(&identity, &granted)
+            }
+            principal => {
+                let granted = auth::granted_scopes(state, headers, &principal).await?;
+                access_of_fresh(state, principal, &granted).await?
+            }
+        }
     };
+    if matches!(caller.auth, Some(AuthPrincipal::User(_))) {
+        caller.credential = auth::bound_credential(state, headers);
+    }
     caller.require(scopes, &[])?;
     Ok(caller)
 }
@@ -919,6 +1011,16 @@ pub struct RefFilter {
     strict_generations: bool,
     hidden_seen: bool,
     client_refs: bool,
+    selected_engine: Arc<dyn crate::backends::EngineBackend>,
+    native_registry: Option<NativeFilter>,
+    fresh_metadata: bool,
+}
+
+struct NativeFilter {
+    logical: String,
+    connector: Arc<dyn InstanceConnector>,
+    service: Option<Access>,
+    loaded: Option<Option<Arc<crate::routes::engine::registry::NativeRegistry>>>,
 }
 
 impl RefFilter {
@@ -935,12 +1037,82 @@ impl RefFilter {
             strict_generations: false,
             hidden_seen: false,
             client_refs: false,
+            selected_engine: state.engine.clone(),
+            native_registry: None,
+            fresh_metadata: false,
         }
     }
 
     /// The caller's access.
     pub fn access(&self) -> &Access {
         &self.access
+    }
+
+    /// Administrator projection shortcuts are valid only within both independent principals.
+    pub fn unrestricted(&self) -> bool {
+        self.access.is_admin() && self.native_registry.is_none()
+    }
+
+    pub(crate) fn fresh_metadata(mut self) -> Self {
+        self.fresh_metadata = true;
+        self
+    }
+
+    pub(crate) fn with_selected_engine(
+        mut self,
+        backend: Arc<dyn crate::backends::EngineBackend>,
+    ) -> Self {
+        self.selected_engine = backend;
+        self
+    }
+
+    pub(crate) fn with_native_registry(
+        mut self,
+        logical: &str,
+        connector: Arc<dyn InstanceConnector>,
+        service: Option<Access>,
+    ) -> Self {
+        self.native_registry = Some(NativeFilter {
+            logical: logical.into(),
+            connector,
+            service,
+            loaded: None,
+        });
+        self
+    }
+
+    fn registry_connector(&self, instance: &str) -> Result<Arc<dyn InstanceConnector>, ApiError> {
+        if let Some(native) = &self.native_registry {
+            if instance != native.logical && instance != native.connector.connector_keys() {
+                return Err(ApiError::not_found());
+            }
+            guard::check_connector_teams(&self.state, &self.access, &native.logical)?;
+            let service = native.service.as_ref().ok_or_else(ApiError::not_found)?;
+            guard::check_connector_teams(&self.state, service, &native.connector.connector_keys())?;
+            return Ok(native.connector.clone());
+        }
+        let conn = self.state.get_api_connector(Some(instance))?;
+        guard::check_connector_teams(&self.state, &self.access, &conn.connector_keys())?;
+        Ok(conn)
+    }
+
+    async fn native_objects(
+        &mut self,
+    ) -> Option<Arc<crate::routes::engine::registry::NativeRegistry>> {
+        let native = self.native_registry.as_mut()?;
+        if native.loaded.is_none() {
+            native.loaded = Some(
+                crate::routes::engine::registry::NativeRegistry::load(
+                    &self.state,
+                    &native.logical,
+                    native.connector.clone(),
+                )
+                .await
+                .ok()
+                .map(Arc::new),
+            );
+        }
+        native.loaded.as_ref()?.clone()
     }
 
     /// The exact selected registry used to interpret local metadata references.
@@ -964,7 +1136,7 @@ impl RefFilter {
     /// Match every snapshot to a fresh, visible registration on this exact registry.
     /// Missing snapshots retain the legacy per-Pipe history policy.
     pub async fn pipeline_snapshots_visible(&mut self, selection: &serde_json::Value) -> bool {
-        if self.access.is_admin() && !self.strict_generations {
+        if self.unrestricted() && !self.strict_generations {
             return true;
         }
         let snapshots = match selection.get("pipeline_definitions") {
@@ -973,13 +1145,9 @@ impl RefFilter {
             Some(serde_json::Value::Array(snapshots)) => snapshots,
             _ => return false,
         };
-        let Ok(conn) = self.state.get_api_connector(Some(&self.default_instance)) else {
+        let Ok(conn) = self.registry_connector(&self.default_instance) else {
             return false;
         };
-        if guard::check_connector_teams(&self.state, &self.access, &conn.connector_keys()).is_err()
-        {
-            return false;
-        }
         if self.pipelines.is_none() {
             let mut identities: HashMap<String, Option<String>> = HashMap::new();
             let listing = conn
@@ -1014,7 +1182,14 @@ impl RefFilter {
                         }
                         _ => continue,
                     };
-                    let visible_name = self.access.can_see(&parameters).then_some(name);
+                    let visible_name = (self.access.can_see(&parameters)
+                        && self.native_registry.as_ref().is_none_or(|native| {
+                            native
+                                .service
+                                .as_ref()
+                                .is_some_and(|service| service.can_see(&parameters))
+                        }))
+                    .then_some(name);
                     // A duplicate UUID is ambiguous even when its other registration is hidden.
                     identities
                         .entry(identity)
@@ -1055,8 +1230,7 @@ impl RefFilter {
     /// as well as checking each event's pipe, since run-level events have no `pipe_ref`.
     pub async fn run_visible(&mut self, run_id: &str) -> bool {
         let records = self
-            .state
-            .engine
+            .selected_engine
             .get_runs(&crate::backends::RunsFilter {
                 run_id: Some(run_id.to_string()),
                 ..Default::default()
@@ -1069,6 +1243,18 @@ impl RefFilter {
     }
 
     async fn entry(&mut self, pipe_ref: &str) -> Option<Option<IndexedPipe>> {
+        if self.native_registry.is_some() {
+            let registry = self.native_objects().await?;
+            let object = registry.object(pipe_ref).ok()?;
+            let pipe = &object.logical;
+            return Some(Some(IndexedPipe {
+                connector_keys: pipe.connector_keys().into(),
+                metric_key: pipe.metric_key().into(),
+                location_key: pipe.location_key().map(str::to_string),
+                parameters: pipe.raw_parameters().clone(),
+                targets: pipe_targets(pipe),
+            }));
+        }
         let parts: Vec<&str> = pipe_ref.split('|').collect();
         let instance = if parts.len() == 4 && !(self.client_refs && parts[0].starts_with("api:")) {
             parts[0].to_string()
@@ -1076,7 +1262,16 @@ impl RefFilter {
             self.default_instance.clone()
         };
         if !self.indexes.contains_key(&instance) {
-            let index = pipe_index(&self.state, Some(&instance)).await.ok();
+            let index = match self.registry_connector(&instance) {
+                Ok(conn) if self.fresh_metadata => self
+                    .state
+                    .pipes(Some(&instance), true)
+                    .await
+                    .ok()
+                    .map(|dict| Arc::new(index_from_dict(&instance, &dict, conn.as_ref()))),
+                Ok(_) => pipe_index(&self.state, Some(&instance)).await.ok(),
+                Err(_) => None,
+            };
             self.indexes.insert(instance.clone(), index);
         }
         let index = self.indexes.get(&instance)?.as_ref()?;
@@ -1085,8 +1280,24 @@ impl RefFilter {
 
     /// Whether the caller may see the pipe `pipe_ref` names.
     pub async fn visible(&mut self, pipe_ref: &str) -> bool {
-        if self.access.is_admin() {
+        if self.unrestricted() {
             return true;
+        }
+        if self.native_registry.is_some() {
+            let visible = match self.native_objects().await {
+                Some(registry) => self
+                    .native_registry
+                    .as_ref()
+                    .and_then(|native| native.service.as_ref())
+                    .is_some_and(|service| {
+                        registry
+                            .check(&self.state, &self.access, service, pipe_ref, false)
+                            .is_ok()
+                    }),
+                None => false,
+            };
+            self.hidden_seen |= !visible;
+            return visible;
         }
         let visible = match self.entry(pipe_ref).await {
             None => false,
@@ -1102,8 +1313,23 @@ impl RefFilter {
     pub async fn editable(&mut self, pipe_ref: &str) -> (bool, bool) {
         let entry = self.entry(pipe_ref).await;
         let locked = matches!(&entry, Some(Some(p)) if rules::Locks::from_parameters(&p.parameters).contains(rules::Lock::Sync));
-        if self.access.is_admin() {
+        if self.unrestricted() {
             return (true, locked);
+        }
+        if self.native_registry.is_some() {
+            let editable = match self.native_objects().await {
+                Some(registry) => self
+                    .native_registry
+                    .as_ref()
+                    .and_then(|native| native.service.as_ref())
+                    .is_some_and(|service| {
+                        registry
+                            .check(&self.state, &self.access, service, pipe_ref, true)
+                            .is_ok()
+                    }),
+                None => false,
+            };
+            return (editable, locked);
         }
         let editable = match entry {
             None => false,

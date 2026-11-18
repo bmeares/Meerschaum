@@ -1340,14 +1340,19 @@ async fn tmux_sessions_survive_reconnects_and_carry_the_environment() {
     read_until(&mut first, |out| has_line(out, "env:it's=ok $HOME")).await;
     // The shell sees TERM from tmux, and the session is named after the user.
     wait_for_session("admin_t");
+    // The window read its environment file and removed it: none stays behind (5.1).
+    let left: Vec<String> = std::fs::read_dir(&env_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("webterm.") && name.ends_with(".env"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(env_dir.join("webterm.env"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
+        let mode = std::fs::metadata(&env_dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 
     // Closing the tab kills the tmux client, not the session.
@@ -2235,4 +2240,66 @@ async fn an_isolated_team_without_plugin_installs_keeps_tmux() {
             && why.contains("Unix sockets are not denied to team code"),
         "{why}"
     );
+}
+
+/// 5.1: the restricted terminals follow the same rule as the administrators': while isolated
+/// teams are recorded and their sandbox does not refuse pathname Unix sockets, a restricted
+/// terminal runs without tmux, so neither the administrators' nor the restricted tmux server
+/// listens for a team's process to connect to; where the sandbox refuses them, it uses the
+/// restricted tmux server (`<socket>-r.sock`).
+#[tokio::test]
+async fn with_isolated_teams_restricted_terminals_use_tmux_only_where_sockets_are_refused() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP: no tmux");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let scope = meerschaum_core::team_scope::TeamScope {
+        team: "wetlands".into(),
+        team_id: Some("id-wetlands".into()),
+        plugins_write: Some(true),
+        ..Default::default()
+    };
+    meerschaum_core::team_scope::write_scope_record(root.path(), &scope).unwrap();
+    let state = state(root.path());
+    for stops in [false, true] {
+        let tmux_dir = short_tmp();
+        let _server = PrivateTmux(tmux_dir.path().to_path_buf());
+        let socket = tmux_socket(tmux_dir.path());
+        let restricted = webterm::restricted_socket(&socket);
+        struct KillSocket(std::path::PathBuf);
+        impl Drop for KillSocket {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("tmux")
+                    .arg("-S")
+                    .arg(&self.0)
+                    .arg("kill-server")
+                    .env_remove("TMUX")
+                    .env_remove("TMUX_PANE")
+                    .output();
+            }
+        }
+        let _restricted_server = KillSocket(restricted.clone());
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: Some(socket.clone()),
+            session_suffix: format!("_r{}", stops as u8),
+            env_dir: root.path().join(format!("webterm{}", stops as u8)),
+            config_file: Some("/dev/null".into()),
+        };
+        let mut cfg = config(&state, sh(), Some(tmux));
+        cfg.sandbox_stops_sockets = Some(stops);
+        let addr = serve(webterm::routes(state.clone(), cfg)).await;
+        let mut term = connect(addr, USER_SESSION).await;
+        expect_setup(&mut term).await;
+        send_json(&mut term, json!(["stdin", "echo r:ok\n"])).await;
+        read_until(&mut term, |out| has_line(out, "r:ok")).await;
+        assert!(!socket.exists(), "stops={stops}");
+        assert_eq!(restricted.exists(), stops, "stops={stops}");
+    }
 }

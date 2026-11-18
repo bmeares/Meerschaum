@@ -153,6 +153,11 @@ pub fn principal_json(principal: Option<&Principal>) -> serde_json::Value {
             .unwrap_or(serde_json::Value::Null)
     };
     match principal {
+        Some(Principal::Execution(identity)) => {
+            json!({"kind": "execution", "grant_id": identity.grant.id,
+            "launch_id": identity.grant.launch_id, "team_id": identity.grant.team_id,
+            "username": identity.current.username()})
+        }
         None => serde_json::Value::Null,
         Some(Principal::User(u)) => json!({
             "kind": "user",
@@ -665,6 +670,13 @@ async fn serve(
     handler: Arc<dyn NativeRouteHandler>,
     req: Request,
 ) -> Response {
+    // A native route can match before the router fallback. Run the same exact typed
+    // adapter before admitting its legacy handler or reading any body, so matching a
+    // Main-trusted path cannot bypass this nonadmin caller's confined source view.
+    let req = match crate::routes::extensions::api_fallback(state.clone(), req).await {
+        std::ops::ControlFlow::Break(response) => return response,
+        std::ops::ControlFlow::Continue(request) => request,
+    };
     let path = req.uri().path().to_string();
     let matching: Vec<(&NativeRoute, BTreeMap<String, String>)> = routes
         .iter()

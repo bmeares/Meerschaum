@@ -443,6 +443,8 @@ pub struct ServerConfig {
     /// The web terminal runs without tmux only while an isolated team that may install plugins
     /// exists and Unix sockets are not denied to team code (the probe applies this mode).
     pub team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode,
+    /// Trusted advertised main API origin for executor callbacks (`api.execution.callback_url`).
+    pub execution_callback_url: Option<String>,
     /// The private key and certificate of HTTPS (`--keyfile` / `--certfile`,
     /// `api:server:ssl_keyfile` / `ssl_certfile`, 4.1's `api:uvicorn:ssl_*`); none: plain HTTP.
     pub tls: crate::tls::TlsSettings,
@@ -709,6 +711,21 @@ impl ServerConfig {
     pub fn from_map(cfg: &Map, flags: &ServerFlags) -> ServerConfig {
         let mut notices = Vec::new();
         let mut errors = Vec::new();
+        let execution_callback_url = match get(cfg, &["api", "execution", "callback_url"]) {
+            None | Some(Value::Null) => None,
+            Some(Value::Str(url)) => {
+                if let Err(error) = crate::executor::environment::validate_callback_url(url) {
+                    errors.push(error);
+                }
+                Some(url.clone())
+            }
+            Some(_) => {
+                errors.push(
+                    "`api:execution:callback_url` must be an HTTP or HTTPS API origin.".into(),
+                );
+                None
+            }
+        };
         let limits = parse_body_limits(get(cfg, &["api", "limits"]), &mut notices, &mut errors);
         let host_response_timeout = match get(cfg, &["api", "host"]) {
             None | Some(Value::Null) => Some(Duration::from_secs(DEFAULT_HOST_RESPONSE_SECONDS)),
@@ -983,6 +1000,7 @@ impl ServerConfig {
                 cfg,
                 &meerschaum_core::team_scope::sandbox::MODE_KEY,
             )),
+            execution_callback_url,
             tls,
             internal_addr: None,
             limits,

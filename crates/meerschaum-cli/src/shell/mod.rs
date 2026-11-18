@@ -26,6 +26,7 @@
 pub mod completer;
 pub mod editor;
 pub mod interrupt;
+pub mod restricted;
 pub mod suggest;
 pub mod toolbar;
 pub mod updates;
@@ -279,7 +280,7 @@ impl ShellState {
         ShellState {
             instance_keys: instance.map(str::to_string).unwrap_or(instance_default),
             repo_keys: repo,
-            executor_keys: executor_keys_from_context(rt.env),
+            executor_keys: default_executor(rt),
             debug: false,
             daemon: cli_daemon,
         }
@@ -295,6 +296,14 @@ pub fn executor_keys_from_context(env: fn(&str) -> Option<String>) -> String {
     } else {
         "local".into()
     }
+}
+
+/// Match the jobs API's configured executor, including a scoped main callback connector.
+fn default_executor(rt: &mut Runtime<'_>) -> String {
+    rt.config()
+        .get(&["meerschaum", "executor"])
+        .and_then(|value| meerschaum_jobs::executor::normalize_executor_keys(value.as_str()))
+        .unwrap_or_else(|| executor_keys_from_context(rt.env))
 }
 
 /// What `precmd` decided.
@@ -421,7 +430,7 @@ pub fn shell_command(
         }
         "executor" => {
             let mut keys = action.first().cloned().unwrap_or_default();
-            let context = executor_keys_from_context(rt.env);
+            let context = default_executor(rt);
             if keys.is_empty() {
                 keys = context.clone();
             }
@@ -650,10 +659,6 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
     if matches!(line.as_str(), "exit" | "quit" | "EOF") {
         return Control::Exit;
     }
-    if let Some(rest) = line.strip_prefix('?') {
-        do_help(&format!("help {rest}"), rt);
-        return Control::Continue;
-    }
     let sysargs = match crate::shlex::split(&line) {
         Ok(s) => s,
         Err(e) => {
@@ -662,6 +667,14 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
             return Control::Continue;
         }
     };
+    if let Err(message) = restricted::check_raw(&sysargs) {
+        print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
+        return Control::Continue;
+    }
+    if let Some(rest) = line.strip_prefix('?') {
+        do_help(&format!("help {rest}"), rt);
+        return Control::Continue;
+    }
     let (sysargs, pipeline_args) = split_pipeline_sysargs(&sysargs);
     let chained = match split_chained_sysargs(&sysargs) {
         Ok(c) => c,
@@ -724,6 +737,14 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
         return Control::Continue;
     }
     if SHELL_COMMANDS.contains(&main) && chained_kwargs.len() == 1 {
+        // A restricted shell asks the server about the commands that change where actions run
+        // (`instance`, `repo`, `executor`); `debug` and `daemon` only change this shell's output.
+        if !matches!(main, "debug" | "daemon")
+            && let Err(message) = restricted::authorize(&first)
+        {
+            print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
+            return Control::Continue;
+        }
         let result = shell_command(main, &first[1..], state, rt);
         print_result(&result, state, rt);
         return Control::Continue;
@@ -742,7 +763,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
         .get(&["meerschaum", "repository"])
         .map(|v| v.py_str())
         .unwrap_or_default();
-    let executor_default = executor_keys_from_context(rt.env);
+    let executor_default = default_executor(rt);
     let mut sysargs_to_execute: Vec<String> = Vec::new();
     for (i, kwargs) in chained_kwargs.iter_mut().enumerate() {
         let mut action = words_of(kwargs);
@@ -751,18 +772,26 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
             Some(n) => n.to_string(),
             // A plugin's `@make_action` is an action too (v4 registers it in `actions`); only
             // words nobody claims run as shell commands.
-            None if crate::python::manifest(rt)
-                .ok()
-                .and_then(|m| crate::python::action_name(&action, &m))
-                .is_some() =>
-            {
-                words_of(kwargs)[0].clone()
-            }
-            None => {
-                action.insert(0, "sh".into());
-                kwargs.insert("action".into(), PyValue::str_list(&action));
-                "sh".into()
-            }
+            None => match crate::python::manifest(rt) {
+                Ok(manifest) if crate::python::action_name(&action, &manifest).is_some() => {
+                    words_of(kwargs)[0].clone()
+                }
+                Err(error) if restricted::active() => {
+                    let clean = crate::executor_jobs::LogSanitizer::default().push(&error.message);
+                    let clean = meerschaum_server::redact::mask_uri_passwords(&clean);
+                    let message = format!(
+                        "Confined plugin action metadata is unavailable: {}",
+                        clean.chars().take(4096).collect::<String>()
+                    );
+                    print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
+                    return Control::Continue;
+                }
+                _ => {
+                    action.insert(0, "sh".into());
+                    kwargs.insert("action".into(), PyValue::str_list(&action));
+                    "sh".into()
+                }
+            },
         };
         if main_name != "api" {
             let mut add = |key: &str, value: &str, default: &str| {
@@ -808,6 +837,12 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
         sysargs_to_execute.extend(pipeline_args);
     }
 
+    // 5.1: a restricted shell runs a line only when the server says this terminal's user may
+    // (the decision of `POST /execute`), on exactly what the dispatcher gets.
+    if let Err(message) = restricted::authorize(&sysargs_to_execute) {
+        print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
+        return Control::Continue;
+    }
     let old_cwd = std::env::current_dir().ok();
     let mut patch = ArgsMap::new();
     patch.insert("shell".into(), PyValue::Bool(true));
@@ -1137,7 +1172,13 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         return;
     }
 
-    let mut history = load_history(&history_path);
+    // A restricted shell keeps its history in memory: the file is every terminal's on the root.
+    let keep_history = !restricted::active();
+    let mut history = if keep_history {
+        load_history(&history_path)
+    } else {
+        Vec::new()
+    };
     let dates = rt.dates.clone();
     let shared: editor::SharedRef = std::sync::Arc::new(std::sync::Mutex::new(
         editor::Shared::new(completion_data(&state, rt), dates),
@@ -1189,7 +1230,9 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
                 // `Buffer.append_to_history`: any non-empty text, unless it repeats the last
                 // entry.
                 if !line.is_empty() && history.last() != Some(&line) {
-                    append_history(&history_path, &line);
+                    if keep_history {
+                        append_history(&history_path, &line);
+                    }
                     history.push(line.clone());
                     if history.len() > max_history {
                         history.remove(0);

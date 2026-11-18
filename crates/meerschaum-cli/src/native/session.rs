@@ -38,7 +38,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use meerschaum_connector::InstanceConnector;
 use meerschaum_connector_sql::SqlConnector;
@@ -49,6 +49,7 @@ use meerschaum_core::config::Config;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{pyfmt, static_config};
 use meerschaum_plugin::NativePlugins;
+use meerschaum_plugin::source::compiler::{CompilerPolicy, SourceCompiler};
 
 use crate::builtin::ActionError;
 
@@ -125,6 +126,8 @@ pub struct Session {
     worker_python: Arc<Mutex<Option<String>>>,
     hook_results: Arc<Mutex<Vec<meerschaum_core::SuccessTuple>>>,
     manifests: Arc<Mutex<ManifestState>>,
+    /// Trusted host attachment; frozen before any manifest/discovery, shared by all children.
+    source_compiler: Arc<OnceLock<CompilerPolicy>>,
     /// The isolated teams' pools and sessions of this process (5.1), shared by clones.
     teams: Arc<TeamSessions>,
     /// The team this session runs for (a team's session, [`Session::for_team`]).
@@ -226,6 +229,10 @@ impl Session {
     }
 
     fn from_runtime(rt: SessionRuntime) -> Session {
+        let source_compiler = Arc::new(OnceLock::new());
+        if let Some(policy) = crate::team_sandbox::source_compiler_policy() {
+            let _ = source_compiler.set(policy);
+        }
         Session {
             rt: Arc::new(rt),
             instances: Arc::new(Mutex::new(HashMap::new())),
@@ -237,6 +244,7 @@ impl Session {
             worker_python: Arc::new(Mutex::new(None)),
             hook_results: Arc::new(Mutex::new(Vec::new())),
             manifests: Arc::new(Mutex::new(ManifestState::default())),
+            source_compiler,
             teams: Arc::new(TeamSessions::default()),
             team: None,
         }
@@ -271,6 +279,9 @@ impl Session {
         member: Option<meerschaum_core::access::Principal>,
         config: &Config,
     ) -> Result<(Session, TeamLookup), ActionError> {
+        scope
+            .check_host_execution(config)
+            .map_err(|message| ActionError::new("RuntimeError", message))?;
         use meerschaum_core::team_scope as ts;
         let io = |e: std::io::Error| ActionError::new("OSError", e.to_string());
         // A connector another process registered (a team's database) since the last read.
@@ -364,6 +375,7 @@ impl Session {
             worker_python: self.worker_python.clone(),
             hook_results: Arc::new(Mutex::new(Vec::new())),
             manifests: self.manifests.clone(),
+            source_compiler: self.source_compiler.clone(),
             teams: self.teams.clone(),
             team: None,
         };
@@ -540,6 +552,36 @@ impl Session {
         self.python_worker.store(on, Ordering::SeqCst);
     }
 
+    /// Attach the trusted host's confined native-source compiler before any manifest or
+    /// native discovery. `None` explicitly refuses source compilation; it never selects
+    /// ambient Cargo. Clones and team children share this single immutable choice.
+    /// This Rust host API has no configuration, environment, job or Python selector.
+    pub fn set_source_compiler(
+        &self,
+        compiler: Option<Arc<dyn SourceCompiler>>,
+    ) -> Result<(), ActionError> {
+        let state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        if state.python.is_some()
+            || state.natives.is_some()
+            || state.native_signature.is_some()
+            || state.merged.is_some()
+            || state.validated
+        {
+            return Err(ActionError::new(
+                "RuntimeError",
+                "The source compiler must be attached before manifest initialization.",
+            ));
+        }
+        self.source_compiler
+            .set(CompilerPolicy::Confined(compiler))
+            .map_err(|_| {
+                ActionError::new(
+                    "RuntimeError",
+                    "The source compiler policy is already fixed for this session.",
+                )
+            })
+    }
+
     /// Whether this session may start the Python worker ([`Session::set_python_worker`]).
     pub fn worker_enabled(&self) -> bool {
         self.python_worker.load(Ordering::SeqCst)
@@ -691,6 +733,11 @@ impl Session {
         config: &Config,
         force: bool,
     ) -> Result<(), ActionError> {
+        // The manifests lock serializes the trusted setter against the first discovery.
+        // Keep this frozen even when cached-only mode later drops ManifestState.
+        let compiler = self
+            .source_compiler
+            .get_or_init(|| crate::team_sandbox::source_compiler_policy().unwrap_or_default());
         if !force && state.validated && state.merged.is_some() {
             return Ok(());
         }
@@ -724,7 +771,36 @@ impl Session {
         // v4 finds pip-installed plugins whatever the plugins directory holds: a cached probe of
         // the interpreter (a few `stat` calls) says whether any exist, so an empty tree with no
         // entry point still starts no Python.
-        let entry_points = probe_entry_points(&pool, &manifest_file, force);
+        let mut entry_points = probe_entry_points(&pool, &manifest_file, force);
+        // An executor's signed grant list also limits pip entry points. Its physical plugin
+        // directory view already limits ordinary Python and native discovery.
+        let inherited_grants = (!pool.config().worker.env_clear
+            && !pool
+                .config()
+                .worker
+                .env_remove
+                .iter()
+                .any(|key| key == "MRSM_EXECUTOR_PLUGINS"))
+        .then(|| std::env::var("MRSM_EXECUTOR_PLUGINS").ok())
+        .flatten();
+        if let Some(grants) = pool
+            .config()
+            .worker
+            .env
+            .iter()
+            .find(|(key, _)| key == "MRSM_EXECUTOR_PLUGINS")
+            .map(|(_, grants)| grants.as_str())
+            .or(inherited_grants.as_deref())
+        {
+            let grants: std::collections::BTreeSet<String> = serde_json::from_str(grants)
+                .map_err(|_| ActionError::new("RuntimeError", "Invalid executor plugin grants."))?;
+            entry_points.retain(|name| grants.contains(name));
+        }
+        if let Some(namespace) =
+            meerschaum_core::team_scope::source_namespace::for_root(&paths.root_dir)
+        {
+            entry_points.retain(|name| namespace.names.contains(name));
+        }
         let python = match previous.clone() {
             Some(cached)
                 if !force && !stale_plugins_for(&cached, &paths.plugins_dirs, &entry_points).0 =>
@@ -767,16 +843,16 @@ impl Session {
             }
         };
         python_changed |= force;
-        let signature = native_signature(&paths.plugins_dirs);
+        let native_cache = crate::native_plugins::cache_path(&paths.root_dir);
+        let signature = native_signature(&paths.plugins_dirs, &native_cache, compiler);
         if force || state.natives.is_none() || state.native_signature.as_ref() != Some(&signature) {
-            let (natives, error) = match NativePlugins::open(
-                &paths.plugins_dirs,
-                &crate::native_plugins::cache_path(&paths.root_dir),
-            ) {
-                Ok(natives) => (Arc::new(natives), None),
-                // A broken native plugin must not disable the Python plugins.
-                Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
-            };
+            let (natives, error) =
+                match NativePlugins::open_with_policy(&paths.plugins_dirs, &native_cache, compiler)
+                {
+                    Ok(natives) => (Arc::new(natives), None),
+                    // A broken native plugin must not disable the Python plugins.
+                    Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
+                };
             state.natives = Some(natives);
             state.native_signature = Some(signature);
             state.merged = None;
@@ -902,6 +978,14 @@ impl Session {
     pub fn instance(&self, keys: &str, config: &Config) -> Result<Instance, ActionError> {
         let (typ, label) = split_keys(keys);
         let full = format!("{typ}:{label}");
+        // Read the exact descriptor before a cached native driver or default attributes can
+        // adopt these logical keys. API execution keeps the identity but carries no DB client.
+        if let Some(alias) =
+            meerschaum_connector_api::APIConnector::execution_alias_from_config(config, &full)
+                .map_err(|e| ActionError::new("InvalidAttributesError", e.to_string()))?
+        {
+            return Ok(Instance::Other(Arc::new(alias)));
+        }
         if let Some(i) = self
             .instances
             .lock()
@@ -1004,6 +1088,18 @@ impl Session {
 
     /// A `sql:<label>` connector from the config registry.
     pub fn sql_connector(&self, label: &str, config: &Config) -> Result<SqlConnector, ActionError> {
+        if meerschaum_connector_api::APIConnector::execution_alias_from_config(
+            config,
+            &format!("sql:{label}"),
+        )
+        .map_err(|e| ActionError::new("InvalidAttributesError", e.to_string()))?
+        .is_some()
+        {
+            return Err(ActionError::new(
+                "InvalidAttributesError",
+                "This logical SQL connector uses the API; a native database client is unavailable.",
+            ));
+        }
         let spec = sql_spec(label, config)?;
         let settings = InstanceSettings::from_config(spec.flavor, config);
         let conn = self
@@ -1060,8 +1156,16 @@ pub fn sql_spec(label: &str, config: &Config) -> Result<ConnectionSpec, ActionEr
 /// `type:label` with the default label filled in (the session's map key).
 /// What native plugin discovery sees (names, trees and skipped directories): when it is
 /// unchanged the opened [`NativePlugins`] and the warnings printed for it are still current.
-fn native_signature(plugins_dirs: &[std::path::PathBuf]) -> Vec<String> {
-    let discovery = meerschaum_plugin::discovery::discover_report(plugins_dirs);
+fn native_signature(
+    plugins_dirs: &[std::path::PathBuf],
+    cache: &std::path::Path,
+    compiler: &CompilerPolicy,
+) -> Vec<String> {
+    let discovery = meerschaum_plugin::discovery::discover_report_in_with_policy(
+        plugins_dirs,
+        &meerschaum_plugin::discovery::build_dir_for_cache(cache),
+        compiler,
+    );
     discovery
         .candidates
         .iter()
@@ -1378,6 +1482,36 @@ mod registration_tests {
         assert!(manifest.plugins.is_empty());
         assert!(session.python_manifest(&config).unwrap().plugins.is_empty());
         assert!(session.pool.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn source_compiler_attachment_is_shared_and_frozen_before_manifest_initialization() {
+        let session = Session::new();
+        let cloned = session.clone();
+        session.set_source_compiler(None).unwrap();
+        assert!(cloned.set_source_compiler(None).is_err());
+        assert!(matches!(
+            cloned.source_compiler.get(),
+            Some(CompilerPolicy::Confined(None))
+        ));
+        let (_root, _plugins, config) = isolated_config();
+        session.set_python_worker(false);
+        session.manifest(&config).unwrap();
+        session.set_cached_manifest_only(false);
+        assert!(session.set_source_compiler(None).is_err());
+
+        let ambient = Session::new();
+        ambient.set_python_worker(false);
+        ambient.manifest(&config).unwrap();
+        assert!(matches!(
+            ambient.source_compiler.get(),
+            Some(CompilerPolicy::Ambient)
+        ));
+        ambient.set_cached_manifest_only(false);
+        assert!(
+            ambient.set_source_compiler(None).is_err(),
+            "Resetting manifest state must not reopen the compiler attachment"
+        );
     }
 
     #[test]

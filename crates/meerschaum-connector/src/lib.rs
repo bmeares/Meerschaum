@@ -28,14 +28,18 @@
 #![deny(unsafe_code)]
 
 pub mod acting_team;
+pub mod api_target;
+pub mod batch_delivery;
 pub mod locks;
 pub mod models;
+pub mod mutation;
 pub mod passwords;
 pub mod pipe_ops;
 pub mod policy;
 pub mod replace;
 pub mod retry;
 pub mod schema;
+pub mod source_replace;
 pub mod sync_metrics;
 pub mod sync_status;
 pub mod teams;

@@ -1471,6 +1471,13 @@ fn sync_yaml_config(
     let value = with_grafana_sign_in(rt, keys, value);
     let value = with_main_readonly(rt, keys, value, true);
     let value = with_secret_files(rt, keys, value, true);
+    let value = if keys == ["stack", "docker-compose.yaml"] {
+        let root = rt.config().paths().root_dir.clone();
+        let image = rt.config().get(&["stack", "executor", "image"]);
+        crate::executor_stack::apply_with_image(&root, value, image)?
+    } else {
+        value
+    };
     let mut text = meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?;
     for (old, new) in replace {
         text = text.replace(old, new);
@@ -1573,6 +1580,13 @@ pub fn write_stack(rt: &mut Runtime<'_>) -> Result<(), String> {
         // `sync_stack_files` below writes them again, with the warnings.
         let value = with_main_readonly(rt, &keys, value, false);
         let value = with_secret_files(rt, &keys, value, false);
+        let value = if keys == ["stack", "docker-compose.yaml"] {
+            let root = rt.config().paths().root_dir.clone();
+            let image = rt.config().get(&["stack", "executor", "image"]);
+            crate::executor_stack::apply_with_image(&root, value, image)?
+        } else {
+            value
+        };
         let mut text = header.unwrap_or_default().to_string();
         text.push_str(&meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?);
         if let Some(parent) = path.parent() {
@@ -1653,6 +1667,28 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if !matches!(rt.host.run(&docker(&["compose"])), Ok(0)) {
         return Ok(SuccessTuple::fail("Docker Compose is not available."));
     }
+    // Only the explicit administrator `up` path may inspect an image or provision
+    // a reverse Factory key. Ordinary rendering/down/dry-run stays read-only.
+    let factory_root = rt.config().paths().root_dir;
+    let factory_image = rt.config().get(&["stack", "executor", "image"]);
+    let factory_installed = match crate::executor_stack::provision_up(
+        &factory_root,
+        &project_name,
+        &sysargs,
+        &stack_env,
+        factory_image,
+        rt.host.as_mut(),
+    ) {
+        Ok(installed) => installed,
+        Err(error) => return Ok(SuccessTuple::fail(error)),
+    };
+    if factory_installed {
+        // The first render above cannot create authority. Re-render after independent
+        // inspection to use the exact image ID and read-only administrator mounts.
+        if let Err(error) = sync_stack_files(rt) {
+            return Ok(SuccessTuple::fail(error));
+        }
+    }
     if sysargs.iter().any(|a| a == "down")
         && sysargs.iter().any(|a| a == "-v")
         && !yes_no(
@@ -1672,6 +1708,12 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .skip(1)
         .find_map(|a| super::upgrade_postgres::StackCheck::of(a));
     let starting = guard.is_some();
+    if starting {
+        let root = rt.config().paths().root_dir;
+        if let Err(error) = crate::executor_stack::preflight(&root, &stack_env, rt.host.as_mut()) {
+            return Ok(SuccessTuple::fail(error));
+        }
+    }
     if let Some(check) = guard
         && !flag(args, "force")
         && !sysargs.iter().any(|a| a == "--force")
@@ -1684,6 +1726,18 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         )
     {
         return Ok(SuccessTuple::fail(e));
+    }
+    {
+        let root = rt.config().paths().root_dir;
+        if let Err(error) = crate::executor_stack::reconcile_up(
+            &root,
+            &project_name,
+            &sysargs,
+            &stack_env,
+            rt.host.as_mut(),
+        ) {
+            return Ok(SuccessTuple::fail(error));
+        }
     }
     let mut cmd_list: Vec<String> = vec!["--project-name".into(), project_name];
     cmd_list.extend(sysargs.iter().skip(1).cloned());

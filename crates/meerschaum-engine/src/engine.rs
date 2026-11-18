@@ -27,6 +27,8 @@ use meerschaum_core::{Config, Map, Pipe, Value};
 use meerschaum_kernel::enforce::PipeInput;
 use tokio::sync::broadcast;
 
+#[path = "accepted_bare.rs"]
+mod accepted_bare;
 mod triggers;
 
 use crate::events::{Event, EventKind, EventRow, EventSink};
@@ -703,6 +705,7 @@ impl Drop for RunAdmission {
 
 /// The Syncing Engine.
 pub struct Engine {
+    plan_authority: Option<Arc<dyn crate::PlanAuthority>>,
     registry: Arc<dyn ConnectorRegistry>,
     config: EngineConfig,
     events: broadcast::Sender<Event>,
@@ -791,6 +794,7 @@ impl Engine {
         ));
         let (events, _) = broadcast::channel(4096);
         Engine {
+            plan_authority: None,
             registry,
             config,
             events,
@@ -800,6 +804,13 @@ impl Engine {
             cadence: None,
             last_retention: Mutex::new(None),
         }
+    }
+
+    /// Consume Main-issued instructions through a trusted per-launch plan source.
+    /// Ordinary engines retain their local planning behavior.
+    pub fn with_plan_authority(mut self, authority: Arc<dyn crate::PlanAuthority>) -> Self {
+        self.plan_authority = Some(authority);
+        self
     }
 
     /// Inject crashes into every node sync (tests).
@@ -836,7 +847,13 @@ impl Engine {
         input: Option<PipeInput>,
         args: &SyncArgs,
     ) -> SyncResult {
+        if let Some(authority) = &self.plan_authority {
+            return self
+                .accepted_bare(pipe, input, args, authority.as_ref())
+                .await;
+        }
         let env = SyncEnv {
+            delivery: None,
             registry: self.registry.as_ref(),
             defaults: &self.config.defaults,
             default_backtrack_minutes: self.config.default_backtrack_minutes,
@@ -1022,8 +1039,25 @@ impl Engine {
     pub async fn plan(&self, opts: &RunOptions) -> Result<PlannedRun, String> {
         let (graph, subgraph, _) = self.resolve(opts).await?;
         let mut plan_opts = self.plan_options(opts);
-        self.resume_options(opts, &mut plan_opts).await?;
-        let plan = plan(&graph, &subgraph, self.state.as_ref(), &plan_opts).await;
+        let plan = match &self.plan_authority {
+            Some(authority) => {
+                if opts.resume.is_some() {
+                    return Err(
+                        "Delegated resume requires Main's original resume admission.".into(),
+                    );
+                }
+                let expected = crate::accepted_plan::structural_proposal(&graph, &subgraph)?;
+                crate::accepted_plan::validate_initial(
+                    &graph,
+                    &expected,
+                    authority.initial(&expected).await?,
+                )?
+            }
+            None => {
+                self.resume_options(opts, &mut plan_opts).await?;
+                plan(&graph, &subgraph, self.state.as_ref(), &plan_opts).await
+            }
+        };
         Ok(PlannedRun {
             graph,
             subgraph,
@@ -1038,6 +1072,11 @@ impl Engine {
         planned: &PlannedRun,
         opts: &RunOptions,
     ) -> Result<Plan, String> {
+        if self.plan_authority.is_some() {
+            // Main has not observed committed parent receipts yet. Do not make
+            // wider provisional instructions by locally forecasting those writes.
+            return Ok(planned.plan.clone());
+        }
         let mut plan_opts = self.plan_options(opts);
         self.resume_options(opts, &mut plan_opts).await?;
         Ok(crate::plan::expected(
@@ -1099,9 +1138,27 @@ impl Engine {
                         );
                     }
                 };
-            match self.state.load_run(run_id).await {
-                Ok(None) => {}
-                Ok(Some(_)) => {
+            let confirmed = match &self.plan_authority {
+                Some(authority) => {
+                    authority
+                        .confirms_unused_run_id(&self.config.home_instance, run_id)
+                        .await
+                }
+                None => Ok(false),
+            };
+            let occupied = match confirmed {
+                Ok(true) => Ok(false),
+                Ok(false) => self
+                    .state
+                    .load_run(run_id)
+                    .await
+                    .map(|record| record.is_some())
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error),
+            };
+            match occupied {
+                Ok(false) => {}
+                Ok(true) => {
                     return RunResult::failed(
                         format!("Run id '{run_id}' already exists; choose a new run id."),
                         t0.elapsed(),
@@ -1135,11 +1192,32 @@ impl Engine {
             Err(e) => return RunResult::failed(e, t0.elapsed()),
         };
         let mut plan_opts = self.plan_options(&opts);
-        if let Err(e) = self.resume_options(&opts, &mut plan_opts).await {
+        if self.plan_authority.is_none()
+            && let Err(e) = self.resume_options(&opts, &mut plan_opts).await
+        {
             return RunResult::failed(e, t0.elapsed());
         }
-        let mut the_plan = plan(&graph, &sub, self.state.as_ref(), &plan_opts).await;
-        if the_plan.needs_confirmation() {
+        let mut the_plan = if let Some(authority) = &self.plan_authority {
+            if opts.resume.is_some() {
+                return RunResult::failed(
+                    "Delegated resume requires Main's original resume admission.",
+                    t0.elapsed(),
+                );
+            }
+            let expected = match crate::accepted_plan::structural_proposal(&graph, &sub) {
+                Ok(expected) => expected,
+                Err(reason) => return RunResult::failed(reason, t0.elapsed()),
+            };
+            match authority.initial(&expected).await.and_then(|issued| {
+                crate::accepted_plan::validate_initial(&graph, &expected, issued)
+            }) {
+                Ok(issued) => issued,
+                Err(reason) => return RunResult::failed(reason, t0.elapsed()),
+            }
+        } else {
+            plan(&graph, &sub, self.state.as_ref(), &plan_opts).await
+        };
+        if self.plan_authority.is_none() && the_plan.needs_confirmation() {
             match &opts.confirm {
                 Some(f) if f(&the_plan) => the_plan.confirm_rebuilds(),
                 _ => the_plan.decline_rebuilds(),
@@ -1290,16 +1368,30 @@ impl Engine {
         });
 
         let exec_opts = ExecutorOptions {
+            plan_authority: self.plan_authority.clone(),
+            // A row-filtered Main window may observe only its accepted rows. A global
+            // post-sync watermark is an optional progress measurement for this run.
+            report_global_watermarks: self.plan_authority.is_none()
+                || opts
+                    .sync
+                    .params
+                    .as_ref()
+                    .is_none_or(|params| params.is_empty()),
             workers: opts.workers.unwrap_or(self.config.workers).max(1),
             limits: self.config.limits.clone(),
             holder: self.config.holder.clone(),
             lease_ttl: self.config.lease_ttl,
             lease_wait: self.config.lease_wait,
             lease_poll: self.config.lease_poll,
-            chunk_pipelining: opts
-                .chunk_pipelining
-                .unwrap_or(self.config.chunk_pipelining),
-            run_id: opts.run_id.clone(),
+            chunk_pipelining: self.plan_authority.is_none()
+                && opts
+                    .chunk_pipelining
+                    .unwrap_or(self.config.chunk_pipelining),
+            run_id: opts.run_id.clone().or_else(|| {
+                self.plan_authority
+                    .as_ref()?
+                    .new_runtime_run_id(&self.config.home_instance)
+            }),
             plan: plan_opts.clone(),
             selection: serde_json::to_value(&selection).ok().map(|mut snapshot| {
                 snapshot["pipeline_definitions"] = serde_json::json!(opts.pipeline_definitions);

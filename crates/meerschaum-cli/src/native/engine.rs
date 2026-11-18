@@ -449,7 +449,11 @@ pub fn build(
         native.set_stream_kwargs(kwargs.clone());
         python.set_stream_kwargs(kwargs);
     }
-    Ok(Engine::new(registry, config).with_cadence(Arc::new(JobsCadence)))
+    session
+        .block_on(crate::native::graph_plan::attach(
+            Engine::new(registry, config).with_cadence(Arc::new(JobsCadence)),
+        ))
+        .map_err(|message| ActionError::new("PermissionError", message))
 }
 
 /// `parameters['schedule']` in continuous mode, parsed with the `-s` grammar of
@@ -573,6 +577,7 @@ mod tests {
             .with_source("sql:wiring", sql.clone());
         let defaults = Default::default();
         let env = SyncEnv {
+            delivery: None,
             registry: &native,
             defaults: &defaults,
             default_backtrack_minutes: 1440,

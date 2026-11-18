@@ -217,7 +217,7 @@ impl SqlConnector {
 
     /// `get_user_id(user)`: the user's `user_id` if registered.
     pub async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
-        if !self.ensure_instance_tables(true).await {
+        if !crate::driver::mysql_authority::active() && !self.ensure_instance_tables(true).await {
             return Ok(None);
         }
         let table = self.instance_table_name("mrsm_users");
@@ -225,10 +225,14 @@ impl SqlConnector {
             "SELECT {table}.user_id \nFROM {table} \nWHERE {table}.username = {}",
             placeholder(self.flavor, 1)
         );
-        let df = self
-            .read_params(&query, &[SqlParam::Text(user.username.clone())])
-            .await
-            .map_err(be)?;
+        let params = [SqlParam::Text(user.username.clone())];
+        let df = crate::driver::mysql_authority::approve(
+            &query,
+            &params,
+            self.read_params(&query, &params),
+        )
+        .await
+        .map_err(be)?;
         let docs = frame_docs(&df);
         // A username held by more than one row (an instance from before the unique key) names
         // none of them: no credential may pick one.
@@ -262,7 +266,9 @@ impl SqlConnector {
             "SELECT {table}.{column} \nFROM {table} \nWHERE {table}.user_id = {}",
             placeholder(self.flavor, 1)
         );
-        self.value_params(&query, &[id_param(&user_id)]).await
+        let params = [id_param(&user_id)];
+        crate::driver::mysql_authority::approve(&query, &params, self.value_params(&query, &params))
+            .await
     }
 
     /// `get_user_attributes(user)`.
@@ -306,10 +312,14 @@ impl SqlConnector {
             "SELECT {table}.username \nFROM {table} \nWHERE {table}.user_id = {}",
             placeholder(self.flavor, 1)
         );
-        Ok(self
-            .value_params(&query, &[id_param(user_id)])
-            .await?
-            .map(|v| Value::Str(v.to_string())))
+        let params = [id_param(user_id)];
+        Ok(crate::driver::mysql_authority::approve(
+            &query,
+            &params,
+            self.value_params(&query, &params),
+        )
+        .await?
+        .map(|v| Value::Str(v.to_string())))
     }
 
     /// [`InstanceConnector::register_first_user`]: one transaction on one connection (SQLite:

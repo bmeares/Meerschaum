@@ -95,9 +95,40 @@ pub struct TeamScope {
     /// use tmux). `None` in a record written before the field: taken as `true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugins_write: Option<bool>,
+    /// 5.1: the team lets its members install, edit and upload plugins, so its members' commands
+    /// may run as its sandboxed processes (team execution). Recorded for what reads the scopes
+    /// without the instance (`mrsm doctor`, the API server's start-up report).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub runs_code: bool,
+    /// A selected separate executor. Host workers and jobs must refuse this scope instead of
+    /// falling back to local execution; generated control connectors never carry credentials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor: Option<String>,
 }
 
 impl TeamScope {
+    /// Refuse host execution when selection or administrator policy requires a separate executor.
+    /// Malformed policy is an error, never an implicit opt-out.
+    pub fn check_host_execution(&self, config: &Config) -> Result<(), String> {
+        if self.executor.is_some() {
+            return Err(
+                "This team selects a separate executor; its code cannot run on the main API host."
+                    .into(),
+            );
+        }
+        let required = match config.get(&["api", "execution", "require_team_executor"]) {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(required)) => required,
+            Some(_) => return Err("api:execution:require_team_executor must be a boolean.".into()),
+        };
+        if required && !self.open && !self.deleted && self.plugins_write.unwrap_or(true) {
+            return Err(
+                "This server requires a separate executor for teams that install plugins.".into(),
+            );
+        }
+        Ok(())
+    }
+
     /// The scope of `team`, given the server's `meerschaum:connectors` section (for the
     /// connectors reserved for it).
     pub fn of(team: &Team, connectors: &Map) -> TeamScope {
@@ -115,6 +146,13 @@ impl TeamScope {
             deleted: false,
             open: false,
             plugins_write: Some(team.may_write_plugins()),
+            runs_code: team.may_write_plugins(),
+            executor: match team.execution() {
+                Ok(settings) => settings
+                    .connector_keys(team)
+                    .unwrap_or_else(|_| Some("invalid".into())),
+                Err(_) => Some("invalid".into()),
+            },
         }
     }
 
@@ -706,7 +744,9 @@ pub fn connector_variables(
         .collect()
 }
 
+pub mod api_execution;
 pub mod sandbox;
+pub mod source_namespace;
 
 mod environment;
 pub use environment::{

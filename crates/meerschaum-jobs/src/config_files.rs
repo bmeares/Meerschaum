@@ -282,10 +282,35 @@ pub fn externalize_team(
     config: &meerschaum_core::Config,
     scope: &meerschaum_core::team_scope::TeamScope,
 ) -> std::io::Result<JobEnvironment> {
+    externalize_team_with(dir, launching, job, config, scope, false)
+}
+
+/// Whether a job's properties mark it team execution (5.1,
+/// [`meerschaum_core::job_access::TEAM_EXECUTION_KEY`]): a command a member of a team that runs
+/// code started, which runs only in its team's sandbox.
+pub fn requires_team_execution(props: &meerschaum_core::value::Map) -> bool {
+    props
+        .get(meerschaum_core::job_access::TEAM_EXECUTION_KEY)
+        .is_some_and(meerschaum_core::value::Value::truthy)
+}
+
+/// [`externalize_team`]; with `required` (team execution) the sandbox is required
+/// ([`meerschaum_core::team_scope::sandbox::prepare_with`]).
+pub fn externalize_team_with(
+    dir: &Path,
+    launching: &[(String, String)],
+    job: &[(String, String)],
+    config: &meerschaum_core::Config,
+    scope: &meerschaum_core::team_scope::TeamScope,
+    required: bool,
+) -> std::io::Result<JobEnvironment> {
     use meerschaum_core::team_scope::{
         JOB_CONFIG_DIR, Passthrough, ScopeFiles, create_private_dir, fingerprint, team_config,
         team_env,
     };
+    scope
+        .check_host_execution(config)
+        .map_err(std::io::Error::other)?;
     let team = team_config(config, scope);
     let fingerprint = fingerprint(scope, &team);
     let files = ScopeFiles {
@@ -306,12 +331,13 @@ pub fn externalize_team(
     // job's command (`system.engine.python_team_sandbox`); in `require` mode on a system without
     // Landlock, the job does not start.
     use meerschaum_core::team_scope::sandbox;
-    if let Some(prepared) = sandbox::prepare(
+    if let Some(prepared) = sandbox::prepare_with(
         config,
         scope,
         &files,
         Some(dir),
         &dir.join(sandbox::JOB_SPEC_FILE),
+        required,
     )? {
         sandbox::apply_env(&mut set, &prepared);
     }
@@ -445,6 +471,27 @@ mod tests {
     }
 
     #[test]
+    fn a_separate_executor_never_externalizes_credentials_for_a_host_job() {
+        let root = tempfile::tempdir().unwrap();
+        let config =
+            meerschaum_core::Config::new(meerschaum_core::config::ConfigOptions::with_env(vec![(
+                "MRSM_ROOT_DIR".into(),
+                root.path().display().to_string(),
+            )]))
+            .unwrap();
+        let scope = meerschaum_core::team_scope::TeamScope {
+            team: "Remote".into(),
+            executor: Some("api:team-00000000000000000000000000000001".into()),
+            ..Default::default()
+        };
+        let directory = root.path().join("host-job-must-not-exist");
+        let error =
+            externalize_team_with(&directory, &[], &[], &config, &scope, false).unwrap_err();
+        assert!(error.to_string().contains("separate executor"));
+        assert!(!directory.exists());
+    }
+
+    #[test]
     fn a_team_job_follows_its_scope_for_good() {
         use meerschaum_core::team_scope::{TeamScope, write_scope_record};
         let root = tempfile::tempdir().unwrap();
@@ -529,6 +576,8 @@ mod tests {
 
     #[test]
     fn a_team_jobs_files_and_environment_hold_only_its_connectors() {
+        // This pure fixture prepares files for a native Rust host; it never starts Python.
+        let _ = meerschaum_core::self_exe::register_native_current_executable();
         use meerschaum_core::team_scope::{JOB_CONFIG_DIR, TEAM_SCOPE_VAR, TeamScope};
         let root = tempfile::tempdir().unwrap();
         let config_dir = root.path().join("config");

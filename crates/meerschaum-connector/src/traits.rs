@@ -370,9 +370,23 @@ pub trait Connector: Send + Sync {
         format!("{}:{}", self.connector_type(), self.label())
     }
 
+    /// A native description of the actual configured API client. Execution aliases and
+    /// request-authentication clients cannot expose their caller credentials as a service.
+    /// This description alone never authorizes a native self-API binding.
+    fn native_api_target(&self) -> Option<crate::api_target::NativeApiTarget> {
+        None
+    }
+
     /// `IS_THREAD_SAFE`: whether concurrent reads may share this connector.
     fn is_thread_safe(&self) -> bool {
         false
+    }
+
+    /// Refuse a pipe target reserved for this connector's own catalog or storage machinery.
+    /// This synchronous native policy is independent of administrator/protected-write bypasses.
+    /// Ordinary connectors have no additional reserved target families.
+    fn pipe_target_refusal(&self, _pipe: &Pipe) -> Option<String> {
+        None
     }
 
     /// `connector.protected`: whether the connector's attributes mark it protected
@@ -429,6 +443,19 @@ pub trait Connector: Send + Sync {
         )))
     }
 
+    /// Pair optional registered-source replacement only with a logical alias of the same
+    /// trusted Main and sealed credential provider. This value stays local to the caller.
+    fn source_replace_transport(&self) -> Option<crate::source_replace::SourceReplaceTransport> {
+        None
+    }
+
+    /// Refuse a replacing fetch before the engine registers or writes its destination.
+    /// Bounded paged sources may require atomic staging that this connector cannot provide.
+    /// Ordinary connectors retain the existing replacement flow.
+    fn fetch_replace_refusal(&self) -> Option<&'static str> {
+        None
+    }
+
     /// [`Connector::fetch`] for sources whose result is not always one frame: Python plugins
     /// and custom connectors, whose `fetch()` may return a generator of chunks, the results of
     /// the `chunk_hook` calls it made, `True` or `None`. The default returns `Ok(None)`: the
@@ -478,6 +505,12 @@ pub trait Connector: Send + Sync {
 /// produces it).
 #[async_trait]
 pub trait ChunkStream: Send {
+    /// Whether the engine may collect the complete stream in memory for replacement.
+    /// A bounded source can refuse before its first chunk is requested.
+    fn collection_refusal(&self) -> Option<&'static str> {
+        None
+    }
+
     /// The next chunk, or `None` when the sequence has ended. A source that fails while
     /// producing chunks returns `Err` (v4: the exception propagates out of the generator).
     async fn next_chunk(
@@ -518,6 +551,52 @@ pub struct ChunkedFetch {
 /// atop pipes (`meerschaum.connectors.InstanceConnector`).
 #[async_trait]
 pub trait InstanceConnector: Connector {
+    /// Native row-window writes are an explicit host capability, never inferred from
+    /// generic SQL read/write support or an API label.
+    fn supports_windowed_writes(&self) -> bool {
+        false
+    }
+    /// Read-only native preflight before inference/registration/DDL.
+    async fn validate_windowed_frame(
+        &self,
+        _pipe: &Pipe,
+        _frame: &Frame,
+        _options: &SyncOptions,
+        _window: &crate::mutation::DataWindow,
+    ) -> ConnectorResult<()> {
+        Err(ConnectorError::NotImplemented(
+            "This connector has no proven native row-window adapter.".into(),
+        ))
+    }
+    /// Verify that this destination can write through the captured Main batch protocol.
+    fn require_node_delivery(&self, _pipe: &Pipe) -> ConnectorResult<()> {
+        Err(ConnectorError::Invalid(
+            "The destination cannot submit a native graph batch to Main.".into(),
+        ))
+    }
+
+    /// An execution-only transport may delegate existing-row filtering to its trusted
+    /// server, without allowing the worker to read stored data. The server must still
+    /// honor SyncOptions.check_existing. Ledger observers then receive a conservative
+    /// superset of changed input cells; ordinary instances retain exact local filtering.
+    fn server_filters_existing_rows(&self) -> bool {
+        false
+    }
+
+    /// Prepare a bounded, canonical registered-source replacement without destination
+    /// writes. Ordinary instances decline this optional capability. A supported instance
+    /// must pair the source transport exactly and reauthorize both resources on commit.
+    async fn prepare_registered_source_replace(
+        &self,
+        pipe: &Pipe,
+        source: &crate::source_replace::SourceReplaceTransport,
+        query: &DataQuery,
+        options: &SyncOptions,
+    ) -> ConnectorResult<Option<Box<dyn crate::source_replace::PreparedSourceReplace>>> {
+        let _ = (pipe, source, query, options);
+        Ok(None)
+    }
+
     // ----------------------------------------------------------------------------------------
     // Pipes
     // ----------------------------------------------------------------------------------------
@@ -652,6 +731,11 @@ pub trait InstanceConnector: Connector {
     ) -> ConnectorResult<Option<(Vec<crate::sync_metrics::MetricAggregate>, bool)>> {
         let _ = (query, begin_micros, bucket_width_micros, max_groups);
         Ok(None)
+    }
+
+    /// Whether the instance offers an operator-bound, typed registered source read.
+    fn supports_registered_source_table(&self) -> bool {
+        false
     }
 
     /// `{{ Pipe(...) }}` without an attribute chain: the table a template for this pipe expands to

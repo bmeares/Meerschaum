@@ -2276,6 +2276,10 @@ pub(crate) fn metadata(file: &Path) -> Result<SingleFileMetadata> {
 
 /// Optional Cargo dependencies in a Rust doc-comment fence; never infer dependencies from use.
 fn dependencies(parsed: &syn::File, file: &Path) -> Result<toml::Table> {
+    dependencies_for(parsed, file, false)
+}
+
+fn dependencies_for(parsed: &syn::File, file: &Path, confined: bool) -> Result<toml::Table> {
     let mut block = None;
     let mut current: Option<String> = None;
     let doc_lines: Vec<String> = parsed
@@ -2342,6 +2346,24 @@ fn dependencies(parsed: &syn::File, file: &Path) -> Result<toml::Table> {
             )));
         }
         if let Some(table) = spec.as_table_mut() {
+            if confined
+                && [
+                    "path",
+                    "git",
+                    "branch",
+                    "tag",
+                    "rev",
+                    "registry",
+                    "index",
+                    "workspace",
+                ]
+                .iter()
+                .any(|key| table.contains_key(*key))
+            {
+                return Err(error(format!(
+                    "confined dependency '{name}' must use the host's pinned offline registry inputs"
+                )));
+            }
             if table.contains_key("workspace")
                 || table.get("optional").and_then(toml::Value::as_bool) == Some(true)
             {
@@ -2370,6 +2392,15 @@ fn dependencies(parsed: &syn::File, file: &Path) -> Result<toml::Table> {
 /// Generate the crate for `file` into `directory` and return what the file declares about
 /// itself (its version is the plugin's version).
 pub(crate) fn prepare(file: &Path, name: &str, directory: &Path) -> Result<SingleFileMetadata> {
+    prepare_with_compiler(file, name, directory, None)
+}
+
+pub(crate) fn prepare_with_compiler(
+    file: &Path,
+    name: &str,
+    directory: &Path,
+    compiler: Option<&dyn crate::source::compiler::SourceCompiler>,
+) -> Result<SingleFileMetadata> {
     let source = std::fs::read_to_string(file).map_err(error)?;
     let parsed = syn::parse_file(&source)
         .map_err(|e| diagnostic(file, e.span(), format!("invalid Rust plugin: {e}")))?;
@@ -2615,7 +2646,11 @@ strip = "debuginfo"
 "#
     ))
     .map_err(error)?;
-    let mut deps = dependencies(&parsed, file)?;
+    let mut deps = if compiler.is_some() {
+        dependencies_for(&parsed, file, true)?
+    } else {
+        dependencies(&parsed, file)?
+    };
     // Users may enable Serde features, but the runtime's JSON semantics remain required.
     if let Some(json) = deps.get_mut("serde_json") {
         let mut spec = if let Some(version) = json.as_str() {
@@ -2637,6 +2672,9 @@ strip = "debuginfo"
         *json = toml::Value::Table(spec);
     }
     cargo["dependencies"].as_table_mut().unwrap().extend(deps);
+    let lock = compiler
+        .map(|compiler| compiler.lockfile(name).map_err(error))
+        .transpose()?;
     std::fs::create_dir_all(directory).map_err(error)?;
     for (filename, contents) in [
         (
@@ -2665,6 +2703,12 @@ strip = "debuginfo"
         let path = directory.join(filename);
         if std::fs::read_to_string(&path).ok().as_ref() != Some(&contents) {
             std::fs::write(path, contents).map_err(error)?;
+        }
+    }
+    if let Some(lock) = lock {
+        let path = directory.join("Cargo.lock");
+        if std::fs::read_to_string(&path).ok().as_ref() != Some(&lock) {
+            std::fs::write(path, lock).map_err(error)?;
         }
     }
     Ok(declared)

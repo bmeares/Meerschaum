@@ -87,6 +87,7 @@ impl Drop for Slot {
 /// Who a stream counts against: the user, the token, or the session of a `--no-auth` server.
 fn slot_key(principal: Option<&auth::Principal>, session_id: Option<&str>) -> String {
     match principal {
+        Some(meerschaum_server::auth::Principal::Execution(identity)) => identity.owner_key(),
         Some(auth::Principal::User(user)) => format!("user:{}", user.username),
         Some(auth::Principal::Token(token)) => match token.id {
             Some(id) => format!("token:{id}"),
@@ -146,7 +147,12 @@ pub(crate) async fn logs(
     // A job's output is its team's (a console run: its creator's, its team's managers'), and the
     // administrators' (the job metadata routes apply the same rule); anyone else sees it as
     // absent.
-    let meta = state.server.jobs.get(&name).await;
+    let meta = match state.server.jobs.try_get(&name).await {
+        Ok(meta) => meta,
+        Err(error) => {
+            return meerschaum_server::error::ApiError::unavailable(error).into_response();
+        }
+    };
     if !meerschaum_server::routes::jobs::can_see(&access, &name, meta.as_ref()) {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -165,7 +171,12 @@ pub(crate) async fn logs(
             return response;
         }
     };
-    let Some(monitor) = state.server.jobs.monitor_logs(&name).await else {
+    let Some(monitor) = meerschaum_server::executor::context::scope(
+        Some(std::sync::Arc::new(access)),
+        state.server.jobs.monitor_logs(&name),
+    )
+    .await
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let mut ticker =
@@ -173,8 +184,17 @@ pub(crate) async fn logs(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let drain = state.server.lifecycle.signal();
     let stream = futures_util::stream::unfold(
-        (monitor, state, session_id, false, ticker, slot),
-        |(mut monitor, state, id, done, mut ticker, slot)| async move {
+        (
+            monitor,
+            state,
+            session_id,
+            auth_headers,
+            name,
+            false,
+            ticker,
+            slot,
+        ),
+        |(mut monitor, state, id, headers, name, done, mut ticker, slot)| async move {
             if done {
                 return None;
             }
@@ -193,6 +213,9 @@ pub(crate) async fn logs(
                         if session_ended(&state, id.as_deref()).await {
                             return None;
                         }
+                        let caller = meerschaum_server::access::require_fresh(
+                            &state.server, &headers, &["jobs:read", "logs:read"]).await.ok()?;
+                        if !meerschaum_server::routes::jobs::may_see(&state.server, &caller, &name).await { return None; }
                     }
                 }
             };
@@ -208,7 +231,7 @@ pub(crate) async fn logs(
             };
             Some((
                 Ok::<_, Infallible>(event),
-                (monitor, state, id, done, ticker, slot),
+                (monitor, state, id, headers, name, done, ticker, slot),
             ))
         },
     );

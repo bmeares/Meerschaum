@@ -48,6 +48,7 @@ futures-util = { version = "0.3", optional = true, default-features = false, fea
 aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"], optional = true }
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { workspace = true }
 base64 = "0.23"
 # The self-signed `wss://` server of `tests/wss.rs`.

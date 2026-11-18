@@ -40,6 +40,7 @@ pub mod config;
 pub mod connect;
 pub mod debug;
 pub mod dtypes;
+pub mod execution;
 pub mod holder;
 pub mod job_access;
 pub mod pipe;

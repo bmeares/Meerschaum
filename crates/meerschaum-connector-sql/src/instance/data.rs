@@ -704,6 +704,36 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        if crate::driver::mysql_authority::active() {
+            let teams = meerschaum_connector::teams::teams_pipe(&self.keys());
+            if pipe.pipe_ref() != teams.pipe_ref()
+                || pipe.raw_parameters() != teams.raw_parameters()
+                || query != &DataQuery::default()
+            {
+                return Err(be(crate::driver::mysql_authority::refused()));
+            }
+            let table = self.instance_table_name("mrsm_teams");
+            let sql = format!("SELECT team_id, name, members, attributes FROM {table}");
+            let frame =
+                crate::driver::mysql_authority::approve(&sql, &[], self.driver().read_frame(&sql))
+                    .await
+                    .map_err(be)?;
+            let dtypes: IndexMap<String, String> = teams
+                .dtypes()
+                .into_iter()
+                .map(|(key, value)| (key, value.py_str()))
+                .collect();
+            let context = PipeDtypesContext {
+                dtypes: dtypes.clone(),
+                explicit_dtypes: dtypes,
+                enforce: true,
+                tz_aware: true,
+                mixed_numerics: false,
+            };
+            return pipe_enforce_dtypes(PipeInput::Frame(frame), &context)
+                .map(Some)
+                .map_err(be);
+        }
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {

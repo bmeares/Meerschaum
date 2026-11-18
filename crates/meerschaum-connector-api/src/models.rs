@@ -11,6 +11,25 @@ use meerschaum_core::{Map, Value};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Rotating execution bearer file; the supervisor replaces it atomically in private storage.
+/// This model is available without the HTTP client feature.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionCredential {
+    /// A short-lived bearer; never a reusable source password or signing key.
+    pub token: String,
+    /// Unix seconds; clients refuse a stale supervisor's file without trying password login.
+    pub expires_at: i64,
+}
+
+impl std::fmt::Debug for ExecutionCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutionCredential")
+            .field("expires_at", &self.expires_at)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The scope every route group requires (`ScopedAuth([...])` in `meerschaum/api/routes`).
 pub mod scopes {
     /// Read pipes' parameters and the contents of target tables.

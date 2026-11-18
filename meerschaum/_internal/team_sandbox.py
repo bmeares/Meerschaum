@@ -164,3 +164,28 @@ def report():
     """This process's sandbox report (`None` when it was not started under one)."""
     import sys
     return getattr(sys, '_mrsm_team_sandbox', None)
+
+
+def has_required_socket_boundary():
+    """Recognize the socket and signal evidence from the native worker report."""
+    active = report()
+    if (
+        not isinstance(active, dict)
+        or not active.get('enforced')
+        or active.get('canary') != 'denied'
+        or type(active.get('abi')) is not int
+        or active['abi'] < 6
+    ):
+        return False
+    level = active.get('level')
+    mechanism = active.get('unix_sockets', '')
+    if level == 'filesystem and sockets' and mechanism in ('', 'landlock'):
+        return True
+    features = active.get('features')
+    return (
+        level == 'filesystem only'
+        and mechanism == 'seccomp'
+        and active.get('socket_probe') == 'denied'
+        and isinstance(features, list)
+        and 'scope_signal' in features
+    )

@@ -18,7 +18,8 @@ use meerschaum_core::pyfmt::{JsonStyle, json_dumps};
 use super::protocol::{PARSE_ERROR, error, map_of, s};
 use super::registry::{Prompt, Resource, Tool, builtin};
 use super::{Caller, McpServer};
-use crate::auth::current_scopes;
+use crate::access::Access;
+use crate::executor::plugin_caller::RequestSource;
 use crate::state::AppState;
 
 /// The `/mcp` endpoint (`STATIC_CONFIG['api']['endpoints']['mcp']`).
@@ -42,22 +43,45 @@ pub fn routes(app: Router<AppState>, server: Arc<McpServer>) -> Router<AppState>
     )
 }
 
-async fn caller(state: &AppState, headers: &HeaderMap) -> Result<Caller, Box<Response>> {
-    let (principal, scopes) = current_scopes(state, headers)
-        .await
-        .map_err(|e| Box::new(e.into_response()))?;
-    let mut caller = Caller::api(scopes, principal);
-    // A walled-off caller (the identity is cached) sees no plugin entries.
-    if !state.config.no_auth {
-        let access = crate::access::resolve(state, headers)
-            .await
-            .map_err(|e| Box::new(e.into_response()))?;
-        caller.plugins_hidden = access.principal.is_isolated();
-        if !access.is_admin() {
-            caller.team_principal = Some(access.principal);
-        }
+struct HttpCaller {
+    access: Arc<Access>,
+    source: Option<Arc<RequestSource>>,
+}
+fn projected_caller(state: &AppState, access: &Access) -> Caller {
+    let mut caller = Caller::api(access.scopes(), access.auth.clone());
+    caller.plugins_hidden = crate::routes::extensions::requires_confined(state, access);
+    if !access.full_admin() {
+        caller.team_principal = Some(access.principal.clone());
     }
-    Ok(caller)
+    caller
+}
+impl HttpCaller {
+    async fn fresh(
+        &self,
+        state: &AppState,
+    ) -> Result<(Caller, Arc<Access>), crate::error::ApiError> {
+        let access = match &self.source {
+            Some(source) => source.refresh(state, &[]).await?,
+            None => self.access.clone(),
+        };
+        Ok((projected_caller(state, &access), access))
+    }
+}
+async fn caller(state: &AppState, headers: &HeaderMap) -> Result<HttpCaller, Box<Response>> {
+    let source = if state.config.no_auth {
+        None
+    } else {
+        Some(Arc::new(
+            RequestSource::resolve(state, headers, &[])
+                .await
+                .map_err(|error| Box::new(error.into_response()))?,
+        ))
+    };
+    let access = source
+        .as_ref()
+        .map(|source| source.access())
+        .unwrap_or_else(|| Arc::new(Access::everything()));
+    Ok(HttpCaller { access, source })
 }
 
 async fn post_mcp(
@@ -66,7 +90,7 @@ async fn post_mcp(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
-    let caller = match caller(&state, &headers).await {
+    let original = match caller(&state, &headers).await {
         Ok(c) => c,
         Err(r) => return *r,
     };
@@ -81,10 +105,40 @@ async fn post_mcp(
             &error(Value::Null, PARSE_ERROR, "Parse error"),
         );
     };
-    match server.handle_payload(&state, payload, &caller).await {
-        // Notifications get no body.
+    let (caller, _) = match original.fresh(&state).await {
+        Ok(fresh) => fresh,
+        Err(error) => return error.into_response(),
+    };
+    let (server, caller, catalog) =
+        match super::extensions::scoped(&state, server, caller, original.source.clone()).await {
+            Ok(scoped) => scoped,
+            Err(error) => return error.into_response(),
+        };
+    let (mut fresh, access) = match original.fresh(&state).await {
+        Ok(fresh) => fresh,
+        Err(error) => return error.into_response(),
+    };
+    fresh.plugins_hidden = caller.plugins_hidden;
+    let result = crate::executor::context::request_headers_scope(
+        headers,
+        crate::executor::context::scope(
+            Some(access),
+            Box::pin(server.handle_payload(&state, payload, &fresh)),
+        ),
+    )
+    .await;
+    let (_, current) = match original.fresh(&state).await {
+        Ok(fresh) => fresh,
+        Err(error) => return error.into_response(),
+    };
+    if let Some(catalog) = catalog
+        && let Err(error) = crate::routes::extensions::confirm_catalog_source(&catalog, &current)
+    {
+        return error.into_response();
+    }
+    match result {
         None => StatusCode::ACCEPTED.into_response(),
-        Some(r) => json(StatusCode::OK, &r),
+        Some(result) => json(StatusCode::OK, &result),
     }
 }
 
@@ -93,10 +147,19 @@ async fn get_mcp(
     Extension(server): Extension<Arc<McpServer>>,
     headers: HeaderMap,
 ) -> Response {
-    let caller = match caller(&state, &headers).await {
+    let original = match caller(&state, &headers).await {
         Ok(c) => c,
         Err(r) => return *r,
     };
+    let (caller, _) = match original.fresh(&state).await {
+        Ok(fresh) => fresh,
+        Err(error) => return error.into_response(),
+    };
+    let (server, caller, catalog) =
+        match super::extensions::scoped(&state, server, caller, original.source.clone()).await {
+            Ok(scoped) => scoped,
+            Err(error) => return error.into_response(),
+        };
     let tools: Vec<Value> = server
         .visible_tools(&state, &caller)
         .await
@@ -115,6 +178,15 @@ async fn get_mcp(
         .iter()
         .map(Prompt::to_dict)
         .collect();
+    let (_, current) = match original.fresh(&state).await {
+        Ok(fresh) => fresh,
+        Err(error) => return error.into_response(),
+    };
+    if let Some(catalog) = catalog
+        && let Err(error) = crate::routes::extensions::confirm_catalog_source(&catalog, &current)
+    {
+        return error.into_response();
+    }
     let b = builtin();
     json(
         StatusCode::OK,

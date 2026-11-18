@@ -66,6 +66,16 @@ impl Connector for SqlConnector {
         SqlConnector::is_thread_safe(self)
     }
 
+    fn pipe_target_refusal(&self, pipe: &Pipe) -> Option<String> {
+        if self.flavor != crate::Flavor::Geopackage {
+            return None;
+        }
+        let resolved = self.sql_pipe(pipe).ok()?;
+        super::geopackage::is_system_target(&resolved.target).then(|| {
+            "A pipe cannot target GeoPackage catalog or spatial-index storage tables.".into()
+        })
+    }
+
     fn is_protected(&self) -> bool {
         SqlConnector::is_protected(self)
     }
@@ -116,6 +126,26 @@ fn fetch_args(query: &DataQuery) -> FetchArgs {
 
 #[async_trait]
 impl InstanceConnector for SqlConnector {
+    fn supports_windowed_writes(&self) -> bool {
+        matches!(
+            self.flavor(),
+            crate::Flavor::Sqlite | crate::Flavor::Mysql | crate::Flavor::Mariadb
+        )
+    }
+    async fn validate_windowed_frame(
+        &self,
+        pipe: &Pipe,
+        frame: &Frame,
+        options: &SyncOptions,
+        window: &meerschaum_connector::mutation::DataWindow,
+    ) -> ConnectorResult<()> {
+        if matches!(self.flavor(), crate::Flavor::Mysql | crate::Flavor::Mariadb) {
+            self.innodb_append_plan(pipe, frame, options, window)?;
+            return Ok(());
+        }
+        self.preflight_window_frame(pipe, frame, options, window)
+            .await
+    }
     async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         if let Err(e) = self.require_schema().await {
             return SuccessTuple::fail(e.to_string());
@@ -164,6 +194,10 @@ impl InstanceConnector for SqlConnector {
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
         self.require_schema().await?;
         SqlConnector::fetch_pipes_keys(self, query).await
+    }
+
+    fn supports_registered_source_table(&self) -> bool {
+        self.flavor == crate::Flavor::Postgresql
     }
 
     fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {
@@ -278,6 +312,9 @@ impl InstanceConnector for SqlConnector {
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
         self.require_schema().await?;
+        if crate::driver::mysql_authority::active() {
+            return SqlConnector::get_pipe_data(self, pipe, query).await;
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_data(self, pipe, query).await
     }

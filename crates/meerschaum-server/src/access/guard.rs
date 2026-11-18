@@ -164,6 +164,13 @@ pub fn check_source_connector(
     access: &Access,
     connector_keys: &str,
 ) -> Result<(), ApiError> {
+    if let Some(name) = connector_keys.strip_prefix("plugin:")
+        && !crate::executor::source_ceiling::permits_name(access, name)
+    {
+        return Err(forbidden(
+            "This source exceeds the launch's immutable plugin ceiling.",
+        ));
+    }
     if access.no_auth || access.is_admin() {
         return Ok(());
     }
@@ -238,6 +245,9 @@ pub fn check_pipe_target(
     pipe: &Pipe,
     hidden: &sql_guard::HiddenTables,
 ) -> Result<(), ApiError> {
+    if let Some(reason) = conn.pipe_target_refusal(pipe) {
+        return Err(forbidden(reason));
+    }
     let target = pipe
         .target(None)
         .map_err(|e| ApiError::new(400, e.to_string()))?;

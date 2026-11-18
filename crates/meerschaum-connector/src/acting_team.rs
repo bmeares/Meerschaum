@@ -42,6 +42,7 @@ impl ActingTeam {
             plugins: scope.plugins.iter().cloned().collect(),
             plugins_write: false,
             instance: scope.instance.clone(),
+            runs_code: false,
         });
         ActingTeam { scope, member }
     }

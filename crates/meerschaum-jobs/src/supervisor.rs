@@ -39,9 +39,50 @@ use meerschaum_core::value::Value;
 use crate::config::Seconds;
 use crate::startup::StartupPolicy;
 
+#[path = "supervisor_deadline.rs"]
+mod deadline;
+#[path = "supervisor_owner.rs"]
+mod owner;
+pub use deadline::ComputeDeadline;
+#[path = "supervisor_exec.rs"]
+mod exec;
+pub use exec::seal_native_command;
+pub use owner::{
+    FactoryPublication, JobGeneration, LifecycleOwner, MetadataResult, record_terminal_child,
+    terminal_child_pid,
+};
+pub use owner::{
+    cancel_unlaunched_terminal, claim_terminal_launch, complete_terminal_launch,
+    prepare_terminal_launch, record_terminal_launch_child, stop_terminal_launches,
+    terminal_launches_inactive,
+};
+
 /// The first argument that turns a host binary into the supervisor
 /// (see [`run_if_requested`]).
 pub const SUPERVISOR_ARG: &str = "__mrsm_job_supervisor__";
+
+/// Only an exact native lifecycle entry selected by the host may precede command confinement.
+/// Client/persisted env never supplies this reserved marker; a confined descendant forging it
+/// still inherits its existing kernel restrictions and cannot regain the host's privileges.
+pub fn trusted_launch(arguments: &[String]) -> bool {
+    if meerschaum_core::self_exe::native_executable().is_none() {
+        return false;
+    }
+    match std::env::var(meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR).as_deref() {
+        Ok("supervisor") => arguments.first().map(String::as_str) == Some(SUPERVISOR_ARG),
+        Ok("systemd") => {
+            arguments.first().map(String::as_str) != Some(SUPERVISOR_ARG)
+                && std::env::var_os(crate::systemd_job::CHILD_ENV).is_none()
+                && std::env::var_os(
+                    &meerschaum_core::static_config::static_config()
+                        .environment
+                        .systemd_log_path,
+                )
+                .is_some()
+        }
+        _ => false,
+    }
+}
 
 /// The environment variable through which a worker may report its result.
 pub const RESULT_PATH_ENV: &str = "MRSM_JOB_RESULT_PATH";
@@ -162,9 +203,49 @@ impl Launcher {
     }
 }
 
+/// Result bounds are selected by the trusted host, never a worker file or persisted env.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResultProtocol {
+    /// Legacy and ordinary jobs retain the two MiB encoded-file limit.
+    #[default]
+    Ordinary,
+    /// Credential-free discovery, selected only by its signed native context.
+    Metadata,
+    /// Exact Main-created API connector registration, selected by its sealed descriptor.
+    Registration,
+    /// Exact Main-created extension, selected by its sealed private API descriptor.
+    Extension,
+}
+impl ResultProtocol {
+    /// Maximum encoded tuple file, accounting for JSON escapes without raising decoded caps.
+    pub const fn envelope_limit(self) -> usize {
+        match self {
+            Self::Ordinary => 2 * 1024 * 1024,
+            // A JSON escape uses at most six ASCII bytes for one input byte. This also
+            // covers ensure_ascii surrogate pairs, quote-heavy documents and the tuple.
+            Self::Metadata | Self::Extension => {
+                meerschaum_core::team_scope::api_execution::MAX_METADATA_BYTES * 6 + 128
+            }
+            Self::Registration => {
+                meerschaum_core::team_scope::api_execution::MAX_REGISTRATION_BYTES * 6 + 128
+            }
+        }
+    }
+    fn as_arg(self) -> &'static str {
+        match self {
+            Self::Ordinary => "ordinary",
+            Self::Metadata => "metadata",
+            Self::Registration => "registration",
+            Self::Extension => "extension",
+        }
+    }
+}
+
 /// Everything the supervisor needs, resolved by the launching process.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SupervisorOptions {
+    /// Immutable host-selected Metadata compute lifetime. Renewal never replaces it.
+    pub compute_deadline: Option<ComputeDeadline>,
     /// The job's name.
     pub daemon_id: String,
     /// `DAEMON_RESOURCES_PATH`.
@@ -198,9 +279,27 @@ pub struct SupervisorOptions {
     /// The launch this supervisor runs (`properties['process']['launch_id']`, see
     /// [`launch_state`]; `None`: an older launcher, nothing to compare).
     pub launch_id: Option<String>,
+    /// Host-selected control API process. Its death stops this detached launch. Never read
+    /// from job properties or environment; legacy standalone jobs have no lifecycle owner.
+    pub lifecycle_owner: Option<LifecycleOwner>,
+    /// Exact sealed API generation selected by the trusted runtime resolver.
+    pub job_generation: Option<JobGeneration>,
+    /// Signed-context-selected Metadata jobs may carry a larger encoded tuple only.
+    pub result_protocol: ResultProtocol,
 }
 
 impl SupervisorOptions {
+    fn validate_compute_profile(&self) -> Result<(), String> {
+        if self.compute_deadline.is_some() != (self.result_protocol == ResultProtocol::Metadata)
+            || (self.compute_deadline.is_some()
+                && (self.lifecycle_owner.is_none() || self.job_generation.is_none()))
+        {
+            return Err(
+                "A compute deadline requires the host-selected sealed Metadata profile.".into(),
+            );
+        }
+        Ok(())
+    }
     /// Encode as supervisor arguments.
     pub fn to_args(&self) -> Vec<String> {
         let b = |v: bool| if v { "1" } else { "0" }.to_string();
@@ -241,6 +340,20 @@ impl SupervisorOptions {
             args.push("--launch-id".into());
             args.push(launch_id.clone());
         }
+        if let Some(owner) = &self.lifecycle_owner {
+            args.push("--_mrsm-lifecycle-owner".into());
+            args.push(owner.to_arg());
+        }
+        if let Some(deadline) = self.compute_deadline {
+            args.push("--_mrsm-compute-deadline".into());
+            args.push(deadline.expires_at.to_string());
+        }
+        if let Some(generation) = &self.job_generation {
+            args.push("--_mrsm-job-generation".into());
+            args.push(serde_json::to_string(generation).expect("fixed generation binding"));
+        }
+        args.push("--_mrsm-result-protocol".into());
+        args.push(self.result_protocol.as_arg().into());
         args.push("--".into());
         args.extend(self.command.iter().cloned());
         args
@@ -250,6 +363,7 @@ impl SupervisorOptions {
     pub fn from_args<I: IntoIterator<Item = String>>(args: I) -> Result<SupervisorOptions, String> {
         let mut it = args.into_iter().peekable();
         let mut opts = SupervisorOptions {
+            compute_deadline: None,
             daemon_id: String::new(),
             jobs_dir: PathBuf::new(),
             log_path: PathBuf::new(),
@@ -266,6 +380,9 @@ impl SupervisorOptions {
             command: Vec::new(),
             startup: None,
             launch_id: None,
+            lifecycle_owner: None,
+            job_generation: None,
+            result_protocol: ResultProtocol::Ordinary,
         };
         while let Some(arg) = it.next() {
             if arg == SUPERVISOR_ARG || arg.starts_with("daemon_id=") {
@@ -301,11 +418,53 @@ impl SupervisorOptions {
                 "--cwd" => opts.cwd = value.into(),
                 "--startup" => opts.startup = Some(StartupPolicy::from_arg(&value)?),
                 "--launch-id" => opts.launch_id = Some(value),
+                "--_mrsm-lifecycle-owner" => {
+                    opts.lifecycle_owner = Some(LifecycleOwner::from_arg(&value)?)
+                }
+                "--_mrsm-compute-deadline" => {
+                    opts.compute_deadline = Some(ComputeDeadline {
+                        expires_at: value
+                            .parse()
+                            .map_err(|_| "Invalid host compute deadline.")?,
+                    });
+                }
+                "--_mrsm-result-protocol" => {
+                    opts.result_protocol = match value.as_str() {
+                        "ordinary" => ResultProtocol::Ordinary,
+                        "metadata" => ResultProtocol::Metadata,
+                        "registration" => ResultProtocol::Registration,
+                        "extension" => ResultProtocol::Extension,
+                        _ => return Err("Invalid host result protocol.".into()),
+                    };
+                }
+                "--_mrsm-job-generation" => {
+                    if value.len() > 8192 {
+                        return Err("Invalid job generation binding.".into());
+                    }
+                    opts.job_generation = Some(
+                        serde_json::from_str(&value)
+                            .map_err(|_| "Invalid job generation binding.")?,
+                    );
+                }
                 other => return Err(format!("Unknown supervisor argument '{other}'.")),
             }
         }
+        if opts.result_protocol != ResultProtocol::Ordinary
+            && (opts.job_generation.is_none() || opts.lifecycle_owner.is_none())
+        {
+            return Err("Typed results require a host-owned sealed native generation.".into());
+        }
+        opts.validate_compute_profile()?;
         if opts.daemon_id.is_empty() || opts.command.is_empty() {
             return Err("The supervisor needs a daemon ID and a command.".into());
+        }
+        if let Some(generation) = &opts.job_generation {
+            generation
+                .validate(&opts.daemon_id)
+                .map_err(|_| "Invalid job generation binding.")?;
+            if opts.lifecycle_owner.is_none() {
+                return Err("An API generation needs its native lifetime owner.".into());
+            }
         }
         Ok(opts)
     }
@@ -507,6 +666,102 @@ mod imp {
         let _ = child.wait();
     }
 
+    /// Owner death never resumes a paused command. The direct Child stays unreaped while
+    /// signalled, so its PID cannot be adopted by an unrelated process between these calls.
+    fn stop_owned_worker(child: &mut std::process::Child) {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        let pid = child.id() as i32;
+
+        if crate::process::proc_state(pid) != crate::process::ProcState::Stopped {
+            let _ = nix::sys::signal::kill(Pid::from_raw(pid), Signal::SIGTERM);
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while std::time::Instant::now() < deadline {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    struct OwnerWatch {
+        done: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+    impl OwnerWatch {
+        fn start(
+            owner: Option<super::LifecycleOwner>,
+            deadline: Option<std::time::Instant>,
+            stopping: Arc<AtomicBool>,
+            dead: Arc<AtomicBool>,
+            expired: Arc<AtomicBool>,
+        ) -> Option<Self> {
+            if owner.is_none() && deadline.is_none() {
+                return None;
+            }
+            let done = Arc::new(AtomicBool::new(false));
+            let finished = done.clone();
+            let thread = std::thread::spawn(move || {
+                while !finished.load(Ordering::SeqCst) {
+                    if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                        expired.store(true, Ordering::SeqCst);
+                        dead.store(true, Ordering::SeqCst);
+                        stopping.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                    if owner.as_ref().is_some_and(|owner| !owner.alive()) {
+                        dead.store(true, Ordering::SeqCst);
+                        stopping.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            });
+            Some(Self {
+                done,
+                thread: Some(thread),
+            })
+        }
+    }
+    impl Drop for OwnerWatch {
+        fn drop(&mut self) {
+            self.done.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    const OWNER_ENDED: &str =
+        "The executor runtime owner ended; explicitly start the job to run it again.";
+    const COMPUTE_ENDED: &str = "Credential-free metadata reached its immutable compute deadline. Trigger a new admitted operation to discover again.";
+
+    fn mark_owner_stopped(opts: &SupervisorOptions, paths: &DaemonPaths) {
+        // Never recreate a deleted directory or stop a superseding launch. Opening the file
+        // directly avoids write_stop_file's legacy create-parent behavior.
+        if launch_state(&paths.dir, &paths.properties, opts.launch_id.as_deref())
+            != LaunchState::Current
+        {
+            return;
+        }
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&paths.stop)
+        {
+            let data = serde_json::json!({
+                "action": "kill",
+                "stop_time": crate::pytime::aware_isoformat(crate::pytime::utcnow()),
+            });
+            let _ = file.write_all(data.to_string().as_bytes());
+        }
+    }
+
     fn set_cloexec(fd: &OwnedFd) {
         use nix::fcntl::{FcntlArg, FdFlag, fcntl};
         let _ = fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC));
@@ -542,16 +797,42 @@ mod imp {
         }
     }
 
-    fn read_result_file(path: &std::path::Path) -> Option<(bool, String)> {
-        let text = fs::read_to_string(path).ok()?;
-        let _ = fs::remove_file(path);
-        match Value::from_json_str(&text).ok()? {
-            Value::List(items) if items.len() == 2 => {
-                let success = items[0].as_bool()?;
-                let msg = items[1].as_str().map(str::to_string).unwrap_or_default();
-                Some((success, msg))
+    #[cfg(test)]
+    pub(super) fn read_result_file(path: &std::path::Path) -> Option<(bool, String)> {
+        read_result_file_with_protocol(path, super::ResultProtocol::Ordinary)
+    }
+    pub(super) fn read_result_file_with_protocol(
+        path: &std::path::Path,
+        protocol: super::ResultProtocol,
+    ) -> Option<(bool, String)> {
+        let refused = || {
+            Some((
+                false,
+                "The job result file is invalid or unavailable.".into(),
+            ))
+        };
+        let bytes = match crate::untrusted_file::read_regular(path, protocol.envelope_limit(), true)
+        {
+            Ok(None) => return None,
+            Ok(Some(bytes)) => bytes,
+            Err(_) => return refused(),
+        };
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            return refused();
+        };
+        match Value::from_json_str(text) {
+            Ok(Value::List(items)) if items.len() == 2 => {
+                match (items[0].as_bool(), items[1].as_str()) {
+                    (Some(_), Some(message)) if match protocol {
+                        super::ResultProtocol::Ordinary => false,
+                        super::ResultProtocol::Metadata | super::ResultProtocol::Extension => message.len() > meerschaum_core::team_scope::api_execution::MAX_METADATA_BYTES,
+                        super::ResultProtocol::Registration => message.len() > meerschaum_core::team_scope::api_execution::MAX_REGISTRATION_BYTES,
+                    } => refused(),
+                    (Some(success), Some(message)) => Some((success, message.into())),
+                    _ => refused(),
+                }
             }
-            _ => None,
+            _ => refused(),
         }
     }
 
@@ -577,7 +858,61 @@ mod imp {
         }
     }
 
+    struct NativeLifecycle {
+        children: Option<crate::process_children::OwnedChildren>,
+        generation: Option<super::JobGeneration>,
+        spawned: bool,
+    }
+    impl NativeLifecycle {
+        fn retire(&mut self) -> std::io::Result<()> {
+            if let Some(children) = self.children.take() {
+                drop(children);
+                if let Some(generation) = &self.generation {
+                    super::owner::record_job_cleanup(generation, !self.spawned)?;
+                }
+            }
+            Ok(())
+        }
+    }
+    impl Drop for NativeLifecycle {
+        fn drop(&mut self) {
+            let _ = self.retire();
+        }
+    }
+
     pub(super) fn supervise(opts: SupervisorOptions) -> i32 {
+        if let Err(message) = opts.validate_compute_profile() {
+            log_error(&opts, &message);
+            return 1;
+        }
+        // The signed Main deadline is resolved once before any worker can start. Credential
+        // rotation, a backward wall-clock jump or child-controlled state cannot extend it.
+        let compute_deadline = match opts
+            .compute_deadline
+            .map(super::ComputeDeadline::pin)
+            .transpose()
+        {
+            Ok(deadline) => deadline,
+            Err(error) => {
+                log_error(&opts, &error.to_string());
+                return 1;
+            }
+        };
+        let mut children = if opts.lifecycle_owner.is_some() {
+            match crate::process_children::OwnedChildren::prepare() {
+                Ok(children) => Some(NativeLifecycle {
+                    children: Some(children),
+                    generation: opts.job_generation.clone(),
+                    spawned: false,
+                }),
+                Err(error) => {
+                    eprintln!("The native job lifecycle cannot inspect its descendants: {error}");
+                    return 1;
+                }
+            }
+        } else {
+            None
+        };
         let paths = JobPaths {
             jobs_dir: opts.jobs_dir.clone(),
             ..JobPaths::for_root(opts.jobs_dir.parent().unwrap_or(&opts.jobs_dir), "/")
@@ -589,6 +924,20 @@ mod imp {
         if launch_state(&dpaths.dir, &dpaths.properties, launch_id) != LaunchState::Current {
             return 0;
         }
+        let _publication = if opts.lifecycle_owner.is_some() && opts.job_generation.is_none() {
+            match launch_id.and_then(|id| super::FactoryPublication::claim(&dpaths.dir, id).ok()) {
+                Some(guard) => Some(guard),
+                None => {
+                    log_error(
+                        &opts,
+                        "The native supervisor could not claim its result publication.",
+                    );
+                    return 1;
+                }
+            }
+        } else {
+            None
+        };
         let mut props = Props {
             path: dpaths.properties.clone(),
             mem: Map::new(),
@@ -668,6 +1017,22 @@ mod imp {
         // it runs), `signals.1` a signal which arrived before that.
         let signals = Arc::new(Mutex::new((0i32, 0i32)));
         let stopping = Arc::new(AtomicBool::new(false));
+        let owner_dead = Arc::new(AtomicBool::new(false));
+        let deadline_expired = Arc::new(AtomicBool::new(false));
+        let lifecycle_message = || {
+            if deadline_expired.load(Ordering::SeqCst) {
+                COMPUTE_ENDED
+            } else {
+                OWNER_ENDED
+            }
+        };
+        let owner_watch = OwnerWatch::start(
+            opts.lifecycle_owner.clone(),
+            compute_deadline,
+            stopping.clone(),
+            owner_dead.clone(),
+            deadline_expired.clone(),
+        );
         {
             let signals = signals.clone();
             let stopping = stopping.clone();
@@ -708,11 +1073,19 @@ mod imp {
                     Ok(admission) => Some(admission),
                     Err(crate::startup::Stopped) => {
                         write_log_line("Startup: stopped before the job started.");
+                        let lost_owner = owner_dead.load(Ordering::SeqCst);
+                        if lost_owner {
+                            mark_owner_stopped(&opts, &dpaths);
+                        }
                         props.set(
                             "result",
                             Value::List(vec![
-                                Value::Bool(true),
-                                Value::Str(format!("Stopped daemon '{}'.", opts.daemon_id)),
+                                Value::Bool(!lost_owner),
+                                Value::Str(if lost_owner {
+                                    lifecycle_message().into()
+                                } else {
+                                    format!("Stopped daemon '{}'.", opts.daemon_id)
+                                }),
                             ]),
                         );
                         finish(&opts, &paths, &dpaths, &mut props, &log);
@@ -724,6 +1097,26 @@ mod imp {
                 }
             }
         };
+
+        if owner_dead.load(Ordering::SeqCst)
+            || opts
+                .lifecycle_owner
+                .as_ref()
+                .is_some_and(|owner| !owner.alive())
+        {
+            mark_owner_stopped(&opts, &dpaths);
+            props.set(
+                "result",
+                Value::List(vec![
+                    Value::Bool(false),
+                    Value::Str(lifecycle_message().into()),
+                ]),
+            );
+            finish(&opts, &paths, &dpaths, &mut props, &log);
+            drop(pid_lock);
+            remove_pid_file_naming(&dpaths, &[own_pid]);
+            return 0;
+        }
 
         // The job may have been deleted (or started again) while this supervisor waited.
         let state = launch_state(&dpaths.dir, &dpaths.properties, launch_id);
@@ -747,6 +1140,7 @@ mod imp {
         let result_path = output_dir.join(RESULT_FILE_NAME);
         let _ = fs::remove_file(&result_path);
         let mut cmd = Command::new(&opts.command[0]);
+        cmd.env_remove(meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR);
         cmd.args(&opts.command[1..])
             .current_dir(&opts.cwd)
             .stdin(stdin)
@@ -791,6 +1185,15 @@ mod imp {
             }
         }
 
+        if opts.lifecycle_owner.is_some()
+            && let Err(error) = super::seal_native_command(&mut cmd)
+        {
+            log_error(
+                &opts,
+                &format!("The native descriptor barrier is unavailable: {error}"),
+            );
+            return 1;
+        }
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -811,9 +1214,30 @@ mod imp {
                 return 1;
             }
         };
+        if let Some(lifecycle) = children.as_mut() {
+            lifecycle.spawned = true;
+        }
         // Close our copies of the write ends so that the readers see EOF.
         drop(cmd);
         let pid = child.id() as i32;
+
+        if let Some(generation) = &opts.job_generation
+            && super::owner::record_job_child(generation, pid).is_err()
+        {
+            stop_owned_worker(&mut child);
+            props.set(
+                "result",
+                Value::List(vec![
+                    Value::Bool(false),
+                    Value::Str("The native job lifecycle proof could not be recorded.".into()),
+                ]),
+            );
+            props.capture("ended");
+            drop(admission);
+            drop(pid_lock);
+            let _ = fs::remove_file(&dpaths.pid);
+            return 1;
+        }
 
         // `process.pid`: now the worker's PID (the `flock` taken above stays).
         let _ = fs::write(&dpaths.pid, pid.to_string());
@@ -938,7 +1362,42 @@ mod imp {
         }
         drop(tx);
 
-        let status = child.wait();
+        let status = if opts.lifecycle_owner.is_some() {
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break Ok(status),
+                    Err(error) => {
+                        stop_owned_worker(&mut child);
+                        break Err(error);
+                    }
+                    Ok(None) => {}
+                }
+                if owner_dead.load(Ordering::SeqCst) {
+                    mark_owner_stopped(&opts, &dpaths);
+                    stop_owned_worker(&mut child);
+                    break child.wait();
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        } else {
+            child.wait()
+        };
+        // Daemonized workers remain descendants even after setsid or their parent exits.
+        // Retire them before status/finished records could authorize another generation.
+        if let Some(mut lifecycle) = children.take()
+            && lifecycle.retire().is_err()
+        {
+            props.set(
+                "result",
+                Value::List(vec![
+                    Value::Bool(false),
+                    Value::Str("The native descendant cleanup proof could not be recorded.".into()),
+                ]),
+            );
+            props.capture("ended");
+            return 1;
+        }
+        drop(owner_watch);
         exited.store(true, Ordering::SeqCst);
         // A job which ended while it waited for input waits no more.
         if let Some(w) = &stdin_watch {
@@ -955,19 +1414,63 @@ mod imp {
         }
         done.store(true, Ordering::Relaxed);
 
-        let result = match &status {
-            // The worker writes its result as it exits: after a signal ended it, a result file
-            // came from someone else (a descendant that inherited `MRSM_JOB_RESULT_PATH`), and
-            // the signal is the result.
-            Ok(s) if std::os::unix::process::ExitStatusExt::signal(s).is_some() => {
-                let _ = fs::remove_file(&result_path);
-                result_from_status(s, &opts.daemon_id)
+        let mut received_metadata_result = false;
+        let mut result = if owner_dead.load(Ordering::SeqCst) {
+            let _ = fs::remove_file(&result_path);
+            Some((false, lifecycle_message().into()))
+        } else {
+            match &status {
+                // The worker writes its result as it exits: after a signal ended it, a result file
+                // came from someone else (a descendant that inherited `MRSM_JOB_RESULT_PATH`), and
+                // the signal is the result.
+                Ok(s) if std::os::unix::process::ExitStatusExt::signal(s).is_some() => {
+                    let _ = fs::remove_file(&result_path);
+                    result_from_status(s, &opts.daemon_id)
+                }
+                Ok(s) => {
+                    let decoded =
+                        read_result_file_with_protocol(&result_path, opts.result_protocol);
+                    received_metadata_result =
+                        decoded.as_ref().is_some_and(|(success, _)| *success);
+                    decoded.or_else(|| result_from_status(s, &opts.daemon_id))
+                }
+                Err(e) => Some((false, e.to_string())),
             }
-            Ok(s) => {
-                read_result_file(&result_path).or_else(|| result_from_status(s, &opts.daemon_id))
-            }
-            Err(e) => Some((false, e.to_string())),
         };
+
+        if opts.result_protocol == super::ResultProtocol::Metadata
+            && result.as_ref().is_some_and(|(success, _)| *success)
+        {
+            // Only an actual bounded result-file tuple and normal worker exit may become
+            // a native completion receipt. Exit-status fallback never establishes provenance.
+            let recorded = match (
+                opts.job_generation.as_ref(),
+                opts.launch_id.as_deref(),
+                opts.compute_deadline,
+                result.as_ref(),
+            ) {
+                (Some(generation), Some(launch), Some(deadline), Some((true, message)))
+                    if received_metadata_result
+                        && status.as_ref().is_ok_and(|status| status.success()) =>
+                {
+                    super::owner::record_metadata_result(
+                        generation,
+                        launch,
+                        deadline.expires_at,
+                        true,
+                        true,
+                        message,
+                    )
+                }
+                _ => Err(std::io::Error::other("Missing native Metadata completion.")),
+            };
+            if recorded.is_err() {
+                result = Some((
+                    false,
+                    "The native Metadata completion receipt could not be recorded.".into(),
+                ));
+            }
+        }
 
         if let Some((success, msg)) = result {
             props.set(
@@ -992,9 +1495,96 @@ mod imp {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn typed_result_protocol_bounds_ascii_escapes_and_non_bmp_without_raising_ordinary_limits() {
+        fn envelope(message: &str) -> String {
+            use std::fmt::Write;
+            let mut output = String::from("[true,\"");
+            for character in message.chars() {
+                match character {
+                    '\"' => output.push_str("\\\""),
+                    '\\' => output.push_str("\\\\"),
+                    character if !character.is_ascii() || character.is_control() => {
+                        let mut encoded = [0u16; 2];
+                        for unit in character.encode_utf16(&mut encoded) {
+                            write!(&mut output, "\\u{unit:04x}").unwrap();
+                        }
+                    }
+                    character => output.push(character),
+                }
+            }
+            output.push_str("\"]");
+            output
+        }
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("result.json");
+        let limit = meerschaum_core::team_scope::api_execution::MAX_METADATA_BYTES;
+        for message in ["\"\\".repeat(limit / 2 - 32), "é😀".repeat(limit / 6 - 32)] {
+            let encoded = envelope(&message);
+            assert!(encoded.len() > ResultProtocol::Ordinary.envelope_limit());
+            assert!(encoded.len() <= ResultProtocol::Metadata.envelope_limit());
+            std::fs::write(&path, &encoded).unwrap();
+            assert!(!imp::read_result_file(&path).unwrap().0);
+            for protocol in [ResultProtocol::Metadata, ResultProtocol::Extension] {
+                std::fs::write(&path, &encoded).unwrap();
+                let result = imp::read_result_file_with_protocol(&path, protocol).unwrap();
+                assert!(result.0 && result.1 == message);
+            }
+        }
+        let oversized = "x".repeat(limit + 1);
+        for protocol in [ResultProtocol::Metadata, ResultProtocol::Extension] {
+            std::fs::write(&path, envelope(&oversized)).unwrap();
+            assert!(
+                !imp::read_result_file_with_protocol(&path, protocol)
+                    .unwrap()
+                    .0
+            );
+        }
+        let limit = meerschaum_core::team_scope::api_execution::MAX_REGISTRATION_BYTES;
+        let message = "é😀".repeat(limit / 6 - 32);
+        let encoded = envelope(&message);
+        assert!(encoded.len() > ResultProtocol::Ordinary.envelope_limit());
+        std::fs::write(&path, &encoded).unwrap();
+        let result =
+            imp::read_result_file_with_protocol(&path, ResultProtocol::Registration).unwrap();
+        assert!(result.0 && result.1 == message);
+        std::fs::write(&path, envelope(&"x".repeat(limit + 1))).unwrap();
+        assert!(
+            !imp::read_result_file_with_protocol(&path, ResultProtocol::Registration)
+                .unwrap()
+                .0
+        );
+    }
+
+    #[test]
+    fn unsafe_or_malformed_worker_result_is_a_failure_instead_of_exit_success() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("result.json");
+        assert!(
+            imp::read_result_file(&path).is_none(),
+            "Missing legacy result retains exit-status behavior."
+        );
+        std::fs::write(&path, br#"[true,"owned"]"#).unwrap();
+        assert_eq!(imp::read_result_file(&path), Some((true, "owned".into())));
+        for bytes in [b"malformed".as_slice(), br#"[true,123]"#] {
+            std::fs::write(&path, bytes).unwrap();
+            assert!(!imp::read_result_file(&path).unwrap().0);
+        }
+        let outside = root.path().join("outside.json");
+        std::fs::write(&outside, br#"[true,"outside"]"#).unwrap();
+        symlink(&outside, &path).unwrap();
+        assert!(!imp::read_result_file(&path).unwrap().0);
+        assert_eq!(std::fs::read(&outside).unwrap(), br#"[true,"outside"]"#);
+        std::fs::write(&path, vec![b'x'; 2 * 1024 * 1024 + 1]).unwrap();
+        assert!(!imp::read_result_file(&path).unwrap().0);
+    }
+
     #[test]
     fn args_round_trip() {
         let opts = SupervisorOptions {
+            compute_deadline: None,
             daemon_id: "my job".into(),
             jobs_dir: "/r/jobs".into(),
             log_path: "/r/logs/my job.log".into(),
@@ -1020,6 +1610,9 @@ mod tests {
                 dir: "/r/jobs/.startup".into(),
             }),
             launch_id: Some("aB3".into()),
+            lifecycle_owner: LifecycleOwner::current().ok(),
+            job_generation: None,
+            result_protocol: ResultProtocol::Ordinary,
         };
         let mut args = vec![SUPERVISOR_ARG.to_string()];
         args.extend(opts.to_args());

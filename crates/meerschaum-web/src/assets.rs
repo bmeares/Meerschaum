@@ -169,7 +169,19 @@ mod tests {
 
     #[test]
     fn embedded_assets_round_trip_to_the_files_in_git() {
-        assert_eq!(ASSETS.len(), 6, "{} assets", ASSETS.len());
+        assert_eq!(
+            ASSETS.iter().map(|asset| asset.name).collect::<Vec<_>>(),
+            vec![
+                "addon-fit.js",
+                "addon-unicode11.js",
+                "extension_frame.js",
+                "plotly.js",
+                "webterm.css",
+                "webterm.js",
+                "xterm.css",
+                "xterm.js"
+            ],
+        );
         for asset in ASSETS {
             let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
             let on_disk = std::fs::read(format!("{path}/{}", asset.name)).unwrap();

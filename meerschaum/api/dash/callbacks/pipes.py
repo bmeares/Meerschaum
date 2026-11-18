@@ -629,9 +629,21 @@ def run_pipe_action(sync_clicks, verify_clicks, confirm_clicks, confirm, typed, 
         action = 'sync' if trigger == 'pipe-action-sync' else 'verify'
     ### Its permission, edit rights on this pipe and its locks (the server checks them again).
     from meerschaum.api.dash import access
-    allowed, reason = access.may_run_pipe_action(pipes_access.viewer(session_data), pipe, action)
+    viewer = pipes_access.viewer(session_data)
+    allowed, reason = access.may_run_pipe_action(viewer, pipe, action)
     if not allowed:
         return dash.no_update, alert_from_success_tuple((False, reason)), False
+    from meerschaum.api.dash._native_execution import api_only, pipe_action
+    if api_only(viewer):
+        if action not in ('sync', 'verify'):
+            return dash.no_update, alert_from_success_tuple((False, 'This operation has no native API-only console adapter.')), False
+        success, message = pipe_action(
+            viewer, (session_data or {}).get('session-id'), pipe_detail.meta_of(pipe),
+            action, begin=begin, end=end,
+        )
+        store = ({'completed': True, 'action': action, 'ref': ref, 'started': time.time()}
+                 if success else dash.no_update)
+        return store, alert_from_success_tuple((success, message)), False
     sysargs, message = pipe_detail.action_sysargs(pipe_detail.meta_of(pipe), action, begin=begin, end=end)
     if sysargs is None:
         return dash.no_update, alert_from_success_tuple((False, message)), dash.no_update

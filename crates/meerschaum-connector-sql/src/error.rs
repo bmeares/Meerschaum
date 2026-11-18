@@ -64,6 +64,26 @@ pub enum SqlError {
     /// refusal (`meerschaum_core::protected::refusal_message`).
     #[error("{0}")]
     Protected(String),
+
+    /// A windowed COMMIT did not return a confirmed outcome. Its durable prepared
+    /// intent stays unknown; no rollback, replay or dependent work is implied.
+    #[error(
+        "The native target COMMIT outcome is unknown. Its durable intent was retained; do not automatically retry or issue dependent work. Inspect the original canonical operation."
+    )]
+    NativeCommitUnknown,
+
+    /// Target COMMIT succeeded, but durable observation or fresh acknowledgement failed.
+    /// This error must never enter a rollback or automatic replay path.
+    #[error(
+        "Target data already committed, but Main could not accept its durable receipt. Do not automatically retry or issue dependent work; inspect the original canonical operation."
+    )]
+    NativeCommittedUnacknowledged,
+
+    /// The actual rollback succeeded, but its exact durable intent could not be retired.
+    #[error(
+        "The native target rolled back, but Main could not retire its durable intent. The operation remains blocked; inspect its canonical record before starting fresh work."
+    )]
+    NativeRollbackUnacknowledged,
 }
 
 /// Convenience alias.

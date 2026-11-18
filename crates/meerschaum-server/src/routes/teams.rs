@@ -170,6 +170,8 @@ fn visible_team(caller: &Access, mut team: Team) -> Team {
 /// After a change of teams: who is in which team is read again.
 fn forget(state: &AppState) {
     state.access_cache().forget_identities();
+    // 5.1: a team's processes are probed again after any change of teams.
+    state.team_execution_probes.clear();
     state.access_cache().forget_pipes();
     let events = state.team_events.clone();
     tokio::spawn(async move {

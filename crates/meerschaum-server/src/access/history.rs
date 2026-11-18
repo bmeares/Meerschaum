@@ -7,7 +7,7 @@ use meerschaum_connector_api::models::RunRecord;
 use meerschaum_core::{Map, Value};
 use meerschaum_kernel::value::Value as KValue;
 
-use super::{RefFilter, guard};
+use super::RefFilter;
 
 struct NodeIdentity {
     reference: String,
@@ -49,17 +49,8 @@ impl RefFilter {
             return false;
         };
         if !self.registrations.contains_key(instance) {
-            let current = match self.state.get_api_connector(Some(instance)) {
-                Ok(conn)
-                    if guard::check_connector_teams(
-                        &self.state,
-                        &self.access,
-                        &conn.connector_keys(),
-                    )
-                    .is_ok() =>
-                {
-                    sync_metrics::registrations(conn.as_ref()).await.ok()
-                }
+            let current = match self.registry_connector(instance) {
+                Ok(conn) => sync_metrics::registrations(conn.as_ref()).await.ok(),
                 _ => None,
             };
             self.registrations.insert(instance.to_string(), current);
@@ -80,7 +71,7 @@ impl RefFilter {
     /// Check the stored immutable node segments before authorizing any whole-run metadata.
     /// Registrations are fresh once per exact instance and node reads use requested run IDs.
     pub async fn prime_run_generations(&mut self, records: &[RunRecord]) {
-        if self.access.is_admin() && !self.strict_generations {
+        if self.unrestricted() && !self.strict_generations {
             return;
         }
         let mut nodes: HashMap<String, Vec<NodeIdentity>> = HashMap::new();
@@ -107,7 +98,7 @@ impl RefFilter {
             .cloned()
             .collect();
         if !missing.is_empty() {
-            let conn = self.state.get_api_connector(Some(&self.default_instance));
+            let conn = self.registry_connector(&self.default_instance);
             if let Ok(conn) = conn {
                 for chunk in missing.chunks(128) {
                     let params: Map = [(
@@ -156,8 +147,7 @@ impl RefFilter {
                 .collect::<Vec<_>>()
             {
                 if let Ok(rows) = self
-                    .state
-                    .engine
+                    .selected_engine
                     .get_runs(&crate::backends::RunsFilter {
                         run_id: Some(id.clone()),
                         ..Default::default()
@@ -193,7 +183,7 @@ impl RefFilter {
 
     /// Only a proven current segment may grant restricted access to retained history.
     pub fn run_generation_current(&self, run_id: &str) -> bool {
-        (self.access.is_admin() && !self.strict_generations)
+        (self.unrestricted() && !self.strict_generations)
             || self.run_generations.get(run_id).copied().unwrap_or(false)
     }
 }

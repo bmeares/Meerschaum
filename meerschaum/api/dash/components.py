@@ -27,7 +27,8 @@ dex = attempt_import('dash_extensions', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 _load_builtin_custom_connectors()
 
-go_button = dbc.Button('Exec', id='go-button', color='primary', style={'width': '100%'})
+go_button = dbc.Button('Exec', id='go-button', color='primary', disabled=True,
+                       style={'width': '100%', 'display': 'none'})
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display': 'none'})
 show_pipes_button = dbc.Button(
     'Pipes',
@@ -266,6 +267,15 @@ def get_nav_state(pathname: Optional[str] = None, session_id: Optional[str] = No
         'signed_in': signed_in,
         'may_act': may_act,
         'terminal': terminal,
+        # Permission fields do not certify a SQL/backend/window/compiler path. Exec
+        # specifically requires the existing terminal, unlike a typed pipe operation.
+        'execution_permissions': {
+            'actions_execute': may_act,
+            'jobs_execute': bool(signed_in and viewer.can('jobs:execute')),
+            'jobs_write': bool(signed_in and viewer.can('jobs:write')),
+        },
+        'terminal_exec': bool(terminal and may_act and viewer.can('jobs:execute')
+                              and viewer.can('jobs:write')),
         'admin': bool(signed_in and viewer.is_admin),
         'viewer': viewer,
     }

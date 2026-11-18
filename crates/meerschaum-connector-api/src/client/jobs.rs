@@ -495,7 +495,27 @@ impl APIConnector {
     )> {
         let connector =
             super::wss::connector_for(url, self.verify).map_err(ConnectorError::Backend)?;
-        tokio_tungstenite::connect_async_tls_with_config(url, None, false, connector)
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = url
+            .into_client_request()
+            .map_err(|e| ConnectorError::Backend(e.to_string()))?;
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|_| ConnectorError::Invalid("Invalid websocket URL.".into()))?;
+        if let Some(authorization) = self.custom_authorization("GET", &parsed, Some(&[]))? {
+            request.headers_mut().insert(
+                "Authorization",
+                authorization.parse().map_err(|_| {
+                    ConnectorError::Invalid("Invalid websocket authentication header.".into())
+                })?,
+            );
+        }
+        let config = self.response_limit.map(|limit| {
+            let mut config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+            config.max_message_size = Some(limit);
+            config.max_frame_size = Some(limit);
+            config
+        });
+        tokio_tungstenite::connect_async_tls_with_config(request, config, false, connector)
             .await
             .map_err(|e| ConnectorError::Backend(e.to_string()))
     }
@@ -511,7 +531,21 @@ impl APIConnector {
         let url = self.logs_websocket_url(name);
         let (ws, _) = self.connect_websocket(&url).await?;
         let (mut tx, mut rx) = ws.split();
-        let token = self.token().await.unwrap_or_else(|| "no-login".into());
+        let parsed = reqwest::Url::parse(&url)
+            .map_err(|_| ConnectorError::Invalid("Invalid websocket URL.".into()))?;
+        let token =
+            if let Some(authorization) = self.custom_authorization("GET", &parsed, Some(&[]))? {
+                authorization
+                    .strip_prefix("Bearer ")
+                    .ok_or_else(|| {
+                        ConnectorError::Invalid(
+                            "The logs websocket requires bearer authentication.".into(),
+                        )
+                    })?
+                    .to_string()
+            } else {
+                self.token().await.unwrap_or_else(|| "no-login".into())
+            };
         let _ = tx.send(Message::text(token)).await;
 
         async fn recv_text(

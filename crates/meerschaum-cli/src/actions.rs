@@ -332,6 +332,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
         "start",
         &[
             sub("api", "_start_api"),
+            sub("executor", "_start_executor"),
             sub("connectors", "_start_connectors"),
             sub("daemons", "_start_daemons"),
             sub("gui", "_start_gui"),

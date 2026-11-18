@@ -16,6 +16,8 @@ include = ["src/**/*", "/LICENSE", "/NOTICE"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
+# The native terminal guardian's bounded, process-birth-checked child status descriptor.
+meerschaum-jobs = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-connector = { workspace = true }
 # Only the shared route/auth models (`models`, `routes`, `wire`); no HTTP client.
@@ -51,11 +53,13 @@ utoipa = "6"
 hmac = { workspace = true }
 sha2 = { workspace = true }
 base64 = "0.23"
+# Executor control requests use per-team Ed25519 keys; reuse rustls's crypto backend.
+aws-lc-rs = "1.19"
 # Crate-private: the web terminal PTY bridge (`webterm`).
 portable-pty = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["process", "fs"] }
 
 # aws-lc-rs (rustls) assembles with NASM on Windows x86_64; the prebuilt objects make the build need
 # no extra tool. Keep this minor equal to the `aws-lc-sys` in Cargo.lock (one aws-lc-sys per tree).

@@ -194,16 +194,31 @@ async fn routes_carry_the_full_request_and_response() {
     let r = send(&app, req("GET", "/demo/tail/a/b", None, None)).await;
     assert_eq!(r.json()["path_params"], json!({"p": "a/b"}));
 
-    // Cookies reach the plugin, except the console's session cookie.
-    let mut request = req("GET", "/demo/open", None, None);
-    request.headers_mut().insert(
+    // No console provider is configured. Its cookie name is inert legacy input,
+    // and only that cookie is removed; ordinary cookies reach public legacy routes
+    // for anonymous, administrator and ordinary signed-in callers.
+    for credential in [None, Some(admin.as_str()), Some(reader.as_str())] {
+        let mut request = req("GET", "/demo/open", credential, None);
+        request.headers_mut().insert(
+            "cookie",
+            "theme=dark; mrsm-session-id=67e55044-10b1-426f-9247-bb680e5fe0c8"
+                .parse()
+                .unwrap(),
+        );
+        let r = send(&app, request).await;
+        assert_eq!(r.status.as_u16(), 299, "{}", r.text());
+        assert_eq!(r.json()["headers"]["cookie"], json!(["theme=dark"]));
+        assert!(r.json()["headers"].get("authorization").is_none());
+    }
+    // An explicitly supplied bad bearer still refuses, even for a public route
+    // and an inert cookie; it cannot adopt cookie or anonymous authority.
+    let mut bad = req("GET", "/demo/open", Some("Bearer invalid-explicit"), None);
+    bad.headers_mut().insert(
         "cookie",
-        "theme=dark; mrsm-session-id=67e55044-10b1-426f-9247-bb680e5fe0c8"
-            .parse()
-            .unwrap(),
+        "theme=dark; mrsm-session-id=inert-session".parse().unwrap(),
     );
-    let r = send(&app, request).await;
-    assert_eq!(r.json()["headers"]["cookie"], json!(["theme=dark"]));
+    let bad = send(&app, bad).await;
+    assert_eq!(bad.status, StatusCode::UNAUTHORIZED, "{}", bad.text());
 
     // An API key (a token principal) authenticates like a login, with the token's scopes.
     let r = send(
@@ -252,9 +267,15 @@ async fn no_auth_opens_every_route_with_every_scope() {
     );
     assert!(notices.is_empty());
     let app = meerschaum_server::app(state).merge(native);
-    let r = send(&app, req("GET", "/demo/1", None, None)).await;
+    let mut request = req("GET", "/demo/1", None, None);
+    request.headers_mut().insert(
+        "cookie",
+        "theme=dark; mrsm-session-id=inert-session".parse().unwrap(),
+    );
+    let r = send(&app, request).await;
     assert_eq!(r.status.as_u16(), 299);
     assert_eq!(r.json()["scopes"], json!(["*"]));
+    assert_eq!(r.json()["headers"]["cookie"], json!(["theme=dark"]));
 }
 
 /// Admits one request at a time and refuses the rest with `503`.

@@ -19,6 +19,13 @@ use serde_json::Value as Json;
 
 use crate::error::ApiError;
 
+#[path = "pipe_special_input.rs"]
+mod special_input;
+
+pub(crate) fn special_input_hints(encoded: Option<&str>) -> Result<Map, ApiError> {
+    special_input::parse(encoded)
+}
+
 /// The datetime column and its dtype (`pipe.get_dtypes().get(dt_col, 'datetime')`).
 pub async fn dt_info(conn: &Arc<dyn InstanceConnector>, pipe: &Pipe) -> (Option<String>, String) {
     let dt_col = pipe.column("datetime");
@@ -399,6 +406,9 @@ pub fn payload_input(payload: &SyncPayload) -> Option<PipeInput> {
 /// Keyword arguments of `Pipe.sync()` the route forwards.
 #[derive(Debug, Clone)]
 pub struct SyncKwargs {
+    /// Known special dtype hints for decoding typed values in the JSON transport. These
+    /// never override explicit registered dtypes or directly update pipe parameters.
+    pub special_dtypes: Map,
     /// `check_existing`.
     pub check_existing: bool,
     /// `force`: retry until success (`retries` = 10, `min_seconds` = 1).
@@ -426,36 +436,300 @@ pub async fn sync(
     kw: &SyncKwargs,
     defaults: &PipeDefaults,
 ) -> SuccessTuple {
+    match sync_with_admission(conn, pipe, payload, kw, defaults, None).await {
+        Ok(result) => result,
+        Err(error) => SuccessTuple::fail(error.detail_text()),
+    }
+}
+
+/// The HTTP caller's original authority, rechecked at each native write after preparation.
+/// Implementations must load stored access rather than trust the passed Pipe's parameters.
+#[async_trait::async_trait]
+pub(crate) trait SyncAdmission: Send + Sync {
+    fn native_batch(&self) -> Option<meerschaum_connector::mutation::NativeBatch> {
+        None
+    }
+    async fn begin(
+        &self,
+        _conn: &Arc<dyn InstanceConnector>,
+        _pipe: &Pipe,
+    ) -> Result<(), ApiError> {
+        Ok(())
+    }
+    async fn write_window(
+        &self,
+        _conn: &Arc<dyn InstanceConnector>,
+        _pipe: &Pipe,
+    ) -> Result<Option<meerschaum_connector::mutation::DataWindow>, ApiError> {
+        Ok(None)
+    }
+    async fn prepare_data_commit(
+        &self,
+        _conn: &Arc<dyn InstanceConnector>,
+        _pipe: &Pipe,
+        _effect: &meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<Option<Arc<dyn meerschaum_connector::mutation::PendingDataCommit>>, ApiError> {
+        Ok(None)
+    }
+    fn rollback_completed(&self, _succeeded: bool) {}
+    fn lock_snapshot_reads(&self) -> bool {
+        false
+    }
+    fn same_store_innodb_reads(&self, _conn: &Arc<dyn InstanceConnector>) -> bool {
+        false
+    }
+    fn tracks_metadata_inference(&self) -> bool {
+        false
+    }
+    async fn metadata_inferred(
+        &self,
+        _conn: &Arc<dyn InstanceConnector>,
+        _change: meerschaum_connector::mutation::MetadataInference,
+    ) -> Result<(), ApiError> {
+        Ok(())
+    }
+
+    async fn prepare(
+        &self,
+        conn: &Arc<dyn InstanceConnector>,
+        pipe: &Pipe,
+    ) -> Result<Pipe, ApiError>;
+}
+
+async fn admit_sync(
+    admission: Option<&dyn SyncAdmission>,
+    conn: &Arc<dyn InstanceConnector>,
+    pipe: &mut Pipe,
+) -> Result<(), ApiError> {
+    if let Some(admission) = admission {
+        *pipe = admission.prepare(conn, pipe).await?;
+    }
+    Ok(())
+}
+
+/// Data POST variant: preserve authorization failures as HTTP errors, including after waits.
+/// The route checks before connector calls; native SQL drivers additionally retain the
+/// injected original authority through supported database write-lock waits and transactions.
+pub(crate) async fn sync_with_admission(
+    conn: &Arc<dyn InstanceConnector>,
+    pipe: &Pipe,
+    payload: &SyncPayload,
+    kw: &SyncKwargs,
+    defaults: &PipeDefaults,
+    admission: Option<Arc<dyn SyncAdmission>>,
+) -> Result<SuccessTuple, ApiError> {
+    if let Some(authority) = &admission {
+        authority.begin(conn, pipe).await?;
+    }
+    let check = admission.as_ref().map(|authority| {
+        Arc::new(DriverAdmission {
+            authority: authority.clone(),
+            conn: conn.clone(),
+            pipe: pipe.clone(),
+        }) as Arc<dyn meerschaum_connector::mutation::MutationCheck>
+    });
+    let future = sync_admitted_inner(conn, pipe, payload, kw, defaults, admission.as_deref());
+    match check {
+        Some(check) => meerschaum_connector::mutation::scope(check, future).await,
+        None => future.await,
+    }
+}
+
+struct DriverAdmission {
+    authority: Arc<dyn SyncAdmission>,
+    conn: Arc<dyn InstanceConnector>,
+    pipe: Pipe,
+}
+
+#[async_trait::async_trait]
+impl meerschaum_connector::mutation::MutationCheck for DriverAdmission {
+    fn native_batch(&self) -> Option<meerschaum_connector::mutation::NativeBatch> {
+        self.authority.native_batch()
+    }
+    async fn write_window(
+        &self,
+    ) -> Result<Option<meerschaum_connector::mutation::DataWindow>, String> {
+        let canonical = self
+            .authority
+            .prepare(&self.conn, &self.pipe)
+            .await
+            .map_err(|e| e.detail_text())?;
+        self.authority
+            .write_window(&self.conn, &canonical)
+            .await
+            .map_err(|e| e.detail_text())
+    }
+    async fn prepare_data_commit(
+        &self,
+        effect: &meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<Option<Arc<dyn meerschaum_connector::mutation::PendingDataCommit>>, String> {
+        let canonical = self
+            .authority
+            .prepare(&self.conn, &self.pipe)
+            .await
+            .map_err(|e| e.detail_text())?;
+        Ok(self
+            .authority
+            .prepare_data_commit(&self.conn, &canonical, effect)
+            .await
+            .map_err(|e| e.detail_text())?
+            .map(|inner| {
+                Arc::new(DriverPending {
+                    authority: self.authority.clone(),
+                    conn: self.conn.clone(),
+                    pipe: self.pipe.clone(),
+                    inner,
+                }) as Arc<dyn meerschaum_connector::mutation::PendingDataCommit>
+            }))
+    }
+    fn rollback_completed(&self, succeeded: bool) {
+        self.authority.rollback_completed(succeeded);
+    }
+    fn lock_snapshot_reads(&self) -> bool {
+        self.authority.lock_snapshot_reads()
+    }
+    fn same_store_innodb_reads(&self) -> bool {
+        self.authority.same_store_innodb_reads(&self.conn)
+    }
+    fn tracks_metadata_inference(&self) -> bool {
+        self.authority.tracks_metadata_inference()
+    }
+    async fn metadata_inferred(
+        &self,
+        change: meerschaum_connector::mutation::MetadataInference,
+    ) -> Result<(), String> {
+        self.authority
+            .metadata_inferred(&self.conn, change)
+            .await
+            .map_err(|error| error.detail_text())
+    }
+
+    async fn check(&self) -> Result<(), String> {
+        let canonical = self
+            .authority
+            .prepare(&self.conn, &self.pipe)
+            .await
+            .map_err(|error| error.detail_text())?;
+        // Statements may already have been built before waiting for a database lock. A new
+        // target requires a fresh request, not permission to apply the old prepared statement.
+        if canonical.target(None).map_err(|error| error.to_string())?
+            != self.pipe.target(None).map_err(|error| error.to_string())?
+        {
+            return Err("The pipe's target changed during preparation; retry the request.".into());
+        }
+        Ok(())
+    }
+}
+
+struct DriverPending {
+    authority: Arc<dyn SyncAdmission>,
+    conn: Arc<dyn InstanceConnector>,
+    pipe: Pipe,
+    inner: Arc<dyn meerschaum_connector::mutation::PendingDataCommit>,
+}
+impl DriverPending {
+    async fn fresh(
+        &self,
+        effect: &meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<(), String> {
+        let canonical = self
+            .authority
+            .prepare(&self.conn, &self.pipe)
+            .await
+            .map_err(|e| e.detail_text())?;
+        if canonical.pipe_ref() != effect.physical_reference()
+            || canonical.target(None).map_err(|e| e.to_string())?
+                != self.pipe.target(None).map_err(|e| e.to_string())?
+        {
+            return Err("The original native target changed during its commit.".into());
+        }
+        Ok(())
+    }
+}
+#[async_trait::async_trait]
+impl meerschaum_connector::mutation::PendingDataCommit for DriverPending {
+    async fn before_commit(
+        &self,
+        effect: &meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<(), String> {
+        self.fresh(effect).await?;
+        self.inner.before_commit(effect).await
+    }
+    async fn committed(
+        &self,
+        effect: &meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<(), String> {
+        self.inner.committed(effect).await
+    }
+    async fn acknowledge(
+        &self,
+        effect: &meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<(), String> {
+        self.fresh(effect).await?;
+        self.inner.acknowledge(effect).await
+    }
+    async fn rolled_back(&self) -> Result<(), String> {
+        self.inner.rolled_back().await
+    }
+}
+
+async fn sync_admitted_inner(
+    conn: &Arc<dyn InstanceConnector>,
+    pipe: &Pipe,
+    payload: &SyncPayload,
+    kw: &SyncKwargs,
+    defaults: &PipeDefaults,
+    admission: Option<&dyn SyncAdmission>,
+) -> Result<SuccessTuple, ApiError> {
     let Some(input) = payload_input(payload) else {
-        return SuccessTuple::fail(format!("Cannot sync the given data to {pipe}."));
+        return Ok(SuccessTuple::fail(format!(
+            "Cannot sync the given data to {pipe}."
+        )));
     };
     let mut pipe = pipe.clone();
     let pipe = &mut pipe;
+    admit_sync(admission, conn, pipe).await?;
+    let native_window = match admission {
+        Some(admission) => admission.write_window(conn, pipe).await?,
+        None => None,
+    };
     // `if not p.temporary and p.id is None: p.register()`: 'already' is not a failure.
     if !pipe.temporary {
         match conn.get_pipe_id(pipe).await {
             Ok(Some(_)) => {}
             Ok(None) => {
+                if native_window.is_some() {
+                    return Err(ApiError::new(
+                        409,
+                        "A captured graph cannot recreate its missing registration.",
+                    ));
+                }
+                admit_sync(admission, conn, pipe).await?;
                 let reg = conn.register_pipe(pipe).await;
                 if !reg.success && !reg.message.contains("already") {
-                    return reg;
+                    return Ok(reg);
                 }
             }
-            Err(e) => return SuccessTuple::fail(e.to_string()),
+            Err(e) => return Ok(SuccessTuple::fail(e.to_string())),
         }
     }
     // `p.validate_indices()`.
     let valid = pipe.validate_indices();
     if !valid.success {
-        return valid;
+        return Ok(valid);
     }
     let ctx = match pipe_ops::dtypes_context(conn.as_ref(), pipe, pipe.parameters()).await {
         Ok(c) => c,
-        Err(e) => return SuccessTuple::fail(e.to_string()),
+        Err(e) => return Ok(SuccessTuple::fail(e.to_string())),
     };
-    let mut df = match pipe_enforce_dtypes(input, &ctx) {
+    let input_context = special_input::context(&ctx, &kw.special_dtypes, &input)?;
+    let mut df = match pipe_enforce_dtypes(input, &input_context) {
         Ok(df) => df,
-        Err(e) => return SuccessTuple::fail(format!("Failed to enforce dtypes:\n{e}")),
+        Err(e) => {
+            return Ok(SuccessTuple::fail(format!(
+                "Failed to enforce dtypes:\n{e}"
+            )));
+        }
     };
     let mut check_existing = kw.check_existing;
     if pipe.autotime() {
@@ -484,14 +758,52 @@ pub async fn sync(
             let n = df.height();
             let col = meerschaum_kernel::frame::Column::object(ts_col.clone(), vec![value; n]);
             if let Err(e) = df.set_column(col) {
-                return SuccessTuple::fail(e.to_string());
+                return Ok(SuccessTuple::fail(e.to_string()));
             }
             check_existing = dt_col.is_some();
         }
     }
     let mut extra = Map::new();
+    if let Some(window) = &native_window {
+        // Whole known mixed batches refuse before metadata inference or persistent DDL.
+        window
+            .validate_frame(pipe, &df, &SyncOptions::default())
+            .map_err(|reason| ApiError::new(403, reason))?;
+        let (begin, end) = if kw.replace {
+            meerschaum_connector::replace::resolve_window(
+                pipe,
+                &df,
+                kw.begin.clone(),
+                kw.end.clone(),
+            )
+            .map_err(|reason| ApiError::new(403, reason))?
+        } else {
+            (None, None)
+        };
+        let options = SyncOptions {
+            check_existing,
+            replace: kw.replace,
+            begin,
+            end,
+            params: kw.params.clone(),
+            ..Default::default()
+        };
+        window
+            .validate_replacement(&options)
+            .map_err(|reason| ApiError::new(403, reason))?;
+        if !conn.supports_windowed_writes() {
+            return Err(ApiError::new(
+                501,
+                "The selected graph target has no native row-window adapter.",
+            ));
+        }
+        conn.validate_windowed_frame(pipe, &df, &options, window)
+            .await
+            .map_err(|error| ApiError::new(409, error.to_string()))?;
+    }
     // `_persist_new_special_columns`.
     let registered = !pipe.temporary;
+    admit_sync(admission, conn, pipe).await?;
     pipe_ops::persist_new_special_columns(
         conn.as_ref(),
         pipe,
@@ -514,7 +826,7 @@ pub async fn sync(
             kw.end.clone(),
         ) {
             Ok(window) => window,
-            Err(e) => return SuccessTuple::fail(e),
+            Err(e) => return Ok(SuccessTuple::fail(e)),
         }
     } else {
         (None, None)
@@ -531,14 +843,21 @@ pub async fn sync(
     let retries = 10;
     let mut attempt = 1;
     loop {
+        admit_sync(admission, conn, pipe).await?;
         let res = conn.sync_pipe(pipe, df.clone(), &opts).await;
         attempt += 1;
-        if res.success || !kw.force || attempt > retries {
+        if res.success || !kw.force || native_window.is_some() || attempt > retries {
             if !res.success && kw.force {
                 tracing::warn!("Unable to sync {pipe} within {retries} attempts!");
             }
             // Apply a compression policy if the pipe is configured for compression.
             if res.success && pipe.param("compress").is_some_and(|v| v.truthy()) {
+                // Data has committed. Refuse any newly unauthorized extra side effect,
+                // while preserving the truthful result of that committed data write.
+                if let Err(error) = admit_sync(admission, conn, pipe).await {
+                    tracing::warn!("Skipped compression for {pipe}: {}", error.detail_text());
+                    return Ok(res);
+                }
                 let compressed = conn.apply_compression_policy(pipe).await;
                 if !compressed.success {
                     tracing::debug!(
@@ -547,7 +866,7 @@ pub async fn sync(
                     );
                 }
             }
-            return res;
+            return Ok(res);
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }

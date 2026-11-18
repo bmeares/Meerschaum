@@ -147,6 +147,7 @@ fn grants_of(obj: &Bound<'_, PyAny>) -> PyResult<TeamGrants> {
             .map(|v| v.str().map(|s| s.to_string()))
             .transpose()?
             .filter(|s| !s.trim().is_empty()),
+        runs_code: flag("runs_code")?,
     })
 }
 
@@ -157,6 +158,7 @@ fn grants_to_py<'py>(py: Python<'py>, grants: &TeamGrants) -> PyResult<Bound<'py
     out.set_item("plugins", grants.plugins.iter().collect::<Vec<_>>())?;
     out.set_item("plugins_write", grants.plugins_write)?;
     out.set_item("instance", grants.instance.clone())?;
+    out.set_item("runs_code", grants.runs_code)?;
     Ok(out)
 }
 
@@ -735,6 +737,30 @@ pub fn team_sandbox_status() -> String {
     .to_string()
 }
 
+/// Native Team bootstrap only: retain the exact source namespace before site hooks.
+/// The descriptor supplies no API credentials or new authorization.
+#[pyfunction]
+pub fn team_sources_capture(path: String, expected_sha256: String) -> PyResult<()> {
+    meerschaum_core::team_scope::source_namespace::capture_sdk(
+        std::path::Path::new(&path),
+        &expected_sha256,
+    )
+    .map_err(pyo3::exceptions::PyPermissionError::new_err)
+}
+
+/// The already captured nonsecret package/cache projection; later env/config cannot change it.
+#[pyfunction]
+pub fn team_sources_namespace() -> PyResult<Option<String>> {
+    meerschaum_core::team_scope::source_namespace::launch()
+        .map_err(pyo3::exceptions::PyPermissionError::new_err)?
+        .map(|launch| {
+            serde_json::to_string(&launch.namespace).map_err(|_| {
+                pyo3::exceptions::PyRuntimeError::new_err("Invalid captured Team source namespace.")
+            })
+        })
+        .transpose()
+}
+
 /// `_core.access_team_scope(user_teams, teams, primary=None, connectors=None, object_team=None,
 /// is_admin=False)` (5.1): the isolated team a user acts for when server-side Python code runs on
 /// their behalf (`meerschaum_core::team_scope::acting_team`), as `{team, team_id, connectors,
@@ -777,6 +803,19 @@ pub fn access_team_scope<'py>(
 #[pyfunction]
 pub fn access_isolated_withheld() -> Vec<&'static str> {
     access::ISOLATED_WITHHELD.to_vec()
+}
+
+/// `_core.access_withheld_permissions(grants)`: the permissions a principal with `grants` does
+/// not hold (5.1: a walled-off member of a team that runs code keeps `actions:execute` and
+/// `webterm:use`, which the API server honours only as the team's sandboxed processes).
+#[pyfunction]
+pub fn access_withheld_permissions(grants: &Bound<'_, PyAny>) -> PyResult<Vec<&'static str>> {
+    let grants = if grants.is_none() {
+        TeamGrants::default()
+    } else {
+        grants_of(grants)?
+    };
+    Ok(access::withheld_permissions(&grants))
 }
 
 /// `_core.access_can_name_connector(principal, keys, teams=None, configured=True)`: whether the
@@ -1321,10 +1360,13 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_team_grants, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_name_connector, m)?)?;
     m.add_function(wrap_pyfunction!(access_isolated_withheld, m)?)?;
+    m.add_function(wrap_pyfunction!(access_withheld_permissions, m)?)?;
     m.add_function(wrap_pyfunction!(access_team_scope, m)?)?;
     m.add_function(wrap_pyfunction!(access_team_process_env, m)?)?;
     m.add_function(wrap_pyfunction!(team_sandbox_enforce, m)?)?;
     m.add_function(wrap_pyfunction!(team_sandbox_status, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sources_capture, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sources_namespace, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_use_plugin, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_write_plugins, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_see_team, m)?)?;

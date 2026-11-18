@@ -66,6 +66,131 @@ pub struct WorkerOptions {
     pub team: Option<TeamExpectation>,
 }
 
+/// Select the host-prepared native trampoline before Python preflight, entry-point discovery
+/// or startup. No interpreter or executable from a persisted job environment is trusted here.
+pub(crate) fn python_launcher(
+    options: &WorkerOptions,
+) -> WorkerResult<(PathBuf, Vec<String>, bool)> {
+    use meerschaum_core::team_scope::sandbox::{self, runtime};
+    let spec_path = if options
+        .env_remove
+        .iter()
+        .any(|name| name == sandbox::SPEC_VAR)
+    {
+        None
+    } else {
+        options
+            .env
+            .iter()
+            .rev()
+            .find(|(name, _)| name == sandbox::SPEC_VAR)
+            .map(|(_, value)| PathBuf::from(value))
+            .or_else(|| {
+                (!options.env_clear)
+                    .then(|| std::env::var_os(sandbox::SPEC_VAR).map(PathBuf::from))
+                    .flatten()
+            })
+    };
+    let Some(path) = spec_path.filter(|path| !path.as_os_str().is_empty()) else {
+        use meerschaum_core::team_scope::source_namespace;
+        let selected = if options
+            .env_remove
+            .iter()
+            .any(|key| key == source_namespace::ENV)
+        {
+            None
+        } else {
+            options
+                .env
+                .iter()
+                .rev()
+                .find(|(key, _)| key == source_namespace::ENV)
+                .map(|(_, path)| PathBuf::from(path))
+                .or_else(|| {
+                    (!options.env_clear)
+                        .then(|| std::env::var_os(source_namespace::ENV).map(PathBuf::from))
+                        .flatten()
+                })
+        };
+        let retained = source_namespace::launch().map_err(WorkerError::Refused)?;
+        let launch = match retained {
+            Some(launch) => {
+                let fixed = launch
+                    .namespace
+                    .cache
+                    .parent()
+                    .ok_or_else(|| {
+                        WorkerError::Refused("The captured Team source context is invalid.".into())
+                    })?
+                    .join(source_namespace::FILE);
+                if selected.as_ref().is_some_and(|selected| selected != &fixed) {
+                    return Err(WorkerError::Refused(
+                        "A later environment cannot replace the captured Team source context."
+                            .into(),
+                    ));
+                }
+                Some(launch.clone())
+            }
+            None => {
+                if selected.is_some() && source_namespace::is_captured() {
+                    return Err(WorkerError::Refused("A later environment cannot add a Team source context to this native process.".into()));
+                }
+                selected
+                    .as_deref()
+                    .map(source_namespace::Launch::read)
+                    .transpose()
+                    .map_err(WorkerError::Refused)?
+            }
+        };
+        if let Some(launch) = launch {
+            let root = options
+                .env
+                .iter()
+                .rev()
+                .find(|(key, _)| key == "MRSM_ROOT_DIR")
+                .map(|(_, root)| PathBuf::from(root))
+                .or_else(|| {
+                    (!options.env_clear)
+                        .then(|| std::env::var_os("MRSM_ROOT_DIR").map(PathBuf::from))
+                        .flatten()
+                });
+            if root.as_deref() != Some(launch.namespace.root.as_path()) {
+                return Err(WorkerError::Refused(
+                    "A Team source launch cannot change its durable runtime root.".into(),
+                ));
+            }
+            return Ok((
+                launch.runtime.launcher,
+                vec![
+                    source_namespace::PYTHON_CHILD.into(),
+                    options.python.to_string_lossy().into_owned(),
+                ],
+                true,
+            ));
+        }
+        return Ok((options.python.clone(), Vec::new(), false));
+    };
+    let spec = sandbox::Spec::read(&path).map_err(|_| {
+        WorkerError::Refused("The isolated worker's host sandbox is unavailable.".into())
+    })?;
+    let runtime = spec.runtime.ok_or_else(|| WorkerError::Refused("The isolated worker has no host-prepared native runtime. Restart it through a trusted standalone mrsm host.".into()))?;
+    if !runtime.launcher.is_absolute()
+        || std::fs::canonicalize(&runtime.launcher).ok().as_ref() != Some(&runtime.launcher)
+    {
+        return Err(WorkerError::Refused(
+            "The isolated worker's native launcher has no canonical provenance.".into(),
+        ));
+    }
+    Ok((
+        runtime.launcher,
+        vec![
+            runtime::PYTHON_CHILD.into(),
+            options.python.to_string_lossy().into_owned(),
+        ],
+        true,
+    ))
+}
+
 /// Whether a start already had the same-major warning enabled (one per program).
 static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -687,7 +812,9 @@ async fn preflight(opts: &WorkerOptions) -> WorkerResult<()> {
         "Install the matching release (`{python} -m pip install 'meerschaum=={version}'`) or set \
          MRSM_PYTHON to an interpreter that has it."
     );
-    let mut cmd = Command::new(&opts.python);
+    let (program, prefix, confined) = python_launcher(opts)?;
+    let mut cmd = Command::new(program);
+    cmd.args(prefix);
     cmd.arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG)
         .arg("-c")
         .arg(format!(
@@ -707,6 +834,9 @@ async fn preflight(opts: &WorkerOptions) -> WorkerResult<()> {
     }
     cmd.envs(meerschaum_core::python_guard::expect_env());
     cmd.envs(opts.env.iter().map(|(k, v)| (k, v)));
+    if confined {
+        meerschaum_core::team_scope::sandbox::runtime::sanitize_command(cmd.as_std_mut());
+    }
     if let Some(dir) = &opts.current_dir {
         cmd.current_dir(dir);
     }
@@ -812,7 +942,9 @@ impl Worker {
             hook();
         }
         let mut channel = Channel::new(opts.socket_dir.as_deref())?;
-        let mut cmd = Command::new(&opts.python);
+        let (program, prefix, confined) = python_launcher(opts)?;
+        let mut cmd = Command::new(program);
+        cmd.args(prefix);
         // `-P`: the working directory (the user's, a project's) stays off `sys.path`, where a
         // `meerschaum.py` or `meerschaum/` would replace the package (`-c` and `-m` both put it
         // first). Plugins are imported through the plugins directory, never the working one.
@@ -862,6 +994,9 @@ impl Worker {
             }
         }
         cmd.envs(opts.env.iter().map(|(k, v)| (k, v)));
+        if confined {
+            meerschaum_core::team_scope::sandbox::runtime::sanitize_command(cmd.as_std_mut());
+        }
         // The shell forwards these pipes verbatim to its terminal, around live progress.
         // Tell the embedded host where they end so SDK prompts can still move the cursor.
         // Set this after the caller's environment, and consume it before importing plugins.

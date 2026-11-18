@@ -36,6 +36,16 @@
 //!   team whose members may install plugins exists, and Unix sockets are not denied to team code
 //!   on this server (neither Landlock, Linux 7.1, nor the seccomp filter of older kernels; the
 //!   server asks a probe process, [`meerschaum_core::team_scope::sandbox::cached_probe`]).
+//! - **Restricted terminals** (5.1). A user who may not run system commands
+//!   ([`crate::execute_policy::may_run_system_commands`]: today, anyone who is not an
+//!   administrator) gets the same `mrsm` shell in restricted mode ([`restricted`]): every line it
+//!   would run is first decided by this server with the decision of `POST /execute` for that
+//!   user, it starts no other program, and its tmux sessions live on a separate tmux server with
+//!   no key bindings (which follows the same rule: no tmux while isolated teams' sandbox does
+//!   not refuse Unix sockets). The mode is decided when the terminal opens and at every check of an open
+//!   one: a change of role closes the terminal (and ends the user's tmux session of the other
+//!   mode), so the next terminal opens in the new mode, and an unrestricted session is never
+//!   reattached by a user who may no longer run system commands.
 //! - **The shell** is `<this binary> -i <instance>` (the `mrsm` shell on the server's instance)
 //!   started with the server's connection/config environment. Job execution context (including
 //!   `MRSM_NONINTERACTIVE`, which every job's environment sets) and `COLUMNS`/`LINES`/`TMUX` are
@@ -72,6 +82,26 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::AppState;
+
+mod api_terminal;
+mod native_pending;
+pub mod remote;
+pub mod restricted;
+pub use api_terminal::open_api_terminal;
+
+/// Retire only a host-prepared API shell which the caller proves it has never handed to
+/// any process launcher. Claimed, malformed or different-owner pending proofs are refused.
+/// This is host lifecycle cleanup, not authority derived from a request or shell environment.
+pub fn cancel_prepared_api_terminal(shell: &ShellCommand) -> std::io::Result<()> {
+    native_pending::cancel_unspawned(shell)
+}
+pub mod team;
+
+use team::{end_team_sessions_of, launch_team, start_team_sweeper, team_new_window};
+
+pub use restricted::{
+    GRANT_ENV, POLICY_ADDRESS_ENV, Policy, RESTRICTED_ENV, TMUX_RESTRICTED_CONF, restricted_socket,
+};
 
 /// The most terminals one server runs at once (every tab is a process).
 pub const MAX_TERMINALS: usize = 128;
@@ -208,6 +238,24 @@ static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 pub trait SessionLookup: Send + Sync {
     /// The user name logged in under `session_id`; `Ok(None)` for an unknown or expired session.
     async fn username(&self, session_id: &str) -> Result<Option<String>, String>;
+    /// Host-selected API profile; its terminal must use the isolated restricted tmux server.
+    async fn restricted(&self, _session_id: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    /// The verified session's username and password binding, captured before remote setup.
+    /// Stores without a credential binding cannot authorize a delegated terminal launch.
+    async fn binding(&self, _session_id: &str) -> Result<Option<(String, String)>, String> {
+        Ok(None)
+    }
+    /// A private executor may bind its main-owned terminal to a per-launch environment.
+    /// Ordinary console session stores retain their configured shell.
+    async fn shell(
+        &self,
+        _session_id: &str,
+        configured: &ShellCommand,
+    ) -> Result<ShellCommand, String> {
+        Ok(configured.clone())
+    }
 }
 
 /// Renders the standalone terminal page for a session id.
@@ -222,6 +270,8 @@ pub struct ShellCommand {
     pub args: Vec<String>,
     /// Extra environment variables for the PTY's process (and the tmux client, on the tmux path).
     pub env: Vec<(String, String)>,
+    /// A complete execution-context environment; omit inherited variables from PTYs and windows.
+    pub clear_env: bool,
     /// The working directory (default: the server's).
     pub cwd: Option<PathBuf>,
 }
@@ -233,6 +283,7 @@ impl ShellCommand {
             program: program.into(),
             args: Vec::new(),
             env: Vec::new(),
+            clear_env: false,
             cwd: None,
         }
     }
@@ -287,6 +338,10 @@ pub struct WebtermConfig {
     pub team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode,
     /// How often an open terminal authorizes its session again ([`REAUTHORIZE_EVERY`]).
     pub reauthorize_every: Duration,
+    /// The restricted terminals' policy socket and grants ([`restricted`]).
+    pub policy: Policy,
+    /// Where the policy socket lives (the webterm resources directory).
+    pub policy_dir: PathBuf,
 }
 
 impl WebtermConfig {
@@ -298,8 +353,32 @@ impl WebtermConfig {
         page: PageRenderer,
         mut shell: ShellCommand,
     ) -> WebtermConfig {
-        let state_dir = state.config.webterm_resources_path.join("shell-state");
-        if create_private_dir(&state_dir).is_ok() {
+        let state_dir = if shell
+            .env
+            .iter()
+            .any(|(key, value)| key == "MRSM_API_EXECUTION" && value == "1")
+        {
+            shell
+                .env
+                .iter()
+                .rev()
+                .find(|(key, _)| key == "MRSM_WEBTERM_STATE_DIR")
+                .map(|(_, value)| PathBuf::from(value))
+                .unwrap_or_else(|| state.config.webterm_resources_path.join("shell-state"))
+        } else {
+            state.config.webterm_resources_path.join("shell-state")
+        };
+        let api_shell = shell
+            .env
+            .iter()
+            .any(|(key, value)| key == "MRSM_API_EXECUTION" && value == "1");
+        let state_ready = if api_shell {
+            std::fs::symlink_metadata(&state_dir)
+                .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        } else {
+            create_private_dir(&state_dir).is_ok()
+        };
+        if state_ready {
             shell.env.push((
                 "MRSM_WEBTERM_STATE_DIR".into(),
                 state_dir.to_string_lossy().into_owned(),
@@ -333,6 +412,8 @@ impl WebtermConfig {
             sandbox_stops_sockets: None,
             team_sandbox_mode: state.config.team_sandbox_mode,
             reauthorize_every: REAUTHORIZE_EVERY,
+            policy: Policy::default(),
+            policy_dir: state.config.webterm_resources_path.clone(),
         };
         // The probe runs at start-up when it matters (and again after a team change).
         let _ = config.tmux_refused();
@@ -399,7 +480,10 @@ impl WebtermConfig {
             }
             if let Some(socket) = self.tmux.as_ref().and_then(|t| t.socket.as_ref()) {
                 stop_owned_server(socket);
+                // 5.1: the restricted terminals' and the teams' tmux servers too.
+                stop_owned_server(&restricted_socket(socket));
             }
+            team::stop_team_servers();
             return None;
         }
         self.tmux.as_ref()
@@ -497,7 +581,8 @@ const MAX_SOCKET_PATH: usize = 100;
 /// in the temporary directory. Its directory is created `0700`.
 pub fn tmux_socket_path(cfg: &crate::config::ServerConfig) -> std::io::Result<PathBuf> {
     let preferred = cfg.webterm_resources_path.join("tmux.sock");
-    if preferred.as_os_str().len() <= MAX_SOCKET_PATH {
+    // Room for the restricted terminals' socket next to it (`tmux-r.sock`).
+    if preferred.as_os_str().len() + 2 <= MAX_SOCKET_PATH {
         create_private_dir(&cfg.webterm_resources_path)?;
         return Ok(preferred);
     }
@@ -842,6 +927,7 @@ pub fn tmux_available(binary: &str, env: &[(String, String)]) -> bool {
 struct Inner {
     state: AppState,
     config: WebtermConfig,
+    executor: bool,
 }
 
 /// The `/webterm/{session_id}` and `/websocket/{session_id}` routes. Merge them only when the
@@ -852,56 +938,132 @@ pub fn routes(state: AppState, config: WebtermConfig) -> Router {
         .route("/webterm/{session_id}/", get(page))
         .route("/websocket/{session_id}", get(socket))
         .route("/websocket/{session_id}/", get(socket))
-        .with_state(Inner { state, config })
+        .with_state(Inner {
+            state,
+            config,
+            executor: false,
+        })
+}
+
+/// Private executor websocket only. Requires signed gateway identity and leased sessions;
+/// it never interprets a main-console session UUID or permits the ordinary no-auth bypass.
+pub fn executor_routes(state: AppState, config: WebtermConfig) -> Router {
+    Router::new()
+        .route("/websocket/{session_id}", get(socket))
+        .with_state(Inner {
+            state,
+            config,
+            executor: true,
+        })
+}
+
+/// How a terminal's shell runs (5.1, [`crate::execute_policy::may_run_system_commands`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TermMode {
+    /// The full `mrsm` shell on the server (administrators).
+    Full,
+    /// The restricted shell: every line decided by the server ([`restricted`]).
+    Restricted,
+    /// A team terminal: an `mrsm` shell that is itself a process of the team (its configuration,
+    /// the environment allowlist and the sandbox applied before the shell starts), on a tmux
+    /// server of the team's own that runs nothing else ([`team::team_tmux`]).
+    Team(String),
+    /// A main-owned terminal transported to one immutable team executor identity.
+    Remote(uuid::Uuid),
+    /// A bounded API-only shell on Main, bound to its registered primary team or Everyone.
+    HostApi(Option<uuid::Uuid>),
 }
 
 /// The user a session may open a terminal as, or why not.
 enum Access {
-    Granted(String),
+    /// The terminal's name (the user's), how its shell runs, and the team record of a team
+    /// terminal.
+    Granted {
+        name: String,
+        mode: TermMode,
+        team: Option<Box<meerschaum_core::access::Team>>,
+    },
     /// No session (log in).
     Denied,
     /// A session whose user may not use the terminal (`webterm:use`).
     Forbidden,
     Unavailable,
+    /// A member of an isolated team whose team terminal is not available here, and why.
+    NoTeamTerminal(String),
 }
 
 impl Access {
     /// What a refused websocket shows before it closes (v4 closed it without a word, leaving a
     /// blank terminal).
-    fn refusal(&self) -> Option<&'static str> {
+    fn refusal(&self) -> Option<String> {
         match self {
-            Access::Granted(_) => None,
-            Access::Denied => {
-                Some("Not logged in, or the session has ended. Log in again to use the terminal.")
-            }
-            Access::Forbidden => Some("You do not have permission to use the terminal."),
-            Access::Unavailable => Some("Could not check your session. Try again later."),
+            Access::Granted { .. } => None,
+            Access::Denied => Some(
+                "Not logged in, or the session has ended. Log in again to use the terminal.".into(),
+            ),
+            Access::Forbidden => Some("You do not have permission to use the terminal.".into()),
+            Access::Unavailable => Some("Could not check your session. Try again later.".into()),
+            Access::NoTeamTerminal(reason) => Some(team_terminal_refusal(reason)),
         }
     }
 
-    /// Why an open terminal of `term_name` closes after authorizing its session again; `None`
-    /// keeps it open.
-    fn revocation(&self, term_name: &str) -> Option<&'static str> {
+    /// Why an open terminal of `term_name` (started in `mode`) closes after authorizing its
+    /// session again; `None` keeps it open.
+    fn revocation(&self, term_name: &str, mode: &TermMode) -> Option<String> {
         match self {
-            Access::Granted(name) if name == term_name => None,
-            Access::Granted(_) | Access::Denied => {
-                Some("Your session has ended. Log in again to use the terminal.")
+            Access::Granted {
+                name, mode: now, ..
+            } if name == term_name => (now != mode).then(|| ROLE_CHANGED.to_string()),
+            Access::Granted { .. } | Access::Denied => {
+                Some("Your session has ended. Log in again to use the terminal.".into())
             }
-            Access::Forbidden => Some("Your permission to use the terminal was removed."),
+            Access::Forbidden => Some("Your permission to use the terminal was removed.".into()),
             Access::Unavailable => {
-                Some("Could not verify your session, so the terminal was closed.")
+                Some("Could not verify your session, so the terminal was closed.".into())
             }
+            Access::NoTeamTerminal(reason) => Some(team_terminal_refusal(reason)),
         }
     }
+}
+
+/// What a member of an isolated team hears when their team terminal is not available.
+fn team_terminal_refusal(reason: &str) -> String {
+    format!("Your team's terminal is not available on this server: {reason}.")
 }
 
 /// Who `session_id` may open a terminal as. `fresh` reads the user's identity now instead of
 /// from the access cache (a websocket, and every check of an open one).
 async fn authorize(inner: &Inner, session_id: &str, fresh: bool) -> Access {
+    if inner.executor {
+        let Some(caller) = crate::executor::gateway::current() else {
+            return Access::Denied;
+        };
+        let name = match inner.config.sessions.username(session_id).await {
+            Ok(Some(name)) => name,
+            Ok(None) => return Access::Denied,
+            Err(_) => return Access::Unavailable,
+        };
+        return match inner.config.sessions.restricted(session_id).await {
+            Ok(restricted) => Access::Granted {
+                name,
+                mode: if restricted {
+                    TermMode::Restricted
+                } else {
+                    TermMode::Team(caller.claims.team_id.to_string())
+                },
+                team: None,
+            },
+            Err(_) => Access::Unavailable,
+        };
+    }
     // PARITY: `is_session_authenticated` is true for everyone under `--no-auth`; the terminal is
     // named after the session then (`username or session_id`).
     if inner.state.config.no_auth {
-        return Access::Granted(session_id.to_string());
+        return Access::Granted {
+            name: session_id.to_string(),
+            mode: TermMode::Full,
+            team: None,
+        };
     }
     let username = match inner.config.sessions.username(session_id).await {
         Ok(Some(username)) if !username.is_empty() => username,
@@ -911,12 +1073,18 @@ async fn authorize(inner: &Inner, session_id: &str, fresh: bool) -> Access {
             return Access::Unavailable;
         }
     };
+    authorize_user(&inner.state, &username, fresh).await
+}
+
+/// Who `username` may open a terminal as (the part of [`authorize`] after the session).
+async fn authorize_user(state: &AppState, username: &str, fresh: bool) -> Access {
+    let username = username.to_string();
     // FIX (intentional v4 change, rc15 access model): v4 gave every logged-in user a shell
     // unless `--secure`; the terminal now needs `webterm:use` (administrators, the role
     // `operator`, or the permission given), and `--secure` keeps it for administrators. v4 also
     // asked only the session store: the session's user must still be a user of the instance.
     let user = meerschaum_core::users::User::new(&username, None);
-    match inner.state.instance().get_user_id(&user).await {
+    match state.instance().get_user_id(&user).await {
         Ok(Some(id)) if !id.is_null() => {}
         Ok(_) => return Access::Denied,
         Err(error) => {
@@ -927,20 +1095,119 @@ async fn authorize(inner: &Inner, session_id: &str, fresh: bool) -> Access {
     let principal = crate::auth::Principal::User(user);
     let granted = crate::auth::Scopes::List(vec!["*".into()]);
     let access = if fresh {
-        crate::access::access_of_fresh(&inner.state, principal, &granted).await
+        crate::access::access_of_fresh(state, principal, &granted).await
     } else {
-        crate::access::access_of(&inner.state, principal, &granted).await
+        crate::access::access_of(state, principal, &granted).await
     };
     let access = match access {
         Ok(access) => access,
         Err(e) if e.status.as_u16() == 503 => return Access::Unavailable,
         Err(_) => return Access::Denied,
     };
-    if !access.is_admin() && (!inner.state.config.actions_non_admin || !access.has("webterm:use")) {
+    if !access.is_admin() && (!state.config.actions_non_admin || !access.has("webterm:use")) {
         return Access::Forbidden;
     }
-    Access::Granted(username)
+    let selected_remote = (!access.full_admin())
+        .then(|| {
+            access
+                .team_records
+                .iter()
+                .find(|team| {
+                    meerschaum_core::access::same_team(Some(&team.name), Some(&access.primary_team))
+                        && access.in_team(Some(&team.name))
+                        && access.principal.permits_team(Some(&team.name))
+                })
+                .cloned()
+        })
+        .flatten()
+        .filter(|team| {
+            team.execution()
+                .is_ok_and(|settings| settings.mode.is_remote())
+        });
+    if let Some(team) =
+        selected_remote.or_else(|| crate::team_execution::code_running_team(&access))
+        && team.execution().is_ok_and(|s| s.mode.is_remote())
+    {
+        if !["webterm:use", "actions:execute", "jobs:execute"]
+            .iter()
+            .all(|p| access.has(p))
+        {
+            return Access::Forbidden;
+        }
+        let Some(id) = team
+            .id
+            .as_deref()
+            .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        else {
+            return Access::NoTeamTerminal("the selected team has no registered identity".into());
+        };
+        return Access::Granted {
+            name: username,
+            mode: TermMode::Remote(id),
+            team: Some(Box::new(team)),
+        };
+    }
+    // 5.1: the one answer to "may this user run system commands" decides the shell's mode. A
+    // member of an isolated team gets their team's terminal or none: never a shell in this
+    // server's process.
+    use crate::execute_policy::SystemCommands;
+    match crate::execute_policy::may_run_system_commands(state, &access).await {
+        SystemCommands::Anywhere => Access::Granted {
+            name: username,
+            mode: TermMode::Full,
+            team: None,
+        },
+        SystemCommands::TeamOnly { team } => match access.acting_team(None) {
+            Some(record) if meerschaum_core::access::same_team(Some(&record.name), Some(&team)) => {
+                Access::Granted {
+                    name: username,
+                    mode: TermMode::Team(team),
+                    team: Some(Box::new(record)),
+                }
+            }
+            _ => Access::NoTeamTerminal("the team you act for changed".into()),
+        },
+        SystemCommands::No { .. } => {
+            if !["webterm:use", "actions:execute", "jobs:execute"]
+                .iter()
+                .all(|permission| access.has(permission))
+            {
+                return Access::Forbidden;
+            }
+            let team_id = if meerschaum_core::access::is_everyone(Some(&access.primary_team)) {
+                None
+            } else {
+                let Some(id) = access
+                    .team_records
+                    .iter()
+                    .find(|team| {
+                        meerschaum_core::access::same_team(
+                            Some(&team.name),
+                            Some(&access.primary_team),
+                        )
+                    })
+                    .and_then(|team| team.id.as_deref())
+                    .and_then(|value| uuid::Uuid::parse_str(value).ok())
+                    .filter(|id| !id.is_nil())
+                else {
+                    return Access::NoTeamTerminal(
+                        "the primary team has no current registered identity".into(),
+                    );
+                };
+                Some(id)
+            };
+            Access::Granted {
+                name: username,
+                mode: TermMode::HostApi(team_id),
+                team: None,
+            }
+        }
+    }
 }
+
+/// Why an open terminal closes when its user's role changed (they may now run system commands,
+/// or no longer may).
+const ROLE_CHANGED: &str = "Your role changed. Open the terminal again.";
 
 const UNAUTHORIZED_PAGE: &str = r#"<html>
     <head>
@@ -980,11 +1247,28 @@ const FORBIDDEN_PAGE: &str = r#"<html>
 </html>
 "#;
 
+/// The page of a member of an isolated team whose team terminal is not available.
+fn no_team_terminal_page(reason: &str) -> String {
+    let escaped = reason
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    FORBIDDEN_PAGE
+        .replace("No terminal access", "No terminal for your team")
+        .replace(
+            "Ask an administrator for the permission to use the terminal.",
+            &format!("Your team's terminal is not available on this server: {escaped}."),
+        )
+}
+
 async fn page(State(inner): State<Inner>, UrlPath(session_id): UrlPath<String>) -> Response {
     let mut response = match authorize(&inner, &session_id, false).await {
-        Access::Granted(_) => Html((inner.config.page)(&session_id)).into_response(),
+        Access::Granted { .. } => Html((inner.config.page)(&session_id)).into_response(),
         Access::Denied => (StatusCode::UNAUTHORIZED, Html(UNAUTHORIZED_PAGE)).into_response(),
         Access::Forbidden => (StatusCode::FORBIDDEN, Html(FORBIDDEN_PAGE)).into_response(),
+        Access::NoTeamTerminal(reason) => {
+            (StatusCode::FORBIDDEN, Html(no_team_terminal_page(&reason))).into_response()
+        }
         Access::Unavailable => (
             StatusCode::SERVICE_UNAVAILABLE,
             "The session store is unavailable.",
@@ -1029,6 +1313,7 @@ pub fn origin_allowed(headers: &axum::http::HeaderMap) -> bool {
 async fn socket(
     State(inner): State<Inner>,
     UrlPath(session_id): UrlPath<String>,
+    verified: Option<axum::Extension<crate::executor::gateway::VerifiedRequest>>,
     headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
@@ -1037,15 +1322,24 @@ async fn socket(
     }
     ws.max_message_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| async move {
-            // PARITY: v4 accepts the websocket, then closes it when the session is not authorized
-            // (v5 says why first).
-            match authorize(&inner, &session_id, true).await {
-                Access::Granted(name) => run(inner, session_id, name, socket).await,
-                refused => {
-                    let reason = refused.refusal().unwrap_or_default();
-                    refuse(socket, reason, 1000).await
+            let verified = inner
+                .executor
+                .then(|| verified.map(|axum::Extension(caller)| caller))
+                .flatten();
+            crate::executor::gateway::scope(verified, async move {
+                // PARITY: v4 accepts the websocket, then closes it when the session is not authorized
+                // (v5 says why first).
+                match authorize(&inner, &session_id, true).await {
+                    Access::Granted { name, mode, team } => {
+                        run(inner, session_id, name, mode, team, socket).await
+                    }
+                    refused => {
+                        let reason = refused.refusal().unwrap_or_default();
+                        refuse(socket, &reason, 1000).await
+                    }
                 }
-            }
+            })
+            .await;
         })
 }
 
@@ -1156,8 +1450,16 @@ fn text(parts: Value) -> Message {
 }
 
 /// Bridge one websocket to one PTY until either side ends, or the session's access does.
-async fn run(inner: Inner, session_id: String, term_name: String, mut socket: WebSocket) {
-    let config = inner.config.clone();
+async fn run(
+    inner: Inner,
+    session_id: String,
+    term_name: String,
+    mode: TermMode,
+    team: Option<Box<meerschaum_core::access::Team>>,
+    mut socket: WebSocket,
+) {
+    let restricted = mode == TermMode::Restricted;
+    let mut config = inner.config.clone();
     let guard = match TerminalGuard::acquire() {
         Some(guard) => guard,
         None => {
@@ -1165,12 +1467,100 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
             return;
         }
     };
-    let launch = {
-        let config = config.clone();
-        let name = term_name.clone();
-        tokio::task::spawn_blocking(move || launch(&config, &name)).await
+    let _guard = guard;
+    if let TermMode::HostApi(team_id) = mode {
+        remote::bridge_host(inner, session_id, term_name, team_id, socket).await;
+        return;
+    }
+    if let TermMode::Remote(team_id) = mode {
+        if let Some(team) = team {
+            remote::bridge(inner, session_id, term_name, team_id, *team, socket).await;
+        } else {
+            refuse(
+                socket,
+                "The terminal's executor placement is unavailable.",
+                1011,
+            )
+            .await;
+        }
+        return;
+    }
+    if inner.executor {
+        match config.sessions.shell(&session_id, &config.shell).await {
+            Ok(shell) => config.shell = shell,
+            Err(_) => {
+                refuse(
+                    socket,
+                    "This terminal's execution environment is unavailable.",
+                    1011,
+                )
+                .await;
+                return;
+            }
+        }
+    }
+    // A restricted shell asks this server's policy socket before it runs anything.
+    let policy_address = if restricted && inner.executor {
+        Ok(Some(restricted::API_POLICY_ADDRESS.to_string()))
+    } else if restricted {
+        config
+            .policy
+            .listen(&inner.state, &config.policy_dir)
+            .await
+            .map(Some)
+    } else {
+        Ok(None)
     };
-    let (pty, tmux_session) = match launch {
+    // A team terminal's shell is a process of the team (5.1), from the host of the actions.
+    let team_shell = match (&mode, &team) {
+        (TermMode::Team(_), None) if inner.executor => Some(Ok(config.shell.clone())),
+        (TermMode::Team(_), Some(record)) => Some(
+            inner
+                .state
+                .actions
+                .team_shell(record)
+                .map_err(std::io::Error::other),
+        ),
+        (TermMode::Team(_), None) => Some(Err(std::io::Error::other("no team record"))),
+        _ => None,
+    };
+    let launch = match (policy_address, team_shell) {
+        (_, Some(Err(error))) => Ok(Err(error)),
+        (_, Some(Ok(shell))) => {
+            let config = config.clone();
+            let name = term_name.clone();
+            let team_name = match &mode {
+                TermMode::Team(team) => team.clone(),
+                _ => String::new(),
+            };
+            let state = inner.state.clone();
+            let every = config.reauthorize_every;
+            // Factory lease expiry retires its own sessions, including detached windows.
+            let check_membership = !inner.executor;
+            let launched = tokio::task::spawn_blocking(move || {
+                launch_team(&config, &name, &team_name, &shell, check_membership)
+            })
+            .await;
+            if check_membership && matches!(launched, Ok(Ok(_))) {
+                start_team_sweeper(&state, every);
+            }
+            launched
+        }
+        (Ok(address), None) => {
+            let config = config.clone();
+            let name = term_name.clone();
+            tokio::task::spawn_blocking(move || launch(&config, &name, address.as_deref())).await
+        }
+        (Err(error), None) => Ok(Err(error)),
+    };
+    let Launched {
+        pty,
+        session: tmux_session,
+        tmux: active_tmux,
+        shell: active_shell,
+        grant: _grant,
+        team_window,
+    } = match launch {
         Ok(Ok(started)) => started,
         Ok(Err(error)) => {
             tracing::warn!("Failed to start a terminal for '{term_name}': {error}");
@@ -1187,7 +1577,6 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
         }
         Err(_) => return,
     };
-    let _guard = guard;
     let Pty {
         process_id,
         master,
@@ -1238,7 +1627,12 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                 }
                 if let Some(request) = shell_waiting.take() {
                     let session = tmux_session.as_deref();
-                    shell_job = Some(spawn_shell_state(&config, session, process_id));
+                    shell_job = Some(spawn_shell_state(
+                        &config,
+                        active_tmux.as_ref(),
+                        session,
+                        process_id,
+                    ));
                     shell_request = Some(request);
                 }
             }
@@ -1277,23 +1671,35 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                             // session (`MAX_SESSION_WINDOWS`, across reconnects), and refused
                             // while the server is at its terminal limit. tmux runs off the
                             // bridge (and bounded): it never delays input or a revocation.
+                            // A restricted terminal's window runs its restricted shell on the
+                            // restricted tmux server (`active_tmux`, `active_shell`).
                             if new_windows < MAX_NEW_WINDOWS
                                 && active_terminals() < MAX_TERMINALS
                                 && let (Some(settings), Some(session)) =
-                                    (config.active_tmux(), &tmux_session)
+                                    (&active_tmux, &tmux_session)
+                                && config.tmux_refused().is_none()
                             {
                                 new_windows += 1;
                                 let (settings, shell, session) =
-                                    (settings.clone(), config.shell.clone(), session.clone());
+                                    (settings.clone(), active_shell.clone(), session.clone());
                                 tokio::task::spawn_blocking(move || {
-                                    tmux_new_window(&settings, &shell, &session)
+                                    if team_window {
+                                        team_new_window(&settings, &shell, &session)
+                                    } else {
+                                        tmux_new_window(&settings, &shell, &session)
+                                    }
                                 });
                             }
                         }
                         Some(ClientMessage::ShellState(request)) => {
                             if shell_job.is_none() {
                                 let session = tmux_session.as_deref();
-                                shell_job = Some(spawn_shell_state(&config, session, process_id));
+                                shell_job = Some(spawn_shell_state(
+                                    &config,
+                                    active_tmux.as_ref(),
+                                    session,
+                                    process_id,
+                                ));
                                 shell_request = Some(request);
                             } else if let Some(dropped) = shell_waiting.replace(request) {
                                 queue(&control, [text(json!(["shell_state", dropped, null]))]);
@@ -1321,12 +1727,26 @@ async fn run(inner: Inner, session_id: String, term_name: String, mut socket: We
                 )
                 .await
                 .unwrap_or(Access::Unavailable);
-                if let Some(reason) = access.revocation(&term_name) {
+                if let Some(reason) = access.revocation(&term_name, &mode) {
                     tracing::info!("Closing the terminal of '{term_name}': {reason}");
+                    // A changed role ends the user's tmux session of the old mode too: an
+                    // unrestricted shell cannot be restricted after the fact, so a demoted user
+                    // never reattaches one (and its windows and commands end now). A team
+                    // terminal's session ends with any revocation (5.1).
+                    if (reason == ROLE_CHANGED || team_window)
+                        && let (Some(settings), Some(session)) = (&active_tmux, &tmux_session)
+                    {
+                        let (settings, session, policy) =
+                            (settings.clone(), session.clone(), config.policy.clone());
+                        tokio::task::spawn_blocking(move || {
+                            end_tmux_session(&settings, &session);
+                            policy.forget_session(&session);
+                        });
+                    }
                     queue(&control, [
-                        reason_message(reason),
+                        reason_message(&reason),
                         text(json!(["disconnect", 1])),
-                        close_message(CLOSE_REVOKED, reason),
+                        close_message(CLOSE_REVOKED, &reason),
                     ]);
                     break;
                 }
@@ -1370,11 +1790,14 @@ async fn joined<T>(
 /// Read the shell's readiness off the bridge (it may run tmux, bounded by `TMUX_TIMEOUT`).
 fn spawn_shell_state(
     config: &WebtermConfig,
+    tmux: Option<&TmuxSettings>,
     session: Option<&str>,
     process_id: Option<u32>,
 ) -> tokio::task::JoinHandle<Option<Value>> {
-    let (config, session) = (config.clone(), session.map(str::to_string));
-    tokio::task::spawn_blocking(move || shell_state(&config, session.as_deref(), process_id))
+    let (config, tmux, session) = (config.clone(), tmux.cloned(), session.map(str::to_string));
+    tokio::task::spawn_blocking(move || {
+        shell_state(&config, tmux.as_ref(), session.as_deref(), process_id)
+    })
 }
 
 /// What a browser may send.
@@ -1583,11 +2006,12 @@ fn spawn_pty(builder: CommandBuilder, state_dir: Option<PathBuf>) -> std::io::Re
 /// The target is this authenticated terminal's own session, never a process-table scan.
 fn shell_state(
     config: &WebtermConfig,
+    tmux: Option<&TmuxSettings>,
     session: Option<&str>,
     process_id: Option<u32>,
 ) -> Option<Value> {
     let dir = config.shell_state_directory()?;
-    let pid = if let (Some(tmux), Some(session)) = (config.active_tmux(), session) {
+    let pid = if let (Some(tmux), Some(session)) = (tmux, session) {
         let mut command = std::process::Command::new(&tmux.binary);
         if let Some(socket) = &tmux.socket {
             command.arg("-S").arg(socket);
@@ -1612,12 +2036,82 @@ fn shell_state(
     } else {
         process_id?
     };
+    let pid = if config
+        .shell
+        .env
+        .iter()
+        .any(|(key, value)| key == "MRSM_API_EXECUTION" && value == "1")
+    {
+        let spec = config
+            .shell
+            .env
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "MRSM_TEAM_SANDBOX")
+            .map(|(_, value)| Path::new(value))?;
+        meerschaum_jobs::supervisor::terminal_child_pid(i32::try_from(pid).ok()?, spec)?
+            .try_into()
+            .ok()?
+    } else {
+        pid
+    };
     read_shell_state(Path::new(dir), pid)
 }
 
+const MAX_SHELL_STATE_BYTES: u64 = 1024 * 1024;
+
+/// Hold the selected directory while opening its numeric leaf: a confined shell may replace
+/// its own state entries, but status reads must never follow links or wait on a FIFO/device.
+fn shell_state_file(dir: &Path, pid: u32) -> Option<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags, open, openat};
+        let directory = open(
+            dir,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .ok()?;
+        let leaf = openat(
+            &directory,
+            format!("{pid}.json"),
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC | OFlags::NOCTTY,
+            Mode::empty(),
+        )
+        .ok()?;
+        Some(std::fs::File::from(leaf))
+    }
+    #[cfg(not(unix))]
+    {
+        // Legacy non-Unix terminals retain their status display with a bounded regular file.
+        // API-only execution profiles are unavailable on these platforms.
+        let directory = std::fs::symlink_metadata(dir).ok()?;
+        if !directory.is_dir() || directory.file_type().is_symlink() {
+            return None;
+        }
+        let path = dir.join(format!("{pid}.json"));
+        let leaf = std::fs::symlink_metadata(&path).ok()?;
+        if !leaf.is_file() || leaf.file_type().is_symlink() {
+            return None;
+        }
+        std::fs::File::open(path).ok()
+    }
+}
+
 fn read_shell_state(dir: &Path, pid: u32) -> Option<Value> {
-    let path = dir.join(format!("{pid}.json"));
-    let snapshot: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let file = shell_state_file(dir, pid)?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_SHELL_STATE_BYTES {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_SHELL_STATE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_SHELL_STATE_BYTES {
+        return None;
+    }
+    let snapshot: Value = serde_json::from_slice(&bytes).ok()?;
     if snapshot.get("pid")?.as_u64()? != u64::from(pid) {
         return None;
     }
@@ -1635,23 +2129,283 @@ fn read_shell_state(dir: &Path, pid: u32) -> Option<Value> {
     )
 }
 
-/// The tmux session name for a terminal: tmux rejects `.` and `:` in names.
+/// The tmux session name for a terminal: tmux rejects `.` and `:` in names, so they are written
+/// `_d` and `_c`, and `_` itself `__` (5.1: one user's session name is never another's, as
+/// `a.b` and `a_b` both were `a_b`). The suffix (`api:webterm:tmux:session_suffix`, the same for
+/// everyone) keeps the old replacement.
 pub fn tmux_session_name(term_name: &str, suffix: &str) -> String {
-    format!("{term_name}{suffix}").replace(['.', ':'], "_")
+    let mut name = String::with_capacity(term_name.len() + suffix.len());
+    for c in term_name.chars() {
+        match c {
+            '_' => name.push_str("__"),
+            '.' => name.push_str("_d"),
+            ':' => name.push_str("_c"),
+            c => name.push(c),
+        }
+    }
+    name.push_str(&suffix.replace(['.', ':'], "_"));
+    name
 }
 
-/// Start a terminal's process: the shell itself, or `tmux new-session -A` around it. The second
-/// value is the tmux session name on the tmux path.
-fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Option<String>)> {
+/// A started terminal.
+struct Launched {
+    pty: Pty,
+    /// The tmux session it attached to (the tmux path).
+    session: Option<String>,
+    /// The tmux server that session lives on (the restricted one for a restricted terminal).
+    tmux: Option<TmuxSettings>,
+    /// The shell a new window runs (a restricted terminal's carries its grant).
+    shell: ShellCommand,
+    /// A restricted terminal's own grant on the plain path (one shell per connection).
+    grant: Option<restricted::GrantGuard>,
+    /// A team terminal (5.1): its windows run the team's shell from an empty environment.
+    team_window: bool,
+}
+
+/// The tmux settings of the restricted terminals next to `tmux` (the administrators'): their own
+/// socket ([`restricted_socket`]) and Meerschaum's [`TMUX_RESTRICTED_CONF`] (never the
+/// administrators' `api:webterm:tmux:config`). `None` without a dedicated socket: the default
+/// tmux server is never used, so such a terminal runs without tmux.
+fn restricted_tmux(tmux: &TmuxSettings) -> Option<TmuxSettings> {
+    let socket = tmux.socket.as_ref()?;
+    Some(TmuxSettings {
+        binary: tmux.binary.clone(),
+        socket: Some(restricted_socket(socket)),
+        session_suffix: tmux.session_suffix.clone(),
+        env_dir: tmux.env_dir.clone(),
+        config_file: Some(
+            tmux.env_dir
+                .join("tmux-restricted.conf")
+                .display()
+                .to_string(),
+        ),
+    })
+}
+
+/// `shell` in restricted mode: it asks `address` with `grant` before running anything.
+fn restricted_shell(shell: &ShellCommand, address: &str, grant: &str) -> ShellCommand {
+    let mut shell = shell.clone();
+    shell.env.retain(|(key, _)| {
+        ![RESTRICTED_ENV, POLICY_ADDRESS_ENV, GRANT_ENV].contains(&key.as_str())
+    });
+    shell.env.push((RESTRICTED_ENV.into(), "1".into()));
+    shell.env.push((POLICY_ADDRESS_ENV.into(), address.into()));
+    shell.env.push((GRANT_ENV.into(), grant.into()));
+    // The shell may be `python -m meerschaum`: never an interactive interpreter after it exits,
+    // a startup script or a debugger.
+    for (var, value) in RESTRICTED_PYTHON_VARS {
+        shell.env.retain(|(key, _)| key != var);
+        shell.env.push((var.to_string(), value.to_string()));
+    }
+    shell
+}
+
+/// What a restricted shell's Python variables are, whatever the server's environment says: they
+/// would make a Python interpreter (the shell, when it runs as `python -m meerschaum`) stay
+/// interactive, run a script of its own or open a debugger (an empty value is unset for Python;
+/// `PYTHONBREAKPOINT=0` turns `breakpoint()` off).
+const RESTRICTED_PYTHON_VARS: &[(&str, &str)] = &[
+    ("PYTHONINSPECT", ""),
+    ("PYTHONSTARTUP", ""),
+    ("PYTHONBREAKPOINT", "0"),
+];
+
+/// A tmux command on `tmux`'s own socket (never the default server), without the caller's tmux
+/// variables or the server's job context.
+fn tmux_command(tmux: &TmuxSettings) -> Option<std::process::Command> {
+    let socket = tmux.socket.as_ref()?;
+    let mut command = std::process::Command::new(&tmux.binary);
+    command
+        .arg("-S")
+        .arg(socket)
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE");
+    for var in job_context_vars() {
+        command.env_remove(var);
+    }
+    Some(command)
+}
+
+/// Whether the tmux `session` (exact name) exists on `tmux`'s socket.
+fn tmux_has_session(tmux: &TmuxSettings, session: &str) -> bool {
+    let Some(mut command) = tmux_command(tmux) else {
+        return false;
+    };
+    command.args(["has-session", "-t", &format!("={session}")]);
+    tmux_output(&mut command).is_some_and(|output| output.status.success())
+}
+
+/// Retire all panes of the exact Factory lease on its Team, API-only or legacy socket.
+/// Each socket belongs to this executor configuration. A dedicated base is required.
+pub fn end_executor_terminal(base: &TmuxSettings, team_id: uuid::Uuid, name: &str) {
+    let session = tmux_session_name(name, &base.session_suffix);
+    for tmux in [
+        team::team_tmux(base, &team_id.to_string()),
+        restricted_tmux(base),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        end_tmux_session(&tmux, &session);
+    }
+    end_tmux_session(base, &session);
+}
+
+/// End the tmux `session` (exact name) on `tmux`'s socket, with every window and process in it.
+/// Nothing happens without a dedicated socket, a running server or such a session.
+pub fn end_tmux_session(tmux: &TmuxSettings, session: &str) {
+    if let Some(mut command) = tmux_command(tmux) {
+        command.args(["kill-session", "-t", &format!("={session}")]);
+        let _ = tmux_output(&mut command);
+    }
+}
+
+/// Write [`TMUX_RESTRICTED_CONF`] (`0600`) where `tmux` (restricted settings) reads it.
+fn write_restricted_conf(tmux: &TmuxSettings) -> std::io::Result<()> {
+    let Some(file) = &tmux.config_file else {
+        return Err(std::io::Error::other(
+            "no restricted tmux configuration path",
+        ));
+    };
+    let path = Path::new(file);
+    if std::fs::read_to_string(path).ok().as_deref() == Some(TMUX_RESTRICTED_CONF) {
+        return Ok(());
+    }
+    create_private_dir(&tmux.env_dir)?;
+    let temporary = tmux
+        .env_dir
+        .join(format!("tmux-restricted.conf.{}.tmp", std::process::id()));
+    write_private_file(&temporary, TMUX_RESTRICTED_CONF.as_bytes())?;
+    std::fs::rename(&temporary, path)
+}
+
+/// Lock down the restricted tmux server that runs on `tmux`'s socket: apply
+/// [`TMUX_RESTRICTED_CONF`] (`source-file`), empty every key table it does not keep
+/// ([`restricted::KEPT_TABLES`]: tmux has more tables than the ones the file names, and new
+/// releases add some), then check that tmux lists exactly the file's bindings and no prefix
+/// key. `true` only when all of that holds.
+fn apply_restricted_conf(tmux: &TmuxSettings) -> bool {
+    let Some(file) = &tmux.config_file else {
+        return false;
+    };
+    let run = |args: &[&str]| -> Option<std::process::Output> {
+        let mut command = tmux_command(tmux)?;
+        command.args(args);
+        tmux_output(&mut command).filter(|output| output.status.success())
+    };
+    if run(&["source-file", file]).is_none() {
+        return false;
+    }
+    let Some(listing) = run(&["list-keys"]) else {
+        return false;
+    };
+    let mut tables: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+        .lines()
+        .filter_map(|line| restricted::binding(line).map(|(table, _, _)| table))
+        .filter(|table| !restricted::KEPT_TABLES.contains(&table.as_str()))
+        .collect();
+    tables.sort();
+    tables.dedup();
+    for table in &tables {
+        if run(&["unbind-key", "-a", "-T", table]).is_none() {
+            return false;
+        }
+    }
+    let Some(listing) = run(&["list-keys"]) else {
+        return false;
+    };
+    if let Err(error) = restricted::only_allowed_bindings(&String::from_utf8_lossy(&listing.stdout))
+    {
+        tracing::warn!("A restricted terminal's tmux server is not locked down: {error}");
+        return false;
+    }
+    ["prefix", "prefix2"].iter().all(|option| {
+        run(&["show-options", "-gv", option])
+            .is_some_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "None")
+    })
+}
+
+/// Start a restricted terminal's tmux session `name` for `term_name` on `tmux` (restricted
+/// A complete shell environment is delivered in its private pane file. The tmux client
+/// and server run as the terminal host and resolve their tools with the host environment.
+fn configure_tmux_environment(command: &mut std::process::Command, shell: &ShellCommand) {
+    if shell.clear_env {
+        command.env_clear().envs(team::minimal_env());
+    } else {
+        command.envs(shell.env.iter().map(|(key, value)| (key, value)));
+    }
+}
+
+/// settings), detached; the terminal attaches to it afterwards. Its grant.
+fn new_restricted_session(
+    config: &WebtermConfig,
+    tmux: &TmuxSettings,
+    term_name: &str,
+    name: &str,
+    address: &str,
+) -> std::io::Result<String> {
+    let grant = config.policy.grant_for_session(term_name, name);
+    let shell = restricted_shell(&config.shell, address, &grant);
+    let argv = tmux_shell_argv(tmux, &shell)?;
+    let mut command =
+        tmux_command(tmux).ok_or_else(|| std::io::Error::other("no restricted tmux socket"))?;
+    configure_tmux_environment(&mut command, &shell);
+    command.arg("-u");
+    if let Some(file) = &tmux.config_file {
+        command.args(["-f", file]);
+    }
+    command
+        .args(["new-session", "-d", "-s", name, "-n", TMUX_WINDOW_NAME])
+        .args(&argv)
+        .env("TERM", "xterm-256color")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE");
+    if let Some(cwd) = shell.cwd.clone().or_else(|| std::env::current_dir().ok()) {
+        command.current_dir(cwd);
+    }
+    for var in job_context_vars() {
+        command.env_remove(var);
+    }
+    if tmux_output(&mut command).is_some_and(|output| output.status.success()) {
+        Ok(grant)
+    } else {
+        config.policy.forget_session(name);
+        Err(std::io::Error::other(
+            "tmux could not start the restricted session",
+        ))
+    }
+}
+
+/// Start a terminal's process: the shell itself, or tmux around it (`new-session -A`, or for a
+/// restricted terminal a session on the restricted tmux server, then `attach-session`).
+/// `restricted` is the policy socket's address when the terminal is restricted.
+fn launch(
+    config: &WebtermConfig,
+    term_name: &str,
+    restricted: Option<&str>,
+) -> std::io::Result<Launched> {
     let cwd = match &config.shell.cwd {
         Some(dir) => Some(dir.clone()),
         None => std::env::current_dir().ok(),
     };
     let mut builder;
     let mut session = None;
-    match config.active_tmux() {
-        Some(tmux) => {
+    let mut active_tmux = None;
+    let mut grant = None;
+    let mut shell = config.shell.clone();
+    // 5.1: no tmux at all while isolated teams' sandbox does not refuse Unix sockets
+    // (`WebtermConfig::active_tmux`), for restricted terminals too.
+    match (config.active_tmux(), restricted) {
+        (Some(tmux), None) => {
             let name = tmux_session_name(term_name, &tmux.session_suffix);
+            // A user who may run system commands now has no use for a restricted session left
+            // from before (a promotion): end it.
+            if let Some(restricted_tmux) = restricted_tmux(tmux)
+                && tmux_has_session(&restricted_tmux, &name)
+            {
+                end_tmux_session(&restricted_tmux, &name);
+                config.policy.forget_session(&name);
+            }
             let wrapped = tmux_shell_argv(tmux, &config.shell)?;
             if claim_tmux_server(tmux) {
                 refresh_tmux_config(tmux);
@@ -1671,14 +2425,84 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
             builder.args(["new-session", "-A", "-s", &name, "-n", TMUX_WINDOW_NAME]);
             builder.args(&wrapped);
             session = Some(name);
+            active_tmux = Some(tmux.clone());
         }
-        None => {
+        (Some(tmux), Some(address)) if restricted_tmux(tmux).is_some() => {
+            let rtmux = restricted_tmux(tmux).expect("checked");
+            let name = tmux_session_name(term_name, &tmux.session_suffix);
+            // One restricted launch at a time: two tabs opening at once must not both start the
+            // session (the second one's grant would replace the first's).
+            static RESTRICTED_LAUNCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let _launching = RESTRICTED_LAUNCH.lock().unwrap_or_else(|e| e.into_inner());
+            // A user who may not run system commands never reattaches a session started when
+            // they could (a demotion): end it, with whatever runs in it.
+            end_tmux_session(tmux, &name);
+            write_restricted_conf(&rtmux)?;
+            claim_tmux_server(&rtmux);
+            // The server already runs: lock it down before anything else happens on it.
+            if tmux_server_running(&rtmux, rtmux.socket.as_deref().expect("socket"))
+                && !apply_restricted_conf(&rtmux)
+            {
+                return Err(std::io::Error::other(
+                    "the restricted tmux configuration could not be applied",
+                ));
+            }
+            scrub_tmux_server_env(&rtmux, Some(&name));
+            // Reattach only a session whose shell this server started for this user (so its
+            // grant is known); end any other.
+            let token = match config.policy.session_grant(term_name, &name) {
+                Some(token) if tmux_has_session(&rtmux, &name) => {
+                    // This fresh prepared shell has not been handed to argv construction or
+                    // any launcher. Reattachment keeps the existing pane's claimed proof.
+                    native_pending::cancel_unspawned(&config.shell)?;
+                    token
+                }
+                _ => {
+                    end_tmux_session(&rtmux, &name);
+                    new_restricted_session(config, &rtmux, term_name, &name, address)?
+                }
+            };
+            // tmux applies all of it, or the terminal does not open.
+            if !apply_restricted_conf(&rtmux) {
+                end_tmux_session(&rtmux, &name);
+                config.policy.forget_session(&name);
+                return Err(std::io::Error::other(
+                    "the restricted tmux configuration could not be applied",
+                ));
+            }
+            shell = restricted_shell(&config.shell, address, &token);
+            builder = CommandBuilder::new(&rtmux.binary);
+            builder.arg("-S");
+            builder.arg(rtmux.socket.as_ref().expect("socket"));
+            builder.arg("-u");
+            builder.args(["attach-session", "-t", &format!("={name}")]);
+            session = Some(name);
+            active_tmux = Some(rtmux);
+        }
+        (_, Some(address)) => {
+            // One restricted shell per connection, with a grant that ends with it.
+            let guard = config.policy.grant_for_connection(term_name);
+            shell = restricted_shell(&config.shell, address, guard.token());
+            grant = Some(guard);
+            builder = CommandBuilder::new(&shell.program);
+            builder.args(&shell.args);
+        }
+        (None, None) => {
             builder = CommandBuilder::new(&config.shell.program);
             builder.args(&config.shell.args);
         }
     }
-    for (key, value) in &config.shell.env {
-        builder.env(key, value);
+    if shell.clear_env {
+        builder.env_clear();
+    }
+    if shell.clear_env && active_tmux.is_some() {
+        for (key, value) in team::minimal_env() {
+            builder.env(key, value);
+        }
+    } else {
+        for (key, value) in &shell.env {
+            builder.env(key, value);
+        }
     }
     // A caller's shell overrides must not reconnect a scratch or web terminal to the
     // enclosing user's tmux server. Strip these after applying the overrides too.
@@ -1695,13 +2519,24 @@ fn launch(config: &WebtermConfig, term_name: &str) -> std::io::Result<(Pty, Opti
     if let Some(cwd) = cwd {
         builder.cwd(cwd);
     }
-    let state_dir = if config.tmux.is_none() {
+    let state_dir = if active_tmux.is_none() {
         config.shell_state_directory().map(PathBuf::from)
     } else {
         // The PTY owns a tmux client; the session's shell survives that client's exit.
         None
     };
-    Ok((spawn_pty(builder, state_dir)?, session))
+    // A user who may now run commands this way never reattaches a team terminal of before.
+    if let Some(name) = &session {
+        end_team_sessions_of(name);
+    }
+    Ok(Launched {
+        pty: spawn_pty(builder, state_dir)?,
+        session,
+        tmux: active_tmux,
+        shell,
+        grant,
+        team_window: false,
+    })
 }
 
 /// The environment variables the tmux path does not carry into the shell.
@@ -1733,8 +2568,11 @@ fn valid_env_name(name: &str) -> bool {
 /// Write the shell's environment for the tmux path (`0600`, replaced atomically) and return its
 /// path: the server's environment plus [`ShellCommand::env`].
 fn write_env_file(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result<PathBuf> {
-    let mut vars: std::collections::BTreeMap<String, String> =
-        meerschaum_core::process_env::vars().into_iter().collect();
+    let mut vars: std::collections::BTreeMap<String, String> = if shell.clear_env {
+        Default::default()
+    } else {
+        meerschaum_core::process_env::vars().into_iter().collect()
+    };
     for (key, value) in &shell.env {
         vars.insert(key.clone(), value.clone());
     }
@@ -1747,17 +2585,49 @@ fn write_env_file(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result<
         body.push_str(&format!("{key}={}\n", sh_quote(value)));
     }
     create_private_dir(&tmux.env_dir)?;
-    let path = tmux.env_dir.join("webterm.env");
-    // Unique per launch: two tabs starting at once must not share a temporary file.
+    remove_stale_env_files(&tmux.env_dir);
+    // One file per launch, which the window's `sh` removes once it has read it
+    // ([`tmux_shell_argv`]): two terminals starting at once never read each other's (a
+    // restricted terminal's carries its own grant), and none stays behind.
     static LAUNCHES: AtomicUsize = AtomicUsize::new(0);
-    let temporary = tmux.env_dir.join(format!(
-        "webterm.env.{}.{}.tmp",
+    let stem = format!(
+        "webterm.{}.{}",
         std::process::id(),
         LAUNCHES.fetch_add(1, Ordering::Relaxed)
-    ));
+    );
+    let path = tmux.env_dir.join(format!("{stem}.env"));
+    let temporary = tmux.env_dir.join(format!("{stem}.env.tmp"));
     write_private_file(&temporary, body.as_bytes())?;
     std::fs::rename(&temporary, &path)?;
     Ok(path)
+}
+
+/// How long an environment file may wait for its window before it counts as abandoned (tmux
+/// never started the window).
+const STALE_ENV_FILE: Duration = Duration::from_secs(120);
+
+/// Remove the environment files ([`write_env_file`]) no window read: older than
+/// [`STALE_ENV_FILE`], and the shared `webterm.env` of earlier releases.
+fn remove_stale_env_files(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("webterm.") || !(name.ends_with(".env") || name.ends_with(".tmp")) {
+            continue;
+        }
+        let stale = name == "webterm.env"
+            || entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age > STALE_ENV_FILE);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
@@ -1782,20 +2652,26 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.write_all(bytes)
 }
 
-/// The argv tmux runs in a window: `sh` sources the environment file, unsets the server's job
-/// context (a tmux server started before, or from a job's environment, may hold it in its global
-/// environment), then replaces itself with the shell.
+/// The argv tmux runs in a window: `sh` sources the environment file and removes it, unsets the
+/// server's job context (a tmux server started before, or from a job's environment, may hold it
+/// in its global environment), then replaces itself with the shell. A file that cannot be read
+/// ends `sh` there (`.` is a special built-in): the window closes, nothing else runs.
 fn tmux_shell_argv(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result<Vec<String>> {
     let env_file = write_env_file(tmux, shell)?;
     // The names are `valid_env_name`s: safe to write into the script as they are.
     let unset = job_context_vars().join(" ");
-    let mut argv = vec![
+    let mut argv: Vec<String> = if shell.clear_env {
+        vec!["/usr/bin/env".into(), "-i".into()]
+    } else {
+        Vec::new()
+    };
+    argv.extend([
         "sh".to_string(),
         "-c".into(),
-        format!("set -a; . \"$0\"; set +a; unset {unset}; exec \"$@\""),
+        format!("set -a; . \"$0\"; set +a; command -p rm -f -- \"$0\"; unset {unset}; exec \"$@\""),
         env_file.display().to_string(),
         shell.program.clone(),
-    ];
+    ]);
     argv.extend(shell.args.iter().cloned());
     Ok(argv)
 }
@@ -1803,6 +2679,7 @@ fn tmux_shell_argv(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result
 /// How many windows the tmux `session` (exact name) has; `None` when tmux cannot say.
 fn tmux_window_count(tmux: &TmuxSettings, shell: &ShellCommand, session: &str) -> Option<usize> {
     let mut command = std::process::Command::new(&tmux.binary);
+    configure_tmux_environment(&mut command, shell);
     if let Some(socket) = &tmux.socket {
         command.arg("-S").arg(socket);
     }
@@ -1815,7 +2692,6 @@ fn tmux_window_count(tmux: &TmuxSettings, shell: &ShellCommand, session: &str) -
                 "-F",
                 "#{window_id}",
             ])
-            .envs(shell.env.iter().map(|(k, v)| (k, v)))
             .env_remove("TMUX")
             .env_remove("TMUX_PANE"),
     )?;
@@ -1840,9 +2716,11 @@ fn tmux_new_window(
     if tmux_window_count(tmux, shell, session).is_none_or(|n| n >= MAX_SESSION_WINDOWS) {
         return Ok(false);
     }
-    let argv = tmux_shell_argv(tmux, shell)?;
+    let shell = native_pending::window_shell(shell)?;
+    let argv = tmux_shell_argv(tmux, &shell)?;
     scrub_tmux_server_env(tmux, Some(session));
     let mut command = std::process::Command::new(&tmux.binary);
+    configure_tmux_environment(&mut command, &shell);
     if let Some(socket) = &tmux.socket {
         command.arg("-S").arg(socket);
     }
@@ -1856,7 +2734,6 @@ fn tmux_new_window(
             TMUX_WINDOW_NAME,
         ])
         .args(&argv)
-        .envs(shell.env.iter().map(|(k, v)| (k, v)))
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
         .stdin(std::process::Stdio::null())
@@ -1961,6 +2838,91 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn an_isolated_tmux_window_uses_only_its_supplied_environment() {
+        let root = tempfile::tempdir().unwrap();
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: None,
+            session_suffix: String::new(),
+            env_dir: root.path().join("env"),
+            config_file: None,
+        };
+        let mut shell = ShellCommand::new("/bin/sh");
+        shell.clear_env = true;
+        shell.env = vec![
+            ("PATH".into(), "/bin:/usr/bin".into()),
+            ("TPR_CURRENT_CONTEXT".into(), "current".into()),
+        ];
+        shell.args = vec!["-c".into(), "env".into()];
+        let argv = tmux_shell_argv(&tmux, &shell).unwrap();
+        // Exercise the actual window wrapper without starting any tmux server.
+        let output = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env(
+                "TPR_UNEXPECTED_PARENT_CREDENTIAL",
+                "synthetic-parent-secret",
+            )
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let environment = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            environment
+                .lines()
+                .any(|line| line == "TPR_CURRENT_CONTEXT=current")
+        );
+        assert!(!environment.contains("TPR_UNEXPECTED_PARENT_CREDENTIAL"));
+        assert!(!environment.contains("synthetic-parent-secret"));
+        assert!(!environment.contains("CARGO_MANIFEST_DIR"));
+    }
+
+    #[test]
+    fn a_restricted_shell_carries_the_servers_restriction_and_no_python_escape() {
+        let mut shell = ShellCommand::new("mrsm");
+        // Whatever the server's own command carries is replaced.
+        shell.env.push((RESTRICTED_ENV.into(), "".into()));
+        shell.env.push((GRANT_ENV.into(), "old".into()));
+        shell.env.push(("PYTHONINSPECT".into(), "1".into()));
+        let restricted = restricted_shell(&shell, "unix:/p.sock", "g");
+        let get = |key: &str| -> Vec<&str> {
+            restricted
+                .env
+                .iter()
+                .filter(|(k, _)| k == key)
+                .map(|(_, v)| v.as_str())
+                .collect()
+        };
+        assert_eq!(get(RESTRICTED_ENV), ["1"]);
+        assert_eq!(get(POLICY_ADDRESS_ENV), ["unix:/p.sock"]);
+        assert_eq!(get(GRANT_ENV), ["g"]);
+        assert_eq!(get("PYTHONINSPECT"), [""]);
+        assert_eq!(get("PYTHONSTARTUP"), [""]);
+        assert_eq!(get("PYTHONBREAKPOINT"), ["0"]);
+        // Restricted sessions never use the default tmux server.
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: None,
+            session_suffix: String::new(),
+            env_dir: PathBuf::from("/e"),
+            config_file: None,
+        };
+        assert!(restricted_tmux(&tmux).is_none());
+        let tmux = TmuxSettings {
+            socket: Some(PathBuf::from("/w/tmux.sock")),
+            ..tmux
+        };
+        let restricted = restricted_tmux(&tmux).unwrap();
+        assert_eq!(restricted.socket, Some(PathBuf::from("/w/tmux-r.sock")));
+        assert_eq!(
+            restricted.config_file.as_deref(),
+            Some("/e/tmux-restricted.conf")
+        );
+    }
+
+    #[test]
     fn utf8_stream_joins_split_characters() {
         let mut stream = Utf8Stream::default();
         let arrow = "→".as_bytes();
@@ -2002,8 +2964,21 @@ mod tests {
     }
 
     #[test]
-    fn tmux_session_names_avoid_reserved_characters() {
-        assert_eq!(tmux_session_name("a.b:c", "_mrsm"), "a_b_c_mrsm");
+    fn tmux_session_names_avoid_reserved_characters_and_never_collide() {
+        assert_eq!(tmux_session_name("a.b:c", "_mrsm"), "a_db_cc_mrsm");
+        assert_eq!(tmux_session_name("alice", "_mrsm"), "alice_mrsm");
+        // Two users never share a session (`a.b` and `a_b` both were `a_b`).
+        let names = ["a.b", "a_b", "a__b", "a_db", "a:b", "a_.b", "a._b"];
+        let mut sessions: Vec<String> =
+            names.iter().map(|n| tmux_session_name(n, "_s.x")).collect();
+        assert!(
+            sessions
+                .iter()
+                .all(|s| !s.contains('.') && !s.contains(':'))
+        );
+        sessions.sort();
+        sessions.dedup();
+        assert_eq!(sessions.len(), names.len());
     }
 
     #[test]
@@ -2049,6 +3024,129 @@ mod tests {
         assert!(read_shell_state(dir.path(), pid).is_none());
     }
 
+    fn current_readiness_snapshot() -> Value {
+        let pid = std::process::id();
+        let start = std::fs::read_to_string("/proc/self/stat")
+            .ok()
+            .and_then(|text| {
+                text.rsplit_once(") ")?
+                    .1
+                    .split_whitespace()
+                    .nth(19)
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+        json!({"pid":pid,"start":start,"idle":true,"empty":true})
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readiness_refuses_outside_file_and_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join("state");
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&state).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let pid = std::process::id();
+        let name = format!("{pid}.json");
+        std::fs::write(
+            outside.join(&name),
+            current_readiness_snapshot().to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_shell_state(&outside, pid),
+            Some(json!({"idle":true,"empty":true}))
+        );
+        symlink(outside.join(&name), state.join(&name)).unwrap();
+        assert!(read_shell_state(&state, pid).is_none());
+        std::fs::remove_file(state.join(&name)).unwrap();
+        std::fs::remove_dir(&state).unwrap();
+        symlink(&outside, &state).unwrap();
+        assert!(read_shell_state(&state, pid).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readiness_refuses_a_named_fifo_promptly_without_reading_it() {
+        use rustix::fs::{CWD, Mode, mkfifoat};
+        const CHILD: &str = "MRSM_TEST_SHELL_STATE_FIFO";
+        if let Some(directory) = std::env::var_os(CHILD) {
+            let directory = Path::new(&directory);
+            let leaf = directory.join(format!("{}.json", std::process::id()));
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while std::fs::symlink_metadata(&leaf).is_err() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "The owned FIFO was not prepared."
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(read_shell_state(directory, std::process::id()).is_none());
+            std::fs::write(directory.join("finished"), "1").unwrap();
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        // The child waits for this owned leaf. Parent-side timeout can kill an accidental
+        // blocking open/read without leaving a stuck test thread or FIFO writer behind.
+        let name = format!(
+            "{}::readiness_refuses_a_named_fifo_promptly_without_reading_it",
+            module_path!()
+        );
+        let name = name.split_once("::").unwrap().1;
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads=1"])
+            .env_clear()
+            .env(CHILD, root.path())
+            .env("MRSM_ROOT_DIR", root.path())
+            .env("MRSM_PLUGINS_DIR", root.path().join("plugins"))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let path = root.path().join(format!("{}.json", child.id()));
+        // The child waits for its own numeric leaf before entering the status reader.
+        mkfifoat(CWD, &path, Mode::RUSR | Mode::WUSR).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let result = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            result.is_some_and(|status| status.success()),
+            "A FIFO status read blocked or failed."
+        );
+        assert!(
+            root.path().join("finished").is_file(),
+            "The exact FIFO reader test did not run."
+        );
+    }
+
+    #[test]
+    fn readiness_refuses_oversized_regular_json_but_accepts_the_live_small_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let pid = std::process::id();
+        let path = root.path().join(format!("{pid}.json"));
+        let mut snapshot = current_readiness_snapshot();
+        std::fs::write(&path, snapshot.to_string()).unwrap();
+        assert_eq!(
+            read_shell_state(root.path(), pid),
+            Some(json!({"idle":true,"empty":true}))
+        );
+        snapshot["padding"] = json!("x".repeat(MAX_SHELL_STATE_BYTES as usize));
+        std::fs::write(&path, snapshot.to_string()).unwrap();
+        assert!(read_shell_state(root.path(), pid).is_none());
+    }
+
     #[test]
     fn simultaneous_launches_never_share_an_env_temp_file() {
         let dir = std::env::temp_dir().join(format!("mrsm-webterm-env-{}", std::process::id()));
@@ -2066,15 +3164,30 @@ mod tests {
                 std::thread::spawn(move || write_env_file(&tmux, &shell))
             })
             .collect();
-        for handle in handles {
-            assert!(handle.join().unwrap().is_ok());
-        }
-        // Only the final file remains: every temporary was renamed away.
-        let names: Vec<_> = std::fs::read_dir(&dir)
+        let mut paths: Vec<PathBuf> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap().unwrap())
+            .collect();
+        paths.sort();
+        paths.dedup();
+        // One file per launch (each window reads and removes its own), every temporary renamed
+        // away.
+        assert_eq!(paths.len(), 16);
+        let mut names: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        assert_eq!(names, ["webterm.env"]);
+        names.sort();
+        assert_eq!(names.len(), 16, "{names:?}");
+        assert!(
+            names
+                .iter()
+                .all(|n| n.starts_with("webterm.") && n.ends_with(".env"))
+        );
+        // The shared file of earlier releases is removed by the next launch.
+        std::fs::write(dir.join("webterm.env"), "OLD=1\n").unwrap();
+        write_env_file(&tmux, &shell).unwrap();
+        assert!(!dir.join("webterm.env").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

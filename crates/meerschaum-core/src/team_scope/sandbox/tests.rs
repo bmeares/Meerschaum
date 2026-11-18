@@ -26,6 +26,9 @@ struct Layout {
 
 /// A root with two teams' files, a home directory and a plugins directory (all synthetic).
 fn layout() -> Layout {
+    // These fixtures model a native Rust host and inspect specs; only the dedicated CLI
+    // acceptance fixtures execute the registered sandbox protocol in an actual mrsm binary.
+    let _ = crate::self_exe::register_native_current_executable();
     let temp = tempfile::tempdir().unwrap();
     let base = temp.path().canonicalize().unwrap();
     let root = base.join("root");
@@ -229,7 +232,7 @@ fn the_rules_cover_the_teams_own_paths_only() {
     // /proc as a whole, /tmp and /dev as a whole are not.
     for (path, access) in [
         ("/usr", Access::ReadExec),
-        ("/etc/ssl", Access::Read),
+        ("/etc/ssl/certs", Access::Read),
         ("/proc/self", Access::Read),
         ("/dev/null", Access::Device),
         ("/dev/shm", Access::SharedMemory),
@@ -239,7 +242,9 @@ fn the_rules_cover_the_teams_own_paths_only() {
             Some(access)
         );
     }
-    for path in ["/proc", "/tmp", "/dev", "/etc", "/home", "/run"] {
+    for path in [
+        "/proc", "/tmp", "/dev", "/etc", "/etc/ssl", "/etc/pki", "/home", "/run",
+    ] {
         assert!(rule_for(&spec, Path::new(path)).is_none(), "{path}");
     }
 }
@@ -418,6 +423,174 @@ fn prepare_writes_the_spec_and_points_the_environment_at_it() {
 }
 
 // --- Real sandboxed processes (Linux with Landlock) ---------------------------------------------
+
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[test]
+#[allow(unsafe_code)]
+fn api_inbound_denial_keeps_outbound_callbacks_and_worker_pairs() {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    const CHILD: &str = "MRSM_TEST_API_INBOUND_CHILD";
+    const TEST: &str =
+        "team_scope::sandbox::tests::api_inbound_denial_keeps_outbound_callbacks_and_worker_pairs";
+    if let Ok(port) = std::env::var(CHILD) {
+        // SAFETY: dedicated child only; no pointers or caller-owned memory involved.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
+            0
+        );
+        imp::deny_inbound_network().unwrap();
+        assert_eq!(
+            std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::EPERM)
+        );
+        // Linux listen() can implicitly bind a socket, so that call is independently denied.
+        // SAFETY: socket returns a uniquely owned descriptor, immediately guarded.
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+        assert!(fd >= 0);
+        // SAFETY: fd is the new unique descriptor returned above.
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        // SAFETY: listen uses a valid owned descriptor and no pointers.
+        assert_eq!(unsafe { libc::listen(fd.as_raw_fd(), 1) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EPERM)
+        );
+        let (mut left, mut right) = std::os::unix::net::UnixStream::pair().unwrap();
+        left.write_all(b"pair").unwrap();
+        let mut answer = [0; 4];
+        right.read_exact(&mut answer).unwrap();
+        assert_eq!(&answer, b"pair");
+        std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+            .unwrap()
+            .write_all(b"callback")
+            .unwrap();
+        return;
+    }
+    assert!(
+        deny_inbound_network().is_err(),
+        "Unconfined callers cannot claim the listener boundary."
+    );
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+        .env(CHILD, listener.local_addr().unwrap().port().to_string())
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    listener.set_nonblocking(true).unwrap();
+    let (mut stream, _) = listener.accept().unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    let mut message = [0; 8];
+    stream.read_exact(&mut message).unwrap();
+    assert_eq!(&message, b"callback");
+}
+
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[test]
+#[allow(unsafe_code)]
+fn metadata_network_denial_preserves_only_connected_worker_pairs_and_is_inherited() {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::net::{UnixDatagram, UnixStream};
+    const CHILD: &str = "MRSM_TEST_METADATA_NETWORK_CHILD";
+    const TEST: &str = "team_scope::sandbox::tests::metadata_network_denial_preserves_only_connected_worker_pairs_and_is_inherited";
+    let stage = std::env::var(CHILD).ok();
+    if stage.is_none() {
+        assert!(current().is_none());
+        assert!(
+            deny_network().is_err(),
+            "An unconfined caller cannot report network proof."
+        );
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "install")
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let denied = |error: std::io::Error| assert_eq!(error.raw_os_error(), Some(libc::EPERM));
+    if stage.as_deref() == Some("install") {
+        // SAFETY: socket returns a new descriptor, immediately placed in an owning guard.
+        let raw = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+        assert!(raw >= 0);
+        // SAFETY: raw is the unique new descriptor from socket above.
+        let existing = unsafe { OwnedFd::from_raw_fd(raw) };
+        // SAFETY: this affects only the dedicated test subprocess and touches no pointers.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
+            0
+        );
+        imp::deny_network().unwrap();
+        let address = libc::sockaddr_in {
+            sin_family: libc::AF_INET as libc::sa_family_t,
+            sin_port: 1u16.to_be(),
+            sin_addr: libc::in_addr {
+                s_addr: u32::from_ne_bytes([127, 0, 0, 1]),
+            },
+            sin_zero: [0; 8],
+        };
+        // SAFETY: address is an initialized sockaddr_in and the supplied length matches it.
+        let connected = unsafe {
+            libc::connect(
+                existing.as_raw_fd(),
+                (&address as *const libc::sockaddr_in).cast(),
+                std::mem::size_of_val(&address) as libc::socklen_t,
+            )
+        };
+        assert_eq!(connected, -1);
+        denied(std::io::Error::last_os_error());
+    }
+    denied(std::net::TcpListener::bind("127.0.0.1:0").unwrap_err());
+    denied(std::net::UdpSocket::bind("[::1]:0").unwrap_err());
+    denied(UnixDatagram::unbound().unwrap_err());
+    denied(UnixDatagram::pair().unwrap_err());
+    let (mut left, mut right) = UnixStream::pair().unwrap();
+    left.write_all(b"worker").unwrap();
+    let mut message = [0; 6];
+    right.read_exact(&mut message).unwrap();
+    assert_eq!(&message, b"worker");
+    if stage.as_deref() == Some("install") {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+            .env(CHILD, "inherited")
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
 //
 // The test process never restricts itself: each case re-runs this test binary as a child (the
 // `sandboxed_child` test, which does nothing unless `CHILD_VAR` is set), and the child restricts
@@ -739,6 +912,59 @@ fn run_child(plan: &ChildPlan) -> Option<(Report, serde_json::Map<String, serde_
     let report: Report = serde_json::from_value(value["report"].clone()).unwrap();
     let results = value["results"].as_object().unwrap().clone();
     Some((report, results))
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn public_certificate_stores_do_not_expose_sibling_private_keys() {
+    let l = layout();
+    let system = l._temp.path().join("system");
+    let public = [
+        "ssl/certs/ca.pem",
+        "ssl/cert.pem",
+        "pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        "pki/ca-trust/source/anchors/local-ca.pem",
+        "pki/tls/certs/ca-bundle.crt",
+        "pki/tls/cert.pem",
+    ];
+    let private = [
+        "ssl/private/service.key",
+        "pki/tls/private/service.key",
+        "pki/nssdb/key4.db",
+        "pki/ca-trust/private/service.key",
+    ];
+    for path in public.iter().chain(private.iter()) {
+        let path = system.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "certificate or private canary").unwrap();
+    }
+    let mut spec = spec_of(&l, Mode::Require, &[]);
+    // Exercise the actual system allowlist against synthetic readable certificate
+    // and key trees, without writing into the host's /etc or reading real keys.
+    for rule in &mut spec.rules {
+        if let Ok(relative) = rule.path.strip_prefix("/etc") {
+            rule.path = system.join(relative);
+        }
+    }
+    let plan = ChildPlan {
+        spec,
+        read: public
+            .iter()
+            .chain(private.iter())
+            .map(|path| (path.to_string(), system.join(path)))
+            .collect(),
+        ..Default::default()
+    };
+    let Some((report, results)) = run_child(&plan) else {
+        return;
+    };
+    assert!(report.verdict().is_ok(), "{report:?}");
+    for path in public {
+        assert_eq!(results[path], "ok", "{path}: {results:?}");
+    }
+    for path in private {
+        assert_eq!(results[path], "denied", "{path}: {results:?}");
+    }
 }
 
 #[cfg(target_os = "linux")]

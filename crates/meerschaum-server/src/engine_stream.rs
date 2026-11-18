@@ -327,6 +327,7 @@ pub fn api_error(e: EngineStoreError) -> ApiError {
 /// Who a stream counts against.
 fn slot_key(principal: Option<&crate::auth::Principal>, session: Option<&str>) -> String {
     match principal {
+        Some(crate::auth::Principal::Execution(identity)) => identity.owner_key(),
         Some(crate::auth::Principal::User(user)) => format!("user:{}", user.username),
         Some(crate::auth::Principal::Token(token)) => {
             format!(
@@ -345,23 +346,15 @@ pub fn store_for(
     ctx: &Ctx,
     caller: &crate::access::Access,
 ) -> Result<(Arc<dyn EngineBackend>, Vec<String>), ApiError> {
-    let conn = ctx
-        .state
-        .get_api_connector(ctx.instance_keys().as_deref())?;
-    crate::access::guard::check_connector_teams(&ctx.state, caller, &conn.connector_keys())?;
-    match ctx.instance_keys() {
-        Some(keys)
-            if keys != ctx.state.config.instance_keys
-                && keys != ctx.state.instance().connector_keys() =>
-        {
-            let conn = ctx.state.get_api_connector(Some(&keys))?;
-            Ok((
-                Arc::new(crate::engine_store::InstanceEngine::new(conn, &keys)),
-                vec![keys],
-            ))
-        }
-        _ => Ok((ctx.state.engine.clone(), own_instance_names(&ctx.state))),
-    }
+    let selected = ctx.selected_engine(caller)?;
+    let instances = if selected.logical() == ctx.state.config.instance_keys
+        || selected.logical() == ctx.state.instance().connector_keys()
+    {
+        own_instance_names(&ctx.state)
+    } else {
+        vec![selected.logical().into()]
+    };
+    Ok((selected.backend(), instances))
 }
 
 /// The names of the server's own instance (the configured keys and the connector's keys).
@@ -428,6 +421,10 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         _ => ctx.headers.clone(),
     };
     let caller = crate::access::require_fresh(&state, &auth_headers, SCOPES).await?;
+    let selected = ctx.selected_engine(&caller)?;
+    let caller = selected
+        .fresh_headers(&state, &auth_headers, SCOPES)
+        .await?;
     let principal = caller.auth.clone();
     if !valid_run_id(&run_id) {
         return Err(ApiError::new(422, "Invalid run ID."));
@@ -469,6 +466,9 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     // Waiting for a run to appear holds no stream slot (it is bounded by `MAX_WAIT`).
     let deadline = Instant::now() + wait;
     while !run_known(store.as_ref(), &run_id).await? {
+        selected
+            .fresh_headers(&state, &auth_headers, SCOPES)
+            .await?;
         if Instant::now() >= deadline {
             return Err(ApiError::new(404, format!("Run '{run_id}' was not found.")));
         }
@@ -476,19 +476,25 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     }
     // A caller who is not an administrator follows the runs of pipes it can see (rc15); the
     // events of hidden pipes reach it anonymized.
-    let caller = crate::access::require_fresh(&state, &auth_headers, SCOPES).await?;
-    let filter = if caller.is_admin() {
+    let caller = selected
+        .fresh_headers(&state, &auth_headers, SCOPES)
+        .await?;
+    let filter = if selected.unrestricted(&caller) {
         None
     } else {
-        let default = instances.first().cloned().unwrap_or_default();
         loop {
-            let fresh = crate::access::require_fresh(&state, &auth_headers, SCOPES).await?;
-            let mut filter = crate::access::RefFilter::new(&state, &fresh, &default).for_engine();
+            let fresh = selected
+                .fresh_headers(&state, &auth_headers, SCOPES)
+                .await?;
+            let mut filter = selected.filter(&state, &fresh);
             let visible =
                 crate::routes::engine::visible_run_detail(store.as_ref(), &run_id, &mut filter)
                     .await
                     .map_err(api_error)?;
             if visible.is_some() {
+                selected
+                    .finish_read_headers(&state, &auth_headers, &fresh, SCOPES)
+                    .await?;
                 break Some(filter);
             }
             // An event alone cannot prove Pipeline visibility. Honor an early-run wait,
@@ -534,6 +540,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     let mut tail = Tail {
         state,
         store,
+        selected,
         instances,
         run_id,
         last: after,
@@ -602,6 +609,7 @@ fn cookies_of(headers: &HeaderMap) -> HeaderMap {
 struct Tail {
     state: AppState,
     store: Arc<dyn EngineBackend>,
+    selected: crate::routes::engine::selection::SelectedEngine,
     /// The keys of the instance that keeps the run (live events of other instances are not
     /// this run's, even under the same run ID).
     instances: Vec<String>,
@@ -761,21 +769,23 @@ impl Tail {
                 _ => return None,
             }
         }
-        let caller = crate::access::require_fresh(&self.state, &self.auth_headers, SCOPES)
+        let caller = self
+            .selected
+            .fresh_headers(&self.state, &self.auth_headers, SCOPES)
             .await
             .ok()?;
-        let default = self.instances.first().cloned().unwrap_or_default();
-        let conn = self.state.get_api_connector(Some(&default)).ok()?;
-        crate::access::guard::check_connector_teams(&self.state, &caller, &conn.connector_keys())
-            .ok()?;
-        if caller.is_admin() {
+        if self.selected.unrestricted(&caller) {
             self.filter = None;
             return Some(());
         }
-        let mut filter = crate::access::RefFilter::new(&self.state, &caller, &default).for_engine();
+        let mut filter = self.selected.filter(&self.state, &caller);
         crate::routes::engine::visible_run_detail(self.store.as_ref(), &self.run_id, &mut filter)
             .await
             .ok()??;
+        self.selected
+            .finish_read_headers(&self.state, &self.auth_headers, &caller, SCOPES)
+            .await
+            .ok()?;
         self.filter = Some(filter);
         Some(())
     }

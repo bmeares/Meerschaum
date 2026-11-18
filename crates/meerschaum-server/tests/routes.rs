@@ -1046,9 +1046,25 @@ fn jobs_scope_app() -> (axum::Router, Arc<common::MemoryInstance>, tempfile::Tem
     let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
         .jobs(Arc::new(FakeJobs))
+        .actions(Arc::new(ShowAction))
         .build()
         .unwrap();
     (meerschaum_server::app(state), instance, dir)
+}
+
+/// The dispatcher's view for [`jobs_scope_app`]: `show` is an action, so a non-administrator who
+/// could run the job `j` (`show version`) may answer its prompts (5.1: a job whose command they
+/// could not run, such as a shell's, they may not; `p5_job_access.rs`).
+struct ShowAction;
+
+#[async_trait]
+impl meerschaum_server::backends::ActionsBackend for ShowAction {
+    fn list(&self) -> Vec<String> {
+        vec!["show".into()]
+    }
+    async fn execute(&self, _: &str, _: Map) -> SuccessTuple {
+        SuccessTuple::success()
+    }
 }
 
 /// Register a token with `scopes` (JSON text) as the admin; returns its API key header and the

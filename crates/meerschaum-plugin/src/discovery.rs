@@ -2,6 +2,7 @@
 use crate::{
     LoadedPlugin, Result, error,
     host::validate_manifest,
+    source::compiler::CompilerPolicy,
     source::{self, SourceBuild},
 };
 use serde::{Deserialize, Serialize};
@@ -108,22 +109,28 @@ impl Skip {
 /// Where source plugins are built: explicit, or `<root>/cache/native_build` of the process
 /// environment's Meerschaum root (resolved by `meerschaum-core`, only when a source plugin
 /// needs it).
-struct BuildRoot<'a>(Option<&'a Path>);
+struct BuildRoot<'a> {
+    directory: Option<&'a Path>,
+    policy: &'a CompilerPolicy,
+}
 
 impl BuildRoot<'_> {
     fn resolve(&self) -> Result<PathBuf> {
-        if let Some(path) = self.0 {
-            return Ok(path.to_path_buf());
-        }
-        let lookup = |key: &str| std::env::var(key).ok();
-        let home = ["HOME", "USERPROFILE"]
-            .iter()
-            .find_map(std::env::var_os)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"));
-        let paths = meerschaum_core::config::Paths::from_env(&lookup, &home, cfg!(windows), None)
-            .map_err(error)?;
-        Ok(paths.root_dir.join("cache").join(source::BUILD_DIR_NAME))
+        let root = if let Some(path) = self.directory {
+            path.to_path_buf()
+        } else {
+            let lookup = |key: &str| std::env::var(key).ok();
+            let home = ["HOME", "USERPROFILE"]
+                .iter()
+                .find_map(std::env::var_os)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/"));
+            let paths =
+                meerschaum_core::config::Paths::from_env(&lookup, &home, cfg!(windows), None)
+                    .map_err(error)?;
+            paths.root_dir.join("cache").join(source::BUILD_DIR_NAME)
+        };
+        self.policy.build_root(&root).map_err(error)
     }
 }
 
@@ -144,13 +151,19 @@ fn read_candidate(
         if seen.contains(name) {
             return Ok(None);
         }
+        let compiler = build_root.policy.selected().map_err(Skip::source)?;
         let generated = build_root
             .resolve()
             .map_err(Skip::invalid)?
             .join(name)
             .join("source");
-        let declared =
-            crate::single_file::prepare(directory, name, &generated).map_err(Skip::invalid)?;
+        let declared = crate::single_file::prepare_with_compiler(
+            directory,
+            name,
+            &generated,
+            compiler.as_deref(),
+        )
+        .map_err(Skip::invalid)?;
         let mut candidate = source_candidate(
             &generated,
             Descriptor {
@@ -176,6 +189,11 @@ fn read_candidate(
     let descriptor = directory.join("plugin.toml");
     if !descriptor.is_file() {
         return Ok(None);
+    }
+    if build_root.policy.is_confined() {
+        return Err(Skip::source(
+            "Confined native packages are unsupported by the pinned single-file compiler.".into(),
+        ));
     }
     let desc: Descriptor = toml::from_str(
         &std::fs::read_to_string(&descriptor)
@@ -241,7 +259,9 @@ fn source_candidate(
             "the crate must build a cdylib (add `[lib] crate-type = [\"cdylib\"]` to Cargo.toml)",
         ));
     }
-    let source_fp = source::source_fingerprint(directory).map_err(Skip::invalid)?;
+    let compiler = build_root.policy.selected().map_err(Skip::source)?;
+    let source_fp =
+        source::build_fingerprint(directory, compiler.as_deref()).map_err(Skip::invalid)?;
     let target_dir = build_root
         .resolve()
         .map_err(Skip::invalid)?
@@ -267,7 +287,11 @@ fn source_candidate(
             std::fs::read_to_string(target_dir.join("mrsm-build-error.txt")).unwrap_or_default()
         )));
     }
-    match source::find_cargo() {
+    let cargo = compiler
+        .as_ref()
+        .map(|compiler| compiler.cargo().to_path_buf())
+        .or_else(source::find_cargo);
+    match cargo {
         Some(cargo) => {
             candidate.build = Some(SourceBuild {
                 cargo,
@@ -275,6 +299,8 @@ fn source_candidate(
                 target_dir,
                 shared_target: None,
                 fingerprint: candidate.fingerprint.clone(),
+                compiler_required: compiler.is_some(),
+                compiler,
             });
             Ok(Some(candidate))
         }
@@ -307,13 +333,35 @@ fn source_candidate(
 /// `<root>/cache/native_build` of the Meerschaum root from the process environment; use
 /// [`discover_report_in`] to name it.
 pub fn discover_report(directories: &[PathBuf]) -> Discovery {
-    scan(directories, &BuildRoot(None))
+    scan(
+        directories,
+        &BuildRoot {
+            directory: None,
+            policy: &CompilerPolicy::Ambient,
+        },
+    )
 }
 
 /// [`discover_report`] with an explicit build directory (the parent of the per-plugin target
 /// directories, normally `<root>/cache/native_build`).
 pub fn discover_report_in(directories: &[PathBuf], build_dir: &Path) -> Discovery {
-    scan(directories, &BuildRoot(Some(build_dir)))
+    discover_report_in_with_policy(directories, build_dir, &CompilerPolicy::Ambient)
+}
+
+/// Discover under an explicit trusted host policy. A missing confined compiler never
+/// searches environment/toolchain settings or adopts a shipped native package.
+pub fn discover_report_in_with_policy(
+    directories: &[PathBuf],
+    build_dir: &Path,
+    policy: &CompilerPolicy,
+) -> Discovery {
+    scan(
+        directories,
+        &BuildRoot {
+            directory: Some(build_dir),
+            policy,
+        },
+    )
 }
 
 fn scan(directories: &[PathBuf], build_root: &BuildRoot<'_>) -> Discovery {

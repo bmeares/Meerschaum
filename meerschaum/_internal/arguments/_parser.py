@@ -622,3 +622,7 @@ groups['actions'].add_argument(
     '--allow-protected', action='store_true',
     help="Allow writes to connectors marked `protected: true`.",
 )
+groups['plugins'].add_argument(
+    '--plugin-manifest', action='store_true',
+    help="Return bounded plugin metadata from this confined execution context (show plugins).",
+)

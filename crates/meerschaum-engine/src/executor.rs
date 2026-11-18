@@ -61,6 +61,8 @@ impl NodeEvents {
 /// Everything a node runner needs to sync one node.
 #[derive(Debug, Clone)]
 pub struct SyncRequest {
+    /// This attempt's continuation of its Main-issued node.
+    pub delivery: Option<meerschaum_connector::batch_delivery::NodeDelivery>,
     /// The run.
     pub run_id: String,
     /// The node.
@@ -400,6 +402,10 @@ impl RetryPolicy {
 /// Executor options.
 #[derive(Debug, Clone)]
 pub struct ExecutorOptions {
+    /// Optional trusted Main plan source; absent on ordinary runs.
+    pub plan_authority: Option<Arc<dyn crate::PlanAuthority>>,
+    /// Whether the operation can observe a whole-pipe watermark for progress events.
+    pub report_global_watermarks: bool,
     /// The global worker count.
     pub workers: usize,
     /// Per-connector, per-instance and Python limits.
@@ -437,6 +443,8 @@ pub enum Priority {
 impl Default for ExecutorOptions {
     fn default() -> Self {
         ExecutorOptions {
+            plan_authority: None,
+            report_global_watermarks: true,
             workers: 4,
             limits: Limits::default(),
             holder: meerschaum_core::holder::process_holder(),
@@ -482,6 +490,7 @@ enum TaskOutput {
         /// The attempt never synced: another holder kept the pipe's lease (another process is
         /// syncing it, and records that sync itself).
         contended: bool,
+        issued_batch: bool,
     },
     Retry(PipeRef),
 }
@@ -605,7 +614,26 @@ where
             .into_iter()
             .flatten()
             .any(|p| self.outcome.get(p) == Some(&ParentState::Failed));
-        if !self.flat && (node.provisional || parent_failed) {
+        if let Some(authority) = &self.options.plan_authority {
+            node =
+                match authority.ready(r).await.and_then(|issued| {
+                    crate::accepted_plan::validate_ready(self.ctx.graph, r, issued)
+                }) {
+                    Ok(issued) => issued,
+                    Err(reason) => {
+                        let mut refused = node.clone();
+                        refused.action = Action::UpstreamFailed;
+                        refused.reason = reason;
+                        refused.bounds = None;
+                        refused.chunks.clear();
+                        refused.ranges.clear();
+                        refused.provisional = false;
+                        refused.clear = false;
+                        refused
+                    }
+                };
+            self.planned.insert(r.clone(), node.clone());
+        } else if !self.flat && (node.provisional || parent_failed) {
             let states: HashMap<PipeRef, ParentState> = self
                 .parents
                 .get(r)
@@ -870,21 +898,23 @@ where
             self.write_hash(&node).await;
         }
         self.cached.invalidate(r);
-        let after = self.cached.watermark(r).await.ok().flatten();
-        if !self.flat
-            && let Some(warning) = held_back_warning(self.ctx.graph, &node, after)
-            && !self.state_warnings.contains(&warning)
-        {
-            self.state_warnings.push(warning);
-        }
-        if after != node.watermark {
-            self.emitter.emit(
-                Some(r),
-                EventKind::WatermarkAdvanced {
-                    from: node.watermark,
-                    to: after,
-                },
-            );
+        if self.options.report_global_watermarks {
+            let after = self.cached.watermark(r).await.ok().flatten();
+            if !self.flat
+                && let Some(warning) = held_back_warning(self.ctx.graph, &node, after)
+                && !self.state_warnings.contains(&warning)
+            {
+                self.state_warnings.push(warning);
+            }
+            if after != node.watermark {
+                self.emitter.emit(
+                    Some(r),
+                    EventKind::WatermarkAdvanced {
+                        from: node.watermark,
+                        to: after,
+                    },
+                );
+            }
         }
         self.emitter.emit(
             Some(r),
@@ -1164,6 +1194,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 finished: Utc::now(),
                 elapsed: t0.elapsed(),
                 contended,
+                issued_batch: false,
             };
             let deadline = t0 + wait;
             let mut errored = false;
@@ -1204,7 +1235,14 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 }
             };
             let pipe_ref = request.pipe_ref.clone();
-            let result = {
+            let delivery = request.delivery.clone();
+            let lease_failure = |mut message: String| {
+                if delivery.as_ref().is_some_and(|owner| owner.has_issued()) {
+                    message.push_str(". Earlier native batches may have committed. Consult Main's receipt for this attempt.");
+                }
+                SyncResult::new(false, message)
+            };
+            let mut result = {
                 let sync = executor.sync(request);
                 tokio::pin!(sync);
                 let period = (ttl / 3).max(Duration::from_millis(1));
@@ -1216,13 +1254,16 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                         _ = heartbeat.tick() => {
                             match leases.renew(&pipe_ref, &holder, ttl).await {
                                 Ok(true) => {},
-                                Ok(false) => break SyncResult::new(false, format!("the lease on {} was lost during sync", pipe_ref.label())),
-                                Err(e) => break SyncResult::new(false, format!("cannot renew the lease during sync: {e}")),
+                                Ok(false) => break lease_failure(format!("the lease on {} was lost during sync", pipe_ref.label())),
+                                Err(e) => break lease_failure(format!("cannot renew the lease during sync: {e}")),
                             }
                         }
                     }
                 }
-            }; // Drop the cancelled sync future before releasing its lease.
+            }; // Drop the cancelled sync future before inspecting its delivery or releasing the lease.
+            if let Some(owner) = &delivery {
+                owner.finish(&mut result);
+            }
             let _ = leases.release(&pipe_ref, &holder).await;
             hold.disarm();
             TaskOutput::Done {
@@ -1234,6 +1275,7 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 finished: Utc::now(),
                 elapsed: t0.elapsed(),
                 contended: false,
+                issued_batch: delivery.is_some_and(|owner| owner.has_issued()),
             }
         });
 }
@@ -1354,7 +1396,8 @@ where
         attempts: HashMap::new(),
         state_warnings: Vec::new(),
         progress: Arc::new(ChunkProgress::default()),
-        pipelining: options.chunk_pipelining
+        pipelining: options.plan_authority.is_none()
+            && options.chunk_pipelining
             && !plan.flat
             && ctx.executor.supports_chunk_pipelining(),
         early: HashMap::new(),
@@ -1447,6 +1490,10 @@ where
             let request = SyncRequest {
                 run_id: run_id.clone(),
                 pipe_ref: r.clone(),
+                delivery: options
+                    .plan_authority
+                    .as_ref()
+                    .and_then(|authority| authority.node_delivery(&r)),
                 record: node.record.clone(),
                 action: planned.action,
                 clear: planned.clear,
@@ -1545,6 +1592,7 @@ where
                 let request = SyncRequest {
                     run_id: run_id.clone(),
                     pipe_ref: c.clone(),
+                    delivery: None, // Speculative pipelining is disabled for admitted plans.
                     record: gnode.record.clone(),
                     action: node.action,
                     clear: false,
@@ -1609,7 +1657,12 @@ where
             }
         };
         match output {
-            TaskOutput::Retry(r) => ready.push(r),
+            TaskOutput::Retry(r) => {
+                if options.plan_authority.is_some() {
+                    resolved.remove(&r);
+                }
+                ready.push(r);
+            }
             TaskOutput::Done {
                 early: true,
                 pipe_ref: r,
@@ -1659,6 +1712,7 @@ where
                 finished,
                 elapsed,
                 contended,
+                issued_batch,
                 ..
             } => {
                 d.progress.finish(&r);
@@ -1666,6 +1720,12 @@ where
                 let result = match result.success {
                     true => match ctx.executor.before_cursor_advance(&r) {
                         Ok(()) => result,
+                        Err(e) if issued_batch => {
+                            let mut partial = result;
+                            partial.success = false;
+                            partial.message = e;
+                            partial
+                        }
                         Err(e) => {
                             let mut failed = SyncResult::new(false, e);
                             failed.duration = result.duration;
@@ -1687,6 +1747,12 @@ where
                     row.started.get_or_insert(started);
                     row.finished = Some(finished);
                     row.message = Some(result.message.clone());
+                    if issued_batch && !result.success {
+                        row.inserted = result.inserted;
+                        row.updated = result.updated;
+                        row.upserted = result.upserted;
+                        row.deleted = result.deleted;
+                    }
                 }
                 if result.success {
                     if let Some(row) = d.rows.get_mut(&r) {
@@ -1700,7 +1766,8 @@ where
                     d.on_success(&r, &result).await;
                     d.record_status(&r, &result, Some(elapsed));
                     d.finish(&r, NodeStatus::Succeeded, None);
-                } else if meerschaum_core::access::is_lock_refusal(&result.message) {
+                } else if !issued_batch && meerschaum_core::access::is_lock_refusal(&result.message)
+                {
                     // Locked after the plan was made (`parameters['locks']`): not a failure
                     // and never retried; children use its current data.
                     if let Some(row) = d.rows.get_mut(&r) {
@@ -1720,7 +1787,7 @@ where
                         .node(&r)
                         .map(|n| RetryPolicy::from_parameters(&n.record.parameters))
                         .unwrap_or_default();
-                    let will_retry = attempt <= policy.max;
+                    let will_retry = !issued_batch && attempt <= policy.max;
                     emitter.emit(
                         Some(&r),
                         EventKind::NodeFailed {
@@ -1951,5 +2018,7 @@ impl SyncExecutor for FakeExecutor {
     }
 }
 
+#[cfg(test)]
+mod accepted_tests;
 #[cfg(test)]
 mod tests;

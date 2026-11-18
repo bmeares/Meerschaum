@@ -28,6 +28,7 @@ pub mod drivers;
 pub mod editor;
 pub mod engine_views;
 pub mod extensions;
+pub mod graph_plan;
 pub mod gui;
 pub mod install_target;
 pub mod jobs;
@@ -65,6 +66,7 @@ pub mod users;
 pub mod venv_admin;
 pub mod venvs;
 pub mod verify;
+pub mod verify_plan;
 pub mod verify_schema;
 
 use meerschaum_core::value::{Map, Value};

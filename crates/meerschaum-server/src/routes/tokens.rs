@@ -70,6 +70,12 @@ async fn get_tokens(ctx: Ctx) -> ApiResult {
     let labels: Option<Vec<String>> =
         (!labels.is_empty()).then(|| labels.split(',').map(String::from).collect());
     let user = match &principal {
+        Some(Principal::Execution(_)) => {
+            return Err(ApiError::new(
+                403,
+                "Execution credentials cannot manage reusable credentials.",
+            ));
+        }
         Some(Principal::User(u)) => Some(u),
         // PARITY: a token principal has no username (`AttributeError`, a 500).
         Some(Principal::Token(_)) => return Err(ApiError::internal()),
@@ -244,6 +250,12 @@ async fn token_model_named(ctx: Ctx, token_id: String) -> ApiResult {
         .map_err(|e| ApiError::exception("get_token_model", e))?
         .ok_or_else(|| ApiError::new(404, "Token does not exist."))?;
     let curr_user = match &principal {
+        Some(Principal::Execution(_)) => {
+            return Err(ApiError::new(
+                403,
+                "Execution credentials cannot manage reusable credentials.",
+            ));
+        }
         Some(Principal::User(u)) => Some(u),
         Some(Principal::Token(_)) => return Err(ApiError::internal()),
         None => None,
@@ -336,6 +348,12 @@ async fn owned_token(
         return Ok((model, true));
     };
     let user = match principal {
+        Principal::Execution(_) => {
+            return Err(ApiError::new(
+                403,
+                "Execution credentials cannot manage reusable credentials.",
+            ));
+        }
         Principal::User(u) => u,
         Principal::Token(_) => return Err(ApiError::internal()),
     };

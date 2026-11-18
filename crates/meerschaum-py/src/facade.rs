@@ -236,6 +236,23 @@ impl FacadeNative {
     /// attributes or the config registry.
     fn resolve(&self, keys: &str) -> Result<Arc<dyn InstanceConnector>, String> {
         let full = full_keys(keys);
+        if let Some(alias) = meerschaum_connector_api::APIConnector::execution_alias_from_config(
+            self.config()?,
+            &full,
+        )
+        .map_err(|e| e.to_string())?
+        {
+            return Ok(Arc::new(alias));
+        }
+        if let Some(attributes) = self.attributes.get(&full)
+            && let Some(alias) = meerschaum_core::team_scope::api_execution::Alias::from_attributes(
+                attributes, &full,
+            )?
+        {
+            return meerschaum_connector_api::APIConnector::from_execution_alias(&alias)
+                .map(|alias| Arc::new(alias) as Arc<dyn InstanceConnector>)
+                .map_err(|e| e.to_string());
+        }
         if let Some(found) = self
             .instances
             .lock()
@@ -443,10 +460,19 @@ pub fn build_registry(
 ) -> Result<Built, String> {
     let session = worker_session();
     suggest_worker_python(py, &session);
+    // Resolve the current transport before retaining concrete SQL handles or selecting the
+    // in-place optimization. A cached Python DB object cannot override a configured API alias.
+    let config = publish_live_config(py).map_err(|e| e.to_string())?;
     let mut sql = HashMap::new();
     let mut instances: HashMap<String, Arc<dyn InstanceConnector>> = HashMap::new();
     for (keys, conn) in &input.sql {
         let full = full_keys(keys);
+        if meerschaum_connector_api::APIConnector::execution_alias_from_config(&config, &full)
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            continue;
+        }
         sql.insert(full.clone(), conn.clone());
         instances.insert(full, conn.clone());
     }
@@ -472,7 +498,6 @@ pub fn build_registry(
     // The live config of the process, as of this call (`set_config()`, `MRSM_CONFIG` patches and
     // `write_config()` are seen by the next sync): the engine's defaults, backtrack and filter
     // limits come from it, not from what the connectors captured when they were built.
-    let config = publish_live_config(py).map_err(|e| e.to_string())?;
     let _ = native.config.set(config.clone());
     let mut engine_config = EngineConfig::from_config(&config, Some(&config.paths().root_dir));
     engine_config.home_instance = full_keys(&input.instance_keys);

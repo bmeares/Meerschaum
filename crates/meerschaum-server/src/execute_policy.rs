@@ -35,6 +35,8 @@ pub struct CommandStep {
 }
 
 const MAX_CHAIN_DEPTH: usize = 8;
+/// The escaped chaining word (`system:arguments:escaped_and_key`).
+const ESCAPED_AND: &str = "++";
 const MAX_CHAIN_STEPS: usize = 128;
 const MAX_CHAIN_WORDS: usize = 4096;
 const MAX_CHAIN_BYTES: usize = 1024 * 1024;
@@ -116,8 +118,10 @@ pub fn command_steps(sysargs: &[String]) -> Result<Vec<CommandStep>, String> {
         if depth > MAX_CHAIN_DEPTH || budget.0 > MAX_CHAIN_WORDS || budget.1 > MAX_CHAIN_BYTES {
             return Err("The remote action chain exceeds its validation limit.".into());
         }
+        // `++` is the escaped `+` a job turns back into `+` (`Job::new`), so it separates steps
+        // here too.
         for step in words
-            .split(|word| word == "+")
+            .split(|word| word == "+" || word == ESCAPED_AND)
             .filter(|step| !step.is_empty())
         {
             if let Some(chain) = meerschaum_core::chain::parse(step) {
@@ -448,6 +452,616 @@ pub fn check_non_admin(sysargs: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// [`check_non_admin`], then what each step's action resolves to in the dispatcher (5.1): a
+/// non-administrator runs a step only when it names a Meerschaum action (a core action, or one of
+/// a plugin the caller may use) that is not refused. Words that name no action would run as a
+/// shell command on the server (the dispatcher's v4 fallthrough), so they are refused here, where
+/// the action is resolved by the same code the dispatcher uses
+/// ([`ActionsBackend::resolve`](crate::backends::ActionsBackend::resolve)) and not by another name
+/// list. `Err` is the message of the 403.
+pub async fn check_non_admin_resolved(
+    actions: &dyn crate::backends::ActionsBackend,
+    caller: &crate::access::Access,
+    sysargs: &[String],
+) -> Result<(), String> {
+    use crate::backends::ActionTarget;
+    check_non_admin(sysargs)?;
+    for step in command_steps(sysargs)? {
+        let words = match step.words.iter().position(|a| a == ":") {
+            Some(ix) => &step.words[..ix],
+            None => &step.words[..],
+        };
+        let Some(first) = words.first() else {
+            continue;
+        };
+        match actions.resolve(words).await {
+            ActionTarget::Shell => {
+                return Err(format!(
+                    "'{first}' is not a Meerschaum action. Non-administrators run Meerschaum \
+                     actions only, never shell commands."
+                ));
+            }
+            ActionTarget::Action { name, plugin, sub } => {
+                // Deny by default: a core command must be one the server can scope.
+                if plugin.is_none() && !non_admin_may_run(&name, sub.as_deref()) {
+                    let what = match sub.as_deref() {
+                        Some(sub) => format!("{name} {sub}"),
+                        None => name.clone(),
+                    };
+                    return Err(format!(
+                        "'{what}' is not among the commands non-administrators may run."
+                    ));
+                }
+                let normalized = normalize(&name);
+                if CONSOLE_OMIT_ACTIONS
+                    .iter()
+                    .chain(NON_ADMIN_OMIT_ACTIONS)
+                    .any(|omitted| normalize(omitted) == normalized)
+                {
+                    return Err(format!(
+                        "The action '{name}' cannot be run by non-administrators."
+                    ));
+                }
+                if let Some(plugin) = plugin
+                    && (!meerschaum_core::access::can_use_plugin(&caller.principal, &plugin)
+                        || !crate::executor::source_ceiling::permits_name(caller, &plugin))
+                {
+                    return Err(format!(
+                        "'{first}' is not a Meerschaum action. Non-administrators run Meerschaum \
+                         actions only, never shell commands."
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The answer of [`may_run_system_commands`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SystemCommands {
+    /// Yes, anywhere: administrators, and everyone under `--no-auth`.
+    Anywhere,
+    /// Yes, but only as team execution of `team` ([`crate::team_execution`]): a job of the team
+    /// or its terminal, started with the team's configuration, the environment allowlist and the
+    /// sandbox applied before the command runs. Never in the API server's process, the shared
+    /// workers or a local command line with the server's credentials.
+    TeamOnly {
+        /// The team.
+        team: String,
+    },
+    /// No: the deny-by-default policy ([`NON_ADMIN_COMMANDS`]) applies. `reason`: why team
+    /// execution is not available, for a caller who acts for a team that runs code.
+    No {
+        /// Why team execution is not available, when it could have been.
+        reason: Option<String>,
+    },
+}
+
+impl SystemCommands {
+    /// Whether the caller may run system commands anywhere (an administrator).
+    pub fn anywhere(&self) -> bool {
+        matches!(self, SystemCommands::Anywhere)
+    }
+}
+
+/// Whether `caller` may run system commands or arbitrary code on the server: a shell (`sh`,
+/// `os`, a word that names no action, `--shell`), `python`, or an interactive program in the web
+/// terminal. This is the one place that answers it (5.1): the action routes check a command line
+/// with [`check_command`], and the web terminal chooses its shell's mode from it
+/// ([`crate::webterm`]). Administrators (and everyone under `--no-auth`, where everyone is one):
+/// [`SystemCommands::Anywhere`]. A caller who acts for a team that runs code
+/// ([`crate::team_execution::code_running_team`]), when every condition of team execution holds
+/// on this server ([`crate::team_execution::status`]): [`SystemCommands::TeamOnly`]. Everyone
+/// else: [`SystemCommands::No`], with the failed condition for such a caller.
+pub async fn may_run_system_commands(
+    state: &crate::state::AppState,
+    caller: &crate::access::Access,
+) -> SystemCommands {
+    if caller.no_auth || caller.full_admin() {
+        return SystemCommands::Anywhere;
+    }
+    let Some(team) = crate::team_execution::code_running_team(caller) else {
+        return SystemCommands::No { reason: None };
+    };
+    let status = crate::team_execution::status(state, &team).await;
+    if status.available {
+        SystemCommands::TeamOnly { team: team.name }
+    } else {
+        SystemCommands::No {
+            reason: status.reason,
+        }
+    }
+}
+
+/// Where a command line would run, for [`check_command`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// As a job (`POST /execute`, `POST /jobs/{name}`): a team job for a member of an isolated
+    /// team.
+    Job,
+    /// In the API server's own process (`POST /actions/{action}`, MCP `execute_action`, the
+    /// restricted web terminal's shell).
+    Server,
+}
+
+/// What a walled-off caller hears where a command would run in the API server's process.
+pub const SERVER_PROCESS_REFUSAL: &str = "This runs inside the API server's process, outside \
+    your team's sandbox, so members of isolated teams cannot use it. Run the command with \
+    `POST /execute` (the console's Execute box) instead: it runs as a job of your team.";
+
+/// The commands a caller who may not run system commands may run (5.1, deny by default): core
+/// actions as `(action, subactions)`, the subaction as the dispatcher resolves it (`""`: the
+/// action with no subaction). Each one is one the server can scope to the caller:
+/// [`crate::execute_access::check`] then checks every object it selects (pipes, Pipelines, jobs,
+/// tokens) with the permissions of the matching route. Any other core action or subaction is
+/// refused ([`NON_ADMIN_REFUSED`]); a plugin's action follows the plugin's grants instead. A new
+/// native action is refused until it is added here deliberately (`meerschaum-cli`'s
+/// `non_admin_commands` test fails while an action is on neither list).
+pub const NON_ADMIN_COMMANDS: &[(&str, &[&str])] = &[
+    // Informational: nothing about other users' objects.
+    ("help", &[""]),
+    (
+        "show",
+        &[
+            "version",
+            "help",
+            "actions",
+            "arguments",
+            "schedules",
+            // Pipes: every selected pipe readable (`pipes:read`).
+            "pipes",
+            "data",
+            "columns",
+            "rowcounts",
+            "sizes",
+            "partitions",
+            "targets",
+            "tags",
+            // Pipelines named, readable with their members (`pipes:read`).
+            "pipelines",
+            // Jobs named, visible (`jobs:read`).
+            "jobs",
+            "daemons",
+            // The caller's own tokens.
+            "tokens",
+        ],
+    ),
+    // Pipe operations: every selected pipe changeable, with the operation's permission.
+    ("sync", &["pipes", "pipelines"]),
+    ("verify", &["pipes", "rowcounts", "schemas"]),
+    ("deduplicate", &["pipes"]),
+    ("clear", &["pipes", "pipelines"]),
+    ("drop", &["pipes", "pipelines"]),
+    ("delete", &["pipes", "pipelines", "jobs"]),
+    ("lock", &["pipes"]),
+    ("unlock", &["pipes"]),
+    ("edit", &["pipes"]),
+    ("partition", &["pipes"]),
+    ("tag", &["pipes"]),
+    // Jobs named, visible, with the job route's permission.
+    ("attach", &["jobs", "logs"]),
+    ("watch", &["jobs", "logs"]),
+    ("stop", &["jobs", "daemons"]),
+    ("pause", &["jobs"]),
+    ("restart", &["jobs", "daemons"]),
+];
+
+/// The native commands refused to a caller who may not run system commands: every core action
+/// and subaction not in [`NON_ADMIN_COMMANDS`], listed so that the two lists together are the
+/// whole CLI (`meerschaum-cli`'s `non_admin_commands` test). Being listed here refuses nothing by
+/// itself: anything not allowed is refused.
+pub const NON_ADMIN_REFUSED: &[(&str, &[&str])] = &[
+    ("attach", &[""]),
+    ("clear", &["", "cache"]),
+    ("deduplicate", &[""]),
+    ("login", &[""]),
+    ("os", &[""]),
+    ("pause", &[""]),
+    (
+        "register",
+        &[
+            "",
+            "connectors",
+            "pipes",
+            "pipelines",
+            "plugins",
+            "teams",
+            "tokens",
+            "users",
+        ],
+    ),
+    ("reload", &[""]),
+    ("restart", &[""]),
+    ("setup", &["", "plugins"]),
+    ("sh", &[""]),
+    ("tag", &[""]),
+    ("verify", &["", "packages", "plugins", "venvs"]),
+    (
+        "install",
+        &[
+            "",
+            "completions",
+            "drivers",
+            "packages",
+            "plugins",
+            "required",
+        ],
+    ),
+    ("sync", &["", "pipeline"]),
+    ("api", &["", "start"]),
+    (
+        "bootstrap",
+        &[
+            "",
+            "connectors",
+            "jobs",
+            "pipes",
+            "pipelines",
+            "plugins",
+            "teams",
+        ],
+    ),
+    ("drop", &["", "indices"]),
+    ("flush", &["", "indices", "pipes"]),
+    ("stack", &[""]),
+    ("stop", &["", "pipelines"]),
+    (
+        "uninstall",
+        &["", "completions", "drivers", "packages", "plugins"],
+    ),
+    ("vacuum", &["", "pipes"]),
+    ("prune", &["", "venvs"]),
+    ("plan", &["", "pipes", "pipelines"]),
+    ("doctor", &[""]),
+    ("backup", &["", "postgres"]),
+    ("restore", &["", "postgres"]),
+    ("watch", &["", "runs"]),
+    ("lock", &[""]),
+    ("unlock", &[""]),
+    (
+        "show",
+        &[
+            "",
+            "completions",
+            "config",
+            "connectors",
+            "drivers",
+            "environment",
+            "graph",
+            "logs",
+            "packages",
+            "plugins",
+            "runs",
+            "teams",
+            "users",
+            "venvs",
+        ],
+    ),
+    (
+        "delete",
+        &[
+            "",
+            "cache",
+            "config",
+            "connectors",
+            "plugins",
+            "teams",
+            "users",
+            "venvs",
+        ],
+    ),
+    ("partition", &[""]),
+    (
+        "start",
+        &[
+            "",
+            "api",
+            "executor",
+            "connectors",
+            "daemons",
+            "gui",
+            "jobs",
+            "mcp",
+            "pipeline",
+            "pipelines",
+            "webterm",
+            "worker",
+        ],
+    ),
+    ("analyze", &["", "pipes", "pipelines"]),
+    ("compress", &["", "pipes"]),
+    ("copy", &["", "connectors", "pipes", "pipelines"]),
+    ("decompress", &["", "pipes"]),
+    (
+        "edit",
+        &[
+            "",
+            "config",
+            "definition",
+            "jobs",
+            "pipelines",
+            "plugins",
+            "teams",
+            "tokens",
+            "users",
+        ],
+    ),
+    ("index", &["", "pipes"]),
+    ("sql", &[""]),
+    ("python", &[""]),
+    (
+        "upgrade",
+        &[
+            "",
+            "extensions",
+            "meerschaum",
+            "packages",
+            "plugins",
+            "postgres",
+        ],
+    ),
+    ("compose", &[""]),
+];
+
+/// `show` / `pipes` as the lists compare them ([`normalize`]): lower case, no `-` or `_`,
+/// singular.
+fn same_word(a: &str, b: &str) -> bool {
+    normalize(a) == normalize(b)
+}
+
+/// Whether a caller who may not run system commands may run the core action `action` with the
+/// subaction `sub` ([`NON_ADMIN_COMMANDS`]).
+pub fn non_admin_may_run(action: &str, sub: Option<&str>) -> bool {
+    let sub = sub.unwrap_or("");
+    NON_ADMIN_COMMANDS.iter().any(|(allowed, subs)| {
+        same_word(allowed, action)
+            && subs
+                .iter()
+                .any(|s| (s.is_empty() && sub.is_empty()) || (!s.is_empty() && same_word(s, sub)))
+    })
+}
+
+/// [`NON_ADMIN_COMMANDS`] as the Markdown table `permissions.md` shows (a test keeps the page
+/// equal to it).
+pub fn non_admin_commands_markdown() -> String {
+    let mut out = String::from("| Action | Subactions |\n|---|---|\n");
+    for (action, subs) in NON_ADMIN_COMMANDS {
+        let subs = if subs == &[""] {
+            "(none)".to_string()
+        } else {
+            subs.iter()
+                .map(|s| format!("`{s}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        out.push_str(&format!("| `{action}` | {subs} |\n"));
+    }
+    out
+}
+
+/// The check every route that runs a command line applies to its caller, for a command that
+/// runs at `place`: nothing for an administrator; for a walled-off caller, a refusal where it
+/// would run in the server's process ([`SERVER_PROCESS_REFUSAL`]); nothing for team execution
+/// ([`SystemCommands::TeamOnly`]) of a job (the job is the team's, sandboxed: its launch requires
+/// the sandbox); else [`check_non_admin_resolved`], naming why team execution is not available
+/// when it could have been. `Err` is the message of the 403.
+pub async fn check_command(
+    state: &crate::state::AppState,
+    caller: &crate::access::Access,
+    sysargs: &[String],
+    place: Place,
+) -> Result<(), String> {
+    let answer = may_run_system_commands(state, caller).await;
+    if answer.anywhere() {
+        return Ok(());
+    }
+    if place == Place::Server && caller.principal.is_isolated() {
+        return Err(SERVER_PROCESS_REFUSAL.to_string());
+    }
+    if place == Place::Job && matches!(answer, SystemCommands::TeamOnly { .. }) {
+        return Ok(());
+    }
+    check_non_admin_resolved(state.actions.as_ref(), caller, sysargs)
+        .await
+        .map_err(|message| match answer {
+            SystemCommands::No {
+                reason: Some(reason),
+            } => format!("{message} Your team's commands cannot run here: {reason}."),
+            _ => message,
+        })
+}
+
+fn plain_argument(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.starts_with('-')
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+}
+
+/// Admit one explicit source and a new destination pipe, using Main-served SQL instances.
+fn bound_copy_instances(sysargs: &[String]) -> Option<(&str, &str)> {
+    let [
+        verb,
+        subject,
+        destination,
+        instance_flag,
+        source,
+        connector_flag,
+        connector,
+        metric_flag,
+        metric,
+        location_flag,
+        location,
+        sync_flag,
+        mode,
+        approval,
+        rest @ ..,
+    ] = sysargs
+    else {
+        return None;
+    };
+    use meerschaum_core::team_scope::api_execution::split_keys;
+    let sql_keys =
+        |keys: &str| keys.len() <= 128 && split_keys(keys).is_ok_and(|(kind, _)| kind == "sql");
+    let pipe_connector = connector
+        .split_once(':')
+        .is_some_and(|(kind, label)| matches!(kind, "manual" | "sql") && plain_argument(label));
+    (verb == "copy"
+        && subject == "pipes"
+        && instance_flag == "-i"
+        && connector_flag == "-c"
+        && metric_flag == "-m"
+        && location_flag == "-l"
+        && sync_flag == "--sync-data"
+        && mode == "all"
+        && matches!(approval.as_str(), "--yes" | "-y")
+        && (rest.is_empty() || rest == ["--nopretty"])
+        && source != destination
+        && sql_keys(source)
+        && sql_keys(destination)
+        && pipe_connector
+        && plain_argument(metric)
+        && plain_argument(location))
+    .then_some((source, destination))
+}
+
+/// Match the same built-in commands at Main admission and inside the confined CLI.
+/// Keep these forms separate from the legacy in-process command permissions.
+pub fn bound_command_scopes(sysargs: &[String]) -> Option<&'static [&'static str]> {
+    let [action, subject, arguments @ ..] = sysargs else {
+        return None;
+    };
+    if let (action @ ("register" | "edit"), "pipelines", [name, flag, params]) =
+        (action.as_str(), subject.as_str(), arguments)
+        && matches!(flag.as_str(), "--params" | "-P")
+        && meerschaum_core::pipeline::validate_name(name).is_ok()
+        && let Ok(value) = serde_json::from_str::<Json>(params)
+        && let Some(fields) = value.get("pipeline").unwrap_or(&value).as_object()
+        && fields
+            .get("name")
+            .is_none_or(|value| value.as_str() == Some(name))
+    {
+        return match action {
+            "register" => Some(&["pipes:read", "pipes:register", "pipes:write"]),
+            "edit"
+                if fields
+                    .get("revision")
+                    .and_then(Json::as_u64)
+                    .is_some_and(|revision| revision < i64::MAX as u64) =>
+            {
+                Some(&["pipes:read", "pipes:write"])
+            }
+            _ => None,
+        };
+    }
+    if bound_copy_instances(sysargs).is_some() {
+        return Some(&[
+            "connectors:read",
+            "pipes:read",
+            "pipes:register",
+            "pipes:write",
+        ]);
+    }
+    let (plain, arguments) = match arguments.split_last() {
+        Some((flag, rest)) if flag == "--nopretty" => (true, rest),
+        _ => (false, arguments),
+    };
+    match (action.as_str(), subject.as_str(), arguments) {
+        ("show", "graph" | "pipes" | "runs", []) => Some(&["pipes:read"]),
+        ("show" | "watch", "run", [id]) if plain_argument(id) => Some(&["pipes:read"]),
+        ("watch", "runs", []) => Some(&["pipes:read"]),
+        ("show", "logs", [job]) if plain && plain_argument(job) => {
+            Some(&["jobs:read", "logs:read"])
+        }
+        _ => None,
+    }
+}
+
+/// Check the original caller's capabilities for a built-in command on an API-only profile.
+pub fn check_bound_command(
+    state: &crate::state::AppState,
+    caller: &crate::access::Access,
+    sysargs: &[String],
+) -> Result<bool, crate::error::ApiError> {
+    let Some(scopes) = bound_command_scopes(sysargs) else {
+        return Ok(false);
+    };
+    caller.require(&["actions:execute"], &[])?;
+    caller.require(scopes, &[])?;
+    if let Some((source, destination)) = bound_copy_instances(sysargs) {
+        for keys in [source, destination] {
+            crate::access::guard::check_connector_teams(state, caller, keys)?;
+            let connector = state.get_api_connector(Some(keys))?;
+            if connector.connector_type() != "sql" || connector.connector_keys() != keys {
+                return Err(crate::error::ApiError::new(
+                    403,
+                    "Copy requires native SQL instances served by this Main.",
+                ));
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// This route can admit a new bound command only when the native backend will create
+/// an API-profile job for this caller. Its canonical launch checks the command again.
+pub(crate) async fn check_bound_job_command(
+    state: &crate::state::AppState,
+    caller: &crate::access::Access,
+    sysargs: &[String],
+) -> Result<bool, crate::error::ApiError> {
+    use crate::backends::ApiExecution;
+    if !matches!(caller.api_execution, ApiExecution::Tracked { .. })
+        || !state.jobs.supports_bound_commands()
+        || crate::team_execution::code_running_team(caller).is_some()
+        || !matches!(
+            may_run_system_commands(state, caller).await,
+            SystemCommands::No { .. }
+        )
+    {
+        return Ok(false);
+    }
+    check_bound_command(state, caller, sysargs)
+}
+
+/// Everything `POST /execute` decides about running `sysargs` for `caller` (who already holds
+/// `jobs:execute`), apart from the job's name: the pipes each step selects
+/// ([`crate::execute_access::check`]), `actions:execute` and `jobs:write` for anything but the
+/// console's pipe operations, the server's `api:permissions:actions:non_admin`, and
+/// [`check_command`]. The restricted web terminal asks the same question for every line its
+/// shell runs ([`crate::webterm`]), so the terminal allows exactly what the route allows.
+pub async fn authorize_command(
+    state: &crate::state::AppState,
+    caller: &crate::access::Access,
+    sysargs: &[String],
+    place: Place,
+) -> Result<crate::execute_access::ExecutePlan, crate::error::ApiError> {
+    use crate::error::ApiError;
+    let plan = crate::execute_access::check(state, caller, sysargs).await?;
+    if plan.needs_actions {
+        caller.require(&["actions:execute", "jobs:write"], &[])?;
+        if !caller.no_auth && !caller.full_admin() {
+            let allowed =
+                crate::auth::is_user_allowed_to_execute_console(state, caller.auth.as_ref()).await;
+            if !allowed.success {
+                return Err(ApiError::new(403, allowed.message));
+            }
+        }
+    } else if !caller.no_auth && !caller.is_admin() && !state.config.actions_non_admin {
+        return Err(ApiError::new(
+            403,
+            "The administrator for this server has not allowed users to perform actions.",
+        ));
+    }
+    check_command(state, caller, sysargs, place)
+        .await
+        .map_err(|message| ApiError::new(403, message))?;
+    Ok(plan)
+}
+
 /// `GET /execute/policy`: the lists above, for the console's own dropdowns.
 pub fn policy_json() -> Json {
     json!({
@@ -677,6 +1291,9 @@ mod tests {
         rust.sort_unstable();
         assert_eq!(python, rust);
     }
+
+    // `may_run_system_commands` and `check_command` need a server state: their tests are in
+    // `tests/team_execution_policy.rs` (5.1).
 
     #[test]
     fn the_published_policy_names_every_list() {

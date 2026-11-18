@@ -290,6 +290,7 @@ impl Reader {
     /// The engine environment (the pieces of `Pipe` logic the engine shares).
     pub fn env(&self) -> SyncEnv<'_> {
         SyncEnv {
+            delivery: None,
             registry: self.registry.as_ref(),
             defaults: &self.defaults,
             default_backtrack_minutes: self.backtrack_minutes,

@@ -26,7 +26,8 @@
 //! [`sysargs_of_keywords`]), `POST /jobs/{name}` (the `api:` executor's jobs) and MCP's
 //! `execute_action`. Those also follow the console's list of what a non-administrator may run
 //! ([`crate::execute_policy`]): `actions:execute` runs actions, never a shell (`sh`, `python`,
-//! `sql`, `--shell`, ...), which only the web terminal (`webterm:use`) gives.
+//! `sql`, `--shell`, ...), which only an administrator runs (5.1: a nonadministrator's web
+//! terminal asks [`crate::execute_policy::authorize_command`] before every command).
 
 use meerschaum_connector::PipesKeysQuery;
 
@@ -62,6 +63,11 @@ enum Step {
     Pipelines(Vec<String>),
     /// Any other action, with what it does to the pipes it selects (if it selects any).
     Action(Option<Use>),
+    /// `show`, `delete`, `clear` or `drop pipelines NAME ...` (5.1): the permission of the
+    /// matching Pipelines route, and whether the Pipelines' members are read or changed.
+    PipelineOp(&'static str, Use, Vec<String>),
+    /// `show tokens [LABEL | ID ...]` (5.1): the caller's own tokens only, as `GET /tokens`.
+    Tokens(Vec<String>),
 }
 
 /// `show` / `edit` / ... as words compare (see [`crate::execute_policy`]): lower case, without
@@ -226,7 +232,7 @@ const VALUE_FLAGS: &[&str] = &[
 ];
 
 /// The positional words of a step after its action (no flags, no flag values).
-fn positionals(words: &[String]) -> Vec<String> {
+pub(crate) fn positionals(words: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let (mut in_list, mut skip_one) = (false, false);
     for word in words {
@@ -253,7 +259,16 @@ fn classify(action: &str, positional: &[String]) -> Step {
             "pipe" | "data" | "rowcount" | "column" | "schema" | "schemata"
         )
     });
+    let names = || positional.get(1..).unwrap_or_default().to_vec();
     match (action.as_str(), sub.as_deref()) {
+        // Read-only views of the pipes a step selects, held to `show pipes` (5.1).
+        ("show", Some("size" | "partition" | "target" | "tag")) => Step::Action(Some(Use::Read)),
+        ("show", Some("pipeline")) => Step::PipelineOp("pipes:read", Use::Read, names()),
+        ("delete" | "clear", Some("pipeline")) => {
+            Step::PipelineOp("pipes:delete", Use::Write, names())
+        }
+        ("drop", Some("pipeline")) => Step::PipelineOp("pipes:drop", Use::Write, names()),
+        ("show", Some("token")) => Step::Tokens(names()),
         ("sync" | "verify" | "deduplicate", Some("pipe")) => Step::PipeOperation("pipes:write"),
         ("verify", Some("schema" | "schemata")) => Step::PipeOperation("pipes:write"),
         ("clear", Some("pipe")) => Step::PipeOperation("pipes:delete"),
@@ -320,11 +335,29 @@ pub async fn check(
                     .iter()
                     .any(|f| w == f || w.starts_with(&format!("{f}=")))
             });
+        // The jobs a step names (5.1): only those the caller may act on over the job routes.
+        check_job_references(state, caller, action, rest, raw_step).await?;
         let step = classify(action, &positionals(rest));
         match &step {
             Step::PipeOperation(_) | Step::Pipelines(_) if repeats => plan.needs_actions = true,
-            Step::Action(_) => plan.needs_actions = true,
+            Step::Action(_) | Step::PipelineOp(..) | Step::Tokens(_) => plan.needs_actions = true,
             _ => {}
+        }
+        // The permission of the route that reads or changes the same pipes (`GET /pipes`,
+        // `PATCH` of a pipe's parameters, access or locks: `pipes:write`).
+        let route_permission = match &step {
+            Step::Action(Some(Use::Read)) => Some("pipes:read"),
+            Step::Action(Some(_)) => Some("pipes:write"),
+            Step::PipelineOp(permission, ..) => Some(*permission),
+            _ => None,
+        };
+        if let Some(permission) = route_permission
+            && !caller.has(permission)
+        {
+            return Err(ApiError::new(
+                403,
+                format!("Missing required scope: '{permission}'"),
+            ));
         }
         if let Step::PipeOperation(permission) = &step
             && !caller.has(permission)
@@ -352,9 +385,264 @@ pub async fn check(
                 check_selection(state, caller, instance.as_deref(), rest, usage, patch).await?;
             }
             Step::Action(None) => {}
+            Step::PipelineOp(_, usage, names) => {
+                check_pipeline_op(state, caller, instance.as_deref(), usage, &names).await?;
+            }
+            Step::Tokens(names) => check_own_tokens(state, caller, &names).await?,
         }
     }
     Ok(plan)
+}
+
+/// `show`, `delete`, `clear` or `drop pipelines NAME ...` for a caller who is not an
+/// administrator (5.1): each Pipeline named, visible to the caller, with every member readable
+/// (show) or changeable (the others, which change the members' data or their membership tags),
+/// as the Pipelines routes require. A step that names none would act on every Pipeline.
+async fn check_pipeline_op(
+    state: &AppState,
+    caller: &Access,
+    instance: Option<&str>,
+    usage: Use,
+    names: &[String],
+) -> Result<(), ApiError> {
+    let names: Vec<&String> = names.iter().filter(|n| !n.starts_with('-')).collect();
+    if names.is_empty() {
+        return Err(ApiError::new(
+            403,
+            "Name the Pipelines to act on (`show pipelines <name>`), or use the console's \
+             Pipelines page.",
+        ));
+    }
+    let conn = served_instance(state, instance)?;
+    for name in names {
+        let (definition, parameters) =
+            crate::routes::pipelines::visible_registration(state, caller, &conn, name).await?;
+        if usage == Use::Read {
+            let mut filter = crate::access::RefFilter::new(state, caller, &conn.connector_keys());
+            for member in crate::routes::pipelines::targets_of(&definition) {
+                if !filter.visible(&member).await {
+                    return Err(ApiError::new(
+                        403,
+                        format!("Pipeline '{name}' has members you may not see."),
+                    ));
+                }
+            }
+            continue;
+        }
+        if !caller.can_edit(&parameters) {
+            return Err(ApiError::new(
+                403,
+                format!(
+                    "You cannot change Pipeline '{name}': only its owner, its team's managers \
+                     and administrators may."
+                ),
+            ));
+        }
+        crate::routes::pipelines::check_members_editable(
+            state,
+            caller,
+            &conn,
+            name,
+            &definition,
+            &PlanOptions::default(),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// `show tokens [LABEL | ID ...]` for a caller who is not an administrator (5.1): only the
+/// caller's own tokens, as `GET /tokens` lists them. Every token the words select (every token,
+/// when they select none) must be the caller's.
+async fn check_own_tokens(
+    state: &AppState,
+    caller: &Access,
+    words: &[String],
+) -> Result<(), ApiError> {
+    let Some(username) = caller
+        .username()
+        .filter(|_| matches!(caller.auth, Some(crate::auth::Principal::User(_))))
+    else {
+        return Err(ApiError::new(403, "Only a user lists their tokens."));
+    };
+    let (ids, labels): (Vec<String>, Vec<String>) = words
+        .iter()
+        .filter(|w| !w.starts_with('-'))
+        .cloned()
+        .partition(|w| uuid::Uuid::parse_str(w).is_ok());
+    let ids: Vec<uuid::Uuid> = ids
+        .iter()
+        .filter_map(|id| uuid::Uuid::parse_str(id).ok())
+        .collect();
+    let labels = (!labels.is_empty()).then_some(labels.as_slice());
+    let id_filter = (!ids.is_empty()).then_some(ids.as_slice());
+    let user = meerschaum_core::users::User::new(username, None);
+    let conn = state.instance();
+    let every = conn
+        .get_tokens(None, labels, id_filter)
+        .await
+        .map_err(|e| ApiError::exception("get_tokens", e))?;
+    let own = conn
+        .get_tokens(Some(&user), labels, id_filter)
+        .await
+        .map_err(|e| ApiError::exception("get_tokens", e))?;
+    if every.len() > own.len() {
+        return Err(ApiError::new(
+            403,
+            "This command selects tokens that are not yours: name your own tokens by label or ID.",
+        ));
+    }
+    Ok(())
+}
+
+/// What a step does to the jobs it names (5.1), with the permissions the job routes need for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JobUse {
+    /// `show jobs` (`GET /jobs`).
+    Read,
+    /// `attach jobs`, `attach logs`, `watch jobs`, `watch logs`, `show logs` (`GET /logs`).
+    Logs,
+    /// `start jobs`, or `-d --name` naming an existing job (`POST /jobs/{name}/start`).
+    Start,
+    /// `stop jobs`.
+    Stop,
+    /// `pause jobs`.
+    Pause,
+    /// `restart jobs` (a stop, then a start).
+    Restart,
+    /// `delete jobs`.
+    Delete,
+}
+
+impl JobUse {
+    /// What `action` (normalized) with the subaction `sub` does to jobs, if `sub` names them
+    /// (`jobs`, `daemons`, `logs`). Any other action on them needs the most of a start.
+    fn of(action: &str, sub: Option<&str>) -> Option<JobUse> {
+        let sub = sub?;
+        if !matches!(sub, "job" | "daemon" | "log") {
+            return None;
+        }
+        Some(match action {
+            "attach" | "watch" => JobUse::Logs,
+            "show" if sub == "log" => JobUse::Logs,
+            "show" => JobUse::Read,
+            "stop" => JobUse::Stop,
+            "pause" => JobUse::Pause,
+            "restart" => JobUse::Restart,
+            "delete" => JobUse::Delete,
+            _ => JobUse::Start,
+        })
+    }
+
+    /// The permissions of the job route that does the same.
+    fn scopes(self) -> &'static [&'static str] {
+        match self {
+            JobUse::Read => &["jobs:read"],
+            JobUse::Logs => &["jobs:read", "logs:read"],
+            JobUse::Start => &["jobs:execute"],
+            JobUse::Stop | JobUse::Restart => &["jobs:execute", "jobs:stop"],
+            JobUse::Pause => &["jobs:execute", "jobs:pause"],
+            JobUse::Delete => &["jobs:delete"],
+        }
+    }
+}
+
+/// Whether a step runs as a job (`-d`, `--daemon`, or `d` in a cluster of boolean short flags).
+fn daemonizes(words: &[String]) -> bool {
+    words.iter().any(|word| {
+        if let Some(long) = word.strip_prefix("--") {
+            let name = long.split('=').next().unwrap_or("");
+            return name.len() >= 2 && "daemon".starts_with(name);
+        }
+        word.strip_prefix('-').is_some_and(|short| {
+            !short.is_empty()
+                && short.contains('d')
+                && short.chars().all(|c| matches!(c, 'y' | 'f' | 'd' | 'v'))
+        })
+    })
+}
+
+/// The job name a step gives (`--name X`, `--name=X`, `--job-name X`, or an abbreviation
+/// `argparse` accepts).
+fn named_job(words: &[String]) -> Option<String> {
+    for (index, word) in words.iter().enumerate() {
+        let Some(long) = word.strip_prefix("--") else {
+            continue;
+        };
+        let (name, value) = match long.split_once('=') {
+            Some((name, value)) => (name, Some(value.to_string())),
+            None => (long, None),
+        };
+        let name = name.replace('_', "-");
+        let is_name = (name.len() >= 2 && "name".starts_with(&name))
+            || (name.len() >= 4 && "job-name".starts_with(&name));
+        if is_name {
+            return value.or_else(|| words.get(index + 1).cloned());
+        }
+    }
+    None
+}
+
+/// Refuse a step that names a job the caller may not act on over the job routes (5.1): the
+/// local CLI that runs a command sees and controls every job, so a caller who is not an
+/// administrator is held to the routes' visibility and permissions. A step that names no job
+/// acts on every job, so every existing job must pass; a job the caller may not see answers as
+/// one that does not exist.
+async fn check_job_references(
+    state: &AppState,
+    caller: &Access,
+    action: &str,
+    rest: &[String],
+    raw_step: &[String],
+) -> Result<(), ApiError> {
+    let positional = positionals(rest);
+    let sub = positional.first().map(|w| normalize(w));
+    let mut uses: Vec<(JobUse, Vec<String>, bool)> = Vec::new();
+    if let Some(usage) = JobUse::of(&normalize(action), sub.as_deref()) {
+        let names = positional[1..].to_vec();
+        let every = names.is_empty();
+        uses.push((usage, names, every));
+    }
+    if daemonizes(raw_step)
+        && let Some(name) = named_job(raw_step)
+        && state.jobs.exists(&name).await
+    {
+        // Starting a job with the name of an existing one starts that job's own command.
+        uses.push((JobUse::Start, vec![name], false));
+    }
+    for (usage, names, every) in uses {
+        caller.require(usage.scopes(), &[])?;
+        let names = if every {
+            state
+                .jobs
+                .try_list_definitions()
+                .await
+                .map_err(ApiError::unavailable)?
+                .keys()
+                .cloned()
+                .collect()
+        } else {
+            names
+        };
+        for name in names {
+            if crate::routes::jobs::may_see(state, caller, &name).await {
+                continue;
+            }
+            return Err(if every {
+                ApiError::new(
+                    403,
+                    "Some jobs on this server are not yours to see: name the jobs to act on \
+                     (`show jobs <name>`), or use the console's Jobs page.",
+                )
+            } else {
+                ApiError::new(
+                    404,
+                    format!("{} does not exist.", state.jobs.job_str(&name)),
+                )
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The keyword arguments of `POST /actions/{action}` (v4's `actions[action](**keywords)`) as the
@@ -459,6 +747,17 @@ async fn check_selection(
         tags: selected_values(words, TAG_FLAGS, patch, "tags").unwrap_or_default(),
         params: None,
     };
+    if usage == Use::Write
+        && crate::routes::engine::graph_registry::check_selection(
+            state,
+            caller,
+            &conn.connector_keys(),
+            &query,
+        )
+        .await?
+    {
+        return Ok(());
+    }
     let keys = conn
         .fetch_pipes_keys(&query)
         .await
@@ -531,6 +830,28 @@ async fn check_pipelines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn job_references_follow_the_parser() {
+        let w = |words: &[&str]| words.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for words in [&["-d"][..], &["--daemon"], &["--dae"], &["-yd"], &["-dy"]] {
+            assert!(daemonizes(&w(words)), "{words:?}");
+        }
+        for words in [&["-m", "d"][..], &["--debug"], &["-md"], &["--d"]] {
+            assert!(!daemonizes(&w(words)), "{words:?}");
+        }
+        assert_eq!(named_job(&w(&["--name", "x"])).as_deref(), Some("x"));
+        assert_eq!(named_job(&w(&["--nam=x"])).as_deref(), Some("x"));
+        assert_eq!(named_job(&w(&["--job-name", "y"])).as_deref(), Some("y"));
+        assert_eq!(named_job(&w(&["--nopretty"])), None);
+        assert_eq!(JobUse::of("show", Some("job")), Some(JobUse::Read));
+        assert_eq!(JobUse::of("show", Some("daemon")), Some(JobUse::Read));
+        assert_eq!(JobUse::of("attach", Some("log")), Some(JobUse::Logs));
+        assert_eq!(JobUse::of("watch", Some("job")), Some(JobUse::Logs));
+        assert_eq!(JobUse::of("delete", Some("job")), Some(JobUse::Delete));
+        assert_eq!(JobUse::of("restart", Some("daemon")), Some(JobUse::Restart));
+        assert_eq!(JobUse::of("show", Some("pipe")), None);
+    }
 
     fn s(args: &[&str]) -> Vec<String> {
         args.iter().map(|a| a.to_string()).collect()

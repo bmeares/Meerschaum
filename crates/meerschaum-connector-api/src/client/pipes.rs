@@ -17,6 +17,7 @@ use crate::traits::{
 };
 use crate::wire::{QueryValue, ToJsonOptions, to_json};
 
+use super::batch_sender::{BatchSender, Operation};
 use super::{
     APIConnector, ATTRIBUTES_CACHE_SECONDS, ApiResponse, Body, COLUMNS_TYPES_CACHE_SECONDS,
     EXISTS_CACHE_SECONDS, PipeCacheEntry, RequestOptions, STATIC_SCHEMA_CACHE_SECONDS,
@@ -256,6 +257,9 @@ impl APIConnector {
     /// `get_pipe_instance_keys(pipe)`: `parameters['instance_keys']` if set, else the
     /// connector's `instance_keys`.
     pub fn get_pipe_instance_keys(&self, pipe: &Pipe) -> Option<String> {
+        if self.logical_identity.is_some() || self.team_data_instance {
+            return self.instance_keys();
+        }
         match pipe.parameters().get("instance_keys") {
             Some(Value::Null) => None,
             Some(v) => Some(py_str(v)),
@@ -263,9 +267,17 @@ impl APIConnector {
         }
     }
 
+    fn instance_query_key<'a>(&self, key: &'a str) -> &'a str {
+        if self.logical_identity.is_some() || self.team_data_instance {
+            "instance_keys"
+        } else {
+            key
+        }
+    }
+
     fn instance_query(&self, pipe: &Pipe, key: &str) -> (String, QueryValue) {
         (
-            key.to_string(),
+            self.instance_query_key(key).to_string(),
             QueryValue::opt(self.get_pipe_instance_keys(pipe)),
         )
     }
@@ -634,7 +646,16 @@ impl APIConnector {
             .filter(|(k, _)| {
                 !opts.replace || !matches!(k.as_str(), "replace" | "begin" | "end" | "params")
             })
-            .map(|(k, v)| (k.clone(), query_value(v)))
+            .map(|(k, v)| {
+                // This structured field decodes the typed JSON payload on Main. Generic
+                // keyword parameters retain their historical Python str(value) encoding.
+                let value = if k == "new_special_cols" && v.as_map().is_some() {
+                    QueryValue::One(py_json(v))
+                } else {
+                    query_value(v)
+                };
+                (k.clone(), value)
+            })
             .collect();
         if !opts.extra.contains_key("check_existing") && !opts.check_existing {
             query.push(("check_existing".into(), QueryValue::bool(false)));
@@ -662,6 +683,14 @@ impl APIConnector {
         let r_url = Self::pipe_r_url(pipe) + "/data";
 
         let n = df.height();
+        let mut sender = if n == 0 && !replace {
+            BatchSender::ordinary(self)
+        } else {
+            match BatchSender::new(self, pipe).await {
+                Ok(sender) => sender,
+                Err(error) => return SyncResult::new(false, error.to_string()),
+            }
+        };
         let json_opts = ToJsonOptions {
             columns_orient: true,
             geometry_format: GeometryFormat::WkbHex,
@@ -674,7 +703,7 @@ impl APIConnector {
         let mut start = 0usize;
         if replace && n == 0 {
             // No rows: the window is cleared.
-            let response = match self
+            let response = match sender
                 .post(
                     &r_url,
                     RequestOptions {
@@ -690,6 +719,7 @@ impl APIConnector {
                         },
                         ..Default::default()
                     },
+                    Operation::Data,
                 )
                 .await
             {
@@ -722,7 +752,7 @@ impl APIConnector {
             }
             let chunk = df.take(&indices);
             let json_str = to_json(&chunk, Some(&indices), &json_opts);
-            let response = match self
+            let response = match sender
                 .post(
                     &r_url,
                     RequestOptions {
@@ -740,6 +770,7 @@ impl APIConnector {
                         },
                         ..Default::default()
                     },
+                    Operation::Data,
                 )
                 .await
             {
@@ -747,6 +778,12 @@ impl APIConnector {
                 Err(e) => {
                     let msg = format!("Failed to post a chunk to {pipe}:\n{e}");
                     super::warnings::warn_pipe_fmt!(pipe, "{msg}");
+                    if sender.is_batched() {
+                        // Only counts from prior fully delivered responses are known.
+                        counts.success = false;
+                        counts.message = msg;
+                        return counts;
+                    }
                     return SuccessTuple::fail(msg).into();
                 }
             };
@@ -871,7 +908,8 @@ impl APIConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
-        self.read_pipe_data(pipe, query, false).await
+        self.read_pipe_data(pipe, query, self.logical_identity.is_some())
+            .await
     }
 
     /// [`Self::get_pipe_data`]; with `strict`, only an unregistered pipe (`409`) or one without a
@@ -901,7 +939,7 @@ impl APIConnector {
             ("params", params_json.into()),
             ("order", QueryValue::opt(query.order.clone())),
             (
-                "instance",
+                self.instance_query_key("instance"),
                 QueryValue::opt(self.get_pipe_instance_keys(pipe)),
             ),
             ("as_chunks", QueryValue::bool(query.as_chunks)),
@@ -1477,7 +1515,7 @@ impl APIConnector {
             ("end", bound_query(&query.end)),
             ("params", py_json_opt_map(&query.params).into()),
             (
-                "instance",
+                self.instance_query_key("instance"),
                 QueryValue::opt(self.get_pipe_instance_keys(pipe)),
             ),
         ]);
@@ -1790,6 +1828,26 @@ impl APIConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn team_service_pipe_reads_address_the_configured_upstream_instance() {
+        let mut client = APIConnector::new(
+            Some("selected"),
+            Map::from_iter([
+                ("host".into(), "fixture.invalid".into()),
+                ("instance_keys".into(), "sql:service".into()),
+            ]),
+        )
+        .unwrap();
+        client.team_data_instance = true;
+        let pipe = Pipe::builder("plugin:fixture", "stations")
+            .kwarg("instance_keys", "sql:alternate")
+            .build()
+            .unwrap();
+        let (key, value) = client.instance_query(&pipe, "instance");
+        assert_eq!(key, "instance_keys");
+        assert!(matches!(value, QueryValue::One(value) if value == "sql:service"));
+    }
 
     #[test]
     fn timespans() {

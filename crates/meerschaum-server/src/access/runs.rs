@@ -93,7 +93,7 @@ fn strip_record_proofs(record: &mut RunRecord) {
 
 /// The run and node records `filter`'s caller may read (see the module documentation).
 pub async fn visible_runs(filter: &mut RefFilter, mut records: Vec<RunRecord>) -> Vec<RunRecord> {
-    if filter.access().is_admin() {
+    if filter.unrestricted() {
         for record in &mut records {
             strip_record_proofs(record);
         }
@@ -192,7 +192,7 @@ pub(crate) fn strip_event_proofs(event: &mut EngineRunEvent) {
 /// `event` as the caller may read it (a hidden pipe's event keeps only its type and order).
 pub async fn visible_event(filter: &mut RefFilter, mut event: EngineRunEvent) -> EngineRunEvent {
     strip_event_proofs(&mut event);
-    if filter.access().is_admin() {
+    if filter.unrestricted() {
         return event;
     }
     if let Some(r) = event.pipe_ref.clone()
@@ -238,7 +238,7 @@ const REF_COLUMNS: &[&str] = &["pipe_ref", "child_ref", "parent_ref"];
 /// are dropped; a run row loses its hidden `targets` (and its `selection`), and is dropped when
 /// every target is hidden.
 pub async fn visible_rows(filter: &mut RefFilter, metric: &str, rows: Vec<Json>) -> Vec<Json> {
-    if filter.access().is_admin() {
+    if filter.unrestricted() {
         return rows;
     }
     if metric == "engine_runs" {
@@ -355,7 +355,7 @@ pub async fn check_rows_editable(
     filter: &mut RefFilter,
     rows: &[meerschaum_connector::pipe_ops::Doc],
 ) -> Result<(), String> {
-    if filter.access().is_admin() {
+    if filter.unrestricted() {
         return Ok(());
     }
     for row in rows {
@@ -397,7 +397,7 @@ pub async fn check_refs_editable<'r, I>(filter: &mut RefFilter, refs: I) -> Resu
 where
     I: IntoIterator<Item = &'r str>,
 {
-    if filter.access().is_admin() {
+    if filter.unrestricted() {
         return Ok(());
     }
     for r in refs {
