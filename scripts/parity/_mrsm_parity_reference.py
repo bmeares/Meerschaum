@@ -7,6 +7,7 @@ meerschaum here: generators set their scratch configuration before its first imp
 
 import importlib.abc
 import importlib.machinery
+import os
 import pathlib
 import sys
 
@@ -29,3 +30,11 @@ class _ReferencePackage(importlib.abc.MetaPathFinder):
 
 
 sys.meta_path.insert(0, _ReferencePackage())
+
+# The recorded v4 defaults (including worker and connection counts) use a 40-CPU
+# reference host. Use the same input when the golden fixtures run on other machines.
+def _fixture_cpu_count():
+    return 40
+
+
+os.cpu_count = _fixture_cpu_count
