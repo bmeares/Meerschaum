@@ -902,6 +902,12 @@ def venv_target_path(
 
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
+        from meerschaum._internal.team_scope import in_team_process
+        if in_team_process() and inside_venv():
+            # Team workers have access to the interpreter's site-packages without being
+            # allowed to list its parent directories.
+            import sysconfig
+            return pathlib.Path(sysconfig.get_path('purelib'))
 
         ### Return the known value for the portable environment.
         environment_runtime = STATIC_CONFIG['environment']['runtime']

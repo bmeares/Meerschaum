@@ -35,6 +35,7 @@ def tpr_probe(action=None, **kwargs):
         'file_has_own': 'w-pw' in text,
         'sandbox': __import__('meerschaum._internal.team_sandbox', fromlist=['report']).report(),
         'server_config': _attempt_read(os.path.join(os.environ['MRSM_ROOT_DIR'], 'config', 'meerschaum.yaml')),
+        'private_files': _private_files() if os.environ.get('MRSM_TEAM_SCOPE') else {},
         'venvs_dir': os.environ.get('MRSM_VENVS_DIR'),
         'writes': _writes() if os.environ.get('MRSM_TEAM_SCOPE') else {},
         'worker_sockets': _worker_sockets(),
@@ -59,6 +60,15 @@ def _attempt_write(path):
     except Exception as e:
         return repr(e)
 
+def _private_files():
+    root = os.environ['MRSM_ROOT_DIR']
+    return {
+        'another job': _attempt_read(os.path.join(root, 'jobs', 'other', 'properties.json')),
+        'another plugin': _attempt_read(os.path.join(root, '.internal', 'plugins', 'other.py')),
+        'parent environment': _attempt_read(f'/proc/{os.getppid()}/environ'),
+        'write root': _attempt_write(os.path.join(root, 'planted.py')),
+    }
+
 def _writes():
     root = os.environ['MRSM_ROOT_DIR']
     here = os.path.dirname(os.path.realpath(__file__))
@@ -77,6 +87,29 @@ def _writes():
     return out
 
 from meerschaum.plugins import make_action
+
+@make_action
+def tpr_runtime(action=None, **kwargs):
+    import concurrent.futures, multiprocessing, socket, ssl, tempfile
+    import meerschaum as mrsm
+    from meerschaum._internal import team_scope, team_sandbox
+    report = team_sandbox.report()
+    assert team_scope.hello_report()['sandbox'] == report
+    with tempfile.TemporaryFile() as stream:
+        stream.write(b'team data')
+        stream.seek(0)
+        assert stream.read() == b'team data'
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        assert list(pool.map(abs, [-1, -2])) == [1, 2]
+    with multiprocessing.get_context('spawn').Pool(2) as pool:
+        assert pool.map(abs, [-1, -2]) == [1, 2]
+    assert socket.getaddrinfo('localhost', 80)
+    assert ssl.create_default_context().cert_store_stats() is not None
+    conn = mrsm.get_connector('sql', 'tpr_memory', flavor='sqlite', database=':memory:')
+    pipe = mrsm.Pipe('tpr', 'memory', instance=conn)
+    success, message = pipe.sync([{'a': 1}, {'a': 2}])
+    assert success, message
+    return True, json.dumps({'rowcount': pipe.get_rowcount()})
 
 @make_action
 def tpr_install(action=None, **kwargs):
@@ -165,6 +198,12 @@ fn root_with_teams(root: &Path, plugins: &Path) -> Config {
     )
     .unwrap();
     std::fs::write(plugins.join("tpr_probe.py"), PLUGIN).unwrap();
+    let other_job = root.join("jobs/other");
+    std::fs::create_dir_all(&other_job).unwrap();
+    std::fs::write(other_job.join("properties.json"), "{}").unwrap();
+    let shared_plugins = root.join(".internal/plugins");
+    std::fs::create_dir_all(&shared_plugins).unwrap();
+    std::fs::write(shared_plugins.join("other.py"), "VALUE = 1\n").unwrap();
     Config::new(ConfigOptions::with_env(vec![
         ("MRSM_ROOT_DIR".into(), root.display().to_string()),
         ("MRSM_PLUGINS_DIR".into(), plugins.display().to_string()),
@@ -312,6 +351,9 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
         assert_eq!(first["sandbox"]["enforced"], true, "{first}");
         assert_eq!(first["sandbox"]["canary"], "denied", "{first}");
         assert_eq!(first["server_config"], "denied", "{first}");
+        for (label, value) in first["private_files"].as_object().unwrap() {
+            assert_eq!(value, "denied", "{label}: {first}");
+        }
         // 5.1: it writes nothing a process outside the team loads, only its own environments.
         let writes = &first["writes"];
         for target in [
@@ -324,6 +366,7 @@ fn a_team_session_runs_python_with_the_teams_configuration_only() {
         }
         assert_eq!(writes["own venv"], "written", "{first}");
         assert!(!shared_venv.join("planted.py").exists());
+        assert_eq!(action(&team, &team_config, "runtime")["rowcount"], 2);
     } else {
         eprintln!(
             "No Landlock here ({}): the sandbox is not checked.",
