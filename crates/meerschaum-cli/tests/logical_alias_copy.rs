@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::http::HeaderMap;
-use meerschaum_cli::executor_profiles::{Inputs, Prepared, prepare};
+use meerschaum_cli::executor_profiles::{Inputs, Prepared, prepare_with_runtime};
 use meerschaum_connector::{Connector, InstanceConnector, SyncOptions};
 use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::access::{Team, TeamRole};
@@ -181,7 +181,9 @@ async fn native_copy_checks_hidden_source_private_destination_and_stamps_new_own
     }));
     let directory = runtime_root.join("execution-contexts/copy");
     let native = std::fs::canonicalize(env!("CARGO_BIN_EXE_mrsm-cli")).unwrap();
-    let prepared = prepare(&Inputs {
+    meerschaum_core::self_exe::register_native_current_executable().unwrap();
+    let python = meerschaum_worker::worker::default_python();
+    let mut prepared = prepare_with_runtime(&Inputs {
         metadata: false,
         server_root: &runtime_root,
         directory: &directory,
@@ -189,10 +191,28 @@ async fn native_copy_checks_hidden_source_private_destination_and_stamps_new_own
         logical_instances: &BTreeSet::from(["sql:source".into(), "sql:target".into()]),
         default_instance: "sql:source",
         callback_url: &origin,
-        read_exec: &[native],
+        read_exec: std::slice::from_ref(&native),
         job_dir: None,
-        environment: &[("PATH".into(), "/usr/bin:/bin".into())],
+        environment: &[
+            ("PATH".into(), "/usr/bin:/bin".into()),
+            ("MRSM_PYTHON".into(), python.display().to_string()),
+        ],
     })
+    .unwrap();
+    // The test prepares the runtime; the standalone CLI enters it.
+    prepared.spec.runtime.as_mut().unwrap().launcher = native.clone();
+    let (_, launcher) = prepared
+        .environment
+        .iter_mut()
+        .find(|(key, _)| key == "MRSM_BIN")
+        .unwrap();
+    *launcher = native.display().to_string();
+    write_private(
+        &prepared
+            .directory
+            .join(meerschaum_core::team_scope::sandbox::SPEC_FILE),
+        &serde_json::to_string(&prepared.spec).unwrap(),
+    )
     .unwrap();
     let configuration = std::fs::read_to_string(prepared.directory.join("config.json")).unwrap();
     for secret in [
