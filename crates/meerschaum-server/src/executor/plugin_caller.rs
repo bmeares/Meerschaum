@@ -225,11 +225,12 @@ impl RequestSource {
             // Browser resolution may wait on the store: refresh the original bearer last.
             access::require_fresh(state, headers, scopes).await?
         } else {
-            let browser = browser.ok_or_else(ApiError::invalid_credentials)?;
+            let not_authenticated = || ApiError::unauthorized("Not authenticated.", None);
+            let browser = browser.ok_or_else(not_authenticated)?;
             let (session_headers, session) = browser
                 .authorize(state, headers)
                 .await
-                .ok_or_else(ApiError::invalid_credentials)?
+                .ok_or_else(not_authenticated)?
                 .map_err(|status| {
                     ApiError::new(status.as_u16(), "The console session is unavailable.")
                 })?;

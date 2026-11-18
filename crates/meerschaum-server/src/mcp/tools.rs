@@ -1132,6 +1132,18 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
     let mut pipe = build_pipe(cx, &conn, &ck, &mk, lk.as_deref(), Some(parameters))?;
     // Checked after construction because `target` may be set in `parameters`.
     check_protected_target(&pipe)?;
+    if cx.caller.api
+        && caller.full_admin()
+        && conn
+            .get_pipe_id(&pipe)
+            .await
+            .map_err(|error| ToolError::other(error.to_string()))?
+            .is_some()
+    {
+        return Ok(tuple_value(&SuccessTuple::fail(format!(
+            "{pipe} is already registered."
+        ))));
+    }
     // `Pipe.register()`: a plugin or custom connector's `register(pipe)` supplies the base
     // parameters under the ones given (`apply_patch_to_config(params, self.parameters)`).
     match cx.server.backend.connector_register(&pipe).await {

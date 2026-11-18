@@ -392,8 +392,7 @@ async fn shared_pipe_cache_and_delete_cache() {
     .await;
     assert_eq!(types.json()["x"], "int64");
 
-    // `get_pipe(refresh=False)` hands out the shared handle: its columns-types cache survives
-    // a schema change until `DELETE .../cache`.
+    // `get_pipe(refresh=False)` hands out the shared handle.
     let h1 = state
         .get_pipe("a", "b", Some("c"), None, false)
         .await
@@ -411,22 +410,25 @@ async fn shared_pipe_cache_and_delete_cache() {
 
     let r = send(&app, sync(r#"[{"ts": "2024-01-02", "x": 1, "y": "z"}]"#)).await;
     assert!(r.json()[0].as_bool().unwrap());
-    let stale = send(
+    let updated = send(
         &app,
         req("GET", "/pipes/a/b/c/columns/types", Some(&admin), None),
     )
     .await;
-    assert!(
-        stale.json().get("y").is_none(),
-        "cached for 60 s: {}",
-        stale.text()
-    );
+    assert_eq!(updated.json()["y"], "string", "{}", updated.text());
+    let current = state
+        .get_pipe("a", "b", Some("c"), None, false)
+        .await
+        .unwrap();
+    let max_age = state.config.columns_types_cache_seconds;
+    assert!(current.cached_columns_types(max_age).is_some());
     let r = send(
         &app,
         req("DELETE", "/pipes/a/b/c/cache", Some(&admin), None),
     )
     .await;
     assert_eq!(r.json(), json!([true, "Success"]));
+    assert!(current.cached_columns_types(max_age).is_none());
     let fresh = send(
         &app,
         req("GET", "/pipes/a/b/c/columns/types", Some(&admin), None),
