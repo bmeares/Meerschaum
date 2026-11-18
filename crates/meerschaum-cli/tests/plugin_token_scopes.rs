@@ -1,22 +1,8 @@
-//! A plugin-defined token scope end to end under `mrsm start api` (rc32): per-device ingest
-//! tokens for a single-file Rust plugin.
-//!
-//! - The plugin declares `POST /example/ingest` requiring its own scope `example:ingest` (and
-//!   `GET /example/report` requiring `example:report`).
-//! - An administrator (a holder of `*`) registers a token with only `example:ingest` and a
-//!   device label; its API key, and a JWT minted from it (`client_credentials`), call the
-//!   ingest route (`200`) and get `403` on every other authenticated route: the pipes routes,
-//!   the plugin's other route and an administrator's route.
-//! - The handler's `Principal` carries the token's id and label (no secret).
-//! - Revocation is immediate: the request after `invalidate` (or `DELETE`) is refused, for the
-//!   API key and for the JWT minted from it (each request reads the token from the instance).
-//!
-//! - rc34: the plugin's own routes mint and revoke tokens (`host::mint_token`,
-//!   `host::revoke_token`): an administrator's provisioning route mints a device token; the
-//!   device's heartbeat (called with that token) mints its successor and revokes itself, and the
-//!   old token is refused on the next request. `*`, core scopes and another plugin's scope are
-//!   never minted; another user's token and a token with a core scope are never revoked.
-//! - rc34: a long poll ends as soon as the server drains (`host::draining()`).
+//! Native plugin device-token provisioning and revocation under `mrsm start api`.
+//! Confined routes require `plugins:read` in addition to their declared scopes. A device
+//! with only a custom scope cannot read plugin routes or run its self-rotation handler.
+//! Administrators can still provision and revoke tokens through their plugin, subject to
+//! the plugin's scope and ownership limits. A trusted route's long poll ends on drain.
 //!
 //! Unix only (as `single_file_server.rs`). A temporary root and plugins directory and a scrubbed
 //! environment; all data is synthetic.
@@ -188,7 +174,11 @@ impl Home {
             .stdin
             .take()
             .unwrap()
-            .write_all(b"n\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
+            .write_all(if username == "admin" {
+                b"y\nsynthetic-pass-1\nsynthetic-pass-1\n\n"
+            } else {
+                b"synthetic-pass-1\nsynthetic-pass-1\n\n"
+            })
             .unwrap();
         let output = registering.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -364,8 +354,27 @@ fn register_device(port: u16, admin: &str, label: &str) -> (String, String, Stri
     )
 }
 
+fn assert_missing_plugin_scope(reply: &Reply) {
+    assert_eq!(reply.status, 403, "{}", reply.text());
+    assert_eq!(
+        reply.json()["detail"],
+        "Missing required scope: 'plugins:read'"
+    );
+}
+
+fn assert_device_route_refused(reply: &Reply) {
+    if reply.status == 503 {
+        assert_eq!(
+            reply.json()["detail"],
+            "Confined Rust metadata requires its host-selected attested offline compiler."
+        );
+    } else {
+        assert_missing_plugin_scope(reply);
+    }
+}
+
 #[test]
-fn a_plugin_scope_admits_only_its_route_and_revocation_is_immediate() {
+fn a_plugin_only_scope_is_refused_and_revocation_is_immediate() {
     let home = Home::new();
     home.register_admin();
     let server = serve(&home);
@@ -386,19 +395,13 @@ fn a_plugin_scope_admits_only_its_route_and_revocation_is_immediate() {
     let jwt = format!("Bearer {}", minted.json()["access_token"].as_str().unwrap());
 
     for auth in [&key, &jwt] {
-        // The plugin's route admits its own scope; the handler sees the token's id and label.
-        let ingest = call(port, "POST", "/example/ingest", auth, br#"{"value": 1}"#);
-        assert_eq!(ingest.status, 200, "{}", ingest.text());
-        let body = ingest.json();
-        assert_eq!(body["principal"]["kind"], "token", "{body}");
-        assert_eq!(body["principal"]["token_id"], id.as_str(), "{body}");
-        assert_eq!(body["principal"]["label"], "device-17", "{body}");
-        assert_eq!(body["scopes"], json!(["example:ingest"]), "{body}");
-        assert_eq!(body["body"], r#"{"value": 1}"#);
-        assert!(
-            !ingest.text().contains(&secret),
-            "the secret reached the plugin"
-        );
+        assert_missing_plugin_scope(&call(
+            port,
+            "POST",
+            "/example/ingest",
+            auth,
+            br#"{"value": 1}"#,
+        ));
 
         // Every other authenticated route is refused.
         for (method, path, body) in [
@@ -432,7 +435,7 @@ fn a_plugin_scope_admits_only_its_route_and_revocation_is_immediate() {
     // Deletion: likewise.
     let (other_id, _, other_key) = register_device(port, &admin, "device-18");
     let ingest = call(port, "POST", "/example/ingest", &other_key, b"{}");
-    assert_eq!(ingest.status, 200, "{}", ingest.text());
+    assert_missing_plugin_scope(&ingest);
     let deleted = call(port, "DELETE", &format!("/tokens/{other_id}"), &admin, b"");
     assert_eq!(deleted.status, 200, "{}", deleted.text());
     let refused = call(port, "POST", "/example/ingest", &other_key, b"{}");
@@ -450,7 +453,7 @@ fn bearer(token: &serde_json::Value) -> String {
 }
 
 #[test]
-fn a_plugin_route_mints_and_rotates_device_tokens_with_its_own_scope() {
+fn a_trusted_plugin_route_mints_and_revokes_tokens_with_its_own_scope() {
     let home = Home::new();
     home.register_admin();
     home.register_user("eve", "example:ingest");
@@ -481,40 +484,24 @@ fn a_plugin_route_mints_and_rotates_device_tokens_with_its_own_scope() {
     assert!(first["secret"].as_str().is_some_and(|s| !s.is_empty()));
     let first_key = bearer(&first);
 
-    // The token reaches that plugin route and nothing else.
-    let ingest = call(port, "POST", "/example/ingest", &first_key, b"{}");
-    assert_eq!(ingest.status, 200, "{}", ingest.text());
-    assert_eq!(ingest.json()["principal"]["token_id"], first["id"]);
-    assert_eq!(ingest.json()["principal"]["label"], "device-17");
+    // The token cannot call the scoped plugin or rotate itself.
+    for path in ["/example/ingest", "/example/heartbeat"] {
+        assert_device_route_refused(&call(port, "POST", path, &first_key, b"{}"));
+    }
     for (method, path) in [
-        ("GET", "/pipes"),
         ("GET", "/example/report"),
         ("GET", "/other/read"),
         ("POST", "/example/provision"),
     ] {
-        let refused = call(port, method, path, &first_key, b"{}");
-        assert_eq!(refused.status, 403, "{method} {path}: {}", refused.text());
+        assert_device_route_refused(&call(port, method, path, &first_key, b"{}"));
     }
+    let pipes = call(port, "GET", "/pipes", &first_key, b"");
+    assert_eq!(pipes.status, 403, "{}", pipes.text());
 
-    // Rotation: the device's heartbeat mints its successor and revokes the token it called with.
-    let heartbeat = call(port, "POST", "/example/heartbeat", &first_key, b"");
-    assert_eq!(heartbeat.status, 200, "{}", heartbeat.text());
-    let rotated = heartbeat.json();
-    let second = &rotated["next"];
-    assert_eq!(second["label"], "device-17");
-    assert_ne!(second["id"], first["id"]);
-    // The very next request with the old token is refused; the successor works.
-    let refused = call(port, "POST", "/example/ingest", &first_key, b"{}");
-    assert_eq!(refused.status, 401, "{}", refused.text());
-    let second_key = bearer(second);
-    let ingest = call(port, "POST", "/example/ingest", &second_key, b"{}");
-    assert_eq!(ingest.status, 200, "{}", ingest.text());
-    assert_eq!(ingest.json()["principal"]["token_id"], second["id"]);
-    // The successor belongs to the administrator, like the token it replaced.
     let model = call(
         port,
         "GET",
-        &format!("/tokens/{}", second["id"].as_str().unwrap()),
+        &format!("/tokens/{}", first["id"].as_str().unwrap()),
         &admin,
         b"",
     );
@@ -584,13 +571,21 @@ fn a_plugin_route_mints_and_rotates_device_tokens_with_its_own_scope() {
         );
     }
     for token in [&eves, &core] {
-        let ingest = call(port, "POST", "/example/ingest", &bearer(token), b"{}");
-        assert_eq!(ingest.status, 200, "{}", ingest.text());
+        let login = form(
+            port,
+            "/login",
+            &format!(
+                "grant_type=client_credentials&client_id={}&client_secret={}",
+                token["id"].as_str().unwrap(),
+                token["secret"].as_str().unwrap(),
+            ),
+        );
+        assert_eq!(login.status, 200, "{}", login.text());
     }
     // The administrator revokes its device's token through the plugin.
-    let revoked = post(port, "/example/revoke", &admin, json!({"id": second["id"]}));
+    let revoked = post(port, "/example/revoke", &admin, json!({"id": first["id"]}));
     assert_eq!(revoked.status, 200, "{}", revoked.text());
-    let refused = call(port, "POST", "/example/ingest", &second_key, b"{}");
+    let refused = call(port, "POST", "/example/ingest", &first_key, b"{}");
     assert_eq!(refused.status, 401, "{}", refused.text());
 }
 
@@ -603,24 +598,15 @@ fn a_long_poll_ends_when_the_server_drains() {
     let login = form(port, "/login", "username=admin&password=synthetic-pass-1");
     assert_eq!(login.status, 200, "{}", login.text());
     let admin = format!("Bearer {}", login.json()["access_token"].as_str().unwrap());
-    let token = post(
-        port,
-        "/example/provision",
-        &admin,
-        json!({"label": "device-17", "scopes": ["example:ingest"]}),
-    );
-    assert_eq!(token.status, 200, "{}", token.text());
-    let key = bearer(&token.json());
-
     // Serving: a short poll runs out its time, not drained.
-    let short = call(port, "GET", "/example/poll?seconds=1", &key, b"");
+    let short = call(port, "GET", "/example/poll?seconds=1", &admin, b"");
     assert_eq!(short.status, 200, "{}", short.text());
     assert_eq!(short.json()["drained"], false);
 
     // A 30-second poll in flight ends as soon as the drain begins, well inside the 8-second
     // shutdown grace period.
     let polling = std::thread::spawn(move || {
-        let reply = call(port, "GET", "/example/poll", &key, b"");
+        let reply = call(port, "GET", "/example/poll", &admin, b"");
         (reply.status, reply.json(), Instant::now())
     });
     std::thread::sleep(Duration::from_millis(1500));

@@ -168,6 +168,12 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
 
 ## 🔑 Tokens and draining
 
+The 5.1.0rc1 confined runtime accepts built-in scopes on authenticated native Rust routes
+and requires callers to hold `plugins:read`. The execution host also needs an attested
+offline Rust compiler. The provisioning and rotation examples below describe the trusted
+runtime. A device token carrying only a plugin-defined scope cannot call a confined
+route or rotate itself in this release.
+
 A plugin that serves devices can issue their tokens itself. `host::mint_token(label, scopes,
 expiration)` registers an API token for the request's caller and returns it once, secret and API
 key included (`MintedToken`: `id`, `label`, `scopes`, `expiration`, `secret`, `api_key`;

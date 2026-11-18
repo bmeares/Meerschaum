@@ -15,6 +15,7 @@ Ordinary Meerschaum use is supported on Linux 6.8, macOS, and Windows. Isolated 
 - Upgrade the native CLI, the Python API host, and the Python package in each Team worker interpreter together. Team workers require Meerschaum 5.1.0 or later. For a Python user-site installation of 5.0.x, run `python3 -m pip install --user --upgrade meerschaum` with the installation's interpreter.
 - Before recreating the stack, review the read-only Grafana role, Valkey password, and credential file changes below. List additional schemas that Grafana must read in `stack:grafana:readonly_schemas`. Run `mrsm stack` to generate the default Compose file.
 - Use TCP for connectors accessed by Team workers whose sandbox denies Unix sockets. Reconnect to a live web terminal to restore its tmux windows. Review the permitted commands and required scopes before upgrading users who rely on the web terminal or command API. [Permissions](https://meerschaum.io/reference/api-instance/permissions/)
+- In 5.1.0rc1, authenticated non-admin calls to confined native Rust plugin routes require `plugins:read`, the route's declared built-in scopes, and an attested offline Rust compiler on the execution host. Device tokens that carry only a plugin-defined scope cannot call or rotate themselves through these routes. Check this before upgrading a deployment that uses native plugin device tokens.
 
 #### Changes
 
