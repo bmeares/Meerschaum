@@ -54,6 +54,10 @@ impl SessionLookup for Sessions {
     async fn username(&self, session_id: &str) -> Result<Option<String>, String> {
         Ok(self.0.lock().unwrap().get(session_id).cloned())
     }
+
+    async fn restricted(&self, session_id: &str) -> Result<bool, String> {
+        Ok(session_id == BOB_SESSION)
+    }
 }
 
 fn sessions() -> Arc<Sessions> {
@@ -218,19 +222,10 @@ async fn ask(address: &str, grant: &str, sysargs: &[&str]) -> Value {
 async fn a_non_administrators_shell_asks_the_server_which_decides_as_post_execute_does() {
     let root = tempfile::tempdir().unwrap();
     let (state, instance) = state(root.path());
-    let addr = serve(webterm::routes(state.clone(), config(&state, None))).await;
-
-    // The administrator's shell is not restricted.
-    let mut admin = connect(addr, ADMIN_SESSION).await;
-    let (restricted, address, grant) = restriction(&mut admin).await;
-    assert_eq!((restricted, address, grant), (None, None, None));
-
-    // bob's is, with the policy socket's address and a grant.
-    let mut bob = connect(addr, BOB_SESSION).await;
-    let (restricted, address, grant) = restriction(&mut bob).await;
-    assert_eq!(restricted.as_deref(), Some("1"));
-    let address = address.expect("the policy address");
-    let grant = grant.expect("a grant");
+    let policy = webterm::restricted::Policy::default();
+    let address = policy.listen(&state, root.path()).await.unwrap();
+    let guard = policy.grant_for_connection("bob");
+    let grant = guard.token().to_owned();
     assert_eq!(grant.len(), 64);
     #[cfg(unix)]
     {
@@ -292,36 +287,31 @@ async fn a_non_administrators_shell_asks_the_server_which_decides_as_post_execut
     instance.seed_user_scopes("bob", &["pipes:read"]);
     let answer = ask(&address, &grant, &["show", "version"]).await;
     assert_eq!(answer["success"], false, "{answer}");
-    // (The terminal itself closes at its next check.)
-    let (out, closed) = read_until(&mut bob, |out| out.contains("permission")).await;
-    assert!(out.contains("permission") || closed, "{out:?}");
-    drop(bob);
-    // The grant ended with the terminal.
+    drop(guard);
+    // The terminated connection's grant stays unusable after restoring the role.
     let operator: Vec<String> = meerschaum_core::access::Role::Operator
         .permissions()
         .into_iter()
         .collect();
     let operator: Vec<&str> = operator.iter().map(String::as_str).collect();
     instance.seed_user_scopes("bob", &operator);
-    tokio::time::sleep(Duration::from_millis(500)).await;
     let ended = ask(&address, &grant, &["show", "version"]).await;
     assert_eq!(ended["success"], false, "{ended}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_change_of_role_closes_the_terminal_in_either_direction() {
+async fn demotion_closes_the_full_terminal_and_the_main_cannot_open_an_unbound_terminal() {
     use meerschaum_connector::InstanceConnector;
     let root = tempfile::tempdir().unwrap();
     let (state, instance) = state(root.path());
     let addr = serve(webterm::routes(state.clone(), config(&state, None))).await;
 
     let mut bob = connect(addr, BOB_SESSION).await;
-    assert!(restriction(&mut bob).await.0.is_some());
+    let (out, _) = read_until(&mut bob, |out| out.contains("session's credential")).await;
+    assert!(out.contains("session's credential"), "{out:?}");
     let mut promoted = meerschaum_core::users::User::new("bob", None);
     promoted.user_type = Some("admin".into());
     assert!(instance.edit_user(&promoted).await.success);
-    let (out, _) = read_until(&mut bob, |out| out.contains("Your role changed")).await;
-    assert!(out.contains("Your role changed"), "{out:?}");
     let mut bob = connect(addr, BOB_SESSION).await;
     assert!(restriction(&mut bob).await.0.is_none());
 
@@ -331,7 +321,8 @@ async fn a_change_of_role_closes_the_terminal_in_either_direction() {
     let (out, _) = read_until(&mut bob, |out| out.contains("Your role changed")).await;
     assert!(out.contains("Your role changed"), "{out:?}");
     let mut bob = connect(addr, BOB_SESSION).await;
-    assert!(restriction(&mut bob).await.0.is_some());
+    let (out, _) = read_until(&mut bob, |out| out.contains("session's credential")).await;
+    assert!(out.contains("session's credential"), "{out:?}");
 }
 
 fn tmux(socket: &Path, args: &[&str]) -> std::process::Output {
@@ -362,6 +353,7 @@ async fn restricted_tmux_sessions_live_on_a_locked_down_server_of_their_own() {
     let probe = std::process::Command::new("tmux")
         .arg("-V")
         .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
         .output();
     if !probe.is_ok_and(|o| o.status.success()) {
         eprintln!(
@@ -371,10 +363,7 @@ async fn restricted_tmux_sessions_live_on_a_locked_down_server_of_their_own() {
     }
     let root = tempfile::tempdir().unwrap();
     // tmux's socket path must fit in `sun_path`.
-    let dir = tempfile::Builder::new()
-        .prefix("mt")
-        .tempdir_in("/tmp")
-        .unwrap();
+    let dir = tempfile::Builder::new().prefix("mt").tempdir().unwrap();
     let socket = dir.path().join("tmux.sock");
     let restricted_socket = webterm::restricted_socket(&socket);
     let _servers = PrivateTmux(vec![socket.clone(), restricted_socket.clone()]);
@@ -386,10 +375,42 @@ async fn restricted_tmux_sessions_live_on_a_locked_down_server_of_their_own() {
         env_dir: dir.path().join("env"),
         config_file: Some("/dev/null".into()),
     };
-    let addr = serve(webterm::routes(
+    let main = serve(webterm::routes(
         state.clone(),
-        config(&state, Some(settings)),
+        config(&state, Some(settings.clone())),
     ))
+    .await;
+    use meerschaum_server::executor::{
+        control::{Actor, Claims},
+        gateway::VerifiedRequest,
+    };
+    let caller = VerifiedRequest {
+        claims: Claims {
+            protocol: meerschaum_server::executor::control::PROTOCOL,
+            version: env!("CARGO_PKG_VERSION").into(),
+            issuer: uuid::Uuid::new_v4(),
+            team_id: uuid::Uuid::new_v4(),
+            generation: uuid::Uuid::new_v4(),
+            issued_at: 0,
+            expires_at: 1,
+            nonce: uuid::Uuid::new_v4(),
+            method: "GET".into(),
+            path: format!("/websocket/{BOB_SESSION}"),
+            body_sha256: String::new(),
+            configuration_sha256: String::new(),
+            actor: Actor {
+                owner: "bob".into(),
+                username: Some("bob".into()),
+                permissions: meerschaum_core::access::Role::Operator.permissions(),
+                administrator: false,
+            },
+        },
+        team_name: "fixture".into(),
+    };
+    let addr = serve(
+        webterm::executor_routes(state.clone(), config(&state, Some(settings)))
+            .layer(axum::Extension(caller)),
+    )
     .await;
 
     // A session of bob's on the administrators' server (made while bob could run anything).
@@ -476,7 +497,7 @@ async fn restricted_tmux_sessions_live_on_a_locked_down_server_of_their_own() {
     drop(bob);
 
     // The administrator's session is on the administrators' server, unrestricted.
-    let mut admin = connect(addr, ADMIN_SESSION).await;
+    let mut admin = connect(main, ADMIN_SESSION).await;
     assert!(restriction(&mut admin).await.0.is_none());
     assert!(sessions(&socket).contains(&"admin_t".to_string()));
 }

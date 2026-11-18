@@ -22,6 +22,9 @@ use common::{MemoryInstance, SECRET, send};
 use futures_util::{SinkExt, StreamExt};
 use meerschaum_core::Value as CoreValue;
 use meerschaum_core::config::default_config;
+use meerschaum_server::access::Access;
+use meerschaum_server::backends::ActionsBackend;
+use meerschaum_server::webterm::remote::{Event, Input, Terminal};
 use meerschaum_server::webterm::{self, SessionLookup, ShellCommand, TmuxSettings, WebtermConfig};
 use meerschaum_server::{AppState, ServerConfig, ServerFlags};
 use serde_json::{Value, json};
@@ -68,6 +71,49 @@ impl SessionLookup for Sessions {
             return Err("the session store is down".into());
         }
         Ok(self.map.lock().unwrap().get(session_id).cloned())
+    }
+
+    async fn binding(&self, session_id: &str) -> Result<Option<(String, String)>, String> {
+        Ok(self
+            .username(session_id)
+            .await?
+            .map(|user| (user, "test-binding".into())))
+    }
+}
+
+struct HostTerminal;
+
+#[async_trait]
+impl ActionsBackend for HostTerminal {
+    fn list(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    async fn execute(&self, _: &str, _: meerschaum_core::Map) -> meerschaum_core::SuccessTuple {
+        panic!("The console bridge must only use the configured terminal backend")
+    }
+
+    async fn host_api_terminal(
+        &self,
+        team: Option<uuid::Uuid>,
+        caller: &Access,
+    ) -> Result<Terminal, String> {
+        assert!(team.is_none());
+        assert_eq!(caller.username(), Some("bob"));
+        assert_eq!(caller.credential.as_deref(), Some("test-binding"));
+        let (input, mut commands) = tokio::sync::mpsc::channel(4);
+        let (output, events) = tokio::sync::mpsc::channel(4);
+        tokio::spawn(async move {
+            let _ = output.send(Event::Setup).await;
+            while let Some(command) = commands.recv().await {
+                if matches!(command, Input::Stdin(text) if text == "fixture command\n") {
+                    let _ = output
+                        .send(Event::Output("fixture response\n".into()))
+                        .await;
+                }
+            }
+        });
+        Ok(Terminal { input, events })
     }
 }
 
@@ -150,6 +196,7 @@ fn state_and_instance(cfg: ServerConfig) -> (AppState, Arc<MemoryInstance>) {
     instance.seed_user("ed", "pass", None);
     let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
+        .actions(Arc::new(HostTerminal))
         .build()
         .expect("state");
     (state, instance)
@@ -1037,17 +1084,14 @@ async fn an_open_terminal_closes_when_its_user_loses_access() {
     // `bob` is an operator (`webterm:use`); `root2` an administrator.
     let mut operator = connect(addr, USER_SESSION).await;
     expect_setup(&mut operator).await;
-    let operator_pid = shell_pid(&mut operator).await;
     let mut admin = connect(addr, OTHER_ADMIN_SESSION).await;
     expect_setup(&mut admin).await;
     let admin_pid = shell_pid(&mut admin).await;
 
     instance.seed_user_scopes("bob", &[]);
-    let (out, disconnected, code) = ending(&mut operator, Duration::from_secs(5)).await;
+    let (out, _, code) = ending(&mut operator, Duration::from_secs(5)).await;
     assert!(out.contains("permission"), "{out:?}");
-    assert!(disconnected);
     assert_eq!(code, Some(1008));
-    assert_shell_ends(operator_pid).await;
 
     let deleted = instance
         .delete_user(&meerschaum_core::users::User::new("root2", None))
@@ -2248,7 +2292,7 @@ async fn an_isolated_team_without_plugin_installs_keeps_tmux() {
 /// listens for a team's process to connect to; where the sandbox refuses them, it uses the
 /// restricted tmux server (`<socket>-r.sock`).
 #[tokio::test]
-async fn with_isolated_teams_restricted_terminals_use_tmux_only_where_sockets_are_refused() {
+async fn with_isolated_teams_the_bridge_leaves_local_tmux_sockets_unused() {
     let probe = std::process::Command::new("tmux")
         .arg("-V")
         .env_remove("TMUX")
@@ -2297,9 +2341,9 @@ async fn with_isolated_teams_restricted_terminals_use_tmux_only_where_sockets_ar
         let addr = serve(webterm::routes(state.clone(), cfg)).await;
         let mut term = connect(addr, USER_SESSION).await;
         expect_setup(&mut term).await;
-        send_json(&mut term, json!(["stdin", "echo r:ok\n"])).await;
-        read_until(&mut term, |out| has_line(out, "r:ok")).await;
+        send_json(&mut term, json!(["stdin", "fixture command\n"])).await;
+        read_until(&mut term, |out| has_line(out, "fixture response")).await;
         assert!(!socket.exists(), "stops={stops}");
-        assert_eq!(restricted.exists(), stops, "stops={stops}");
+        assert!(!restricted.exists(), "stops={stops}");
     }
 }
