@@ -477,8 +477,24 @@ fn a_sandboxed_team_jobs_prompt_is_seen_and_answered() {
         &ctx,
     )
     .unwrap();
-    let started = job.start();
-    assert!(started.success, "{started}");
+    let saved = job.daemon().write_properties();
+    assert!(saved.success, "{saved}");
+    // Start the recorded fixture through the same standalone entry point as the
+    // server, so the native launcher is captured by that process at startup.
+    let started = home
+        .command()
+        .env_remove("MRSM_PYTHON")
+        .args([
+            "start",
+            "jobs",
+            "team-asks",
+            "--no-stagger",
+            "--noask",
+            "--nopretty",
+        ])
+        .output()
+        .unwrap();
+    assert!(started.status.success(), "{}", text(&started));
     let deadline = Instant::now() + Duration::from_secs(60);
     while !job.is_blocking_on_stdin() {
         assert!(
