@@ -1600,32 +1600,9 @@ impl SqlDriver {
     /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction
     /// (`psql_insert_copy`, `_sql.py:1109`). Returns the number of rows copied.
     pub async fn copy_in(&self, copy_sql: &str, data: Vec<u8>) -> Result<u64> {
-        if meerschaum_connector::mutation::current().is_some() {
-            return Err(self.scoped_write_unavailable());
-        }
-        meerschaum_core::dprint!(
-            "{}\n({} bytes)",
-            meerschaum_core::debug::redact_sql(copy_sql),
-            data.len()
-        );
-        self.ready().await?;
-        match &self.pool {
-            Pool::Postgres(p) => {
-                let mut tx = p.begin().await?;
-                let mut copy = tx.copy_in_raw(copy_sql).await?;
-                if let Err(e) = copy.send(data).await {
-                    let _ = copy.abort(e.to_string()).await;
-                    return Err(e.into());
-                }
-                let n = copy.finish().await?;
-                tx.commit().await?;
-                Ok(n)
-            }
-            _ => Err(crate::error::SqlError::InvalidArgument(format!(
-                "COPY is only available on PostgreSQL (flavor '{}').",
-                self.flavor.as_str()
-            ))),
-        }
+        self.copy_in_after(&[], copy_sql, data)
+            .await
+            .map(|(_, count)| count)
     }
 
     /// [`copy_in`](SqlDriver::copy_in) after `prelude` statements, all in one transaction (a
@@ -1637,36 +1614,49 @@ impl SqlDriver {
         copy_sql: &str,
         data: Vec<u8>,
     ) -> Result<(Vec<u64>, u64)> {
-        if meerschaum_connector::mutation::current().is_some() {
+        if !matches!(self.pool, Pool::Postgres(_)) {
+            return Err(crate::SqlError::InvalidArgument(format!(
+                "COPY is only available on PostgreSQL (flavor '{}').",
+                self.flavor.as_str()
+            )));
+        }
+        if meerschaum_connector::mutation::current()
+            .is_some_and(|check| !check.direct_administrator())
+        {
             return Err(self.scoped_write_unavailable());
         }
-        prelude.iter().for_each(|q| debug_sql!(q));
         meerschaum_core::dprint!(
             "{}\n({} bytes)",
             meerschaum_core::debug::redact_sql(copy_sql),
             data.len()
         );
-        self.ready().await?;
-        match &self.pool {
-            Pool::Postgres(p) => {
-                let mut tx = p.begin().await?;
-                let mut counts = Vec::with_capacity(prelude.len());
-                for sql in prelude {
-                    counts.push(backend::pg_tx::tx_exec(&mut tx, sql).await?);
-                }
-                let mut copy = tx.copy_in_raw(copy_sql).await?;
-                if let Err(e) = copy.send(data).await {
-                    let _ = copy.abort(e.to_string()).await;
-                    return Err(e.into());
-                }
-                let n = copy.finish().await?;
-                tx.commit().await?;
-                Ok((counts, n))
+        let mut transaction = self.begin_write().await?;
+        let result = async {
+            let mut counts = Vec::with_capacity(prelude.len());
+            for sql in prelude {
+                counts.push(transaction.exec(sql).await?);
             }
-            _ => Err(crate::error::SqlError::InvalidArgument(format!(
-                "COPY is only available on PostgreSQL (flavor '{}').",
-                self.flavor.as_str()
-            ))),
+            transaction.check_write().await?;
+            let TxInner::Postgres(native) = &mut transaction.inner else {
+                unreachable!("PostgreSQL COPY requires a PostgreSQL connection");
+            };
+            let mut copy = native.copy_in_raw(copy_sql).await?;
+            if let Err(error) = copy.send(data).await {
+                let _ = copy.abort(error.to_string()).await;
+                return Err(crate::SqlError::from(error));
+            }
+            Ok((counts, copy.finish().await?))
+        }
+        .await;
+        match result {
+            Ok(counts) => {
+                transaction.commit().await?;
+                Ok(counts)
+            }
+            Err(error) => {
+                Box::pin(transaction.rollback()).await?;
+                Err(error)
+            }
         }
     }
 
