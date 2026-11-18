@@ -225,8 +225,10 @@ paths = {
 # A credentialed Team keeps its durable root and resource paths. Only source discovery uses
 # the namespace captured by its native launcher before interpreter site hooks. This is a
 # fixed projection, not an environment-selected path or additional API authorization.
-from meerschaum import _core as _paths_native_core
-_team_source_json = getattr(_paths_native_core, 'team_sources_namespace', lambda: None)()
+# The Team launcher loads this module and captures its namespace before site hooks.
+# An ordinary SDK import has no namespace to query and keeps the extension lazy.
+_paths_native_module = sys.modules.get('meerschaum._core._native')
+_team_source_json = getattr(_paths_native_module, 'team_sources_namespace', lambda: None)()
 _TEAM_SOURCE_NAMESPACE = json.loads(_team_source_json) if _team_source_json else None
 if _TEAM_SOURCE_NAMESPACE is not None:
     PLUGINS_DIR_PATHS = [Path(_TEAM_SOURCE_NAMESPACE['view'])]
