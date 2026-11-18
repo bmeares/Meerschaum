@@ -145,8 +145,11 @@ jobs:
       - name: Prepare the native API test interpreter
         run: |
           native_test_env="$(mktemp -d "$RUNNER_TEMP/mrsm-native-python.XXXXXX")"
-          python3 -m venv "$native_test_env"
-          "$native_test_env/bin/python" -m pip install -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt
+          # The reference-interpreter setup also supplies uv on self-hosted runners.
+          scripts/parity/setup_reference.sh
+          native_uv="$(command -v uv || printf '%s\n' "$HOME/.local/bin/uv")"
+          python3 -m venv --without-pip "$native_test_env"
+          "$native_uv" pip install --python "$native_test_env/bin/python" pip -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt
           echo "PYTHON_BIN=$native_test_env/bin/python" >> "$GITHUB_ENV"
           echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Build the native Python extension
@@ -226,22 +229,23 @@ jobs:
   # crates/*/tests/fixtures/gen_*.py with the released meerschaum 4.1.4 in .venv-ref and fail if
   # the committed fixtures change. ~10 minutes, so it runs only when a generator, a fixture or the
   # reference harness changed (scripts/ci/changes.py), or on a dispatch / tag. Skip it with the repository
-  # variable MRSM_SKIP_PARITY=true or by unticking `parity` on a manual run. .venv-ref/ persists on the runner.
+  # variable MRSM_SKIP_PARITY=true or by unticking `parity` on a manual run.
   parity:
     needs: [ changes ]
     if: ${{ !cancelled() && needs.changes.outputs.parity == 'true' && (inputs.full || vars.MRSM_SKIP_PARITY != 'true') && (inputs.full || github.event_name != 'workflow_dispatch' || inputs.parity) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     concurrency:
       group: mrsm-rust-parity
       cancel-in-progress: false
     timeout-minutes: 40
+    services:
+      valkey:
+        image: valkey/valkey
+        ports: ['127.0.0.1:6399:6379']
+        options: --health-cmd "valkey-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v7
-        with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
-      - name: Clean the workspace (keep target/, .venv-ref/ and .venv-test/)
-        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
-      - name: Toolchain
-        run: scripts/rust/ci.sh setup
+        with: { persist-credentials: false, ref: '${{ github.sha }}' }
       - name: Regenerate fixtures with the v4.1.4 reference and diff
         run: scripts/rust/ci.sh parity
       - name: Retain detailed reference-generator output
