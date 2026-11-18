@@ -202,7 +202,45 @@ fn tree_has(dir: &Path, name: &str) -> bool {
     })
 }
 
-#[test]
+const TEST: &str = "a_team_session_runs_python_with_the_teams_configuration_only";
+
+fn main() -> std::process::ExitCode {
+    use std::process::ExitCode;
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if std::env::var_os(meerschaum_core::team_scope::sandbox::SPEC_VAR).is_some()
+        || args.first().is_some_and(|arg| arg.starts_with("__mrsm_"))
+    {
+        return meerschaum_cli::run_main();
+    }
+    if args.iter().any(|arg| arg == "--list") {
+        println!("{TEST}: test");
+        return ExitCode::SUCCESS;
+    }
+    if args.iter().any(|arg| arg == "--ignored")
+        && !args.iter().any(|arg| arg == "--include-ignored")
+    {
+        return ExitCode::SUCCESS;
+    }
+    let exact = args.iter().any(|arg| arg == "--exact");
+    let mut remaining = args.iter();
+    while let Some(arg) = remaining.next() {
+        if matches!(arg.as_str(), "--format" | "--test-threads" | "--color") {
+            let _ = remaining.next();
+        } else if !arg.starts_with('-')
+            && if exact {
+                arg != TEST
+            } else {
+                !TEST.contains(arg)
+            }
+        {
+            return ExitCode::SUCCESS;
+        }
+    }
+    meerschaum_core::self_exe::register_native_current_executable().unwrap();
+    a_team_session_runs_python_with_the_teams_configuration_only();
+    ExitCode::SUCCESS
+}
+
 fn a_team_session_runs_python_with_the_teams_configuration_only() {
     let Some(python) = python_support::current("MRSM_PYTHON") else {
         eprintln!("Skipping: no Python with meerschaum.");

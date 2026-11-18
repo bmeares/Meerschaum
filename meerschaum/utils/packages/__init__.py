@@ -75,6 +75,10 @@ def _auto_install_allowed() -> bool:
 def _get_uv_bin() -> Optional[str]:
     """Find uv without importing or installing any bootstrap dependencies."""
     import shutil
+    from meerschaum._internal.team_scope import in_team_process
+    if in_team_process():
+        # The native Team launcher grants execution to uv on PATH.
+        return shutil.which('uv')
     try:
         import uv
         return str(uv.find_uv_bin())

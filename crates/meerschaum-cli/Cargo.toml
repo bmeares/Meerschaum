@@ -41,6 +41,11 @@ harness = false
 name = "native_source_compiler"
 harness = false
 
+[[test]]
+# The Team session fixture also handles its native Python launcher children.
+name = "team_sessions"
+harness = false
+
 [package.metadata.docs.rs]
 # docs.rs has no Oracle client: document the lean build.
 no-default-features = true
