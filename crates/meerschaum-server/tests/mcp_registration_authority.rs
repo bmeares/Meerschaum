@@ -108,7 +108,9 @@ async fn source_revocation_during_registration_hook_never_reaches_metadata_write
             .unwrap()
             .unwrap();
         assert!(
-            response.json()["result"]["isError"] == true || response.json().get("error").is_some(),
+            matches!(response.status.as_u16(), 401 | 403)
+                || response.json()["result"]["isError"] == true
+                || response.json().get("error").is_some(),
             "Revoked registration continued: {}",
             response.text()
         );
@@ -172,7 +174,9 @@ async fn expiry_at_hook(admin: bool) {
         .unwrap()
         .unwrap();
     assert!(
-        response.json()["result"]["isError"] == true || response.json().get("error").is_some(),
+        response.status == 401
+            || response.json()["result"]["isError"] == true
+            || response.json().get("error").is_some(),
         "Expired original credential continued registration: {}",
         response.text()
     );

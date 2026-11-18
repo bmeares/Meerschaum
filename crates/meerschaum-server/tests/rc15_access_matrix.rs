@@ -1358,14 +1358,9 @@ async fn edited_permission_grids_do_not_regain_unchecked_permissions() {
     )
     .await;
     assert!(tuple_of(&r).0, "{}", r.text());
-    let caller = Caller::api(
-        Scopes::List(vec!["pipes:register".into()]),
-        Some(Principal::User(User::new("ed", None))),
-    );
-    let r = tool(
+    let r = register_mcp_pipe(
         &f,
-        &caller,
-        "register_pipe",
+        &fresh,
         json!({"connector_keys": "plugin:data", "metric_key": "grid-mcp"}),
     )
     .await;
@@ -1862,10 +1857,9 @@ async fn definitions_use_the_sources_visibility_byte_limit_and_instance_policy()
     .await;
     assert!(tuple_of(&r).0, "{}", r.text());
     // MCP registration shares the same source guard.
-    let r = tool(
+    let r = register_mcp_pipe(
         &f,
-        &caller("otto", Role::Operator),
-        "register_pipe",
+        &otto,
         json!({"connector_keys": "sql:other", "metric_key": "mcp_source", "parameters": {
             "fetch": {"definition": "SELECT * FROM plugin_shared_legacy"}
         }}),
@@ -2244,6 +2238,25 @@ async fn tool(f: &Fixture, caller: &Caller, name: &str, arguments: Json) -> Resu
         .await
         .expect("a reply");
     let reply = serde_json::to_value(reply).unwrap();
+    tool_result(reply)
+}
+
+async fn register_mcp_pipe(f: &Fixture, auth: &str, arguments: Json) -> Result<Json, String> {
+    // Registration revalidates the original HTTP credential after the connector hook.
+    let reply = call(
+        f,
+        "POST",
+        auth,
+        "/mcp",
+        Some(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {"name": "register_pipe", "arguments": arguments}})),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    tool_result(reply.json())
+}
+
+fn tool_result(reply: Json) -> Result<Json, String> {
     let result = &reply["result"];
     let text = result["content"][0]["text"]
         .as_str()
@@ -2311,10 +2324,9 @@ async fn mcp_tools_apply_the_same_rules() {
     assert!(!r.to_string().contains("sql:secure"), "{r}");
     let r = tool(&f, &ed, "list_connectors", json!({})).await.unwrap();
     assert!(r.to_string().contains("sql:secure"), "{r}");
-    let r = tool(
+    let r = register_mcp_pipe(
         &f,
-        &otto,
-        "register_pipe",
+        &token(&f, "otto").await,
         json!({"connector_keys": "sql:secure", "metric_key": "z"}),
     )
     .await;

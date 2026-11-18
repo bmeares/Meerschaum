@@ -153,15 +153,18 @@ pub(crate) fn registration_access(
         }
         // Keep the immutable object's Team boundary. A shared native instance can be used
         // without an explicit open-side Team grant, but a sibling's private label cannot.
+        let available_in_team = |keys: &str| {
+            crate::access::guard::may_use_connector(state, original, keys)
+                && crate::access::guard::connector_teams(state, keys).is_none_or(|teams| {
+                    teams.iter().any(|team| {
+                        meerschaum_core::access::same_team(Some(team), Some(&caller.primary_team))
+                    })
+                })
+        };
         if !matches!(
             instance_keys.split(':').next(),
             Some("sql" | "api" | "valkey")
-        ) || !crate::access::guard::may_use_connector(state, original, instance_keys)
-            || crate::access::guard::connector_teams(state, instance_keys).is_some_and(|teams| {
-                !teams.iter().any(|team| {
-                    meerschaum_core::access::same_team(Some(team), Some(&caller.primary_team))
-                })
-            })
+        ) || !available_in_team(instance_keys)
         {
             return Err(refused(
                 "The registration instance is unavailable within this Team.",
@@ -172,6 +175,18 @@ pub(crate) fn registration_access(
             .grants
             .connectors
             .insert(instance_keys.to_string());
+        // A SQL definition may read from a different served instance. Carry just that
+        // source into the bounded proof after applying the same connector and Team checks.
+        if connector_keys.starts_with("sql:")
+            && available_in_team(connector_keys)
+            && state.get_api_connector(Some(connector_keys)).is_ok()
+        {
+            caller
+                .principal
+                .grants
+                .connectors
+                .insert(connector_keys.to_string());
+        }
     }
     caller.require(&["pipes:register"], &[])?;
     crate::access::guard::check_source_connector(state, &caller, connector_keys)?;
