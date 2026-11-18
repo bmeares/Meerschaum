@@ -2,7 +2,7 @@ mod common;
 
 use chrono::{TimeZone, Utc};
 use common::{Env, env};
-use meerschaum_connector::{DataQuery, InstanceConnector};
+use meerschaum_connector::DataQuery;
 use meerschaum_core::Pipe;
 use meerschaum_engine::SyncArgs;
 
