@@ -939,13 +939,15 @@ fn widen_summary(
 
 /// The ordinary SQLite bound-parameter encoder, separated from transaction ownership.
 /// Each input Frame is already byte/row bounded by the main-owned snapshot reader.
-pub(super) fn insert_statements(
+fn insert_statements(
     target: &str,
     frame: &Frame,
     dtype: &IndexMap<String, String>,
     literal: &[String],
 ) -> ConnectorResult<Vec<(String, Vec<SqlParam>)>> {
-    insert_statements_in(target, None, frame, dtype, literal)
+    // Source frames are already limited to a 2,048-row page. Use the whole page when
+    // the bind limit permits it and recheck authority before each actual write.
+    build_insert_statements(target, None, frame, dtype, literal, 2048)
 }
 
 pub(super) fn insert_statements_in(
@@ -954,6 +956,17 @@ pub(super) fn insert_statements_in(
     frame: &Frame,
     dtype: &IndexMap<String, String>,
     literal: &[String],
+) -> ConnectorResult<Vec<(String, Vec<SqlParam>)>> {
+    build_insert_statements(target, schema, frame, dtype, literal, 1000)
+}
+
+fn build_insert_statements(
+    target: &str,
+    schema: Option<&str>,
+    frame: &Frame,
+    dtype: &IndexMap<String, String>,
+    literal: &[String],
+    max_rows: usize,
 ) -> ConnectorResult<Vec<(String, Vec<SqlParam>)>> {
     if frame.height() == 0 || frame.width() == 0 {
         return Ok(Vec::new());
@@ -991,7 +1004,7 @@ pub(super) fn insert_statements_in(
         .map(|name| sql_item_name(name, Flavor::Sqlite, None))
         .collect::<Vec<_>>()
         .join(", ");
-    let rows_per_statement = (max_bind_params(Flavor::Sqlite) / columns.len()).clamp(1, 1000);
+    let rows_per_statement = (max_bind_params(Flavor::Sqlite) / columns.len()).clamp(1, max_rows);
     let mut statements = Vec::new();
     for start in (0..frame.height()).step_by(rows_per_statement) {
         let mut parameters = Vec::new();
