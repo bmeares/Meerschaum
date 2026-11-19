@@ -698,6 +698,9 @@ pub(crate) unsafe fn manifest_for_in(
         && slot != cache
         && let Some(v) = read_valid_cached_manifest(slot, &key)
     {
+        if let Ok(payload) = serde_json::to_vec_pretty(&v) {
+            let _ = write_atomic_json(cache, &payload);
+        }
         return Ok((v, skipped));
     }
     let mut result = json!({"schema_version":crate::MANIFEST_SCHEMA_VERSION,"meerschaum_version":env!("CARGO_PKG_VERSION"),"python_version":"","python_executable":null,"fingerprint":key,"plugins":{},"connector_types":{},"executor_types":{},"pre_sync_hooks":[],"post_sync_hooks":[],"load_errors":{}});

@@ -14401,10 +14401,14 @@ fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
 | `pipe.sync(rows)` | `SuccessTuple` | `pipe.sync(docs)` |
 | `pipe.replace(rows, begin, end)` | `SuccessTuple` | `pipe.sync(docs, begin=, end=, replace=True)` |
 | `pipe.clear(begin, end, params)` | `SuccessTuple` | `pipe.clear(begin=, end=, params=)` |
-| `pipe.exists()`, `pipe.get_columns_types()`, `pipe.register()` | `bool`, a map, `SuccessTuple` | `pipe.exists()`, `pipe.get_columns_types()`, `pipe.register()` |
+| `pipe.exists()`, `pipe.id()`, `pipe.is_registered()`, `pipe.get_columns_types()`, `pipe.register()` | `bool`, `Option<i64>`, `bool`, a map, `SuccessTuple` | `pipe.exists()`, `pipe.get_id()`, `pipe.is_registered()`, `pipe.get_columns_types()`, `pipe.register()` |
 | `pipe.target()`, `pipe.datetime_column()`, `pipe.parameters()`, `pipe.with_parameters(json!({...}))` | | `pipe.target`, `pipe.columns['datetime']`, `pipe.parameters`, `mrsm.Pipe(..., parameters=...)` |
 | `host::read_sql(connector, query)` | rows | `mrsm.get_connector(connector).read(query)` |
+| `host::read_sql_with(connector, query, &params)` | rows | `mrsm.get_connector(connector).read(query, params=params)` (`:name` binds, native PostgreSQL arrays, typed datetimes) |
 | `host::exec_sql(connector, statement)` | `SuccessTuple` | `mrsm.get_connector(connector).exec(statement)` |
+| `host::exec_sql_with(connector, statement, &params)` | `SuccessTuple` | `mrsm.get_connector(connector).exec(statement, params)` |
+| `host::transaction(connector, lock_key, \|tx\| ...)` | `Result<T>` | Atomic SQL transaction (`tx.read_sql_with`, `tx.exec_sql_with`), optional advisory lock (`pg_advisory_xact_lock` / SQLite `BEGIN IMMEDIATE`), commit on `Ok`, rollback on `Err` or panic |
+| `host::root_dir()` | `PathBuf` | Resolved `MRSM_ROOT_DIR` of the current call (honors Compose `run_in_process`; also passed in `context["root_dir"]` for `fetch` / `subscribe`) |
 | `host::plugin_config()` | `Value` (`null` when unset) | `get_plugin_config()` |
 | `host::write_plugin_config(&json!({...}))` | `SuccessTuple` | `write_plugin_config({...})` |
 | `host::config(&["meerschaum", "instance"])` | `Value` | `get_config('meerschaum', 'instance')` |
@@ -14433,8 +14437,40 @@ Arrow-backed `Frame` in a Cargo plugin (`frame.to_rows()` gives the JSON objects
   bounds empties the window. Writes to a `protected` instance are refused unless the command has
   `--allow-protected` (or `MRSM_ALLOW_PROTECTED=1`); the refusal comes back as a failed
   `SuccessTuple`.
-- **SQL.** `read_sql` and `exec_sql` take any configured `sql:` connector's keys, including
-  `pipe.instance_keys()` for the Pipe's own database. Quote table names for your database.
+- **SQL, bound parameters, and transactions.** `read_sql` / `exec_sql` and their parameterized
+  counterparts `read_sql_with` / `exec_sql_with` take any configured `sql:` connector's keys,
+  including `pipe.instance_keys()` for the Pipe's own database. Quote table names for your
+  database. Named `:param` placeholders accept JSON scalars, `null`, arrays (bound as native
+  PostgreSQL arrays for `= ANY(:ids)`, including empty `[]`), and typed values built with
+  `Bound::to_sql_param()`, `host::sql_timestamptz(...)`, `host::sql_timestamp(...)`,
+  `host::sql_date(...)`, `host::sql_bytes(...)`, or `host::sql_json(...)`. For multi-step atomic
+  SQL work (including from concurrent HTTP route handlers), wrap statements in
+  `host::transaction(connector_keys, lock_key, |tx| ...)`:
+
+    ```rust
+    let next_id: i64 = host::transaction("sql:main", Some("cmdq:counter-1"), |tx| {
+        let rows = tx.read_sql_with(
+            "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM cmd_queue WHERE counter = :c AND created_at >= :since",
+            &json!({
+                "c": "counter-1",
+                "since": host::sql_timestamptz("2026-09-25T00:00:00+00:00"),
+            }),
+        )?;
+        let id = rows[0]["next_id"].as_i64().unwrap_or(1);
+        tx.exec_sql_with(
+            "INSERT INTO cmd_queue (id, counter) VALUES (:id, :c)",
+            &json!({"id": id, "c": "counter-1"}),
+        )?;
+        Ok(id)
+    })?;
+    ```
+
+    When `lock_key` is `Some(key)`, PostgreSQL-family databases acquire
+    `pg_advisory_xact_lock` for the duration of the transaction and SQLite/GeoPackage uses
+    `BEGIN IMMEDIATE`. Returning `Ok` commits; returning `Err` or panicking rolls back
+    automatically and releases the lock. Run all SQL inside the closure through `tx` rather than
+    calling `host::read_sql` / `host::exec_sql` on the same connector (which checks out a second
+    pooled connection).
 - **Plugin config.** `plugin_config()` reads the `plugins:<name>` section of the Meerschaum
   config (`mrsm edit config plugins`) and `write_plugin_config` replaces it in the config
   directory's `plugins` file (`plugins.json` unless you keep it as YAML), keeping the other
@@ -14458,14 +14494,14 @@ the core API would require:
 
 | Calls | Scope |
 |---|---|
-| `host::pipe`, `get_data`, `get_rowcount`, `get_sync_time`, `get_columns_types`, `exists` | `pipes:read` |
+| `host::pipe`, `get_data`, `get_rowcount`, `get_sync_time`, `get_columns_types`, `exists`, `id`, `is_registered` | `pipes:read` |
 | `sync`, `replace` | `pipes:write` (also `pipes:register` when creating a pipe) |
 | `clear` | `pipes:delete` |
 | `register` | `pipes:register` |
-| `read_sql` (read-only queries only) | `sql:read` |
-| `exec_sql` | `actions:execute`, and a caller who may run actions (below) |
+| `read_sql`, `read_sql_with`, `transaction` begin & `tx.read_sql*` (read-only queries only) | `sql:read` |
+| `exec_sql`, `exec_sql_with`, `tx.exec_sql*` | `actions:execute`, and a caller who may run actions (below) |
 | `config` | every scope (`*`: an administrator, or `--no-auth`) |
-| `plugin_config`, `write_plugin_config` | none: the plugin's own settings |
+| `plugin_config`, `write_plugin_config`, `root_dir` | none: the plugin's own settings and call root |
 | `mint_token`, `revoke_token` | a signed-in caller holding each scope minted; only the plugin's own custom scopes ([rules](routes-and-mcp.md#tokens-and-draining)) |
 | `draining` | none |
 
@@ -14752,6 +14788,28 @@ mod feed {
     }
 }
 ```
+
+### Custom connector methods callable from Python
+
+A native connector can expose custom named methods beyond `fetch` / `sync` / `subscribe` — even
+without defining `fetch`, `sync`, or `subscribe` at all (for push-only or utility connectors).
+In a single-file plugin, mark them with `#[method]` inside `#[make_connector]`; in a Cargo
+plugin, list them in `Manifest::connector_type("kuma", ["push"])` and handle `request.method`
+in `Plugin::call`:
+
+```rust
+#[make_connector]
+mod kuma {
+    #[method]
+    pub fn push(connector: &Connector, kwargs: &Value) -> Result<SuccessTuple> {
+        let status = kwargs["status"].as_str().unwrap_or("up");
+        Ok(SuccessTuple::ok(format!("Pushed {status} to {}", connector.label())))
+    }
+}
+```
+
+From Python, `mrsm.get_connector('kuma:main').push(status='up')` forwards keyword arguments
+directly to `kwargs` and returns the JSON / `SuccessTuple` reply.
 
 ### Instance connectors
 
@@ -15086,11 +15144,12 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
 
 ## 🔑 Tokens and draining
 
-The 5.1.0 confined runtime accepts built-in scopes on authenticated native Rust routes
-and requires callers to hold `plugins:read`. The execution host also needs an attested
-offline Rust compiler. The provisioning and rotation examples below describe the trusted
-runtime. A device token carrying only a plugin-defined scope cannot call a confined
-route or rotate itself in this release.
+The 5.1.0 confined runtime applies to **isolated-team** callers: authenticated isolated-team
+calls to confined native Rust routes require `plugins:read`, the route's declared built-in
+scopes, and an attested offline Rust compiler on the execution host. Non-isolated host callers
+(`Everyone`, custom-scope portal users, and host device tokens) continue to use the trusted host
+runtime below, where device tokens carrying only a plugin-defined scope can call and rotate
+themselves through host native routes.
 
 A plugin that serves devices can issue their tokens itself. `host::mint_token(label, scopes,
 expiration)` registers an API token for the request's caller and returns it once, secret and API

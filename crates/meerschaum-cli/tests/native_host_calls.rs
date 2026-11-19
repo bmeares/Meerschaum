@@ -696,14 +696,6 @@ fn route_host_calls_run_with_the_callers_scopes() {
         &[("Authorization", &reader)],
         b"",
     );
-    if !Path::new("/etc/meerschaum/native-runtime.json").is_file() {
-        assert_eq!(status, 503, "{body}");
-        assert!(
-            body.contains("host-selected attested offline compiler"),
-            "{body}"
-        );
-        return;
-    }
     assert_eq!(status, 200, "{body}");
     let reply: serde_json::Value = serde_json::from_str(&body).unwrap();
     // Without instance keys, a route's Pipe is on the server's instance.
@@ -883,15 +875,6 @@ fn api_host_calls_enforce_pipe_access_and_connector_teams() {
             b"",
         )
     };
-    if !Path::new("/etc/meerschaum/native-runtime.json").is_file() {
-        let (status, body) = probe("secret", "count", &ada);
-        assert_eq!(status, 503, "{body}");
-        assert!(
-            body.contains("host-selected attested offline compiler"),
-            "{body}"
-        );
-        return;
-    }
     // The fabricated metadata omits the registered ACL and sets temporary=true. Every
     // method must still see the stored private/team ACL, including direct calls without PIPE.
     for metric in ["secret", "team"] {

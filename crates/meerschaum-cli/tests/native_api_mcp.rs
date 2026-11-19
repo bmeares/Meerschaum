@@ -306,26 +306,12 @@ fn native_routes_and_mcp_are_served_by_start_api() {
     // Path parameters, the query, headers and the principal; the scope is enforced.
     let denied = http(port, "GET", "/native-api/items/7", &[], b"");
     assert_eq!(denied.status, 401);
-    let reader = login(port, Some("pipes%3Aread+plugins%3Aread"));
-    let confined = http(
-        port,
-        "GET",
-        "/native-api/items/7",
-        &[("Authorization", &reader)],
-        b"",
-    );
-    assert_eq!(confined.status, 503);
-    assert!(
-        String::from_utf8_lossy(&confined.body).contains(
-            "Confined native package metadata requires a supported pinned compiler adapter"
-        )
-    );
-    let writer = login(port, None);
+    let reader = login(port, Some("pipes%3Aread"));
     let item = http(
         port,
         "GET",
         "/native-api/items/7?q=a&q=b",
-        &[("Authorization", &writer), ("X-Native-Api", "yes")],
+        &[("Authorization", &reader), ("X-Native-Api", "yes")],
         b"",
     );
     assert_eq!(item.status, 200, "{}", String::from_utf8_lossy(&item.body));
@@ -338,17 +324,17 @@ fn native_routes_and_mcp_are_served_by_start_api() {
     assert_eq!(body["principal"]["kind"], "user");
     assert_eq!(body["principal"]["username"], "ada");
 
-    // Catalog admission requires plugins:read before returning any confined route metadata.
-    let pipes_only = login(port, Some("pipes%3Aread"));
+    // Bytes in and out, with response headers; `pipes:write` is missing from the reader's JWT.
     let bytes = [0u8, 159, 146, 150, 255];
     let forbidden = http(
         port,
         "PUT",
         "/native-api/blobs/a/b",
-        &[("Authorization", &pipes_only)],
+        &[("Authorization", &reader)],
         &bytes,
     );
     assert_eq!(forbidden.status, 403);
+    let writer = login(port, None);
     let blob = http(
         port,
         "PUT",

@@ -796,7 +796,7 @@ fn shorthand_errors_report_original_file_and_line() {
         ("#[make_connector] mod data;", "inline module"),
         (
             "#[make_connector] mod data { fn helper() {} }",
-            "fetch, sync and/or subscribe",
+            "a connector must define fetch, sync, subscribe, test_connection, and/or #[method] custom methods",
         ),
         (
             "#[make_connector] mod data { #[make_action] fn hello() {} }",

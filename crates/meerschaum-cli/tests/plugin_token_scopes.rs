@@ -354,27 +354,8 @@ fn register_device(port: u16, admin: &str, label: &str) -> (String, String, Stri
     )
 }
 
-fn assert_missing_plugin_scope(reply: &Reply) {
-    assert_eq!(reply.status, 403, "{}", reply.text());
-    assert_eq!(
-        reply.json()["detail"],
-        "Missing required scope: 'plugins:read'"
-    );
-}
-
-fn assert_device_route_refused(reply: &Reply) {
-    if reply.status == 503 {
-        assert_eq!(
-            reply.json()["detail"],
-            "Confined Rust metadata requires its host-selected attested offline compiler."
-        );
-    } else {
-        assert_missing_plugin_scope(reply);
-    }
-}
-
 #[test]
-fn a_plugin_only_scope_is_refused_and_revocation_is_immediate() {
+fn a_plugin_only_scope_reaches_its_route_and_revocation_is_immediate() {
     let home = Home::new();
     home.register_admin();
     let server = serve(&home);
@@ -395,13 +376,10 @@ fn a_plugin_only_scope_is_refused_and_revocation_is_immediate() {
     let jwt = format!("Bearer {}", minted.json()["access_token"].as_str().unwrap());
 
     for auth in [&key, &jwt] {
-        assert_missing_plugin_scope(&call(
-            port,
-            "POST",
-            "/example/ingest",
-            auth,
-            br#"{"value": 1}"#,
-        ));
+        let ingest = call(port, "POST", "/example/ingest", auth, br#"{"value": 1}"#);
+        assert_eq!(ingest.status, 200, "{}", ingest.text());
+        assert_eq!(ingest.json()["principal"]["token_id"], id);
+        assert_eq!(ingest.json()["principal"]["label"], "device-17");
 
         // Every other authenticated route is refused.
         for (method, path, body) in [
@@ -435,7 +413,7 @@ fn a_plugin_only_scope_is_refused_and_revocation_is_immediate() {
     // Deletion: likewise.
     let (other_id, _, other_key) = register_device(port, &admin, "device-18");
     let ingest = call(port, "POST", "/example/ingest", &other_key, b"{}");
-    assert_missing_plugin_scope(&ingest);
+    assert_eq!(ingest.status, 200, "{}", ingest.text());
     let deleted = call(port, "DELETE", &format!("/tokens/{other_id}"), &admin, b"");
     assert_eq!(deleted.status, 200, "{}", deleted.text());
     let refused = call(port, "POST", "/example/ingest", &other_key, b"{}");
@@ -453,7 +431,7 @@ fn bearer(token: &serde_json::Value) -> String {
 }
 
 #[test]
-fn a_trusted_plugin_route_mints_and_revokes_tokens_with_its_own_scope() {
+fn a_trusted_plugin_route_mints_and_rotates_tokens_with_its_own_scope() {
     let home = Home::new();
     home.register_admin();
     home.register_user("eve", "example:ingest");
@@ -484,24 +462,40 @@ fn a_trusted_plugin_route_mints_and_revokes_tokens_with_its_own_scope() {
     assert!(first["secret"].as_str().is_some_and(|s| !s.is_empty()));
     let first_key = bearer(&first);
 
-    // The token cannot call the scoped plugin or rotate itself.
-    for path in ["/example/ingest", "/example/heartbeat"] {
-        assert_device_route_refused(&call(port, "POST", path, &first_key, b"{}"));
-    }
+    // The token reaches that plugin route and nothing else.
+    let ingest = call(port, "POST", "/example/ingest", &first_key, b"{}");
+    assert_eq!(ingest.status, 200, "{}", ingest.text());
+    assert_eq!(ingest.json()["principal"]["token_id"], first["id"]);
+    assert_eq!(ingest.json()["principal"]["label"], "device-17");
     for (method, path) in [
+        ("GET", "/pipes"),
         ("GET", "/example/report"),
         ("GET", "/other/read"),
         ("POST", "/example/provision"),
     ] {
-        assert_device_route_refused(&call(port, method, path, &first_key, b"{}"));
+        let refused = call(port, method, path, &first_key, b"{}");
+        assert_eq!(refused.status, 403, "{method} {path}: {}", refused.text());
     }
-    let pipes = call(port, "GET", "/pipes", &first_key, b"");
-    assert_eq!(pipes.status, 403, "{}", pipes.text());
+
+    // Rotation: the device's heartbeat mints its successor and revokes the token it called with.
+    let heartbeat = call(port, "POST", "/example/heartbeat", &first_key, b"");
+    assert_eq!(heartbeat.status, 200, "{}", heartbeat.text());
+    let rotated = heartbeat.json();
+    let second = &rotated["next"];
+    assert_eq!(second["label"], "device-17");
+    assert_ne!(second["id"], first["id"]);
+    // The very next request with the old token is refused; the successor works.
+    let refused = call(port, "POST", "/example/ingest", &first_key, b"{}");
+    assert_eq!(refused.status, 401, "{}", refused.text());
+    let second_key = bearer(second);
+    let ingest = call(port, "POST", "/example/ingest", &second_key, b"{}");
+    assert_eq!(ingest.status, 200, "{}", ingest.text());
+    assert_eq!(ingest.json()["principal"]["token_id"], second["id"]);
 
     let model = call(
         port,
         "GET",
-        &format!("/tokens/{}", first["id"].as_str().unwrap()),
+        &format!("/tokens/{}", second["id"].as_str().unwrap()),
         &admin,
         b"",
     );
@@ -571,21 +565,13 @@ fn a_trusted_plugin_route_mints_and_revokes_tokens_with_its_own_scope() {
         );
     }
     for token in [&eves, &core] {
-        let login = form(
-            port,
-            "/login",
-            &format!(
-                "grant_type=client_credentials&client_id={}&client_secret={}",
-                token["id"].as_str().unwrap(),
-                token["secret"].as_str().unwrap(),
-            ),
-        );
-        assert_eq!(login.status, 200, "{}", login.text());
+        let ingest = call(port, "POST", "/example/ingest", &bearer(token), b"{}");
+        assert_eq!(ingest.status, 200, "{}", ingest.text());
     }
     // The administrator revokes its device's token through the plugin.
-    let revoked = post(port, "/example/revoke", &admin, json!({"id": first["id"]}));
+    let revoked = post(port, "/example/revoke", &admin, json!({"id": second["id"]}));
     assert_eq!(revoked.status, 200, "{}", revoked.text());
-    let refused = call(port, "POST", "/example/ingest", &first_key, b"{}");
+    let refused = call(port, "POST", "/example/ingest", &second_key, b"{}");
     assert_eq!(refused.status, 401, "{}", refused.text());
 }
 
