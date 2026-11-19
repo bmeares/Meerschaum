@@ -790,52 +790,53 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
         // draw the same denial, which its incremental redraw may leave untouched.
         bob.ready().await;
     }
-    // List jobs only through the caller's visible job catalog. Named mutations still require
-    // a visible job and its matching permission.
+    // Require the actual listing before checking that it excluded the private job.
     let before = bob.out.len();
     bob.line("show jobs").await;
-    bob.ready().await;
+    assert!(
+        bob.wait_for(
+            |out| prompt_follows(&out[before..], |response| {
+                response.contains("tpr-stdin")
+                    || response.contains("No running or stopped jobs.")
+                    || response.contains("Some jobs on this server are not yours to see")
+            }),
+            Duration::from_secs(60)
+        )
+        .await,
+        "show jobs: {}",
+        &bob.out[before..]
+    );
     assert!(
         !bob.out[before..].contains("execute-tpr-hidden"),
         "{}",
         &bob.out[before..]
     );
+
+    // Mutations, including a new job with a colliding name, cannot reach the hidden job.
     for line in [
         "attach logs execute-tpr-hidden",
         "delete jobs execute-tpr-hidden -y",
         "stop jobs execute-tpr-hidden -y",
+        "show version -d --name execute-tpr-hidden",
     ] {
         let before = bob.out.len();
         bob.line(line).await;
         assert!(
             bob.wait_for(
-                |out| {
-                    let new = &out[before.min(out.len())..];
-                    new.contains("does not exist")
-                        || new.contains("not yours to see")
-                        || new.contains("Missing required scope")
-                },
+                |out| prompt_follows(&out[before..], |response| {
+                    response.contains("does not exist")
+                        || response.contains("not yours to see")
+                        || response.contains("Missing required scope")
+                }),
                 Duration::from_secs(60)
             )
             .await,
             "{line}: {}",
             &bob.out[before..]
         );
+        bob.ready().await;
     }
     assert!(hidden_job.exists(), "bob deleted the administrator's job");
-    let before = bob.out.len();
-    bob.line("show version -d --name execute-tpr-hidden").await;
-    assert!(
-        bob.wait_for(
-            |out| out[before.min(out.len())..]
-                .split_once('\n')
-                .is_some_and(|(_, response)| response.contains("➤")),
-            Duration::from_secs(20)
-        )
-        .await,
-        "{}",
-        &bob.out[before..]
-    );
     let properties: Value = serde_json::from_slice(
         &std::fs::read(hidden_job.join("properties.json")).expect("administrator's job persists"),
     )
@@ -849,10 +850,9 @@ async fn a_non_administrators_terminal_runs_only_what_the_action_routes_allow() 
         .await;
     assert!(
         bob.wait_for(
-            |out| {
-                let new = &out[before.min(out.len())..];
-                new.contains("does not open an editor") && new.contains("--params")
-            },
+            |out| prompt_follows(&out[before..], |response| {
+                response.contains("does not open an editor") && response.contains("--params")
+            }),
             Duration::from_secs(60)
         )
         .await,
