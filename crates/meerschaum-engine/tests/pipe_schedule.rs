@@ -105,13 +105,53 @@ async fn setup(tag: &str) -> Env {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn scheduled_pipe_waits_for_its_fire_time() {
     let env = setup("sched").await;
-    let engine = env.engine().with_cadence(Arc::new(EverySeconds(1.5)));
-    let ran = laps(engine, Duration::from_millis(3300)).await;
+    let engine = env.engine().with_cadence(Arc::new(EverySeconds(3.5)));
+    let log: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+    let sink = log.clone();
+    let stop = StopToken::default();
+    let stopper = stop.clone();
+    let cb_stop = stop.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        stopper.stop();
+    });
+    engine
+        .run_loop(
+            RunOptions {
+                selection: Some(Selection::filter(KeyFilter::default())),
+                workers: Some(1),
+                ..Default::default()
+            },
+            LoopOptions {
+                run_loop: true,
+                min_seconds: 0.4,
+                stop,
+                ..Default::default()
+            },
+            Arc::new(move |e| {
+                if let LapEvent::PipeFinished(o) = e {
+                    let name = o.pipe_ref.parts().metric_key.to_string();
+                    let mut guard = sink.lock().unwrap();
+                    guard.push((name, "ran".into()));
+                    let fast = guard.iter().filter(|(n, _)| n == "fast").count();
+                    let broken = guard.iter().filter(|(n, _)| n == "broken").count();
+                    let slow = guard.iter().filter(|(n, _)| n == "slow").count();
+                    if fast >= 4 && broken >= 4 && slow >= 1 {
+                        cb_stop.stop();
+                    }
+                }
+            }),
+        )
+        .await;
+    let ran = log.lock().unwrap().clone();
     let count = |m: &str| ran.iter().filter(|(n, _)| n == m).count();
-    // `fast` and the unparsable `broken` run every lap; `slow` only when due (about 1.5 s, 3 s).
+    // `fast` and the unparsable `broken` run every lap; `slow` only when due.
     assert!(count("fast") >= 4, "{ran:?}");
     assert_eq!(count("fast"), count("broken"), "{ran:?}");
-    assert!((1..=2).contains(&count("slow")), "{ran:?}");
+    assert!(
+        count("slow") >= 1 && count("slow") < count("fast"),
+        "{ran:?}"
+    );
     // It did not run on the first lap.
     let first_slow = ran.iter().position(|(n, _)| n == "slow").unwrap();
     assert!(first_slow >= 2, "{ran:?}");

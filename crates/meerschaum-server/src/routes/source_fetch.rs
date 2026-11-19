@@ -676,7 +676,7 @@ fn registered_table(
 async fn prepare(ctx: &Ctx, request: Request) -> Result<Plan, ApiError> {
     prepare_scoped(ctx, request, false)
         .await
-        .map(|(plan, _)| plan)
+        .map(|(plan, _, _)| plan)
 }
 
 /// Final resource metadata is bounded and loaded before the last original-caller reload.
@@ -685,7 +685,7 @@ async fn prepare_scoped(
     ctx: &Ctx,
     request: Request,
     replace: bool,
-) -> Result<(Plan, Option<Pipe>), ApiError> {
+) -> Result<(Plan, Option<Pipe>, Option<(uuid::Uuid, uuid::Uuid)>), ApiError> {
     if ctx.state.config.no_auth {
         return Err(forbidden(
             "The canonical source broker requires authentication.",
@@ -823,6 +823,12 @@ async fn prepare_scoped(
         attributes(&request.source_keys),
         attributes(&request.instance_keys),
     ))?;
+    let execution = match caller.auth.as_ref() {
+        Some(crate::auth::Principal::Execution(identity)) => {
+            Some((identity.grant.id, identity.grant.launch_id))
+        }
+        _ => None,
+    };
     Ok((
         Plan {
             request,
@@ -833,6 +839,7 @@ async fn prepare_scoped(
             receipt_fingerprint,
         },
         destination,
+        execution,
     ))
 }
 
@@ -841,12 +848,14 @@ struct ReplacementParts {
     destination: Pipe,
     binding: Binding,
     request_identity: String,
+    execution: Option<(uuid::Uuid, uuid::Uuid)>,
 }
 async fn replacement_parts(
     ctx: &Ctx,
     request: &meerschaum_connector_api::source_replace::Request,
 ) -> Result<ReplacementParts, ApiError> {
-    let (source, destination) = prepare_scoped(ctx, request.source.clone(), true).await?;
+    let (source, destination, execution) =
+        prepare_scoped(ctx, request.source.clone(), true).await?;
     let destination = destination.ok_or_else(ApiError::not_found)?;
     let binding = Binding {
         owner: source.binding().owner.clone(),
@@ -873,6 +882,7 @@ async fn replacement_parts(
         destination,
         binding,
         request_identity,
+        execution,
     })
 }
 
@@ -884,7 +894,51 @@ struct ReplacementAuthority {
     receipt: bool,
     destination: Pipe,
     request_identity: String,
+    execution: Option<(uuid::Uuid, uuid::Uuid)>,
+    batch: Option<Arc<super::graph_batch::WriteBatch>>,
     data: Arc<dyn crate::pipe_methods::SyncAdmission>,
+}
+/// For an already-admitted in-flight execution callback request, re-verify the live
+/// grant (revocation, lease, generation, user/team/scopes) rather than letting the
+/// initial 30-second HTTP bearer `exp` abort a longer Prepare/Commit phase mid-request.
+async fn live_execution_ctx(
+    ctx: &Ctx,
+    execution: Option<(uuid::Uuid, uuid::Uuid)>,
+) -> Result<Ctx, ApiError> {
+    let mut headers = ctx.headers.clone();
+    if let Some((grant_id, launch_id)) = execution {
+        let fresh = crate::executor::callbacks::credential(&ctx.state, grant_id, launch_id).await?;
+        let value = format!("Bearer {}", fresh.token)
+            .parse()
+            .map_err(|_| forbidden("Could not refresh in-flight execution authority."))?;
+        headers.insert(axum::http::header::AUTHORIZATION, value);
+    }
+    Ok(Ctx {
+        state: ctx.state.clone(),
+        headers,
+        query: ctx.query.clone(),
+        team_instance: Default::default(),
+        engine_selection: Default::default(),
+    })
+}
+
+impl ReplacementAuthority {
+    async fn live_ctx(&self) -> Result<Ctx, ApiError> {
+        live_execution_ctx(&self.ctx, self.execution).await
+    }
+
+    async fn live_data(&self) -> Result<Arc<dyn crate::pipe_methods::SyncAdmission>, String> {
+        if self.execution.is_none() {
+            return Ok(self.data.clone());
+        }
+        let live = self.live_ctx().await.map_err(|e| e.detail_text())?;
+        Ok(super::pipes::replacement_admission(
+            &live.state,
+            live.headers,
+            &self.destination,
+            self.batch.clone(),
+        ))
+    }
 }
 #[async_trait::async_trait]
 impl meerschaum_connector::mutation::MutationCheck for ReplacementAuthority {
@@ -900,8 +954,8 @@ impl meerschaum_connector::mutation::MutationCheck for ReplacementAuthority {
             .state
             .get_api_connector(Some(self.destination.instance_keys()))
             .map_err(|e| e.detail_text())?;
-        self.data
-            .write_window(&conn, &self.destination)
+        let data = self.live_data().await?;
+        data.write_window(&conn, &self.destination)
             .await
             .map_err(|e| e.detail_text())
     }
@@ -915,8 +969,8 @@ impl meerschaum_connector::mutation::MutationCheck for ReplacementAuthority {
             .state
             .get_api_connector(Some(self.destination.instance_keys()))
             .map_err(|e| e.detail_text())?;
-        Ok(self
-            .data
+        let data = self.live_data().await?;
+        Ok(data
             .prepare_data_commit(&conn, &self.destination, effect)
             .await
             .map_err(|e| e.detail_text())?
@@ -965,11 +1019,12 @@ impl meerschaum_connector::mutation::MutationCheck for ReplacementAuthority {
         // The old full operation snapshot deliberately cannot authorize after its own
         // metadata commit. Reconstruct the original source and validate only this exact
         // native transition before Main's private canonical CAS advances that member.
-        let caller = access::require_fresh(&self.ctx.state, &self.ctx.headers, &["pipes:write"])
+        let live = self.live_ctx().await.map_err(|error| error.detail_text())?;
+        let caller = access::require_fresh(&live.state, &live.headers, &["pipes:write"])
             .await
             .map_err(|error| error.detail_text())?;
         access::guard::check_parameters(
-            &self.ctx.state,
+            &live.state,
             &caller,
             &conn,
             &change.pipe,
@@ -978,12 +1033,11 @@ impl meerschaum_connector::mutation::MutationCheck for ReplacementAuthority {
         )
         .await
         .map_err(|error| error.detail_text())?;
-        self.ctx
-            .state
+        live.state
             .actions
             .accept_pipe_inference(&caller, change)
             .await?;
-        let fresh = replacement_parts(&self.ctx, &self.request)
+        let fresh = replacement_parts(&live, &self.request)
             .await
             .map_err(|error| error.detail_text())?;
         if fresh.request_identity != self.request_identity {
@@ -995,19 +1049,18 @@ impl meerschaum_connector::mutation::MutationCheck for ReplacementAuthority {
     }
 
     async fn check(&self) -> Result<(), String> {
-        let fresh = replacement_parts(&self.ctx, &self.request)
+        let live = self.live_ctx().await.map_err(|error| error.detail_text())?;
+        let fresh = replacement_parts(&live, &self.request)
             .await
             .map_err(|error| {
-                let authorization = self
-                    .ctx
+                let authorization = live
                     .headers
                     .get(axum::http::header::AUTHORIZATION)
                     .and_then(|value| value.to_str().ok())
                     .unwrap_or_default();
                 let token = authorization.strip_prefix("Bearer ").unwrap_or_default();
                 let now = chrono::Utc::now();
-                let credential = match crate::auth::jwt_decode(token, self.ctx.state.secret(), now)
-                {
+                let credential = match crate::auth::jwt_decode(token, live.state.secret(), now) {
                     Ok(payload) => format!(
                         "signed JWT valid; {} seconds remaining",
                         payload
@@ -1087,6 +1140,8 @@ fn replacement_plan(
         receipt: false,
         destination: parts.destination.clone(),
         request_identity: parts.request_identity.clone(),
+        execution: parts.execution,
+        batch: batch.clone(),
         data: super::pipes::replacement_admission(
             &ctx.state,
             ctx.headers.clone(),
@@ -1101,6 +1156,8 @@ fn replacement_plan(
         receipt: true,
         destination: parts.destination.clone(),
         request_identity: parts.request_identity.clone(),
+        execution: parts.execution,
+        batch: batch.clone(),
         data: super::pipes::replacement_admission(
             &ctx.state,
             ctx.headers.clone(),
@@ -1225,6 +1282,7 @@ async fn replacement(
         ),
         None => None,
     };
+    let execution = parts.execution;
     let plan = replacement_plan(&ctx, &request, parts, batch.clone());
     let response = match request.phase {
         Phase::Prepare => {
@@ -1237,7 +1295,10 @@ async fn replacement(
             let source_replace::Response::Prepared { id, .. } = &response else {
                 return Err(ApiError::internal());
             };
-            let refreshed = replacement_parts(&ctx, &request).await;
+            let refreshed = match live_execution_ctx(&ctx, execution).await {
+                Ok(live) => replacement_parts(&live, &request).await,
+                Err(error) => Err(error),
+            };
             if refreshed.as_ref().is_err()
                 || refreshed.as_ref().is_ok_and(|parts| {
                     parts.binding.fingerprint != expected.fingerprint

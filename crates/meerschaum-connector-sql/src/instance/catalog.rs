@@ -57,7 +57,7 @@ fn key(table: &str, schema: Option<&str>) -> TableKey {
 }
 
 fn fresh(at: Instant, ttl: Duration) -> bool {
-    at.elapsed() < ttl
+    !crate::driver::authorization_reads::active() && at.elapsed() < ttl
 }
 
 /// A cached answer was used instead of a catalog query: with debug output on, say so, so a

@@ -210,6 +210,13 @@ pub struct Handle(Arc<Pin>);
 
 tokio::task_local! { static CURRENT: Handle; }
 
+/// Whether an authorization snapshot pin is active for this task's live recheck.
+/// Callers with a time-based in-memory cache skip it so the pre-freeze and post-freeze
+/// rechecks issue the exact same query set even across a cache TTL boundary.
+pub(crate) fn active() -> bool {
+    meerschaum_connector::mutation::rechecking() && CURRENT.try_with(|_| ()).is_ok()
+}
+
 impl Handle {
     pub(super) async fn verify_read(&self, connection: &mut sqlx::SqliteConnection) -> Result<()> {
         self.alive()?;

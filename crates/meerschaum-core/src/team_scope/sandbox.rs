@@ -416,6 +416,26 @@ pub const SYSTEM_RULES: &[(&str, Access, &str)] = &[
         Access::Read,
         "ODBC drivers (SQL Server)",
     ),
+    (
+        "/etc/flexiblasrc",
+        Access::Read,
+        "BLAS configuration (numpy)",
+    ),
+    (
+        "/etc/flexiblasrc.d",
+        Access::Read,
+        "BLAS configuration (numpy)",
+    ),
+    (
+        "/etc/flexiblas64rc",
+        Access::Read,
+        "BLAS configuration (numpy)",
+    ),
+    (
+        "/etc/flexiblas64rc.d",
+        Access::Read,
+        "BLAS configuration (numpy)",
+    ),
     // Devices.
     ("/dev/null", Access::Device, "a device"),
     ("/dev/zero", Access::Device, "a device"),
