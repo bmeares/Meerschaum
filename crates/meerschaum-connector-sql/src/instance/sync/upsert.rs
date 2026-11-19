@@ -250,7 +250,16 @@ impl SqlConnector {
                         .find_map(|v| match encode_param(v, f, &enc) {
                             SqlParam::Bool(_) | SqlParam::Int(_) => Some("NUMBER"),
                             SqlParam::Float(_) => Some("BINARY_DOUBLE"),
-                            SqlParam::Text(_) | SqlParam::Json(_) => Some("VARCHAR2(4000)"),
+                            SqlParam::Text(_)
+                            | SqlParam::Json(_)
+                            | SqlParam::EmptyArray
+                            | SqlParam::TextArray(_)
+                            | SqlParam::IntArray(_)
+                            | SqlParam::FloatArray(_)
+                            | SqlParam::BoolArray(_)
+                            | SqlParam::TimestampArray(_)
+                            | SqlParam::TimestampTzArray(_)
+                            | SqlParam::DateArray(_) => Some("VARCHAR2(4000)"),
                             SqlParam::Timestamp(_) => Some("TIMESTAMP"),
                             SqlParam::TimestampTz(_) => Some("TIMESTAMP WITH TIME ZONE"),
                             SqlParam::Date(_) => Some("DATE"),

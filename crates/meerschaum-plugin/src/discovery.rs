@@ -607,7 +607,7 @@ pub fn manifest_cache_is_current_with_policy(
     keyed != cache && cache_matches_key(&keyed, &key)
 }
 
-/// Whether [`NativePlugins::open_with_policy`] can answer from cache without building a source
+/// Whether [`crate::NativePlugins::open_with_policy`] can answer from cache without building a source
 /// plugin or loading any shared library.
 pub fn manifest_cache_ready_with_policy(
     directories: &[PathBuf],

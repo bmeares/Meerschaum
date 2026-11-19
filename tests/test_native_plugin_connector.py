@@ -458,3 +458,47 @@ def test_native_empty_rows_are_zero_rows_and_none_is_no_data(tmp_path):
     assert result['maybe:none'] == [
         False, "No data were fetched for Pipe('maybe:none', 'm', instance='sql:local')."
     ], result
+
+
+CUSTOM_METHOD_CONNECTOR = textwrap.dedent(
+    """
+    #[make_connector]
+    mod kuma {
+        #[method]
+        pub fn push(connector: &Connector, kwargs: &Value) -> Result<SuccessTuple> {
+            let status = kwargs["status"].as_str().unwrap_or("unknown");
+            let debug = kwargs["debug"].as_bool().unwrap_or(false);
+            let pipe_name = kwargs["pipe"].as_str().unwrap_or("");
+            Ok(SuccessTuple::ok(format!(
+                "{}:{}:{}:{}",
+                connector.label(),
+                status,
+                debug,
+                pipe_name
+            )))
+        }
+    }
+    """
+)
+
+CUSTOM_METHOD_SCRIPT = textwrap.dedent(
+    """
+    import json
+    import meerschaum as mrsm
+
+    conn = mrsm.get_connector('kuma:main')
+    res = conn.push(status='up', debug=True, pipe='heartbeat')
+    print('RESULT ' + json.dumps({'res': res, 'methods': list(type(conn).NATIVE_METHODS)}))
+    """
+)
+
+
+@pytest.mark.skipif(not os.path.exists(CARGO), reason="single-file plugins need cargo")
+def test_native_custom_connector_method_from_python(tmp_path):
+    plugins = tmp_path / 'plugins'
+    plugins.mkdir()
+    (plugins / 'kuma.rs').write_text(CUSTOM_METHOD_CONNECTOR)
+    result, output = _run(tmp_path, 'kuma', CUSTOM_METHOD_SCRIPT)
+    assert 'Traceback' not in output, output
+    assert result['methods'] == ['push'], result
+    assert result['res'] == [True, 'main:up:true:heartbeat'], result

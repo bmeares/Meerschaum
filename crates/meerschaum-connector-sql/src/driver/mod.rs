@@ -32,6 +32,7 @@ mod mssql;
 mod mysql;
 pub(crate) mod mysql_append;
 pub(crate) mod mysql_authority;
+pub mod named_params;
 #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
 mod native;
 #[cfg(feature = "oracle")]
@@ -488,6 +489,86 @@ impl SqlTransaction {
             TxInner::Native(tx) => tx.read(sql).await?,
         };
         batches_to_frame(&batches)
+    }
+
+    /// Execute one parameterized statement inside this transaction, returning the rows affected.
+    pub async fn exec_with(&mut self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        if params.is_empty() {
+            return self.exec(sql).await;
+        }
+        self.check_write().await?;
+        debug_sql!(sql);
+        match &mut self.inner {
+            TxInner::PinnedRead => Err(crate::SqlError::InvalidArgument(
+                "An authorization snapshot cannot write.".into(),
+            )),
+            TxInner::Postgres(tx) => backend::pg_tx::tx_exec_with(tx, sql, params).await,
+            TxInner::Mysql(tx, _) => backend::mysql_tx::tx_exec_with(tx, sql, params).await,
+            TxInner::Sqlite(tx) => backend::sqlite_tx::tx_exec_with(tx, sql, params).await,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.exec_with(sql, params).await,
+        }
+    }
+
+    /// Run a parameterized query inside this transaction and collect the result as a kernel
+    /// [`Frame`].
+    pub async fn read_frame_with(&mut self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
+        if params.is_empty() {
+            return self.read_frame(sql).await;
+        }
+        debug_sql!(sql);
+        let batches = match &mut self.inner {
+            TxInner::PinnedRead => {
+                return Err(crate::SqlError::InvalidArgument(
+                    "Invalid authorization snapshot.".into(),
+                ));
+            }
+            TxInner::Postgres(tx) => backend::pg_tx::tx_read_with(tx, sql, params).await?,
+            TxInner::Mysql(tx, _) => backend::mysql_tx::tx_read_with(tx, sql, params).await?,
+            TxInner::Sqlite(tx) => backend::sqlite_tx::tx_read_with(tx, sql, params).await?,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.read_with(sql, params).await?,
+        };
+        batches_to_frame(&batches)
+    }
+
+    /// Acquire a transaction-scoped advisory lock for `key` (released automatically on commit or
+    /// rollback).
+    ///
+    /// - PostgreSQL family (except CockroachDB): hashes `key` with SHA-256 (domain-separated) and
+    ///   calls `SELECT pg_advisory_xact_lock($1)`.
+    /// - SQLite / GeoPackage: when opened via [`SqlDriver::begin_write`], `BEGIN IMMEDIATE`
+    ///   already holds the database write lock for the transaction's lifetime.
+    /// - Flavors without transaction-scoped advisory locks return [`crate::SqlError::InvalidArgument`].
+    pub async fn advisory_xact_lock(&mut self, flavor: Flavor, key: &str) -> Result<()> {
+        match &mut self.inner {
+            TxInner::Postgres(tx) => {
+                if flavor == Flavor::Cockroachdb {
+                    return Err(crate::SqlError::InvalidArgument(
+                        "CockroachDB does not support transaction-scoped advisory locks.".into(),
+                    ));
+                }
+                use sha2::{Digest, Sha256};
+                let mut digest = Sha256::new();
+                digest.update(b"meerschaum:plugin-tx-lock:");
+                digest.update(key.as_bytes());
+                let lock_id =
+                    i64::from_be_bytes(digest.finalize()[..8].try_into().expect("eight bytes"));
+                sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                    .bind(lock_id)
+                    .execute(&mut **tx)
+                    .await?;
+                Ok(())
+            }
+            TxInner::Sqlite(_) => {
+                // `SqlDriver::begin_write()` opens SQLite transactions with `BEGIN IMMEDIATE`,
+                // which acquires the database write lock up front (waiting up to `busy_timeout`).
+                Ok(())
+            }
+            _ => Err(crate::SqlError::InvalidArgument(format!(
+                "Flavor '{flavor}' does not support transaction-scoped advisory locks."
+            ))),
+        }
     }
 
     /// Commit the transaction.

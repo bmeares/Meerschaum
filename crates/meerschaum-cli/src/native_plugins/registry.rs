@@ -400,19 +400,31 @@ impl NativeRegistry {
         &self,
         keys: &str,
     ) -> Option<Result<meerschaum_plugin::NativeConnector, String>> {
+        let root_dir = self
+            .host_config
+            .paths()
+            .root_dir
+            .to_string_lossy()
+            .into_owned();
         let (kind, label) = keys.split_once(':')?;
         if kind == "plugin" {
             return self.natives.source(label).map(|r| {
-                r.map(|c| c.with_host_services(self.pipe_host()))
-                    .map_err(|e| e.to_string())
+                r.map(|c| {
+                    c.with_root_dir(root_dir)
+                        .with_host_services(self.pipe_host())
+                })
+                .map_err(|e| e.to_string())
             });
         }
         let attributes = attributes(&self.connectors, kind, label);
         self.natives
             .connector(kind, label, config_json(&attributes))
             .map(|r| {
-                r.map(|c| c.with_host_services(self.pipe_host()))
-                    .map_err(|e| e.to_string())
+                r.map(|c| {
+                    c.with_root_dir(root_dir)
+                        .with_host_services(self.pipe_host())
+                })
+                .map_err(|e| e.to_string())
             })
     }
 }
@@ -477,6 +489,7 @@ impl ConnectorRegistry for NativeRegistry {
                         .plugin(label)
                         .ok()?
                         .source(serde_json::Value::Null)
+                        .with_root_dir(self.host_config.paths().root_dir.to_string_lossy())
                 } else {
                     self.source_connector(keys)?.ok()?
                 };
@@ -493,7 +506,10 @@ impl ConnectorRegistry for NativeRegistry {
                 self.natives
                     .stream_source(label)
                     .and_then(Result::ok)
-                    .map(|c| c.with_host_services(self.pipe_host()))
+                    .map(|c| {
+                        c.with_root_dir(self.host_config.paths().root_dir.to_string_lossy())
+                            .with_host_services(self.pipe_host())
+                    })
             } else {
                 self.source_connector(keys).and_then(Result::ok)
             };

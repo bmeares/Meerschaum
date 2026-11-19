@@ -183,6 +183,8 @@ enum Kind {
     InstanceData,
     /// Instance methods answering a JSON value (`pipe_exists`, `fetch_pipes_keys`, ...).
     InstanceValue,
+    /// Custom connector methods marked with `#[method]` inside `#[make_connector]`.
+    CustomMethod,
 }
 
 impl Kind {
@@ -227,6 +229,9 @@ impl Kind {
             Kind::Page => "pages accept page: &PageRequest",
             Kind::InstanceSuccess | Kind::InstanceData | Kind::InstanceValue => {
                 "instance methods accept pipe: &Pipe, connector: &Connector, data: Option<Frame> (or Vec<Value>), context: &Value, and the call's fields (query, options, params, begin, end, select_columns, omit_columns, limit, order, check_existing, chunksize, extra, newest, patch, no_policy, full, chunk_minutes, holder, ttl_seconds)"
+            }
+            Kind::CustomMethod => {
+                "custom connector methods accept connector: &Connector, pipe: &Pipe, kwargs: &Value, and context: &Value"
             }
             _ => {
                 "use pipe: &Pipe, connector: &Connector, kwargs: &Value, begin/end: Option<Bound> (fetch/sync), or data: Option<Frame> (sync)"
@@ -333,7 +338,9 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
     for (param, arg) in parameters(file, function)? {
         let param = param.as_str();
         let (expected, valid, value) = match param {
-            "pipe" if kind.data() || kind.hook() || kind.instance() => {
+            "pipe"
+                if kind.data() || kind.hook() || kind.instance() || kind == Kind::CustomMethod =>
+            {
                 needs_pipe = true;
                 (
                     "&Pipe",
@@ -341,7 +348,7 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
                     "&__mrsm_pipe".to_owned(),
                 )
             }
-            "connector" if kind.data() || kind.instance() => {
+            "connector" if kind.data() || kind.instance() || kind == Kind::CustomMethod => {
                 needs_connector = true;
                 (
                     "&Connector",
@@ -435,7 +442,7 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
                     )
                 }
             }
-            "context" if kind.instance() => (
+            "context" if kind.instance() || kind == Kind::CustomMethod => (
                 "&Value",
                 reference_type(&arg.ty, "Value"),
                 "&__mrsm_request.context".to_owned(),
@@ -540,7 +547,7 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
         Kind::InstanceData => format!(
             "meerschaum_plugin::sdk::FetchOutput::into_frame({call}).map(meerschaum_plugin::Reply::data)"
         ),
-        Kind::InstanceValue => {
+        Kind::InstanceValue | Kind::CustomMethod => {
             let q = if returns_result(sig) { "?" } else { "" };
             format!(
                 "let __mrsm_value = {call}{q}; meerschaum_plugin::serde_json::to_value(__mrsm_value).map(meerschaum_plugin::Reply::json).map_err(|e| meerschaum_plugin::Error::Message(e.to_string()))"
@@ -870,11 +877,18 @@ impl Generated {
                 ack = format!("Some(user::{forward})");
                 continue;
             }
+            let method_attr = function.attrs.iter().find(|a| a.path().is_ident("method"));
+            if let Some(attr) = method_attr {
+                clear_attribute(source, attr, &mut self.edits);
+            }
             let kind = match connector_kind(&method) {
-                Some(Kind::Subscribe) if !streaming => None,
+                Some(Kind::Subscribe) if !streaming => method_attr.map(|_| Kind::CustomMethod),
                 Some(kind) => Some(kind),
-                None if instance => instance_kind(&method),
-                None => None,
+                None if instance => {
+                    instance_kind(&method).or_else(|| method_attr.map(|_| Kind::CustomMethod))
+                }
+                None if method == "test_connection" => Some(Kind::InstanceValue),
+                None => method_attr.map(|_| Kind::CustomMethod),
             };
             let Some(kind) = kind else {
                 continue;
@@ -920,10 +934,7 @@ impl Generated {
                     ),
                 ));
             }
-        } else if !methods
-            .iter()
-            .any(|m| m == "fetch" || m == "sync" || m == "subscribe")
-        {
+        } else if methods.is_empty() {
             // Say why a `subscribe` here is not the streaming one.
             if let Some(function) = subscribe {
                 adapter(file, function, Kind::Subscribe, "__mrsm_subscribe")?;
@@ -936,7 +947,7 @@ impl Generated {
             return Err(diagnostic(
                 file,
                 module.span(),
-                "a source connector must define fetch, sync and/or subscribe",
+                "a connector must define fetch, sync, subscribe, test_connection, and/or #[method] custom methods",
             ));
         }
         let dispatch = dispatch.replace("__MRSM_ACK__", &ack);

@@ -123,6 +123,32 @@ impl SqlConnector {
         Ok(frame)
     }
 
+    /// Run a parameterized raw SQL query (`sql` with positional placeholders for `self.flavor` and
+    /// `params`) and return its rows, honoring protected-connector read-only rules identically to
+    /// [`read_raw`](Self::read_raw).
+    pub async fn read_raw_with(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+    ) -> crate::Result<meerschaum_kernel::Frame> {
+        if params.is_empty() {
+            return self.read_raw(sql).await;
+        }
+        let Err(refusal) = self.check_writable("execute SQL") else {
+            return self.read_params(sql, params).await;
+        };
+        if !crate::readonly::is_read_statement(sql, Some(self.flavor)) {
+            return Err(crate::SqlError::Protected(refusal));
+        }
+        self.log(sql);
+        let mut tx = self.driver.begin_read_only().await?;
+        let frame = tx.read_frame_with(sql, params).await;
+        let rolled_back = tx.rollback().await;
+        let frame = frame?;
+        rolled_back?;
+        Ok(frame)
+    }
+
     /// The `parameters` bind for this flavor (`json.dumps(parameters)` unless JSONB).
     pub(crate) fn json_param(&self, map: &Map) -> SqlParam {
         if self.flavor.is_json_flavor() {

@@ -8,6 +8,7 @@
 mod extensions;
 mod host;
 mod host_env;
+mod host_sql;
 mod registry;
 mod routes;
 pub use extensions::{mcp, pages};

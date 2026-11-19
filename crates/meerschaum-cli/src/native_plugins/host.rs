@@ -28,6 +28,8 @@ pub(crate) struct PluginHost {
     /// The sync options `pipe.sync(...)` on the request's Pipe inherits.
     pub(super) args: SyncArgs,
     pub(super) api: Option<ApiAccess>,
+    /// Open host-managed SQL transactions (`host::transaction`).
+    pub(super) txs: super::host_sql::TxRegistry,
 }
 
 pub(super) type HostResult<T> = meerschaum_plugin::Result<T>;
@@ -114,6 +116,7 @@ impl PluginHost {
             env: None,
             args,
             api: None,
+            txs: Default::default(),
         }
     }
 
@@ -124,6 +127,7 @@ impl PluginHost {
             env: Some(env),
             args: SyncArgs::default(),
             api: None,
+            txs: Default::default(),
         }
     }
 
@@ -144,6 +148,7 @@ impl PluginHost {
                 host_scopes: Vec::new(),
                 principal,
             }),
+            txs: Default::default(),
         }
     }
 
@@ -547,6 +552,21 @@ impl PluginHost {
                     .as_ref()
                     .is_some_and(|api| api.state.lifecycle.is_draining())
             ))),
+            m::ROOT_DIR => Ok(json(serde_json::json!(
+                self.env()?
+                    .config
+                    .paths()
+                    .root_dir
+                    .to_string_lossy()
+                    .into_owned()
+            ))),
+            m::READ_SQL_WITH => self.serve_sql_with(call, true).await,
+            m::EXEC_SQL_WITH => self.serve_sql_with(call, false).await,
+            m::TX_BEGIN => self.serve_tx_begin(call).await,
+            m::TX_READ_SQL => self.serve_tx_sql(call, true).await,
+            m::TX_EXEC_SQL => self.serve_tx_sql(call, false).await,
+            m::TX_COMMIT => self.serve_tx_commit(call).await,
+            m::TX_ROLLBACK => self.serve_tx_rollback(call).await,
             m::MINT_TOKEN | m::REVOKE_TOKEN => self.serve_token(call).await.map(json),
             m::PLUGIN_CONFIG => Ok(json(self.env()?.plugin_config(&call.plugin))),
             m::WRITE_PLUGIN_CONFIG => {
@@ -683,7 +703,9 @@ impl PluginHost {
                     | m::GET_DATA
                     | m::GET_ROWCOUNT
                     | m::GET_COLUMNS_TYPES
-                    | m::EXISTS => ("pipes:read", "read pipes"),
+                    | m::EXISTS
+                    | m::GET_PIPE_ID
+                    | m::IS_REGISTERED => ("pipes:read", "read pipes"),
                     other => {
                         return Err(meerschaum_plugin::Error::Unsupported(format!(
                             "unsupported host call: {other}"
@@ -799,6 +821,23 @@ impl PluginHost {
                             .await
                             .map_err(|e| host_error(e.to_string()))?;
                         Ok(json(serde_json::json!(exists)))
+                    }
+                    m::GET_PIPE_ID => {
+                        let id = instance
+                            .get_pipe_id(&pipe)
+                            .await
+                            .map_err(|e| host_error(e.to_string()))?;
+                        Ok(json(
+                            serde_json::to_value(id).map_err(|e| host_error(e.to_string()))?,
+                        ))
+                    }
+                    m::IS_REGISTERED => {
+                        let registered = instance
+                            .get_pipe_id(&pipe)
+                            .await
+                            .map_err(|e| host_error(e.to_string()))?
+                            .is_some();
+                        Ok(json(serde_json::json!(registered)))
                     }
                     m::REGISTER => {
                         if let Some(refused) = Self::protected(&*instance, &pipe, "register") {

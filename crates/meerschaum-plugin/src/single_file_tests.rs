@@ -118,6 +118,33 @@ fn hello() {
         assert!(transformed.contains("//! this is an example, not a dependency"));
         assert!(transformed.starts_with("//  Actual file documentation."));
     }
+
+    #[test]
+    fn custom_connector_methods_work_without_fetch_or_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("kuma.rs");
+        std::fs::write(
+            &file,
+            r#"
+#[make_connector]
+mod kuma {
+    #[method]
+    pub fn push(connector: &Connector, kwargs: &Value) -> Result<SuccessTuple> {
+        Ok(SuccessTuple::ok(format!("{}:{}", connector.label(), kwargs["status"])))
+    }
+}
+"#,
+        )
+        .unwrap();
+        let output = dir.path().join("generated");
+        prepare(&file, "kuma", &output).unwrap();
+        let user_rs = std::fs::read_to_string(output.join("user.rs")).unwrap();
+        let lib_rs = std::fs::read_to_string(output.join("lib.rs")).unwrap();
+        assert!(!user_rs.contains("#[method]"));
+        assert!(syn::parse_file(&user_rs).is_ok());
+        assert!(lib_rs.contains(r#""push" =>"#));
+        assert!(lib_rs.contains(r#"\"methods\":[\"push\"]"#) || lib_rs.contains(r#""push""#));
+    }
 }
 
 #[cfg(test)]

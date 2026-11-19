@@ -93,14 +93,18 @@ class NativeConnector(Connector):
         """The module's `test_connection()` (`True` when it does not define one)."""
         return self._core_native().test_connection()
 
+    def _invoke(self, method: str, pipe: Optional[mrsm.Pipe], kw: Dict[str, Any]) -> Any:
+        if method in ('fetch', 'sync', 'register', 'test_connection'):
+            kw.pop('debug', None)
+        result = self._core_native().call(method, pipe, kw or None)
+        return None if result is NotImplemented else result
+
     def call(self, method: str, pipe: Optional[mrsm.Pipe] = None, **kw: Any) -> Any:
         """
         Run `method` of the native connector module with the pipe and keyword arguments as its
         context. Returns `None` when the module does not define the method.
         """
-        kw.pop('debug', None)
-        result = self._core_native().call(method, pipe, kw or None)
-        return None if result is NotImplemented else result
+        return self._invoke(method, pipe, kw)
 
     def __getattr__(self, name: str) -> Any:
         ### Only reached for attributes not found normally: route the module's other methods.
@@ -109,8 +113,18 @@ class NativeConnector(Connector):
                 f"'{type(self).__name__}' object has no attribute '{name}'"
             )
 
-        def _method(pipe: Optional[mrsm.Pipe] = None, **kw: Any) -> Any:
-            return self.call(name, pipe, **kw)
+        def _method(*args: Any, **kw: Any) -> Any:
+            pipe: Optional[mrsm.Pipe] = None
+            if args:
+                if isinstance(args[0], mrsm.Pipe):
+                    pipe = args[0]
+                    if len(args) > 1:
+                        kw = {'_args': list(args[1:]), **kw}
+                else:
+                    kw = {'_args': list(args), **kw}
+            elif isinstance(kw.get('pipe', None), mrsm.Pipe):
+                pipe = kw.pop('pipe')
+            return self._invoke(name, pipe, kw)
 
         _method.__name__ = name
         return _method

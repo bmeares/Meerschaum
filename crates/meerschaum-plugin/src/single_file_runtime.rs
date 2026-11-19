@@ -89,6 +89,16 @@ impl Bound {
             secs % 60
         ))
     }
+    /// Encode this bound as a typed SQL parameter value for `host::read_sql_with` /
+    /// `host::exec_sql_with` / `Transaction` queries: integer bounds stay JSON integers; datetime
+    /// bounds travel as typed `timestamptz` parameters so PostgreSQL accepts `WHERE time >= :begin`
+    /// without casts.
+    pub fn to_sql_param(&self) -> Value {
+        match self {
+            Bound::Int(i) => json!(i),
+            Bound::Datetime(s) => json!({"$mrsm_sql": "timestamptz", "value": s}),
+        }
+    }
 }
 impl std::fmt::Display for Bound {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -412,6 +422,8 @@ fn host_call(
 /// The first Meerschaum whose hosts answer `method` (for the upgrade message of an older host).
 fn minimum_version(method: &str) -> &'static str {
     match method {
+        "get_pipe_id" | "is_registered" | "read_sql_with" | "exec_sql_with" | "root_dir"
+        | "tx_begin" | "tx_read_sql" | "tx_exec_sql" | "tx_commit" | "tx_rollback" => "5.1.0",
         "mint_token" | "revoke_token" | "draining" => "5.0.0rc34",
         _ => "5.0.0rc15",
     }
@@ -700,9 +712,109 @@ impl<'a> Pipe<'a> {
             .as_bool()
             .unwrap_or(false))
     }
+    /// The Pipe's registered id on its instance (`None` when unregistered), matching Python's
+    /// `pipe.get_id()` / `pipe.id`.
+    pub fn id(&self) -> Result<Option<i64>> {
+        match self.call("get_pipe_id", json!({}), None)? {
+            Value::Null => Ok(None),
+            Value::Number(n) => n
+                .as_i64()
+                .map(Some)
+                .ok_or_else(|| error(format!("pipe id '{n}' is not a 64-bit integer"))),
+            Value::String(s) => s
+                .parse::<i64>()
+                .map(Some)
+                .map_err(|_| error(format!("pipe id '{s}' is not an integer"))),
+            other => Err(error(format!("invalid pipe id returned by host: {other}"))),
+        }
+    }
+    /// Whether the Pipe is registered on its instance.
+    pub fn is_registered(&self) -> Result<bool> {
+        Ok(self
+            .call("is_registered", json!({}), None)?
+            .as_bool()
+            .unwrap_or(false))
+    }
     /// Register the Pipe on its instance with this view's parameters.
     pub fn register(&self) -> Result<SuccessTuple> {
         host_tuple(self.call("register", json!({}), None)?)
+    }
+}
+/// An active host-managed SQL transaction opened by [`host::transaction`].
+pub struct Transaction {
+    tx_id: u64,
+    generation: u64,
+    finished: std::cell::Cell<bool>,
+    _thread: PhantomData<Rc<()>>,
+}
+impl Transaction {
+    fn call(&self, method: &str, mut args: Value) -> Result<Value> {
+        if self.finished.get() {
+            return Err(error("this SQL transaction has already finished"));
+        }
+        if let Some(obj) = args.as_object_mut() {
+            obj.insert("tx_id".into(), json!(self.tx_id));
+        }
+        host_call(
+            Some(self.generation),
+            method,
+            None,
+            args,
+            None,
+            &format!("tx.{method}()"),
+        )
+    }
+    /// Run a query inside this transaction and return its rows as JSON objects.
+    pub fn read_sql(&self, query: &str) -> Result<Vec<Value>> {
+        self.read_sql_with(query, &json!({}))
+    }
+    /// Run a parameterized query (`:name` binds) inside this transaction and return its rows.
+    pub fn read_sql_with(&self, query: &str, params: &Value) -> Result<Vec<Value>> {
+        host_rows(self.call("tx_read_sql", json!({"query": query, "params": params}))?)
+    }
+    /// Execute a statement inside this transaction.
+    pub fn exec_sql(&self, query: &str) -> Result<SuccessTuple> {
+        self.exec_sql_with(query, &json!({}))
+    }
+    /// Execute a parameterized statement (`:name` binds) inside this transaction.
+    pub fn exec_sql_with(&self, query: &str, params: &Value) -> Result<SuccessTuple> {
+        host_tuple(self.call("tx_exec_sql", json!({"query": query, "params": params}))?)
+    }
+    fn commit(&self) -> Result<()> {
+        if self.finished.replace(true) {
+            return Ok(());
+        }
+        let res = host_tuple(host_call(
+            Some(self.generation),
+            "tx_commit",
+            None,
+            json!({"tx_id": self.tx_id}),
+            None,
+            "host::transaction()",
+        )?)?;
+        if res.success {
+            Ok(())
+        } else {
+            Err(error(res.message))
+        }
+    }
+    fn rollback(&self) {
+        if self.finished.replace(true) {
+            return;
+        }
+        let _ = host_call(
+            Some(self.generation),
+            "tx_rollback",
+            None,
+            json!({"tx_id": self.tx_id}),
+            None,
+            "host::transaction()",
+        );
+    }
+}
+impl Drop for Transaction {
+    fn drop(&mut self) {
+        self.rollback();
     }
 }
 /// Host calls that are not about one Pipe. Each works during a plugin call (fetch, sync, hooks,
@@ -744,6 +856,14 @@ pub mod host {
             json!({"connector_keys": connector_keys, "query": query}),
         )?)
     }
+    /// Run a parameterized query (`:name` binds) on a SQL connector and return its rows as JSON
+    /// objects.
+    pub fn read_sql_with(connector_keys: &str, query: &str, params: &Value) -> Result<Vec<Value>> {
+        host_rows(call(
+            "read_sql_with",
+            json!({"connector_keys": connector_keys, "query": query, "params": params}),
+        )?)
+    }
     /// Execute a statement on a SQL connector (no rows back).
     pub fn exec_sql(connector_keys: &str, query: &str) -> Result<SuccessTuple> {
         host_tuple(call(
@@ -751,6 +871,83 @@ pub mod host {
             json!({"connector_keys": connector_keys, "query": query}),
         )?)
     }
+    /// Execute a parameterized statement (`:name` binds) on a SQL connector (no rows back).
+    pub fn exec_sql_with(
+        connector_keys: &str,
+        query: &str,
+        params: &Value,
+    ) -> Result<SuccessTuple> {
+        host_tuple(call(
+            "exec_sql_with",
+            json!({"connector_keys": connector_keys, "query": query, "params": params}),
+        )?)
+    }
+    /// Run `f` inside a host-managed SQL transaction on `connector_keys`, optionally holding a
+    /// transaction-scoped advisory lock for `lock_key`.
+    pub fn transaction<T, F>(connector_keys: &str, lock_key: Option<&str>, f: F) -> Result<T>
+    where
+        F: FnOnce(&Transaction) -> Result<T>,
+    {
+        let generation = HOST
+            .with(|h| h.get().map(|h| h.generation))
+            .ok_or_else(|| error(UNAVAILABLE))?;
+        let value = host_call(
+            Some(generation),
+            "tx_begin",
+            None,
+            json!({"connector_keys": connector_keys, "lock_key": lock_key}),
+            None,
+            "host::transaction()",
+        )?;
+        let tx_id = value["tx_id"]
+            .as_u64()
+            .ok_or_else(|| error("host returned no transaction id"))?;
+        let tx = Transaction {
+            tx_id,
+            generation,
+            finished: std::cell::Cell::new(false),
+            _thread: PhantomData,
+        };
+        match f(&tx) {
+            Ok(out) => {
+                tx.commit()?;
+                Ok(out)
+            }
+            Err(err) => {
+                tx.rollback();
+                Err(err)
+            }
+        }
+    }
+    /// The resolved Meerschaum root directory (`MRSM_ROOT_DIR`) of the current call.
+    pub fn root_dir() -> Result<std::path::PathBuf> {
+        call("root_dir", json!({}))?
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| error("host returned no root_dir"))
+    }
+    /// Encode a datetime ([`Bound`] or ISO-8601 string) as a typed `timestamptz` SQL parameter.
+    pub fn sql_timestamptz(value: impl Into<Bound>) -> Value {
+        value.into().to_sql_param()
+    }
+    /// Encode an ISO-8601 timestamp as a typed naive `timestamp` SQL parameter.
+    pub fn sql_timestamp(iso: &str) -> Value {
+        json!({"$mrsm_sql": "timestamp", "value": iso})
+    }
+    /// Encode a `YYYY-MM-DD` date string as a typed `date` SQL parameter.
+    pub fn sql_date(iso: &str) -> Value {
+        json!({"$mrsm_sql": "date", "value": iso})
+    }
+    /// Encode binary data as a typed `bytes` SQL parameter.
+    pub fn sql_bytes(bytes: &[u8]) -> Value {
+        json!({"$mrsm_sql": "bytes", "value": base64::encode(bytes)})
+    }
+    /// Encode any JSON value explicitly as a `json` / `jsonb` SQL parameter.
+    pub fn sql_json(value: Value) -> Value {
+        json!({"$mrsm_sql": "json", "value": value})
+    }
+    pub use super::Transaction;
     /// This plugin's configuration (`plugins:<name>` in the Meerschaum config, the section
     /// Python's `get_plugin_config()` reads), or `null` when it has none.
     pub fn plugin_config() -> Result<Value> {
