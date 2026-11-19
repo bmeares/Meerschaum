@@ -42,12 +42,13 @@ def tpr_probe(action=None, **kwargs):
     })
 
 def _worker_sockets():
-    """The bound Unix sockets of Rust hosts' worker channels this process could see."""
+    """The bound Unix sockets of this test host's worker channels this process could see."""
     try:
         lines = open('/proc/self/net/unix').read().splitlines()[1:]
     except Exception as e:
         return [repr(e)]
-    return sorted(line.split()[-1] for line in lines if 'mrsm-w-' in line.split()[-1])
+    needle = f'mrsm-w-{os.getppid()}-'
+    return sorted(line.split()[-1] for line in lines if needle in line.split()[-1])
 
 def _attempt_write(path):
     try:

@@ -115,6 +115,9 @@ def get_jobs_commands(compose_config: Dict[str, Any]) -> Dict[str, List[str]]:
     )
     project_name = get_project_name(compose_config)
     explicit_jobs = compose_config.get('jobs', {})
+    ### An explicitly empty mapping (`jobs: {}`) opts out of the default syncing jobs.
+    if explicit_jobs == {} and 'jobs' in compose_config:
+        return {}
     if explicit_jobs:
         jobs = {}
         for job_name in explicit_jobs:
