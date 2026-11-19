@@ -90,6 +90,7 @@ mod pty;
 mod tmux;
 use auth::*;
 pub use auth::{executor_routes, routes};
+pub use bridge::active_terminals;
 use bridge::*;
 use launch::*;
 pub use launch::{end_executor_terminal, end_tmux_session, tmux_session_name};
