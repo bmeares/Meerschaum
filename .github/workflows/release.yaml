@@ -40,10 +40,18 @@ jobs:
         with: {persist-credentials: false, ref: '${{ github.sha }}'}
       - run: python scripts/check_packaging.py
 
+  wheels-linux:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
+    uses: ./.github/workflows/wheels.yaml
+    with:
+      scope: linux_x86_64
+      experimental: false
+
   wheels:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
     uses: ./.github/workflows/wheels.yaml
     with:
+      scope: rest
       experimental: ${{ inputs.experimental || false }}
 
   rust:
@@ -52,7 +60,7 @@ jobs:
     with: {full: true, parity: true}
 
   python:
-    needs: wheels
+    needs: wheels-linux
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
     uses: ./.github/workflows/pytest.yaml
     with:
@@ -67,7 +75,7 @@ jobs:
 
   gate:
     name: verified release candidate
-    needs: [wheels, rust, python, docs]
+    needs: [wheels-linux, wheels, rust, python, docs]
     if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -93,7 +101,18 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
-          checks="$(python -c 'import json,os; print(json.dumps({k:v["result"] for k,v in json.loads(os.environ["NEEDS"]).items()}))')"
+          checks="$(python - <<'PY'
+          import json, os
+          results = {k: v['result'] for k, v in json.loads(os.environ['NEEDS']).items()}
+          wheel_results = [results.pop('wheels-linux'), results.pop('wheels')]
+          results['wheels'] = (
+              'success'
+              if all(r == 'success' for r in wheel_results)
+              else next(r for r in wheel_results if r != 'success')
+          )
+          print(json.dumps(results))
+          PY
+          )"
           python scripts/ci/release_gate.py create --artifacts release-artifacts --manifest release-candidate.json --checks-json "$checks"
       - uses: actions/upload-artifact@v7
         with:

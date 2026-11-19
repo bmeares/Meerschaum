@@ -1494,11 +1494,74 @@ impl SqlConnector {
             )));
         }
         let sql = self.get_clear_pipe_query(&sp, &state, query)?;
+        if let Some(drop_sql) = self.get_drop_chunks_query(&sp, &state, query)?
+            && self.is_hypertable(&sp).await
+            && self.exec(&drop_sql).await.is_none()
+        {
+            tracing::debug!("drop_chunks skipped for {pipe}; falling back to DELETE.");
+        }
         Ok(if self.exec(&sql).await.is_some() {
             SuccessTuple::ok("Success")
         } else {
             SuccessTuple::fail(format!("Failed to clear {pipe}."))
         })
+    }
+
+    /// Best-effort `public.drop_chunks(...)` pre-pass for an `end`-only `clear_pipe` on a
+    /// TimescaleDB hypertable (such as engine history / metrics retention). Dropping whole
+    /// expired chunks immediately frees OS disk space and avoids row-by-row deletes over
+    /// compressed chunks; the subsequent `DELETE` removes any remaining rows in the boundary
+    /// chunk straddling `end`.
+    pub fn get_drop_chunks_query(
+        &self,
+        sp: &SqlPipe,
+        state: &PipeState,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<String>> {
+        if !self.flavor.is_timescaledb()
+            || !sp.hypertable()
+            || query.begin.is_some()
+            || query.params.as_ref().is_some_and(|p| !p.is_empty())
+        {
+            return Ok(None);
+        }
+        let Some(dt_col) = sp.column("datetime") else {
+            return Ok(None);
+        };
+        let Some(end) = self
+            .parse_date_bound(sp, &state.dtypes, query.end.clone())
+            .map_err(be)?
+        else {
+            return Ok(None);
+        };
+        let dt_typ = state
+            .dtypes
+            .get(&dt_col)
+            .cloned()
+            .unwrap_or_else(|| "datetime".into());
+        let dt_db_type = get_db_type_from_pd_type(&dt_typ, Some(self.flavor));
+        let bound = dateadd_str(
+            Some(self.flavor),
+            Some("day"),
+            Number::Int(0),
+            &date_arg(Some(&end)),
+            Some(&dt_db_type),
+        )
+        .map_err(be)?;
+        if bound.is_empty() {
+            return Ok(None);
+        }
+        let older_than = if matches!(end, DateBound::Int(_))
+            || meerschaum_core::dtypes::are_dtypes_equal(&dt_typ, "int")
+        {
+            format!("CAST({bound} AS BIGINT)")
+        } else {
+            bound
+        };
+        let pipe_name = self.pipe_table_name(sp).replace('\'', "''");
+        Ok(Some(format!(
+            "SELECT public.drop_chunks('{pipe_name}', older_than => {older_than})"
+        )))
     }
 
     /// The `DELETE` query of `clear_pipe(pipe, begin, end, params)`.

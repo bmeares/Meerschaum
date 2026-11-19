@@ -225,6 +225,52 @@ def test_release_matrix_cli_emits_actions_outputs(tmp_path):
         assert json.loads(outputs[key]) == matrix[key]
 
 
+@pytest.mark.parametrize('version', ['5.1.0-rc.1', '5.1.0'])
+def test_release_matrix_scopes_partition_all_targets_without_empty_actions_matrices(version, tmp_path):
+    full = release_matrices(version)
+    linux = release_matrices(version, scope='linux_x86_64')
+    rest = release_matrices(version, scope='rest')
+
+    assert [e['target'] for e in linux['wheels']['include']] == ['x86_64-unknown-linux-gnu']
+    assert [e['target'] for e in linux['binaries']['include']] == ['x86_64-unknown-linux-gnu']
+    assert linux['experimental_wheels']['include'] == []
+    assert linux['has_wheels'] is True
+    assert linux['has_binaries'] is True
+    assert linux['has_experimental_wheels'] is False
+
+    for key in ('wheels', 'binaries', 'experimental_wheels'):
+        combined = linux[key]['include'] + rest[key]['include']
+        assert len(combined) == len(full[key]['include'])
+        assert sorted(combined, key=lambda d: json.dumps(d, sort_keys=True)) == sorted(
+            full[key]['include'], key=lambda d: json.dumps(d, sort_keys=True)
+        )
+
+    for scope in ('linux_x86_64', 'rest'):
+        output = tmp_path / f'outputs-{version}-{scope}'
+        subprocess.run(
+            [sys.executable, '-I', str(RELEASE_MATRIX), '--version', version,
+             '--scope', scope, '--github-output', str(output)],
+            capture_output=True, text=True, check=True,
+        )
+        outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
+        for key in ('wheels', 'binaries', 'experimental_wheels'):
+            assert json.loads(outputs[key])['include'], (
+                f'Actions rejects empty matrices even on skipped jobs ({version}, {scope}, {key})'
+            )
+
+
+def test_release_workflow_unblocks_pytest_on_linux_wheels_and_seals_both_scopes(wheels):
+    release = _load('release.yaml')
+    jobs = release['jobs']
+    assert jobs['wheels-linux']['with']['scope'] == 'linux_x86_64'
+    assert jobs['wheels']['with']['scope'] == 'rest'
+    assert jobs['python']['needs'] == 'wheels-linux'
+    assert set(jobs['gate']['needs']) == {'wheels-linux', 'wheels', 'rust', 'python', 'docs'}
+    assert 'inputs.scope' in wheels['concurrency']['group'], (
+        'parallel wheels-linux and wheels calls must not cancel each other'
+    )
+
+
 def test_nothing_publishes_without_the_input(docker_build):
     for name, job in docker_build['jobs'].items():
         for step in job['steps']:

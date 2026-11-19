@@ -57,10 +57,33 @@ FULL_MATRICES = {
 }
 
 
-def release_matrices(version):
-    """Return GitHub Actions outputs for a Cargo (SemVer) version."""
+def _is_linux_x86_64_wheel(entry):
+    return (
+        entry.get('os') == 'ubuntu-latest'
+        and entry.get('target') == 'x86_64-unknown-linux-gnu'
+        and not entry.get('musl')
+        and not entry.get('freethreaded')
+    )
+
+
+def _is_linux_x86_64_binary(entry):
+    return (
+        entry.get('os') == 'ubuntu-latest'
+        and entry.get('target') == 'x86_64-unknown-linux-gnu'
+    )
+
+
+def release_matrices(version, *, scope='all'):
+    """Return GitHub Actions outputs for a Cargo (SemVer) version.
+
+    ``scope`` splits the build matrix when callers want Linux x86_64 release artifacts
+    (which unblock ``pytest.yaml``) to run independently from the remaining platforms:
+    ``'all'`` (default), ``'linux_x86_64'``, or ``'rest'``.
+    """
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', version):
         raise ValueError(f'Invalid Cargo version: {version!r}')
+    if scope not in ('all', 'linux_x86_64', 'rest'):
+        raise ValueError(f'Invalid release matrix scope: {scope!r}')
     prerelease = '-' in version.split('+', 1)[0]
     selected = {}
     for name, entries in FULL_MATRICES.items():
@@ -71,8 +94,23 @@ def release_matrices(version):
                 and entry.get('arch', 'amd64') in ('amd64', 'x86_64')
                 and entry.get('target', '').split('-')[0] in ('', 'x86_64')
             )]
+        if scope != 'all':
+            want_linux = scope == 'linux_x86_64'
+            if name == 'wheels':
+                entries = [entry for entry in entries if _is_linux_x86_64_wheel(entry) is want_linux]
+            elif name == 'binaries':
+                entries = [entry for entry in entries if _is_linux_x86_64_binary(entry) is want_linux]
+            elif name == 'experimental_wheels':
+                entries = [] if want_linux else entries
+            elif name == 'smoke':
+                entries = [entry for entry in entries if (entry.get('os') == 'ubuntu-latest') is want_linux]
+            elif name == 'smoke_musl':
+                entries = [] if want_linux else entries
         selected[name] = {'include': [dict(entry) for entry in entries]}
     selected['prerelease'] = prerelease
+    selected['has_wheels'] = bool(selected['wheels']['include'])
+    selected['has_binaries'] = bool(selected['binaries']['include'])
+    selected['has_experimental_wheels'] = bool(selected['experimental_wheels']['include'])
     selected['docker_platforms'] = ','.join(
         entry['platform'] for entry in selected['docker']['include']
     )
@@ -82,6 +120,12 @@ def release_matrices(version):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', help='Cargo version (defaults to Cargo.toml)')
+    parser.add_argument(
+        '--scope',
+        choices=('all', 'linux_x86_64', 'rest'),
+        default='all',
+        help='Subset of build platforms to emit (default: all)',
+    )
     parser.add_argument('--github-output', type=Path, help='Append outputs to this Actions file')
     args = parser.parse_args()
     version = args.version
@@ -89,10 +133,18 @@ def main():
         manifest = Path(__file__).resolve().parents[2] / 'Cargo.toml'
         with manifest.open('rb') as stream:
             version = tomllib.load(stream)['workspace']['package']['version']
-    outputs = release_matrices(version)
+    outputs = release_matrices(version, scope=args.scope)
     if args.github_output:
         with args.github_output.open('a') as stream:
             for key, value in outputs.items():
+                # GitHub Actions rejects an empty `strategy.matrix` even when the job is skipped
+                # via `if:`; keep a placeholder entry while `has_<key>=false` skips the job.
+                if (
+                    key in ('wheels', 'binaries', 'experimental_wheels')
+                    and isinstance(value, dict)
+                    and not value.get('include')
+                ):
+                    value = {'include': [dict(FULL_MATRICES[key][0])]}
                 encoded = value if isinstance(value, str) else json.dumps(value, separators=(',', ':'))
                 stream.write(f'{key}={encoded}\n')
     print(json.dumps(outputs, indent=2))

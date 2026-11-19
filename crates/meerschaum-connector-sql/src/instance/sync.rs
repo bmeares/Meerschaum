@@ -1036,9 +1036,8 @@ impl SqlConnector {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
         }
-        if initializing_internal && flavor.is_timescaledb() && pipe.metric_key() == "engine_metrics"
-        {
-            self.upgrade_metrics_partition_interval(&sp).await?;
+        if initializing_internal && flavor.is_timescaledb() && dt_col.is_some() {
+            self.upgrade_engine_hypertable_policy(&sp).await?;
         }
 
         if autoincrement_needs_reset && let Some(pk) = &primary_key {
@@ -1141,45 +1140,160 @@ impl SqlConnector {
         Ok(result)
     }
 
-    /// rc17 metrics omitted the integer axis's unit, creating microsecond-sized chunks.
-    /// Correct future chunks once per connection; retained history stays untouched.
-    async fn upgrade_metrics_partition_interval(&self, sp: &SqlPipe) -> ConnectorResult<()> {
-        let ChunkInterval::Int(expected) = sp.chunk_interval().map_err(be)? else {
+    /// Reconcile internal engine hypertables on TimescaleDB once per connection:
+    /// - rc17 `engine_metrics` omitted the integer axis unit (`43200` µs chunks).
+    /// - 5.0 internal engine tables (`engine_metrics`, `engine_events`, `engine_nodes`,
+    ///   `engine_runs`, `engine_ledger`) used 30-day chunks and 30-day `compress_after`,
+    ///   leaving history uncompressed until retention deleted it.
+    ///
+    /// Only known legacy Meerschaum defaults (`1..=43200` µs or 30 days) are migrated to
+    /// the current chunk interval and 7-day compression window; custom admin intervals and
+    /// retained history stay untouched.
+    async fn upgrade_engine_hypertable_policy(&self, sp: &SqlPipe) -> ConnectorResult<()> {
+        let Some(dt_col) = sp.column("datetime") else {
             return Ok(());
         };
+        let expected = sp.chunk_interval().map_err(be)?;
         let schema = self.get_pipe_schema(sp);
         let schema = schema.as_deref().unwrap_or("public");
-        let query = format!(
-            "SELECT integer_interval FROM timescaledb_information.dimensions \
-             WHERE hypertable_schema = '{}' AND hypertable_name = '{}' \
-             AND column_name = 'ts_us'",
-            schema.replace('\'', "''"),
-            sp.target.replace('\'', "''"),
-        );
-        let current = self.driver.value(&query).await.map_err(be)?;
-        if current
-            .and_then(|value| value.as_i64())
-            .is_some_and(|n| n < expected)
-        {
-            let table = sql_item_name(&sp.target, self.flavor, Some(schema));
-            let query = format!(
-                "SELECT public.set_chunk_time_interval('{}', {expected})",
-                table.replace('\'', "''"),
-            );
-            self.driver.exec(&query).await.map_err(be)?;
+        let schema_lit = schema.replace('\'', "''");
+        let table_lit = sp.target.replace('\'', "''");
+        let dt_lit = dt_col.replace('\'', "''");
+        let table = sql_item_name(&sp.target, self.flavor, Some(schema));
+        let table_reg = table.replace('\'', "''");
+
+        const LEGACY_MONTH_DAYS: i64 = 30;
+        const LEGACY_MONTH_SECONDS: i64 = LEGACY_MONTH_DAYS * 86_400;
+        const LEGACY_MONTH_US: i64 = LEGACY_MONTH_SECONDS * 1_000_000;
+
+        match expected {
+            ChunkInterval::Int(expected_int) => {
+                let query = format!(
+                    "SELECT integer_interval FROM timescaledb_information.dimensions \
+                     WHERE hypertable_schema = '{schema_lit}' AND hypertable_name = '{table_lit}' \
+                     AND column_name = '{dt_lit}'"
+                );
+                let current = self.driver.value(&query).await.map_err(be)?;
+                let Some(current_val) = current else {
+                    return Ok(());
+                };
+                if current_val.as_i64().is_some_and(|n| {
+                    n != expected_int && ((1..=43_200).contains(&n) || n == LEGACY_MONTH_US)
+                }) {
+                    let query = format!(
+                        "SELECT public.set_chunk_time_interval('{table_reg}', {expected_int})"
+                    );
+                    self.driver.exec(&query).await.map_err(be)?;
+                }
+                if sp.pipe().param("compress").is_some_and(|v| v.truthy()) {
+                    let has_policy = self
+                        .driver
+                        .value(&format!(
+                            "SELECT 1 FROM timescaledb_information.jobs \
+                             WHERE hypertable_schema = '{schema_lit}' AND hypertable_name = '{table_lit}' \
+                             AND proc_name = 'policy_compression' LIMIT 1"
+                        ))
+                        .await
+                        .map_err(be)?
+                        .is_some();
+                    if has_policy {
+                        let expected_after = crate::queries::compress::get_integer_after(
+                            sp,
+                            sp.pipe().param("compress").and_then(|v| v.get("after")),
+                        );
+                        let query = format!(
+                            "SELECT public.alter_job(job_id, config => jsonb_set(config, '{{compress_after}}', \
+                             to_jsonb({expected_after}::bigint))) FROM timescaledb_information.jobs \
+                             WHERE hypertable_schema = '{schema_lit}' AND hypertable_name = '{table_lit}' \
+                             AND proc_name = 'policy_compression' \
+                             AND CASE WHEN jsonb_typeof(config->'compress_after') = 'number' \
+                             THEN ((config->>'compress_after')::numeric BETWEEN 1 AND 43200 \
+                             OR (config->>'compress_after')::numeric = {LEGACY_MONTH_US}) \
+                             AND (config->>'compress_after')::numeric <> {expected_after} \
+                             ELSE false END"
+                        );
+                        self.driver.exec(&query).await.map_err(be)?;
+                    } else {
+                        let res = self.apply_compression_policy(sp.pipe()).await;
+                        if !res.success {
+                            tracing::debug!(
+                                "Could not install compression policy on {}: {}",
+                                sp.pipe(),
+                                res.message
+                            );
+                        }
+                    }
+                }
+            }
+            ChunkInterval::Delta(delta) => {
+                let expected_minutes = delta.num_minutes();
+                let expected_seconds = delta.num_seconds();
+                if expected_minutes <= 0 {
+                    return Ok(());
+                }
+                let query = format!(
+                    "SELECT EXTRACT(EPOCH FROM time_interval)::bigint \
+                     FROM timescaledb_information.dimensions \
+                     WHERE hypertable_schema = '{schema_lit}' AND hypertable_name = '{table_lit}' \
+                     AND column_name = '{dt_lit}'"
+                );
+                let current = self.driver.value(&query).await.map_err(be)?;
+                let Some(current_val) = current else {
+                    return Ok(());
+                };
+                if current_val
+                    .as_i64()
+                    .is_some_and(|secs| secs == LEGACY_MONTH_SECONDS && secs != expected_seconds)
+                {
+                    let query = format!(
+                        "SELECT public.set_chunk_time_interval('{table_reg}', INTERVAL '{expected_minutes} MINUTES')"
+                    );
+                    self.driver.exec(&query).await.map_err(be)?;
+                }
+                if sp.pipe().param("compress").is_some_and(|v| v.truthy()) {
+                    let has_policy = self
+                        .driver
+                        .value(&format!(
+                            "SELECT 1 FROM timescaledb_information.jobs \
+                             WHERE hypertable_schema = '{schema_lit}' AND hypertable_name = '{table_lit}' \
+                             AND proc_name = 'policy_compression' LIMIT 1"
+                        ))
+                        .await
+                        .map_err(be)?
+                        .is_some();
+                    if has_policy {
+                        let compress_after_str = sp
+                            .pipe()
+                            .param("compress")
+                            .and_then(|v| v.get("after"))
+                            .filter(|v| v.truthy())
+                            .map(|v| v.py_str())
+                            .unwrap_or_else(|| format!("{expected_minutes} minutes"));
+                        let after_lit = compress_after_str.replace('\'', "''");
+                        let query = format!(
+                            "SELECT public.alter_job(job_id, config => jsonb_set(config, '{{compress_after}}', \
+                             to_jsonb('{after_lit}'::text))) FROM timescaledb_information.jobs \
+                             WHERE hypertable_schema = '{schema_lit}' AND hypertable_name = '{table_lit}' \
+                             AND proc_name = 'policy_compression' \
+                             AND CASE WHEN jsonb_typeof(config->'compress_after') = 'string' \
+                             THEN (config->>'compress_after')::interval = INTERVAL '{LEGACY_MONTH_DAYS} days' \
+                             AND (config->>'compress_after')::interval <> INTERVAL '{after_lit}' \
+                             ELSE false END"
+                        );
+                        self.driver.exec(&query).await.map_err(be)?;
+                    } else {
+                        let res = self.apply_compression_policy(sp.pipe()).await;
+                        if !res.success {
+                            tracing::debug!(
+                                "Could not install compression policy on {}: {}",
+                                sp.pipe(),
+                                res.message
+                            );
+                        }
+                    }
+                }
+            }
         }
-        // The same legacy chunk value also became the automatically created columnstore policy.
-        let query = format!(
-            "SELECT public.alter_job(job_id, config => jsonb_set(config, '{{compress_after}}', \
-             to_jsonb({expected}::bigint))) FROM timescaledb_information.jobs \
-             WHERE hypertable_schema = '{}' AND hypertable_name = '{}' \
-             AND proc_name = 'policy_compression' \
-             AND CASE WHEN jsonb_typeof(config->'compress_after') = 'number' \
-             THEN (config->>'compress_after')::numeric BETWEEN 1 AND 43200 ELSE false END",
-            schema.replace('\'', "''"),
-            sp.target.replace('\'', "''"),
-        );
-        self.driver.exec(&query).await.map_err(be)?;
         Ok(())
     }
 

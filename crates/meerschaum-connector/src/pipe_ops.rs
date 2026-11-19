@@ -511,6 +511,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
         }
         "engine_ledger" => {
             r#"{"columns": {"datetime": "created", "pipe_ref": "pipe_ref", "seq": "seq"},
+                    "verify": {"chunk_days": 7}, "compress": {"after": "7 days"},
                     "dtypes": {"created": "datetime", "pipe_ref": "string", "seq": "int",
                                "begin": "json", "end": "json"}}"#
         }
@@ -522,6 +523,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
         }
         "engine_runs" => {
             r#"{"columns": {"datetime": "started", "primary": "run_id"},
+                    "verify": {"chunk_days": 7}, "compress": {"after": "7 days"},
                     "dtypes": {"run_id": "string", "started": "datetime", "finished": "datetime",
                                "success": "bool", "message": "string", "targets": "json",
                                "workers": "int", "num_nodes": "int", "resumed_from": "string",
@@ -530,6 +532,7 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
         }
         "engine_nodes" => {
             r#"{"columns": {"datetime": "started", "run_id": "run_id", "pipe_ref": "pipe_ref"},
+                    "verify": {"chunk_days": 7}, "compress": {"after": "7 days"},
                     "dtypes": {"run_id": "string", "pipe_ref": "string", "action": "string",
                                "status": "string", "reason": "string", "begin": "json",
                                "end": "json", "num_chunks": "int", "attempts": "int",
@@ -543,13 +546,15 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
         }
         "engine_events" => {
             r#"{"columns": {"datetime": "ts", "run_id": "run_id", "seq": "seq"},
+                    "verify": {"chunk_days": 7}, "compress": {"after": "7 days"},
                     "dtypes": {"ts": "datetime", "run_id": "string", "seq": "int",
                                "pipe_ref": "string", "event": "string", "payload": "json"}}"#
         }
         // Numeric sync outcomes (`crate::sync_metrics`): one row per completed sync.
         "engine_metrics" => {
             r#"{"columns": {"datetime": "ts_us", "primary": "event_id"},
-                    "precision": {"unit": "microsecond"}, "verify": {"chunk_days": 30},
+                    "precision": {"unit": "microsecond"},
+                    "verify": {"chunk_days": 7}, "compress": {"after": "7 days"},
                     "dtypes": {"event_id": "string", "ts_us": "int", "ts": "datetime", "started": "datetime",
                                "pipe_key": "string", "registration_id": "string", "pipe_ref": "string", "instance_keys": "string",
                                "connector_keys": "string", "metric_key": "string", "location_key": "string",

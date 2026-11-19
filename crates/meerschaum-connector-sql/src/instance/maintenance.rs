@@ -168,7 +168,10 @@ impl SqlConnector {
         if let Some(refused) = self.protected_refusal(pipe, "apply a compression policy to") {
             return refused;
         }
-        if pipe.upsert() && self.warn_compress_upsert_once(&pipe.to_string()) {
+        if pipe.upsert()
+            && pipe.connector_keys() != "mrsm"
+            && self.warn_compress_upsert_once(&pipe.to_string())
+        {
             tracing::warn!(
                 "{pipe} declares both `upsert` and `compress`:\n    upserts into compressed chunks will fail with \"no unique or exclusion constraint matching the ON CONFLICT specification\".\n    Ensure `compress:after` exceeds how far back this pipe re-syncs history."
             );
