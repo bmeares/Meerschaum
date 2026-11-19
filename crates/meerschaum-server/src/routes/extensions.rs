@@ -254,33 +254,19 @@ pub(crate) async fn execute_source(
     Ok(reply)
 }
 
-/// Main's trusted tracked bridge selects this behavior; no request/property can opt into or
-/// out of it. Narrowed admin tokens and admin-origin callbacks remain effective nonadmins.
+/// Isolated-team callers must stay inside their attested confined extension view and never
+/// fall through to Main's host Python/native plugin handlers. Ordinary non-isolated callers
+/// (`Everyone`, host custom-scope users, and host device tokens) keep access to host plugin
+/// routes and pages under each route's own scopes.
 pub fn requires_confined(state: &AppState, caller: &crate::access::Access) -> bool {
     !state.config.no_auth
         && !caller.no_auth
         && caller.auth.is_some()
         && !caller.full_admin()
-        && (caller.principal.is_isolated()
-            || matches!(
-                state.actions.api_execution(),
-                crate::backends::ApiExecution::Tracked { .. }
-            ))
+        && caller.principal.is_isolated()
 }
-fn credential_attempt(state: &AppState, headers: &HeaderMap) -> bool {
+fn credential_attempt(_state: &AppState, headers: &HeaderMap) -> bool {
     headers.contains_key(header::AUTHORIZATION)
-        // Without a console provider, a browser's old session-cookie name cannot
-        // authenticate here. Leave public legacy routing intact; the legacy handler
-        // still removes that cookie before forwarding ordinary cookies to a plugin.
-        || (state.engine_streams.browser_auth().is_some()
-            && headers.get_all(header::COOKIE).iter().any(|value| {
-            value.to_str().is_ok_and(|cookie| {
-                cookie.split(';').any(|part| {
-                    part.split_once('=')
-                        .is_some_and(|(name, _)| name.trim() == "mrsm-session-id")
-                })
-            })
-            }))
 }
 
 /// Preserve declared legacy fragment URLs without taking over Main's ordinary pages.

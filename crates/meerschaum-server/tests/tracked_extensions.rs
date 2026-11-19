@@ -362,68 +362,124 @@ async fn rpc(
     common::send(app, req).await
 }
 #[tokio::test]
-async fn tracked_host_everyone_native_match_fallback_head_and_mcp_never_call_main_plugins() {
+async fn tracked_host_isolated_native_match_fallback_head_and_mcp_never_call_main_plugins() {
     let root = tempfile::tempdir().unwrap();
     let f = fixture(root.path(), false).await;
-    for user in ["alice", "host_user"] {
-        let bearer = common::login(&f.app, user, "pass", Some("plugins:read")).await;
-        for path in ["/tracked/matched", "/tracked/fallback"] {
-            let response =
-                common::send(&f.app, common::req("GET", path, Some(&bearer), None)).await;
-            assert_eq!(response.status, StatusCode::OK, "{}", response.text());
-            assert_eq!(response.json()["typed"], true);
-            let head = common::send(&f.app, common::req("HEAD", path, Some(&bearer), None)).await;
-            assert_eq!(head.status, StatusCode::OK, "{}", head.text());
-            assert!(head.body.is_empty());
-            let wrong = common::send(&f.app, common::req("POST", path, Some(&bearer), None)).await;
-            assert!(
-                !wrong.status.is_success(),
-                "An undeclared method was normalized into GET"
-            );
-        }
-        let listed = rpc(&f.app, Some(&bearer), None, "tools/list", json!({})).await;
-        assert_eq!(listed.status, StatusCode::OK, "{}", listed.text());
-        let names: Vec<_> = listed.json()["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|tool| tool["name"].as_str().unwrap().to_string())
-            .collect();
-        assert!(names.iter().any(|name| name == "scoped_tool"), "{names:?}");
-        assert!(!names.iter().any(|name| name == "legacy_tool"), "{names:?}");
-        let called = rpc(
-            &f.app,
-            Some(&bearer),
-            None,
-            "tools/call",
-            json!({"name":"scoped_tool","arguments":{}}),
-        )
-        .await;
-        assert_eq!(called.status, StatusCode::OK, "{}", called.text());
+    let bearer = common::login(&f.app, "host_user", "pass", Some("plugins:read")).await;
+    for path in ["/tracked/matched", "/tracked/fallback"] {
+        let response = common::send(&f.app, common::req("GET", path, Some(&bearer), None)).await;
+        assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+        assert_eq!(response.json()["typed"], true);
+        let head = common::send(&f.app, common::req("HEAD", path, Some(&bearer), None)).await;
+        assert_eq!(head.status, StatusCode::OK, "{}", head.text());
+        assert!(head.body.is_empty());
+        let wrong = common::send(&f.app, common::req("POST", path, Some(&bearer), None)).await;
         assert!(
-            called.text().contains("typed-scoped-result"),
-            "{}",
-            called.text()
+            !wrong.status.is_success(),
+            "An undeclared method was normalized into GET"
         );
     }
-    // An admin's deliberately narrow bearer is an effective nonadmin, not a legacy escape.
-    let narrow = common::login(&f.app, "admin", "pass", Some("plugins:read")).await;
-    let response = common::send(
+    let listed = rpc(&f.app, Some(&bearer), None, "tools/list", json!({})).await;
+    assert_eq!(listed.status, StatusCode::OK, "{}", listed.text());
+    let names: Vec<_> = listed.json()["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(names.iter().any(|name| name == "scoped_tool"), "{names:?}");
+    assert!(!names.iter().any(|name| name == "legacy_tool"), "{names:?}");
+    let called = rpc(
         &f.app,
-        common::req("GET", "/tracked/matched", Some(&narrow), None),
+        Some(&bearer),
+        None,
+        "tools/call",
+        json!({"name":"scoped_tool","arguments":{}}),
     )
     .await;
-    assert_eq!(response.json()["typed"], true, "{}", response.text());
+    assert_eq!(called.status, StatusCode::OK, "{}", called.text());
+    assert!(
+        called.text().contains("typed-scoped-result"),
+        "{}",
+        called.text()
+    );
     assert_eq!(f.counts.legacy_admit.load(Ordering::SeqCst), 0);
     assert_eq!(f.counts.legacy_api.load(Ordering::SeqCst), 0);
     assert_eq!(f.counts.legacy_mcp.load(Ordering::SeqCst), 0);
-    assert!(f.counts.typed.load(Ordering::SeqCst) >= 11);
+    assert!(f.counts.typed.load(Ordering::SeqCst) >= 5);
+}
+#[tokio::test]
+async fn non_isolated_cookie_and_custom_scope_callers_keep_host_plugin_routes() {
+    let root = tempfile::tempdir().unwrap();
+    let f = fixture(root.path(), false).await;
+    f.instance.seed_user_attributes(
+        "alice",
+        map(json!({"role":"custom","scopes":["sra"],"primary_team":EVERYONE})),
+    );
+    let bearer = common::login(&f.app, "alice", "pass", Some("sra")).await;
+    let cookies = Arc::new(Cookies {
+        bearer: bearer.clone(),
+        active: AtomicBool::new(true),
+    });
+    assert!(f.state.engine_streams.set_browser_auth(cookies.clone()));
+
+    // Non-isolated session-cookie caller with custom-only scope ["sra"] (no `plugins:read`):
+    // 1. Host native route succeeds (200) instead of 403 Missing required scope 'plugins:read'.
+    let mut native_req = common::req("GET", "/tracked/matched", Some(&bearer), None);
+    native_req
+        .headers_mut()
+        .insert("cookie", "mrsm-session-id=owned-cookie".parse().unwrap());
+    let response = common::send(&f.app, native_req).await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.text(), "legacy-main");
+
+    // 2. Host plugin page/API fallback path with session cookie only (no Bearer, no `plugins:read`)
+    //    is NOT intercepted with 403 by the confined extension adapter (reaches host fallback -> 404
+    //    when no Python host is mounted, never 403 Missing required scope 'plugins:read').
+    for path in ["/app/dashboard", "/sra/web/status"] {
+        let mut req = common::req("GET", path, None, None);
+        req.headers_mut()
+            .insert("cookie", "mrsm-session-id=owned-cookie".parse().unwrap());
+        let resp = common::send(&f.app, req).await;
+        assert_ne!(
+            resp.status,
+            StatusCode::FORBIDDEN,
+            "host plugin path {path} must not demand plugins:read: {}",
+            resp.text()
+        );
+        assert_eq!(resp.status, StatusCode::NOT_FOUND, "{}", resp.text());
+    }
+
+    // 3. Stale/expired session cookie on a public plugin path does not fail with 401 from
+    //    api_fallback before reaching the host plugin handler.
+    cookies.active.store(false, Ordering::SeqCst);
+    let mut stale_req = common::req("GET", "/app/dashboard", None, None);
+    stale_req
+        .headers_mut()
+        .insert("cookie", "mrsm-session-id=owned-cookie".parse().unwrap());
+    let stale_resp = common::send(&f.app, stale_req).await;
+    assert_eq!(
+        stale_resp.status,
+        StatusCode::NOT_FOUND,
+        "expired cookie must fall through to host handler: {}",
+        stale_resp.text()
+    );
+
+    // 4. Policy endpoint classifies non-isolated Everyone callers as unconfined.
+    let policy = common::send(
+        &f.app,
+        common::req("GET", "/plugins/extensions/policy", Some(&bearer), None),
+    )
+    .await;
+    assert_eq!(policy.status, StatusCode::OK, "{}", policy.text());
+    assert_eq!(policy.json(), json!({"confined": false}));
+    assert_eq!(f.counts.typed.load(Ordering::SeqCst), 0);
 }
 #[tokio::test]
 async fn verified_cookie_keeps_scopes_and_fake_bearer_or_revoked_metadata_never_falls_back() {
     let root = tempfile::tempdir().unwrap();
     let f = fixture(root.path(), false).await;
-    let bearer = common::login(&f.app, "alice", "pass", Some("plugins:read")).await;
+    let bearer = common::login(&f.app, "host_user", "pass", Some("plugins:read")).await;
     let cookies = Arc::new(Cookies {
         bearer: bearer.clone(),
         active: AtomicBool::new(true),
@@ -529,7 +585,7 @@ async fn source_scope_loss_during_catalog_or_handler_wait_never_releases_stale_o
     for during_invocation in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let f = fixture(root.path(), false).await;
-        let bearer = common::login(&f.app, "alice", "pass", Some("plugins:read")).await;
+        let bearer = common::login(&f.app, "host_user", "pass", Some("plugins:read")).await;
         let gate = if during_invocation {
             f.typed.invocation_gate.clone()
         } else {
@@ -543,8 +599,8 @@ async fn source_scope_loss_during_catalog_or_handler_wait_never_releases_stale_o
             .await
             .unwrap();
         f.instance.seed_user_attributes(
-            "alice",
-            map(json!({"role":"custom","scopes":["logs:read"]})),
+            "host_user",
+            map(json!({"role":"custom","scopes":["logs:read"],"primary_team":"HostScope"})),
         );
         gate.release.notify_one();
         let response = tokio::time::timeout(std::time::Duration::from_secs(3), task)
@@ -572,10 +628,10 @@ async fn missing_original_plugin_scope_does_not_discover_or_fall_back_to_main() 
     let root = tempfile::tempdir().unwrap();
     let f = fixture(root.path(), false).await;
     f.instance.seed_user_attributes(
-        "alice",
-        map(json!({"role":"custom","scopes":["logs:read"]})),
+        "host_user",
+        map(json!({"role":"custom","scopes":["logs:read"],"primary_team":"HostScope"})),
     );
-    let bearer = common::login(&f.app, "alice", "pass", Some("logs:read")).await;
+    let bearer = common::login(&f.app, "host_user", "pass", Some("logs:read")).await;
     for path in ["/tracked/matched", "/tracked/fallback"] {
         let response = common::send(&f.app, common::req("GET", path, Some(&bearer), None)).await;
         assert_eq!(
@@ -647,13 +703,11 @@ async fn native_page_policy_needs_no_plugin_scope_or_discovery_and_preserves_tru
             assert_eq!(response.status, StatusCode::OK, "{}", response.text());
             assert_eq!(response.json(), json!({"confined":false}));
         } else {
-            for user in ["alice", "host_user"] {
-                // Prove the classification remains confined when plugin rights are absent.
-                let primary = if user == "alice" {
-                    EVERYONE
-                } else {
-                    "HostScope"
-                };
+            for (user, primary, expected_confined) in
+                [("alice", EVERYONE, false), ("host_user", "HostScope", true)]
+            {
+                // Isolated team members remain confined when plugin rights are absent;
+                // non-isolated Everyone callers keep host plugin routing.
                 f.instance.seed_user_attributes(
                     user,
                     map(json!({
@@ -667,7 +721,7 @@ async fn native_page_policy_needs_no_plugin_scope_or_discovery_and_preserves_tru
                 )
                 .await;
                 assert_eq!(response.status, StatusCode::OK, "{}", response.text());
-                assert_eq!(response.json(), json!({"confined":true}));
+                assert_eq!(response.json(), json!({"confined": expected_confined}));
                 assert_eq!(response.headers.get("cache-control").unwrap(), "no-store");
             }
             let administrator = common::login(&f.app, "admin", "pass", None).await;
