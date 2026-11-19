@@ -8276,7 +8276,7 @@ Use a trusted standalone native `mrsm` of the same release as the main API. The 
 executor, HTTP proxy and destination relays all require native entry points. A Python console
 script or wheel-only image cannot establish the required confinement before Python starts.
 
-The default executor image is `bmeares/meerschaum:5.1.0rc1-full` for this release candidate, independently of a customized
+The default executor image is `bmeares/meerschaum:5.1.0rc2-full` for this release candidate, independently of a customized
 `services.api.image`. For an administrator-built image, set the separate Stack setting:
 
 ```yaml
@@ -15078,7 +15078,7 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
 
 ## 🔑 Tokens and draining
 
-The 5.1.0rc1 confined runtime accepts built-in scopes on authenticated native Rust routes
+The 5.1.0rc2 confined runtime accepts built-in scopes on authenticated native Rust routes
 and requires callers to hold `plugins:read`. The execution host also needs an attested
 offline Rust compiler. The provisioning and rotation examples below describe the trusted
 runtime. A device token carrying only a plugin-defined scope cannot call a confined
@@ -18009,7 +18009,7 @@ Ordinary Meerschaum use is supported on Linux 6.8, macOS, and Windows. Isolated 
 - Upgrade the native CLI, the Python API host, and the Python package in each Team worker interpreter together. Team workers require Meerschaum 5.1.0 or later. For a Python user-site installation of 5.0.x, run `python3 -m pip install --user --upgrade meerschaum` with the installation's interpreter.
 - Before recreating the stack, review the read-only Grafana role, Valkey password, and credential file changes below. List additional schemas that Grafana must read in `stack:grafana:readonly_schemas`. Run `mrsm stack` to generate the default Compose file.
 - Use TCP for connectors accessed by Team workers whose sandbox denies Unix sockets. Reconnect to a live web terminal to restore its tmux windows. Review the permitted commands and required scopes before upgrading users who rely on the web terminal or command API. [Permissions](../reference/api-instance/permissions.md)
-- In 5.1.0rc1, authenticated non-admin calls to confined native Rust plugin routes require `plugins:read`, the route's declared built-in scopes, and an attested offline Rust compiler on the execution host. Device tokens that carry only a plugin-defined scope cannot call or rotate themselves through these routes. Check this before upgrading a deployment that uses native plugin device tokens.
+- In 5.1.0rc2, authenticated non-admin calls to confined native Rust plugin routes require `plugins:read`, the route's declared built-in scopes, and an attested offline Rust compiler on the execution host. Device tokens that carry only a plugin-defined scope cannot call or rotate themselves through these routes. Check this before upgrading a deployment that uses native plugin device tokens.
 
 ### Changes
 

@@ -350,7 +350,7 @@ Use a trusted standalone native `mrsm` of the same release as the main API. The 
 executor, HTTP proxy and destination relays all require native entry points. A Python console
 script or wheel-only image cannot establish the required confinement before Python starts.
 
-The default executor image is `bmeares/meerschaum:5.1.0rc1-full` for this release candidate, independently of a customized
+The default executor image is `bmeares/meerschaum:5.1.0rc2-full` for this release candidate, independently of a customized
 `services.api.image`. For an administrator-built image, set the separate Stack setting:
 
 ```yaml
