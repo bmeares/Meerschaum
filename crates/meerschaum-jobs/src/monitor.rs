@@ -59,7 +59,7 @@ pub fn default_interval() -> Duration {
 /// One check: restart the stopped restart-jobs of `ctx`'s root under the check-jobs lock.
 /// `None` when another process holds the lock (it is doing the same check).
 pub fn check_once(ctx: &JobsContext) -> Option<meerschaum_core::success::SuccessTuple> {
-    let _lock = lock(ctx)?;
+    let _lock = lock(ctx, false).ok()?;
     let mut jobs = get_restart_jobs(ctx, true);
     jobs.retain(|_, job| !job.is_running() && job.stop_time().is_none());
     if jobs.is_empty() {
@@ -94,24 +94,32 @@ pub fn spawn(ctx: JobsContext, interval: Duration) -> std::io::Result<RestartMon
     })
 }
 
+// The Python restart monitor also holds this file while it reads and starts jobs.
 #[cfg(unix)]
-fn lock(ctx: &JobsContext) -> Option<nix::fcntl::Flock<std::fs::File>> {
+pub(crate) fn lock(
+    ctx: &JobsContext,
+    blocking: bool,
+) -> std::io::Result<nix::fcntl::Flock<std::fs::File>> {
     use nix::fcntl::{Flock, FlockArg};
     let path = &ctx.paths.check_jobs_lock;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok()?;
+        std::fs::create_dir_all(parent)?;
     }
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(path)
-        .ok()?;
-    Flock::lock(file, FlockArg::LockExclusiveNonblock).ok()
+        .open(path)?;
+    let kind = if blocking {
+        FlockArg::LockExclusive
+    } else {
+        FlockArg::LockExclusiveNonblock
+    };
+    Flock::lock(file, kind).map_err(|(_, error)| std::io::Error::from_raw_os_error(error as i32))
 }
 
 #[cfg(not(unix))]
-fn lock(_ctx: &JobsContext) -> Option<()> {
-    Some(())
+pub(crate) fn lock(_ctx: &JobsContext, _blocking: bool) -> std::io::Result<()> {
+    Ok(())
 }

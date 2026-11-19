@@ -430,6 +430,16 @@ impl Job {
         if let Some(ex) = self.executor() {
             return ex.delete_job(&self.name);
         }
+        // Keep restart monitors out of the interval between stopping the process and
+        // removing its definition. Otherwise they can see a stopped job and start it again.
+        let _restart_lock = match crate::monitor::lock(&self.ctx, true) {
+            Ok(lock) => lock,
+            Err(error) => {
+                return SuccessTuple::fail(format!(
+                    "Could not lock restart checks while deleting {self}: {error}"
+                ));
+            }
+        };
         // PARITY: only a *running* job is stopped first; a paused job's process is left behind.
         if self.is_running() {
             let stopped = self.stop(None);
@@ -633,6 +643,9 @@ impl Job {
 
     /// `check_restart()`: restart a stopped `--restart` / `--loop` job unless manually stopped.
     pub fn check_restart(&mut self) -> SuccessTuple {
+        if self.executor_keys == "local" && !self.exists() {
+            return SuccessTuple::ok(format!("{self} no longer exists."));
+        }
         if self.is_running() {
             return SuccessTuple::ok(format!("{self} is running."));
         }

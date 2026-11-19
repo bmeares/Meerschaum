@@ -123,3 +123,40 @@ fn a_held_lock_skips_the_check() {
     let _held = Flock::lock(file, FlockArg::LockExclusiveNonblock).unwrap();
     assert!(monitor::check_once(&ctx).is_none());
 }
+
+#[test]
+fn deletion_waits_for_a_restart_check_and_a_stale_job_stays_deleted() {
+    use nix::fcntl::{Flock, FlockArg};
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    let mut deleting = job(&ctx, "deleted", true);
+    assert!(deleting.daemon().setup(true).success);
+    let mut stale = job(&ctx, "deleted", true);
+    assert!(stale.restarts());
+
+    std::fs::create_dir_all(ctx.paths.check_jobs_lock.parent().unwrap()).unwrap();
+    let file = std::fs::File::create(&ctx.paths.check_jobs_lock).unwrap();
+    let held = Flock::lock(file, FlockArg::LockExclusiveNonblock).unwrap();
+    let (ready, entered) = channel();
+    let (finished, result) = channel();
+    let thread = std::thread::spawn(move || {
+        ready.send(()).unwrap();
+        finished.send(deleting.delete()).unwrap();
+    });
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(
+        result.recv_timeout(Duration::from_millis(200)),
+        Err(RecvTimeoutError::Timeout)
+    ));
+    assert!(stale.exists());
+
+    drop(held);
+    let deleted = result.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(deleted.success, "{}", deleted.message);
+    thread.join().unwrap();
+    let checked = stale.check_restart();
+    assert!(checked.success, "{}", checked.message);
+    assert!(!stale.exists());
+}
