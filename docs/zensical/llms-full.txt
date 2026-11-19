@@ -7693,6 +7693,13 @@ Python code authorized to run with an isolated team's credentials (its plugins' 
 | `python_worker_team_idle_seconds` | `60` | Stop an isolated team's idle worker after this long (`0`: never) |
 | `python_team_env_passthrough` | `[]` | Further variables of the server's environment, by name, that isolated teams' workers and jobs receive (never Meerschaum's configuration, patch or connector variables) |
 | `python_team_sandbox` | `auto` | The [filesystem sandbox](#the-filesystem-sandbox) of isolated teams' workers and jobs: `auto`, `require`, `require_sockets` or `off` |
+| `python_team_max_cpu_seconds` | unset | Hard `RLIMIT_CPU` CPU-time cap (seconds) for isolated host-team workers and jobs on Linux |
+| `python_team_max_memory_mb` | unset | Hard `RLIMIT_AS` address-space cap (MiB) for isolated host-team workers and jobs on Linux |
+| `python_team_max_file_mb` | unset | Hard `RLIMIT_FSIZE` maximum single-file write size (MiB) on Linux |
+| `python_team_max_disk_mb` | unset | Aggregate disk quota (MiB) across a team's temporary, cache, virtual-environment, and job work directories, enforced before launching team processes |
+| `python_team_max_processes` | unset | Hard `RLIMIT_NPROC` process/thread cap on Linux |
+| `python_team_egress` | `open` | Outbound IPv4/IPv6 policy for isolated host-team processes on Linux: `open`, `deny` (seccomp blocks IPv4/IPv6 sockets), or `allow_ports` (Landlock ABI 4+ TCP port allowlist plus seccomp blocking non-TCP IPv4/IPv6) |
+| `python_team_egress_ports` | `[]` | Permitted outbound TCP ports when `python_team_egress` is `allow_ports` (for example `[443, 5432]`) |
 
 A team's workers otherwise follow `python_workers`, `python_worker_max_calls` and `python_worker_max_memory_mb`. The shared pool is not affected. Each live team worker is a Python interpreter: measured on one Linux host (Python 3.14), an idle one held about 59 MiB resident (27 MiB of it private), a team's first call after its workers stopped took about 0.45 s instead of 0.07 s (the interpreter starts), and later calls about 0.07 s, as in the shared pool. Ten teams syncing at once with `python_team_workers: 10` kept ten workers (about 590 MiB resident); with the default limit (4 on that host) they shared four, and calls waited up to about a second.
 
@@ -7838,9 +7845,8 @@ Inside the team's processes nothing is refused by name: the sandbox and the team
 
 These limits describe execution on the main host. Separate executors can add CPU, memory, process and outbound controls; shared-kernel and unbounded-disk limits still need deployment planning. See [resource and host requirements](../team-executors.md#resource-and-host-requirements).
 
-- **Network reach.** A team's code connects anywhere the server can: databases, internal services, cloud metadata endpoints (`169.254.169.254`, which can hand out the machine's cloud credentials). Restrict those with a firewall or the cloud's metadata settings.
-- **CPU, memory and disk use.** A team's code can use as much as the server's user may; `python_team_workers` and `python_worker_max_memory_mb` bound the pool, not the code.
-- **Outbound TCP and UDP.** Neither Landlock nor the seccomp filter restricts them (see Network reach).
+- **Network reach (when `python_team_egress: open`).** By default, a team's code connects anywhere the server can: databases, internal services, cloud metadata endpoints (`169.254.169.254`, which can hand out the machine's cloud credentials). On Linux, set `system.engine.python_team_egress: deny` to block all IPv4/IPv6 sockets, or `allow_ports` with `python_team_egress_ports` to restrict outbound connections to specific TCP ports (Landlock ABI 4+ and seccomp); for per-host or domain filtering, use a firewall, cloud metadata settings, or a separate container executor.
+- **CPU, memory and disk use (when unconfigured).** By default, a team's code can use as much as the server's user may; `python_team_workers` and `python_worker_max_memory_mb` bound the pool, not individual team commands. On Linux, configure `python_team_max_cpu_seconds`, `python_team_max_memory_mb`, `python_team_max_file_mb`, `python_team_max_disk_mb`, and `python_team_max_processes` to enforce OS `rlimit` caps and team directory disk quotas; for cgroup CPU-share quotas and per-container network isolation, use a separate container executor.
 - **Unix sockets where neither mechanism holds.** Without the seccomp filter (refused by a container runtime, another architecture) and before Linux 7.1, a team's code can connect to any Unix socket the server's user can. Tested on one host by running a team's process at Landlock ABI 8 without the filter: it connected to the user's D-Bus session bus, where `systemd-run --user` would start a program outside the sandbox, and to the Docker socket, which answered its requests (a user who can open the Docker socket is root on the host); with the filter or at **filesystem and sockets** both were refused, and a tmux server on a scratch socket could no longer be told to run a command.
 - **Shared memory by name.** A team's code cannot list `/dev/shm`, but can open an object there whose name it knows.
 - **Kernel bugs** and anything the server's user may do that Landlock does not cover.
@@ -8276,7 +8282,7 @@ Use a trusted standalone native `mrsm` of the same release as the main API. The 
 executor, HTTP proxy and destination relays all require native entry points. A Python console
 script or wheel-only image cannot establish the required confinement before Python starts.
 
-The default executor image is `bmeares/meerschaum:5.1.0rc2-full` for this release candidate, independently of a customized
+The default executor image is `bmeares/meerschaum:5.1.0-full` for this release, independently of a customized
 `services.api.image`. For an administrator-built image, set the separate Stack setting:
 
 ```yaml
@@ -10320,6 +10326,8 @@ Keys under the parent key `sync` are the following:
 ### The `jobs` Key
 
 Keys under `jobs` are the names of jobs to be run with `compose up`. If defined, these jobs override the default syncing jobs: `compose up` registers the project's pipes and starts these jobs without syncing the pipes first (run `mrsm compose up --presync` to force a sync pass).
+
+Set `jobs: {}` for a project which defines pipes but starts no jobs, for example when a job of another project syncs them (one job may name [Pipelines](/reference/pipelines/compose/) saved by several projects). `compose up` then registers the pipes, removes the jobs the project started earlier, and starts nothing. Leaving `jobs` out (or empty without the braces) keeps the default syncing jobs.
 
 !!! example "Example jobs"
     ```yaml
@@ -15078,7 +15086,7 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
 
 ## 🔑 Tokens and draining
 
-The 5.1.0rc2 confined runtime accepts built-in scopes on authenticated native Rust routes
+The 5.1.0 confined runtime accepts built-in scopes on authenticated native Rust routes
 and requires callers to hold `plugins:read`. The execution host also needs an attested
 offline Rust compiler. The provisioning and rotation examples below describe the trusted
 runtime. A device token carrying only a plugin-defined scope cannot call a confined
@@ -18009,10 +18017,12 @@ Ordinary Meerschaum use is supported on Linux 6.8, macOS, and Windows. Isolated 
 - Upgrade the native CLI, the Python API host, and the Python package in each Team worker interpreter together. Team workers require Meerschaum 5.1.0 or later. For a Python user-site installation of 5.0.x, run `python3 -m pip install --user --upgrade meerschaum` with the installation's interpreter.
 - Before recreating the stack, review the read-only Grafana role, Valkey password, and credential file changes below. List additional schemas that Grafana must read in `stack:grafana:readonly_schemas`. Run `mrsm stack` to generate the default Compose file.
 - Use TCP for connectors accessed by Team workers whose sandbox denies Unix sockets. Reconnect to a live web terminal to restore its tmux windows. Review the permitted commands and required scopes before upgrading users who rely on the web terminal or command API. [Permissions](../reference/api-instance/permissions.md)
-- In 5.1.0rc2, authenticated non-admin calls to confined native Rust plugin routes require `plugins:read`, the route's declared built-in scopes, and an attested offline Rust compiler on the execution host. Device tokens that carry only a plugin-defined scope cannot call or rotate themselves through these routes. Check this before upgrading a deployment that uses native plugin device tokens.
+- In 5.1.0, authenticated non-admin calls to confined native Rust plugin routes require `plugins:read`, the route's declared built-in scopes, and an attested offline Rust compiler on the execution host. Device tokens that carry only a plugin-defined scope cannot call or rotate themselves through these routes. Check this before upgrading a deployment that uses native plugin device tokens.
 
 ### Changes
 
+- **Host-team resource limits and egress controls (Linux).** Optional `system.engine` settings cap isolated host-team workers and jobs with kernel `rlimit` bounds (`python_team_max_cpu_seconds`, `python_team_max_memory_mb`, `python_team_max_file_mb`, `python_team_max_processes`), an aggregate writable-directory disk quota (`python_team_max_disk_mb`), and outbound network policies (`python_team_egress: open | deny | allow_ports` with `python_team_egress_ports` enforced via Landlock ABI 4+ and seccomp). `mrsm doctor` reports active limits under `teams`.
+- **Empty `jobs: {}` in Compose.** Setting `jobs: {}` in a Compose project starts no jobs instead of falling back to syncing the project's pipes.
 - Declare rows immutable with `sync.immutable: true` and select a [synchronization strategy](../reference/pipes/syncing.md#immutable-synchronization-strategies) such as `join`, `unbounded-simple`, or a monthly corrective strategy. Existing pipes keep their backtrack behavior.
 - **Isolated teams.** A team created with "Hide Everyone's pipes, jobs, connectors and plugins" sees only what belongs to it or was granted to it, in the console, the HTTP API and MCP. Isolated members cannot chain instances. Commands and terminals follow the caller's permissions and the team's execution policy. A user in both an isolated and an open team keeps the open team's view.
 - **A database per team.** **New team** in the console and the new `bootstrap teams` action can create a database or a schema for the team on an existing PostgreSQL-family connector, with a role for the team, a read-only role for dashboards and a connector reserved for the team, which becomes its default instance. The server picks up the new connector without a restart.

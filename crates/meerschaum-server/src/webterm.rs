@@ -89,7 +89,7 @@ mod launch;
 mod pty;
 mod tmux;
 use auth::*;
-pub use auth::{executor_routes, routes};
+pub use auth::{TermMode, executor_routes, origin_allowed, routes};
 pub use bridge::active_terminals;
 use bridge::*;
 use launch::*;
@@ -97,8 +97,9 @@ pub use launch::{end_executor_terminal, end_tmux_session, tmux_session_name};
 use pty::*;
 use tmux::*;
 pub use tmux::{
-    TMUX_CONF, TMUX_WINDOW_LIST, TMUX_WINDOW_NAME, owned_server_sockets, stop_owned_server,
-    stop_owned_servers, tmux_available, tmux_config_path, tmux_socket_path,
+    TMUX_CONF, TMUX_WINDOW_LIST, TMUX_WINDOW_NAME, owned_server_sockets, refresh_tmux_config,
+    stop_owned_server, stop_owned_servers, tmux_available, tmux_config_path, tmux_owner_path,
+    tmux_socket_path,
 };
 mod api_terminal;
 mod native_pending;

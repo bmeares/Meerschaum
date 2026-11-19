@@ -168,7 +168,7 @@ An `Err` from `api_route` becomes `500 {"detail": "<message>"}`.
 
 ## 🔑 Tokens and draining
 
-The 5.1.0rc2 confined runtime accepts built-in scopes on authenticated native Rust routes
+The 5.1.0 confined runtime accepts built-in scopes on authenticated native Rust routes
 and requires callers to hold `plugins:read`. The execution host also needs an attested
 offline Rust compiler. The provisioning and rotation examples below describe the trusted
 runtime. A device token carrying only a plugin-defined scope cannot call a confined
