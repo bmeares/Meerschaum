@@ -58,6 +58,12 @@ impl Unit {
             .env("MRSM_PLUGINS_DIR", self.path("plugins"))
             .env("MRSM_PYTHON", self.path("no-python"))
             .env("MRSM_NO_UPDATE_CHECK", "1")
+            // The fixture starts one explicit unit. Bulk startup jitter can otherwise
+            // consume its entire deadline before the job reaches the prompt or signal check.
+            .env(
+                meerschaum_jobs::startup::KIND_ENV,
+                meerschaum_jobs::startup::StartKind::Single.as_str(),
+            )
             .env("MRSM_DAEMON_ID", "sysjob")
             .env(
                 "MRSM_SYSTEMD_LOG_PATH",
