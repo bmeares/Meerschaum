@@ -2,6 +2,9 @@
 //! Every process and database belongs to this fixture; no host installation or service is used.
 #![cfg(unix)]
 
+mod common;
+use common::json_map as core;
+
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -771,10 +774,6 @@ impl Drop for Process {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
-}
-
-fn core(value: serde_json::Value) -> Map {
-    Value::from_json_str(&value.to_string()).unwrap().to_map()
 }
 
 async fn primary(

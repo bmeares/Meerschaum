@@ -8,73 +8,22 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use meerschaum_connector_api::APIConnector;
-use meerschaum_connector_api::client::authentication::{Request, RequestAuthentication};
 use meerschaum_connector_api::client::{Body, Method, RequestOptions};
-use meerschaum_connector_api::traits::{ConnectorError, ConnectorResult};
-use meerschaum_core::{Map, Value};
+use meerschaum_core::Map;
 use meerschaum_jobs::process::{self, ProcState, Sig};
-use meerschaum_server::executor::control::{Actor, Authority};
+use meerschaum_server::executor::control::Authority;
 use meerschaum_server::executor::environment::{JOB_CONTEXT_PROPERTY, Profile, Target, Update};
 use meerschaum_server::executor::gateway::{CONFIGURATION_PATH, CONTEXTS_PATH, Configuration};
 use serde_json::json;
 use uuid::Uuid;
 
-struct Signer {
-    authority: Authority,
-    revision: String,
-}
+mod common;
+use common::executor::ControlSigner;
+use common::fs::only_generation;
+use common::process::Subreaper;
 
-fn only_generation(directory: &Path) -> PathBuf {
-    let generations = std::fs::read_dir(directory)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| {
-            path.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("generation-")
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(generations.len(), 1, "{generations:?}");
-    generations.into_iter().next().unwrap()
-}
-impl RequestAuthentication for Signer {
-    fn authorization(&self, request: Request<'_>) -> ConnectorResult<String> {
-        self.authority
-            .issue(
-                Actor {
-                    owner: "operator".into(),
-                    username: Some("operator".into()),
-                    permissions: Default::default(),
-                    administrator: false,
-                },
-                meerschaum_server::executor::control::Request {
-                    method: request.method,
-                    path: request.path,
-                    body: request.body.ok_or_else(|| {
-                        ConnectorError::Invalid("Unbuffered fixture request.".into())
-                    })?,
-                },
-                &self.revision,
-                chrono::Utc::now().timestamp(),
-            )
-            .map(|token| format!("Bearer {token}"))
-            .map_err(|_| ConnectorError::Invalid("Could not sign fixture request.".into()))
-    }
-}
-
-struct Subreaper(Option<rustix::process::Pid>);
-impl Subreaper {
-    fn install() -> Self {
-        let old = rustix::process::child_subreaper().unwrap();
-        rustix::process::set_child_subreaper(rustix::process::Pid::from_raw(1)).unwrap();
-        Self(old)
-    }
-}
-impl Drop for Subreaper {
-    fn drop(&mut self) {
-        let _ = rustix::process::set_child_subreaper(self.0);
-    }
+fn signer(authority: Authority, revision: impl Into<String>) -> ControlSigner {
+    ControlSigner::operator(authority, revision)
 }
 
 /// Exact fixture PIDs are remembered with their births; cleanup never signals a reused PID.
@@ -168,9 +117,8 @@ impl Drop for Fixture {
         let _ = self.bystander.wait();
     }
 }
-fn core(value: serde_json::Value) -> Map {
-    Value::from_json_str(&value.to_string()).unwrap().to_map()
-}
+use common::json_map as core;
+use common::process::AbortOnDrop as CallbackTask;
 
 async fn status(api: &APIConnector, name: &str, wanted: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -184,13 +132,6 @@ async fn status(api: &APIConnector, name: &str, wanted: &str) {
             "{name}: expected {wanted}, observed {observed}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
-struct CallbackTask(tokio::task::JoinHandle<()>);
-impl Drop for CallbackTask {
-    fn drop(&mut self) {
-        self.0.abort();
     }
 }
 
@@ -625,10 +566,7 @@ def profile_probe(action=None, **kw):
     )
     .unwrap()
     .with_request_authentication(
-        Arc::new(Signer {
-            authority,
-            revision: configuration.fingerprint().unwrap(),
-        }),
+        Arc::new(signer(authority, configuration.fingerprint().unwrap())),
         1024 * 1024,
     )
     .unwrap();

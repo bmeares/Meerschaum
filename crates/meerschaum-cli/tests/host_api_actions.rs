@@ -1,17 +1,21 @@
 //! Ordinary endpoint scopes remain exact while Main tracks confined API workers.
 #![cfg(unix)]
 
+mod common;
+
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use common::http::response;
+use common::json_map as map;
 use meerschaum_cli::executor_jobs::{Catalog, JobPlacement};
 use meerschaum_core::users::User;
-use meerschaum_core::{Map, Pipe, Value};
+use meerschaum_core::{Pipe, Value};
 use serde_json::{Value as Json, json};
 
-fn map(value: Json) -> Map {
-    Value::from_json_str(&value.to_string()).unwrap().to_map()
+fn file_tail(path: &std::path::Path) -> String {
+    common::fs::file_tail(path, 16 * 1024)
 }
 
 struct Main {
@@ -46,56 +50,8 @@ impl Drop for Main {
     }
 }
 
-fn file_tail(path: &std::path::Path) -> String {
-    use std::io::{Read, Seek, SeekFrom};
-    let Ok(fd) = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::NONBLOCK
-            | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    ) else {
-        return String::new();
-    };
-    let mut file = std::fs::File::from(fd);
-    let Ok(metadata) = file.metadata() else {
-        return String::new();
-    };
-    if !metadata.is_file()
-        || file
-            .seek(SeekFrom::Start(metadata.len().saturating_sub(16 * 1024)))
-            .is_err()
-    {
-        return String::new();
-    }
-    let mut bytes = Vec::new();
-    if file.take(16 * 1024).read_to_end(&mut bytes).is_err() {
-        return String::new();
-    }
-    String::from_utf8_lossy(&bytes).into_owned()
-}
-
-async fn response(request: reqwest::RequestBuilder) -> (u16, Json) {
-    let response = request.send().await.unwrap();
-    let status = response.status().as_u16();
-    let text = response.text().await.unwrap();
-    (
-        status,
-        serde_json::from_str(&text).unwrap_or_else(|_| json!(text)),
-    )
-}
-
 async fn login(client: &reqwest::Client, origin: &str, username: &str) -> String {
-    let (status, body) = response(
-        client
-            .post(format!("{origin}/login"))
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(format!("username={username}&password=synthetic-scope-pass")),
-    )
-    .await;
-    assert_eq!(status, 200, "{body}");
-    body["access_token"].as_str().unwrap().into()
+    common::http::login(client, origin, username, "synthetic-scope-pass").await
 }
 
 async fn tool(client: &reqwest::Client, origin: &str, token: &str, name: &str, args: Json) -> Json {

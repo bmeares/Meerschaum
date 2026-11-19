@@ -30,18 +30,21 @@ use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::access::{Team, TeamRole};
 use meerschaum_core::team_scope::source_namespace::FACTORY_CONTROL_ROOT;
 use meerschaum_core::users::User;
-use meerschaum_core::{Map, Pipe, Value};
+use meerschaum_core::{Pipe, Value};
 use meerschaum_kernel::value::Value as KValue;
 use meerschaum_server::executor::environment::Profile;
 use meerschaum_server::executor::factory_attestation::{PRIVATE_PATH, PUBLIC_DIRECTORY};
 use serde_json::{Value as Json, json};
 
+mod common;
 #[path = "fixtures/container_terminal.rs"]
 mod container_terminal;
+use common::http::response;
+use common::json_map as map;
 use container_terminal::Placement;
 
-fn map(value: Json) -> Map {
-    serde_json::from_value::<Value>(value).unwrap().to_map()
+fn file_tail(path: &Path) -> String {
+    common::fs::file_tail(path, 16 * 1024)
 }
 
 async fn assert_committed_container_row(instance: &SqlConnector, metric: &str) {
@@ -108,36 +111,6 @@ struct Docker {
     project: String,
     compose: PathBuf,
     main: PathBuf,
-}
-
-fn file_tail(path: &Path) -> String {
-    use std::io::{Read, Seek, SeekFrom};
-    let Ok(fd) = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::NONBLOCK
-            | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    ) else {
-        return String::new();
-    };
-    let mut file = std::fs::File::from(fd);
-    let Ok(metadata) = file.metadata() else {
-        return String::new();
-    };
-    if !metadata.is_file()
-        || file
-            .seek(SeekFrom::Start(metadata.len().saturating_sub(16 * 1024)))
-            .is_err()
-    {
-        return String::new();
-    }
-    let mut bytes = Vec::new();
-    if file.take(16 * 1024).read_to_end(&mut bytes).is_err() {
-        return String::new();
-    }
-    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 impl Docker {
@@ -379,39 +352,14 @@ impl Drop for SelfCommand {
     }
 }
 
-async fn response(request: reqwest::RequestBuilder) -> (u16, Json) {
-    let response = request.send().await.unwrap();
-    let status = response.status().as_u16();
-    let text = response.text().await.unwrap();
-    (
-        status,
-        serde_json::from_str(&text).unwrap_or_else(|_| json!(text)),
-    )
-}
 async fn login(client: &reqwest::Client, origin: &str, username: &str) -> String {
-    let (status, result) = response(
-        client
-            .post(format!("{origin}/login"))
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(format!(
-                "username={username}&password=synthetic-container-user"
-            )),
-    )
-    .await;
-    assert_eq!(status, 200, "{result}");
-    result["access_token"].as_str().unwrap().into()
+    common::http::login(client, origin, username, "synthetic-container-user").await
 }
 async fn healthy(client: &reqwest::Client, origin: &str) {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while !client
-        .get(format!("{origin}/healthcheck"))
-        .send()
-        .await
-        .is_ok_and(|response| response.status().is_success())
-    {
-        assert!(Instant::now() < deadline, "owned Main did not become ready");
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    assert!(
+        common::http::wait_healthy(client, origin, Duration::from_secs(60)).await,
+        "owned Main did not become ready"
+    );
 }
 async fn start_job(
     client: &reqwest::Client,
@@ -888,16 +836,7 @@ async fn assert_version_completed(
 }
 
 fn publish_archive(directory: &Path, plugin: &str, filename: &str, source: &str) {
-    let file = std::fs::File::create(directory.join(format!("{plugin}.tar.gz"))).unwrap();
-    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
-    let mut tar = tar::Builder::new(encoder);
-    let mut header = tar::Header::new_gnu();
-    header.set_size(source.len() as u64);
-    header.set_mode(0o400);
-    header.set_cksum();
-    tar.append_data(&mut header, filename, source.as_bytes())
-        .unwrap();
-    tar.into_inner().unwrap().finish().unwrap();
+    common::fs::write_plugin_archive(directory, plugin, filename, source);
 }
 
 async fn run_container(scenario: Scenario) {

@@ -14,6 +14,10 @@
 //! is only connected to with a read-only `GET /_ping`. All data is synthetic.
 #![cfg(target_os = "linux")]
 
+mod common;
+use common::appears;
+use common::webterm::plain;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -310,18 +314,6 @@ fn send(port: u16, method: &str, auth: &str, path: &str, body: Value) -> (u16, S
     .unwrap_or_else(|| panic!("no reply from {path}"))
 }
 
-/// Wait up to `within` for `path` to appear.
-fn appears(path: &Path, within: Duration) -> bool {
-    let deadline = Instant::now() + within;
-    while Instant::now() < deadline {
-        if path.exists() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    path.exists()
-}
-
 /// A shell script that tries every way out and records each outcome under `$TMPDIR` as
 /// `<prefix>_<what>` (`yes`: it worked, `no`: refused), then `<prefix>_done`.
 fn escape_script(home: &Home, prefix: &str, server_pid: u32, other_job: &Path) -> String {
@@ -448,44 +440,6 @@ struct Term {
     >,
     out: String,
     closed: bool,
-}
-
-/// Terminal output without escape sequences and carriage returns.
-fn plain(raw: &str) -> String {
-    let mut out = String::new();
-    let mut chars = raw.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\x1b' => match chars.peek() {
-                Some('[') => {
-                    chars.next();
-                    for c in chars.by_ref() {
-                        if ('@'..='~').contains(&c) {
-                            break;
-                        }
-                    }
-                }
-                Some(']') | Some('P') | Some('k') | Some('_') => {
-                    chars.next();
-                    while let Some(c) = chars.next() {
-                        if c == '\x07' {
-                            break;
-                        }
-                        if c == '\x1b' {
-                            chars.next();
-                            break;
-                        }
-                    }
-                }
-                _ => {
-                    chars.next();
-                }
-            },
-            '\r' => {}
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 impl Term {

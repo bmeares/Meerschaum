@@ -17,15 +17,9 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 #[path = "fixtures/executor_browser_hold.rs"]
 mod browser_gate;
-fn map(value: Json) -> Map {
-    serde_json::from_value::<Value>(value).unwrap().to_map()
-}
-struct Task(tokio::task::JoinHandle<()>);
-impl Drop for Task {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
+mod common;
+use common::json_map as map;
+use common::process::{AbortOnDrop as Task, Subreaper};
 struct Executor {
     child: Child,
     root: PathBuf,
@@ -77,31 +71,8 @@ impl Drop for Executor {
         }
     }
 }
-struct Subreaper(Option<rustix::process::Pid>);
-impl Subreaper {
-    fn new() -> Self {
-        let old = rustix::process::child_subreaper().unwrap();
-        rustix::process::set_child_subreaper(rustix::process::Pid::from_raw(1)).unwrap();
-        Self(old)
-    }
-}
-impl Drop for Subreaper {
-    fn drop(&mut self) {
-        let _ = rustix::process::set_child_subreaper(self.0);
-    }
-}
 fn archive(path: &Path, name: &str, source: &str) {
-    std::fs::create_dir_all(path).unwrap();
-    let file = std::fs::File::create(path.join(format!("{name}.tar.gz"))).unwrap();
-    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
-    let mut tar = tar::Builder::new(encoder);
-    let mut header = tar::Header::new_gnu();
-    header.set_size(source.len() as u64);
-    header.set_mode(0o400);
-    header.set_cksum();
-    tar.append_data(&mut header, format!("{name}.py"), source.as_bytes())
-        .unwrap();
-    tar.into_inner().unwrap().finish().unwrap();
+    common::fs::write_plugin_archive(path, name, &format!("{name}.py"), source);
 }
 fn diagnostics(root: &Path) -> String {
     let mut text = String::new();

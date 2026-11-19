@@ -12,6 +12,11 @@
 //! temporary root and plugins directory and a scrubbed environment; all data is synthetic.
 #![cfg(unix)]
 
+mod common;
+use common::appears;
+use common::process::tmux_available;
+use common::webterm::plain;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -369,44 +374,6 @@ struct Term {
     closed: bool,
 }
 
-/// Terminal output without escape sequences and carriage returns, for matching.
-fn plain(raw: &str) -> String {
-    let mut out = String::new();
-    let mut chars = raw.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\x1b' => match chars.peek() {
-                Some('[') => {
-                    chars.next();
-                    for c in chars.by_ref() {
-                        if ('@'..='~').contains(&c) {
-                            break;
-                        }
-                    }
-                }
-                Some(']') | Some('P') | Some('k') | Some('_') => {
-                    chars.next();
-                    while let Some(c) = chars.next() {
-                        if c == '\x07' {
-                            break;
-                        }
-                        if c == '\x1b' {
-                            chars.next();
-                            break;
-                        }
-                    }
-                }
-                _ => {
-                    chars.next();
-                }
-            },
-            '\r' => {}
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 impl Term {
     async fn open(port: u16, session: &str) -> Term {
         let (socket, _) =
@@ -519,29 +486,6 @@ fn refused(text: &str) -> bool {
         || text.contains("does not start other programs")
         || text.contains("does not open an editor")
         || text.contains("not among the commands non-administrators may run")
-}
-
-/// Wait up to `within` for `path` to appear.
-fn appears(path: &Path, within: Duration) -> bool {
-    let deadline = Instant::now() + within;
-    while Instant::now() < deadline {
-        if path.exists() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    path.exists()
-}
-
-fn tmux_available() -> bool {
-    Command::new("tmux")
-        .arg("-V")
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
 }
 
 /// `tmux -S <socket> <args>` (never the default server, never the caller's tmux).

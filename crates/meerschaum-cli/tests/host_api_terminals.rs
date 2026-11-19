@@ -9,6 +9,9 @@ fn main() -> std::process::ExitCode {
 fn main() {}
 
 #[cfg(target_os = "linux")]
+mod common;
+
+#[cfg(target_os = "linux")]
 mod fixture {
 
     use std::path::{Path, PathBuf};
@@ -22,7 +25,7 @@ mod fixture {
     use meerschaum_core::access::{Team, TeamRole};
     use meerschaum_core::config::ConfigOptions;
     use meerschaum_core::users::User;
-    use meerschaum_core::{Map, SuccessTuple, Value};
+    use meerschaum_core::{Map, SuccessTuple};
     use meerschaum_server::access::Access;
     use meerschaum_server::backends::{ActionTarget, ActionsBackend};
     use meerschaum_server::webterm::remote::Terminal;
@@ -89,9 +92,7 @@ mod fixture {
             .unwrap()
     }
 
-    fn map(value: Json) -> Map {
-        serde_json::from_value::<Value>(value).unwrap().to_map()
-    }
+    use super::common::json_map as map;
 
     struct Actions(Arc<Controller>);
     #[async_trait::async_trait]
