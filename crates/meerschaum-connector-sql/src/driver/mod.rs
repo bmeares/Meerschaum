@@ -19,7 +19,7 @@
 
 #[cfg(all(test, unix))]
 mod authorization_read_tests;
-mod authorization_reads;
+pub(crate) mod authorization_reads;
 mod backend;
 pub mod batch;
 pub mod connect;
