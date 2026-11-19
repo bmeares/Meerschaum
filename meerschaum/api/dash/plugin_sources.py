@@ -1,6 +1,7 @@
 """
 Bounded plugin source inspection (no plugin is imported or archive extracted) and, for the
-administrators who may use the web terminal, editing an installed plugin's files in place.
+administrators who may use the web terminal and the plugin managers of a plugin's team, editing
+an installed plugin's files in place.
 """
 
 from __future__ import annotations
@@ -38,50 +39,78 @@ def source_viewer(session: Any):
     return access.viewer_for(username) if username else access.ANONYMOUS
 
 
-def may_read_source(kind: str, session: Any) -> bool:
+def may_read_source(kind: str, session: Any, name: Optional[str] = None) -> bool:
+    """
+    Whether this session may read a plugin's source: a repository plugin they may see (its
+    archive is already downloadable), or the installed files of the plugin `name` if they may
+    manage it (`plugins.may_manage_plugin`: administrators, and its team's plugin managers).
+    Without a `name`, installed source is the administrators'.
+    """
+    from meerschaum.api.dash import plugins as pages
     who = source_viewer(session)
     if who.no_auth:
         return True
     if not who.signed_in or not who.can('plugins:read'):
         return False
-    # Installed code is server-private. A repository archive is already downloadable.
-    return kind == 'repository' or (kind == 'installed' and who.is_admin)
+    if kind == 'repository':
+        return name is None or pages.can_see_plugin(who, name)
+    if kind != 'installed':
+        return False
+    # Installed code is server-private.
+    if who.is_admin:
+        return True
+    return name is not None and pages.can_see_plugin(who, name) and pages.may_manage_plugin(who, name)
 
 
 #: Why creating and editing plugins is unavailable to a viewer.
 AUTHORING_OFF = 'Creating and editing plugins is turned off on this server.'
-AUTHORING_ADMINS = 'Only administrators can create and edit plugins.'
+AUTHORING_ADMINS = 'Only administrators and team plugin managers can create and edit plugins.'
 
 
-def authoring_refusal(session: Any) -> Optional[str]:
+def authoring_refusal(session: Any, name: Optional[str] = None) -> Optional[str]:
     """
     Why this session may not create or edit plugins (`None` when it may). Writing a plugin is
-    running code on the server, so it is gated exactly as the web terminal is: the server serves
-    the terminal (not `--no-webterm`, `--no-dash`, `--no-auth` or `--public`), and the session's
-    user, read fresh, is an administrator who may use it (`webterm:use`). The server must also
-    accept plugins (`api:permissions:registration:plugins`).
+    running code on the server, so the server must accept plugins
+    (`api:permissions:registration:plugins`), it is never offered without authentication
+    (`--no-auth`), and the session's user, read fresh, is one of:
+
+    - an administrator, gated exactly as the web terminal is: the server serves the terminal
+      (not `--no-webterm`, `--no-dash` or `--public`) and they may use it (`webterm:use`);
+    - a member of a team that may manage plugins (`plugins_write`, the explicit decision to
+      trust that team with code on this server: `plugins.may_manage_plugins`).
+
+    With a `name`, editing that installed plugin: a non-administrator edits only their team's
+    plugins (`plugins.may_manage_plugin`).
     """
     try:
         from meerschaum.api.dash.webterm import webterm_enabled
-        if not webterm_enabled():
-            return AUTHORING_OFF
         from meerschaum.config import get_config
         if get_config('api', 'permissions', 'registration', 'plugins', warn=False) is False:
             return AUTHORING_OFF
+        terminal = bool(webterm_enabled())
     except Exception:
         return AUTHORING_OFF
+    ### What everyone but a team's plugin manager is told, as before teams managed plugins.
+    refused = AUTHORING_ADMINS if terminal else AUTHORING_OFF
     try:
         who = source_viewer(session)
     except Exception:
-        return AUTHORING_ADMINS
-    if who.no_auth or not who.signed_in or not who.is_admin or not who.can('webterm:use'):
-        return AUTHORING_ADMINS
+        return refused
+    if who.no_auth or not who.signed_in:
+        return refused
+    if who.is_admin:
+        return None if (terminal and who.can('webterm:use')) else refused
+    from meerschaum.api.dash import plugins as pages
+    if not pages.may_manage_plugins(who):
+        return refused
+    if name is not None and not pages.may_manage_plugin(who, name):
+        return f"Plugin '{name}' does not belong to your team."
     return None
 
 
-def may_author(session: Any) -> bool:
-    """Whether this session may create and edit plugins (`authoring_refusal`)."""
-    return authoring_refusal(session) is None
+def may_author(session: Any, name: Optional[str] = None) -> bool:
+    """Whether this session may create plugins, or edit `name` (`authoring_refusal`)."""
+    return authoring_refusal(session, name) is None
 
 
 def _relative(value: Any) -> pathlib.PurePosixPath:
@@ -253,12 +282,17 @@ def _validate(kind: str, name: str, session: Any):
     from meerschaum.api.dash.plugins import is_safe_plugin_name
     if kind not in ('installed', 'repository') or not is_safe_plugin_name(name):
         raise ValueError('Invalid plugin source selection.')
+    if kind == 'installed':
+        if not may_read_source(kind, session, name):
+            raise PermissionError('Plugin source is not available to your account.')
+        return
     if not may_read_source(kind, session):
         raise PermissionError('Plugin source is not available to your account.')
-    if kind == 'repository':
-        from meerschaum.api import get_api_connector
-        if name not in (get_api_connector().get_plugins(search_term=name) or []):
-            raise ValueError('This plugin is not in the repository.')
+    from meerschaum.api import get_api_connector
+    ### A repository plugin hidden from the viewer reads as one that is not there.
+    if (not may_read_source(kind, session, name)
+            or name not in (get_api_connector().get_plugins(search_term=name) or [])):
+        raise ValueError('This plugin is not in the repository.')
 
 
 def source_files(kind: str, name: str, session: Any) -> List[str]:
@@ -435,9 +469,9 @@ def save_source(name: str, selected: str, text: Any, expected: Any, session: Any
     Save `text` as an installed plugin's listed file `selected`, if it is unchanged on disk since
     it was loaded (its digest is `expected`). Returns `(success, message, new digest)`. Only a
     file the source view lists, inside that plugin's own directory, can be written
-    (`authoring_refusal` is checked again here, with a fresh read of the user).
+    (`authoring_refusal` is checked again here, for this plugin, with a fresh read of the user).
     """
-    refusal = authoring_refusal(session)
+    refusal = authoring_refusal(session, name)
     if refusal:
         return False, refusal, None
     try:
@@ -537,12 +571,12 @@ def build_source_browser(
 ):
     """
     A plugin's source: the file tree and the chosen file (`selected`, else the entry point).
-    Administrators who may author plugins can edit an installed plugin's files (`edit` opens
-    `selected` for editing, as New plugin does); `notice` is shown above the files.
+    Those who may author the plugin (`may_author`) can edit an installed plugin's files (`edit`
+    opens `selected` for editing, as New plugin does); `notice` is shown above the files.
     """
     from dash import html, dcc
     import dash_bootstrap_components as dbc
-    if not may_read_source(kind, session):
+    if not may_read_source(kind, session, name):
         return None
     try:
         files = source_files(kind, name, session)
@@ -553,7 +587,7 @@ def build_source_browser(
     first = selected if selected in files else files[0]
     editing = (
         {'path': first, 'nonce': uuid.uuid4().hex}
-        if edit and kind == 'installed' and may_author(session) else None
+        if edit and kind == 'installed' and may_author(session, name) else None
     )
     return html.Section([
         html.Div(html.H4('Source'), className='plugin-source-header'),

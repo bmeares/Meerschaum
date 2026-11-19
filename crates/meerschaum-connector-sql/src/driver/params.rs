@@ -24,6 +24,23 @@ pub enum SqlParam {
     TimestampTz(DateTime<Utc>),
     /// A date (bound natively).
     Date(NaiveDate),
+    /// An empty untyped array (`[]`); rewritten to `'{}'` on PostgreSQL so `= ANY(:ids)` works
+    /// with every element type, and serialized as `"[]"` elsewhere.
+    EmptyArray,
+    /// A PostgreSQL `TEXT[]` (JSON text on drivers without native array binds).
+    TextArray(Vec<Option<String>>),
+    /// A PostgreSQL `BIGINT[]` (JSON text on drivers without native array binds).
+    IntArray(Vec<Option<i64>>),
+    /// A PostgreSQL `DOUBLE PRECISION[]` (JSON text on drivers without native array binds).
+    FloatArray(Vec<Option<f64>>),
+    /// A PostgreSQL `BOOLEAN[]` (JSON text on drivers without native array binds).
+    BoolArray(Vec<Option<bool>>),
+    /// A PostgreSQL `TIMESTAMP[]` (JSON text on drivers without native array binds).
+    TimestampArray(Vec<Option<NaiveDateTime>>),
+    /// A PostgreSQL `TIMESTAMPTZ[]` (JSON text on drivers without native array binds).
+    TimestampTzArray(Vec<Option<DateTime<Utc>>>),
+    /// A PostgreSQL `DATE[]` (JSON text on drivers without native array binds).
+    DateArray(Vec<Option<NaiveDate>>),
 }
 
 impl SqlParam {
@@ -33,6 +50,34 @@ impl SqlParam {
             Some(s) => SqlParam::Text(s.to_string()),
             None => SqlParam::Null,
         }
+    }
+
+    /// Serialize an array variant to JSON text for drivers without native array parameters.
+    pub(crate) fn array_as_json(&self) -> Option<String> {
+        let value = match self {
+            SqlParam::EmptyArray => serde_json::Value::Array(Vec::new()),
+            SqlParam::TextArray(v) => serde_json::json!(v),
+            SqlParam::IntArray(v) => serde_json::json!(v),
+            SqlParam::FloatArray(v) => serde_json::json!(v),
+            SqlParam::BoolArray(v) => serde_json::json!(v),
+            SqlParam::TimestampArray(v) => serde_json::json!(
+                v.iter()
+                    .map(|t| t.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.f").to_string()))
+                    .collect::<Vec<_>>()
+            ),
+            SqlParam::TimestampTzArray(v) => serde_json::json!(
+                v.iter()
+                    .map(|t| t.map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)))
+                    .collect::<Vec<_>>()
+            ),
+            SqlParam::DateArray(v) => serde_json::json!(
+                v.iter()
+                    .map(|d| d.map(|d| d.format("%Y-%m-%d").to_string()))
+                    .collect::<Vec<_>>()
+            ),
+            _ => return None,
+        };
+        Some(value.to_string())
     }
 }
 
@@ -87,6 +132,14 @@ macro_rules! bind_param_impl {
             SqlParam::Timestamp(t) => q.bind(*t),
             SqlParam::TimestampTz(t) => q.bind(*t),
             SqlParam::Date(d) => q.bind(*d),
+            SqlParam::EmptyArray
+            | SqlParam::TextArray(_)
+            | SqlParam::IntArray(_)
+            | SqlParam::FloatArray(_)
+            | SqlParam::BoolArray(_)
+            | SqlParam::TimestampArray(_)
+            | SqlParam::TimestampTzArray(_)
+            | SqlParam::DateArray(_) => q.bind($p.array_as_json().unwrap_or_else(|| "[]".into())),
         }
     }};
 }
@@ -119,6 +172,14 @@ pub(crate) fn bind_pg<'q>(
 ) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
     match p {
         SqlParam::Null => q.bind(PgUntypedNull),
+        SqlParam::EmptyArray => q.bind(Vec::<String>::new()),
+        SqlParam::TextArray(v) => q.bind(v.clone()),
+        SqlParam::IntArray(v) => q.bind(v.clone()),
+        SqlParam::FloatArray(v) => q.bind(v.clone()),
+        SqlParam::BoolArray(v) => q.bind(v.clone()),
+        SqlParam::TimestampArray(v) => q.bind(v.clone()),
+        SqlParam::TimestampTzArray(v) => q.bind(v.clone()),
+        SqlParam::DateArray(v) => q.bind(v.clone()),
         _ => bind_param_impl!(q, p, json_native = true),
     }
 }

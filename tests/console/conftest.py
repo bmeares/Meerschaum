@@ -176,6 +176,11 @@ def _console_diagnostics(request, monkeypatch):
             except OSError:
                 continue
             (dest / f'server-{server.name}-{server.port}.log').write_bytes(data)
+            for log_file in (server.root / 'logs').glob('*.log*'):
+                if log_file.is_file() and not log_file.name.startswith('.'):
+                    (dest / f'job-{server.name}-{log_file.name}').write_bytes(
+                        log_file.read_bytes()[-4_000_000:]
+                    )
         (dest / 'failure.txt').write_text(
             f"{item.nodeid}\nwritten {_now()}\n\n"
             + '\n\n'.join(
@@ -363,6 +368,9 @@ def base_env(root: pathlib.Path, plugins: pathlib.Path, config: dict | None = No
         'MRSM_PYTHON': server_python(),
         'MRSM_W7_CONSOLE': '1',
         'MRSM_SQL_W7CONSOLE': f"sqlite:///{root / 'w7console.db'}",
+        ### Parts of the API host resolve `sql:main` whatever the instance (its default is a
+        ### database on localhost:5432): a SQLite file in the root, never a network database.
+        'MRSM_SQL_MAIN': json.dumps({'flavor': 'sqlite', 'database': str(root / 'sql_main.db')}),
         'MRSM_CONFIG': json.dumps(merged_config),
     })
     return env
@@ -944,8 +952,8 @@ class Tab:
             self.page.wait_for_selector('#pages-navbar-div', timeout=30000)
 
     def wait_for_dashboard(self) -> None:
-        """The Terminal page is ready when its action form has its default (`show pipes`)."""
-        self.page.wait_for_selector('#go-button', timeout=30000)
+        """Wait for the signed-in Terminal page and its default action."""
+        self.page.wait_for_selector('#console-nav-user', state='attached', timeout=30000)
         self.page.wait_for_function(
             "document.getElementById('action-dropdown') && "
             "document.getElementById('action-dropdown').value === 'show'",
@@ -954,7 +962,7 @@ class Tab:
 
     def goto_terminal(self) -> None:
         """Open the Terminal page (`/dash/terminal`) and wait for its action form."""
-        self.goto('/dash/terminal', '#go-button')
+        self.goto('/dash/terminal', '#action-dropdown')
         self.wait_for_dashboard()
 
     def sign_out(self) -> None:

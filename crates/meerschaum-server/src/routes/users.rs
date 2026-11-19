@@ -78,6 +78,10 @@ async fn user_row(
             .await
             .map_err(read("get_user_teams"))?,
     };
+    // A walled-off caller sees their own account and those of their teams.
+    if !caller.no_auth && !rules::can_see_user(&caller.principal, username, &teams) {
+        return Ok(None);
+    }
     let default_role = crate::access::default_role(state);
     let role = rules::user_role(user_type.as_deref(), attributes.as_ref(), default_role);
     let permissions = rules::ordered_permissions(&rules::user_permissions(
@@ -364,12 +368,25 @@ async fn read_current_user(ctx: Ctx) -> ApiResult {
 
 async fn get_users(ctx: Ctx) -> ApiResult {
     scoped_auth_if_private(&ctx.state, &ctx.headers, &["users:read"]).await?;
-    let users = ctx
-        .state
-        .instance()
+    let conn = ctx.state.instance();
+    let mut users = conn
         .get_users()
         .await
         .map_err(|e| ApiError::exception("get_users", e))?;
+    // A walled-off caller (when the request names one) sees the accounts of their teams.
+    if let Some(caller) = crate::access::resolve_optional(&ctx.state, &ctx.headers).await?
+        && caller.principal.is_isolated()
+    {
+        let teams = conn
+            .get_teams()
+            .await
+            .map_err(|e| ApiError::exception("get_teams", e))?;
+        let by_user = super::teams::teams_by_user(&teams);
+        users.retain(|username| {
+            let teams = by_user.get(username).cloned().unwrap_or_default();
+            meerschaum_core::access::can_see_user(&caller.principal, username, &teams)
+        });
+    }
     Ok(ok_json(&json!(users)))
 }
 

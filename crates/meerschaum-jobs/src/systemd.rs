@@ -11,8 +11,10 @@
 //! Compose started, else a short hash of the root's path. A root lists only its own units: the ones
 //! whose files live under its `systemd/services/` directory, so the default root never sees
 //! another root's jobs. Units of other roots export `MRSM_ROOT_DIR` so they come back after a
-//! reboot, and every unit file is private (`0600`: it may carry the project's `MRSM_CONFIG`). Status, PID and timestamps come from `systemctl is-active` / `show`; the job's
-//! properties live in the hidden "sister" local job (`jobs/<name>/`, externally managed); logs
+//! reboot, and every unit file is private (`0600`). Since 5.1 a unit names `MRSM_CONFIG_FILE` /
+//! `MRSM_PATCH_FILE` (owner-only files next to it, [`crate::config_files`]) instead of carrying
+//! the launching process's `MRSM_CONFIG` / `MRSM_PATCH`. Status, PID and timestamps come from
+//! `systemctl is-active` / `show`; the job's properties live in the hidden "sister" local job (`jobs/<name>/`, externally managed); logs
 //! are the service's rotating log file under `<root>/systemd/logs/`.
 //!
 //! The job-side runtime (what runs inside the unit: the rotating log, the result file, the stdin
@@ -244,6 +246,9 @@ impl SystemdExecutor {
         process_env: &[(String, String)],
     ) -> String {
         let sc = meerschaum_core::static_config::static_config();
+        let scoped = process_env
+            .iter()
+            .any(|(key, _)| key == meerschaum_core::team_scope::sandbox::SPEC_VAR);
         let env_names: Vec<String> = meerschaum_core::static_config::static_config()
             .get(&["environment"])
             .and_then(Value::as_map)
@@ -251,7 +256,11 @@ impl SystemdExecutor {
             .unwrap_or_default();
         let mut vars: indexmap::IndexMap<String, String> = process_env
             .iter()
-            .filter(|(k, _)| env_names.contains(k))
+            .filter(|(k, _)| {
+                env_names.contains(k)
+                    || k == meerschaum_core::team_scope::TEAM_SCOPE_VAR
+                    || (scoped && !meerschaum_core::team_scope::sandbox::runtime::injection_name(k))
+            })
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         // The unit runs the `mrsm` binary, which starts its Python workers with `MRSM_PYTHON`
@@ -299,6 +308,9 @@ impl SystemdExecutor {
         );
         if let Some(job) = job.as_mut() {
             for (k, v) in job.env() {
+                if scoped && meerschaum_core::team_scope::sandbox::runtime::host_runtime_name(&k) {
+                    continue;
+                }
                 vars.insert(k, v);
             }
         }
@@ -307,11 +319,39 @@ impl SystemdExecutor {
             vars.entry(sc.environment.root.clone())
                 .or_insert_with(|| posix(self.ctx.paths.root.clone()));
         }
-        let environment = vars
+        if scoped {
+            vars.retain(|key, _| {
+                !meerschaum_core::team_scope::sandbox::runtime::injection_name(key)
+            });
+            vars.insert(
+                meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR.into(),
+                "systemd".into(),
+            );
+        }
+        let mut environment = vars
             .iter()
             .map(|(k, v)| format!("Environment={k}={}", crate::shlex::quote(v)))
             .collect::<Vec<_>>()
             .join("\n");
+        if scoped {
+            let mut names: std::collections::BTreeSet<String> =
+                meerschaum_core::team_scope::sandbox::runtime::BOOTSTRAP_UNSET
+                    .iter()
+                    .map(|name| (*name).into())
+                    .collect();
+            names.extend(
+                process_env
+                    .iter()
+                    .filter(|(key, _)| {
+                        meerschaum_core::team_scope::sandbox::runtime::injection_name(key)
+                    })
+                    .map(|(key, _)| key.clone()),
+            );
+            environment.push_str(&format!(
+                "\nUnsetEnvironment={}",
+                names.into_iter().collect::<Vec<_>>().join(" ")
+            ));
+        }
         let service_name = self.get_service_name(name);
         format!(
             "[Unit]\nDescription=Run the job '{name}'\n\n[Service]\nExecStart={python} -m meerschaum {sysargs}\nKillSignal=SIGTERM\nRestart=always\nRestartSec=5\nRestartPreventExitStatus=0\nSyslogIdentifier={service_name}\n{environment}\n\n[Install]\nWantedBy=default.target\n",
@@ -904,6 +944,103 @@ impl SystemdExecutor {
         {
             warnings.push(unpinned_python_warning(name));
         }
+        // 5.1: the unit names owner-only files in its directory instead of carrying
+        // `MRSM_CONFIG` / `MRSM_PATCH` (`config_files`); unchanged when they cannot be written.
+        // 5.1: the unit of an isolated team's job carries that team's configuration only (written
+        // when the unit is written), or it is not written.
+        let required = properties.is_some_and(crate::config_files::requires_team_execution);
+        let team = match properties.filter(|p| crate::config_files::may_be_team_job(p)) {
+            None if required => {
+                return SuccessTuple::fail(format!(
+                    "Job '{name}' runs a team member's command but names no isolated team."
+                ));
+            }
+            None => None,
+            Some(props) => {
+                let config = match meerschaum_core::Config::new(
+                    meerschaum_core::config::ConfigOptions::with_env(process_env.clone()),
+                ) {
+                    Ok(config) => config,
+                    Err(e) => return SuccessTuple::fail(e.to_string()),
+                };
+                match crate::config_files::job_team_scope(&config.paths().root_dir, props) {
+                    Some((_, scope)) => Some((config, scope)),
+                    None if required => {
+                        return SuccessTuple::fail(format!(
+                            "Job '{name}' runs a team member's command, but its team's scope is \
+                             not recorded."
+                        ));
+                    }
+                    None => None,
+                }
+            }
+        };
+        let process_env = match team {
+            Some((config, scope)) => match crate::config_files::externalize_team_with(
+                &self.get_service_job_path(name),
+                &process_env,
+                &[],
+                &config,
+                &scope,
+                required,
+            ) {
+                Ok(changes) => {
+                    // The unit adds the job's `env` property: reduced to the allowlist first.
+                    let passthrough =
+                        meerschaum_core::team_scope::Passthrough::from_config(&config);
+                    let daemon = job.daemon();
+                    if let Some(Value::Map(mut env)) = daemon.properties().get("env").cloned()
+                        && crate::config_files::strip_team_env(&mut env, &passthrough)
+                    {
+                        let written = daemon.replace_property("env", Value::Map(env));
+                        if !written.success {
+                            return written;
+                        }
+                    }
+                    changes.apply(&process_env)
+                }
+                Err(e) => {
+                    return SuccessTuple::fail(format!(
+                        "The configuration of team '{}' could not be written for job '{name}': {e}",
+                        scope.team
+                    ));
+                }
+            },
+            None => match crate::config_files::externalize(
+                &self.get_service_job_path(name),
+                &process_env,
+            ) {
+                Ok(changes) => changes.apply(&process_env),
+                Err(_) => process_env,
+            },
+        };
+        match crate::daemon::validate_native_command(
+            &process_env,
+            &self.ctx.launcher.program,
+            false,
+        ) {
+            Ok(true) => {
+                // An older manager ignores this security-relevant directive, so absence or an
+                // unknown version refuses admission instead of silently inheriting loader code.
+                let version = self
+                    .ctx
+                    .process
+                    .run("systemctl", &["--version".into()])
+                    .ok()
+                    .filter(|out| out.success())
+                    .and_then(|out| {
+                        out.stdout
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|value| value.parse::<u32>().ok())
+                    });
+                if version.is_none_or(|version| version < 235) {
+                    return SuccessTuple::fail("Scoped systemd jobs require systemd 235 or newer with verified UnsetEnvironment support.".to_string());
+                }
+            }
+            Ok(false) => {}
+            Err(error) => return SuccessTuple::fail(error.to_string()),
+        }
         let text = self.get_service_file_text(name, sysargs, &self.exec_program(), &process_env);
         if let Err(e) = write_private(&service_file_path, &text) {
             return SuccessTuple::fail(e.to_string());
@@ -1300,8 +1437,9 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     canon(a) == canon(b)
 }
 
-/// Write a file only its owner can read (`0600` on Unix): a unit may carry credentials in its
-/// `Environment=MRSM_CONFIG=...` line.
+/// Write a file only its owner can read (`0600` on Unix): a unit written before 5.1 may carry
+/// credentials in its `Environment=MRSM_CONFIG=...` line, and a user's `MRSM_<TYPE>_<LABEL>`
+/// in `properties.env` still reaches it.
 fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     #[cfg(unix)]
     {

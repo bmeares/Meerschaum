@@ -16,6 +16,7 @@
 //! - [`plugins`]: plugin actions, sync hooks, `setup()`.
 //! - [`manifest`]: the plugin manifest schema, source fingerprints and the cache.
 //! - [`sync`]: `Pipe.sync()` for a Python source into a native instance.
+//! - [`team`]: isolated teams' pools (5.1), under one limit on their live workers.
 //!
 //! The Python side lives in `meerschaum/worker/`. See `README.md` for the protocol spec.
 #![deny(unsafe_code)]
@@ -32,6 +33,7 @@ pub mod pool;
 pub mod protocol;
 pub mod stream;
 pub mod sync;
+pub mod team;
 pub mod transport;
 pub mod worker;
 
@@ -40,7 +42,8 @@ pub use chunk::FetchChunk;
 pub use connector::{ConnectorInfo, FetchOptions, FetchOutcome, PythonConnector};
 pub use error::{WorkerError, WorkerResult};
 pub use manifest::{Manifest, ensure_manifest, manifest_path};
-pub use pool::{PoolConfig, WorkerPool};
+pub use pool::{PoolConfig, PoolScope, WorkerPool};
 pub use protocol::PROTOCOL_VERSION;
 pub use stream::{PythonStream, StreamEvent, StreamMode, StreamOptions};
+pub use team::{LiveLimit, TeamPools};
 pub use worker::{CallOptions, Worker, WorkerOptions};

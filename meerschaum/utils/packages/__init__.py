@@ -75,6 +75,10 @@ def _auto_install_allowed() -> bool:
 def _get_uv_bin() -> Optional[str]:
     """Find uv without importing or installing any bootstrap dependencies."""
     import shutil
+    from meerschaum._internal.team_scope import in_team_process
+    if in_team_process():
+        # The native Team launcher grants execution to uv on PATH.
+        return shutil.which('uv')
     try:
         import uv
         return str(uv.find_uv_bin())
@@ -562,8 +566,9 @@ def determine_version(
         + "except:\n"
         + f"  print('{_no_version_str}', end='')"
     )
+    from meerschaum.config.environment import get_child_env
     exit_code, stdout_bytes, stderr_bytes = venv_exec(
-        code, venv=venv, with_extras=True, debug=debug
+        code, venv=venv, with_extras=True, env=get_child_env(), debug=debug
     )
     stdout, stderr = stdout_bytes.decode('utf-8'), stderr_bytes.decode('utf-8')
     _version = stdout.split('\n')[-1] if exit_code == 0 else None
@@ -1414,7 +1419,8 @@ def run_python_package(
         os.chdir(cwd)
     executable = venv_executable(venv=venv)
     venv_path = (paths.VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
-    env_dict = (env if isinstance(env, dict) else (os.environ or {})).copy()
+    from meerschaum.config.environment import get_child_env
+    env_dict = get_child_env(env if isinstance(env, dict) else (os.environ or {}))
     if venv_path is not None:
         env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
     uv_bin = _get_uv_bin() if package_name == 'uv' else None
@@ -1452,6 +1458,47 @@ def run_python_package(
         to_return = 1 if not as_proc else None
     os.chdir(old_cwd)
     return to_return
+
+
+
+def _prepared_execution_import(names, lazy, precheck, warn):
+    """Import from native-prepared private sites without managing an environment.
+
+    Api and Metadata processes already have their complete import path selected by the native
+    launcher. Activating a named venv here can attempt recovery/installation even with
+    install=False. Standard import machinery is the only lookup needed in these processes.
+    The marker removes side effects; it never grants access or substitutes for confinement.
+    """
+    import importlib.util
+    import sys
+    import warnings
+    if names == ('meerschaum',):
+        # Match the ordinary helper's recursion guard while the SDK is initializing.
+        return _import_module('meerschaum')
+    modules = []
+    for name in names:
+        try:
+            module = sys.modules.get(name)
+            if module is not None and not getattr(getattr(module, '__spec__', None), '_initializing', False):
+                modules.append(module)
+                continue
+            if lazy:
+                # This is Python's current-path lookup, with no venv/package management.
+                # Preserve lazy imports and return None for an unavailable dependency.
+                if precheck and importlib.util.find_spec(name) is None:
+                    raise ModuleNotFoundError(name=name)
+                module = lazy_import(name, precheck=False, install=False, warn=warn)
+            else:
+                module = _import_module(name)
+        except Exception:
+            if warn:
+                warnings.warn(
+                    f"Module '{name}' is unavailable in the prepared private interpreter.",
+                    ImportWarning, stacklevel=3,
+                )
+            module = None
+        modules.append(module)
+    return modules[0] if len(modules) == 1 else tuple(modules)
 
 
 def attempt_import(
@@ -1533,6 +1580,9 @@ def attempt_import(
     """
 
     import importlib.util
+
+    if os.environ.get('MRSM_API_EXECUTION') == '1':
+        return _prepared_execution_import(names, lazy=lazy, precheck=precheck, warn=warn)
 
     global emitted_auto_install_warning
     no_auto_install_env_var = NO_AUTO_INSTALL_ENV_VAR
@@ -1918,6 +1968,13 @@ def get_modules_from_package(
                and not f.endswith('__init__.py')
                and not f.endswith('__pycache__')
     ]
+    ### 5.1: in an isolated team's sandboxed process the plugins package holds every team's
+    ### links, but only the team's own plugins can be read.
+    if package.__name__ == 'plugins':
+        from meerschaum.plugins import sandboxed_plugins_names
+        own = sandboxed_plugins_names()
+        if own is not None:
+            _all = [name for name in _all if name in own]
 
     if debug:
         from meerschaum.utils.debug import dprint
@@ -2201,8 +2258,9 @@ def _get_pip_os_env(color: bool = True):
     See PEP 668 for why we are overriding the environment.
     """
     import os, sys, platform
+    from meerschaum.config.environment import get_child_env
     python_bin_path = pathlib.Path(sys.executable)
-    pip_os_env = os.environ.copy()
+    pip_os_env = get_child_env()
     path_str = pip_os_env.get('PATH', '') or ''
     path_sep = ':' if platform.system() != 'Windows' else ';'
     pip_os_env.update({

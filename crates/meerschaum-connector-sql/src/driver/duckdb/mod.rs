@@ -264,6 +264,7 @@ fn to_param(p: &SqlParam) -> ffi::Param {
             let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch");
             ffi::Param::Date((*d - epoch).num_days() as i32)
         }
+        other => ffi::Param::Text(other.array_as_json().unwrap_or_else(|| "[]".into())),
     }
 }
 

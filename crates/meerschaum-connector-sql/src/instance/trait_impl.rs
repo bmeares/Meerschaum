@@ -66,6 +66,16 @@ impl Connector for SqlConnector {
         SqlConnector::is_thread_safe(self)
     }
 
+    fn pipe_target_refusal(&self, pipe: &Pipe) -> Option<String> {
+        if self.flavor != crate::Flavor::Geopackage {
+            return None;
+        }
+        let resolved = self.sql_pipe(pipe).ok()?;
+        super::geopackage::is_system_target(&resolved.target).then(|| {
+            "A pipe cannot target GeoPackage catalog or spatial-index storage tables.".into()
+        })
+    }
+
     fn is_protected(&self) -> bool {
         SqlConnector::is_protected(self)
     }
@@ -78,6 +88,75 @@ impl Connector for SqlConnector {
         self.require_schema().await?;
         let args = fetch_args(query);
         SqlConnector::fetch(self, pipe, &args).await
+    }
+
+    async fn get_sync_time_remote(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        newest: bool,
+    ) -> ConnectorResult<Option<DateBound>> {
+        self.require_schema().await?;
+        let query = DataQuery {
+            params: params.cloned(),
+            ..Default::default()
+        };
+        self.immutable_remote_bound(pipe, &fetch_args(&query), newest)
+            .await
+    }
+
+    async fn get_rowcount_remote(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        self.require_schema().await?;
+        self.immutable_remote_count(pipe, &fetch_args(query)).await
+    }
+
+    async fn immutable_sync_remote_daily_counts(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        self.require_schema().await?;
+        let source = self.fetch_query(pipe, &fetch_args(query)).await?;
+        self.immutable_daily_counts(pipe, &source).await
+    }
+
+    async fn immutable_sync_fetch_by_id(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        watermarks: &[(String, DateBound)],
+        joined: bool,
+    ) -> ConnectorResult<Option<Frame>> {
+        self.require_schema().await?;
+        self.immutable_fetch_by_id(pipe, &fetch_args(query), watermarks, joined)
+            .await
+    }
+
+    async fn immutable_sync_remote_cpi(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        points: i64,
+    ) -> ConnectorResult<meerschaum_connector::CpiSeries> {
+        self.require_schema().await?;
+        let source = self.fetch_query(pipe, &fetch_args(query)).await?;
+        self.immutable_cpi_samples(pipe, query, &source, points)
+            .await
+    }
+
+    async fn immutable_sync_fetch_cpi(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        polynomials: &meerschaum_connector::CpiPolynomials,
+    ) -> ConnectorResult<Frame> {
+        self.require_schema().await?;
+        self.immutable_fetch_cpi(pipe, query, &fetch_args(query), polynomials)
+            .await
     }
 
     async fn fetch_stream(
@@ -116,6 +195,26 @@ fn fetch_args(query: &DataQuery) -> FetchArgs {
 
 #[async_trait]
 impl InstanceConnector for SqlConnector {
+    fn supports_windowed_writes(&self) -> bool {
+        matches!(
+            self.flavor(),
+            crate::Flavor::Sqlite | crate::Flavor::Mysql | crate::Flavor::Mariadb
+        )
+    }
+    async fn validate_windowed_frame(
+        &self,
+        pipe: &Pipe,
+        frame: &Frame,
+        options: &SyncOptions,
+        window: &meerschaum_connector::mutation::DataWindow,
+    ) -> ConnectorResult<()> {
+        if matches!(self.flavor(), crate::Flavor::Mysql | crate::Flavor::Mariadb) {
+            self.innodb_append_plan(pipe, frame, options, window)?;
+            return Ok(());
+        }
+        self.preflight_window_frame(pipe, frame, options, window)
+            .await
+    }
     async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         if let Err(e) = self.require_schema().await {
             return SuccessTuple::fail(e.to_string());
@@ -164,6 +263,10 @@ impl InstanceConnector for SqlConnector {
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
         self.require_schema().await?;
         SqlConnector::fetch_pipes_keys(self, query).await
+    }
+
+    fn supports_registered_source_table(&self) -> bool {
+        self.flavor == crate::Flavor::Postgresql
     }
 
     fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {
@@ -278,6 +381,9 @@ impl InstanceConnector for SqlConnector {
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
         self.require_schema().await?;
+        if crate::driver::mysql_authority::active() {
+            return SqlConnector::get_pipe_data(self, pipe, query).await;
+        }
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_data(self, pipe, query).await
     }
@@ -320,6 +426,37 @@ impl InstanceConnector for SqlConnector {
         self.require_schema().await?;
         let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_rowcount(self, pipe, query).await
+    }
+
+    async fn immutable_sync_watermarks(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Vec<(String, DateBound)>> {
+        self.require_schema().await?;
+        self.immutable_target_watermarks(pipe, query).await
+    }
+
+    async fn immutable_sync_daily_counts(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        self.require_schema().await?;
+        let target = self.immutable_target_query(pipe, query).await?;
+        self.immutable_daily_counts(pipe, &target).await
+    }
+
+    async fn immutable_sync_target_cpi(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        points: i64,
+    ) -> ConnectorResult<meerschaum_connector::CpiSeries> {
+        self.require_schema().await?;
+        let target = self.immutable_target_query(pipe, query).await?;
+        self.immutable_cpi_samples(pipe, query, &target, points)
+            .await
     }
 
     async fn get_pipe_rowcount_estimate(

@@ -432,6 +432,89 @@ def test_the_tcp_transport_requires_the_proxy_token(sandbox):
             proc.wait()
 
 
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """`http.client` over a Unix socket."""
+
+    def __init__(self, path: str):
+        super().__init__('localhost', timeout=10)
+        self._path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(10)
+        self.sock.connect(self._path)
+
+
+def _unix_request(path: str, route: str, headers: dict = None) -> int:
+    connection = _UnixHTTPConnection(path)
+    try:
+        connection.request('GET', route, headers=headers or {})
+        return connection.getresponse().status
+    finally:
+        connection.close()
+
+
+def test_the_unix_socket_requires_the_proxy_token(sandbox):
+    """
+    5.1: a host the Rust server started (`MRSM_API_HOST_PROXY_TOKEN` set) refuses requests
+    without the token on its Unix socket too: another process of the same user that connects
+    to the socket gets `403`, and the token leaves the host's environment before any plugin runs.
+    """
+    import tempfile
+    import shutil
+    root, plugins = sandbox
+    socket_dir = tempfile.mkdtemp(prefix='tpr-host-')
+    socket_path = os.path.join(socket_dir, 'host.sock')
+    env = make_env(root, plugins)
+    env['MRSM_API_HOST_PROXY_TOKEN'] = 'proxy-token-for-the-unix-test'
+    proc = subprocess.Popen(
+        [sys.executable, '-m', 'meerschaum.api.host', '--socket', socket_path],
+        env=env, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        start_new_session=True,
+    )
+    good = {'X-Mrsm-Host-Proxy-Token': 'proxy-token-for-the-unix-test'}
+    try:
+        deadline = time.time() + 120
+        status = None
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                raise AssertionError(f"The host exited:\n{proc.stdout.read()[-4000:]}")
+            try:
+                status = _unix_request(socket_path, '/openapi.json', good)
+                break
+            except OSError:
+                time.sleep(0.3)
+        assert status == 200
+        assert _unix_request(socket_path, '/openapi.json') == 403
+        assert _unix_request(socket_path, '/dash/', {'X-Mrsm-Host-Proxy-Token': 'wrong'}) == 403
+        assert _unix_request(socket_path, '/_mrsm/host/status') == 403
+        with open(f'/proc/{proc.pid}/environ', 'rb') as f:
+            initial = f.read()
+        ### The process started with it (only the server and this host can read that) ...
+        assert b'MRSM_API_HOST_PROXY_TOKEN' in initial
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        shutil.rmtree(socket_dir, ignore_errors=True)
+
+
+def test_the_host_drops_its_token_from_its_environment(monkeypatch):
+    """... and nothing the host starts inherits it."""
+    from meerschaum.api.host._app import take_proxy_token
+    monkeypatch.setenv('MRSM_API_HOST_PROXY_TOKEN', 'tok')
+    assert take_proxy_token() == 'tok'
+    assert 'MRSM_API_HOST_PROXY_TOKEN' not in os.environ
+    out = subprocess.run(
+        [sys.executable, '-c', "import os; print(os.environ.get('MRSM_API_HOST_PROXY_TOKEN'))"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert out.stdout.strip() == 'None'
+
+
 def test_the_host_needs_one_transport(sandbox):
     root, plugins = sandbox
     for argv in ([], ['--socket', 'a.sock', '--tcp', '127.0.0.1:1'], ['--tcp', 'nope']):

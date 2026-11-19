@@ -197,6 +197,25 @@ pub struct DataQuery {
     pub remote: bool,
 }
 
+/// Characteristic-polynomial samples for one (possibly unnamed) immutable series.
+#[derive(Debug)]
+pub struct CpiSamples {
+    pub rows: i64,
+    pub distinct_timestamps: i64,
+    pub values: Vec<i64>,
+}
+
+/// Polynomial samples keyed by series ID.
+pub type CpiSeries = std::collections::BTreeMap<Option<String>, CpiSamples>;
+
+/// One missing-timestamp polynomial per series, with coefficients in ascending order.
+pub type CpiPolynomials = Vec<(Option<String>, Vec<i64>)>;
+
+/// The modulus used by both the SQL-side CPISync samples and the engine's solver.
+pub const CPI_PRIME: i64 = (1 << 61) - 1;
+/// The first evaluation point lies outside the range of UTC day offsets in microseconds.
+pub const CPI_FIRST_POINT: i64 = 86_400_000_001;
+
 /// Keyword arguments for `sync_pipe`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncOptions {
@@ -370,9 +389,23 @@ pub trait Connector: Send + Sync {
         format!("{}:{}", self.connector_type(), self.label())
     }
 
+    /// A native description of the actual configured API client. Execution aliases and
+    /// request-authentication clients cannot expose their caller credentials as a service.
+    /// This description alone never authorizes a native self-API binding.
+    fn native_api_target(&self) -> Option<crate::api_target::NativeApiTarget> {
+        None
+    }
+
     /// `IS_THREAD_SAFE`: whether concurrent reads may share this connector.
     fn is_thread_safe(&self) -> bool {
         false
+    }
+
+    /// Refuse a pipe target reserved for this connector's own catalog or storage machinery.
+    /// This synchronous native policy is independent of administrator/protected-write bypasses.
+    /// Ordinary connectors have no additional reserved target families.
+    fn pipe_target_refusal(&self, _pipe: &Pipe) -> Option<String> {
+        None
     }
 
     /// `connector.protected`: whether the connector's attributes mark it protected
@@ -429,6 +462,67 @@ pub trait Connector: Send + Sync {
         )))
     }
 
+    /// Group an immutable source query by UTC calendar day. Keys are Unix days.
+    async fn immutable_sync_remote_daily_counts(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support daily row counts for immutable sync.".into(),
+        ))
+    }
+
+    /// Fetch by target-side per-ID watermarks, preserving all rows for unseen IDs.
+    async fn immutable_sync_fetch_by_id(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _watermarks: &[(String, DateBound)],
+        _joined: bool,
+    ) -> ConnectorResult<Option<Frame>> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support per-ID immutable sync.".into(),
+        ))
+    }
+
+    /// Evaluate a source partition's characteristic polynomials at consecutive points.
+    async fn immutable_sync_remote_cpi(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _points: i64,
+    ) -> ConnectorResult<CpiSeries> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support Iterative CPISync.".into(),
+        ))
+    }
+
+    /// Fetch rows whose timestamp is a root of a recovered polynomial for their series.
+    async fn immutable_sync_fetch_cpi(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _polynomials: &CpiPolynomials,
+    ) -> ConnectorResult<Frame> {
+        Err(ConnectorError::NotImplemented(
+            "The source does not support Iterative CPISync.".into(),
+        ))
+    }
+
+    /// Pair optional registered-source replacement only with a logical alias of the same
+    /// trusted Main and sealed credential provider. This value stays local to the caller.
+    fn source_replace_transport(&self) -> Option<crate::source_replace::SourceReplaceTransport> {
+        None
+    }
+
+    /// Refuse a replacing fetch before the engine registers or writes its destination.
+    /// Bounded paged sources may require atomic staging that this connector cannot provide.
+    /// Ordinary connectors retain the existing replacement flow.
+    fn fetch_replace_refusal(&self) -> Option<&'static str> {
+        None
+    }
+
     /// [`Connector::fetch`] for sources whose result is not always one frame: Python plugins
     /// and custom connectors, whose `fetch()` may return a generator of chunks, the results of
     /// the `chunk_hook` calls it made, `True` or `None`. The default returns `Ok(None)`: the
@@ -478,6 +572,12 @@ pub trait Connector: Send + Sync {
 /// produces it).
 #[async_trait]
 pub trait ChunkStream: Send {
+    /// Whether the engine may collect the complete stream in memory for replacement.
+    /// A bounded source can refuse before its first chunk is requested.
+    fn collection_refusal(&self) -> Option<&'static str> {
+        None
+    }
+
     /// The next chunk, or `None` when the sequence has ended. A source that fails while
     /// producing chunks returns `Err` (v4: the exception propagates out of the generator).
     async fn next_chunk(
@@ -518,6 +618,52 @@ pub struct ChunkedFetch {
 /// atop pipes (`meerschaum.connectors.InstanceConnector`).
 #[async_trait]
 pub trait InstanceConnector: Connector {
+    /// Native row-window writes are an explicit host capability, never inferred from
+    /// generic SQL read/write support or an API label.
+    fn supports_windowed_writes(&self) -> bool {
+        false
+    }
+    /// Read-only native preflight before inference/registration/DDL.
+    async fn validate_windowed_frame(
+        &self,
+        _pipe: &Pipe,
+        _frame: &Frame,
+        _options: &SyncOptions,
+        _window: &crate::mutation::DataWindow,
+    ) -> ConnectorResult<()> {
+        Err(ConnectorError::NotImplemented(
+            "This connector has no proven native row-window adapter.".into(),
+        ))
+    }
+    /// Verify that this destination can write through the captured Main batch protocol.
+    fn require_node_delivery(&self, _pipe: &Pipe) -> ConnectorResult<()> {
+        Err(ConnectorError::Invalid(
+            "The destination cannot submit a native graph batch to Main.".into(),
+        ))
+    }
+
+    /// An execution-only transport may delegate existing-row filtering to its trusted
+    /// server, without allowing the worker to read stored data. The server must still
+    /// honor SyncOptions.check_existing. Ledger observers then receive a conservative
+    /// superset of changed input cells; ordinary instances retain exact local filtering.
+    fn server_filters_existing_rows(&self) -> bool {
+        false
+    }
+
+    /// Prepare a bounded, canonical registered-source replacement without destination
+    /// writes. Ordinary instances decline this optional capability. A supported instance
+    /// must pair the source transport exactly and reauthorize both resources on commit.
+    async fn prepare_registered_source_replace(
+        &self,
+        pipe: &Pipe,
+        source: &crate::source_replace::SourceReplaceTransport,
+        query: &DataQuery,
+        options: &SyncOptions,
+    ) -> ConnectorResult<Option<Box<dyn crate::source_replace::PreparedSourceReplace>>> {
+        let _ = (pipe, source, query, options);
+        Ok(None)
+    }
+
     // ----------------------------------------------------------------------------------------
     // Pipes
     // ----------------------------------------------------------------------------------------
@@ -652,6 +798,11 @@ pub trait InstanceConnector: Connector {
     ) -> ConnectorResult<Option<(Vec<crate::sync_metrics::MetricAggregate>, bool)>> {
         let _ = (query, begin_micros, bucket_width_micros, max_groups);
         Ok(None)
+    }
+
+    /// Whether the instance offers an operator-bound, typed registered source read.
+    fn supports_registered_source_table(&self) -> bool {
+        false
     }
 
     /// `{{ Pipe(...) }}` without an attribute chain: the table a template for this pipe expands to
@@ -826,6 +977,40 @@ pub trait InstanceConnector: Connector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>>;
+
+    /// Get the newest target timestamp or integer axis value for each distinct ID.
+    async fn immutable_sync_watermarks(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+    ) -> ConnectorResult<Vec<(String, DateBound)>> {
+        Err(ConnectorError::NotImplemented(
+            "The instance does not support per-ID immutable sync.".into(),
+        ))
+    }
+
+    /// Group the target table by UTC calendar day. Keys are Unix days.
+    async fn immutable_sync_daily_counts(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+    ) -> ConnectorResult<std::collections::BTreeMap<i64, i64>> {
+        Err(ConnectorError::NotImplemented(
+            "The instance does not support daily row counts for immutable sync.".into(),
+        ))
+    }
+
+    /// Evaluate a target partition's characteristic polynomials at consecutive points.
+    async fn immutable_sync_target_cpi(
+        &self,
+        _pipe: &Pipe,
+        _query: &DataQuery,
+        _points: i64,
+    ) -> ConnectorResult<CpiSeries> {
+        Err(ConnectorError::NotImplemented(
+            "The instance does not support Iterative CPISync.".into(),
+        ))
+    }
 
     /// `Pipe.get_rowcount(estimate=True)`: the database's estimate of the number of rows in the
     /// pipe's table (catalog statistics, no table scan), falling back to the exact count where

@@ -37,12 +37,16 @@ async fn forget_engine_state_after(
 
 #[async_trait]
 impl Connector for APIConnector {
+    fn native_api_target(&self) -> Option<meerschaum_connector::api_target::NativeApiTarget> {
+        self.configured_native_target()
+    }
+
     fn connector_type(&self) -> &str {
-        "api"
+        self.logical_identity.as_ref().map_or("api", |(typ, _)| typ)
     }
 
     fn label(&self) -> &str {
-        &self.label
+        APIConnector::label(self)
     }
 
     fn is_protected(&self) -> bool {
@@ -60,10 +64,30 @@ impl Connector for APIConnector {
     /// frame, when the source has more rows than its server sends at once (a sync reads it in
     /// chunks, [`Connector::fetch_chunked`]).
     async fn fetch(&self, pipe: &Pipe, query: &DataQuery) -> ConnectorResult<Option<Frame>> {
+        if self
+            .logical_identity
+            .as_ref()
+            .is_some_and(|(typ, _)| typ != "api")
+        {
+            return self.fetch_registered_source(pipe, query).await;
+        }
         let Some((source, q)) = self.fetch_source(pipe, query)? else {
             return Ok(None);
         };
         super::chunked::fetch_whole(self, &source, &q).await
+    }
+
+    fn source_replace_transport(
+        &self,
+    ) -> Option<meerschaum_connector::source_replace::SourceReplaceTransport> {
+        self.replacement_transport()
+    }
+
+    fn fetch_replace_refusal(&self) -> Option<&'static str> {
+        self.logical_identity
+            .as_ref()
+            .filter(|(typ, _)| typ == "sql")
+            .map(|_| super::execution_alias::REPLACE_REFUSAL)
     }
 
     /// The source pipe's rows in windows read one at a time as the sync asks for them (v4:
@@ -74,6 +98,19 @@ impl Connector for APIConnector {
         query: &DataQuery,
         _sync_chunks: bool,
     ) -> ConnectorResult<Option<crate::traits::ChunkedFetch>> {
+        if self
+            .logical_identity
+            .as_ref()
+            .is_some_and(|(typ, _)| typ != "api")
+        {
+            return Ok(Some(crate::traits::ChunkedFetch {
+                chunks: Box::new(super::execution_alias::PagedSource::new(
+                    self.clone(),
+                    pipe,
+                    query,
+                )?),
+            }));
+        }
         let Some((source, q)) = self.fetch_source(pipe, query)? else {
             // `fetch` warns and answers no data.
             return Ok(None);
@@ -148,6 +185,26 @@ impl APIConnector {
 
 #[async_trait]
 impl InstanceConnector for APIConnector {
+    fn require_node_delivery(&self, pipe: &Pipe) -> ConnectorResult<()> {
+        super::batch_sender::require_node_delivery(self, pipe)
+    }
+
+    fn server_filters_existing_rows(&self) -> bool {
+        self.logical_identity.is_some()
+    }
+
+    async fn prepare_registered_source_replace(
+        &self,
+        pipe: &Pipe,
+        source: &meerschaum_connector::source_replace::SourceReplaceTransport,
+        query: &DataQuery,
+        options: &SyncOptions,
+    ) -> ConnectorResult<Option<Box<dyn meerschaum_connector::source_replace::PreparedSourceReplace>>>
+    {
+        self.prepare_source_replacement(pipe, source, query, options)
+            .await
+    }
+
     async fn engine_run_generations(
         &self,
         run_ids: &[String],

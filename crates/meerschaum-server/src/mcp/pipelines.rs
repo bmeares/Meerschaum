@@ -318,7 +318,7 @@ pub async fn list_jobs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
     let status = str_arg(args, "status").map(|s| s.to_lowercase());
     let viewer = job_viewer(cx).await;
     let mut jobs = Vec::new();
-    for (name, mut meta) in cx.state.jobs.list().await {
+    for (name, mut meta) in cx.state.jobs.try_list().await.map_err(ToolError::value)? {
         if !may_see(viewer.as_ref(), &name, Some(&meta)) {
             continue;
         }
@@ -362,11 +362,22 @@ pub async fn get_job_logs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErro
     let name = required_str(args, "name")?;
     let lines = limit_arg(args, "lines", DEFAULT_LOG_LINES, MAX_LOG_LINES)?;
     let missing = || ToolError::value(format!("Job '{name}' does not exist."));
-    let meta = cx.state.jobs.get(&name).await.ok_or_else(missing)?;
+    let meta = cx
+        .state
+        .jobs
+        .try_get(&name)
+        .await
+        .map_err(ToolError::value)?
+        .ok_or_else(missing)?;
     if !may_see(job_viewer(cx).await.as_ref(), &name, Some(&meta)) {
         return Err(missing());
     }
-    let logs = cx.state.jobs.logs(&name).await.unwrap_or_default();
+    let logs = cx
+        .state
+        .jobs
+        .logs(&name)
+        .await
+        .ok_or_else(|| ToolError::value("The selected job's logs are unavailable."))?;
     let all: Vec<&str> = logs.lines().collect();
     let start = all.len().saturating_sub(lines);
     let tail = all[start..].join("\n");
@@ -384,7 +395,7 @@ pub async fn list_connectors(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolE
     // A connector reserved for other teams is not listed (rc15).
     let caller = caller_access(cx).await?;
     let mut connectors = Vec::new();
-    for (typ, labels) in &cx.state.config.connectors {
+    for (typ, labels) in cx.state.connectors().iter() {
         if wanted.as_ref().is_some_and(|w| w != typ) {
             continue;
         }

@@ -9,6 +9,18 @@ import json
 import os
 import sys
 
+# The shell's output pipes end at a real terminal. Keep their identity on the original
+# stream, rather than inheritable environment hints or a false fileno()/isatty() result.
+# Captures, replaced streams and redirected file descriptors must still render plain text.
+for _stream_name in ('stdout', 'stderr'):
+    if os.environ.pop('_MRSM_FORWARDED_' + _stream_name.upper() + '_TTY', '') == '1':
+        _stream = getattr(sys, _stream_name)
+        try:
+            _stat = os.fstat(_stream.fileno())
+            _stream._mrsm_forwarded_terminal = (_stat.st_dev, _stat.st_ino)
+        except (OSError, ValueError, AttributeError):
+            pass  # A startup hook may have replaced the standard stream with a capture.
+
 # Worker diagnostics must never share an MCP host's protocol stdout.
 sys.stdout = sys.stderr
 
@@ -18,6 +30,25 @@ sys.stdout = sys.stderr
 
 from meerschaum.worker import main
 from meerschaum.worker import _ops
+
+# 5.1: the Rust host passes the worker's end of a socket pair (`--socket fd:<n>`). A package
+# whose worker only connects to a socket path opens it here.
+try:
+    from meerschaum.worker import _server as _worker_server
+    if not getattr(_worker_server, 'SUPPORTS_INHERITED_CHANNEL', False):
+        _connect_path = _worker_server._connect
+
+        def _connect_channel(address):
+            if str(address).startswith('fd:'):
+                import socket as _socket
+                sock = _socket.socket(fileno=int(str(address)[3:]))
+                sock.set_inheritable(False)
+                return sock.makefile('rwb', buffering=1024 * 1024)
+            return _connect_path(address)
+
+        _worker_server._connect = _connect_channel
+except Exception:
+    pass
 
 # This interpreter is a worker: while it imports a plugin, no worker is started (a plugin whose
 # import syncs a `plugin:` pipe or calls `mrsm.entry()` would recurse without end).

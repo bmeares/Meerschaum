@@ -627,6 +627,13 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         G::Api,
     ),
     store(
+        "control_root",
+        &["--control-root"],
+        T::Str,
+        "Administrator-selected private Factory storage for start executor, outside the Team work root.",
+        G::Api,
+    ),
+    store(
         "webterm_port",
         &["--webterm-port"],
         T::Int,
@@ -907,10 +914,22 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "Allow writes to connectors marked `protected: true`.",
         G::Actions,
     ),
+    flag(
+        "plugin_manifest",
+        &["--plugin-manifest"],
+        "Return bounded plugin metadata from this confined execution context (show plugins).",
+        G::Plugins,
+    ),
 ];
 
 /// The arguments added since v4.1 (absent from the v4 parser fixture `tests/fixtures/parser.json`).
-pub const V5_ONLY_DESTS: &[&str] = &["replace", "public", "allow_protected"];
+pub const V5_ONLY_DESTS: &[&str] = &[
+    "replace",
+    "public",
+    "allow_protected",
+    "plugin_manifest",
+    "control_root",
+];
 
 /// Find an argument by `dest`.
 pub fn by_dest(dest: &str) -> Option<&'static ArgSpec> {

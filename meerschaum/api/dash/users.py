@@ -33,6 +33,7 @@ import dash_bootstrap_components as dbc
 from meerschaum.core import Plugin, User
 from meerschaum.api.dash import debug
 from meerschaum.api.dash import access
+from meerschaum.api.dash import team_setup
 
 USERS_PER_PAGE: int = 50
 USERS_GRID_COLUMNS: int = 3
@@ -511,7 +512,12 @@ def visible_teams(teams: List[Dict[str, Any]], who: Dict[str, Any]) -> List[Dict
     if who.get('admin'):
         return list(teams)
     username = who.get('username')
-    return [team for team in teams if team['builtin'] or username in team['members']]
+    ### A walled-off viewer is not in Everyone: they see their own teams only.
+    isolated = bool(getattr(who.get('viewer'), 'is_isolated', False))
+    return [
+        team for team in teams
+        if (team['builtin'] and not isolated) or username in team['members']
+    ]
 
 
 def may_manage_team(who: Dict[str, Any], team: Dict[str, Any]) -> bool:
@@ -891,6 +897,9 @@ def build_teams_table(
         if who.get('admin') and not team['builtin']:
             items += [
                 dbc.DropdownMenuItem(
+                    'Settings', id={'type': 'team-action', 'action': 'settings', 'index': name},
+                ),
+                dbc.DropdownMenuItem(
                     'Rename', id={'type': 'team-action', 'action': 'rename', 'index': name},
                 ),
                 dbc.DropdownMenuItem(divider=True),
@@ -913,7 +922,7 @@ def build_teams_table(
             [
                 html.Td([html.Span(name, className='team-name')] + (
                     [dbc.Badge('built-in', color='secondary', class_name='ms-1')] if team['builtin'] else []
-                )),
+                ) + team_badges(team)),
                 html.Td(members_text, className='team-members'),
                 html.Td(', '.join(managers), className='team-managers'),
                 html.Td(f"{pipe_counts.get(None if team['builtin'] else name, 0):,}", className='team-pipes'),
@@ -931,6 +940,40 @@ def build_teams_table(
         ),
         className='console-table-scroll',
     )
+
+
+def team_badges(team: Dict[str, Any]) -> List[Any]:
+    """A team's settings at a glance: `isolated`, and its default instance."""
+    attributes = team.get('attributes', None) or {}
+    badges = []
+    if attributes.get('isolated', False) and not team.get('builtin'):
+        badges.append(dbc.Badge('isolated', color='warning', text_color='dark', class_name='ms-1'))
+    if attributes.get('instance', None):
+        badges.append(dbc.Badge(str(attributes['instance']), color='info', text_color='dark',
+                                class_name='ms-1 team-instance-badge'))
+    return badges
+
+
+def build_team_settings_fields(prefix: str) -> List[Any]:
+    """
+    The settings a team is created with and edited to (`prefix`: `teams-new` or
+    `teams-settings`): isolation, the connectors and plugins it may use, and whether its members
+    may install plugins. Their options are filled when the dialog opens.
+    """
+    return [
+        dbc.Switch(id=f'{prefix}-isolated', label="Hide Everyone's pipes, jobs, connectors and plugins",
+                   value=True, class_name='team-setting-switch'),
+        _field('Connectors', dcc.Dropdown(
+            id=f'{prefix}-connectors', multi=True, options=[], value=[],
+            placeholder='None', className='dbc_dark team-setting-dropdown',
+        ), f'{prefix}-connectors'),
+        _field('Plugins', dcc.Dropdown(
+            id=f'{prefix}-plugins', multi=True, options=[], value=[],
+            placeholder='None', className='dbc_dark team-setting-dropdown',
+        ), f'{prefix}-plugins'),
+        dbc.Switch(id=f'{prefix}-plugins-write', label='Members install, edit and upload plugins',
+                   value=False, class_name='team-setting-switch'),
+    ]
 
 
 def build_team_members_editor(team: Dict[str, Any], user_names: List[str]) -> Any:
@@ -1117,10 +1160,50 @@ def build_users_modals() -> List[Any]:
             [
                 html.Div(id='teams-new-alert'),
                 _field('Name', dbc.Input(id='teams-new-name', autoComplete='off'), 'teams-new-name'),
+                _field('Storage', dbc.RadioItems(
+                    id='teams-new-storage',
+                    options=[{'label': label, 'value': value}
+                             for value, label in team_setup.STORAGE_CHOICES],
+                    value='instance',
+                    inline=True,
+                    class_name='team-storage-choices',
+                ), 'teams-new-storage'),
+                html.Div(
+                    [
+                        _field('Branch from', dbc.Select(id='teams-new-base', options=[], class_name='dbc_dark custom-select'),
+                               'teams-new-base'),
+                        _field(html.Span('Database name', id='teams-new-database-label'),
+                               dbc.Input(id='teams-new-database', autoComplete='off'),
+                               'teams-new-database'),
+                    ],
+                    id='teams-new-database-fields',
+                    hidden=True,
+                ),
+                html.Div(
+                    _field('Default instance', dbc.Select(id='teams-new-instance', options=[], class_name='dbc_dark custom-select'),
+                           'teams-new-instance'),
+                    id='teams-new-instance-fields',
+                ),
+                *build_team_settings_fields('teams-new'),
             ],
             [
                 dbc.Button('Cancel', id='teams-new-cancel', color='secondary'),
                 dbc.Button('Create team', id='teams-new-submit', color='primary'),
+            ],
+        ),
+        _modal(
+            'teams-settings-modal', 'teams-settings-title',
+            [
+                html.Div(id='teams-settings-alert'),
+                html.Div(id='teams-settings-database', className='team-settings-database'),
+                _field('Default instance', dbc.Select(id='teams-settings-instance', options=[], class_name='dbc_dark custom-select'),
+                       'teams-settings-instance'),
+                *build_team_settings_fields('teams-settings'),
+                dcc.Store(id='teams-settings-target'),
+            ],
+            [
+                dbc.Button('Cancel', id='teams-settings-cancel', color='secondary'),
+                dbc.Button('Save', id='teams-settings-submit', color='primary'),
             ],
         ),
         _modal(

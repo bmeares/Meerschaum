@@ -11,13 +11,17 @@ use crate::driver::{SqlTransaction, SqlValue};
 use crate::dtypes::{cast_dtype, get_db_type_from_pd_type};
 use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::sql_item_name;
+use crate::pipe::SqlPipe;
 use crate::queries::metadef::{Bound, SQLITE_STORED_DATETIME_GLOB, sqlite_canonical_datetime};
 use crate::queries::table::{
     ColumnTypeRow, CreateTableOptions, QueryOrDtypes, cols_types_from_rows,
     get_create_schema_if_not_exists_queries, get_create_table_queries, get_table_cols_types_query,
 };
 use crate::queries::templates::has_update_query;
-use crate::queries::update::{UpdateQueriesArgs, get_null_replacement, get_update_queries};
+use crate::queries::update::{
+    UpdateQueriesArgs, changed_only_comparable, changed_only_new_value, get_null_replacement,
+    get_update_queries, null_replacement_applies, null_safe_equals,
+};
 use meerschaum_connector::DataQuery;
 
 use super::data::{DataQueryOptions, fmt_thousands};
@@ -133,10 +137,12 @@ impl SqlConnector {
             Flavor::Sqlite | Flavor::Geopackage | Flavor::Duckdb | Flavor::Oracle => None,
             _ => self.database(),
         };
-        // NOTE: Check for PostGIS GEOMETRY columns.
+        // NOTE: Check for PostGIS GEOMETRY columns. Only where PostGIS is installed: the lookup
+        // fails without its views, and a failed statement aborts the sync's transaction.
         let mut geometry = IndexMap::new();
         if self.flavor.driver_family() == DriverFamily::Postgres
             && crate::queries::table::needs_postgis_lookup(&rows)
+            && Box::pin(self.postgis_catalog(tx.as_mut())).await
         {
             let ischema = crate::queries::table::introspection_schema(self.flavor, schema);
             if let Ok(q) = crate::queries::table::get_postgis_geo_columns_types_query(
@@ -160,6 +166,52 @@ impl SqlConnector {
             }
         }
         cols_types_from_rows(&rows, self.flavor, schema, database, &geometry)
+    }
+
+    /// Create the native range partitions (PostgreSQL, PostGIS) that the rows of `staged` (a
+    /// table this transaction staged, so read in it) need in the pipe's partitioned table.
+    /// The partitions are created on their own connection and kept, as the frame path creates
+    /// them (`create_missing_partitions`): creating them in this transaction would hold the
+    /// parent's lock while later catalog reads on other connections wait for it. Nothing when
+    /// the table is not partitioned (an older table, `hypertable: false`) or `staged` has no
+    /// datetimes.
+    async fn create_partitions_for_staged(
+        &self,
+        tx: &mut Option<SqlTransaction>,
+        sp: &SqlPipe,
+        staged: &str,
+        dt_col: &str,
+    ) -> Result<(), String> {
+        let flavor = self.flavor;
+        let Some(t) = tx.as_mut() else {
+            return Err("The session was rolled back.".into());
+        };
+        let partitioned = t
+            .read_frame(&crate::queries::partition::get_pg_is_partitioned_query(
+                &self.ctx(),
+                sp,
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
+        if partitioned.height() == 0 {
+            return Ok(());
+        }
+        let dt = sql_item_name(dt_col, flavor, None);
+        let bounds = t
+            .read_frame(&format!(
+                "SELECT {dt} FROM (SELECT MIN({dt}) AS {dt} FROM {staged} UNION ALL \
+                 SELECT MAX({dt}) FROM {staged}) AS {} WHERE {dt} IS NOT NULL",
+                sql_item_name("bounds", flavor, None)
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
+        let ranges = self.partition_ranges_for_frame(sp, &bounds);
+        let queries =
+            crate::queries::partition::get_pg_partition_creation_queries(&self.ctx(), sp, &ranges);
+        if !queries.is_empty() && !self.exec_queries_all(&queries, true, true).await {
+            return Err(format!("Failed to create partitions for {}.", sp.pipe()));
+        }
+        Ok(())
     }
 
     /// `sync_pipe_inplace(pipe, params, begin, end, check_existing)`: sync a pipe whose SQL
@@ -305,7 +357,9 @@ impl SqlConnector {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
-        let state = self.pipe_state(&sp).await;
+        // These catalog futures are large in debug builds. Keep them out of the deeply
+        // nested engine poll stack, which otherwise exhausts Tokio's default 2 MiB stack.
+        let state = Box::pin(self.pipe_state(&sp)).await;
         if let Some(o) = observer {
             o.pipe_dtypes(&self.dtypes_ctx(&sp, &state));
         }
@@ -423,7 +477,9 @@ impl SqlConnector {
             } else {
                 vec![temp_tables["update"].clone()]
             };
-            async move {
+            // Every exit awaits cleanup. Returning a boxed future also keeps its state
+            // out of each of those await sites in this large state machine's poll method.
+            Box::pin(async move {
                 let (ok, msg) = self
                     .log_temporary_tables_creation(&tables, ready_to_drop, !pipe.temporary)
                     .await;
@@ -434,7 +490,7 @@ impl SqlConnector {
                 if !ok {
                     tracing::warn!("{msg}");
                 }
-            }
+            })
         };
 
         if !state.exists && sqlite_family {
@@ -508,7 +564,7 @@ impl SqlConnector {
                         "Could not insert new data into {pipe} from its SQL query definition."
                     ));
                 }
-                if !self.create_indices_sp(&sp, None, None, None).await {
+                if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
                     tracing::warn!("Failed to create indices for {pipe}. Continuing...");
                 }
                 let rowcount = self
@@ -583,7 +639,7 @@ impl SqlConnector {
                 clean_up(false).await;
                 return SuccessTuple::fail(e.to_string());
             }
-            if !self.create_indices_sp(&sp, None, None, None).await {
+            if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
             clean_up(true).await;
@@ -591,6 +647,156 @@ impl SqlConnector {
                 "Inserted {}, updated 0 rows.",
                 fmt_thousands(inserted)
             ));
+        }
+
+        if !state.exists
+            && flavor.pg_partition()
+            && self.should_partition(&sp)
+            && let Some(dt) = dt_col.as_deref()
+        {
+            // Boxed: the in-place sync's future stays small (a debug build's 2 MiB worker
+            // stack, see `sync_pipe_inplace_forgetting`).
+            return Box::pin(async {
+            // The frame path partitions this pipe's table by its datetime column (`CREATE
+            // TABLE ... PARTITION BY RANGE`, the datetime column folded into the primary key):
+            // `CREATE TABLE ... AS` cannot. Stage the definition's rows, create the table
+            // with the staged columns' own types, its partitions, then copy the rows.
+            let schema = self.get_pipe_schema(&sp);
+            let staged = &temp_tables["new"];
+            let staged_name = &names["new"];
+            let mut stage =
+                get_create_schema_if_not_exists_queries(isch, flavor).unwrap_or_default();
+            match get_create_table_queries(
+                &QueryOrDtypes::Query(metadef.clone()),
+                staged,
+                flavor,
+                &CreateTableOptions {
+                    schema: internal_schema.clone(),
+                    ..Default::default()
+                },
+            ) {
+                Ok(q) => stage.extend(q),
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            }
+            if !self.exec_queries_all(&stage, false, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not stage new data for {pipe} from its SQL query definition."
+                ));
+            }
+            if let Some(o) = observer {
+                let query = format!("SELECT {observed_col} FROM {staged_name}");
+                let observed = match self.driver().read_frame(&query).await {
+                    Ok(delta) => o.before_merge(&delta).await,
+                    Err(e) => Err(e.to_string()),
+                };
+                if let Err(e) = observed {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e);
+                }
+            }
+            // The staged columns' types as the catalog formats them for DDL (`integer[]`, an
+            // enum's name, `numeric(10,2)`), not `information_schema`'s placeholders.
+            let types_query = format!(
+                "SELECT a.attname AS \"column\", pg_catalog.format_type(a.atttypid, a.atttypmod) AS \"type\" \
+                 FROM pg_catalog.pg_attribute a WHERE a.attrelid = '{}'::regclass \
+                 AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
+                staged_name.replace('\'', "''")
+            );
+            let db_types: IndexMap<String, String> = match self.read_catalog(&types_query).await {
+                Ok(df) => frame_docs(&df)
+                    .iter()
+                    .filter_map(|d| Some((kv_str(d.get("column"))?, kv_str(d.get("type"))?)))
+                    .collect(),
+                Err(e) => {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e.to_string());
+                }
+            };
+            let mut queries = match get_create_table_queries(
+                &QueryOrDtypes::Dtypes(db_types.clone()),
+                &target,
+                flavor,
+                &CreateTableOptions {
+                    schema: schema.clone(),
+                    primary_key: primary_key.clone(),
+                    primary_key_db_type: primary_key
+                        .as_ref()
+                        .and_then(|pk| db_types.get(pk))
+                        .cloned()
+                        .or(primary_key_db_type.clone()),
+                    autoincrement,
+                    datetime_column: dt_col.clone(),
+                    partition_by_column: Some(dt.to_string()),
+                    parse_dtypes: false,
+                    ..Default::default()
+                },
+            ) {
+                Ok(q) => q,
+                Err(e) => return SuccessTuple::fail(e.to_string()),
+            };
+            if let Some(s) = schema.as_deref().filter(|s| !s.is_empty())
+                && let Ok(mut q) = get_create_schema_if_not_exists_queries(Some(s), flavor)
+            {
+                q.extend(queries);
+                queries = q;
+            }
+            if !self.exec_queries_all(&queries, false, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not insert new data into {pipe} from its SQL query definition."
+                ));
+            }
+            let dt_name = sql_item_name(dt, flavor, None);
+            let bounds = match self
+                .driver()
+                .read_frame(&format!(
+                    "SELECT {dt_name} FROM (SELECT MIN({dt_name}) AS {dt_name} FROM {staged_name} \
+                     UNION ALL SELECT MAX({dt_name}) FROM {staged_name}) AS {} WHERE {dt_name} IS NOT NULL",
+                    sql_item_name("bounds", flavor, None)
+                ))
+                .await
+            {
+                Ok(df) => df,
+                Err(e) => {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e.to_string());
+                }
+            };
+            let partitions = self.create_missing_partitions(&sp, &bounds).await;
+            if !partitions.success {
+                clean_up(false).await;
+                return partitions;
+            }
+            let cols = db_types
+                .keys()
+                .map(|c| sql_item_name(c, flavor, None))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let insert =
+                format!("INSERT INTO {pipe_name} ({cols})\nSELECT {cols}\nFROM {staged_name}");
+            if !self.exec_queries_all(&[insert], false, true).await {
+                clean_up(false).await;
+                return SuccessTuple::fail(format!(
+                    "Could not insert new data into {pipe} from its SQL query definition."
+                ));
+            }
+            if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
+                tracing::warn!("Failed to create indices for {pipe}. Continuing...");
+            }
+            let rowcount = self
+                .get_pipe_rowcount(pipe, &DataQuery::default())
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            clean_up(true).await;
+            SuccessTuple::ok(format!(
+                "Inserted {}, updated 0 rows.",
+                fmt_thousands(rowcount)
+            ))
+            })
+            .await;
         }
 
         if !state.exists {
@@ -673,7 +879,7 @@ impl SqlConnector {
                     "Could not insert new data into {pipe} from its SQL query definition."
                 ));
             }
-            if !self.create_indices_sp(&sp, None, None, None).await {
+            if !Box::pin(self.create_indices_sp(&sp, None, None, None)).await {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
             let rowcount = self
@@ -924,7 +1130,7 @@ impl SqlConnector {
             table_cols_types = self
                 .get_table_cols_types(&target, pipe_schema.as_deref())
                 .await;
-            state = self.pipe_state(&sp).await;
+            state = Box::pin(self.pipe_state(&sp)).await;
         }
         // PostgreSQL can store integer, floating and decimal SQL expressions in an existing
         // unbounded NUMERIC column. A CASE expression may promote NUMERIC to DOUBLE PRECISION;
@@ -986,7 +1192,7 @@ impl SqlConnector {
         // The table is read again only after it was altered; new explicit dtypes only change
         // how its columns are typed.
         let state = if altered {
-            self.pipe_state(&sp).await
+            Box::pin(self.pipe_state(&sp)).await
         } else {
             super::data::PipeState {
                 exists: state.exists,
@@ -1003,6 +1209,19 @@ impl SqlConnector {
                 Ok(t) => Some(t),
                 Err(e) => fail!(e.to_string()),
             };
+        }
+
+        // Native range partitions (PostgreSQL, PostGIS) for the staged rows, as the frame path
+        // creates them before it writes: in this transaction (the staged table is visible only
+        // here), after the columns were added on their own connection.
+        if flavor.pg_partition()
+            && self.should_partition(&sp)
+            && let Some(dt) = dt_col.as_deref()
+            && let Err(e) =
+                Box::pin(self.create_partitions_for_staged(&mut tx, &sp, &names[new_root], dt))
+                    .await
+        {
+            fail!(e);
         }
 
         // The window a replacing sync deletes (`[begin, end)`, the sync time minus the backtrack
@@ -1327,6 +1546,26 @@ impl SqlConnector {
                 .collect(),
             Some(pk) => {
                 let mut m = IndexMap::new();
+                // An upsert conflicts on the table's own unique key. A partitioned table (a
+                // hypertable, native partitions) folds the datetime column into its primary
+                // key, so `(pk)` alone matches no unique index there: use `(dt, pk)` when that
+                // is the key, as the frame path does (`sync.rs`, `partition_upsert`).
+                if upsert
+                    && flavor.driver_family() == DriverFamily::Postgres
+                    && let Some(dt) = dt_col.as_ref().filter(|dt| {
+                        *dt != pk
+                            && backtrack_cols_types.contains_key(*dt)
+                            && new_cols.contains_key(*dt)
+                    })
+                    && Box::pin(self.upsert_conflict_target(&sp, std::slice::from_ref(pk)))
+                        .await
+                        .is_none()
+                    && Box::pin(self.upsert_conflict_target(&sp, &[dt.clone(), pk.clone()]))
+                        .await
+                        .is_some()
+                {
+                    m.insert(dt.clone(), new_cols.get(dt).cloned().unwrap_or_default());
+                }
                 m.insert(pk.clone(), new_cols.get(pk).cloned().unwrap_or_default());
                 m
             }
@@ -1345,12 +1584,23 @@ impl SqlConnector {
             "\n    {}",
             new_cols
                 .keys()
-                .map(|col| format!(
-                    "COALESCE({a_new}.{}, {}) AS {}",
-                    q(col),
-                    get_null_replacement(&get_col_typ(col, &new_cols_types), Some(flavor)),
-                    q(col)
-                ))
+                .map(|col| {
+                    let typ = get_col_typ(col, &new_cols_types);
+                    if (upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only())
+                        || !null_replacement_applies(&typ, Some(flavor))
+                    {
+                        // A type the stand-in is not a value of keeps its NULLs (the
+                        // comparisons below are NULL-safe for it).
+                        format!("{a_new}.{} AS {}", q(col), q(col))
+                    } else {
+                        format!(
+                            "COALESCE({a_new}.{}, {}) AS {}",
+                            q(col),
+                            get_null_replacement(&get_col_typ(col, &new_cols_types), Some(flavor)),
+                            q(col)
+                        )
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(",\n    ")
         );
@@ -1382,24 +1632,67 @@ impl SqlConnector {
                     let new = format!("{a_new}.{}", q(c));
                     let old = format!("{a_bt}.{}", q(c));
                     let target_type = get_col_typ(c, &backtrack_cols_types);
-                    let new_value = upsert_comparable_value(
+                    let mut new_value = upsert_comparable_value(
                         &new,
                         &get_col_typ(c, &new_cols_types),
                         &target_type,
                         flavor,
                     );
-                    let old_value =
+                    let mut old_value =
                         upsert_comparable_value(&old, &target_type, &target_type, flavor);
+                    // Value columns compare as the guard does (key columns match as above);
+                    // the new value is converted to the stored type as its assignment does.
+                    let source_type = get_col_typ(c, &new_cols_types);
+                    if !null_replacement_applies(&target_type, Some(flavor))
+                        || !null_replacement_applies(&source_type, Some(flavor))
+                    {
+                        // A type without an exact `=` (`point`, `xml`) or compared exactly by
+                        // its text (an enum, `interval`).
+                        return format!(
+                            "({})",
+                            null_safe_equals(&new, &old, &source_type, &target_type, Some(flavor))
+                        );
+                    }
+                    if sp.upsert_changed_only()
+                        && flavor.supports_upsert_changed_only()
+                        && !on_cols.contains_key(c)
+                    {
+                        let assigned = changed_only_new_value(
+                            &new,
+                            &get_col_typ(c, &new_cols_types),
+                            &target_type,
+                        );
+                        new_value = changed_only_comparable(&assigned, &target_type);
+                        old_value = changed_only_comparable(&old, &target_type);
+                    }
                     return format!(
                         "({new_value} = {old_value} OR ({new} IS NULL AND {old} IS NULL))"
+                    );
+                }
+                let (new_type, old_type) = (
+                    get_col_typ(c, &new_cols_types),
+                    get_col_typ(c, &backtrack_cols_types),
+                );
+                if !null_replacement_applies(&new_type, Some(flavor))
+                    || !null_replacement_applies(&old_type, Some(flavor))
+                {
+                    return format!(
+                        "    {} ",
+                        null_safe_equals(
+                            &format!("{a_new}.{}", q(c)),
+                            &format!("{a_bt}.{}", q(c)),
+                            &new_type,
+                            &old_type,
+                            Some(flavor),
+                        )
                     );
                 }
                 format!(
                     "    COALESCE({a_new}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {}) ",
                     q(c),
-                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
+                    get_null_replacement(&new_type, Some(flavor)),
                     q(c),
-                    get_null_replacement(&get_col_typ(c, &backtrack_cols_types), Some(flavor)),
+                    get_null_replacement(&old_type, Some(flavor)),
                 )
             })
             .collect::<Vec<_>>()
@@ -1473,13 +1766,28 @@ impl SqlConnector {
             names["backtrack"],
             on_cols
                 .keys()
-                .map(|c| format!(
-                    "    COALESCE({a_delta}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {})",
-                    q(c),
-                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
-                    q(c),
-                    get_null_replacement(&get_col_typ(c, &new_cols_types), Some(flavor)),
-                ))
+                .map(|c| {
+                    let typ = get_col_typ(c, &new_cols_types);
+                    if !null_replacement_applies(&typ, Some(flavor)) {
+                        return format!(
+                            "    {}",
+                            null_safe_equals(
+                                &format!("{a_delta}.{}", q(c)),
+                                &format!("{a_bt}.{}", q(c)),
+                                &typ,
+                                &get_col_typ(c, &backtrack_cols_types),
+                                Some(flavor),
+                            )
+                        );
+                    }
+                    format!(
+                        "    COALESCE({a_delta}.{}, {})\n        =\n        COALESCE({a_bt}.{}, {})",
+                        q(c),
+                        get_null_replacement(&typ, Some(flavor)),
+                        q(c),
+                        get_null_replacement(&typ, Some(flavor)),
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n    AND\n    "),
         );
@@ -1497,10 +1805,15 @@ impl SqlConnector {
         let case_cols = delta_cols
             .keys()
             .map(|c| {
+                let typ = get_col_typ(c, &delta_cols_types);
+                if !null_replacement_applies(&typ, Some(flavor)) {
+                    // Its NULLs were kept (no stand-in to turn back into NULL).
+                    return format!("{} AS {}", q(&format!("{c}_delta")), q(c));
+                }
                 format!(
                     "CASE\n        WHEN {} != {} THEN {}\n        ELSE NULL\n    END AS {}",
                     q(&format!("{c}_delta")),
-                    get_null_replacement(&get_col_typ(c, &delta_cols_types), Some(flavor)),
+                    get_null_replacement(&typ, Some(flavor)),
                     q(&format!("{c}_delta")),
                     q(c)
                 )
@@ -1579,6 +1892,7 @@ impl SqlConnector {
             args.null_safe_upsert = sp.null_indices()
                 && pipe.connector_keys() != "mrsm"
                 && (matches!(flavor, Flavor::Mysql | Flavor::Mariadb) || !key_null_safe);
+            args.changed_only = sp.upsert_changed_only();
         }
         let apply_update_queries = get_update_queries(&args);
 
@@ -1607,10 +1921,12 @@ impl SqlConnector {
             };
         }
         let mut update_count = 0;
+        let count_all = upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only();
         for (i, query) in apply_update_queries.iter().enumerate() {
             self.log(query);
             match session_execute(self, &mut tx, query, flavor).await {
                 // PARITY: only the first statement's rowcount is reported (`_pipes.py:2905`).
+                Ok(n) if count_all => update_count += n,
                 Ok(n) if i == 0 => update_count = n,
                 Ok(_) => {}
                 Err(e) => fail!(e),
@@ -1873,6 +2189,65 @@ fn storage_classes_query<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Engine calls nest these futures on Tokio's default 2 MiB worker stack. The large
+    /// in-place state machine must stay boxed rather than embedded in every caller.
+    #[tokio::test]
+    async fn inplace_futures_stay_small() {
+        let spec = crate::uri::ConnectionSpec::from_attributes(&crate::uri::ConnectorAttributes {
+            flavor: Some(Flavor::Sqlite),
+            database: Some(":memory:".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let conn = SqlConnector::connect_lazy(
+            "future_size",
+            spec,
+            super::super::InstanceSettings::defaults(Flavor::Sqlite),
+        )
+        .unwrap();
+        let pipe = Pipe::builder("sql:future_size", "inplace").build().unwrap();
+        let sizes = [
+            (
+                "sync_pipe_inplace",
+                std::mem::size_of_val(&conn.sync_pipe_inplace(
+                    &pipe,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                )),
+            ),
+            (
+                "sync_pipe_inplace_replacing",
+                std::mem::size_of_val(&conn.sync_pipe_inplace_replacing(
+                    &pipe,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                    true,
+                    None,
+                )),
+            ),
+            (
+                "sync_pipe_inplace_forgetting",
+                std::mem::size_of_val(&conn.sync_pipe_inplace_forgetting(
+                    &pipe,
+                    None,
+                    Bound::None,
+                    Bound::None,
+                    true,
+                    false,
+                    None,
+                )),
+            ),
+        ];
+        eprintln!("in-place future sizes: {sizes:?}");
+        for (name, size) in sizes {
+            assert!(size <= 1024, "{name} future is {size} bytes");
+        }
+    }
 
     #[test]
     fn storage_classes_type_untyped_columns() {

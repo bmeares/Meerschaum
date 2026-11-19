@@ -658,6 +658,14 @@ impl Admission {
         &self.release_file
     }
 
+    /// Have the worker create its release file in `dir` instead (5.1: a sandboxed team job's
+    /// work directory, the only place its command may write).
+    pub fn relocate_release(&mut self, dir: &Path) {
+        if let Some(name) = self.release_file.file_name() {
+            self.release_file = dir.join(name);
+        }
+    }
+
     /// The value of [`RELEASE_ENV`] for the worker.
     pub fn release_env(&self) -> String {
         format!("{}:{}", std::process::id(), self.release_file.display())
@@ -916,9 +924,12 @@ pub fn take_start_hint(dir: &Path, job: &str) -> Option<StartKind> {
         .ok()
         .and_then(|m| m.elapsed().ok())
         .is_some_and(|age| age < HINT_MAX_AGE);
-    let text = fs::read_to_string(&path).ok();
-    let _ = fs::remove_file(&path);
-    text.filter(|_| fresh).and_then(|t| StartKind::parse(&t))
+    let bytes = crate::untrusted_file::read_regular(&path, 64, true)
+        .ok()
+        .flatten();
+    bytes
+        .filter(|_| fresh)
+        .and_then(|bytes| std::str::from_utf8(&bytes).ok().and_then(StartKind::parse))
 }
 
 #[cfg(test)]

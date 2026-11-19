@@ -440,6 +440,8 @@ pub struct InstanceState {
     /// The pipes whose sync statuses this state recorded since the last
     /// [`InstanceState::flush_sync_statuses`] ([`StateWriter::record_sync_status`]).
     status_refs: Mutex<std::collections::HashSet<String>>,
+    read_limit: Option<usize>,
+    read_byte_limit: Option<usize>,
 }
 
 impl std::fmt::Debug for InstanceState {
@@ -459,7 +461,22 @@ impl InstanceState {
             pipes: RwLock::new(HashMap::new()),
             seq_locks: Mutex::new(HashMap::new()),
             status_refs: Mutex::new(std::collections::HashSet::new()),
+            read_limit: None,
+            read_byte_limit: None,
         }
+    }
+
+    /// Bound each state read for a host that accepts only bounded metadata plans.
+    /// The extra selected row distinguishes a complete result from truncation.
+    pub fn with_read_limit(mut self, limit: usize) -> Self {
+        self.read_limit = Some(limit.min(i64::MAX as usize - 1));
+        self
+    }
+
+    /// Refuse oversized state payloads before materializing documents for planning.
+    pub fn with_read_byte_limit(mut self, limit: usize) -> Self {
+        self.read_byte_limit = Some(limit);
+        self
     }
 
     /// Wait (up to `timeout`) until the sync statuses recorded so far
@@ -523,13 +540,57 @@ impl InstanceState {
         let pipe = engine_pipe_on(conn.as_ref(), instance, kind)
             .await
             .map_err(|e| unreachable(instance, e))?;
+        // Bounded readers do not retrieve arbitrary extra JSON columns from state tables.
+        let narrow: Option<&[&str]> = if self.read_limit.is_some() {
+            match kind {
+                EnginePipe::State => Some(&["pipe_ref", "definition_hash"]),
+                EnginePipe::Ledger => Some(&["pipe_ref", "seq", "begin", "end", "created"]),
+                EnginePipe::Cursors => Some(&[
+                    "parent_ref",
+                    "child_ref",
+                    "seq",
+                    "parent_watermark_at_cursor",
+                    "role",
+                ]),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let q = DataQuery {
             params: Some(params),
-            select_columns: select.map(|s| s.iter().map(|c| c.to_string()).collect()),
+            select_columns: select
+                .or(narrow)
+                .map(|s| s.iter().map(|c| c.to_string()).collect()),
+            limit: self.read_limit.map(|limit| limit as i64 + 1),
             ..Default::default()
         };
         match conn.get_pipe_data(&pipe, &q).await {
-            Ok(Some(df)) => Ok(frame_to_docs(&df)),
+            Ok(Some(df)) if self.read_limit.is_some_and(|limit| df.height() > limit) => Err(
+                StateError::Other("Engine metadata exceeds the planner's read limit.".into()),
+            ),
+            Ok(Some(df)) => {
+                if let Some(limit) = self.read_byte_limit {
+                    let mut bytes = 0usize;
+                    for column in df.columns() {
+                        for value in column.data.values_ref().iter() {
+                            let size = match value {
+                                KValue::Str(value) => value.len(),
+                                KValue::Bytes(value) => value.len(),
+                                KValue::Json(value) => value.as_text().len(),
+                                _ => 64,
+                            };
+                            bytes = bytes.saturating_add(size);
+                            if size > 1024 * 1024 || bytes > limit {
+                                return Err(StateError::Other(
+                                    "Engine metadata exceeds the planner's payload limit.".into(),
+                                ));
+                            }
+                        }
+                    }
+                }
+                Ok(frame_to_docs(&df))
+            }
             Ok(None) => Ok(Vec::new()),
             Err(ConnectorError::NotImplemented(m)) => Err(StateError::ReadOnly { instance: m }),
             Err(e) => Err(unreachable(instance, e)),

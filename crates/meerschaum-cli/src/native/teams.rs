@@ -10,7 +10,7 @@
 //! On an `api:` instance the server decides who may.
 
 use meerschaum_core::SuccessTuple;
-use meerschaum_core::access::{EVERYONE, Team, TeamRole, is_everyone as everyone_name};
+use meerschaum_core::access::{EVERYONE, Team, TeamRole, is_everyone as everyone_name, same_team};
 use meerschaum_core::value::{Map, Value};
 
 use crate::builtin::{ActionError, ActionResult};
@@ -67,7 +67,7 @@ pub fn is_everyone(name: &str) -> bool {
 }
 
 /// Members and managers as stored: every manager is a member; both sorted, each name once.
-fn normalized(mut team: TeamInfo) -> TeamInfo {
+pub(super) fn normalized(mut team: TeamInfo) -> TeamInfo {
     let clean = |names: &mut Vec<String>| {
         for name in names.iter_mut() {
             *name = name.trim().to_string();
@@ -125,7 +125,7 @@ pub async fn get_teams(inst: &Instance) -> Result<Vec<TeamInfo>, String> {
 }
 
 /// One team, by name.
-async fn get_team(inst: &Instance, name: &str) -> Result<Option<TeamInfo>, String> {
+pub(super) async fn get_team(inst: &Instance, name: &str) -> Result<Option<TeamInfo>, String> {
     inst.conn()
         .get_team(name)
         .await
@@ -133,7 +133,7 @@ async fn get_team(inst: &Instance, name: &str) -> Result<Option<TeamInfo>, Strin
         .map_err(|e| e.to_string())
 }
 
-async fn register_team(inst: &Instance, team: &TeamInfo) -> SuccessTuple {
+pub(super) async fn register_team(inst: &Instance, team: &TeamInfo) -> SuccessTuple {
     let mut core = to_core(team);
     inst.conn().register_team(&mut core).await
 }
@@ -155,7 +155,7 @@ async fn delete_team(inst: &Instance, name: &str) -> SuccessTuple {
 // ------------------------------------------------------------------------------------------
 
 /// A comma-separated list argument (`--members a,b`).
-fn list_arg(args: &ArgsMap, key: &str) -> Option<Vec<String>> {
+pub(super) fn list_arg(args: &ArgsMap, key: &str) -> Option<Vec<String>> {
     string(args, key).map(|text| {
         text.split(',')
             .map(|n| n.trim().to_string())
@@ -167,7 +167,7 @@ fn list_arg(args: &ArgsMap, key: &str) -> Option<Vec<String>> {
 /// The usernames among `names` that are not registered on the instance. When the users cannot
 /// be listed (an `api:` caller without `users:read`, such as a team's manager), the team store
 /// checks them itself.
-fn unregistered(
+pub(super) fn unregistered(
     rt: &mut Runtime<'_>,
     inst: &Instance,
     names: &[String],
@@ -191,7 +191,7 @@ fn unregistered(
     Ok(missing)
 }
 
-fn unregistered_failure(inst: &Instance, missing: &[String]) -> SuccessTuple {
+pub(super) fn unregistered_failure(inst: &Instance, missing: &[String]) -> SuccessTuple {
     SuccessTuple::fail(format!(
         "{} not registered on instance '{}': {}.",
         if missing.len() == 1 {
@@ -363,6 +363,67 @@ pub fn show_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::success())
 }
 
+/// Whether `--params` asks to adopt the connectors reserved for a team's name (`"adopt": true`).
+pub(super) fn adopt_requested(args: &ArgsMap) -> bool {
+    super::params(args).is_some_and(|p| p.get("adopt").is_some_and(Value::truthy))
+}
+
+/// Refuse to give `name` (no team has it) the connectors still reserved for that name in this
+/// configuration (a deleted or renamed team's, or written by hand) unless `adopt`. An `api:`
+/// instance's server refuses for itself.
+pub(super) fn refuse_reserved(
+    rt: &mut Runtime<'_>,
+    inst: &Instance,
+    name: &str,
+    adopt: bool,
+) -> Option<SuccessTuple> {
+    if adopt || inst.type_name() == "api" {
+        return None;
+    }
+    let connectors = rt
+        .config()
+        .get(&["meerschaum", "connectors"])
+        .map(|v| v.to_map())
+        .unwrap_or_default();
+    let reserved = meerschaum_core::access::reserved_for(&connectors, name);
+    if reserved.is_empty() {
+        return None;
+    }
+    Some(SuccessTuple::fail(format!(
+        "The connector{s} {} {are} reserved for a team named '{name}' that does not exist (it may \
+         hold another team's data). Choose another name, remove the connector's `teams`, or add \
+         `--params '{{\"adopt\": true}}'` to let the team use it.",
+        reserved.join(", "),
+        s = if reserved.len() == 1 { "" } else { "s" },
+        are = if reserved.len() == 1 { "is" } else { "are" },
+    )))
+}
+
+/// After a rename (`to`: the new name) or a deletion (`to`: [`meerschaum_core::access::retired_reservation`])
+/// on a local instance: move the team's connector reservations in the configuration file.
+pub(super) fn move_reservations(rt: &mut Runtime<'_>, inst: &Instance, from: &str, to: &str) {
+    if inst.type_name() == "api" {
+        return;
+    }
+    match rt.config().move_team_reservations(from, to) {
+        Ok(changed) if !changed.is_empty() => info(
+            rt,
+            &format!(
+                "The reservation of {} for team '{from}' now names '{to}'.",
+                changed.join(", ")
+            ),
+        ),
+        Ok(_) => {}
+        Err(e) => warn(
+            rt,
+            &format!(
+                "{e}\nThe connectors reserved for team '{from}' still name it: remove their \
+                 `teams` (or change it) before a team takes that name."
+            ),
+        ),
+    }
+}
+
 /// `register teams NAME ... [--members a,b] [--managers c]`.
 pub fn register_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let inst = super::get_instance(args, rt)?;
@@ -402,6 +463,11 @@ pub fn register_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 failed += 1;
                 continue;
             }
+        }
+        if let Some(refused) = refuse_reserved(rt, &inst, name, adopt_requested(args)) {
+            print_tuple(rt, &refused, TupleArgs::default());
+            failed += 1;
+            continue;
         }
         let team = normalized(TeamInfo {
             name: name.clone(),
@@ -632,6 +698,15 @@ pub fn edit_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 edited.name,
                 counts_text(pipes, jobs)
             );
+            if !same_team(Some(&current.name), Some(&edited.name))
+                && matches!(session.block_on(get_team(&inst, &edited.name)), Ok(None))
+                && let Some(refused) =
+                    refuse_reserved(rt, &inst, &edited.name, adopt_requested(args))
+            {
+                print_tuple(rt, &refused, TupleArgs::default());
+                failed += 1;
+                continue;
+            }
             if !(force || yes_no(rt, &question, "y", yes, noask)?) {
                 info(rt, &format!("Team '{}' is unchanged.", current.name));
                 continue;
@@ -642,8 +717,25 @@ pub fn edit_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 failed += 1;
                 continue;
             }
+            move_reservations(rt, &inst, &current.name, &edited.name);
             if jobs.is_some_and(|n| n > 0) {
                 retag_jobs(rt, &inst, &current.name, Some(&edited.name));
+            }
+            // The team's Grafana organization (its saved id) follows (`api:grafana`). An `api:`
+            // instance's server does it itself.
+            if inst.type_name() != "api" {
+                let org = meerschaum_web::grafana::team_org_id(&to_core(&current));
+                let renamed = match super::team_setup::grafana_settings(rt) {
+                    Ok(settings) => session.block_on(meerschaum_web::grafana::rename_team(
+                        settings.as_ref(),
+                        org,
+                        &edited.name,
+                    )),
+                    Err(e) => Err(e),
+                };
+                if let Err(e) = renamed {
+                    warn(rt, &e);
+                }
             }
             team_name = edited.name.clone();
         }
@@ -699,10 +791,10 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         )));
     }
     let session = session(rt);
-    let mut registered: Vec<String> = Vec::new();
+    let mut registered: Vec<TeamInfo> = Vec::new();
     for name in &names {
         match session.block_on(get_team(&inst, name)) {
-            Ok(Some(team)) => registered.push(team.name),
+            Ok(Some(team)) => registered.push(team),
             Ok(None) => info(rt, &format!("Team '{name}' does not exist. Skipping...")),
             Err(e) => {
                 return Ok(SuccessTuple::fail(format!(
@@ -718,7 +810,8 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         "Are you sure you want to delete these teams from Meerschaum instance '{}'?\nTheir pipes and jobs move to '{EVERYONE}'.\n",
         inst.keys()
     );
-    for name in &registered {
+    for team in &registered {
+        let name = &team.name;
         let (pipes, jobs) = team_counts(rt, &inst, name);
         question.push_str(&format!(" - {name} ({})\n", counts_text(pipes, jobs)));
     }
@@ -729,7 +822,8 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let mut succeeded = 0usize;
     let mut failed = 0usize;
-    for name in &registered {
+    for team in &registered {
+        let name = &team.name;
         info(
             rt,
             &format!(
@@ -741,6 +835,25 @@ pub fn delete_teams(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         print_tuple(rt, &res, TupleArgs::default());
         if res.success {
             retag_jobs(rt, &inst, name, None);
+            // Its connectors, database and data stay; no later team of its name inherits them.
+            let retired = meerschaum_core::access::retired_reservation(name, team.id.as_deref());
+            move_reservations(rt, &inst, name, &retired);
+            // The team's Grafana organization is retired (`api:grafana`). An `api:` instance's
+            // server does it itself.
+            if inst.type_name() != "api" {
+                let org = meerschaum_web::grafana::team_org_id(&to_core(team));
+                let retired = match super::team_setup::grafana_settings(rt) {
+                    Ok(settings) => session.block_on(meerschaum_web::grafana::retire_team(
+                        settings.as_ref(),
+                        name,
+                        org,
+                    )),
+                    Err(e) => Err(e),
+                };
+                if let Err(e) = retired {
+                    warn(rt, &e);
+                }
+            }
             succeeded += 1;
         } else {
             failed += 1;

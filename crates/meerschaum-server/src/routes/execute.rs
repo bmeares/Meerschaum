@@ -32,10 +32,14 @@ use crate::error::{ApiError, ApiResult};
 use crate::routes::pipes::parse_json_body;
 use crate::state::AppState;
 
+#[path = "execute_capabilities.rs"]
+mod capabilities;
+
 /// Register `POST /execute` (part of the `actions` route group).
 pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
     app.route("/execute", post(execute))
         .route("/execute/policy", get(policy))
+        .route("/execute/capabilities", get(capabilities::get))
         .route("/execute/validate", post(validate_terminal_command))
         .route("/execute/runs", get(run_summaries))
         .route("/execute/runs/{name}/retain", post(retain_run))
@@ -51,6 +55,7 @@ pub const JOB_PREFIX: &str = "execute-";
 /// for `--no-auth`, where everyone is an administrator).
 pub fn owner_label(principal: Option<&Principal>) -> Option<String> {
     match principal? {
+        Principal::Execution(identity) => owner_label(identity.current.auth.as_ref()),
         Principal::User(user) => Some(user.username.clone()),
         Principal::Token(token) => Some(format!(
             "token:{}",
@@ -116,16 +121,35 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
     if args.is_empty() {
         return Err(ApiError::new(422, "sysargs is empty"));
     }
+    if matches!(caller.auth.as_ref(), Some(Principal::Execution(_))) {
+        crate::executor::terminal::api_command(&ctx.state, &caller, &args).await?;
+        return Ok(envelope::ok(
+            "You may run this API-only command.",
+            serde_json::Map::new(),
+        ));
+    }
     if !caller.no_auth && !caller.full_admin() {
-        crate::execute_policy::check_non_admin(&args)
-            .map_err(|message| ApiError::new(403, message))?;
+        crate::execute_policy::check_command(
+            &ctx.state,
+            &caller,
+            &args,
+            crate::execute_policy::Place::Job,
+        )
+        .await
+        .map_err(|message| ApiError::new(403, message))?;
         // The pipes the command selects (rc15 access model).
         crate::execute_access::check(&ctx.state, &caller, &args).await?;
     }
-    Ok(envelope::ok(
-        "You may run this command.",
-        serde_json::Map::new(),
-    ))
+    // 5.1: a command allowed only as team execution: a job started for it must carry the mark
+    // (`mrsm_team_execution`) so that it runs only in the team's sandbox.
+    let mut fields = serde_json::Map::new();
+    if let crate::execute_policy::SystemCommands::TeamOnly { team } =
+        crate::execute_policy::may_run_system_commands(&ctx.state, &caller).await
+    {
+        fields.insert("team_execution".into(), json!(true));
+        fields.insert("team".into(), json!(team));
+    }
+    Ok(envelope::ok("You may run this command.", fields))
 }
 
 /// Retained summaries are owner filtered and redact the same secrets as Job metadata.
@@ -137,7 +161,7 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
             if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
                 continue;
             }
-            let Some(mut record) = std::fs::read(file.path())
+            let Some(record) = std::fs::read(file.path())
                 .ok()
                 .and_then(|v| serde_json::from_slice::<Json>(&v).ok())
             else {
@@ -149,10 +173,24 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
             if !super::jobs::can_see(&access, name, record.get("metadata")) {
                 continue;
             }
-            if let Some(meta) = record.get_mut("metadata") {
-                crate::redact::redact_job_meta(meta);
-            }
             records.push(record);
+        }
+    }
+    let teams = if records.iter().any(|record| {
+        record
+            .get("metadata")
+            .is_some_and(super::jobs::registered_team)
+    }) {
+        ctx.state.instance().get_teams().await.map_err(|_| {
+            ApiError::unavailable("Could not resolve retained execution team identities.")
+        })?
+    } else {
+        Vec::new()
+    };
+    for record in &mut records {
+        if let Some(meta) = record.get_mut("metadata") {
+            super::jobs::project_team_names(meta, &teams);
+            crate::redact::redact_job_meta(meta);
         }
     }
     records.sort_by(|a, b| b["ended"].as_str().cmp(&a["ended"].as_str()));
@@ -216,7 +254,7 @@ pub async fn prune_finished(state: &AppState) {
     let _maintenance = state.execution_maintenance.lock().await;
     let now = chrono::Utc::now();
     let archive = state.config.root_dir.join("runs");
-    if let Err(error) = std::fs::create_dir_all(&archive) {
+    if let Err(error) = meerschaum_core::team_scope::create_private_dir(&archive) {
         tracing::warn!(%error, "Unable to create execution archive");
         return;
     }
@@ -250,10 +288,7 @@ pub async fn prune_finished(state: &AppState) {
         let record = json!({"name": name, "metadata": meta, "ended": stopped,
             "summary_expires": stopped.timestamp().saturating_add(state.config.execution_retention[2] as i64)});
         let path = archive.join(format!("{name}.json"));
-        let temporary = archive.join(format!("{name}.json.tmp"));
-        if std::fs::write(&temporary, record.to_string()).is_ok()
-            && std::fs::rename(&temporary, &path).is_ok()
-        {
+        if meerschaum_core::team_scope::write_private(&path, &record.to_string()).is_ok() {
             let _ = state.jobs.delete(&name).await;
         }
     }
@@ -347,27 +382,27 @@ async fn execute(ctx: Ctx, body: Body) -> ApiResult {
             ));
         }
     };
-    let plan = crate::execute_access::check(&ctx.state, &caller, &sysargs).await?;
-    if plan.needs_actions {
-        caller.require(&["actions:execute", "jobs:write"], &[])?;
-        if !caller.no_auth && !caller.full_admin() {
-            let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
-            if !allowed.success {
-                return Err(ApiError::new(403, allowed.message));
-            }
+    // The pipes it selects, the permissions it needs, and what a caller who may not run system
+    // commands may run (the console's actions, never the shell): the one decision the restricted
+    // web terminal also asks for.
+    if crate::execute_policy::check_bound_job_command(&ctx.state, &caller, &sysargs).await? {
+        caller.require(&["jobs:write"], &[])?;
+        let allowed = is_user_allowed_to_execute_console(&ctx.state, principal.as_ref()).await;
+        if !allowed.success {
+            return Err(ApiError::new(403, allowed.message));
         }
-    } else if !caller.no_auth && !caller.is_admin() && !ctx.state.config.actions_non_admin {
-        return Err(ApiError::new(
-            403,
-            "The administrator for this server has not allowed users to perform actions.",
-        ));
+    } else {
+        crate::execute_policy::authorize_command(
+            &ctx.state,
+            &caller,
+            &sysargs,
+            crate::execute_policy::Place::Job,
+        )
+        .await?;
     }
     if !caller.no_auth && !caller.full_admin() {
-        // A non-administrator runs what the console offers, and only in `execute-*` jobs (the
-        // family whose visibility is the creator's).
-        if let Err(message) = crate::execute_policy::check_non_admin(&sysargs) {
-            return Err(ApiError::new(403, message));
-        }
+        // A non-administrator runs only in `execute-*` jobs (the family whose visibility is the
+        // creator's).
         if !name.starts_with(JOB_PREFIX) {
             return Err(invalid(
                 &["body", "name"],
@@ -407,10 +442,14 @@ pub async fn start_execution(
 ) -> Result<meerschaum_core::SuccessTuple, ApiError> {
     prune_finished(state).await;
     let mut properties = Map::new();
-    let owner = owner_label(principal);
+    let owner = crate::executor::gateway::current()
+        .map(|verified| verified.claims.actor.owner)
+        .or_else(|| owner_label(principal));
     // The run is the caller's (`owner`, `mrsm_owner`), in the caller's primary team (`team`).
     let access = super::jobs::access_of_principal(state, principal).await?;
     super::jobs::stamp_caller(&mut properties, &access);
+    // 5.1: a member's command allowed as team execution runs only in the team's sandbox.
+    super::jobs::mark_team_execution(state, &mut properties, &access).await;
     if let Some(owner) = owner.as_ref().filter(|_| access.username().is_none()) {
         // A token without an owner keeps its `token:<id>` label.
         properties.insert(OWNER_KEY.into(), Value::Str(owner.clone()));
@@ -444,6 +483,7 @@ pub async fn start_execution(
             format!("{} already exists.", state.jobs.job_str(name)),
         )),
         CreateJob::Started(result) => Ok(result),
+        CreateJob::Unavailable(error) => Err(ApiError::unavailable(error)),
     }
 }
 

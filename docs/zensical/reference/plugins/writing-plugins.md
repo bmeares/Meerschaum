@@ -915,6 +915,10 @@ At run time, plugins are imported under the global `plugins` namespace, but you'
 
 Actions, hooks, API endpoints, and web pages defined in submodules belong to the root plugin. For example, decorated functions in `plugins.foo.routes` are unloaded and reloaded with `plugins.foo`, so a submodule does not need separate lifecycle management.
 
+### Plugins of an Isolated Team
+
+On an API server shared by several teams, a plugin of an [isolated team](/reference/api-instance/teams/#team-scoped-workers) runs in that team's own Python workers and jobs, whose configuration holds only the team's connectors and the settings of the team's plugins (`plugins:<name>`). `mrsm.get_connector()` raises `PermissionError` for another connector, `get_config('meerschaum', 'connectors')` leaves them out, and the server's connector variables are not in `os.environ`. A plugin that uses only its team's connectors needs no change. On Linux its processes also run in the team's [filesystem sandbox](/reference/api-instance/teams/#the-filesystem-sandbox): the plugin's virtual environment there is the team's own copy of the server's, so what the plugin installs at run time is installed for that team only, and the plugin cannot change files that the server or other teams load (the plugins directory, the server's virtual environments, compiled bytecode next to shared source).
+
 ### Package Management
 
 Meerschaum plugins only need to be modules, no package metadata required. But if you plan on managing your plugins as proper packages (e.g. to publish to repositories like [PyPI](https://pypi.org/)), simply add the [entry point](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata) `meerschaum.plugins` to your package metadata:

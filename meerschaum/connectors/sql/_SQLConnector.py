@@ -550,7 +550,14 @@ class SQLConnector(InstanceConnector):
             import tempfile
             import weakref
             shm = '/dev/shm'
-            base = shm if os.path.isdir(shm) and os.access(shm, os.W_OK) else None
+            ### 5.1: an isolated team's sandbox lets it use `/dev/shm` without listing it, so
+            ### its private directories go to the team's own temporary directory instead.
+            sandboxed = bool(os.environ.get('MRSM_TEAM_SANDBOX'))
+            base = (
+                shm
+                if not sandboxed and os.path.isdir(shm) and os.access(shm, os.W_OK)
+                else None
+            )
             directory = tempfile.mkdtemp(prefix='mrsm_mem_', dir=base)
             path = os.path.join(directory, 'memory.db')
             self.__dict__['_memory_path'] = path

@@ -65,6 +65,20 @@ def _failure(message: str):
 
 
 @dash_app.callback(
+    Output('go-button', 'disabled'),
+    Output('go-button', 'style'),
+    Input('session-store', 'data'),
+)
+def terminal_exec_control(session_data):
+    """Action permission alone never exposes the terminal's Exec control."""
+    from meerschaum.api.dash.components import get_nav_state
+    session_id = (session_data or {}).get('session-id') if isinstance(session_data, dict) else None
+    state = get_nav_state(session_id=session_id)
+    allowed = bool(state.get('terminal_exec'))
+    return not allowed, {'width': '100%', 'display': 'block' if allowed else 'none'}
+
+
+@dash_app.callback(
     Output('exec-hide', 'data'),
     *[Input(trigger, 'n_clicks') for trigger in HIDING_TRIGGERS],
     prevent_initial_call=True,
@@ -172,8 +186,23 @@ def start_exec(
         allowed, reason = may_run_pipe_action(viewer, pipe, action_name)
         if not allowed:
             return _failure(reason)
+        from meerschaum.api.dash._native_execution import api_only, pipe_action
+        if api_only(viewer):
+            if action_name not in ('sync', 'verify'):
+                return _failure('This operation has no native API-only console adapter.')
+            from meerschaum.api.dash.pipe_detail import meta_of
+            success, message = pipe_action(
+                viewer, (session_store_data or {}).get('session-id'), meta_of(pipe), action_name,
+            )
+            # This native request has completed. It grants no public Job/log scope and
+            # never supplies a command to the terminal's readiness/ack bridge.
+            return {'visible': True, 'typed_pipe': True, 'completed': success}, alert_from_success_tuple((success, message))
     elif not is_state_authenticated(session_store_data):
         return _failure("You are not authorized to run actions.")
+    elif trigger_id == 'go-button':
+        from meerschaum.api.dash._native_execution import api_only
+        if api_only(viewer):
+            return _failure('The API-only terminal is unavailable; use a typed pipe operation.')
 
     session_id = (session_store_data or {}).get('session-id', None)
     username = get_username_from_session(session_id)

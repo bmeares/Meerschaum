@@ -9,6 +9,10 @@ import dash_bootstrap_components as dbc
 import dash.html as html
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.api.dash.components import build_pages_navbar, build_icon
+from meerschaum.api.dash.mcp_details import mcp_is_served, build_mcp_connect_modal
+
+### The MCP configuration is offered only when the server serves `/mcp`.
+_mcp_is_served = mcp_is_served()
 
 
 layout = [
@@ -26,6 +30,14 @@ layout = [
                             id='tokens-refresh-button',
                             title='Refresh tokens',
                         ),
+                        *([
+                            dbc.Button(
+                                'Connect an agent',
+                                color='light',
+                                outline=True,
+                                id='tokens-mcp-button',
+                            ),
+                        ] if _mcp_is_served else []),
                         dbc.Button(
                             'New token',
                             color='primary',
@@ -56,6 +68,7 @@ layout = [
             backdrop='static',
             class_name='tokens-modal',
         ),
+        *([build_mcp_connect_modal()] if _mcp_is_served else []),
         html.Div(id='tokens-register-output-modal-div'),
         html.Div(id='tokens-output-div'),
     ], class_name='console-page tokens-page'),

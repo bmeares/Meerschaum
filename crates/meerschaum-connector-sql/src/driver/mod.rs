@@ -17,15 +17,22 @@
 //! (`SQLConnector.read` / `exec` / `value` / `to_sql`, rc15 Q53, through [`raw`]: statements with
 //! bound parameters whose rows keep what each flavor's Python driver returns).
 
+#[cfg(all(test, unix))]
+mod authorization_read_tests;
+pub(crate) mod authorization_reads;
 mod backend;
 pub mod batch;
 pub mod connect;
+pub mod data_commit;
 #[cfg(feature = "duckdb")]
 pub(crate) mod duckdb;
 pub mod gpkg_functions;
 #[cfg(feature = "mssql")]
 mod mssql;
 mod mysql;
+pub(crate) mod mysql_append;
+pub(crate) mod mysql_authority;
+pub mod named_params;
 #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
 mod native;
 #[cfg(feature = "oracle")]
@@ -33,8 +40,13 @@ mod oracle;
 pub mod params;
 mod postgres;
 pub mod raw;
+pub(crate) mod registered_source;
+#[cfg(test)]
+mod scoped_pg;
+mod source_snapshot;
 mod sqlite;
 mod unsupported;
+pub(crate) mod write_guard;
 
 use std::fmt;
 use std::pin::Pin;
@@ -52,6 +64,7 @@ use crate::error::Result;
 use crate::flavor::{DriverFamily, Flavor};
 use crate::uri::ConnectionSpec;
 
+pub use authorization_reads::Handle as AuthorizationReadScope;
 pub use batch::{ColumnKind, ColumnPlan, GeometryEncoding};
 #[cfg(feature = "duckdb")]
 pub use duckdb::register_host_factory as register_duckdb_host_factory;
@@ -227,12 +240,22 @@ macro_rules! on_pool {
 /// An open transaction (SQLAlchemy `Session`): statements see each other's uncommitted
 /// effects until [`SqlTransaction::commit`]. Dropping it without committing rolls back.
 pub struct SqlTransaction {
+    // Drop the capability before SQLx schedules rollback / returns a connection to its pool.
+    authorization_pin: Option<authorization_reads::Owner>,
+    authorization_read: Option<authorization_reads::Handle>,
     inner: TxInner,
+    mutation_check: Option<std::sync::Arc<dyn meerschaum_connector::mutation::MutationCheck>>,
+    write_lock: bool,
+    refused: bool,
 }
 
 enum TxInner {
+    PinnedRead,
     Postgres(sqlx::Transaction<'static, sqlx::Postgres>),
-    Mysql(sqlx::Transaction<'static, sqlx::MySql>),
+    Mysql(
+        sqlx::Transaction<'static, sqlx::MySql>,
+        Option<mysql_authority::Policy>,
+    ),
     Sqlite(sqlx::Transaction<'static, sqlx::Sqlite>),
     #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
     Native(native::NativeTx),
@@ -263,12 +286,162 @@ macro_rules! debug_sql {
 }
 
 impl SqlTransaction {
+    /// The host's frame-source callbacks remain under this exact still-held transaction.
+    pub fn authorization_read_scope(&self) -> Option<AuthorizationReadScope> {
+        self.authorization_pin
+            .as_ref()
+            .map(authorization_reads::Owner::handle)
+    }
+
+    async fn with_held_authorization_reads<F: std::future::Future>(
+        &mut self,
+        future: F,
+    ) -> Result<F::Output> {
+        if matches!(self.inner, TxInner::Mysql(_, Some(_))) {
+            let TxInner::Mysql(tx, Some(policy)) =
+                std::mem::replace(&mut self.inner, TxInner::PinnedRead)
+            else {
+                unreachable!("verified InnoDB transaction")
+            };
+            let held = mysql_authority::Held::new(tx, policy.clone());
+            let result = held.scope(future).await;
+            self.inner = TxInner::Mysql(held.take().await?, Some(policy));
+            return result;
+        }
+        Ok(match self.authorization_read_scope() {
+            Some(scope) => scope.scope(future).await,
+            None => future.await,
+        })
+    }
+
+    async fn check_write(&mut self) -> Result<()> {
+        let result = Box::pin(self.check_write_inner()).await;
+        if result.is_err() {
+            self.refused = true;
+            self.authorization_pin.take();
+        }
+        result
+    }
+
+    async fn check_write_inner(&mut self) -> Result<()> {
+        let Some(check) = self.mutation_check.clone() else {
+            return Ok(());
+        };
+        if self.refused || !self.write_lock {
+            self.refused = true;
+            return Err(crate::SqlError::InvalidArgument(
+                "This scoped transaction has no admitted write lock.".into(),
+            ));
+        }
+        if self.authorization_pin.is_none() {
+            return Box::pin(
+                self.with_held_authorization_reads(meerschaum_connector::mutation::recheck(&check)),
+            )
+            .await?
+            .map_err(crate::SqlError::InvalidArgument);
+        }
+        let TxInner::Sqlite(transaction) = &mut self.inner else {
+            self.refused = true;
+            return Err(crate::SqlError::InvalidArgument(
+                "This write has no native SQLite lock proof.".into(),
+            ));
+        };
+        let identity = Box::pin(authorization_reads::identity(transaction, true)).await?;
+        let pin = self.authorization_pin.as_ref().ok_or_else(|| {
+            crate::SqlError::InvalidArgument(
+                "This write has no lock-backed authorization snapshot.".into(),
+            )
+        })?;
+        pin.verify(&identity)?;
+        let handle = pin.handle();
+        if let Err(reason) =
+            Box::pin(handle.scope(meerschaum_connector::mutation::recheck(&check))).await
+        {
+            self.refused = true;
+            return Err(crate::SqlError::InvalidArgument(reason));
+        }
+        let identity = Box::pin(authorization_reads::identity(transaction, true)).await?;
+        pin.verify(&identity)?;
+        pin.freeze();
+        Ok(())
+    }
+
+    /// Install a host-owned SQLite VM budget for a bounded native read. The caller must retain
+    /// this transaction through cancellation, clear the handler, and roll back before pool
+    /// reuse. Returning false from SQLx's safe callback interrupts sqlite3_step itself.
+    pub async fn set_sqlite_read_budget(
+        &mut self,
+        deadline: std::time::Instant,
+        cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<()> {
+        if matches!(self.inner, TxInner::PinnedRead) {
+            return Ok(());
+        }
+        let TxInner::Sqlite(transaction) = &mut self.inner else {
+            return Err(crate::SqlError::InvalidArgument(
+                "A SQLite read budget requires a SQLite transaction.".into(),
+            ));
+        };
+        transaction
+            .lock_handle()
+            .await?
+            .set_progress_handler(1000, move || {
+                !cancelled.load(std::sync::atomic::Ordering::Relaxed)
+                    && std::time::Instant::now() < deadline
+            });
+        Ok(())
+    }
+
+    /// Remove a read budget before rollback/pool reuse, including every error and cancellation
+    /// path. A handler is never left armed on a shared connector's next operation.
+    pub async fn clear_sqlite_read_budget(&mut self) -> Result<()> {
+        if matches!(self.inner, TxInner::PinnedRead) {
+            return Ok(());
+        }
+        let TxInner::Sqlite(transaction) = &mut self.inner else {
+            return Err(crate::SqlError::InvalidArgument(
+                "A SQLite read budget requires a SQLite transaction.".into(),
+            ));
+        };
+        transaction.lock_handle().await?.remove_progress_handler();
+        Ok(())
+    }
+
+    /// Stream one SQLite read statement through bounded frames while retaining this exact
+    /// transaction. The caller owns cancellation, progress-handler cleanup and rollback.
+    pub async fn for_each_sqlite_batch<F>(
+        &mut self,
+        sql: &str,
+        chunksize: usize,
+        max_bytes: usize,
+        accept: F,
+    ) -> Result<()>
+    where
+        F: FnMut(Frame) -> Result<()>,
+    {
+        if chunksize == 0 || chunksize > 100_000 || max_bytes == 0 || max_bytes > 8 * 1024 * 1024 {
+            return Err(crate::SqlError::InvalidArgument(
+                "Invalid SQLite batch size.".into(),
+            ));
+        }
+        let TxInner::Sqlite(transaction) = &mut self.inner else {
+            return Err(crate::SqlError::InvalidArgument(
+                "Snapshot batches require a SQLite transaction.".into(),
+            ));
+        };
+        backend::for_each_sqlite_batch(transaction, sql, chunksize, max_bytes, accept).await
+    }
+
     /// Execute one or more statements, returning the rows affected.
     pub async fn exec(&mut self, sql: &str) -> Result<u64> {
+        self.check_write().await?;
         debug_sql!(sql);
         match &mut self.inner {
+            TxInner::PinnedRead => Err(crate::SqlError::InvalidArgument(
+                "An authorization snapshot cannot write.".into(),
+            )),
             TxInner::Postgres(tx) => backend::pg_tx::tx_exec(tx, sql).await,
-            TxInner::Mysql(tx) => backend::mysql_tx::tx_exec(tx, sql).await,
+            TxInner::Mysql(tx, _) => backend::mysql_tx::tx_exec(tx, sql).await,
             TxInner::Sqlite(tx) => backend::sqlite_tx::tx_exec(tx, sql).await,
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             TxInner::Native(tx) => tx.exec(sql).await,
@@ -278,9 +451,39 @@ impl SqlTransaction {
     /// Run a query and collect the result as a kernel [`Frame`].
     pub async fn read_frame(&mut self, sql: &str) -> Result<Frame> {
         debug_sql!(sql);
+        if let Some(handle) = &self.authorization_read {
+            if let Some(authorization_reads::Output::Batches(batches)) =
+                handle.get(sql, &[], authorization_reads::Mode::Batches)?
+            {
+                return batches_to_frame(&batches);
+            }
+            let TxInner::Sqlite(transaction) = &mut self.inner else {
+                return Err(crate::SqlError::InvalidArgument(
+                    "The authorization read has no live snapshot.".into(),
+                ));
+            };
+            let (output, bytes) = backend::authorization_read(
+                transaction,
+                sql,
+                &[],
+                authorization_reads::Mode::Batches,
+            )
+            .await?;
+            let authorization_reads::Output::Batches(batches) =
+                handle.store(sql, &[], authorization_reads::Mode::Batches, output, bytes)?
+            else {
+                unreachable!()
+            };
+            return batches_to_frame(&batches);
+        }
         let batches = match &mut self.inner {
+            TxInner::PinnedRead => {
+                return Err(crate::SqlError::InvalidArgument(
+                    "Invalid authorization snapshot.".into(),
+                ));
+            }
             TxInner::Postgres(tx) => backend::pg_tx::tx_read(tx, sql).await?,
-            TxInner::Mysql(tx) => backend::mysql_tx::tx_read(tx, sql).await?,
+            TxInner::Mysql(tx, _) => backend::mysql_tx::tx_read(tx, sql).await?,
             TxInner::Sqlite(tx) => backend::sqlite_tx::tx_read(tx, sql).await?,
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             TxInner::Native(tx) => tx.read(sql).await?,
@@ -288,11 +491,104 @@ impl SqlTransaction {
         batches_to_frame(&batches)
     }
 
+    /// Execute one parameterized statement inside this transaction, returning the rows affected.
+    pub async fn exec_with(&mut self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        if params.is_empty() {
+            return self.exec(sql).await;
+        }
+        self.check_write().await?;
+        debug_sql!(sql);
+        match &mut self.inner {
+            TxInner::PinnedRead => Err(crate::SqlError::InvalidArgument(
+                "An authorization snapshot cannot write.".into(),
+            )),
+            TxInner::Postgres(tx) => backend::pg_tx::tx_exec_with(tx, sql, params).await,
+            TxInner::Mysql(tx, _) => backend::mysql_tx::tx_exec_with(tx, sql, params).await,
+            TxInner::Sqlite(tx) => backend::sqlite_tx::tx_exec_with(tx, sql, params).await,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.exec_with(sql, params).await,
+        }
+    }
+
+    /// Run a parameterized query inside this transaction and collect the result as a kernel
+    /// [`Frame`].
+    pub async fn read_frame_with(&mut self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
+        if params.is_empty() {
+            return self.read_frame(sql).await;
+        }
+        debug_sql!(sql);
+        let batches = match &mut self.inner {
+            TxInner::PinnedRead => {
+                return Err(crate::SqlError::InvalidArgument(
+                    "Invalid authorization snapshot.".into(),
+                ));
+            }
+            TxInner::Postgres(tx) => backend::pg_tx::tx_read_with(tx, sql, params).await?,
+            TxInner::Mysql(tx, _) => backend::mysql_tx::tx_read_with(tx, sql, params).await?,
+            TxInner::Sqlite(tx) => backend::sqlite_tx::tx_read_with(tx, sql, params).await?,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.read_with(sql, params).await?,
+        };
+        batches_to_frame(&batches)
+    }
+
+    /// Acquire a transaction-scoped advisory lock for `key` (released automatically on commit or
+    /// rollback).
+    ///
+    /// - PostgreSQL family (except CockroachDB): hashes `key` with SHA-256 (domain-separated) and
+    ///   calls `SELECT pg_advisory_xact_lock($1)`.
+    /// - SQLite / GeoPackage: when opened via [`SqlDriver::begin_write`], `BEGIN IMMEDIATE`
+    ///   already holds the database write lock for the transaction's lifetime.
+    /// - Flavors without transaction-scoped advisory locks return [`crate::SqlError::InvalidArgument`].
+    pub async fn advisory_xact_lock(&mut self, flavor: Flavor, key: &str) -> Result<()> {
+        match &mut self.inner {
+            TxInner::Postgres(tx) => {
+                if flavor == Flavor::Cockroachdb {
+                    return Err(crate::SqlError::InvalidArgument(
+                        "CockroachDB does not support transaction-scoped advisory locks.".into(),
+                    ));
+                }
+                use sha2::{Digest, Sha256};
+                let mut digest = Sha256::new();
+                digest.update(b"meerschaum:plugin-tx-lock:");
+                digest.update(key.as_bytes());
+                let lock_id =
+                    i64::from_be_bytes(digest.finalize()[..8].try_into().expect("eight bytes"));
+                sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                    .bind(lock_id)
+                    .execute(&mut **tx)
+                    .await?;
+                Ok(())
+            }
+            TxInner::Sqlite(_) => {
+                // `SqlDriver::begin_write()` opens SQLite transactions with `BEGIN IMMEDIATE`,
+                // which acquires the database write lock up front (waiting up to `busy_timeout`).
+                Ok(())
+            }
+            _ => Err(crate::SqlError::InvalidArgument(format!(
+                "Flavor '{flavor}' does not support transaction-scoped advisory locks."
+            ))),
+        }
+    }
+
     /// Commit the transaction.
-    pub async fn commit(self) -> Result<()> {
+    pub async fn commit(mut self) -> Result<()> {
+        if self.mutation_check.is_some()
+            && self.write_lock
+            && let Err(error) = self.check_write().await
+        {
+            Box::pin(self.rollback()).await?;
+            return Err(error);
+        }
+        self.authorization_pin.take();
         match self.inner {
+            TxInner::PinnedRead => {
+                return Err(crate::SqlError::InvalidArgument(
+                    "An authorization snapshot cannot commit.".into(),
+                ));
+            }
             TxInner::Postgres(tx) => tx.commit().await?,
-            TxInner::Mysql(tx) => tx.commit().await?,
+            TxInner::Mysql(tx, _) => tx.commit().await?,
             TxInner::Sqlite(tx) => tx.commit().await?,
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             TxInner::Native(tx) => tx.commit().await?,
@@ -301,15 +597,24 @@ impl SqlTransaction {
     }
 
     /// Roll the transaction back.
-    pub async fn rollback(self) -> Result<()> {
-        match self.inner {
-            TxInner::Postgres(tx) => tx.rollback().await?,
-            TxInner::Mysql(tx) => tx.rollback().await?,
-            TxInner::Sqlite(tx) => tx.rollback().await?,
+    pub async fn rollback(mut self) -> Result<()> {
+        let check = self
+            .write_lock
+            .then(|| self.mutation_check.clone())
+            .flatten();
+        self.authorization_pin.take();
+        let result = match self.inner {
+            TxInner::PinnedRead => Ok(()),
+            TxInner::Postgres(tx) => tx.rollback().await.map_err(crate::SqlError::from),
+            TxInner::Mysql(tx, _) => tx.rollback().await.map_err(crate::SqlError::from),
+            TxInner::Sqlite(tx) => tx.rollback().await.map_err(crate::SqlError::from),
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
-            TxInner::Native(tx) => tx.rollback().await?,
+            TxInner::Native(tx) => tx.rollback().await,
+        };
+        if let Some(check) = check {
+            check.rollback_completed(result.is_ok());
         }
-        Ok(())
+        result
     }
 }
 
@@ -369,8 +674,18 @@ fn connect_native_lazy(spec: &ConnectionSpec) -> Result<Pool> {
 /// A pooled connection to one database.
 #[derive(Clone)]
 pub struct SqlDriver {
+    lineage: std::sync::Arc<()>,
+    windowed_pool: std::sync::Arc<tokio::sync::OnceCell<sqlx::SqlitePool>>,
     flavor: Flavor,
     pool: Pool,
+    /// One lazy writer slot for scoped SQLite transactions. Canonical authorization reads
+    /// retain the ordinary pool, including on installations with only one read slot.
+    scoped_sqlite_pool: Option<sqlx::SqlitePool>,
+    /// A separate slot lets an administrator's late recheck read the canonical
+    /// catalog even when its normal PostgreSQL pool has only one connection.
+    admin_postgres_pool: Option<sqlx::PgPool>,
+    /// Dedicated read-only source pool with one-row native prefetch.
+    snapshot_sqlite_pool: Option<sqlx::SqlitePool>,
     /// The fail-fast gate of the first connection (network flavors only; see [`connect`]).
     gate: Option<std::sync::Arc<ConnectGate>>,
 }
@@ -657,9 +972,46 @@ impl SqlDriver {
                 | DriverFamily::Mssql
                 | DriverFamily::Oracle
         );
+        let scoped_sqlite_pool = match &pool {
+            Pool::Sqlite(readers) => Some(
+                sqlite::pool_options(spec)
+                    .max_connections(1)
+                    .min_connections(0)
+                    .acquire_timeout(readers.options().get_acquire_timeout())
+                    .after_release(|connection, _| {
+                        Box::pin(async move {
+                            // Flush SQLx's queued rollback before checking its transaction
+                            // state. A failed rollback can leave the worker alive but its
+                            // transaction depth nonzero; discard that connection instead
+                            // of returning it as a usable authorized writer.
+                            sqlx::Connection::ping(connection).await?;
+                            Ok(!sqlx::Connection::is_in_transaction(connection))
+                        })
+                    })
+                    .connect_lazy_with((*readers.connect_options()).clone()),
+            ),
+            _ => None,
+        };
+        let admin_postgres_pool = match &pool {
+            Pool::Postgres(readers) => Some(
+                ping_idle_connections(sqlx::postgres::PgPoolOptions::new().max_connections(1))
+                    .acquire_timeout(readers.options().get_acquire_timeout())
+                    .connect_lazy_with((*readers.connect_options()).clone()),
+            ),
+            _ => None,
+        };
+        let snapshot_sqlite_pool = match &pool {
+            Pool::Sqlite(_) => source_snapshot::pool(spec),
+            _ => None,
+        };
         Self {
+            lineage: std::sync::Arc::new(()),
+            windowed_pool: std::sync::Arc::new(tokio::sync::OnceCell::new()),
             flavor: spec.flavor,
             pool,
+            scoped_sqlite_pool,
+            admin_postgres_pool,
+            snapshot_sqlite_pool,
             gate: networked.then(|| {
                 std::sync::Arc::new(ConnectGate {
                     spec: spec.clone(),
@@ -675,6 +1027,9 @@ impl SqlDriver {
     /// not resolve, is unreachable or rejects the credentials. Later calls cost one atomic load,
     /// and an established pool keeps the driver's own reconnect behavior.
     pub(crate) async fn ready(&self) -> Result<()> {
+        if mysql_authority::active() {
+            return Err(mysql_authority::refused());
+        }
         let Some(gate) = &self.gate else {
             return Ok(());
         };
@@ -807,6 +1162,20 @@ impl SqlDriver {
         collect: bool,
     ) -> Result<RecordBatchStream> {
         debug_sql!(sql);
+        if let Some(authorization_reads::Output::Batches(batches)) = Box::pin(
+            authorization_reads::read(self, sql, &[], authorization_reads::Mode::Batches),
+        )
+        .await?
+        {
+            let schema = batches
+                .first()
+                .map(RecordBatch::schema)
+                .unwrap_or_else(|| std::sync::Arc::new(arrow::datatypes::Schema::empty()));
+            return Ok(RecordBatchStream::new(
+                schema,
+                futures_util::stream::iter(batches.into_iter().map(Ok)).boxed(),
+            ));
+        }
         self.ready().await?;
         let chunksize = chunksize.max(1);
         let sql = sql.to_string();
@@ -898,9 +1267,98 @@ impl SqlDriver {
         }
     }
 
+    fn scoped_write_unavailable(&self) -> crate::SqlError {
+        crate::SqlError::InvalidArgument(format!(
+            "Authorized native writes after database lock acquisition are not yet supported for '{}'.",
+            self.flavor.as_str()
+        ))
+    }
+
+    async fn scoped_write_transaction(
+        &self,
+        check: std::sync::Arc<dyn meerschaum_connector::mutation::MutationCheck>,
+    ) -> Result<SqlTransaction> {
+        Box::pin(self.scoped_write_transaction_inner(check)).await
+    }
+
+    async fn scoped_write_transaction_inner(
+        &self,
+        check: std::sync::Arc<dyn meerschaum_connector::mutation::MutationCheck>,
+    ) -> Result<SqlTransaction> {
+        if check.direct_administrator()
+            && let Some(pool) = &self.admin_postgres_pool
+        {
+            self.ready().await?;
+            // The administrator's native transaction checks the original authority
+            // before writing and again after the statements, while their SQL locks
+            // are held. Delegated calls still use the explicit backend adapters.
+            let mut transaction = SqlTransaction {
+                authorization_pin: None,
+                authorization_read: None,
+                inner: TxInner::Postgres(pool.begin().await?),
+                mutation_check: Some(check),
+                write_lock: true,
+                refused: false,
+            };
+            if let Err(error) = transaction.check_write().await {
+                Box::pin(transaction.rollback()).await?;
+                return Err(error);
+            }
+            return Ok(transaction);
+        }
+        let pool = self
+            .scoped_sqlite_pool
+            .as_ref()
+            .ok_or_else(|| self.scoped_write_unavailable())?;
+        // Acquire the SQLite write lock before reconstructing caller/ACL authority. The
+        // separate, bounded writer pool leaves canonical read capacity even with pool_size=1.
+        let mut transaction = SqlTransaction {
+            authorization_pin: None,
+            authorization_read: None,
+            inner: TxInner::Sqlite(pool.begin_with("BEGIN IMMEDIATE").await?),
+            mutation_check: Some(check),
+            write_lock: true,
+            refused: false,
+        };
+        if transaction
+            .mutation_check
+            .as_ref()
+            .is_some_and(|check| check.lock_snapshot_reads())
+        {
+            let TxInner::Sqlite(locked) = &mut transaction.inner else {
+                unreachable!()
+            };
+            let file = match Box::pin(authorization_reads::identity(locked, true)).await {
+                Ok(file) => file,
+                Err(error) => {
+                    Box::pin(transaction.rollback()).await?;
+                    return Err(error);
+                }
+            };
+            transaction.authorization_pin = Some(authorization_reads::Owner::new(file));
+        }
+        if let Err(error) = transaction.check_write().await {
+            Box::pin(transaction.rollback()).await?;
+            return Err(error);
+        }
+        Ok(transaction)
+    }
+
     /// Execute one or more statements (simple-query protocol, like SQLAlchemy `text()`),
     /// returning the number of rows affected.
     pub async fn exec(&self, sql: &str) -> Result<u64> {
+        if let Some(check) = meerschaum_connector::mutation::current() {
+            let mut transaction = self.scoped_write_transaction(check).await?;
+            let result = match transaction.exec(sql).await {
+                Ok(result) => result,
+                Err(error) => {
+                    Box::pin(transaction.rollback()).await?;
+                    return Err(error);
+                }
+            };
+            transaction.commit().await?;
+            return Ok(result);
+        }
         debug_sql!(sql);
         self.ready().await?;
         let sql = sql.to_string();
@@ -913,6 +1371,16 @@ impl SqlDriver {
     /// column keeps its `meerschaum:dtype` / `meerschaum:db_type` tags, so
     /// `meerschaum_kernel::enforce::enforce_dtypes` needs no dtype detection on them.
     pub async fn read_docs_frame(&self, sql: &str) -> Result<Frame> {
+        if let Some(authorization_reads::Output::Docs(frame)) = Box::pin(authorization_reads::read(
+            self,
+            sql,
+            &[],
+            authorization_reads::Mode::Docs,
+        ))
+        .await?
+        {
+            return Ok(frame);
+        }
         // PARITY: v4 get_docs uses result.mappings(): SQLite timestamps remain raw text.
         if let Pool::Sqlite(pool) = &self.pool {
             debug_sql!(sql);
@@ -961,6 +1429,31 @@ impl SqlDriver {
         break_on_error: bool,
         rollback: bool,
     ) -> Result<Vec<Option<u64>>> {
+        if let Some(check) = meerschaum_connector::mutation::current() {
+            let mut transaction = self.scoped_write_transaction(check).await?;
+            let mut results = Vec::with_capacity(queries.len());
+            for query in queries {
+                match transaction.exec(query).await {
+                    Ok(count) => results.push(Some(count)),
+                    Err(error) => {
+                        if transaction.refused {
+                            Box::pin(transaction.rollback()).await?;
+                            return Err(error);
+                        }
+                        results.push(None);
+                        if break_on_error {
+                            if rollback {
+                                Box::pin(transaction.rollback()).await?;
+                                return Ok(results);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            transaction.commit().await?;
+            return Ok(results);
+        }
         queries.iter().for_each(|q| debug_sql!(q));
         self.ready().await?;
         let queries = queries.to_vec();
@@ -972,6 +1465,9 @@ impl SqlDriver {
     /// (`SQLConnector._run_in_autocommit`, `_maintenance.py:54`; required for `VACUUM`).
     /// Returns whether every statement succeeded.
     pub async fn exec_autocommit(&self, queries: &[String]) -> Result<bool> {
+        if meerschaum_connector::mutation::current().is_some() {
+            return Err(self.scoped_write_unavailable());
+        }
         queries.iter().for_each(|q| debug_sql!(q));
         self.ready().await?;
         let queries = queries.to_vec();
@@ -1005,6 +1501,13 @@ impl SqlDriver {
 
     async fn value_once(&self, sql: &str, persistent: bool) -> Result<Option<SqlValue>> {
         debug_sql!(sql);
+        if let Some(authorization_reads::Output::Value(value)) = Box::pin(
+            authorization_reads::read(self, sql, &[], authorization_reads::Mode::Value),
+        )
+        .await?
+        {
+            return Ok(value);
+        }
         self.ready().await?;
         let sql = sql.to_string();
         on_native!(self.pool, p => p.value_with(&sql, &[]).await);
@@ -1014,6 +1517,18 @@ impl SqlDriver {
 
     /// Execute one statement with bound parameters, returning the rows affected.
     pub async fn exec_with(&self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        if let Some(check) = meerschaum_connector::mutation::current() {
+            let mut transaction = self.scoped_write_transaction(check).await?;
+            let result = match transaction.raw_execute(sql, params).await {
+                Ok(result) => result,
+                Err(error) => {
+                    Box::pin(transaction.rollback()).await?;
+                    return Err(error);
+                }
+            };
+            transaction.commit().await?;
+            return Ok(result);
+        }
         debug_sql!(sql, params);
         self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
@@ -1027,6 +1542,21 @@ impl SqlDriver {
         &self,
         statements: &[(String, Vec<SqlParam>)],
     ) -> Result<Vec<Option<u64>>> {
+        if let Some(check) = meerschaum_connector::mutation::current() {
+            let mut transaction = self.scoped_write_transaction(check).await?;
+            let mut results = Vec::with_capacity(statements.len());
+            for (query, params) in statements {
+                match transaction.raw_execute(query, params).await {
+                    Ok(count) => results.push(Some(count)),
+                    Err(error) => {
+                        Box::pin(transaction.rollback()).await?;
+                        return Err(error);
+                    }
+                }
+            }
+            transaction.commit().await?;
+            return Ok(results);
+        }
         statements.iter().for_each(|(q, p)| debug_sql!(q, p));
         self.ready().await?;
         let statements = statements.to_vec();
@@ -1075,6 +1605,13 @@ impl SqlDriver {
         persistent: bool,
     ) -> Result<Vec<RecordBatch>> {
         debug_sql!(sql, params);
+        if let Some(authorization_reads::Output::Batches(batches)) = Box::pin(
+            authorization_reads::read(self, sql, params, authorization_reads::Mode::Batches),
+        )
+        .await?
+        {
+            return Ok(batches);
+        }
         self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.read_with(&sql, &params).await);
@@ -1125,6 +1662,13 @@ impl SqlDriver {
         persistent: bool,
     ) -> Result<Option<SqlValue>> {
         debug_sql!(sql, params);
+        if let Some(authorization_reads::Output::Value(value)) = Box::pin(
+            authorization_reads::read(self, sql, params, authorization_reads::Mode::Value),
+        )
+        .await?
+        {
+            return Ok(value);
+        }
         self.ready().await?;
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.value_with(&sql, &params).await);
@@ -1137,29 +1681,9 @@ impl SqlDriver {
     /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction
     /// (`psql_insert_copy`, `_sql.py:1109`). Returns the number of rows copied.
     pub async fn copy_in(&self, copy_sql: &str, data: Vec<u8>) -> Result<u64> {
-        meerschaum_core::dprint!(
-            "{}\n({} bytes)",
-            meerschaum_core::debug::redact_sql(copy_sql),
-            data.len()
-        );
-        self.ready().await?;
-        match &self.pool {
-            Pool::Postgres(p) => {
-                let mut tx = p.begin().await?;
-                let mut copy = tx.copy_in_raw(copy_sql).await?;
-                if let Err(e) = copy.send(data).await {
-                    let _ = copy.abort(e.to_string()).await;
-                    return Err(e.into());
-                }
-                let n = copy.finish().await?;
-                tx.commit().await?;
-                Ok(n)
-            }
-            _ => Err(crate::error::SqlError::InvalidArgument(format!(
-                "COPY is only available on PostgreSQL (flavor '{}').",
-                self.flavor.as_str()
-            ))),
-        }
+        self.copy_in_after(&[], copy_sql, data)
+            .await
+            .map(|(_, count)| count)
     }
 
     /// [`copy_in`](SqlDriver::copy_in) after `prelude` statements, all in one transaction (a
@@ -1171,47 +1695,73 @@ impl SqlDriver {
         copy_sql: &str,
         data: Vec<u8>,
     ) -> Result<(Vec<u64>, u64)> {
-        prelude.iter().for_each(|q| debug_sql!(q));
+        if !matches!(self.pool, Pool::Postgres(_)) {
+            return Err(crate::SqlError::InvalidArgument(format!(
+                "COPY is only available on PostgreSQL (flavor '{}').",
+                self.flavor.as_str()
+            )));
+        }
+        if meerschaum_connector::mutation::current()
+            .is_some_and(|check| !check.direct_administrator())
+        {
+            return Err(self.scoped_write_unavailable());
+        }
         meerschaum_core::dprint!(
             "{}\n({} bytes)",
             meerschaum_core::debug::redact_sql(copy_sql),
             data.len()
         );
-        self.ready().await?;
-        match &self.pool {
-            Pool::Postgres(p) => {
-                let mut tx = p.begin().await?;
-                let mut counts = Vec::with_capacity(prelude.len());
-                for sql in prelude {
-                    counts.push(backend::pg_tx::tx_exec(&mut tx, sql).await?);
-                }
-                let mut copy = tx.copy_in_raw(copy_sql).await?;
-                if let Err(e) = copy.send(data).await {
-                    let _ = copy.abort(e.to_string()).await;
-                    return Err(e.into());
-                }
-                let n = copy.finish().await?;
-                tx.commit().await?;
-                Ok((counts, n))
+        let mut transaction = self.begin_write().await?;
+        let result = async {
+            let mut counts = Vec::with_capacity(prelude.len());
+            for sql in prelude {
+                counts.push(transaction.exec(sql).await?);
             }
-            _ => Err(crate::error::SqlError::InvalidArgument(format!(
-                "COPY is only available on PostgreSQL (flavor '{}').",
-                self.flavor.as_str()
-            ))),
+            transaction.check_write().await?;
+            let TxInner::Postgres(native) = &mut transaction.inner else {
+                unreachable!("PostgreSQL COPY requires a PostgreSQL connection");
+            };
+            let mut copy = native.copy_in_raw(copy_sql).await?;
+            if let Err(error) = copy.send(data).await {
+                let _ = copy.abort(error.to_string()).await;
+                return Err(crate::SqlError::from(error));
+            }
+            Ok((counts, copy.finish().await?))
+        }
+        .await;
+        match result {
+            Ok(counts) => {
+                transaction.commit().await?;
+                Ok(counts)
+            }
+            Err(error) => {
+                Box::pin(transaction.rollback()).await?;
+                Err(error)
+            }
         }
     }
 
     /// Begin a transaction on a pooled connection.
     pub async fn begin(&self) -> Result<SqlTransaction> {
+        if let Some(check) = meerschaum_connector::mutation::current() {
+            return self.scoped_write_transaction(check).await;
+        }
         self.ready().await?;
         let inner = match &self.pool {
             Pool::Postgres(p) => TxInner::Postgres(p.begin().await?),
-            Pool::Mysql(p) => TxInner::Mysql(p.begin().await?),
+            Pool::Mysql(p) => TxInner::Mysql(p.begin().await?, None),
             Pool::Sqlite(p) => TxInner::Sqlite(p.begin().await?),
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             Pool::Native(p) => TxInner::Native(p.begin().await?),
         };
-        Ok(SqlTransaction { inner })
+        Ok(SqlTransaction {
+            authorization_pin: None,
+            authorization_read: None,
+            inner,
+            mutation_check: None,
+            write_lock: false,
+            refused: false,
+        })
     }
 
     /// [`SqlDriver::begin`] for a transaction that is going to write. On SQLite the
@@ -1221,11 +1771,19 @@ impl SqlDriver {
     /// `SQLITE_BUSY` at once, without waiting, because waiting could deadlock the two. Every other
     /// driver begins as usual.
     pub async fn begin_write(&self) -> Result<SqlTransaction> {
+        if let Some(check) = meerschaum_connector::mutation::current() {
+            return self.scoped_write_transaction(check).await;
+        }
         match &self.pool {
             Pool::Sqlite(p) => {
                 self.ready().await?;
                 Ok(SqlTransaction {
+                    authorization_pin: None,
+                    authorization_read: None,
                     inner: TxInner::Sqlite(p.begin_with("BEGIN IMMEDIATE").await?),
+                    mutation_check: None,
+                    write_lock: false,
+                    refused: false,
                 })
             }
             _ => self.begin().await,
@@ -1242,16 +1800,74 @@ impl SqlDriver {
         self.ready().await?;
         let inner = match &self.pool {
             Pool::Postgres(p) => TxInner::Postgres(p.begin_with("BEGIN READ ONLY").await?),
-            Pool::Mysql(p) => TxInner::Mysql(p.begin_with("START TRANSACTION READ ONLY").await?),
+            Pool::Mysql(p) => {
+                TxInner::Mysql(p.begin_with("START TRANSACTION READ ONLY").await?, None)
+            }
             Pool::Sqlite(p) => TxInner::Sqlite(p.begin().await?),
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             Pool::Native(p) => TxInner::Native(p.begin().await?),
         };
-        Ok(SqlTransaction { inner })
+        Ok(SqlTransaction {
+            authorization_pin: None,
+            authorization_read: None,
+            inner,
+            mutation_check: meerschaum_connector::mutation::current(),
+            write_lock: false,
+            refused: false,
+        })
+    }
+
+    /// Begin a file-backed SQLite source snapshot on a dedicated read-only pool with
+    /// one-row prefetch. Never borrow the ordinary 8192-row query queue for page capture.
+    pub async fn begin_source_snapshot(&self) -> Result<SqlTransaction> {
+        let read = Box::pin(authorization_reads::route(self)).await?;
+        if let Some(handle) = &read
+            && handle.frozen()
+        {
+            return Ok(SqlTransaction {
+                authorization_pin: None,
+                authorization_read: read,
+                inner: TxInner::PinnedRead,
+                mutation_check: None,
+                write_lock: false,
+                refused: false,
+            });
+        }
+        let pool = self.snapshot_sqlite_pool.as_ref().ok_or_else(|| {
+            crate::SqlError::InvalidArgument(
+                "Bounded source snapshots require a file-backed SQLite source.".into(),
+            )
+        })?;
+        let mut transaction = source_snapshot::begin(pool).await?;
+        if let Some(handle) = read {
+            let TxInner::Sqlite(connection) = &mut transaction.inner else {
+                unreachable!()
+            };
+            handle.verify_read(connection).await?;
+            transaction.authorization_read = Some(handle);
+        }
+        Ok(transaction)
+    }
+
+    /// Retire only the source-read pool when cleanup of one of its VM handlers fails.
+    pub async fn close_source_snapshots(&self) {
+        if let Some(pool) = &self.snapshot_sqlite_pool {
+            pool.close().await;
+        }
     }
 
     /// Close every pooled connection.
     pub async fn close(&self) {
+        if let Some(pool) = self.windowed_pool.get() {
+            pool.close().await;
+        }
+        self.close_source_snapshots().await;
+        if let Some(pool) = &self.scoped_sqlite_pool {
+            pool.close().await;
+        }
+        if let Some(pool) = &self.admin_postgres_pool {
+            pool.close().await;
+        }
         match &self.pool {
             Pool::Postgres(p) => p.close().await,
             Pool::Mysql(p) => p.close().await,
@@ -1510,5 +2126,243 @@ mod future_size_tests {
         eprintln!("ready={ready} exec={exec}");
         assert!(ready <= 128, "ready() future is {ready} bytes");
         assert!(exec <= 1024, "exec() future is {exec} bytes");
+    }
+}
+
+#[cfg(test)]
+mod mutation_authority_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct OriginalAuthority {
+        allowed: AtomicBool,
+        checks: AtomicUsize,
+        reader: SqlDriver,
+        rolled_back: AtomicUsize,
+        rollback_failed: AtomicUsize,
+    }
+
+    #[meerschaum_connector::async_trait]
+    impl meerschaum_connector::mutation::MutationCheck for OriginalAuthority {
+        fn rollback_completed(&self, succeeded: bool) {
+            if succeeded {
+                self.rolled_back.fetch_add(1, Ordering::SeqCst);
+            } else {
+                self.rollback_failed.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        async fn check(&self) -> std::result::Result<(), String> {
+            self.checks.fetch_add(1, Ordering::SeqCst);
+            // A one-slot ordinary pool must remain usable for canonical authorization reads.
+            self.reader
+                .value("SELECT COUNT(*) FROM guarded_rows")
+                .await
+                .map_err(|error| error.to_string())?;
+            if self.allowed.load(Ordering::SeqCst) {
+                Ok(())
+            } else {
+                Err("The original caller's write permission was revoked.".into())
+            }
+        }
+    }
+
+    async fn fixture() -> (tempfile::TempDir, SqlDriver, Arc<OriginalAuthority>) {
+        let root = tempfile::tempdir().unwrap();
+        let mut spec = ConnectionSpec::from_uri(
+            &format!("sqlite:///{}", root.path().join("owned.db").display()),
+            Some("scoped_mutation"),
+            None,
+        )
+        .unwrap();
+        spec.pool_size = 1;
+        spec.max_overflow = 0;
+        let driver = SqlDriver::connect(&spec).await.unwrap();
+        driver
+            .exec("CREATE TABLE guarded_rows (id INTEGER PRIMARY KEY)")
+            .await
+            .unwrap();
+        let authority = Arc::new(OriginalAuthority {
+            allowed: AtomicBool::new(true),
+            checks: AtomicUsize::new(0),
+            reader: driver.clone(),
+            rolled_back: AtomicUsize::new(0),
+            rollback_failed: AtomicUsize::new(0),
+        });
+        (root, driver, authority)
+    }
+
+    #[tokio::test]
+    async fn sqlite_waiting_writer_rechecks_after_lock_and_releases_refused_transaction() {
+        let (_root, driver, authority) = fixture().await;
+        let held = driver.begin_write().await.unwrap();
+        let contender = driver.clone();
+        let check = authority.clone();
+        let mut pending = tokio::spawn(async move {
+            meerschaum_connector::mutation::scope(
+                check,
+                contender.exec_with("INSERT INTO guarded_rows VALUES (?)", &[SqlParam::Int(1)]),
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let pool = driver.scoped_sqlite_pool.as_ref().unwrap();
+            while pool.size() != 1 || pool.num_idle() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut pending)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            authority.checks.load(Ordering::SeqCst),
+            0,
+            "no stale pre-lock admission"
+        );
+        authority.allowed.store(false, Ordering::SeqCst);
+        held.rollback().await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("revoked"), "{error}");
+        assert_eq!(authority.rolled_back.load(Ordering::SeqCst), 1);
+        assert_eq!(authority.rollback_failed.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            driver
+                .value("SELECT COUNT(*) FROM guarded_rows")
+                .await
+                .unwrap(),
+            Some(SqlValue::Int(0))
+        );
+        // The refused transaction returned its writer slot and did not strand the lock.
+        authority.allowed.store(true, Ordering::SeqCst);
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            meerschaum_connector::mutation::scope(
+                authority.clone(),
+                driver.exec_with("INSERT INTO guarded_rows VALUES (?)", &[SqlParam::Int(2)]),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(result, 1);
+        assert_eq!(
+            driver
+                .value("SELECT COUNT(*) FROM guarded_rows")
+                .await
+                .unwrap(),
+            Some(SqlValue::Int(1))
+        );
+        driver.close().await;
+    }
+
+    #[tokio::test]
+    async fn captured_transaction_authority_survives_scope_and_refusal_always_rolls_back() {
+        let (_root, driver, authority) = fixture().await;
+        let mut transaction =
+            meerschaum_connector::mutation::scope(authority.clone(), driver.begin_write())
+                .await
+                .unwrap();
+        transaction
+            .exec("INSERT INTO guarded_rows VALUES (1)")
+            .await
+            .unwrap();
+        authority.allowed.store(false, Ordering::SeqCst);
+        let error = transaction
+            .raw_execute("INSERT INTO guarded_rows VALUES (?)", &[SqlParam::Int(2)])
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("revoked"), "{error}");
+        authority.allowed.store(true, Ordering::SeqCst);
+        assert!(
+            transaction.commit().await.is_err(),
+            "a refused transaction cannot be revived"
+        );
+        assert_eq!(authority.rolled_back.load(Ordering::SeqCst), 1);
+        assert_eq!(authority.rollback_failed.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            driver
+                .value("SELECT COUNT(*) FROM guarded_rows")
+                .await
+                .unwrap(),
+            Some(SqlValue::Int(0))
+        );
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            meerschaum_connector::mutation::scope(
+                authority,
+                driver.exec("INSERT INTO guarded_rows VALUES (3)"),
+            ),
+        )
+        .await
+        .expect("the scoped writer must remain usable after a refused transaction")
+        .unwrap();
+        assert_eq!(
+            driver
+                .value("SELECT COUNT(*) FROM guarded_rows")
+                .await
+                .unwrap(),
+            Some(SqlValue::Int(1))
+        );
+        driver.close().await;
+    }
+
+    #[tokio::test]
+    async fn native_rollback_failure_is_reported_without_relabeling_it_as_authorization_cleanup() {
+        let (_root, driver, authority) = fixture().await;
+        let mut transaction =
+            meerschaum_connector::mutation::scope(authority.clone(), driver.begin_write())
+                .await
+                .unwrap();
+        transaction
+            .exec("INSERT INTO guarded_rows VALUES (1)")
+            .await
+            .unwrap();
+        // Deliberately end this fixture-owned native transaction behind SQLx's transaction
+        // object. Its later explicit rollback must fail, providing a real database failure
+        // rather than a mocked completion callback or a production fault-injection flag.
+        transaction.exec("ROLLBACK").await.unwrap();
+        authority.allowed.store(false, Ordering::SeqCst);
+        let error = transaction.commit().await.unwrap_err();
+        assert!(
+            error.to_string().to_ascii_lowercase().contains("rollback"),
+            "{error}"
+        );
+        assert_eq!(authority.rolled_back.load(Ordering::SeqCst), 0);
+        assert_eq!(authority.rollback_failed.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            driver
+                .value("SELECT COUNT(*) FROM guarded_rows")
+                .await
+                .unwrap(),
+            Some(SqlValue::Int(0))
+        );
+        authority.allowed.store(true, Ordering::SeqCst);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            meerschaum_connector::mutation::scope(
+                authority,
+                driver.exec("INSERT INTO guarded_rows VALUES (3)"),
+            ),
+        )
+        .await
+        .expect("the scoped writer must replace a connection whose rollback failed")
+        .unwrap();
+        assert_eq!(
+            driver
+                .value("SELECT COUNT(*) FROM guarded_rows")
+                .await
+                .unwrap(),
+            Some(SqlValue::Int(1))
+        );
+        driver.close().await;
     }
 }

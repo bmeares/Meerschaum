@@ -38,6 +38,7 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+mod accepted_plan;
 pub mod axis;
 pub mod cadence;
 pub mod engine;
@@ -63,6 +64,7 @@ pub mod stream;
 pub mod sync;
 pub mod viz;
 
+pub use accepted_plan::PlanAuthority;
 pub use axis::{Axis, AxisKind, Interval};
 pub use cadence::{Cadence, PipeSchedules, Timer};
 pub use engine::{

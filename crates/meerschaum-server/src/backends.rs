@@ -29,15 +29,341 @@ use tokio::sync::mpsc;
 // Actions
 // ------------------------------------------------------------------------------------------------
 
+/// Native canonical SQL source reads. The HTTP route authorizes and freezes a registered
+/// definition before this trusted host backend sees it; no plugin or action dispatch belongs here.
+#[async_trait]
+pub trait SourceFetchBackend: Send + Sync {
+    /// Return a native SQL instance for metadata only. Never resolve Python, API aliases or
+    /// arbitrary connector types. Returned connector keys must exactly equal the requested keys.
+    async fn native_instance(
+        &self,
+        _keys: &str,
+    ) -> Result<Arc<dyn InstanceConnector>, SourceFetchError> {
+        Err(SourceFetchError::Unsupported)
+    }
+
+    /// Read one bounded page of a native snapshot. The plan is freshly authorized for every
+    /// call; a cursor is bound to its original actor and exact canonical query proof.
+    async fn page(
+        &self,
+        _plan: crate::routes::source_fetch::Plan,
+        _cursor: Option<meerschaum_connector_api::source_fetch::Cursor>,
+    ) -> Result<SourcePage, SourceFetchError> {
+        Err(SourceFetchError::Unsupported)
+    }
+
+    /// Release only the named caller's state. A last-used credential fingerprint may close
+    /// its own revoked snapshot, but never authorizes reading another page.
+    async fn close_snapshot(
+        &self,
+        _cursor: &meerschaum_connector_api::source_fetch::Cursor,
+        _owner: Option<&str>,
+        _credential: &str,
+    ) -> Result<(), SourceFetchError> {
+        Err(SourceFetchError::Unsupported)
+    }
+
+    /// Prepare a registered source replacement without destination mutations.
+    async fn prepare_replacement(
+        &self,
+        _plan: crate::routes::source_fetch::ReplacementPlan,
+    ) -> Result<meerschaum_connector_api::source_replace::Response, SourceFetchError> {
+        Err(SourceFetchError::Unsupported)
+    }
+
+    /// Consume one owned prepared lease in a single destination transaction.
+    async fn commit_replacement(
+        &self,
+        _plan: crate::routes::source_fetch::ReplacementPlan,
+        _id: &str,
+    ) -> Result<meerschaum_core::success::SyncResult, SourceFetchError> {
+        Err(SourceFetchError::Unsupported)
+    }
+
+    /// Release only the named original caller's prepared source state.
+    async fn close_replacement(
+        &self,
+        id: &str,
+        owner: Option<&str>,
+        credential: &str,
+    ) -> Result<(), SourceFetchError> {
+        self.close_snapshot(
+            &meerschaum_connector_api::source_fetch::Cursor {
+                id: id.into(),
+                page: 0,
+            },
+            owner,
+            credential,
+        )
+        .await
+    }
+
+    /// Read a bounded, already authorized source without resolving more templates or running
+    /// hooks. Guard the final generated SQL with Plan::check_sql before executing it.
+    async fn fetch(
+        &self,
+        _plan: crate::routes::source_fetch::Plan,
+    ) -> Result<meerschaum_connector_api::source_fetch::Response, SourceFetchError> {
+        Err(SourceFetchError::Unsupported)
+    }
+}
+
+/// A page plus its bounded response allocation lease. The HTTP body retains the lease until
+/// its encoded bytes are released, so slow clients cannot build an unbounded page queue.
+pub struct SourcePage {
+    /// Wire response; contains no private paths or credentials.
+    pub response: meerschaum_connector_api::source_fetch::PageResponse,
+    /// Host resource ownership, never serialized into the response.
+    pub lease: Box<dyn std::any::Any + Send + Sync>,
+}
+
+/// A source broker is absent unless the host explicitly injects a native implementation.
+#[derive(Debug, Default)]
+pub struct NoSourceFetch;
+
+#[async_trait]
+impl SourceFetchBackend for NoSourceFetch {}
+
+/// Safe, non-driver errors (never source SQL, database paths or credentials).
+#[derive(Debug, Clone, Copy)]
+pub enum SourceFetchError {
+    /// No supported native implementation or connector.
+    Unsupported,
+    /// The native connector or concurrency allowance is unavailable.
+    Unavailable,
+    /// The guarded query failed.
+    Failed,
+    /// The bounded response cannot represent this result.
+    TooLarge,
+    /// The final native query failed the broker's SQL guard.
+    Forbidden,
+    /// Snapshot metadata, query or page position changed.
+    Stale,
+    /// The snapshot expired, was closed or does not belong to this caller.
+    Closed,
+    /// The exact operation is still committing; a retry never starts another write.
+    InProgress,
+    /// The lease/receipt has expired; a previous commit may already have completed.
+    Uncertain,
+}
+
 /// Action dispatch for `/actions` (`meerschaum.actions.actions`).
 #[async_trait]
 pub trait ActionsBackend: Send + Sync {
+    /// Trusted host capability, never a user configuration flag. The tracked bridge must
+    /// refuse execution when its native runtime cannot enforce the mandatory API profile.
+    fn api_execution(&self) -> ApiExecution {
+        ApiExecution::Unavailable
+    }
+    /// Pure confined-source Metadata. This is separate from action dispatch and never
+    /// imports a plugin on Main. Missing support is explicit.
+    async fn extension_catalog(
+        &self,
+    ) -> Result<Option<crate::executor::plugins::Validated>, String> {
+        Ok(None)
+    }
+    /// Invoke one exact source-bound handler in its private executor runtime.
+    async fn extension_invoke(
+        &self,
+        _invocation: crate::executor::plugin_handlers::Invocation,
+    ) -> Result<crate::executor::plugin_handlers::Reply, String> {
+        Err("This server has no confined extension runtime.".into())
+    }
     /// `list(actions)`, in the action table's order.
     fn list(&self) -> Vec<String>;
 
     /// Run `actions[action](**keywords)`. `keywords` already carries `mrsm_instance` and
     /// `debug`.
     async fn execute(&self, action: &str, keywords: Map) -> SuccessTuple;
+
+    /// Advance a registered Pipeline's provisional child from actual Main completion
+    /// evidence. Hosts without a native completion adapter cannot issue that window.
+    async fn ready_pipe_operation(
+        &self,
+        _caller: &crate::access::Access,
+        _reference: &str,
+    ) -> Result<(), String> {
+        Err("Main has no native parent-window completion adapter.".into())
+    }
+
+    /// Main-only canonical write-operation read primitives. This does not add a permission
+    /// to a user or callback; each route must constrain its response to this exact snapshot.
+    async fn pipe_operation_read(
+        &self,
+        caller: &crate::access::Access,
+    ) -> Result<Option<crate::executor::pipe_operation::ReadAccess>, String> {
+        if let Some(crate::auth::Principal::Execution(identity)) = &caller.auth
+            && (identity.grant.graph_origin.is_some()
+                || identity.grant.graph_pending
+                || identity.grant.graph_tracking != 1)
+        {
+            return Err("This server has no trusted provider for the execution's captured or unknown graph. Ordinary data-scope fallback is unavailable.".into());
+        }
+        Ok(None)
+    }
+
+    /// Reserve or acknowledge delivery of Main's canonical native batch state.
+    /// A wire identifier never proves that a native transaction started or committed.
+    async fn graph_batch(
+        &self,
+        _caller: &crate::access::Access,
+        _request: &meerschaum_connector_api::graph_batch::BatchRequest,
+    ) -> Result<Option<meerschaum_connector_api::graph_batch::BatchReply>, String> {
+        Err("This server has no canonical native batch provider.".into())
+    }
+
+    /// Only Main's actual data-route adapter may claim the exact decoded request.
+    /// Implementations construct an opaque native owner after their durable claim CAS.
+    async fn claim_pipe_batch(
+        &self,
+        _caller: &crate::access::Access,
+        _reference: &str,
+        _selector: &meerschaum_connector_api::graph_batch::BatchSelector,
+        _actual_request_sha256: &str,
+    ) -> Result<meerschaum_connector::mutation::BatchClaimOutcome, String> {
+        Err("This server has no native batch claim adapter.".into())
+    }
+
+    /// Recheck an owned native data-route claim against the current journal.
+    async fn confirm_pipe_batch(
+        &self,
+        _caller: &crate::access::Access,
+        _batch: &meerschaum_connector::mutation::NativeBatch,
+    ) -> Result<(), String> {
+        Err("This server has no native batch claim adapter.".into())
+    }
+
+    /// Read the accepted native receipt after the original transaction completes.
+    async fn accepted_pipe_batch(
+        &self,
+        _caller: &crate::access::Access,
+        _batch: &meerschaum_connector::mutation::NativeBatch,
+    ) -> Result<meerschaum_connector::mutation::NativeBatchReceipt, String> {
+        Err("This server has no native batch claim adapter.".into())
+    }
+
+    /// A Main native data writer, never a public RPC, supplies a committed inference receipt.
+    async fn prepare_pipe_commit(
+        &self,
+        _caller: &crate::access::Access,
+        _effect: meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<std::sync::Arc<dyn meerschaum_connector::mutation::PendingDataCommit>, String> {
+        Err("This server has no durable native graph commit provider.".into())
+    }
+
+    /// A Main native data writer, never a public RPC, supplies a committed inference receipt.
+    async fn accept_pipe_inference(
+        &self,
+        _caller: &crate::access::Access,
+        _change: meerschaum_connector::mutation::MetadataInference,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    /// What the dispatcher would run for one step of a command line (`step`: the words between
+    /// `+`, before any `:`, flags included): a Meerschaum action, or the system shell for words
+    /// that name no action (5.1, [`crate::execute_policy::check_non_admin_resolved`]). The
+    /// default knows only [`list`](Self::list) and the first word; the CLI's backend resolves
+    /// the step exactly as its dispatcher does.
+    async fn resolve(&self, step: &[String]) -> ActionTarget {
+        match step.first() {
+            Some(first) if self.list().iter().any(|name| name == first) => ActionTarget::Action {
+                name: first.clone(),
+                plugin: None,
+                sub: step.get(1).filter(|w| !w.starts_with('-')).cloned(),
+            },
+            _ => ActionTarget::Shell,
+        }
+    }
+
+    /// 5.1: what team execution of `team` needs from the host of the actions
+    /// ([`crate::team_execution`]): the sandbox mode, and a probe of a process of the team started
+    /// the way its jobs are (its configuration, the environment allowlist, the sandbox required).
+    /// `None` (the default): this backend cannot start the team's processes, so its members'
+    /// commands never run as team execution.
+    async fn team_execution_probe(
+        &self,
+        _team: &meerschaum_core::access::Team,
+    ) -> Option<crate::team_execution::HostFacts> {
+        None
+    }
+
+    /// Validate the selected separate executor against current team settings and signed health.
+    /// This does not attest a host sandbox; remote execution has its own process boundary.
+    async fn executor_ready(&self, _team: &meerschaum_core::access::Team) -> Result<(), String> {
+        Err("this server cannot reach the team's selected executor".into())
+    }
+
+    /// Open a bounded, typed terminal through a separate team executor. Console credentials
+    /// remain on main; the backend assigns and leases a distinct owner-bound terminal identity.
+    async fn executor_terminal(
+        &self,
+        _team: &meerschaum_core::access::Team,
+        _caller: &crate::access::Access,
+    ) -> Result<crate::webterm::remote::Terminal, String> {
+        Err("This API cannot open the team's separate terminal.".into())
+    }
+
+    /// Revoke this owner's canonical terminal after current authorization is lost.
+    async fn revoke_executor_terminal(&self, _team_id: uuid::Uuid, _owner: &str) {}
+
+    /// An API-only host terminal has a private runtime and original-user callback authority.
+    /// Selecting this mode never authorizes the ambient host shell as a fallback.
+    async fn host_api_terminal(
+        &self,
+        _team_id: Option<uuid::Uuid>,
+        _caller: &crate::access::Access,
+    ) -> Result<crate::webterm::remote::Terminal, String> {
+        Err("This API cannot prepare a private host terminal.".into())
+    }
+
+    async fn revoke_host_api_terminal(
+        &self,
+        _team_id: Option<uuid::Uuid>,
+        _owner: &str,
+        _credential: &str,
+    ) {
+    }
+
+    /// 5.1: the shell of a team terminal for `team`: an `mrsm` shell that is itself a process of
+    /// the team (its configuration, the environment allowlist, and the sandbox, required, applied
+    /// before the shell starts). Its environment is complete: the terminal starts it from an
+    /// empty one. `Err` (the default): this backend cannot.
+    fn team_shell(
+        &self,
+        _team: &meerschaum_core::access::Team,
+    ) -> Result<crate::webterm::ShellCommand, String> {
+        Err("this server cannot start the team's processes".to_string())
+    }
+}
+
+/// The host's implemented execution path, separate from a caller's roles and scopes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ApiExecution {
+    /// An inert/legacy backend cannot restore isolated callers' execution permissions.
+    #[default]
+    Unavailable,
+    /// Every accepted operation is tracked and confined before loading user code.
+    Tracked {
+        /// Restricted terminals also have their required native lifecycle acceptance.
+        terminals: bool,
+    },
+}
+
+/// What one step of a command line resolves to ([`ActionsBackend::resolve`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionTarget {
+    /// A Meerschaum action: its name, and the plugin that provides it (`None` for a core action).
+    Action {
+        /// The action's name (`show`, a plugin's `foo_bar`).
+        name: String,
+        /// The plugin that provides it.
+        plugin: Option<String>,
+        /// The subaction it resolved to (`pipes` of `show pipes`), for a core action.
+        sub: Option<String>,
+    },
+    /// No Meerschaum action: the dispatcher runs the words as a shell command (v4).
+    Shell,
 }
 
 /// No actions installed: every action is invalid.
@@ -87,12 +413,24 @@ pub enum CreateJob {
     Started(SuccessTuple),
     /// The job already exists (409 `"{job} already exists."`).
     Exists,
+    /// The selected executor or main-owned placement catalog cannot admit work.
+    Unavailable(String),
 }
 
 /// Jobs for `/jobs/*` and `/logs/*` (`meerschaum.jobs.Job` with the `local` executor, falling
 /// back from `systemd`).
 #[async_trait]
 pub trait JobsBackend: Send + Sync {
+    /// Whether authenticated jobs from callers without system-command authority
+    /// are bound to the original user on the API-only profile before launch.
+    fn supports_bound_commands(&self) -> bool {
+        false
+    }
+
+    /// Check a known job's execution environment before a mutation; never silently fall back.
+    async fn ready(&self, _name: &str) -> Result<(), String> {
+        Ok(())
+    }
     /// `str(Job(name))` (`Job("name", "sysargs")`), used in error details.
     fn job_str(&self, name: &str) -> String {
         format!("Job(\"{name}\")")
@@ -101,6 +439,12 @@ pub trait JobsBackend: Send + Sync {
     /// Every job's metadata (`GET /jobs`): `{name: {sysargs, result, restart, status, daemon}}`.
     async fn list(&self) -> IndexMap<String, Json>;
 
+    /// Listing with an explicit storage/transport failure. Public routes and authorization
+    /// use this form so an unavailable executor catalog never looks like an empty job set.
+    async fn try_list(&self) -> Result<IndexMap<String, Json>, String> {
+        Ok(self.list().await)
+    }
+
     /// The same jobs as [`JobsBackend::list`] with only `{sysargs, daemon: {properties}}`: what
     /// matching commands and checking visibility need, without each job's status, pid, result or
     /// health (which can cost a process or `systemctl` query per job). Defaults to `list()`.
@@ -108,8 +452,18 @@ pub trait JobsBackend: Send + Sync {
         self.list().await
     }
 
+    /// Canonical definitions with explicit failure, for visibility and command selection.
+    async fn try_list_definitions(&self) -> Result<IndexMap<String, Json>, String> {
+        Ok(self.list_definitions().await)
+    }
+
     /// One job's metadata, or `None` when the job does not exist.
     async fn get(&self, name: &str) -> Option<Json>;
+
+    /// Canonical metadata with an explicit catalog failure, distinct from an absent name.
+    async fn try_get(&self, name: &str) -> Result<Option<Json>, String> {
+        Ok(self.get(name).await)
+    }
 
     /// `job.exists()`.
     async fn exists(&self, name: &str) -> bool;
@@ -235,6 +589,8 @@ pub struct PlanOptions {
 pub enum PlanError {
     /// This server cannot plan (no Syncing Engine behind it): `501`.
     Unavailable,
+    /// Current confined source classification is missing; retry after an authorized refresh.
+    MetadataUnavailable(String),
     /// The Pipeline cannot be planned as it is (a missing member, a cycle, a bad bound): `400`.
     Invalid(String),
     /// The planner or an instance failed: `500`.
@@ -247,7 +603,9 @@ impl std::fmt::Display for PlanError {
             PlanError::Unavailable => {
                 f.write_str("This server cannot plan Pipelines (it runs no Syncing Engine).")
             }
-            PlanError::Invalid(m) | PlanError::Failed(m) => f.write_str(m),
+            PlanError::Invalid(m) | PlanError::Failed(m) | PlanError::MetadataUnavailable(m) => {
+                f.write_str(m)
+            }
         }
     }
 }
@@ -679,7 +1037,46 @@ impl EngineBackend for MemoryEngine {
 pub trait InstanceResolver: Send + Sync {
     /// The connector for `keys`, or `None` (422 `Invalid instance keys.`).
     fn resolve(&self, keys: &str) -> Option<Arc<dyn InstanceConnector>>;
+
+    /// The current `meerschaum:connectors` section, when the resolver follows the config files
+    /// (connectors registered while the server runs, e.g. a new team's database). `None`: the
+    /// section the server started with.
+    fn connectors(&self) -> Option<Arc<meerschaum_core::Map>> {
+        None
+    }
 }
+
+/// What follows a change of teams outside the instance (5.1: a team's Grafana organization).
+/// Best effort: a failure is reported in the answer's `notes`, never undone.
+#[async_trait]
+pub trait TeamEvents: Send + Sync {
+    /// The team `old` was renamed (`POST /teams/{name}/rename`); `team` is its record under the
+    /// new name (its attributes name what it owns outside the instance).
+    async fn renamed(
+        &self,
+        _team: &meerschaum_core::access::Team,
+        _old: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The team `team` (its record before deletion) was deleted (`DELETE /teams/{name}/delete`).
+    async fn deleted(&self, _team: &meerschaum_core::access::Team) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// A team or its members changed through this server (registered, edited, a member added or
+    /// removed): what depends on the teams' settings follows (5.1: the isolated teams' scopes).
+    async fn changed(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Nothing follows.
+#[derive(Debug, Default, Clone)]
+pub struct NoTeamEvents;
+
+impl TeamEvents for NoTeamEvents {}
 
 /// Resolves nothing: only the server's own instance is served.
 #[derive(Debug, Default, Clone)]

@@ -40,6 +40,11 @@ impl Query {
         }
     }
 
+    /// Decoded pairs in wire order, retaining repeated keys for native request identity.
+    pub(crate) fn pairs(&self) -> &[(String, String)] {
+        &self.pairs
+    }
+
     /// The raw value of `key` (the last one wins, like Starlette's `QueryParams`).
     pub fn get(&self, key: &str) -> Option<&str> {
         self.pairs

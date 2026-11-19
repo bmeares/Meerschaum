@@ -147,6 +147,19 @@ pub fn frame_positions(df: &Frame, axis: &Axis) -> Vec<i64> {
         .collect()
 }
 
+fn source_replace_positions(
+    summary: &meerschaum_connector::source_replace::SourceReplaceSummary,
+    axis: &Axis,
+) -> Vec<i64> {
+    [&summary.first, &summary.last]
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            crate::sync::date_bound_to_bound(value).and_then(|bound| axis.pos(&bound))
+        })
+        .collect()
+}
+
 /// Writes a sync's ledger entries before its data commit (the [`DeltaObserver`] the native
 /// executor and stream flushes use).
 pub struct LedgerWriter<'a, S> {
@@ -257,6 +270,24 @@ impl<S: StateWriter> DeltaObserver for LedgerWriter<'_, S> {
         self.write_intervals(intervals).await
     }
 
+    fn supports_source_replace_summary(&self) -> bool {
+        true
+    }
+
+    async fn before_source_replace(
+        &self,
+        _pipe: &Pipe,
+        summary: &meerschaum_connector::source_replace::SourceReplaceSummary,
+    ) -> Result<(), String> {
+        self.write_intervals(crate::sync::replaced_intervals(
+            &self.axis,
+            source_replace_positions(summary, &self.axis),
+            summary.begin.as_ref(),
+            summary.end.as_ref(),
+        ))
+        .await
+    }
+
     async fn after_commit(&self, _pipe: &Pipe, _result: &SyncResult) -> Result<(), String> {
         if let Some(f) = self.faults {
             f.after_data_commit(&self.pipe_ref)?;
@@ -274,6 +305,18 @@ struct FaultsOnly<'a> {
 #[async_trait]
 impl DeltaObserver for FaultsOnly<'_> {
     async fn before_commit(&self, _pipe: &Pipe, _delta: &Frame) -> Result<(), String> {
+        self.faults.after_ledger_write(&self.pipe_ref)
+    }
+
+    fn supports_source_replace_summary(&self) -> bool {
+        true
+    }
+
+    async fn before_source_replace(
+        &self,
+        _pipe: &Pipe,
+        _summary: &meerschaum_connector::source_replace::SourceReplaceSummary,
+    ) -> Result<(), String> {
         self.faults.after_ledger_write(&self.pipe_ref)
     }
 
@@ -309,6 +352,22 @@ impl DeltaObserver for FetchProgress<'_> {
     ) -> Result<(), String> {
         match self.inner {
             Some(o) => o.before_replace(pipe, delta, begin, end).await,
+            None => Ok(()),
+        }
+    }
+
+    fn supports_source_replace_summary(&self) -> bool {
+        self.inner
+            .is_none_or(|observer| observer.supports_source_replace_summary())
+    }
+
+    async fn before_source_replace(
+        &self,
+        pipe: &Pipe,
+        summary: &meerschaum_connector::source_replace::SourceReplaceSummary,
+    ) -> Result<(), String> {
+        match self.inner {
+            Some(observer) => observer.before_source_replace(pipe, summary).await,
             None => Ok(()),
         }
     }
@@ -415,6 +474,7 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
 
     fn env(&self) -> SyncEnv<'_> {
         SyncEnv {
+            delivery: None,
             registry: self.registry.as_ref(),
             defaults: &self.config.defaults,
             default_backtrack_minutes: self.config.default_backtrack_minutes,
@@ -450,10 +510,10 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
         &self,
         pipe: &Pipe,
         pipe_ref: &PipeRef,
-        input: Option<PipeInput>,
         args: &SyncArgs,
         ledger: Option<&LedgerWriter<'_, S>>,
         events: Option<&NodeEvents>,
+        delivery: Option<&meerschaum_connector::batch_delivery::NodeDelivery>,
     ) -> SyncResult {
         let faults_only = match (ledger, self.faults.as_deref()) {
             (None, Some(f)) => Some(FaultsOnly {
@@ -476,7 +536,8 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
             Some(p) => Some(p),
             None => observer,
         };
-        self.sync_observed(pipe, input, args, observer).await
+        self.sync_observed(pipe, None, args, observer, delivery)
+            .await
     }
 
     fn ledger_for(&self, pipe_ref: &PipeRef, axis: &Axis) -> Option<LedgerWriter<'_, S>> {
@@ -562,7 +623,8 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
             span: Mutex::new(None),
         };
         let mut result = if hooks {
-            self.sync_observed(pipe, input, args, Some(&extent)).await
+            self.sync_observed(pipe, input, args, Some(&extent), None)
+                .await
         } else {
             sync_pipe(&self.env(), pipe, input, args, Some(&extent)).await
         };
@@ -583,8 +645,12 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
         input: Option<PipeInput>,
         args: &SyncArgs,
         observer: Option<&dyn DeltaObserver>,
+        delivery: Option<&meerschaum_connector::batch_delivery::NodeDelivery>,
     ) -> SyncResult {
-        let env = self.env();
+        let env = SyncEnv {
+            delivery: delivery.cloned(),
+            ..self.env()
+        };
         let hooks = if args.extra.get("skip_hooks").is_some_and(Value::truthy) {
             None
         } else {
@@ -653,6 +719,31 @@ impl DeltaObserver for Extent<'_> {
         }
     }
 
+    fn supports_source_replace_summary(&self) -> bool {
+        self.inner
+            .is_none_or(|observer| observer.supports_source_replace_summary())
+    }
+
+    async fn before_source_replace(
+        &self,
+        pipe: &Pipe,
+        summary: &meerschaum_connector::source_replace::SourceReplaceSummary,
+    ) -> Result<(), String> {
+        let mut positions = source_replace_positions(summary, self.axis);
+        for bound in [&summary.begin, &summary.end].into_iter().flatten() {
+            if let Some(position) =
+                crate::sync::date_bound_to_bound(bound).and_then(|bound| self.axis.pos(&bound))
+            {
+                positions.push(position);
+            }
+        }
+        self.widen(&positions);
+        match self.inner {
+            Some(observer) => observer.before_source_replace(pipe, summary).await,
+            None => Ok(()),
+        }
+    }
+
     async fn after_commit(&self, pipe: &Pipe, result: &SyncResult) -> Result<(), String> {
         match self.inner {
             Some(o) => o.after_commit(pipe, result).await,
@@ -671,7 +762,41 @@ fn span_args(base: &SyncArgs, span: &Span) -> SyncArgs {
     args
 }
 
-fn combine(pipe: &Pipe, results: Vec<SyncResult>) -> SyncResult {
+pub(crate) fn native_call_args(
+    action: Action,
+    bounds: Option<crate::Bounds>,
+    chunks: &[Span],
+    ranges: &[Span],
+    base: &SyncArgs,
+) -> Vec<SyncArgs> {
+    if matches!(action, Action::Root | Action::Rebuild) {
+        let mut args = base.clone();
+        if let Some(bounds) = bounds {
+            args.begin = match bounds.begin {
+                Begin::Default => SyncBegin::Default,
+                Begin::Unbounded => SyncBegin::Unbounded,
+                Begin::At(value) => SyncBegin::At(value.into()),
+            };
+            args.end = bounds.end.map(Into::into);
+        }
+        return vec![args];
+    }
+    let fallback;
+    let spans = if !chunks.is_empty() {
+        chunks
+    } else if !ranges.is_empty() {
+        ranges
+    } else {
+        fallback = vec![Span {
+            begin: bounds.and_then(|bounds| bounds.begin.bound()),
+            end: bounds.and_then(|bounds| bounds.end),
+        }];
+        &fallback
+    };
+    spans.iter().map(|span| span_args(base, span)).collect()
+}
+
+pub(crate) fn combine(pipe: &Pipe, results: Vec<SyncResult>) -> SyncResult {
     if results.len() == 1 {
         return results.into_iter().next().expect("one result");
     }
@@ -764,38 +889,13 @@ impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
         }
 
         let bounds = request.bounds;
-        let windows: Vec<SyncArgs> = match request.action {
-            Action::Root | Action::Rebuild => {
-                let mut args = base.clone();
-                if let Some(b) = bounds {
-                    args.begin = match b.begin {
-                        Begin::Default => SyncBegin::Default,
-                        Begin::Unbounded => SyncBegin::Unbounded,
-                        Begin::At(x) => SyncBegin::At(x.into()),
-                    };
-                    args.end = b.end.map(Into::into);
-                }
-                vec![args]
-            }
-            _ => {
-                let spans: Vec<Span> = if !request.chunks.is_empty() {
-                    request.chunks.clone()
-                } else if !request.ranges.is_empty() {
-                    request.ranges.clone()
-                } else if let Some(b) = bounds {
-                    vec![Span {
-                        begin: b.begin.bound(),
-                        end: b.end,
-                    }]
-                } else {
-                    vec![Span {
-                        begin: None,
-                        end: None,
-                    }]
-                };
-                spans.iter().map(|s| span_args(&base, s)).collect()
-            }
-        };
+        let windows = native_call_args(
+            request.action,
+            bounds,
+            &request.chunks,
+            &request.ranges,
+            &base,
+        );
 
         let chunked = windows.len() > 1 || !request.chunks.is_empty();
         let mut results = Vec::with_capacity(windows.len());
@@ -820,10 +920,10 @@ impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
                 .sync_window(
                     &pipe,
                     pipe_ref,
-                    None,
                     args,
                     ledger.as_ref(),
                     Some(&request.events),
+                    request.delivery.as_ref(),
                 )
                 .await;
             if chunked {

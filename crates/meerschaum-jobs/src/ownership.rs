@@ -8,7 +8,8 @@
 //! CLI's or Python's (`MRSM_ROOT_DIR`). Jobs on another API server's executor are that server's.
 //!
 //! A rename writes the new name into every job naming the old one (names compare without case);
-//! a deletion writes `team: null` (Everyone). The value on disk always wins over an in-memory
+//! a deletion writes `team: null` (Everyone) for legacy jobs. Registered API histories retain
+//! their original team UUID and historical label; deletion never declassifies them. The value on disk always wins over an in-memory
 //! copy ([`crate::properties::FILE_OWNED_KEYS`]), so a running job's supervisor never writes the
 //! old team back.
 //!
@@ -135,6 +136,15 @@ pub fn retag_team<R: JobsRoot + ?Sized>(root: &R, old: &str, new: Option<&str>) 
         if !JobAccess::from_properties(&name, &props).is_team(Some(old)) {
             continue;
         }
+        if new.is_none()
+            && props
+                .get(meerschaum_core::job_access::TEAM_ID_KEY)
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.trim().is_empty())
+        {
+            // A namespace deletion retires registered history, not its private provenance.
+            continue;
+        }
         props.insert(
             TEAM_KEY.to_string(),
             new.clone().map_or(Value::Null, Value::Str),
@@ -218,6 +228,24 @@ pub fn inherit_parent_access(props: &mut Map, job_dir: &Path, parent_dir: Option
         return false;
     }
     JobAccess::stamp(props, owner.as_deref(), access.team.as_deref());
+    // Registration evidence follows the inherited owner, never a child's supplied marker.
+    // This lower layer preserves trusted local parent data without interpreting identities.
+    props.shift_remove(meerschaum_core::job_access::OWNER_BINDING_KEY);
+    if owner.is_some()
+        && let Some(binding) = parent_props.get(meerschaum_core::job_access::OWNER_BINDING_KEY)
+    {
+        props.insert(
+            meerschaum_core::job_access::OWNER_BINDING_KEY.into(),
+            binding.clone(),
+        );
+    }
+    props.shift_remove(meerschaum_core::job_access::TEAM_ID_KEY);
+    if let Some(team_id) = parent_props.get(meerschaum_core::job_access::TEAM_ID_KEY) {
+        props.insert(
+            meerschaum_core::job_access::TEAM_ID_KEY.into(),
+            team_id.clone(),
+        );
+    }
     true
 }
 
@@ -225,6 +253,52 @@ pub fn inherit_parent_access(props: &mut Map, job_dir: &Path, parent_dir: Option
 mod tests {
     use super::*;
     use crate::properties::write_properties;
+
+    #[test]
+    fn registered_parent_provenance_is_inherited_and_team_deletion_retains_the_archive() {
+        let root = tempfile::tempdir().unwrap();
+        write_job(
+            root.path(),
+            "execute-parent",
+            r#"{"owner":"alice","team":"Wetlands","_mrsm_owner_binding":{"kind":"user","username":"alice","user_id":7},"_mrsm_team_id":"00000000-0000-4000-8000-000000000001"}"#,
+        );
+        let paths = root.path().job_paths();
+        let parent = DaemonPaths::new(&paths, "execute-parent").dir;
+        let child = DaemonPaths::new(&paths, "child");
+        let mut props = Map::new();
+        props.insert(
+            meerschaum_core::job_access::OWNER_BINDING_KEY.into(),
+            Value::Str("forged".into()),
+        );
+        props.insert(meerschaum_core::job_access::TEAM_ID_KEY.into(), Value::Null);
+        assert!(inherit_parent_access(&mut props, &child.dir, Some(&parent)));
+        assert_eq!(
+            props.get(meerschaum_core::job_access::OWNER_BINDING_KEY),
+            props_of(root.path(), "execute-parent")
+                .get(meerschaum_core::job_access::OWNER_BINDING_KEY)
+        );
+        assert_eq!(
+            props
+                .get(meerschaum_core::job_access::TEAM_ID_KEY)
+                .and_then(Value::as_str),
+            Some("00000000-0000-4000-8000-000000000001")
+        );
+        assert!(write_properties(&child.properties, &props).success);
+        assert!(retag_team(root.path(), "Wetlands", None).jobs.is_empty());
+        assert_eq!(
+            props_of(root.path(), "child")
+                .get("team")
+                .and_then(Value::as_str),
+            Some("Wetlands")
+        );
+        assert_eq!(rename_team(root.path(), "Wetlands", "Marsh"), 2);
+        assert_eq!(
+            props_of(root.path(), "child")
+                .get("team")
+                .and_then(Value::as_str),
+            Some("Marsh")
+        );
+    }
 
     fn write_job(root: &Path, name: &str, json: &str) {
         let daemon = DaemonPaths::new(&root.job_paths(), name);

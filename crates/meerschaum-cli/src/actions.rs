@@ -82,12 +82,15 @@ pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[
     ("watch", "runs"),
     ("verify", "schemas"),
     ("start", "pipelines"),
+    ("start", "executor"),
     ("stop", "pipelines"),
     // rc15 wave 2 (AC10): teams and pipe locks.
     ("show", "teams"),
     ("register", "teams"),
     ("edit", "teams"),
     ("delete", "teams"),
+    // 5.1: a team with its own database, grants and Grafana organization.
+    ("bootstrap", "teams"),
     ("lock", "pipes"),
     ("unlock", "pipes"),
 ];
@@ -211,6 +214,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("pipes", "_bootstrap_pipes"),
             sub("pipelines", "_bootstrap_pipelines"),
             sub("plugins", "_bootstrap_plugins"),
+            sub("teams", "_bootstrap_teams"),
         ],
     ),
     action(
@@ -329,6 +333,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
         "start",
         &[
             sub("api", "_start_api"),
+            sub("executor", "_start_executor"),
             sub("connectors", "_start_connectors"),
             sub("daemons", "_start_daemons"),
             sub("gui", "_start_gui"),

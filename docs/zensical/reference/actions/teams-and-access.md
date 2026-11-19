@@ -64,14 +64,14 @@ mrsm register teams analytics --members alice,bob --managers carol
 mrsm show teams
 mrsm edit teams analytics        # members, managers and name in your editor
 mrsm edit team analytics --managers carol,dave
-mrsm delete teams analytics      # its pipes and jobs move to Everyone
+mrsm delete teams analytics      # review data and retained job history first
 ```
 
 - Team names follow the username rules (letters, digits and `_ - . @`) and are unique without case.
 - `edit teams` opens a YAML file with `name`, `managers` and `members`. Change `name` to rename the
   team: the pipes and jobs that name it are renamed too (the question counts them). With
   `--members` or `--managers`, the lists are set without opening the editor.
-- `delete teams` says how many pipes and jobs move to Everyone before it asks.
+- `delete teams` previews affected pipes and jobs before it asks. Pipes and legacy jobs follow their retagging rules; registered private job history retains its original identity as an owner/admin archive, rather than becoming Everyone's. Recreating a team or username does not transfer that history; see [job access](../background-jobs/access.md).
 - `mrsm show teams --nopretty` prints one JSON object per team.
 
 ## Pipe access

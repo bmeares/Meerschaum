@@ -329,6 +329,39 @@ pub fn rewrite_uri(uri: &str) -> (String, Option<Flavor>) {
     (uri, flavor)
 }
 
+/// 5.1: a secret reference (`MRSM{file:...}` / `MRSM{env:...}`) that could not be resolved stays
+/// as its text; building the connector is where it fails, naming the reference and the key.
+fn check_secret_references(attrs: &ConnectorAttributes) -> Result<()> {
+    use meerschaum_core::config::secrets;
+    use meerschaum_core::value::{Map, Value};
+    let mut map = Map::new();
+    let mut put = |k: &str, v: &Option<String>| {
+        if let Some(v) = v {
+            map.insert(k.to_string(), Value::Str(v.clone()));
+        }
+    };
+    put("uri", &attrs.uri);
+    put("host", &attrs.host);
+    put("username", &attrs.username);
+    put("password", &attrs.password);
+    put("database", &attrs.database);
+    put("schema", &attrs.schema);
+    match &attrs.options {
+        Some(ConnectionOptions::Str(s)) => put("options", &Some(s.clone())),
+        Some(ConnectionOptions::Pairs(pairs)) => {
+            for (k, v) in pairs {
+                map.insert(format!("options:{k}"), Value::Str(v.clone()));
+            }
+        }
+        None => {}
+    }
+    for (k, v) in &attrs.extra {
+        map.insert(k.clone(), Value::Str(v.clone()));
+    }
+    let label = attrs.label.as_deref().unwrap_or("main");
+    secrets::check_connector_attributes("sql", label, &map).map_err(SqlError::InvalidArgument)
+}
+
 impl ConnectionSpec {
     /// Build a spec from a URI (`SQLConnector(uri=uri, label=label, flavor=flavor)`).
     pub fn from_uri(uri: &str, label: Option<&str>, flavor: Option<Flavor>) -> Result<Self> {
@@ -344,6 +377,7 @@ impl ConnectionSpec {
     /// attributes: URI rewriting and parsing, explicit flavor override, requirement checks and
     /// flavor defaults.
     pub fn from_attributes(attrs: &ConnectorAttributes) -> Result<Self> {
+        check_secret_references(attrs)?;
         let mut flavor = attrs.flavor;
         let mut label = attrs.label.clone();
         let mut uri = attrs.uri.clone();

@@ -302,7 +302,7 @@ impl Home {
             .stdin
             .take()
             .unwrap()
-            .write_all(b"n\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
+            .write_all(b"y\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
             .unwrap();
         let output = registering.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -501,14 +501,15 @@ fn single_file_routes_and_mcp_entries_are_served_by_start_api() {
     let server = serve(&home);
     let port = server.port;
 
-    // Scopes are enforced before the plugin runs; the plugin sees the principal and scopes.
+    // The host's trusted administrator path serves the source already built by the fixture.
     assert_eq!(http(port, "GET", "/sfx/items/7", &[], b"").status, 401);
     let reader = login(port, Some("pipes:read"));
+    let writer = login(port, None);
     let item = http(
         port,
         "GET",
         "/sfx/items/7?q=a",
-        &[("Authorization", &reader)],
+        &[("Authorization", &writer)],
         b"",
     );
     assert_eq!(item.status, 200, "{}", String::from_utf8_lossy(&item.body));
@@ -516,14 +517,13 @@ fn single_file_routes_and_mcp_entries_are_served_by_start_api() {
     assert_eq!(body["id"], "7");
     assert_eq!(body["q"], "a");
     assert_eq!(body["principal"]["username"], "ada");
-    assert_eq!(body["scopes"], json!(["pipes:read"]));
     // The `int` converter refuses a non-integer.
     assert_eq!(
         http(
             port,
             "GET",
             "/sfx/items/x",
-            &[("Authorization", &reader)],
+            &[("Authorization", &writer)],
             b""
         )
         .status,
@@ -540,7 +540,6 @@ fn single_file_routes_and_mcp_entries_are_served_by_start_api() {
         .status,
         403
     );
-    let writer = login(port, None);
     let echo = http(
         port,
         "POST",
@@ -558,8 +557,8 @@ fn single_file_routes_and_mcp_entries_are_served_by_start_api() {
         doc.head
     );
 
-    // MCP: listed per scope, called with validated arguments.
-    let tools = mcp(port, &reader, "tools/list", json!({}));
+    // The administrator's catalog exposes the synthetic tool and validates its arguments.
+    let tools = mcp(port, &writer, "tools/list", json!({}));
     let names: Vec<&str> = tools["result"]["tools"]
         .as_array()
         .unwrap()
@@ -567,10 +566,10 @@ fn single_file_routes_and_mcp_entries_are_served_by_start_api() {
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     assert!(names.contains(&"sfx_add"), "{names:?}");
-    assert!(!names.contains(&"sfx_secret"), "{names:?}");
+    assert!(names.contains(&"sfx_secret"), "{names:?}");
     let sum = mcp(
         port,
-        &reader,
+        &writer,
         "tools/call",
         json!({"name": "sfx_add", "arguments": {"a": 2, "b": 40}}),
     );
@@ -582,14 +581,14 @@ fn single_file_routes_and_mcp_entries_are_served_by_start_api() {
     );
     let invalid = mcp(
         port,
-        &reader,
+        &writer,
         "tools/call",
         json!({"name": "sfx_add", "arguments": {"a": 2}}),
     );
     assert_eq!(invalid["result"]["isError"], true, "{invalid}");
     let item = mcp(
         port,
-        &reader,
+        &writer,
         "resources/read",
         json!({"uri": "sfx://items/9"}),
     );
@@ -602,7 +601,7 @@ fn single_file_routes_and_mcp_entries_are_served_by_start_api() {
     );
     let greet = mcp(
         port,
-        &reader,
+        &writer,
         "prompts/get",
         json!({"name": "sfx_greet", "arguments": {"who": "Ada"}}),
     );

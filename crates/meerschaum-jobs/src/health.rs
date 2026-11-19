@@ -193,14 +193,27 @@ impl LapRecord {
 
 /// The heartbeat file of the job named `name` under `jobs_dir` (a `systemd` job's is in its
 /// hidden sister job's directory, which has the same path).
+///
+/// A sandboxed team job's command writes its heartbeat in the job's work directory
+/// (`meerschaum_core::team_scope::sandbox::JOB_WORK_DIR`, 5.1): the newer of the two is read.
 pub fn laps_path(jobs_dir: &Path, name: &str) -> PathBuf {
-    jobs_dir.join(name).join(LAPS_FILE_NAME)
+    let plain = jobs_dir.join(name).join(LAPS_FILE_NAME);
+    let work = jobs_dir
+        .join(name)
+        .join(meerschaum_core::team_scope::sandbox::JOB_WORK_DIR)
+        .join(LAPS_FILE_NAME);
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    match (modified(&plain), modified(&work)) {
+        (Some(a), Some(b)) if b > a => work,
+        (None, Some(_)) => work,
+        _ => plain,
+    }
 }
 
 /// Read a heartbeat file (`None` when it is missing or unreadable).
 pub fn read_record(path: &Path) -> Option<LapRecord> {
-    let text = std::fs::read_to_string(path).ok()?;
-    LapRecord::from_json(&serde_json::from_str(&text).ok()?)
+    let bytes = crate::untrusted_file::read_regular(path, 1024 * 1024, false).ok()??;
+    LapRecord::from_json(&serde_json::from_slice(&bytes).ok()?)
 }
 
 /// Write a heartbeat file atomically (a temporary file renamed over it). The directory must

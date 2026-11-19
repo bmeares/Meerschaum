@@ -317,6 +317,50 @@ fn parameters<'py>(py: Python<'py>, params: &[SqlParam]) -> PyResult<Bound<'py, 
                     .getattr("date")?
                     .call_method1("fromisoformat", (v.to_string(),))?,
             )?,
+            SqlParam::EmptyArray => out.append(PyList::empty(py))?,
+            SqlParam::TextArray(v) => out.append(v.as_slice())?,
+            SqlParam::IntArray(v) => out.append(v.as_slice())?,
+            SqlParam::FloatArray(v) => out.append(v.as_slice())?,
+            SqlParam::BoolArray(v) => out.append(v.as_slice())?,
+            SqlParam::TimestampArray(v) => {
+                let dt_cls = datetime.getattr("datetime")?;
+                let list = PyList::empty(py);
+                for item in v {
+                    match item {
+                        Some(ts) => {
+                            list.append(dt_cls.call_method1("fromisoformat", (ts.to_string(),))?)?
+                        }
+                        None => list.append(py.None())?,
+                    }
+                }
+                out.append(list)?;
+            }
+            SqlParam::TimestampTzArray(v) => {
+                let dt_cls = datetime.getattr("datetime")?;
+                let list = PyList::empty(py);
+                for item in v {
+                    match item {
+                        Some(ts) => {
+                            list.append(dt_cls.call_method1("fromisoformat", (ts.to_rfc3339(),))?)?
+                        }
+                        None => list.append(py.None())?,
+                    }
+                }
+                out.append(list)?;
+            }
+            SqlParam::DateArray(v) => {
+                let date_cls = datetime.getattr("date")?;
+                let list = PyList::empty(py);
+                for item in v {
+                    match item {
+                        Some(d) => {
+                            list.append(date_cls.call_method1("fromisoformat", (d.to_string(),))?)?
+                        }
+                        None => list.append(py.None())?,
+                    }
+                }
+                out.append(list)?;
+            }
         }
     }
     Ok(out)

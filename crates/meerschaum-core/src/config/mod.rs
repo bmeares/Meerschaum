@@ -30,8 +30,12 @@
 pub mod backup;
 pub mod connector_types;
 pub mod dataframe;
+pub mod environment;
+pub mod grafana_readonly;
 pub mod lossless;
 pub mod paths;
+pub mod provenance;
+pub mod secrets;
 pub mod sync;
 
 use std::path::{Path, PathBuf};
@@ -39,7 +43,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use regex::Regex;
 
-use crate::pyfmt::{JsonStyle, json_dumps_str, py_repr, str_repr, string_to_dict};
+use crate::pyfmt::{JsonStyle, json_dumps_str, py_repr, str_repr};
 use crate::static_config::static_config;
 use crate::value::{Map, Value};
 use crate::yaml::dumper::{DumpOptions, dump_node};
@@ -48,6 +52,7 @@ use crate::yaml::scanner::PyYamlError;
 
 pub use lossless::{ConfigMap, ConfigValue, JsonDecodeError};
 pub use paths::{PathValue, Paths};
+pub use provenance::{EnvLayer, Origin};
 
 use lossless::{
     apply_patch, apply_patch_maps, json_dumps, json_dumps_lossless, json_dumps_map_lossless,
@@ -145,6 +150,10 @@ pub enum ConfigError {
     /// An I/O error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The environment configures the same thing twice (`MRSM_CONFIG` and `MRSM_CONFIG_FILE`),
+    /// or a `*_FILE` variable names a file that cannot be read.
+    #[error("{0}")]
+    Environment(String),
 }
 
 /// The default-config paths v5 adds to v4.1.4's `default_config` (see [`default_config`]).
@@ -360,6 +369,21 @@ pub struct ConfigState {
     allow_writes: bool,
     notices: Vec<Notice>,
     write_error: Option<(std::io::ErrorKind, String)>,
+    /// The layers applied over the files, in order (`MRSM_<TYPE>_<LABEL>` connectors,
+    /// `MRSM_CONFIG` / `MRSM_PATCH`, `patch_config/`): what [`provenance`] replays to know
+    /// where a value came from, so a writer never persists what only they hold.
+    layers: Vec<EnvLayer>,
+    /// 5.1: a team-scoped process's registry (`MRSM_TEAM_SCOPE` is set). Its configuration sets
+    /// the connectors the team was not given to `null`: a key path through such a `null` is
+    /// withheld, not missing, and never falls back to the defaults (which would resurrect a
+    /// default connector's attributes, and merge every default into the configuration on each
+    /// such lookup).
+    withholds: bool,
+}
+
+/// Whether a registry built from `lookup` is a team-scoped process's ([`ConfigState::withholds`]).
+fn team_scoped(lookup: impl Fn(&str) -> Option<String>) -> bool {
+    lookup(crate::team_scope::TEAM_SCOPE_VAR).is_some_and(|v| !v.trim().is_empty())
 }
 
 /// The keyword arguments of `search_and_substitute_config`.
@@ -455,6 +479,7 @@ impl Config {
             opts.cpu_count,
             opts.windows,
         ));
+        environment::environment_patch_texts(&opts.env).map_err(ConfigError::Environment)?;
         let mut state = ConfigState {
             paths,
             defaults,
@@ -462,10 +487,16 @@ impl Config {
             allow_writes: opts.allow_writes,
             notices: Vec::new(),
             write_error: None,
+            layers: Vec::new(),
+            withholds: team_scoped(lookup),
         };
         state.apply_environment_uris(&opts.env, false);
         state.apply_environment_patches(&opts.env);
-        state.apply_patch_dirs();
+        // A team-scoped process (5.1) never reads or consumes the root's patch directories:
+        // what they hold is the server's.
+        if lookup(crate::team_scope::TEAM_SCOPE_VAR).is_none_or(|v| v.is_empty()) {
+            state.apply_patch_dirs();
+        }
         Ok(Config {
             state: Mutex::new(state),
         })
@@ -488,6 +519,9 @@ impl Config {
                 allow_writes,
                 notices: Vec::new(),
                 write_error: None,
+                layers: Vec::new(),
+                // The Python boundary's registry: the process's own environment.
+                withholds: team_scoped(|k| std::env::var(k).ok()),
             }),
         }
     }
@@ -585,9 +619,163 @@ impl Config {
         self.lock().search_and_substitute_lossless(config)
     }
 
+    /// Re-read `meerschaum:connectors` from the config files and patch it over the section in
+    /// memory: the connectors another process registered since this one read its config (a team's
+    /// database created from the console while the server runs). Connectors that exist only in
+    /// memory (environment connectors, patches) are kept. `true` when the section changed.
+    pub fn refresh_connectors(&self) -> bool {
+        self.with_state(|s| s.refresh_connectors())
+    }
+
+    /// The file `meerschaum` is read from (to notice that another process wrote it).
+    pub fn connectors_file(&self) -> Option<PathBuf> {
+        self.with_state(|s| s.get_keyfile_path("meerschaum", false, None))
+    }
+
     /// `write_config(config_dict, directory)`.
     pub fn write_config(&self, config: Option<&Map>, directory: Option<&Path>) -> bool {
         self.lock().write_config(config, directory)
+    }
+
+    /// Add the connector `typ:label` with `attributes` to the configuration file, as written, and
+    /// to memory (5.1: a team's connector). Nothing else in the file changes: `MRSM{...}`
+    /// references stay references, and what only the environment holds (`MRSM_<TYPE>_<LABEL>`
+    /// connectors, `MRSM_CONFIG` / `MRSM_PATCH` patches) is never written. The attributes hold a
+    /// generated password, so the file is left readable by its owner only. `Err` when the
+    /// connector is already in the file, or the file could not be read or written.
+    pub fn add_connector(&self, typ: &str, label: &str, attributes: &Map) -> Result<(), String> {
+        let keys = format!("{typ}:{label}");
+        self.with_state(|s| {
+            let key = "meerschaum".to_string();
+            let (disk, _) = s
+                .read_config_lossless(None, Some(std::slice::from_ref(&key)), false, false, true)
+                .map_err(|e| format!("The configuration could not be read: {e:?}"))?;
+            let mut section = disk
+                .get(&key)
+                .and_then(ConfigValue::as_map)
+                .cloned()
+                .unwrap_or_default();
+            let value = ConfigValue::from_value(&Value::Map(attributes.clone()));
+            let connectors = section
+                .entry("connectors".to_string())
+                .or_insert_with(ConfigValue::new_map);
+            if connectors.as_map().is_none() {
+                *connectors = ConfigValue::new_map();
+            }
+            let labels = connectors
+                .as_map_mut()
+                .expect("a map")
+                .entry(typ.to_string())
+                .or_insert_with(ConfigValue::new_map);
+            if labels.as_map().is_none() {
+                *labels = ConfigValue::new_map();
+            }
+            let labels = labels.as_map_mut().expect("a map");
+            if labels.get(label).is_some_and(ConfigValue::truthy) {
+                return Err(format!("The connector '{keys}' already exists."));
+            }
+            labels.insert(label.to_string(), value.clone());
+            let mut config = ConfigMap::new();
+            config.insert(key.clone(), ConfigValue::Map(section));
+            if !s.write_config_lossless(Some(&config), None) {
+                let reason = s
+                    .take_write_error()
+                    .map(|(_, message)| format!(": {message}"))
+                    .unwrap_or_else(|| ".".into());
+                return Err(format!(
+                    "The connector '{keys}' could not be written to the configuration{reason}"
+                ));
+            }
+            #[cfg(unix)]
+            if let Some(path) = s.get_keyfile_path(&key, false, None) {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    let mode = meta.permissions().mode() & 0o7777;
+                    if mode & 0o077 != 0 {
+                        std::fs::set_permissions(
+                            &path,
+                            std::fs::Permissions::from_mode(mode & 0o7700),
+                        )
+                        .map_err(|e| {
+                            format!(
+                                "The connector '{keys}' was written, but '{}' could not be made \
+                                 readable by its owner only: {e}",
+                                path.display()
+                            )
+                        })?;
+                    }
+                }
+            }
+            // In memory (when the section is loaded; else its first read loads the file).
+            if let Some(section) = s.config.get_mut(&key).and_then(|m| m.as_map_mut()) {
+                let connectors = section
+                    .entry("connectors".to_string())
+                    .or_insert_with(ConfigValue::new_map);
+                if let Some(connectors) = connectors.as_map_mut() {
+                    let labels = connectors
+                        .entry(typ.to_string())
+                        .or_insert_with(ConfigValue::new_map);
+                    if let Some(labels) = labels.as_map_mut() {
+                        labels.insert(label.to_string(), value);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Move the connector reservations of team `from` to `to` (5.1,
+    /// [`crate::access::move_reservations`]) in the configuration file, as written (references
+    /// are kept), and in memory. The connectors changed (`type:label`); `Err` when the file could
+    /// not be read or written. Connectors that exist only in memory (environment connectors) are
+    /// rewritten in memory only.
+    pub fn move_team_reservations(&self, from: &str, to: &str) -> Result<Vec<String>, String> {
+        self.with_state(|s| {
+            let key = "meerschaum".to_string();
+            let (disk, _) = s
+                .read_config(None, Some(std::slice::from_ref(&key)), false, false, true)
+                .map_err(|e| format!("The configuration could not be read: {e:?}"))?;
+            let mut section = disk.get(&key).map(|v| v.to_map()).unwrap_or_default();
+            let mut changed = Vec::new();
+            if let Some(Value::Map(connectors)) = section.get_mut("connectors") {
+                changed = crate::access::move_reservations(connectors, from, to);
+            }
+            if !changed.is_empty() {
+                let mut config = Map::new();
+                config.insert(key.clone(), Value::Map(section));
+                if !s.write_config(Some(&config), None) {
+                    return Err(format!(
+                        "The connectors {} could not be written to the configuration.",
+                        changed.join(", ")
+                    ));
+                }
+                s.refresh_connectors();
+            }
+            // What is only in memory.
+            let mut live = ConfigValue::map_to_value(&s.config);
+            if let Some(Value::Map(meerschaum)) = live.get_mut(&key)
+                && let Some(Value::Map(connectors)) = meerschaum.get_mut("connectors")
+            {
+                let more = crate::access::move_reservations(connectors, from, to);
+                if !more.is_empty() {
+                    let connectors = ConfigValue::from_value(&Value::Map(connectors.clone()));
+                    if let Some(section) = s.config.get_mut(&key).and_then(|m| m.as_map_mut()) {
+                        section.insert("connectors".to_string(), connectors);
+                    }
+                    for keys in more {
+                        if !changed.contains(&keys) {
+                            changed.push(keys);
+                        }
+                    }
+                }
+            }
+            Ok(changed)
+        })
+    }
+
+    /// Where each value of the top-level key `key` comes from (5.1, see [`provenance`]).
+    pub fn origins(&self, key: &str) -> provenance::KeyOrigins {
+        self.with_state(|s| s.origins(key))
     }
 
     /// Drain the warnings recorded so far (Python emits them with `warn()`).
@@ -617,6 +805,36 @@ static URI_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&rust).expect("valid connector URI regex")
 });
 
+/// Native launch controls are never connector URI declarations, including when a plugin
+/// registers a connector type whose name happens to match one of these exact markers.
+/// Keep in sync with config/environment.py; do not reserve an entire connector prefix.
+pub const NATIVE_EXECUTION_ENV_VARS: &[&str] = &[
+    "MRSM_API_HOST",
+    "MRSM_API_HOST_CONFIG",
+    "MRSM_API_HOST_PARENT_PIPE",
+    "MRSM_API_HOST_PROXY_TOKEN",
+    "MRSM_API_HOST_TRANSPORT",
+    "MRSM_API_EXECUTION",
+    "MRSM_METADATA_EXECUTION",
+    "MRSM_NATIVE_JOB_LIFECYCLE",
+    "MRSM_TEAM_SCOPE",
+    "MRSM_TEAM_SANDBOX",
+    "MRSM_TEAM_FINGERPRINT",
+    "MRSM_TEAM_PROBE",
+    "MRSM_EXECUTOR_PLUGINS",
+    "MRSM_TERMINAL_LAUNCH",
+    "MRSM_WEBTERM_STATE_DIR",
+    "MRSM_BIN_EXEC",
+    "MRSM_JOB_RESULT_PATH",
+    "MRSM_JOB_SUPERVISOR",
+    "MRSM_JOB_PROGRAM",
+    "MRSM_JOB_STARTUP_RELEASE",
+    "MRSM_JOB_START_KIND",
+    "MRSM_JOB_LAPS_PATH",
+    "MRSM_JOB_LAPS_PARENT",
+    "MRSM_SYSTEMD_JOB_CHILD",
+];
+
 /// Port of `get_connector_env_vars`: the `MRSM_<TYPE>_<LABEL>` variable names in `env`.
 pub fn get_connector_env_vars(env: &[(String, String)]) -> Vec<String> {
     let reserved: Vec<String> = static_config()
@@ -630,7 +848,11 @@ pub fn get_connector_env_vars(env: &[(String, String)]) -> Vec<String> {
         })
         .unwrap_or_default();
     env.iter()
-        .filter(|(k, _)| URI_REGEX.is_match(k) && !reserved.contains(k))
+        .filter(|(k, _)| {
+            URI_REGEX.is_match(k)
+                && !reserved.contains(k)
+                && !NATIVE_EXECUTION_ENV_VARS.contains(&k.as_str())
+        })
         .map(|(k, _)| k.clone())
         .collect()
 }
@@ -786,6 +1008,74 @@ fn decode_error_text(bytes: &[u8], err: &std::str::Utf8Error) -> String {
         "invalid continuation byte"
     };
     format!("'utf-8' codec can't decode byte 0x{byte:02x} in position {pos}: {reason}")
+}
+
+// Execution aliases are complete connector sections, even when an unrelated missing legacy
+// setting makes the parity fallback merge all defaults. Preserve malformed explicit fields
+// too: the alias validator must reject them instead of silently repairing their input.
+fn connector_alias_sections(connectors: &ConfigValue) -> Vec<(String, String, ConfigValue)> {
+    let mut aliases = Vec::new();
+    if let Some(types) = connectors.as_map() {
+        for (kind, labels) in types {
+            if let Some(labels) = labels.as_map() {
+                for (label, attributes) in labels {
+                    if attributes
+                        .get(crate::team_scope::api_execution::ALIAS_ATTRIBUTE)
+                        .is_some()
+                    {
+                        aliases.push((kind.clone(), label.clone(), attributes.clone()));
+                    }
+                }
+            }
+        }
+    }
+    aliases
+}
+
+fn restore_connector_alias_sections(
+    connectors: &mut ConfigValue,
+    aliases: Vec<(String, String, ConfigValue)>,
+) {
+    let Some(types) = connectors.as_map_mut() else {
+        return;
+    };
+    for (kind, label, attributes) in aliases {
+        let Some(labels) = types.get_mut(&kind).and_then(ConfigValue::as_map_mut) else {
+            continue;
+        };
+        // An explicit null still revokes a section; only an alias surviving the merge is
+        // replaced with its exact original descriptor map.
+        if labels.get(&label).is_some_and(|value| {
+            value
+                .get(crate::team_scope::api_execution::ALIAS_ATTRIBUTE)
+                .is_some()
+        }) {
+            labels.insert(label, attributes);
+        }
+    }
+}
+
+// Incoming complete aliases override native defaults atomically; an existing alias is also
+// protected from a later partial native-attribute patch. Explicit null sections still revoke.
+fn apply_config_patch(base: &ConfigMap, patch: &ConfigMap) -> ConfigMap {
+    let aliases_of = |config: &ConfigMap| {
+        config
+            .get("meerschaum")
+            .and_then(|section| section.get("connectors"))
+            .map(connector_alias_sections)
+            .unwrap_or_default()
+    };
+    let mut aliases = aliases_of(base);
+    aliases.extend(aliases_of(patch));
+    let mut merged = apply_patch_maps(base, patch);
+    if let Some(connectors) = merged
+        .get_mut("meerschaum")
+        .and_then(ConfigValue::as_map_mut)
+        .and_then(|section| section.get_mut("connectors"))
+    {
+        restore_connector_alias_sections(connectors, aliases);
+    }
+    merged
 }
 
 impl ConfigState {
@@ -950,13 +1240,24 @@ impl ConfigState {
 
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let mut found: Option<ConfigValue> = None;
+        let mut withheld = false;
+        let mut alias_withheld = false;
         if !invalid_keys {
             let mut current: Option<&ConfigValue> = None;
             for (i, k) in key_refs.iter().enumerate() {
                 current = if i == 0 {
                     self.config.get(*k)
                 } else {
-                    current.and_then(|c| c.get(k))
+                    let parent = current;
+                    let child = parent.and_then(|c| c.get(k));
+                    withheld = child.is_none() && matches!(parent, Some(ConfigValue::Null));
+                    alias_withheld |= child.is_none()
+                        && parent.is_some_and(|value| {
+                            value
+                                .get(crate::team_scope::api_execution::ALIAS_ATTRIBUTE)
+                                .is_some()
+                        });
+                    child
                 };
                 if current.is_none() {
                     break;
@@ -964,7 +1265,20 @@ impl ConfigState {
             }
             found = current.cloned();
         }
-        if let Some(value) = found {
+        // 5.1: below a connector a team-scoped process was not given (`null`): withheld. No
+        // default stands in for it and nothing is merged (see `ConfigState::withholds`).
+        if alias_withheld || withheld && self.withholds {
+            return (false, ConfigValue::Null);
+        }
+        if let Some(mut value) = found {
+            // 5.1: a path holding a secret reference re-reads it (a rotated file is seen by the
+            // next connector built); a process that never met one pays an atomic load.
+            if opts.substitute && k0 != symlinks_key && secrets::seen() {
+                if let Some(fresh) = self.refresh_secrets(keys) {
+                    value = fresh;
+                }
+                self.warn_unresolved_secret(keys, &value);
+            }
             return (true, value);
         }
 
@@ -1013,7 +1327,21 @@ impl ConfigState {
         // Don't write keys that we haven't yet loaded into memory.
         let mut trimmed = patched_default;
         trimmed.retain(|k, _| self.config.contains_key(k));
+        let aliases = self
+            .config
+            .get("meerschaum")
+            .and_then(|section| section.get("connectors"))
+            .map(connector_alias_sections)
+            .unwrap_or_default();
         self.config = apply_patch_maps(&trimmed, &self.config);
+        if let Some(connectors) = self
+            .config
+            .get_mut("meerschaum")
+            .and_then(ConfigValue::as_map_mut)
+            .and_then(|section| section.get_mut("connectors"))
+        {
+            restore_connector_alias_sections(connectors, aliases);
+        }
 
         if opts.patch && k0 != symlinks_key && opts.write_missing {
             let keyfile_exists = self.get_keyfile_path(&k0, false, None).is_some();
@@ -1024,6 +1352,87 @@ impl ConfigState {
         }
 
         (true, default_value)
+    }
+
+    /// Re-resolve the secret references (5.1) recorded under `_symlinks` at `keys` (or below), and
+    /// update the in-memory values that changed. Returns the value at `keys` when one did.
+    fn refresh_secrets(&mut self, keys: &[String]) -> Option<ConfigValue> {
+        let symlinks_key = Self::symlinks_key();
+        let mut node = self.config.get(symlinks_key)?;
+        for k in keys {
+            node = node.get(k)?;
+        }
+        let mut found: Vec<(Vec<String>, String)> = Vec::new();
+        fn collect(v: &ConfigValue, path: &mut Vec<String>, out: &mut Vec<(Vec<String>, String)>) {
+            match v {
+                ConfigValue::Str(s) if secrets::contains_reference(s) => {
+                    out.push((path.clone(), s.clone()))
+                }
+                ConfigValue::Map(m) => {
+                    for (k, v) in m {
+                        path.push(k.clone());
+                        collect(v, path, out);
+                        path.pop();
+                    }
+                }
+                _ => {}
+            }
+        }
+        collect(node, &mut Vec::new(), &mut found);
+        if found.is_empty() {
+            return None;
+        }
+        let options = SubstituteOptions {
+            keep_symlinks: false,
+            ..SubstituteOptions::default()
+        };
+        let mut changed = false;
+        for (rel, original) in found {
+            let resolved = match secrets::substitute_references(&original, &self.paths.root_dir) {
+                Some(text) => ConfigValue::Str(text),
+                // Also an ordinary symlink: the general substitution.
+                None => {
+                    let mut single = ConfigMap::new();
+                    single.insert("v".into(), ConfigValue::Str(original));
+                    let Ok(subbed) = self.search_and_substitute_with(&single, &options) else {
+                        continue;
+                    };
+                    let Some(resolved) = subbed.get("v").cloned() else {
+                        continue;
+                    };
+                    resolved
+                }
+            };
+            let full: Vec<&str> = keys.iter().chain(rel.iter()).map(String::as_str).collect();
+            if let Some(slot) = value_at_mut(&mut self.config, &full)
+                && *slot != resolved
+            {
+                *slot = resolved;
+                changed = true;
+            }
+        }
+        if !changed {
+            return None;
+        }
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        self.config
+            .get(refs[0])
+            .and_then(|v| v.get_path(&refs[1..]))
+            .cloned()
+    }
+
+    /// Warn once per process when a setting read through `get_config` is a secret reference that
+    /// could not be resolved (its text is what the caller gets).
+    fn warn_unresolved_secret(&mut self, keys: &[String], value: &ConfigValue) {
+        let ConfigValue::Str(text) = value else {
+            return;
+        };
+        for reference in secrets::references_in(text) {
+            let key = keys.join(":");
+            if secrets::first_time(&format!("unresolved\u{0}{key}\u{0}{reference}")) {
+                self.warn(secrets::unresolved_message(&key, &reference));
+            }
+        }
     }
 
     /// The file names in a config directory (sorted, for determinism).
@@ -1249,6 +1658,24 @@ impl ConfigState {
                         .unwrap_or_else(ConfigValue::new_map)
                 }
             };
+            if secrets::RESERVED_KEYS.contains(&key.as_str())
+                && secrets::first_time(&format!("reserved\u{0}{}", filepath.display()))
+            {
+                let source = if key == secrets::FILE_SOURCE {
+                    "a file's contents"
+                } else {
+                    "an environment variable"
+                };
+                self.warn(format!(
+                    "The config file '{filename}' defines the top-level key '{key}', which is \
+                     reserved for secret references: `MRSM{{{key}:...}}` reads {source}, not this \
+                     key. `get_config('{key}', ...)` still reads it; rename the key to refer to \
+                     it with `MRSM{{}}`."
+                ));
+            }
+            if directory == self.paths.config_dir {
+                secrets::warn_if_exposed(&filepath, &key, &config_key);
+            }
             let mut single = ConfigMap::new();
             single.insert(key.clone(), config_key);
             let single = if substitute {
@@ -1277,6 +1704,39 @@ impl ConfigState {
         }
 
         Ok((config, filekeys))
+    }
+
+    /// See [`Config::refresh_connectors`].
+    pub fn refresh_connectors(&mut self) -> bool {
+        let key = "meerschaum".to_string();
+        let Ok((fresh, _)) =
+            self.read_config_lossless(None, Some(std::slice::from_ref(&key)), false, true, false)
+        else {
+            return false;
+        };
+        let Some(fresh) = fresh
+            .get(&key)
+            .and_then(|section| section.get("connectors"))
+            .cloned()
+        else {
+            return false;
+        };
+        let Some(section) = self.config.get_mut(&key).and_then(|m| m.as_map_mut()) else {
+            return false;
+        };
+        let existing = section
+            .get("connectors")
+            .cloned()
+            .unwrap_or_else(ConfigValue::new_map);
+        let mut aliases = connector_alias_sections(&existing);
+        aliases.extend(connector_alias_sections(&fresh));
+        let mut merged = apply_patch(&existing, &fresh);
+        restore_connector_alias_sections(&mut merged, aliases);
+        if merged == existing {
+            return false;
+        }
+        section.insert("connectors".to_string(), merged);
+        true
     }
 
     /// Port of `get_keyfile_path`.
@@ -1355,7 +1815,14 @@ impl ConfigState {
             Some(c) => c.clone(),
             None => self.config.clone(),
         };
-        let config_dict = revert_symlinks_lossless(&config_dict);
+        // 5.1: into the config directory, only the file as written plus the caller's change
+        // (never what the environment, a patch or a secret reference holds; see `provenance`).
+        // Another directory (a patch directory, the defaults copy) gets what the caller passed.
+        let config_dict = if directory == self.paths.config_dir {
+            self.persistable_config(&config_dict)
+        } else {
+            revert_symlinks_lossless(&config_dict)
+        };
         let default_ft = static_config().config.default_filetype.clone();
         for (k, v) in &config_dict {
             let filetype = if k == "meerschaum" {
@@ -1499,6 +1966,9 @@ impl ConfigState {
                 std::collections::HashMap::new();
             let mut memo: std::collections::HashMap<Vec<String>, (bool, ConfigValue)> =
                 std::collections::HashMap::new();
+            // 5.1: `MRSM{file:...}` / `MRSM{env:...}` (the resolved secret of each pattern).
+            let mut secret_values: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             let matches: Vec<(String, String, usize, usize)> = pattern_re
                 .captures_iter(&haystack)
                 .filter_map(|caps| {
@@ -1518,6 +1988,21 @@ impl ConfigState {
                     .split(options.delimiter.as_str())
                     .map(String::from)
                     .collect();
+                if let Some(reference) = secret_reference(&raw_keys, options) {
+                    match secrets::resolve(&reference, &self.paths.root_dir) {
+                        Ok(value) => {
+                            if !patterns.contains_key(&pattern)
+                                && !secret_values.contains_key(&pattern)
+                            {
+                                order.push(pattern.clone());
+                            }
+                            secret_values.insert(pattern, value);
+                        }
+                        // The reference stays as its text: only what needs the value fails.
+                        Err(error) => self.debug(error.to_string()),
+                    }
+                    continue;
+                }
                 let mut force_literal = false;
                 if let Some(first) = keys.first_mut()
                     && let Some(stripped) = first.strip_prefix(options.literal_key.as_str())
@@ -1560,6 +2045,13 @@ impl ConfigState {
                 );
             }
             for pattern in order {
+                if let Some(secret) = secret_values.get(&pattern) {
+                    // A string, alone or inside a longer one: the same JSON-escaped text either
+                    // way (a quote or backslash in a secret never breaks the document).
+                    let dumped = json_dumps_str(secret, true);
+                    haystack = haystack.replace(&pattern, &dumped[1..dumped.len() - 1]);
+                    continue;
+                }
                 let (value, isolated, literal) = &patterns[&pattern];
                 if *isolated {
                     let dumped = json_dumps_lossless(value, JsonStyle::Default, true, &mut table)?;
@@ -1616,6 +2108,7 @@ impl ConfigState {
         preserve_keys: bool,
     ) -> usize {
         let mut applied = 0;
+        let mut used: Vec<(String, String)> = Vec::new();
         // Plugin connector types, read lazily: only a variable of a non-built-in type needs them.
         let mut plugin_types: Option<std::collections::BTreeSet<String>> = None;
         for var in get_connector_env_vars(env) {
@@ -1675,37 +2168,32 @@ impl ConfigState {
             connectors.insert("connectors".to_string(), ConfigValue::Map(typ_map));
             let mut patch = ConfigMap::new();
             patch.insert("meerschaum".to_string(), ConfigValue::Map(connectors));
-            self.config = apply_patch_maps(&base, &patch);
+            self.config = apply_config_patch(&base, &patch);
             applied += 1;
+            used.push((var.clone(), uri.to_string()));
+        }
+        if !used.is_empty() {
+            self.record_layer(EnvLayer::Uris(used));
         }
         applied
     }
 
-    /// Port of `apply_environment_patches` (`MRSM_CONFIG`, then `MRSM_PATCH`).
+    /// Port of `apply_environment_patches` (`MRSM_CONFIG`, then `MRSM_PATCH`; 5.1: or the file
+    /// `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` names). Both forms of one set, or an unreadable
+    /// file, is reported and nothing is applied ([`Config::new`] refuses it).
     pub fn apply_environment_patches(&mut self, env: &[(String, String)]) {
-        let env_names = &static_config().environment;
-        for var in [env_names.config.clone(), env_names.patch.clone()] {
-            let Some((_, raw)) = env.iter().find(|(k, _)| k == &var) else {
-                continue;
-            };
-            let patch = match string_to_dict(raw.trim_start()) {
-                Ok(p) => ConfigValue::map_from_value(&p),
-                Err(_) => {
-                    self.print(format!(
-                        "Environment variable {var} is set but cannot be parsed.\nUnset {var} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n{var} is set to:\n{raw}\nSkipping patching os environment into config..."
-                    ));
-                    continue;
-                }
-            };
-            for key in patch.keys() {
-                let opts = GetOptions {
-                    warn: false,
-                    ..GetOptions::default()
-                };
-                let _ = self.get_config_lossless(std::slice::from_ref(key), opts);
+        let texts = match environment::environment_patch_texts(env) {
+            Ok(texts) => texts,
+            Err(message) => {
+                self.warn(message);
+                return;
             }
-            self.config = apply_patch_maps(&self.config, &patch);
+        };
+        if texts.is_empty() {
+            return;
         }
+        self.record_layer(EnvLayer::Patches(texts.clone()));
+        self.apply_patch_texts(&texts);
     }
 
     /// Apply `patch_config/` and `permanent_patch_config/` under the root directory.
@@ -1727,13 +2215,14 @@ impl ConfigState {
             None
         };
         if let Some(patch) = patch_config {
-            self.config = apply_patch_maps(&self.config, &patch);
+            self.record_layer(EnvLayer::PatchDir(patch.clone()));
+            self.config = apply_config_patch(&self.config, &patch);
             if self.allow_writes {
                 let _ = std::fs::remove_dir_all(&patch_dir);
             }
         }
         if let Some(permanent) = permanent_config {
-            self.config = apply_patch_maps(&self.config, &permanent);
+            self.config = apply_config_patch(&self.config, &permanent);
             let cfg = self.config.clone();
             self.write_config_lossless(Some(&cfg), None);
             if self.allow_writes {
@@ -1742,6 +2231,44 @@ impl ConfigState {
             }
         }
     }
+}
+
+/// The value at a key path of a config map, mutably.
+fn value_at_mut<'a>(map: &'a mut ConfigMap, path: &[&str]) -> Option<&'a mut ConfigValue> {
+    let (first, rest) = path.split_first()?;
+    let mut current = map.get_mut(*first)?;
+    for k in rest {
+        current = current.as_map_mut()?.get_mut(*k)?;
+    }
+    Some(current)
+}
+
+/// The secret reference a symlink's keys name (5.1), read from the JSON text the substitution
+/// edits (so `\\` in a Windows path is one backslash). `None` for an ordinary symlink, or with
+/// a non-default syntax (another leading key or delimiter).
+fn secret_reference(raw_keys: &str, options: &SubstituteOptions) -> Option<secrets::SecretRef> {
+    let default = SubstituteOptions::default();
+    if options.delimiter != default.delimiter || options.leading_key != default.leading_key {
+        return None;
+    }
+    let first = raw_keys.split(':').next()?;
+    let first = first
+        .strip_prefix(options.literal_key.as_str())
+        .unwrap_or(first);
+    if !secrets::RESERVED_KEYS.contains(&first) {
+        return None;
+    }
+    let text = match json_loads(&format!("\"{raw_keys}\"")) {
+        Ok(ConfigValue::Str(text)) => text,
+        _ => raw_keys.to_string(),
+    };
+    let mut keys: Vec<String> = text.split(':').map(String::from).collect();
+    if let Some(first) = keys.first_mut()
+        && let Some(stripped) = first.strip_prefix(options.literal_key.as_str())
+    {
+        *first = stripped.to_string();
+    }
+    secrets::SecretRef::from_keys(&keys)
 }
 
 fn uri_attrs(uri: &str) -> ConfigValue {
@@ -1761,6 +2288,8 @@ mod tests {
             ("MRSM_ROOT_DIR", "/x"),
             ("MRSM_SQL_A.B", "x"),
             ("MRSM_API_MY-LABEL", "http://x"),
+            ("MRSM_API_HOST_PROXY_TOKEN", "synthetic-internal-token"),
+            ("MRSM_API_HOSTED", "http://x"),
             ("HOME", "/home"),
         ]
         .iter()
@@ -1768,11 +2297,54 @@ mod tests {
         .collect();
         assert_eq!(
             get_connector_env_vars(&env),
-            vec!["MRSM_SQL_FOO".to_string(), "MRSM_API_MY-LABEL".to_string()]
+            vec!["MRSM_SQL_FOO", "MRSM_API_MY-LABEL", "MRSM_API_HOSTED"]
         );
         assert_eq!(
             parse_connector_env_var("MRSM_SQL_MY_DB"),
             Some(("sql".to_string(), "my_db".to_string()))
+        );
+    }
+
+    #[test]
+    fn native_execution_markers_cannot_create_raw_api_connectors() {
+        let root = tempfile::tempdir().unwrap();
+        let mut env = vec![
+            ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+            (
+                "MRSM_API_DATA".into(),
+                "https://fixture.invalid:8443".into(),
+            ),
+        ];
+        env.extend(
+            NATIVE_EXECUTION_ENV_VARS
+                .iter()
+                .map(|name| ((*name).into(), "1".into())),
+        );
+        assert_eq!(
+            get_connector_env_vars(&env),
+            vec!["MRSM_API_DATA".to_string()]
+        );
+        let config = Config::new(ConfigOptions::with_env(
+            env.into_iter()
+                .filter(|(name, _)| {
+                    matches!(
+                        name.as_str(),
+                        "MRSM_ROOT_DIR" | "MRSM_API_DATA" | "MRSM_API_EXECUTION"
+                    )
+                })
+                .collect(),
+        ))
+        .unwrap();
+        assert!(
+            config
+                .get(&["meerschaum", "connectors", "api", "execution"])
+                .is_none()
+        );
+        assert_eq!(
+            config
+                .get(&["meerschaum", "connectors", "api", "data", "uri"])
+                .and_then(|value| value.as_str().map(str::to_owned)),
+            Some("https://fixture.invalid:8443".into())
         );
     }
 
@@ -1787,6 +2359,196 @@ mod tests {
             Value::Map(d).get_path(&["api", "uvicorn", "workers"]),
             Some(&Value::Int(4))
         );
+    }
+
+    #[test]
+    fn missing_legacy_defaults_and_connector_refresh_keep_execution_aliases_atomic() {
+        use crate::team_scope::api_execution::{Alias, VERSION};
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = root.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let mut options = ConfigOptions::with_env(vec![
+            ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+            ("MRSM_CONFIG_DIR".into(), config_dir.display().to_string()),
+        ]);
+        options.allow_writes = false;
+        options.home = root.path().into();
+        let config = Config::new(options).unwrap();
+        let mut alias = Alias {
+            version: VERSION,
+            logical_keys: "sql:main".into(),
+            callback_url: "http://127.0.0.1:12345".into(),
+            credential_file: root.path().join("credential.json"),
+        };
+        let snapshot = |attributes: Map| {
+            Map::from_iter([
+                (
+                    "meerschaum".into(),
+                    Value::Map(Map::from_iter([(
+                        "connectors".into(),
+                        Value::Map(Map::from_iter([(
+                            "sql".into(),
+                            Value::Map(Map::from_iter([("main".into(), Value::Map(attributes))])),
+                        )])),
+                    )])),
+                ),
+                ("pipes".into(), Value::Map(Map::new())),
+            ])
+        };
+        config.set_config(snapshot(alias.attributes()));
+        // This is a real missing legacy key: its parity fallback merges defaults into every
+        // loaded section, which formerly restored shipped sql:main native attributes.
+        assert!(
+            config
+                .get(&["pipes", "parameters", "verify", "chunk_minutes"])
+                .is_some()
+        );
+        let exact = config
+            .get(&["meerschaum", "connectors", "sql", "main"])
+            .unwrap()
+            .to_map();
+        assert_eq!(exact, alias.attributes());
+        assert_eq!(
+            Alias::from_attributes(&exact, "sql:main").unwrap(),
+            Some(alias.clone())
+        );
+        assert!(
+            config
+                .get(&["meerschaum", "connectors", "sql", "main", "database"])
+                .is_none()
+        );
+        alias.callback_url = "http://127.0.0.1:12346".into();
+        let refreshed = Value::Map(Map::from_iter([(
+            "connectors".into(),
+            Value::Map(Map::from_iter([(
+                "sql".into(),
+                Value::Map(Map::from_iter([(
+                    "main".into(),
+                    Value::Map(alias.attributes()),
+                )])),
+            )])),
+        )]));
+        std::fs::write(
+            config_dir.join("meerschaum.json"),
+            refreshed.to_json_string(),
+        )
+        .unwrap();
+        assert!(config.refresh_connectors());
+        assert_eq!(
+            config
+                .get(&["meerschaum", "connectors", "sql", "main"])
+                .unwrap()
+                .to_map(),
+            alias.attributes()
+        );
+        let mut malformed = alias.attributes();
+        malformed.insert("password".into(), "synthetic-explicit-invalid".into());
+        config.set_config(snapshot(malformed.clone()));
+        assert!(
+            config
+                .get(&["pipes", "parameters", "verify", "chunk_minutes"])
+                .is_some()
+        );
+        let mixed = config
+            .get(&["meerschaum", "connectors", "sql", "main"])
+            .unwrap()
+            .to_map();
+        assert_eq!(
+            mixed, malformed,
+            "Default fallback silently repaired a malformed explicit alias"
+        );
+        assert!(Alias::from_attributes(&mixed, "sql:main").is_err());
+    }
+
+    #[test]
+    fn initial_environment_patch_never_merges_native_defaults_into_execution_alias() {
+        use crate::team_scope::api_execution::{self, Alias};
+        let root = tempfile::tempdir().unwrap();
+        let snapshot = api_execution::configuration(
+            &Map::new(),
+            &std::collections::BTreeSet::from(["sql:main".to_string()]),
+            "sql:main",
+            "http://127.0.0.1:12345",
+            &root.path().join("credential.json"),
+        )
+        .unwrap();
+        let file = root.path().join("api-config.json");
+        std::fs::write(&file, Value::Map(snapshot.clone()).to_json_string()).unwrap();
+        for variable in ["MRSM_CONFIG", "MRSM_CONFIG_FILE"] {
+            let patch = if variable.ends_with("_FILE") {
+                file.display().to_string()
+            } else {
+                Value::Map(snapshot.clone()).to_json_string()
+            };
+            let mut options = ConfigOptions::with_env(vec![
+                ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+                (variable.into(), patch),
+            ]);
+            options.allow_writes = false;
+            options.home = root.path().into();
+            let config = Config::new(options).unwrap();
+            let attributes = config
+                .get(&["meerschaum", "connectors", "sql", "main"])
+                .unwrap()
+                .to_map();
+            assert_eq!(
+                attributes.len(),
+                1,
+                "{variable} restored native default keys: {:?}",
+                attributes.keys().collect::<Vec<_>>()
+            );
+            assert!(
+                Alias::from_attributes(&attributes, "sql:main")
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                config
+                    .get(&["meerschaum", "connectors", "sql", "main", "password"])
+                    .is_none()
+            );
+            assert_eq!(
+                config.get(&["meerschaum", "connectors", "sql", "default"]),
+                Some(Value::Null)
+            );
+        }
+        // A caller's explicitly mixed descriptor remains invalid through the same overlay.
+        let mut malformed = snapshot;
+        malformed
+            .get_mut("meerschaum")
+            .unwrap()
+            .as_map_mut()
+            .unwrap()
+            .get_mut("connectors")
+            .unwrap()
+            .as_map_mut()
+            .unwrap()
+            .get_mut("sql")
+            .unwrap()
+            .as_map_mut()
+            .unwrap()
+            .get_mut("main")
+            .unwrap()
+            .as_map_mut()
+            .unwrap()
+            .insert("password".into(), "synthetic-explicit-invalid".into());
+        let mut options = ConfigOptions::with_env(vec![
+            ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+            ("MRSM_CONFIG".into(), Value::Map(malformed).to_json_string()),
+        ]);
+        options.allow_writes = false;
+        options.home = root.path().into();
+        let config = Config::new(options).unwrap();
+        let attributes = config
+            .get(&["meerschaum", "connectors", "sql", "main"])
+            .unwrap()
+            .to_map();
+        assert_eq!(
+            attributes.len(),
+            2,
+            "An incoming malformed alias was silently repaired"
+        );
+        assert!(Alias::from_attributes(&attributes, "sql:main").is_err());
     }
 
     fn scratch(env: &[(&str, &str)]) -> (tempfile::TempDir, Config) {

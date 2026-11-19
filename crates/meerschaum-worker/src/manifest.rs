@@ -41,7 +41,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{WorkerError, WorkerResult};
 use crate::pool::WorkerPool;
-use crate::protocol::{Msg, wire_to_json};
+use crate::protocol::{Msg, json_to_wire, wire_to_json};
 use crate::worker::CallOptions;
 
 /// The manifest schema version (`meerschaum/worker/_manifest.py`). 4: custom connector
@@ -233,6 +233,15 @@ pub struct McpPromptManifest {
     pub name: String,
     /// The description.
     pub description: Option<String>,
+    /// Declared argument names, descriptions and required flags.
+    #[serde(default)]
+    pub arguments: Vec<serde_json::Value>,
+    /// Required scopes, retained independently from the original caller's ceiling.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Optional client-facing title.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 /// A custom connector type declared with `@make_connector`.
@@ -490,7 +499,16 @@ impl Manifest {
 
 /// Where the manifest is cached: `<root>/cache/plugins_manifest.json`
 /// (`CACHE_RESOURCES_PATH`).
+///
+/// A sandboxed team process keeps its own (5.1,
+/// `meerschaum_core::team_scope::sandbox::private_cache_dir`).
 pub fn manifest_path(root_dir: &Path) -> PathBuf {
+    if let Some(namespace) = meerschaum_core::team_scope::source_namespace::for_root(root_dir) {
+        return namespace.cache.join(MANIFEST_FILE_NAME);
+    }
+    if let Some(dir) = meerschaum_core::team_scope::sandbox::private_cache_dir() {
+        return dir.join(MANIFEST_FILE_NAME);
+    }
     root_dir.join("cache").join(MANIFEST_FILE_NAME)
 }
 
@@ -720,6 +738,110 @@ fn tracked_staleness(manifest: &Manifest, plugins_dirs: &[PathBuf]) -> (bool, Ve
     (stale, changed)
 }
 
+/// The secondary manifest cache slot keyed by the resolved `plugins_dirs` list, next to `primary`
+/// (`<root>/cache/manifests/python-<hash>.json`). Processes sharing a root directory with
+/// different `MRSM_PLUGINS_DIR` values (for example multiple Compose files) keep independent
+/// cached manifests instead of invalidating each other's primary cache.
+pub fn keyed_manifest_path(primary: &Path, plugins_dirs: &[PathBuf]) -> PathBuf {
+    let mut hasher = Sha256::new();
+    for dir in plugins_dirs {
+        let resolved = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+        hasher.update(resolved.to_string_lossy().as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hex::encode(hasher.finalize());
+    primary
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("manifests")
+        .join(format!("python-{}.json", &digest[..16]))
+}
+
+/// Read the cached manifest for `plugins_dirs` if either the primary cache at `path` or the
+/// `plugins_dirs`-keyed slot is fresh for `(plugins_dirs, entry_points)`. Never spawns Python.
+pub fn read_fresh_manifest_for(
+    path: &Path,
+    plugins_dirs: &[PathBuf],
+    entry_points: &[String],
+) -> WorkerResult<Option<Manifest>> {
+    if let Some(cached) = Manifest::read(path)?
+        && !stale_plugins_for(&cached, plugins_dirs, entry_points).0
+    {
+        return Ok(Some(cached));
+    }
+    let keyed = keyed_manifest_path(path, plugins_dirs);
+    if keyed != path
+        && let Some(cached) = Manifest::read(&keyed)?
+        && !stale_plugins_for(&cached, plugins_dirs, entry_points).0
+    {
+        return Ok(Some(cached));
+    }
+    Ok(None)
+}
+
+/// Read the best cached manifest on disk for `plugins_dirs` without rebuilding (preferring a
+/// non-stale entry in the `plugins_dirs`-keyed slot or primary path, falling back to any cached
+/// copy for `plugins_dirs`, then primary).
+pub fn read_cached_manifest_for(
+    path: &Path,
+    plugins_dirs: &[PathBuf],
+) -> WorkerResult<Option<Manifest>> {
+    let keyed_path = keyed_manifest_path(path, plugins_dirs);
+    let keyed = if keyed_path != path {
+        Manifest::read(&keyed_path).ok().flatten()
+    } else {
+        None
+    };
+    let primary = Manifest::read(path).ok().flatten();
+    if let Some(m) = &keyed
+        && !stale_plugins(m, plugins_dirs).0
+    {
+        return Ok(Some(m.clone()));
+    }
+    if let Some(m) = &primary
+        && !stale_plugins(m, plugins_dirs).0
+    {
+        return Ok(Some(m.clone()));
+    }
+    Ok(keyed.or(primary))
+}
+
+fn write_manifest_caches(
+    manifest: &Manifest,
+    primary: &Path,
+    plugins_dirs: &[PathBuf],
+) -> WorkerResult<()> {
+    manifest.write(primary)?;
+    let keyed = keyed_manifest_path(primary, plugins_dirs);
+    if keyed != primary {
+        let _ = manifest.write(&keyed);
+    }
+    Ok(())
+}
+
+fn cached_venv_warnings_for(
+    previous: Option<&Manifest>,
+    plugins_dirs: &[PathBuf],
+) -> Option<serde_json::Value> {
+    let previous = previous?;
+    let (_, per_plugin) = fingerprint(plugins_dirs);
+    let mut map = serde_json::Map::new();
+    for (name, fp) in per_plugin {
+        if let Some(plugin) = previous.plugins.get(&name)
+            && plugin.fingerprint.as_deref() == Some(fp.as_str())
+        {
+            map.insert(
+                name,
+                serde_json::json!({
+                    "required": plugin.required,
+                    "warnings": plugin.venv_warnings,
+                }),
+            );
+        }
+    }
+    (!map.is_empty()).then_some(serde_json::Value::Object(map))
+}
+
 /// Build a fresh manifest and stamp it with the fingerprints of the plugins it tracks.
 ///
 /// The manifest is built in a dedicated, freshly started worker (shut down afterwards): pooled
@@ -734,6 +856,16 @@ pub async fn build_manifest(
     plugins_dirs: &[PathBuf],
     entry_points: &[String],
 ) -> WorkerResult<Manifest> {
+    build_manifest_with_options(pool, plugins_dirs, entry_points, None, false).await
+}
+
+async fn build_manifest_with_options(
+    pool: &WorkerPool,
+    plugins_dirs: &[PathBuf],
+    entry_points: &[String],
+    cached_venv_warnings: Option<&serde_json::Value>,
+    quiet: bool,
+) -> WorkerResult<Manifest> {
     let (combined, per_plugin) = fingerprint(plugins_dirs);
     if per_plugin.is_empty() && entry_points.is_empty() {
         return Ok(Manifest {
@@ -746,11 +878,19 @@ pub async fn build_manifest(
         "Building the plugin manifest: {} plugin(s) in {plugins_dirs:?}, entry points {entry_points:?}.",
         per_plugin.len()
     );
-    let worker = pool.spawn_worker().await?;
+    let worker = if quiet {
+        pool.spawn_quiet_worker().await?
+    } else {
+        pool.spawn_worker().await?
+    };
+    let mut msg = Msg::new();
+    if let Some(cached) = cached_venv_warnings {
+        msg = msg.set("cached_venv_warnings", json_to_wire(cached));
+    }
     let reply = worker
         .call(
             "build_manifest",
-            Msg::new(),
+            msg,
             Vec::new(),
             CallOptions {
                 timeout: pool.config().call_timeout,
@@ -804,15 +944,34 @@ pub async fn ensure_manifest_for(
     plugins_dirs: &[PathBuf],
     entry_points: &[String],
 ) -> WorkerResult<(Manifest, ManifestSource)> {
-    if let Some(cached) = Manifest::read(path)? {
-        let (stale, _) = stale_plugins_for(&cached, plugins_dirs, entry_points);
-        if !stale {
-            return Ok((cached, ManifestSource::Cache));
-        }
+    ensure_manifest_for_with_options(pool, path, plugins_dirs, entry_points, false).await
+}
+
+/// [`ensure_manifest_for`] with control over whether the worker silences stdout/stderr (used by
+/// background shell startup refreshes so warnings never write over an active prompt).
+pub async fn ensure_manifest_for_with_options(
+    pool: &WorkerPool,
+    path: &Path,
+    plugins_dirs: &[PathBuf],
+    entry_points: &[String],
+    quiet: bool,
+) -> WorkerResult<(Manifest, ManifestSource)> {
+    if let Some(cached) = read_fresh_manifest_for(path, plugins_dirs, entry_points)? {
+        return Ok((cached, ManifestSource::Cache));
     }
-    rebuild_manifest_for(pool, path, plugins_dirs, entry_points)
-        .await
-        .map(|manifest| (manifest, ManifestSource::Built))
+    let prior = read_cached_manifest_for(path, plugins_dirs).ok().flatten();
+    let cached_warnings = cached_venv_warnings_for(prior.as_ref(), plugins_dirs);
+    let manifest = build_manifest_with_options(
+        pool,
+        plugins_dirs,
+        entry_points,
+        cached_warnings.as_ref(),
+        quiet,
+    )
+    .await?;
+    write_manifest_caches(&manifest, path, plugins_dirs)?;
+    pool.recycle().await;
+    Ok((manifest, ManifestSource::Built))
 }
 
 /// The entry-point plugins of the pool's interpreter ([`crate::entry_points::plugins`]); the
@@ -843,8 +1002,9 @@ pub async fn rebuild_manifest_for(
     plugins_dirs: &[PathBuf],
     entry_points: &[String],
 ) -> WorkerResult<Manifest> {
-    let manifest = build_manifest(pool, plugins_dirs, entry_points).await?;
-    manifest.write(path)?;
+    let manifest =
+        build_manifest_with_options(pool, plugins_dirs, entry_points, None, false).await?;
+    write_manifest_caches(&manifest, path, plugins_dirs)?;
     pool.recycle().await;
     Ok(manifest)
 }
@@ -1262,5 +1422,83 @@ mod tests {
                 "{key} missing from the schema"
             );
         }
+    }
+
+    #[test]
+    fn different_plugins_dirs_do_not_invalidate_each_other() {
+        let root = tempfile::tempdir().unwrap();
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::write(dir_a.path().join("alpha.py"), "x = 1\n").unwrap();
+        std::fs::write(dir_b.path().join("beta.py"), "y = 2\n").unwrap();
+
+        let primary = manifest_path(root.path());
+        let dirs_a = vec![dir_a.path().to_path_buf()];
+        let dirs_b = vec![dir_a.path().to_path_buf(), dir_b.path().to_path_buf()];
+
+        let manifest_a = stamped(
+            &dirs_a,
+            vec![listed("alpha", Some(&dir_a.path().join("alpha.py")))],
+        );
+        write_manifest_caches(&manifest_a, &primary, &dirs_a).unwrap();
+
+        let manifest_b = stamped(
+            &dirs_b,
+            vec![
+                listed("alpha", Some(&dir_a.path().join("alpha.py"))),
+                listed("beta", Some(&dir_b.path().join("beta.py"))),
+            ],
+        );
+        // Writing dirs_b overwrites primary, while dirs_a keeps its own keyed slot.
+        write_manifest_caches(&manifest_b, &primary, &dirs_b).unwrap();
+
+        let hit_a = read_fresh_manifest_for(&primary, &dirs_a, &[]).unwrap();
+        assert!(
+            hit_a.is_some(),
+            "dirs_a must remain fresh via its keyed slot"
+        );
+        assert!(hit_a.unwrap().plugins.contains_key("alpha"));
+
+        let hit_b = read_fresh_manifest_for(&primary, &dirs_b, &[]).unwrap();
+        assert!(hit_b.is_some(), "dirs_b must remain fresh");
+        assert!(hit_b.unwrap().plugins.contains_key("beta"));
+
+        // Editing alpha.py invalidates both slots.
+        std::fs::write(dir_a.path().join("alpha.py"), "x = 11111\n").unwrap();
+        assert!(
+            read_fresh_manifest_for(&primary, &dirs_a, &[])
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            read_fresh_manifest_for(&primary, &dirs_b, &[])
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn cached_venv_warnings_carries_forward_unchanged_plugins() {
+        let plugins = tempfile::tempdir().unwrap();
+        std::fs::write(plugins.path().join("keep.py"), "x = 1\n").unwrap();
+        std::fs::write(plugins.path().join("edit.py"), "y = 2\n").unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+
+        let mut keep = listed("keep", Some(&plugins.path().join("keep.py")));
+        keep.required = vec!["Pillow".into()];
+        keep.venv_warnings = vec!["cached warning".into()];
+        let mut edit = listed("edit", Some(&plugins.path().join("edit.py")));
+        edit.venv_warnings = vec!["stale warning".into()];
+        let prior = stamped(&dirs, vec![keep, edit]);
+
+        // Modify only `edit.py`: `keep` stays eligible for carry-forward, `edit` is omitted.
+        std::fs::write(plugins.path().join("edit.py"), "y = 22222\n").unwrap();
+        let carried = cached_venv_warnings_for(Some(&prior), &dirs).unwrap();
+        assert_eq!(carried["keep"]["required"], serde_json::json!(["Pillow"]));
+        assert_eq!(
+            carried["keep"]["warnings"],
+            serde_json::json!(["cached warning"])
+        );
+        assert!(carried.get("edit").is_none());
     }
 }

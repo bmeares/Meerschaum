@@ -16,7 +16,9 @@ use meerschaum_core::value::{Map, Value, apply_patch_maps};
 
 use crate::command::{CommandRunner, MrsmCommand, RunOptions, build_command, execute};
 use crate::error::{ComposeError, ErrorKind, Messages};
-use crate::jobs::{get_jobs_commands, get_project_job_names, job_compose_root, job_project_name};
+use crate::jobs::{
+    get_jobs_commands, get_project_job_names, job_compose_root, job_project_name, jobs_disabled,
+};
 use crate::lint::{LintInput, LintWarning, lint};
 use crate::ops::{InstanceOps, JobInfo, JobOps, PipeFilters, Prompter};
 use crate::pipes::{
@@ -1005,7 +1007,8 @@ fn compose_up(
     }
     let groups = instance_pipes(&pipes);
     let project_name = project.project_name();
-    let explicit_jobs = project.config.get("jobs").is_some_and(Value::truthy);
+    let no_project_jobs = jobs_disabled(&project.config);
+    let explicit_jobs = no_project_jobs || project.config.get("jobs").is_some_and(Value::truthy);
     let tags = vec![project_name.clone()];
 
     let mut remote_instance_pipes: IndexMap<String, Vec<Pipe>> = IndexMap::new();
@@ -1300,7 +1303,9 @@ fn compose_up(
         )?;
     }
 
-    let mut msg = if explicit_jobs {
+    let mut msg = if no_project_jobs {
+        "This project starts no jobs (`jobs: {}`).".to_string()
+    } else if explicit_jobs {
         format!(
             "Running {} background job{}.",
             jobs_commands.len(),
@@ -1322,7 +1327,7 @@ fn compose_up(
             plural(jobs_commands.len())
         )
     };
-    if !mode.force {
+    if !mode.force && !no_project_jobs {
         msg.push_str("\nRun `mrsm compose logs` or pass `-f` to follow logs output.");
     }
     Ok(SuccessTuple::ok(msg))

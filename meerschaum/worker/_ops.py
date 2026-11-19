@@ -610,7 +610,36 @@ def op_post_sync_hook(conn, call_id, args, frames) -> Result:
 
 def op_build_manifest(conn, call_id, args, frames) -> Result:
     from meerschaum.worker._manifest import build_manifest
-    return build_manifest(debug=bool(args.get('debug', False)) or CALL_DEBUG), []
+    cached = args.get('cached_venv_warnings', None)
+    return build_manifest(
+        debug=bool(args.get('debug', False)) or CALL_DEBUG,
+        cached_venv_warnings=(cached if isinstance(cached, dict) else None),
+    ), []
+
+
+def op_inspect_selected_sources(conn, call_id, args, frames) -> Result:
+    import json
+    from meerschaum.worker._plugin_registry import inspect_selected_sources
+    if frames or set(args) != {'catalog_sha256', 'catalog_json', 'fingerprints_json'}:
+        raise PermissionError('Invalid confined discovery request.')
+    encoded = args['catalog_json']
+    if not isinstance(encoded, str) or len(encoded.encode('utf-8')) > 2 * 1024 * 1024:
+        raise ValueError('The source catalog exceeds its limit.')
+    fingerprints = args['fingerprints_json']
+    if not isinstance(fingerprints, str) or len(fingerprints.encode('utf-8')) > 128 * 1024:
+        raise ValueError('The native source fingerprints exceed their limit.')
+    return inspect_selected_sources(args['catalog_sha256'], json.loads(encoded), json.loads(fingerprints)), []
+
+
+def op_invoke_extension(conn, call_id, args, frames) -> Result:
+    import json
+    from meerschaum.worker._plugin_invoke import invoke
+    if frames or set(args) != {'operation_json'}:
+        raise PermissionError('Invalid confined extension invocation.')
+    encoded = args['operation_json']
+    if not isinstance(encoded, str) or len(encoded.encode('utf-8')) > 4 * 1024 * 1024:
+        raise ValueError('The extension operation exceeds its byte bound.')
+    return invoke(json.loads(encoded)), []
 
 
 ### The instance-connector methods that write, and the verb of their refusal.
@@ -707,5 +736,7 @@ HANDLERS = {
     'pre_sync_hook': op_pre_sync_hook,
     'post_sync_hook': op_post_sync_hook,
     'build_manifest': op_build_manifest,
+    'inspect_selected_sources': op_inspect_selected_sources,
+    'invoke_extension': op_invoke_extension,
     'instance': op_instance,
 }

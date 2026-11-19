@@ -16,6 +16,7 @@ impl ConsoleSessionAuth {
             server: state.clone(),
             config: self.config.clone(),
             streams: Arc::default(),
+            grafana: None,
         }
     }
 }

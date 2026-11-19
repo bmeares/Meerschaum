@@ -160,7 +160,11 @@ impl SqlConnector {
 
     /// The query a fetch runs: cross-pipe templates resolved, the parent found, the sync
     /// metadefinition built.
-    async fn fetch_query(&self, pipe: &Pipe, args: &FetchArgs) -> ConnectorResult<String> {
+    pub(super) async fn fetch_query(
+        &self,
+        pipe: &Pipe,
+        args: &FetchArgs,
+    ) -> ConnectorResult<String> {
         // Resolve cross-pipe templates (`{{ Pipe() }}` in the SQL definition) first.
         let pipe = self.prepare_pipe(pipe).await;
         let mut args = args.clone();

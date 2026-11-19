@@ -437,7 +437,20 @@ impl JobsMonitor {
         ));
         let (tx, now) = (self.tx.clone(), self.refresh_now.clone());
         std::thread::spawn(move || {
-            let result =
+            // A restricted terminal asks the server, as for a typed `stop jobs <name>` (5.1).
+            let word = match command {
+                JobCommand::Start => "start",
+                JobCommand::Stop => "stop",
+                JobCommand::Pause => "pause",
+            };
+            let asked = crate::shell::restricted::authorize(&[
+                word.to_string(),
+                "jobs".to_string(),
+                name.clone(),
+            ]);
+            let result = if let Err(message) = asked {
+                SuccessTuple::fail(message)
+            } else {
                 super::app::guarded(|| match source.open(&name, &row.executor_keys_full()) {
                     Some(mut job) => match command {
                         JobCommand::Start => job.start(),
@@ -446,7 +459,8 @@ impl JobsMonitor {
                     },
                     None => SuccessTuple::fail(format!("Cannot open job '{name}'.")),
                 })
-                .unwrap_or_else(SuccessTuple::fail);
+                .unwrap_or_else(SuccessTuple::fail)
+            };
             now.store(true, Ordering::SeqCst);
             let _ = tx.send(Msg::Done {
                 verb: command.verb(),

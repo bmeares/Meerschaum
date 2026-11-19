@@ -412,8 +412,13 @@ pub struct ServerConfig {
     pub pipe_defaults: meerschaum_core::pipe::PipeDefaults,
     /// `meerschaum:connectors` (for `/connectors`).
     pub connectors: Map,
+    /// `api:grafana` (the Grafana the console signs its users in to; empty when unset).
+    pub grafana: Map,
     /// `API_SECRET_KEY_PATH`.
     pub secret_key_path: PathBuf,
+    /// Where the generated password of Grafana's administrator is kept (`api:grafana` without
+    /// `admin_password`): `.grafana_admin_password` beside the secret key.
+    pub grafana_password_path: PathBuf,
     /// `PLUGINS_ARCHIVES_RESOURCES_PATH`.
     pub plugins_archives_path: PathBuf,
     /// `API_STATIC_PATH` (the Python package's static files), if known.
@@ -434,6 +439,12 @@ pub struct ServerConfig {
     pub webterm_tmux_config: Option<PathBuf>,
     /// `WEBTERM_INTERNAL_RESOURCES_PATH`: where the tmux path keeps the shell's environment file.
     pub webterm_resources_path: PathBuf,
+    /// `system.engine.python_team_sandbox` (5.1): how isolated teams' processes are sandboxed.
+    /// The web terminal runs without tmux only while an isolated team that may install plugins
+    /// exists and Unix sockets are not denied to team code (the probe applies this mode).
+    pub team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode,
+    /// Trusted advertised main API origin for executor callbacks (`api.execution.callback_url`).
+    pub execution_callback_url: Option<String>,
     /// The private key and certificate of HTTPS (`--keyfile` / `--certfile`,
     /// `api:server:ssl_keyfile` / `ssl_certfile`, 4.1's `api:uvicorn:ssl_*`); none: plain HTTP.
     pub tls: crate::tls::TlsSettings,
@@ -664,6 +675,10 @@ const UVICORN_DEFAULTS: &[(&str, &str)] = &[
     ("proxy_headers", "True"),
 ];
 
+/// The file (in `API_CONFIG_RESOURCES_PATH`) of the generated password of Grafana's
+/// administrator (`meerschaum_web::grafana::ADMIN_PASSWORD_FILENAME`).
+pub const GRAFANA_PASSWORD_FILENAME: &str = ".grafana_admin_password";
+
 impl ServerConfig {
     /// Resolve the configuration from the config registry and the `start api` flags.
     pub fn from_config(config: &Config, flags: &ServerFlags) -> ServerConfig {
@@ -676,6 +691,9 @@ impl ServerConfig {
         let mut sc = ServerConfig::from_map(&cfg, flags);
         if let Some(p) = path_of(config, "API_SECRET_KEY_PATH") {
             sc.secret_key_path = p;
+        }
+        if let Some(p) = path_of(config, "API_CONFIG_RESOURCES_PATH") {
+            sc.grafana_password_path = p.join(GRAFANA_PASSWORD_FILENAME);
         }
         if let Some(p) = path_of(config, "PLUGINS_ARCHIVES_RESOURCES_PATH") {
             sc.plugins_archives_path = p;
@@ -693,6 +711,21 @@ impl ServerConfig {
     pub fn from_map(cfg: &Map, flags: &ServerFlags) -> ServerConfig {
         let mut notices = Vec::new();
         let mut errors = Vec::new();
+        let execution_callback_url = match get(cfg, &["api", "execution", "callback_url"]) {
+            None | Some(Value::Null) => None,
+            Some(Value::Str(url)) => {
+                if let Err(error) = crate::executor::environment::validate_callback_url(url) {
+                    errors.push(error);
+                }
+                Some(url.clone())
+            }
+            Some(_) => {
+                errors.push(
+                    "`api:execution:callback_url` must be an HTTP or HTTPS API origin.".into(),
+                );
+                None
+            }
+        };
         let limits = parse_body_limits(get(cfg, &["api", "limits"]), &mut notices, &mut errors);
         let host_response_timeout = match get(cfg, &["api", "host"]) {
             None | Some(Value::Null) => Some(Duration::from_secs(DEFAULT_HOST_RESPONSE_SECONDS)),
@@ -939,7 +972,12 @@ impl ServerConfig {
             ),
             pipe_defaults: meerschaum_core::pipe::PipeDefaults::default(),
             connectors,
+            grafana: match get(cfg, &["api", "grafana"]) {
+                Some(Value::Map(m)) => m.clone(),
+                _ => Map::new(),
+            },
             secret_key_path: PathBuf::from("api/.api_secret_key"),
+            grafana_password_path: PathBuf::from("api").join(GRAFANA_PASSWORD_FILENAME),
             plugins_archives_path: PathBuf::from("plugins/.archives"),
             static_path: None,
             root_dir: PathBuf::from("."),
@@ -958,6 +996,11 @@ impl ServerConfig {
                 _ => None,
             },
             webterm_resources_path: PathBuf::from("internal/webterm"),
+            team_sandbox_mode: meerschaum_core::team_scope::sandbox::Mode::from_value(get(
+                cfg,
+                &meerschaum_core::team_scope::sandbox::MODE_KEY,
+            )),
+            execution_callback_url,
             tls,
             internal_addr: None,
             limits,
@@ -979,6 +1022,9 @@ impl ServerConfig {
         );
         let paths = meerschaum_core::config::paths::Paths::for_root(root);
         sc.secret_key_path = paths.path("API_SECRET_KEY_PATH");
+        sc.grafana_password_path = paths
+            .path("API_CONFIG_RESOURCES_PATH")
+            .join(GRAFANA_PASSWORD_FILENAME);
         sc.plugins_archives_path = paths.path("PLUGINS_ARCHIVES_RESOURCES_PATH");
         sc.webterm_resources_path = paths.path("WEBTERM_INTERNAL_RESOURCES_PATH");
         sc.root_dir = root.to_path_buf();

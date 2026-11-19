@@ -1,9 +1,11 @@
 """Docker promotion validates every image before publishing any of the catalog."""
 from copy import deepcopy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import zipfile
 
 import pytest
 
@@ -12,6 +14,37 @@ spec = importlib.util.spec_from_file_location('test_docker_candidate', ROOT / 's
 docker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(docker)
 SOURCE = {'commit': 'a' * 40, 'tree': 'b' * 40}
+
+
+@pytest.mark.parametrize('missing_case', [False, True])
+def test_executor_checks_use_the_sealed_artifacts_and_require_all_cases(tmp_path, monkeypatch, missing_case):
+    (tmp_path / 'wheels').mkdir()
+    wheel = tmp_path / 'wheels' / 'test.whl'
+    with zipfile.ZipFile(wheel, 'w') as archive:
+        archive.writestr('meerschaum/_core/_native.abi3.so', b'test extension')
+    cli = tmp_path / 'mrsm'
+    cli.write_bytes(b'test binary')
+    info = {'wheel_sha256': docker.gate.artifacts.sha256(wheel),
+            'binary_sha256': docker.gate.artifacts.sha256(cli)}
+    monkeypatch.setenv('TMUX', 'test-parent')
+    monkeypatch.setenv('MRSM_SQL_MAIN', 'inherited-test-value')
+
+    def run(args, *, env, **kwargs):
+        assert set(args[args.index('--test-threads=1') + 1:]) == set(docker.EXECUTOR_CASES)
+        assert 'TMUX' not in env and 'MRSM_SQL_MAIN' not in env
+        assert Path(env['MRSM_ROOT_DIR']).is_dir() and Path(env['MRSM_PLUGINS_DIR']).is_dir()
+        assert env['MRSM_TEST_EXECUTOR_IMAGE'] == 'fixture-id'
+        assert env['MRSM_TEST_EXECUTOR_NATIVE_SHA256'] == info['binary_sha256']
+        assert env['MRSM_TEST_EXECUTOR_SDK_SHA256'] == hashlib.sha256(b'test extension').hexdigest()
+        count = len(docker.EXECUTOR_CASES) - int(missing_case)
+        return subprocess.CompletedProcess(args, 0, f'test result: ok. {count} passed;')
+
+    monkeypatch.setattr(docker.subprocess, 'run', run)
+    if missing_case:
+        with pytest.raises(ValueError, match='every selected case'):
+            docker.check_executor_image('fixture-id', tmp_path, info)
+    else:
+        docker.check_executor_image('fixture-id', tmp_path, info)
 
 
 @pytest.fixture
@@ -23,7 +56,8 @@ def receipt(tmp_path, monkeypatch):
     record = {'schema': 1, 'source': SOURCE, 'version': '5.0.0rc25', 'platform': 'linux/amd64',
               'sdk': {'source': SOURCE, 'candidate_run_id': '123', 'platform': 'linux/amd64'},
               'run_id': '456', 'images': images,
-              'checks': {'runtime_smokes': 'success', 'size_gate': 'success', 'facade_smoke': 'success'}}
+              'checks': {'runtime_smokes': 'success', 'size_gate': 'success', 'facade_smoke': 'success',
+                         'installed_team_executors': 'success'}}
     path = tmp_path / 'docker-candidate.json'
     path.write_text(json.dumps(record))
     def inspect(reference):
@@ -65,7 +99,7 @@ def test_one_missing_image_prevents_every_registry_mutation(receipt, monkeypatch
         docker.promote(path, 'linux/amd64', '123')
 
 
-@pytest.mark.parametrize('damage', ['source', 'sdk', 'platform', 'checks', 'catalog', 'id', 'local_source'])
+@pytest.mark.parametrize('damage', ['source', 'sdk', 'platform', 'checks', 'executors', 'catalog', 'id', 'local_source'])
 def test_invalid_candidate_cannot_be_promoted(receipt, monkeypatch, damage):
     path, record = receipt
     record = deepcopy(record)
@@ -73,6 +107,7 @@ def test_invalid_candidate_cannot_be_promoted(receipt, monkeypatch, damage):
     elif damage == 'sdk': record['sdk']['candidate_run_id'] = '999'
     elif damage == 'platform': record['platform'] = 'linux/arm64'
     elif damage == 'checks': record['checks']['size_gate'] = 'skipped'
+    elif damage == 'executors': del record['checks']['installed_team_executors']
     elif damage == 'catalog': record['images'].pop('slim')
     elif damage == 'id': record['images']['full']['id'] = 'invalid'
     else:

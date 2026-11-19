@@ -386,9 +386,69 @@ def schedule_function(
     return True, "Success"
 
 
+#: The v5 clauses `tz <zone>` and `jitter <duration>` (handled by `meerschaum-jobs`).
+_V5_CLAUSE_PATTERN = re.compile(r'(?:^|\s)(?:tz|jitter)\s+\S', flags=re.IGNORECASE)
+
+
+def _has_v5_clauses(schedule: str) -> bool:
+    return bool(_V5_CLAUSE_PATTERN.search(str(schedule)))
+
+
+def _from_iso(text: Optional[str]) -> Optional[datetime]:
+    return datetime.fromisoformat(text) if text else None
+
+
+def _aware_iso(dt: Optional[datetime]) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+class _NativeTrigger:
+    """
+    A schedule with the v5 `tz <zone>` or `jitter <duration>` clause, parsed by the native
+    scheduler (`meerschaum-jobs`, the grammar `mrsm start job -s` runs). Fire times carry the
+    offset of the schedule's zone at each instant.
+    """
+
+    def __init__(self, native):
+        self._native = native
+
+    @property
+    def zone(self) -> Optional[str]:
+        """The IANA zone the schedule steps in, or `None` for a fixed offset."""
+        return self._native.zone
+
+    def next(self) -> Optional[datetime]:
+        return _from_iso(self._native.next())
+
+    def next_after(self, after: datetime) -> Optional[datetime]:
+        return _from_iso(self._native.next_after(_aware_iso(after)))
+
+    def __repr__(self) -> str:
+        return f"<{self._native.type_name} zone={self.zone!r}>"
+
+
+def _parse_native(schedule: str, now: Optional[datetime]) -> _NativeTrigger:
+    from meerschaum.jobs import _native
+    trigger, warnings = _native.core().jobs_parse_schedule(str(schedule), _aware_iso(now))
+    for message in warnings:
+        warn(message, stack=False)
+    return _NativeTrigger(trigger)
+
+
 def parse_schedule(schedule: str, now: Optional[datetime] = None):
-    """Parse a schedule string into a stateful object with a ``next()`` method."""
+    """
+    Parse a schedule string into a stateful object with a ``next()`` method.
+
+    A schedule ending in `tz <zone>` (`local`, `utc` or an IANA name) or `jitter <duration>`
+    (both v5) is parsed by the native scheduler, the one `mrsm start job -s` runs.
+    """
     from meerschaum.utils.misc import items_str, is_int
+
+    if _has_v5_clauses(schedule):
+        return _parse_native(schedule, now)
 
     schedule = _canonicalize_starting_keyword(schedule)
     starting_ts = parse_start_time(schedule, now=now)
@@ -457,7 +517,17 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
 
 
 def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
-    """Return the explicit starting datetime in ``schedule``, or ``now``."""
+    """
+    Return the explicit starting datetime in ``schedule``, or ``now``. Under a v5 `tz <zone>`
+    clause, a time without a zone of its own is read on that zone's clock.
+    """
+    if _has_v5_clauses(schedule):
+        from meerschaum.jobs import _native
+        start, warnings = _native.core().jobs_parse_start_time(str(schedule), _aware_iso(now))
+        for message in warnings:
+            warn(message, stack=False)
+        return datetime.fromisoformat(start)
+
     from meerschaum.utils.dtypes import round_time
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
     schedule = _canonicalize_starting_keyword(schedule)

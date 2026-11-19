@@ -21,6 +21,10 @@ fn static_toml_matches_python() {
     assert!(environment.shift_remove("compose_root").is_some());
     // rc15 (Q54, PARITY.md RC15-R3-001): `environment.dataframe`, `MRSM_DATAFRAME`.
     assert!(environment.shift_remove("dataframe").is_some());
+    // 5.1: `environment.config_file` / `environment.patch_file`, `MRSM_CONFIG_FILE` and
+    // `MRSM_PATCH_FILE` (files holding what `MRSM_CONFIG` / `MRSM_PATCH` would hold).
+    assert!(environment.shift_remove("config_file").is_some());
+    assert!(environment.shift_remove("patch_file").is_some());
     // 5.0's permissions (the access model): `pipes:register`, `pipes:define_sql` and
     // `webterm:use` follow v4's scopes.
     let scopes = actual

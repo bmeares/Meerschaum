@@ -41,7 +41,18 @@ tracing = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # `holder.rs`: the host name in run holders (`uname`).
-rustix = { version = "1", features = ["system"] }
+rustix = { version = "1", features = ["system", "process", "fs"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# `team_scope::sandbox`: isolated teams' processes restrict themselves with Landlock.
+landlock = "0.4.7"
+libc = "0.2"
+# `team_scope::sandbox`: where Landlock cannot deny Unix sockets (before Linux 7.1), a seccomp
+# filter refuses to create them (pure Rust BPF, no libseccomp).
+seccompiler = "0.5.0"
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1", features = ["fs"] }

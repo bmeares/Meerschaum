@@ -17,7 +17,8 @@
 
 use meerschaum_connector::InstanceConnector;
 use meerschaum_core::access::{
-    self, EditMode, LockOp, Locks, PipeAccess, Principal, Role, Team, TeamRole, Visibility,
+    self, EditMode, LockOp, Locks, PipeAccess, Principal, Role, Team, TeamGrants, TeamRole,
+    Visibility,
 };
 use meerschaum_core::users::User;
 use meerschaum_core::{Map, Value};
@@ -116,7 +117,49 @@ fn principal_of(obj: &Bound<'_, PyAny>) -> PyResult<Principal> {
         .into_iter()
         .collect();
     let teams = teams_of(field(obj, "teams")?.as_ref())?;
-    Ok(Principal::new(&username, is_admin, permissions, teams))
+    let grants = match field(obj, "grants")?.filter(|g| !g.is_none()) {
+        Some(grants) => grants_of(&grants)?,
+        None => TeamGrants::default(),
+    };
+    Ok(Principal::new(&username, is_admin, permissions, teams).with_grants(grants))
+}
+
+/// A principal's team grants: `{"isolated", "connectors", "plugins", "plugins_write",
+/// "instance"}` (a dict or an object; every key is optional).
+fn grants_of(obj: &Bound<'_, PyAny>) -> PyResult<TeamGrants> {
+    let flag = |name: &str| -> PyResult<bool> {
+        Ok(match field(obj, name)? {
+            Some(v) => v.is_truthy()?,
+            None => false,
+        })
+    };
+    Ok(TeamGrants {
+        isolated: flag("isolated")?,
+        connectors: strings(field(obj, "connectors")?.filter(|v| !v.is_none()).as_ref())?
+            .into_iter()
+            .collect(),
+        plugins: strings(field(obj, "plugins")?.filter(|v| !v.is_none()).as_ref())?
+            .into_iter()
+            .collect(),
+        plugins_write: flag("plugins_write")?,
+        instance: field(obj, "instance")?
+            .filter(|v| !v.is_none())
+            .map(|v| v.str().map(|s| s.to_string()))
+            .transpose()?
+            .filter(|s| !s.trim().is_empty()),
+        runs_code: flag("runs_code")?,
+    })
+}
+
+fn grants_to_py<'py>(py: Python<'py>, grants: &TeamGrants) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item("isolated", grants.isolated)?;
+    out.set_item("connectors", grants.connectors.iter().collect::<Vec<_>>())?;
+    out.set_item("plugins", grants.plugins.iter().collect::<Vec<_>>())?;
+    out.set_item("plugins_write", grants.plugins_write)?;
+    out.set_item("instance", grants.instance.clone())?;
+    out.set_item("runs_code", grants.runs_code)?;
+    Ok(out)
 }
 
 fn access_of(obj: Option<&Bound<'_, PyAny>>) -> PyResult<PipeAccess> {
@@ -555,21 +598,288 @@ pub fn access_can_administer_teams(principal: &Bound<'_, PyAny>) -> PyResult<boo
     Ok(access::can_administer_teams(&principal_of(principal)?))
 }
 
-/// Shared connector-team restriction for trusted console callers.
+/// Shared connector-team restriction for trusted console callers (`keys`: the connector's keys,
+/// for the grants of the principal's teams).
 #[pyfunction]
-#[pyo3(signature = (principal, teams=None))]
+#[pyo3(signature = (principal, teams=None, keys=None))]
 pub fn access_can_use_connector(
     principal: &Bound<'_, PyAny>,
     teams: Option<&Bound<'_, PyAny>>,
+    keys: Option<&str>,
 ) -> PyResult<bool> {
     let teams = teams
         .filter(|teams| !teams.is_none())
         .map(|teams| strings(Some(teams)))
         .transpose()?;
-    Ok(access::can_use_connector(
+    let principal = principal_of(principal)?;
+    Ok(match keys {
+        Some(keys) => access::can_use_connector_keys(&principal, keys, teams.as_deref()),
+        None => access::can_use_connector(&principal, teams.as_deref()),
+    })
+}
+
+/// `_core.access_team_grants(user_teams, teams, primary=None)`: what the teams of a user grant
+/// and withhold (`teams`: the instance's team records).
+#[pyfunction]
+#[pyo3(signature = (user_teams, teams, primary=None))]
+pub fn access_team_grants<'py>(
+    py: Python<'py>,
+    user_teams: &Bound<'py, PyAny>,
+    teams: &Bound<'py, PyAny>,
+    primary: Option<&str>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let user_teams = teams_of(Some(user_teams).filter(|t| !t.is_none()))?;
+    let mut records = Vec::new();
+    for item in teams.try_iter()? {
+        records.push(team_of(&item?)?);
+    }
+    grants_to_py(py, &TeamGrants::of(&user_teams, &records, primary))
+}
+
+/// `_core.access_team_process_env(root, team, connectors, env, plugins=None, sandbox=False)`
+/// (5.1): the environment the API server gives a worker of the isolated team `team` whose
+/// connectors are `connectors` (`type:label`), built from the configuration under `root` and the
+/// launching environment `env` (a dict): the team's files are written under `<root>/team_scopes/`
+/// as the server writes them. With `sandbox`, also the team's filesystem sandbox (its spec,
+/// temporary and cache directories), for the team's `plugins`, as the server prepares it (unless
+/// `system.engine.python_team_sandbox` is `off`). For tests of the Python package's side of
+/// team-scoped workers.
+#[pyfunction]
+#[pyo3(signature = (root, team, connectors, env, plugins=None, sandbox=false))]
+pub fn access_team_process_env(
+    root: &str,
+    team: &str,
+    connectors: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+    plugins: Option<Vec<String>>,
+    sandbox: bool,
+) -> PyResult<std::collections::BTreeMap<String, String>> {
+    use meerschaum_core::team_scope as ts;
+    let mut launching: Vec<(String, String)> = env
+        .into_iter()
+        .filter(|(k, _)| k != "MRSM_ROOT_DIR")
+        .collect();
+    launching.push(("MRSM_ROOT_DIR".into(), root.to_string()));
+    let mut options = meerschaum_core::config::ConfigOptions::with_env(launching.clone());
+    options.allow_writes = false;
+    let config = meerschaum_core::Config::new(options)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let scope = ts::TeamScope {
+        team: team.to_string(),
+        team_id: Some(format!("id-{team}")),
+        connectors: connectors.into_iter().collect(),
+        plugins: plugins.unwrap_or_default().into_iter().collect(),
+        ..ts::TeamScope::default()
+    };
+    let map = ts::team_config(&config, &scope);
+    let fingerprint = ts::fingerprint(&scope, &map);
+    let scope_dir = ts::scope_dir(std::path::Path::new(root), &scope.key());
+    let files = ts::write_scope_files(&scope_dir, &map)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let passthrough = ts::Passthrough::from_config(&config);
+    let mut env = ts::team_env(&launching, &[], &files, &scope, &fingerprint, &passthrough);
+    if sandbox
+        && let Some(prepared) = ts::sandbox::prepare(
+            &config,
+            &scope,
+            &files,
+            None,
+            &scope_dir.join(ts::sandbox::SPEC_FILE),
+        )
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+    {
+        ts::sandbox::apply_env(&mut env, &prepared);
+    }
+    Ok(env.into_iter().collect())
+}
+
+/// `_core.team_sandbox_enforce(paths, socket=None)` (5.1): in a process started for an isolated
+/// team (`MRSM_TEAM_SANDBOX` names its rules), restrict this process and everything it starts to
+/// those rules plus `paths` (the interpreter's prefixes and import path, read and execute) and,
+/// with `socket`, connecting to that Unix socket (the worker's host); then try the canary.
+/// Irreversible. Returns the report as JSON text (`None` outside a sandboxed team process).
+/// Called by the worker's start-up (`meerschaum/_internal/team_sandbox.py`) before any plugin or
+/// user code is imported.
+#[pyfunction]
+#[pyo3(signature = (paths, socket=None))]
+pub fn team_sandbox_enforce(
+    py: Python<'_>,
+    paths: Vec<String>,
+    socket: Option<String>,
+) -> PyResult<Option<String>> {
+    use meerschaum_core::team_scope::sandbox::{Access, Rule, enforce_from_env};
+    let mut extra: Vec<Rule> = paths
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .map(|p| Rule::new(p, Access::ReadExec, "the interpreter"))
+        .collect();
+    // 5.1: a worker on Unix inherits its channel (`fd:<n>`) and connects to nothing.
+    if let Some(socket) = socket.filter(|s| !s.is_empty() && !s.starts_with("fd:")) {
+        extra.push(Rule::new(socket, Access::Connect, "the worker's host"));
+    }
+    let report = py.detach(|| enforce_from_env(&extra));
+    Ok(report.map(|r| serde_json::to_string(&r).unwrap_or_default()))
+}
+
+/// `_core.team_sandbox_status()` (5.1): this system's support for isolated teams' filesystem
+/// sandbox and this process's own report, as JSON text: `{"support": ..., "describe": ...,
+/// "current": ...}`.
+#[pyfunction]
+pub fn team_sandbox_status() -> String {
+    use meerschaum_core::team_scope::sandbox::{current, kernel_support};
+    let support = kernel_support();
+    serde_json::json!({
+        "support": support,
+        "abi": support.abi(),
+        "describe": support.describe(),
+        "current": current(),
+    })
+    .to_string()
+}
+
+/// Native Team bootstrap only: retain the exact source namespace before site hooks.
+/// The descriptor supplies no API credentials or new authorization.
+#[pyfunction]
+pub fn team_sources_capture(path: String, expected_sha256: String) -> PyResult<()> {
+    meerschaum_core::team_scope::source_namespace::capture_sdk(
+        std::path::Path::new(&path),
+        &expected_sha256,
+    )
+    .map_err(pyo3::exceptions::PyPermissionError::new_err)
+}
+
+/// The already captured nonsecret package/cache projection; later env/config cannot change it.
+#[pyfunction]
+pub fn team_sources_namespace() -> PyResult<Option<String>> {
+    meerschaum_core::team_scope::source_namespace::launch()
+        .map_err(pyo3::exceptions::PyPermissionError::new_err)?
+        .map(|launch| {
+            serde_json::to_string(&launch.namespace).map_err(|_| {
+                pyo3::exceptions::PyRuntimeError::new_err("Invalid captured Team source namespace.")
+            })
+        })
+        .transpose()
+}
+
+/// `_core.access_team_scope(user_teams, teams, primary=None, connectors=None, object_team=None,
+/// is_admin=False)` (5.1): the isolated team a user acts for when server-side Python code runs on
+/// their behalf (`meerschaum_core::team_scope::acting_team`), as `{team, team_id, connectors,
+/// plugins, instance}`, or `None` for the open view. `connectors` is the server's
+/// `meerschaum:connectors` section (the connectors reserved for the team).
+#[pyfunction]
+#[pyo3(signature = (user_teams, teams, primary=None, connectors=None, object_team=None, is_admin=false))]
+pub fn access_team_scope<'py>(
+    py: Python<'py>,
+    user_teams: &Bound<'py, PyAny>,
+    teams: &Bound<'py, PyAny>,
+    primary: Option<&str>,
+    connectors: Option<&Bound<'py, PyAny>>,
+    object_team: Option<&str>,
+    is_admin: bool,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let user_teams = teams_of(Some(user_teams).filter(|t| !t.is_none()))?;
+    let mut records = Vec::new();
+    for item in teams.try_iter()? {
+        records.push(team_of(&item?)?);
+    }
+    let Some(team) = meerschaum_core::team_scope::acting_team(
+        is_admin,
+        &user_teams,
+        &records,
+        primary,
+        object_team,
+    ) else {
+        return Ok(None);
+    };
+    let connectors = match connectors.filter(|c| !c.is_none()) {
+        Some(c) => py_to_core(c)?.to_map(),
+        None => Map::new(),
+    };
+    let scope = meerschaum_core::team_scope::TeamScope::of(&team, &connectors);
+    Ok(Some(core_to_py(py, &scope.to_value())?))
+}
+
+/// `_core.access_isolated_withheld()`: the permissions a walled-off principal never holds.
+#[pyfunction]
+pub fn access_isolated_withheld() -> Vec<&'static str> {
+    access::ISOLATED_WITHHELD.to_vec()
+}
+
+/// `_core.access_withheld_permissions(grants)`: the permissions a principal with `grants` does
+/// not hold (5.1: a walled-off member of a team that runs code keeps `actions:execute` and
+/// `webterm:use`, which the API server honours only as the team's sandboxed processes).
+#[pyfunction]
+pub fn access_withheld_permissions(grants: &Bound<'_, PyAny>) -> PyResult<Vec<&'static str>> {
+    let grants = if grants.is_none() {
+        TeamGrants::default()
+    } else {
+        grants_of(grants)?
+    };
+    Ok(access::withheld_permissions(&grants))
+}
+
+/// `_core.access_can_name_connector(principal, keys, teams=None, configured=True)`: whether the
+/// principal may give a pipe the source connector `keys`.
+#[pyfunction]
+#[pyo3(signature = (principal, keys, teams=None, configured=true))]
+pub fn access_can_name_connector(
+    principal: &Bound<'_, PyAny>,
+    keys: &str,
+    teams: Option<&Bound<'_, PyAny>>,
+    configured: bool,
+) -> PyResult<bool> {
+    let teams = teams
+        .filter(|teams| !teams.is_none())
+        .map(|teams| strings(Some(teams)))
+        .transpose()?;
+    Ok(access::can_name_connector(
         &principal_of(principal)?,
+        keys,
         teams.as_deref(),
+        configured,
     ))
+}
+
+/// `_core.access_can_use_plugin(principal, name)`.
+#[pyfunction]
+pub fn access_can_use_plugin(principal: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
+    Ok(access::can_use_plugin(&principal_of(principal)?, name))
+}
+
+/// `_core.access_can_write_plugins(principal)`.
+#[pyfunction]
+pub fn access_can_write_plugins(principal: &Bound<'_, PyAny>) -> PyResult<bool> {
+    Ok(access::can_write_plugins(&principal_of(principal)?))
+}
+
+/// `_core.access_can_see_team(principal, team)`.
+#[pyfunction]
+pub fn access_can_see_team(principal: &Bound<'_, PyAny>, team: &str) -> PyResult<bool> {
+    Ok(access::can_see_team(&principal_of(principal)?, team))
+}
+
+/// `_core.access_can_see_user(viewer, target_username, target_user_teams)`.
+#[pyfunction]
+#[pyo3(signature = (viewer, target_username, target_user_teams=None))]
+pub fn access_can_see_user(
+    viewer: &Bound<'_, PyAny>,
+    target_username: &str,
+    target_user_teams: Option<&Bound<'_, PyAny>>,
+) -> PyResult<bool> {
+    let teams = teams_of(target_user_teams.filter(|t| !t.is_none()))?;
+    Ok(access::can_see_user(
+        &principal_of(viewer)?,
+        target_username,
+        &teams,
+    ))
+}
+
+/// `_core.access_is_member(principal, team=None)`: whether the principal is in `team` (`None`:
+/// Everyone, which a walled-off principal is not in).
+#[pyfunction]
+#[pyo3(signature = (principal, team=None))]
+pub fn access_is_member(principal: &Bound<'_, PyAny>, team: Option<&str>) -> PyResult<bool> {
+    Ok(principal_of(principal)?.is_member(team))
 }
 
 /// `_core.access_check_access_change(principal, old, new)`: `None` when allowed, else why not.
@@ -1047,6 +1357,21 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_can_manage_team, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_administer_teams, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_use_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(access_team_grants, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_name_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(access_isolated_withheld, m)?)?;
+    m.add_function(wrap_pyfunction!(access_withheld_permissions, m)?)?;
+    m.add_function(wrap_pyfunction!(access_team_scope, m)?)?;
+    m.add_function(wrap_pyfunction!(access_team_process_env, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sandbox_enforce, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sandbox_status, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sources_capture, m)?)?;
+    m.add_function(wrap_pyfunction!(team_sources_namespace, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_use_plugin, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_write_plugins, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_see_team, m)?)?;
+    m.add_function(wrap_pyfunction!(access_can_see_user, m)?)?;
+    m.add_function(wrap_pyfunction!(access_is_member, m)?)?;
     m.add_function(wrap_pyfunction!(access_check_access_change, m)?)?;
     m.add_function(wrap_pyfunction!(access_for_new_pipe, m)?)?;
     m.add_function(wrap_pyfunction!(access_primary_team, m)?)?;

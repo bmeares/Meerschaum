@@ -197,9 +197,11 @@ def cargo_events(repo, sdk, binary):
 
 @pytest.mark.parametrize('problem', [None, 'failed-build', 'missing-cli', 'registry-sdk', 'two-sdks',
                                    'wrong-profile'])
-def test_sdk_comes_from_matching_cargo_events_not_newest_cached_rlib(tmp_path, problem):
+@pytest.mark.parametrize('layout', ['deps', 'build'])
+def test_sdk_comes_from_matching_cargo_events_not_newest_cached_rlib(tmp_path, problem, layout):
     repo = tmp_path / 'repo'
-    deps = repo / 'target/debug/deps'
+    profile_dir = repo / 'target/debug'
+    deps = profile_dir / ('deps' if layout == 'deps' else 'build/meerschaum-plugin/hash')
     deps.mkdir(parents=True)
     sdk = deps / 'libmeerschaum_plugin-current.rlib'
     sdk.write_bytes(b'current')
@@ -209,6 +211,11 @@ def test_sdk_comes_from_matching_cargo_events_not_newest_cached_rlib(tmp_path, p
     binary = repo / 'target/debug/mrsm'
     binary.write_bytes(b'\x7fELFcli')
     events = cargo_events(repo, sdk, binary)
+    dependency_dir = deps if layout == 'deps' else profile_dir / 'build/serde/hash'
+    dependency_dir.mkdir(parents=True, exist_ok=True)
+    dependency = dependency_dir / 'libserde.rlib'
+    dependency.touch()
+    events.insert(2, {'reason': 'compiler-artifact', 'filenames': [str(dependency)]})
     if problem == 'failed-build':
         events[-1]['success'] = False
     elif problem == 'missing-cli':
@@ -220,7 +227,9 @@ def test_sdk_comes_from_matching_cargo_events_not_newest_cached_rlib(tmp_path, p
     messages = tmp_path / 'cargo.jsonl'
     messages.write_text('\n'.join(json.dumps(event) for event in events))
     if problem is None:
-        assert fixture.select_sdk(messages, binary, 'debug', repo) == sdk
+        assert fixture.select_sdk(messages, binary, 'debug', repo) == (
+            sdk, sorted({deps, dependency_dir}),
+        )
     else:
         with pytest.raises(fixture.artifacts.ArtifactError):
             fixture.select_sdk(messages, binary, 'release' if problem == 'wrong-profile' else 'debug', repo)

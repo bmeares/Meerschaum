@@ -1017,13 +1017,20 @@ impl SqlTransaction {
     pub async fn raw_query(&mut self, sql: &str, params: &[SqlParam]) -> Result<RecordBatch> {
         meerschaum_core::dprint!("{}", meerschaum_core::debug::redact_sql(sql));
         let batches = match &mut self.inner {
+            TxInner::PinnedRead => {
+                return Err(SqlError::InvalidArgument(
+                    "Raw queries cannot adopt an authorization snapshot.".into(),
+                ));
+            }
             TxInner::Sqlite(tx) => return sqlite_tx_rows(tx, sql, params).await,
             TxInner::Postgres(tx) => super::backend::pg_tx::tx_read_with(tx, sql, params)
                 .await?
                 .into_iter()
                 .map(decode_pg_raw)
                 .collect(),
-            TxInner::Mysql(tx) => super::backend::mysql_tx::tx_read_with(tx, sql, params).await?,
+            TxInner::Mysql(tx, _) => {
+                super::backend::mysql_tx::tx_read_with(tx, sql, params).await?
+            }
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             TxInner::Native(tx) => tx.read_with(sql, params).await?,
         };
@@ -1042,18 +1049,22 @@ impl SqlTransaction {
         if params.is_empty() {
             return self.exec(sql).await;
         }
+        self.check_write().await?;
         meerschaum_core::dprint!(
             "{}\n({} bound parameters)",
             meerschaum_core::debug::redact_sql(sql),
             params.len()
         );
         match &mut self.inner {
+            TxInner::PinnedRead => Err(SqlError::InvalidArgument(
+                "An authorization snapshot cannot write.".into(),
+            )),
             TxInner::Sqlite(tx) => Ok(bind_sqlite(sql, params)
                 .execute(&mut **tx)
                 .await?
                 .rows_affected()),
             TxInner::Postgres(tx) => super::backend::pg_tx::tx_exec_with(tx, sql, params).await,
-            TxInner::Mysql(tx) => super::backend::mysql_tx::tx_exec_with(tx, sql, params).await,
+            TxInner::Mysql(tx, _) => super::backend::mysql_tx::tx_exec_with(tx, sql, params).await,
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             TxInner::Native(tx) => tx.exec_with(sql, params).await,
         }

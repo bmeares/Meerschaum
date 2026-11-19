@@ -30,49 +30,20 @@ def test_connection(
     """
     Test if a successful connection to the API may be made.
 
-    The API instance must answer `/chaining`; keyword arguments are those of `retry_connect()`:
+    The keyword arguments are those of `meerschaum.connectors.poll.retry_connect()`:
     `max_retries` (default 1), `retry_wait` (default 0), `warn` (default `False`),
-    `enforce_chaining` and `enforce_login` (default `False`).
+    `enforce_chaining` and `enforce_login` (default `False`). With `warn`, a failed attempt
+    says why (`cannot connect to localhost:8000 (connection refused)`).
     """
-    import time
-    from meerschaum.utils.warnings import warn as _warn
-    max_retries = kw.get('max_retries', 1)
-    retry_wait = kw.get('retry_wait', 0)
-    warn = kw.get('warn', False)
-    enforce_chaining = kw.get('enforce_chaining', False)
-    enforce_login = kw.get('enforce_login', False)
-
+    from meerschaum.connectors.poll import retry_connect
+    from meerschaum.utils.misc import filter_keywords
+    _default_kw = {
+        'max_retries': 1, 'retry_wait': 0, 'warn': False,
+        'connector': self, 'enforce_chaining': False,
+        'enforce_login': False,
+    }
+    _default_kw.update(kw)
     try:
-        retries = 0
-        chaining_status = None
-        while retries < max_retries:
-            connected = None
-            if not isinstance(chaining_status, bool):
-                chaining_status = self.get_chaining_status()
-                if chaining_status is False:
-                    if enforce_chaining:
-                        if warn:
-                            _warn(
-                                f"Meerschaum instance '{self}' does not allow chaining "
-                                + "and cannot be used as the parent for this instance.",
-                                stack=False,
-                            )
-                        return False
-                    chaining_status = True
-
-            if chaining_status:
-                connected = self.login(warn=warn)[0] if enforce_login else True
-                if not connected and warn:
-                    _warn(f"Unable to login to '{self}'!", stack=False)
-
-            if connected:
-                return True
-
-            if warn:
-                _warn(f"Connection to '{self}' failed.", stack=False)
-            if retry_wait > 0:
-                time.sleep(retry_wait)
-            retries += 1
-        return False
+        return retry_connect(**filter_keywords(retry_connect, **_default_kw))
     except Exception:
         return False

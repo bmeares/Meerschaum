@@ -40,14 +40,22 @@ impl APIConnector {
 
     /// `get_chaining_status()`: `GET /chaining` (`None` on errors).
     pub async fn get_chaining_status(&self) -> Option<bool> {
+        self.try_get_chaining_status().await.ok().flatten()
+    }
+
+    /// [`APIConnector::get_chaining_status`] keeping why the instance could not be reached:
+    /// `Err(cause)` when the request never got an answer (`api:main: cannot connect to
+    /// localhost:8000 (connection refused). Is the API server running?`), `Ok(None)` for an
+    /// answer that is not a boolean (an error status).
+    pub async fn try_get_chaining_status(&self) -> Result<Option<bool>, String> {
         let r = self
             .get(routes::CHAINING, RequestOptions::default())
             .await
-            .ok()?;
+            .map_err(|e| e.to_string())?;
         if !r.ok() {
-            return None;
+            return Ok(None);
         }
-        r.json().ok()?.as_bool()
+        Ok(r.json().ok().and_then(|j| j.as_bool()))
     }
 
     /// `GET /info`.

@@ -70,7 +70,7 @@ except Exception:
 pub fn probe_interpreter(python: &str) -> Result<Interpreter, String> {
     // `PYTHONSAFEPATH` keeps the current directory off `sys.path` (a `pip.py` there must not run);
     // unlike `-P` it is ignored by interpreters older than 3.11 instead of failing the probe.
-    let output = Command::new(python)
+    let output = meerschaum_core::child_env::scrubbed(Command::new(python))
         .args(["-c", PROBE])
         .env("PYTHONSAFEPATH", "1")
         .stdin(Stdio::null())
@@ -258,13 +258,22 @@ impl PipEnv {
         false
     }
 
-    /// `_get_pip_os_env(color=True)`: the environment of installer processes.
-    pub fn installer_env(&self) -> Vec<(String, String)> {
-        let mut env = vec![
-            ("PIP_BREAK_SYSTEM_PACKAGES".to_string(), "true".to_string()),
-            ("UV_BREAK_SYSTEM_PACKAGES".to_string(), "true".to_string()),
-            ("FORCE_COLOR".to_string(), "1".to_string()),
-        ];
+    /// `_get_pip_os_env(color=True)`: the environment of installer processes. An install into
+    /// the host interpreter (`host`) never overrides PEP 668 on the user's behalf: `upgrade
+    /// meerschaum` refuses an externally managed interpreter first, and `-A
+    /// --break-system-packages` is the explicit way to override it.
+    pub fn installer_env(&self, host: bool) -> Vec<(String, String)> {
+        let mut env = vec![("FORCE_COLOR".to_string(), "1".to_string())];
+        if !host {
+            env.insert(
+                0,
+                ("UV_BREAK_SYSTEM_PACKAGES".to_string(), "true".to_string()),
+            );
+            env.insert(
+                0,
+                ("PIP_BREAK_SYSTEM_PACKAGES".to_string(), "true".to_string()),
+            );
+        }
         if let Ok(interpreter) = self.interpreter() {
             env.push((
                 "UV_PYTHON".into(),
@@ -334,7 +343,7 @@ impl PipEnv {
             .map(|s| s.to_string())
             .chain(self.auto_install.then(|| "--seed".to_string()))
             .collect();
-            created = self.run(rt, &uv.to_string_lossy(), &args, true, debug) == 0;
+            created = self.run(rt, &uv.to_string_lossy(), &args, true, false, debug) == 0;
         }
         if !created {
             let mut args = vec![
@@ -350,10 +359,11 @@ impl PipEnv {
                 args.push("--without-pip".into());
             }
             // The module's own output goes nowhere (v4 redirects stdout while it runs).
-            let status = Command::new(&interpreter.executable)
-                .args(&args)
-                .stdout(Stdio::null())
-                .status();
+            let status =
+                meerschaum_core::child_env::scrubbed(Command::new(&interpreter.executable))
+                    .args(&args)
+                    .stdout(Stdio::null())
+                    .status();
             created = status.is_ok_and(|s| s.success());
             if !created {
                 rt.print(
@@ -373,6 +383,7 @@ impl PipEnv {
         program: &str,
         args: &[String],
         quiet_stdout: bool,
+        host: bool,
         debug: bool,
     ) -> i32 {
         if debug {
@@ -381,8 +392,8 @@ impl PipEnv {
             rt.eprint(&format!("{}\n", py_list(&command)));
         }
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        let mut command = Command::new(program);
-        command.args(args).envs(self.installer_env());
+        let mut command = meerschaum_core::child_env::scrubbed(Command::new(program));
+        command.args(args).envs(self.installer_env(host));
         if quiet_stdout {
             command.stdout(Stdio::null());
         }
@@ -445,6 +456,9 @@ pub struct PipInstall {
     /// `venv=None`: the host interpreter instead of a virtual environment (`upgrade meerschaum`).
     /// Nothing is created, no `--target` is passed, the request ledger is not touched.
     pub host: bool,
+    /// With `host`: the user scheme (`pip install --user`), for a distribution in the user site.
+    /// uv has no user scheme, so this always runs `pip`.
+    pub user: bool,
 }
 
 /// `get_pip_install_lock_path(venv)`: the cross-process lock of an environment.
@@ -525,7 +539,7 @@ pub fn install_plan(env: &PipEnv, opts: &PipInstall, rt: &Runtime<'_>) -> Json {
     let interpreter = env.interpreter().ok();
     let have_pip = interpreter.is_some_and(|i| i.has_pip);
     let uv_bin = env.uv_bin();
-    let use_uv = uv_bin.is_some() && env.uv_enabled;
+    let use_uv = uv_bin.is_some() && env.uv_enabled && !opts.user;
     let packages: Vec<&str> = opts
         .names
         .iter()
@@ -592,8 +606,21 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
         }
     };
     let uv_bin = env.uv_bin();
-    let use_uv = uv_bin.is_some() && env.uv_enabled;
+    let use_uv = uv_bin.is_some() && env.uv_enabled && !opts.user;
     let have_pip = interpreter.has_pip;
+    if opts.user && !have_pip {
+        // Never another interpreter's pip, nor uv: either would install somewhere else.
+        if !silent {
+            warn(
+                rt,
+                &format!(
+                    "A user-site installation is upgraded with pip, which {} does not have.",
+                    interpreter.executable.display()
+                ),
+            );
+        }
+        return false;
+    }
     let verb = if opts.uninstall {
         "uninstall"
     } else {
@@ -644,6 +671,9 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
         }
     });
     let mut args = given.clone();
+    if opts.host && opts.user && !given.iter().any(|a| a == "--user") {
+        args.insert(0, "--user".into());
+    }
     if !opts.host && !opts.uninstall {
         if !given.iter().any(|a| a == "--ignore-installed")
             && !given.iter().any(|a| a == "-I")
@@ -799,7 +829,7 @@ pub fn pip_install(env: &PipEnv, rt: &mut Runtime<'_>, opts: &PipInstall) -> boo
         };
         command_args.extend(full);
         command_args.extend(packages.iter().cloned());
-        env.run(rt, &program, &command_args, false, opts.debug)
+        env.run(rt, &program, &command_args, false, opts.host, opts.debug)
     };
     if opts.debug {
         rt.print(&format!("rc={rc}\n"));

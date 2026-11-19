@@ -68,7 +68,7 @@ pub struct SystemRunner;
 
 impl ProcessRunner for SystemRunner {
     fn run(&self, program: &str, args: &[String]) -> io::Result<CommandOutput> {
-        let output = std::process::Command::new(program)
+        let output = meerschaum_core::child_env::scrubbed(std::process::Command::new(program))
             .args(args)
             .stdin(std::process::Stdio::null())
             .output()?;
@@ -252,6 +252,7 @@ impl ProcessRunner for FakeSystemctl {
             return Ok(CommandOutput::failed(format!("fake failure of `{sub}`")));
         }
         match sub {
+            "--version" => Ok(CommandOutput::ok("systemd 255\n")),
             "daemon-reload" => Ok(CommandOutput::ok("")),
             "enable" | "disable" => {
                 let enable = sub == "enable";

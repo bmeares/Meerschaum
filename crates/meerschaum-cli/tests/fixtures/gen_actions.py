@@ -318,7 +318,7 @@ def setup(**kw):
     return result[0], 'Synthetic callback complete.'
 ''',
 }
-for _source in (HERE.parents[3] / 'crates/meerschaum-worker/tests/plugins/wk_custom').glob('*.py'):
+for _source in sorted((HERE.parents[3] / 'crates/meerschaum-worker/tests/plugins/wk_custom').glob('*.py')):
     WIRING_PLUGINS['wk_custom/' + _source.name] = _source.read_text()
 
 WIRING_CASES = [

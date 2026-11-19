@@ -26,7 +26,8 @@ pub const ARCHIVE_MAX_BYTES: usize = 128 * 1024 * 1024;
 
 /// Register the `plugins` route group.
 pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
-    app.route("/plugins", get(get_plugins))
+    super::extensions::mount(app)
+        .route("/plugins", get(get_plugins))
         .route(
             "/plugins/{name}",
             get(get_plugin)
@@ -64,6 +65,12 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
         manager(&state, &ctx.headers).await?
     };
     let user = match principal {
+        Principal::Execution(_) => {
+            return Err(ApiError::new(
+                403,
+                "Execution credentials cannot publish plugins on main.",
+            ));
+        }
         Principal::User(user) => user,
         Principal::Token(_) => {
             // RC30: publishing with client credentials or an API key acts as its owner,
@@ -178,7 +185,11 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
 }
 
 async fn get_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
+    if crate::executor::plugin_delivery::recognizes(&ctx.headers) {
+        return crate::executor::plugin_delivery::archive(&ctx.state, &ctx.headers, &name).await;
+    }
     scoped_auth_if_private(&ctx.state, &ctx.headers, &["plugins:read"]).await?;
+    check_visible(&ctx, &name).await?;
     let path = archive_path(&ctx.state, &name);
     match tokio::fs::read(&path).await {
         Ok(bytes) => {
@@ -203,6 +214,7 @@ async fn get_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
 
 async fn get_plugin_attributes(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     scoped_auth_if_private(&ctx.state, &ctx.headers, &["plugins:read"]).await?;
+    check_visible(&ctx, &name).await?;
     let attrs = ctx
         .state
         .instance()
@@ -214,6 +226,7 @@ async fn get_plugin_attributes(ctx: Ctx, Path(name): Path<String>) -> ApiResult 
 
 async fn get_plugin_version(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     scoped_auth_if_private(&ctx.state, &ctx.headers, &["plugins:read"]).await?;
+    check_visible(&ctx, &name).await?;
     let version = ctx
         .state
         .instance()
@@ -222,6 +235,24 @@ async fn get_plugin_version(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         .map_err(|e| ApiError::exception("get_plugin_version", e))?
         .filter(|v| !v.is_empty());
     Ok(ok_json(&json!(version)))
+}
+
+/// The caller when they are walled off (every team of theirs is isolated), else `None`: the
+/// repository then serves only the plugins their teams were granted.
+async fn hidden_from(ctx: &Ctx) -> Result<Option<crate::access::Access>, ApiError> {
+    Ok(crate::access::resolve_optional(&ctx.state, &ctx.headers)
+        .await?
+        .filter(|caller| caller.principal.is_isolated()))
+}
+
+/// `404` for a plugin a walled-off caller may not see.
+async fn check_visible(ctx: &Ctx, name: &str) -> Result<(), ApiError> {
+    match hidden_from(ctx).await? {
+        Some(caller) if !meerschaum_core::access::can_use_plugin(&caller.principal, name) => {
+            Err(ApiError::not_found())
+        }
+        _ => Ok(()),
+    }
 }
 
 async fn get_plugins(ctx: Ctx) -> ApiResult {
@@ -234,6 +265,14 @@ async fn get_plugins(ctx: Ctx) -> ApiResult {
         .get_plugins(user_id.as_ref(), search_term.as_deref())
         .await
         .map_err(|e| ApiError::exception("get_plugins", e))?;
+    // A walled-off caller (when the request names one) sees the plugins of their teams.
+    let plugins: Vec<String> = match hidden_from(&ctx).await? {
+        Some(caller) => plugins
+            .into_iter()
+            .filter(|name| meerschaum_core::access::can_use_plugin(&caller.principal, name))
+            .collect(),
+        None => plugins,
+    };
     Ok(ok_json(&json!(plugins)))
 }
 
@@ -249,6 +288,12 @@ async fn delete_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         return Ok(tuple(false, format!("Plugin '{name}' is not registered.")));
     };
     let curr_user_id = match &principal {
+        Principal::Execution(_) => {
+            return Err(ApiError::new(
+                403,
+                "Execution credentials cannot change main's plugin registry.",
+            ));
+        }
         Principal::User(u) => conn.get_user_id(u).await,
         Principal::Token(t) => match t.id {
             Some(id) => conn.get_token_user_id(&id).await,

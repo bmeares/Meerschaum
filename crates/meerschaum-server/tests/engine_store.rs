@@ -24,12 +24,16 @@ async fn app(dir: &Path, db: &Path) -> axum::Router {
             .await
             .unwrap(),
     );
-    let store: Arc<dyn InstanceConnector> = store;
+    app_with_store(dir, store)
+}
+
+fn app_with_store(dir: &Path, store: Arc<dyn InstanceConnector>) -> axum::Router {
+    let instance_keys = store.connector_keys();
     let users = Arc::new(common::MemoryInstance::new("fixture"));
     users.seed_user("admin", "pass", Some("admin"));
     let state = AppState::builder(common::config(dir), users)
         .secret(SECRET.to_vec())
-        .engine(Arc::new(InstanceEngine::new(store, "sql:w17bgstore")))
+        .engine(Arc::new(InstanceEngine::new(store, &instance_keys)))
         .build()
         .unwrap();
     meerschaum_server::app(state)
@@ -37,6 +41,80 @@ async fn app(dir: &Path, db: &Path) -> axum::Router {
 
 fn body(j: serde_json::Value) -> Option<(&'static str, Vec<u8>)> {
     Some(("application/json", j.to_string().into_bytes()))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn direct_admin_engine_writes_on_postgres() {
+    let Ok(uri) = std::env::var("MRSM_TEST_PG_URI") else {
+        assert!(std::env::var_os("MRSM_TEST_ISOLATED").is_none());
+        eprintln!("Skipping postgresql: set MRSM_TEST_PG_URI.");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        SqlConnector::from_uri("engine_pg_regression", &uri)
+            .await
+            .unwrap(),
+    );
+    let app = app_with_store(dir.path(), store);
+    let admin = login(&app, "admin", "pass", None).await;
+    let nonce = uuid::Uuid::new_v4().simple();
+    let reference = format!("api:x|synthetic|engine_{nonce}|None");
+    let lease = json!({"pipe_ref": reference, "holder": "direct-admin", "ttl_ms": 60_000});
+    let r = send(
+        &app,
+        req("POST", "/engine/leases", Some(&admin), body(lease.clone())),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    let events = json!([{
+        "run_id": format!("engine-{nonce}"),
+        "created": "2026-01-01T00:00:00Z",
+        "event": "node_started",
+        "pipe_ref": reference,
+    }]);
+    let r = send(
+        &app,
+        req("POST", "/engine/events", Some(&admin), body(events)),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let r = send(
+        &app,
+        req("DELETE", "/engine/leases", Some(&admin), body(lease)),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    for (period, started) in [
+        ("first", "2026-01-01T00:00:00Z"),
+        ("second", "2026-06-01T00:00:00Z"),
+    ] {
+        let run_id = format!("engine-{nonce}-{period}");
+        for (path, rows) in [
+            (
+                "/engine/runs",
+                json!([{"run_id": run_id, "started": started, "status": "running"}]),
+            ),
+            (
+                "/engine/pipes/engine_nodes/write",
+                json!([{"run_id": run_id, "started": started, "pipe_ref": reference,
+                        "status": "succeeded", "action": "incremental", "inserted": 1}]),
+            ),
+        ] {
+            let r = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                send(&app, req("POST", path, Some(&admin), body(rows))),
+            )
+            .await
+            .expect(
+                "PostgreSQL history authorization must be able to read while creating a partition",
+            );
+            assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.text());
+            assert_eq!(r.json()["success"], json!(true), "{path}: {}", r.text());
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

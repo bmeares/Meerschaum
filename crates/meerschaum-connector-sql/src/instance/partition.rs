@@ -15,7 +15,8 @@ use crate::queries::partition::{
     get_mysql_max_partition_bound_query, get_partition_count_query, get_pg_is_partitioned_query,
     get_pg_partition_creation_queries, get_set_chunk_time_interval_query,
     get_timescaledb_chunk_count_query, parse_mssql_max_partition_boundary,
-    parse_mysql_max_partition_bound, partition_ranges, partition_scheme_name, should_partition,
+    parse_mysql_max_partition_bound, partition_literal, partition_name, partition_ranges,
+    partition_scheme_name, should_partition,
 };
 
 use super::values::py_datetime;
@@ -210,15 +211,96 @@ impl SqlConnector {
                 sp.pipe()
             ));
         }
-        let queries = get_pg_partition_creation_queries(&self.ctx(), sp, &ranges);
-        if !self.exec_queries_all(&queries, true, true).await {
+        let created = if sp.pipe().temporary
+            && sp.pipe().connector_keys() == "mrsm"
+            && meerschaum_connector::mutation::current()
+                .is_some_and(|authority| authority.direct_administrator())
+        {
+            self.attach_internal_pg_partitions(sp, &ranges)
+                .await
+                .map_err(|error| {
+                    tracing::warn!("Failed to attach partitions for {}: {error}", sp.pipe())
+                })
+                .is_ok()
+        } else {
+            let queries = get_pg_partition_creation_queries(&self.ctx(), sp, &ranges);
+            self.exec_queries_all(&queries, true, true).await
+        };
+        if !created {
             return SuccessTuple::fail(format!("Failed to create partitions for {}.", sp.pipe()));
         }
         SuccessTuple::ok(format!(
             "Ensured {} partition(s) for {}.",
-            queries.len(),
+            ranges.len(),
             sp.pipe()
         ))
+    }
+
+    /// Creating a partition with `PARTITION OF` takes an exclusive parent lock.
+    /// The native writer's authorization check reads engine history on a different
+    /// connection, so use ATTACH PARTITION to keep the existing parent readable.
+    async fn attach_internal_pg_partitions(
+        &self,
+        sp: &SqlPipe,
+        ranges: &[(PartitionValue, PartitionValue)],
+    ) -> crate::error::Result<()> {
+        use crate::ident::sql_item_name;
+
+        let schema = self.get_pipe_schema(sp);
+        let parent = sql_item_name(&sp.target, self.flavor, schema.as_deref());
+        let parent_literal = parent.replace('\'', "''");
+        let mut tx = self.driver.begin_write().await?;
+        let result = async {
+            // Serialize the check and attach even when several processes need the same range.
+            tx.exec(&format!("LOCK TABLE ONLY {parent} IN SHARE UPDATE EXCLUSIVE MODE"))
+                .await?;
+            let has_default = tx
+                .read_frame(&format!(
+                    "SELECT 1 FROM pg_partitioned_table WHERE partrelid = to_regclass('{parent_literal}') AND partdefid <> 0"
+                ))
+                .await?
+                .height() != 0;
+            for &(lo, hi) in ranges {
+                let child = sql_item_name(
+                    &partition_name(self.flavor, &sp.target, lo),
+                    self.flavor,
+                    schema.as_deref(),
+                );
+                let child_literal = child.replace('\'', "''");
+                if tx
+                    .read_frame(&format!(
+                        "SELECT 1 FROM pg_inherits WHERE inhparent = to_regclass('{parent_literal}') AND inhrelid = to_regclass('{child_literal}')"
+                    ))
+                    .await?
+                    .height() != 0
+                {
+                    continue;
+                }
+                if has_default {
+                    return Err(crate::SqlError::InvalidArgument(
+                        "Scoped attachment cannot lock an internal history table's default partition."
+                            .into(),
+                    ));
+                }
+                tx.exec(&format!("CREATE TABLE {child} (LIKE {parent} INCLUDING ALL)"))
+                    .await?;
+                tx.exec(&format!(
+                    "ALTER TABLE {parent} ATTACH PARTITION {child} FOR VALUES FROM ({}) TO ({})",
+                    partition_literal(self.flavor, lo),
+                    partition_literal(self.flavor, hi)
+                ))
+                .await?;
+            }
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => tx.commit().await,
+            Err(error) => {
+                tx.rollback().await?;
+                Err(error)
+            }
+        }
     }
 
     /// `_get_mysql_max_partition_bound(pipe)`.

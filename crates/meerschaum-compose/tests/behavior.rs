@@ -839,6 +839,26 @@ fn up_refuses_foreign_collisions_and_propagates_job_start_failures() {
 }
 
 #[test]
+fn up_with_an_empty_jobs_mapping_starts_nothing() {
+    let env = env_from_yaml(
+        "project_name: alpha\nroot_dir: ./root\npipes:\n  - connector: sql:local\n    metric: bar\n    instance: sql:local\njobs: {}\n",
+    );
+    let o = scoped(&env, &["up"], &mut InMemoryJobs::default(), true);
+    assert!(succeeded(&o), "{}", message(&o));
+    assert!(message(&o).contains("starts no jobs"), "{}", message(&o));
+    let ran = acting(&o.commands);
+    assert!(
+        !ran.iter().any(|c| c.contains(&"-d".to_string())),
+        "no job is started: {ran:?}"
+    );
+    assert!(
+        !ran.iter()
+            .any(|c| c.starts_with(&["sync".to_string(), "pipes".to_string()])),
+        "the pipes are not synced: {ran:?}"
+    );
+}
+
+#[test]
 fn up_starts_jobs_instead_of_syncing_pipes() {
     let env = env_from_yaml(
         "project_name: alpha\nroot_dir: ./root\npipes:\n  - connector: sql:local\n    metric: bar\n    instance: sql:local\njobs:\n  hello: show version\n",

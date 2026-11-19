@@ -11,6 +11,26 @@
 use std::sync::{OnceLock, RwLock};
 
 static OVERRIDE: RwLock<Option<Vec<String>>> = RwLock::new(None);
+static NATIVE_EXECUTABLE: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// Register the native host from its compiled process entry point, before handling commands.
+/// Environment variables and Python embedding never establish this provenance.
+pub fn register_native_current_executable() -> std::io::Result<()> {
+    let executable = std::fs::canonicalize(std::env::current_exe()?)?;
+    if is_python_executable(&executable.to_string_lossy()) {
+        return Err(std::io::Error::other(
+            "A Python interpreter is not a native sandbox launcher.",
+        ));
+    }
+    NATIVE_EXECUTABLE
+        .set(executable)
+        .map_err(|_| std::io::Error::other("The native launcher is already registered."))
+}
+
+/// A host-selected native launcher, never a value adopted from MRSM_BIN or a job's environment.
+pub fn native_executable() -> Option<std::path::PathBuf> {
+    NATIVE_EXECUTABLE.get().cloned()
+}
 
 /// The module arguments an interpreter needs to run the CLI: `python -m meerschaum`.
 pub const PYTHON_MODULE_ARGS: [&str; 2] = ["-m", "meerschaum"];

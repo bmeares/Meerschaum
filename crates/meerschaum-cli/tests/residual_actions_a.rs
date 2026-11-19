@@ -1490,10 +1490,32 @@ fn start_gui_without_the_gui_extra_says_what_to_install() {
 // --- the loopback API -------------------------------------------------------------------------
 
 fn free_port() -> u16 {
-    let socket = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let port = socket.local_addr().unwrap().port();
-    assert_ne!(port, 8989);
-    port
+    // The tests of this file start servers at the same time: a port which was released a moment
+    // ago would be handed to a second test (whose client then talks to the first one's server),
+    // so every port handed out is remembered.
+    static HANDED_OUT: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    loop {
+        let socket = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        let mut taken = HANDED_OUT.lock().unwrap();
+        if port != 8989 && !taken.contains(&port) {
+            taken.push(port);
+            return port;
+        }
+    }
+}
+
+/// The status line of `GET /healthcheck` on `port`, or the I/O error that ended the request.
+fn healthcheck(port: u16) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(20)))?;
+    stream.write_all(
+        b"GET /healthcheck HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    )?;
+    let mut out = String::new();
+    let _ = stream.read_to_string(&mut out);
+    Ok(out.lines().next().unwrap_or_default().to_string())
 }
 
 /// A server started with `<args>` over a temporary root, stopped when dropped.
@@ -1504,7 +1526,23 @@ struct Server {
 }
 
 impl Server {
+    /// A started server which answers HTTP. The server cannot be asked to bind port 0 and report
+    /// the port it got, so a port is chosen first; under load a port which was free a moment ago
+    /// can be taken by another test binary before this server binds it (then the server exits, or
+    /// a foreign listener answers for it until its own test ends). A failed attempt is therefore
+    /// retried on a new port.
     fn start(prefix: &[&str]) -> Server {
+        let mut last = String::new();
+        for _ in 0..5 {
+            match Server::try_start(prefix) {
+                Ok(server) => return server,
+                Err(why) => last = why,
+            }
+        }
+        panic!("the server did not start in 5 attempts: {last}");
+    }
+
+    fn try_start(prefix: &[&str]) -> Result<Server, String> {
         let home = Home::new();
         let port = free_port();
         let mut command = home.command();
@@ -1518,25 +1556,38 @@ impl Server {
             .args(["-i", "sql:local", "--host", "127.0.0.1", "-p"])
             .arg(port.to_string())
             .args(["--no-dash", "-w", "2"]);
-        let mut child = command
+        let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
+        // Dropped (and the process group stopped) on every early return.
+        let mut server = Server { home, child, port };
+        // Ready = a whole HTTP answer, not merely an accepted connection: under load a listener
+        // can accept before the app serves, and the early connection is reset.
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
-            assert!(
-                child.try_wait().unwrap().is_none(),
-                "the server exited before it listened"
-            );
-            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            if let Some(status) = server.child.try_wait().unwrap() {
+                return Err(format!("the server exited ({status}) before it served"));
+            }
+            if healthcheck(port).is_ok_and(|status| {
+                status.starts_with("HTTP/1.1 200") || status.starts_with("HTTP/1.0 200")
+            }) {
                 break;
             }
-            assert!(Instant::now() < deadline, "the server did not listen");
+            if Instant::now() >= deadline {
+                return Err("the server did not serve in 60 s".into());
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Server { home, child, port }
+        // The answer must be ours: had another process taken the port, our server would have
+        // failed to bind and be gone by now.
+        std::thread::sleep(Duration::from_millis(300));
+        if let Some(status) = server.child.try_wait().unwrap() {
+            return Err(format!("the server exited ({status}): its port was taken"));
+        }
+        Ok(server)
     }
 }
 

@@ -287,8 +287,10 @@ impl PluginSync for PythonSync {
             tokio::select! {
                 result = &mut call => {
                     let status = result.unwrap_or_else(|e| SuccessTuple::fail(e.to_string()));
-                    totals.success = status.success;
-                    totals.message = status.message;
+                    if totals.success || env.delivery.is_none() {
+                        totals.success = status.success;
+                        totals.message = status.message;
+                    }
                     return totals;
                 },
                 request = rx.recv() => {
@@ -314,6 +316,13 @@ impl PluginSync for PythonSync {
                             Err(e) => SuccessTuple::fail(e.to_string()),
                         }
                     } else { SuccessTuple::fail("No pipe was provided to sync.") };
+                    if let Some(owner) = &env.delivery && !result.success {
+                        owner.record_failure();
+                        if totals.success {
+                            totals.success = false;
+                            totals.message = result.message.clone();
+                        }
+                    }
                     let _ = reply.send(result);
                 }
             }

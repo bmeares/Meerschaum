@@ -9,7 +9,7 @@ use chrono::Duration;
 use meerschaum_connector::{DataQuery, DateBound};
 use meerschaum_connector_sql::instance::data::{ChunkBounds, get_chunk_bounds, subtract_interval};
 use meerschaum_core::pipe::{ChunkInterval, ChunkIntervalArg};
-use meerschaum_core::value::{Map, Value};
+use meerschaum_core::value::Map;
 use meerschaum_core::{SuccessTuple, pyfmt, static_config};
 use meerschaum_kernel::value::DateTimeValue;
 
@@ -162,53 +162,7 @@ fn chunk_label(b: &ChunkBounds) -> String {
 
 /// `Pipe.get_bound_interval()`.
 fn get_bound_interval(sp: &SelectedPipe) -> Option<ChunkInterval> {
-    let verify = sp.pipe.parameters().get("verify")?.as_map()?.clone();
-    let suffixes = ["minutes", "hours", "days", "weeks", "years", "seconds"];
-    let mut found: Option<(String, Value)> = None;
-    for (key, val) in &verify {
-        if !key.starts_with("bound_") {
-            continue;
-        }
-        if suffixes.iter().any(|s| *key == format!("bound_{s}")) {
-            found = Some((key.clone(), val.clone()));
-            break;
-        }
-    }
-    let (key, val) = found?;
-    if val.is_null() {
-        return None;
-    }
-    let dt_col = sp.pipe.column("datetime");
-    let is_int = dt_col.as_ref().is_some_and(|c| {
-        sp.pipe
-            .parameters()
-            .get("dtypes")
-            .and_then(Value::as_map)
-            .and_then(|d| d.get(c))
-            .map(pyfmt::py_str)
-            .unwrap_or_else(|| "datetime".into())
-            .to_lowercase()
-            .contains("int")
-    });
-    let n = match &val {
-        Value::Int(i) => *i as f64,
-        Value::Float(f) => *f,
-        other => pyfmt::py_str(other).trim().parse().unwrap_or(0.0),
-    };
-    if dt_col.is_none() || is_int {
-        return Some(ChunkInterval::Int(n as i64));
-    }
-    let unit_secs: f64 = match key.trim_start_matches("bound_") {
-        "minutes" => 60.0,
-        "hours" => 3600.0,
-        "days" => 86400.0,
-        "weeks" => 604_800.0,
-        "years" => 365.0 * 86400.0,
-        _ => 1.0,
-    };
-    Some(ChunkInterval::Delta(Duration::microseconds(
-        (n * unit_secs * 1e6) as i64,
-    )))
+    super::verify_plan::bound_interval(&sp.pipe)
 }
 
 fn bound_lt(a: &DateBound, b: &DateBound) -> bool {
@@ -479,6 +433,11 @@ pub fn verify_pipe_with(
     sync_args: &SyncArgs,
 ) -> SuccessTuple {
     hydrate(rt, inst, sp);
+    match confined_verify(rt, session, inst, sp, va, sync_args) {
+        Ok(Some(result)) => return result,
+        Ok(None) => {}
+        Err(error) => return SuccessTuple::fail(error),
+    }
     let source = remote_instance(rt, session, inst, sp);
     let source = &source;
     let defaults = super::pipes::defaults(rt);
@@ -797,6 +756,85 @@ pub fn verify_pipe_with(
         &message_header,
         va.check_rowcounts_only,
     ))
+}
+
+/// API workers consume Main's actual effective calls without watermarks/grid
+/// recomputation. Known nongraph handlers retain ordinary native verification.
+fn confined_verify(
+    rt: &mut Runtime<'_>,
+    session: &Session,
+    inst: &Instance,
+    sp: &SelectedPipe,
+    va: &VerifyArgs,
+    args: &SyncArgs,
+) -> Result<Option<SuccessTuple>, String> {
+    let Some(callback) = super::graph_plan::callback()? else {
+        return Ok(None);
+    };
+    let Some(expected) = session.block_on(super::graph_plan::verification(&callback, &sp.pipe))?
+    else {
+        return Ok(None);
+    };
+    if va.bounded.is_some()
+        || va.chunk_interval.is_some()
+        || va.deduplicate
+        || va.check_rowcounts_only
+        || va.skip_chunks_with_greater_rowcounts
+        || args.params.as_ref().filter(|params| !params.is_empty())
+            != expected.2.row_params.as_ref()
+    {
+        return Err("These verification options need their exact original Main admission; no local grid fallback is allowed.".into());
+    }
+    if expected.2.calls.is_empty() {
+        return Ok(Some(SuccessTuple::ok(
+            "Main issued no data calls for this verification.",
+        )));
+    };
+    let built =
+        super::sync::engine::registry(rt.config(), session, inst, std::slice::from_ref(sp), false)
+            .map_err(|error| error.message)?;
+    let env = meerschaum_engine::sync::SyncEnv {
+        delivery: Some(meerschaum_connector::batch_delivery::NodeDelivery::new(
+            expected.0.clone(),
+            expected.1.clone(),
+            sp.pipe.pipe_ref(),
+        )),
+        registry: built.registry.as_ref(),
+        defaults: &built.config.defaults,
+        default_backtrack_minutes: built.config.default_backtrack_minutes,
+        filter_params_index_limit: built.config.filter_params_index_limit,
+        known: None,
+    };
+    let mut messages = Vec::new();
+    for call in &expected.2.calls {
+        let current = session
+            .block_on(super::graph_plan::verification(&callback, &sp.pipe))?
+            .ok_or("Main retired the originating verification; local fallback is unavailable.")?;
+        if current != expected {
+            return Err("Main's verification lineage or call vector changed; earlier committed calls remain committed.".into());
+        }
+        let native = meerschaum_engine::SyncArgs {
+            begin: call
+                .begin
+                .map_or(meerschaum_engine::SyncBegin::Unbounded, |bound| {
+                    meerschaum_engine::SyncBegin::At(bound.into())
+                }),
+            end: call.end.map(Into::into),
+            params: args.params.clone(),
+            check_existing: args.check_existing,
+            chunksize: args.chunksize,
+            extra: args.extra.clone(),
+            ..Default::default()
+        };
+        let result = session.block_on(meerschaum_engine::sync::sync_pipe(
+            &env, &sp.pipe, None, &native, None,
+        ));
+        messages.push(result.message);
+        if !result.success {
+            return Ok(Some(SuccessTuple::fail(messages.join("\n"))));
+        }
+    }
+    Ok(Some(SuccessTuple::ok(messages.join("\n"))))
 }
 
 fn upsert(all: &mut Vec<(ChunkBounds, SuccessTuple)>, b: &ChunkBounds, t: &SuccessTuple) {

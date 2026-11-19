@@ -927,3 +927,76 @@ fn shell_key_command_output_stays_above_the_kept_line() {
     term.assert_restored();
     term.no_crash_text();
 }
+
+/// 5.1: in a restricted web terminal the jobs view's keys ask the server, as a typed
+/// `stop jobs <name>` does: a refusal is shown and the job keeps running.
+#[cfg(unix)]
+#[test]
+fn watch_jobs_keys_ask_the_server_in_a_restricted_terminal() {
+    use std::io::{BufRead, Write};
+    let setup = Setup::new("restricted-jobs");
+    let _cleanup = DeleteJobs(setup.env.clone(), &["tuirestricted"]);
+    ok(
+        &setup.env,
+        &[
+            "sh",
+            "sleep",
+            "300",
+            "-d",
+            "--name",
+            "tuirestricted",
+            "--noask",
+        ],
+    );
+    // The server's policy socket, refusing everything and recording the questions.
+    let socket = setup.base.join("policy.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    {
+        let asked = asked.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                asked.lock().unwrap().push(line);
+                let mut stream = stream;
+                let _ = stream.write_all(b"{\"success\": false, \"message\": \"tpr refused\"}\n");
+            }
+        });
+    }
+    let mut env = setup.env.clone();
+    env.push(("MRSM_WEBTERM_RESTRICTED".into(), "1".into()));
+    env.push((
+        "MRSM_WEBTERM_POLICY".into(),
+        format!("unix:{}", socket.display()),
+    ));
+    env.push(("MRSM_WEBTERM_GRANT".into(), "g".into()));
+    let mut term = Term::spawn(&env, &setup.base, &["watch", "jobs"]);
+    term.wait_screen("the running job", 60, |s| {
+        s.lines()
+            .any(|l| l.contains("tuirestricted") && l.contains("running"))
+    });
+    term.send("x");
+    term.wait_screen("the confirmation", 10, |s| {
+        s.contains("Stop job 'tuirestricted'? [y/N]")
+    });
+    term.send("y");
+    term.wait_screen("the refusal", 30, |s| s.contains("tpr refused"));
+    let question = asked.lock().unwrap().join("");
+    assert!(
+        question.contains("\"stop\"") && question.contains("tuirestricted"),
+        "{question}"
+    );
+    term.pump(Duration::from_secs(2));
+    let (_, out, _) = mrsm(&setup.env, &["show", "jobs", "tuirestricted"]);
+    assert!(
+        out.lines()
+            .any(|l| l.contains("tuirestricted") && l.contains("running")),
+        "the job was stopped: {out}"
+    );
+    term.send("\x1b");
+    let status = term.wait_exit(20);
+    assert!(status.success(), "{}", term.screen());
+    term.assert_restored();
+}

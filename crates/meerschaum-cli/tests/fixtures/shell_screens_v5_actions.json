@@ -1,4 +1,19 @@
 {
+  "tiny": {
+    "startup": {
+      "rows": {
+        "5": {"line": " [ (no usern…@sql:local ] ➤", "styles": [[0, 3, "green", "default", ""], [3, 13, "white", "default", ""], [13, 14, "green", "default", ""], [14, 23, "cyan", "default", ""], [23, 28, "green", "default", ""]]}
+      },
+      "cursor": [5, 28]
+    },
+    "typed sh": {
+      "rows": {
+        "4": {"line": "                               sh", "styles": [[30, 31, "000000", "bcbcbc", ""], [31, 33, "blue", "bcbcbc", "B"], [33, 37, "000000", "bcbcbc", ""], [37, 38, "000000", "444444", ""]]},
+        "5": {"line": " [ (no usern…@sql:local ] ➤ sh", "styles": [[0, 3, "green", "default", ""], [3, 13, "white", "default", ""], [13, 14, "green", "default", ""], [14, 23, "cyan", "default", ""], [23, 28, "green", "default", ""]]}
+      },
+      "cursor": [5, 30]
+    }
+  },
   "menu_subactions": {
     "typed show p": {
       "rows": {

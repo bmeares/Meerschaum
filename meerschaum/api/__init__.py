@@ -62,6 +62,18 @@ def _is_host_process() -> bool:
 
 _host_mode = _is_host_process()
 
+# The native private inspector/invoker installs hooks only in its exact fresh app. Importing
+# SDK helpers there must not initialize the legacy global plugin app a second time. Require
+# the actual native boundary before honoring the marker; ordinary Host/Main stays unchanged.
+_private_extension_process = os.environ.get('MRSM_API_EXECUTION') == '1'
+if _private_extension_process:
+    if os.environ.get('MRSM_METADATA_EXECUTION') == '1':
+        from meerschaum.worker._plugin_registry import _require_metadata
+        _require_metadata()
+    else:
+        from meerschaum.worker._plugin_invoke import _require_execution
+        _require_execution()
+
 ### Skip verifying packages in the docker image. Outside the API host (an `@api_plugin` helper
 ### imported elsewhere) nothing is checked, installed or reported: the packages are the host's.
 CHECK_UPDATE = (
@@ -460,7 +472,7 @@ from meerschaum.api._oauth2 import manager, ScopedAuth, CurrentScopes
 from meerschaum.api._plugin_helpers import session_user, optional_session_user, mount_static
 
 ### Execute the API plugins functions (the API host runs them itself, in plugin order).
-for module_name, functions_list in ({} if _host_mode else _api_plugins).items():
+for module_name, functions_list in ({} if _host_mode or _private_extension_process else _api_plugins).items():
     plugin_name = (
         module_name.split('.')[1]
         if module_name and module_name.startswith('plugins.')

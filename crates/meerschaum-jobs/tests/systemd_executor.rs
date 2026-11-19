@@ -181,6 +181,66 @@ fn props_without_target(text: &str) -> Value {
     v
 }
 
+/// A unit's `Environment=MRSM_CONFIG_FILE=<path>` line as v4 wrote it: `MRSM_CONFIG=` with
+/// the file's contents, quoted the same way (the path is under the fixture's directory).
+fn v4_config_line(f: &Fixture, text: &str) -> String {
+    text.split('\n')
+        .map(
+            |line| match line.strip_prefix("Environment=MRSM_CONFIG_FILE=") {
+                Some(path) => {
+                    let path = meerschaum_jobs::shlex::split(&path.replace("{TMP}", &f.tmp))
+                        .unwrap()
+                        .concat();
+                    let contents =
+                        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+                    format!(
+                        "Environment=MRSM_CONFIG={}",
+                        meerschaum_jobs::shlex::quote(&contents)
+                    )
+                }
+                None => line.to_string(),
+            },
+        )
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 5.1: a unit carries no credentials: the launching process's `MRSM_CONFIG` / `MRSM_PATCH`
+/// go to owner-only files next to it, named by `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`, and the
+/// files go with the job.
+#[test]
+fn a_unit_names_its_configuration_in_files() {
+    let mut f = Fixture::new();
+    let secret = r#"{"meerschaum": {"connectors": {"sql": {"x": {"password": "unit-s3cret"}}}}}"#;
+    f.process_env.retain(|(k, _)| k != "MRSM_CONFIG");
+    f.process_env.push(("MRSM_CONFIG".into(), secret.into()));
+    f.process_env.push(("MRSM_PATCH".into(), "{}".into()));
+    let ex = f.executor();
+    let created = ex.create_job("secretive", &["show".into(), "version".into()], None);
+    assert!(created.success, "{}", created.message);
+    let unit = std::fs::read_to_string(ex.get_service_file_path("secretive")).unwrap();
+    assert!(!unit.contains("unit-s3cret"), "{unit}");
+    assert!(!unit.contains("Environment=MRSM_CONFIG="), "{unit}");
+    let dir = ex.get_service_job_path("secretive");
+    let file = dir.join(meerschaum_jobs::config_files::CONFIG_FILENAME);
+    assert!(
+        unit.contains(&format!("Environment=MRSM_CONFIG_FILE={}", file.display())),
+        "{unit}"
+    );
+    assert!(unit.contains("Environment=MRSM_PATCH_FILE="), "{unit}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), secret);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(&ex.get_service_file_path("secretive")), 0o600);
+    }
+    f.fake.stop_on_sigint(true);
+    assert!(ex.delete_job("secretive").success);
+    assert!(!file.exists());
+}
+
 #[test]
 fn create_matches_the_reference() {
     let fx = fixture();
@@ -230,10 +290,14 @@ fn create_matches_the_reference() {
                 }
                 "text" => {
                     // v5 adds `RestartSec=5` to units (D23, PARITY.md W18-JB-001); v4 has none.
+                    // 5.1 names `MRSM_CONFIG_FILE` (an owner-only file next to the unit)
+                    // where v4 wrote `MRSM_CONFIG` itself (PARITY.md 51-SEC-005): the file
+                    // holds exactly v4's value.
                     let got_text = got
                         .get("text")
                         .and_then(Value::as_str)
-                        .map(|t| t.replace("\nRestartSec=5\n", "\n"));
+                        .map(|t| t.replace("\nRestartSec=5\n", "\n"))
+                        .map(|t| v4_config_line(&f, &t));
                     assert_eq!(
                         got_text.as_deref(),
                         want.get("text").and_then(Value::as_str),
@@ -243,8 +307,15 @@ fn create_matches_the_reference() {
                 _ => {}
             }
         }
-        // No file the reference did not write (but the pickle, which Rust cannot).
+        // No file the reference did not write (but the pickle, which Rust cannot, and 5.1's
+        // copy of `MRSM_CONFIG`).
         for path in actual.keys() {
+            if path.ends_with(&format!(
+                "/{}",
+                meerschaum_jobs::config_files::CONFIG_FILENAME
+            )) {
+                continue;
+            }
             assert!(expected.contains_key(path), "{name}: extra file {path}");
         }
     }
@@ -1109,4 +1180,102 @@ fn a_run_without_a_result_reports_how_systemd_saw_it_end() {
         (r.success, r.message.as_str()),
         (false, "No result available.")
     );
+}
+
+/// 5.1: the unit of an isolated team's job carries the team's configuration and an allowlisted
+/// environment: neither the launching process's variables of its own nor those the job's `env`
+/// property recorded (an API server records its whole environment), except the names an
+/// administrator passes on; never Meerschaum's patches or connector variables.
+#[test]
+fn a_team_jobs_unit_holds_an_allowlisted_environment() {
+    use meerschaum_core::team_scope::{TeamScope, write_scope_record};
+    // This fixture renders the unit without starting the launcher.
+    meerschaum_core::self_exe::register_native_current_executable().unwrap();
+    let native = meerschaum_core::self_exe::native_executable()
+        .unwrap()
+        .display()
+        .to_string();
+    let r = Roots::new();
+    let root = r.root("teams/root");
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    std::fs::write(
+        root.join("config/meerschaum.yaml"),
+        "connectors:\n  sql:\n    wetlands:\n      flavor: sqlite\n      database: /tmp/w.db\n      password: w-pw\n      teams: [wetlands]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("config/system.yaml"),
+        "engine:\n  python_team_env_passthrough: [TPR_PASSED, MRSM_SQL_MAIN]\n",
+    )
+    .unwrap();
+    write_scope_record(
+        &root,
+        &TeamScope {
+            team: "wetlands".into(),
+            team_id: Some("id-w".into()),
+            connectors: ["sql:wetlands".to_string()].into_iter().collect(),
+            ..TeamScope::default()
+        },
+    )
+    .unwrap();
+    let ctx = r.ctx("teams/root").with_launcher(Launcher {
+        supervisor: vec![
+            native.clone(),
+            meerschaum_jobs::supervisor::SUPERVISOR_ARG.into(),
+        ],
+        program: vec![native],
+    });
+    let ex = SystemdExecutor::new(ctx).with_process_env(vec![
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("MRSM_ROOT_DIR".to_string(), root.to_string_lossy().into()),
+        (
+            "MRSM_SQL_MAIN".to_string(),
+            "postgresql://u:server-pw@db/m".into(),
+        ),
+        ("TPR_SENTINEL_CLOUD_KEY".to_string(), "cloud-secret".into()),
+        ("TPR_PASSED".to_string(), "passed".into()),
+    ]);
+    let mut env = Map::new();
+    for (k, v) in [
+        ("TPR_SENTINEL_CLOUD_KEY", "recorded-secret"),
+        ("TPR_PASSED", "passed"),
+        ("MRSM_SQL_MAIN", "postgresql://u:server-pw@db/m"),
+        ("LANG", "C"),
+    ] {
+        env.insert(k.into(), Value::Str(v.into()));
+    }
+    let mut props = Map::new();
+    props.insert("team".into(), Value::Str("wetlands".into()));
+    props.insert("env".into(), Value::Map(env));
+    let sysargs: Vec<String> = vec!["sync".into(), "pipes".into()];
+    let created = ex.create_job("team-sync", &sysargs, Some(&props));
+    assert!(created.success, "{}", created.message);
+    let text = std::fs::read_to_string(ex.get_service_file_path("team-sync")).unwrap();
+    for absent in [
+        "TPR_SENTINEL_CLOUD_KEY",
+        "secret",
+        "MRSM_SQL_MAIN",
+        "server-pw",
+    ] {
+        assert!(!text.contains(absent), "{absent}: {text}");
+    }
+    for present in [
+        "Environment=MRSM_TEAM_SCOPE=wetlands",
+        "Environment=MRSM_CONFIG_FILE=",
+        "Environment=TPR_PASSED=passed",
+        "Environment=LANG=C",
+    ] {
+        assert!(text.contains(present), "{present}: {text}");
+    }
+    // The recorded properties keep the allowlist only (a later unit or launch reads them).
+    let mut hidden = ex.get_hidden_job("team-sync", None, None).unwrap();
+    let recorded = hidden.properties();
+    let env = recorded["env"].to_map();
+    let mut names: Vec<&String> = env.keys().collect();
+    names.sort();
+    assert_eq!(names, vec!["LANG", "TPR_PASSED"], "{recorded:?}");
+    // 5.1: the team's temporary directory is under the system's: leave nothing behind.
+    if let Ok(tmp) = meerschaum_core::team_scope::sandbox::team_tmp_dir(&root, "id-w") {
+        let _ = std::fs::remove_dir_all(tmp);
+    }
 }

@@ -94,8 +94,21 @@ def ansi_allowed(stream: Optional[Any] = None) -> bool:
     if _in_notebook():
         return True
     try:
-        return bool((sys.stdout if stream is None else stream).isatty())
+        output = sys.stdout if stream is None else stream
+        return bool(output.isatty()) or _forwarded_terminal(output)
     except Exception:
+        return False
+
+
+def _forwarded_terminal(stream: Any) -> bool:
+    """Whether this is still the worker pipe the shell forwards to a terminal."""
+    identity = getattr(stream, '_mrsm_forwarded_terminal', None)
+    if identity is None:
+        return False
+    try:
+        stat = os.fstat(stream.fileno())
+        return identity == (stat.st_dev, stat.st_ino)
+    except (OSError, ValueError, AttributeError):
         return False
 
 
@@ -245,7 +258,9 @@ def _init():
     from ctypes import windll
     k = windll.kernel32
     k.SetConsoleMode(k.GetStdHandle(-11), 7)
-    os.system("color")
+    import subprocess
+    from meerschaum.config.environment import get_child_env
+    subprocess.call("color", shell=True, env=get_child_env())
 
     from meerschaum.utils.packages import attempt_import
     ### init colorama for Windows color output

@@ -72,6 +72,9 @@ impl Sandbox {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(temp) = std::env::var_os("TMPDIR") {
+            command.env("TMPDIR", temp);
+        }
         command
     }
 }
@@ -340,12 +343,11 @@ def wiring_echo(**kw):
             child.0.try_wait().unwrap().is_none(),
             "server exited before listening"
         );
-        if serves_http(port) {
-            let response = request(port, "GET", "/wiring-host-check", "");
-            if response.starts_with("HTTP/1.1 200") {
-                assert!(response.contains("wiring"), "{response}");
-                break;
-            }
+        if let Ok(response) = try_request(port, "GET", "/wiring-host-check", "")
+            && response.starts_with("HTTP/1.1 200")
+        {
+            assert!(response.contains("wiring"), "{response}");
+            break;
         }
         assert!(
             Instant::now() < deadline,

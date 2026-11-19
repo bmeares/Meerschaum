@@ -104,7 +104,7 @@ fn mrsm_help_prints_the_grouped_actions_then_the_options() {
     }
     assert!(
         text.contains(
-            "  bootstrap    Create pipes, connectors, jobs, Pipelines or plugins step by step."
+            "  bootstrap    Create pipes, connectors, jobs, Pipelines, plugins or teams step by step."
         ),
         "{text}"
     );

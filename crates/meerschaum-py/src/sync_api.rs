@@ -607,6 +607,7 @@ pub fn sync_pipe<'py>(
                 }
             };
             let env = SyncEnv {
+                delivery: None,
                 registry: registry.as_ref(),
                 defaults: &defaults,
                 default_backtrack_minutes: backtrack,
@@ -618,7 +619,24 @@ pub fn sync_pipe<'py>(
             } else {
                 registered_parameters(&instance, &core).await
             };
-            let result = engine_sync_pipe(&env, &core, input, &args, None).await;
+            let result = if meerschaum_core::team_scope::sandbox::is_native_api() {
+                let mut config = engine_config.clone().unwrap_or_default();
+                config.defaults = defaults.clone();
+                config.default_backtrack_minutes = backtrack;
+                config.filter_params_index_limit = limit;
+                config.home_instance = instance_keys.clone();
+                match meerschaum_cli::native::graph_plan::attach(meerschaum_engine::Engine::new(
+                    registry.clone(),
+                    config,
+                ))
+                .await
+                {
+                    Ok(engine) => engine.sync_pipe(&core, input, &args).await,
+                    Err(error) => meerschaum_core::success::SyncResult::new(false, error),
+                }
+            } else {
+                engine_sync_pipe(&env, &core, input, &args, None).await
+            };
             let mut patch = Map::new();
             if result.success
                 && !core.temporary

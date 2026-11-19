@@ -70,6 +70,8 @@ struct Identity {
     user_type: Option<String>,
     attributes: Option<Map>,
     teams: Vec<(String, TeamRole)>,
+    /// The records of the teams the user is in (their attributes carry the team's grants).
+    records: Vec<rules::Team>,
 }
 
 /// The caches behind [`resolve`] and [`pipe_index`] (one per server state).
@@ -77,12 +79,20 @@ struct Identity {
 pub struct AccessCache {
     identities: Mutex<HashMap<String, (Instant, Identity)>>,
     indexes: Mutex<HashMap<String, (Instant, Arc<PipeIndex>)>>,
+    /// The access last resolved for a credential, by the SHA-256 of its `Authorization` header:
+    /// what a request's instance is scoped with before its handler authorizes it
+    /// ([`instance_scope`]). Never an authorization by itself.
+    scopes: Mutex<HashMap<[u8; 32], (Instant, Access)>>,
 }
 
 impl AccessCache {
     /// Forget every cached identity (a user, role or team changed).
     pub fn forget_identities(&self) {
         self.identities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.scopes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clear();
@@ -102,6 +112,9 @@ impl AccessCache {
 pub struct Access {
     /// The authenticated principal (`None` under `--no-auth`).
     pub auth: Option<AuthPrincipal>,
+    /// Original password-login binding, retained across a long prepare or spawned launch.
+    /// It is a fingerprint, never the password, bearer or server signing key.
+    pub credential: Option<String>,
     /// The rules' principal. Its `permissions` are the request's: an administrator's API key
     /// holds only its scopes (its `is_admin` is the owner's, for what it may see).
     pub principal: rules::Principal,
@@ -111,6 +124,11 @@ pub struct Access {
     pub attributes: Option<Map>,
     /// Under `--no-auth` (everyone is an administrator).
     pub no_auth: bool,
+    /// The records of the caller's teams other than Everyone (their settings decide the team the
+    /// caller acts for: [`Access::acting_team`]).
+    pub team_records: Vec<rules::Team>,
+    /// Ephemeral trusted backend capability. Never read from user attributes, JWTs or JSON.
+    pub api_execution: crate::backends::ApiExecution,
 }
 
 impl Access {
@@ -118,11 +136,73 @@ impl Access {
     pub fn everything() -> Access {
         Access {
             auth: None,
+            credential: None,
             principal: rules::Principal::admin(""),
             primary_team: EVERYONE.to_string(),
             attributes: None,
             no_auth: true,
+            team_records: Vec::new(),
+            api_execution: crate::backends::ApiExecution::Unavailable,
         }
+    }
+
+    /// Apply the normal Core wall, retaining declared execution scopes only when Main has
+    /// its tracked API bridge. The input ceiling has already intersected role/token/parent
+    /// authority; nothing here creates a scope or grants code/instance chaining.
+    pub(crate) fn apply_grants(&mut self, grants: rules::TeamGrants) {
+        let ceiling = self.principal.permissions.clone();
+        self.principal = self.principal.clone().with_grants(grants);
+        let crate::backends::ApiExecution::Tracked { terminals } = self.api_execution else {
+            return;
+        };
+        if self.no_auth
+            || self.principal.is_admin
+            || !self.principal.grants.isolated
+            || self.principal.grants.runs_code
+        {
+            return;
+        }
+        let registered = self.team_records.iter().any(|team| {
+            rules::same_team(Some(&team.name), Some(&self.primary_team))
+                && self.principal.is_member(Some(&team.name))
+                && team
+                    .id
+                    .as_deref()
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                    .is_some_and(|id| !id.is_nil())
+                && team.execution().is_ok()
+        });
+        if !registered {
+            return;
+        }
+        for permission in [
+            rules::Permission::ACTIONS_EXECUTE,
+            rules::Permission::WEBTERM_USE,
+        ] {
+            if (permission != rules::Permission::WEBTERM_USE || terminals)
+                && (ceiling.contains(permission) || ceiling.contains(rules::ALL_SCOPE))
+            {
+                self.principal.permissions.insert(permission.into());
+            }
+        }
+    }
+
+    /// The isolated team the caller acts for when Python code runs on their behalf (5.1,
+    /// [`meerschaum_core::team_scope::acting_team`]): `None` for administrators, `--no-auth` and
+    /// the open side. `object_team` is the team of the object acted on (a pipe's, a job's).
+    pub fn acting_team(&self, object_team: Option<&str>) -> Option<rules::Team> {
+        if self.no_auth || !self.principal.is_isolated() {
+            return None;
+        }
+        meerschaum_core::team_scope::acting_team(
+            self.principal.is_admin,
+            &self.principal.teams,
+            &self.team_records,
+            Some(&self.primary_team),
+            object_team,
+        )
+        // Walled off, yet no record names the team: a team without connectors.
+        .or_else(|| Some(rules::Team::new(&self.primary_team)))
     }
 
     /// Whether the caller is an administrator (everyone is under `--no-auth`).
@@ -328,14 +408,25 @@ async fn user_identity(
         .get_user_attributes(&user)
         .await
         .map_err(identity_unavailable)?;
-    let teams = user_teams(&conn, username)
-        .await
-        .map_err(identity_unavailable)?;
+    // One read of the teams: the user's roles in them, and the records of their own teams.
+    let all_teams = conn.get_teams().await.map_err(identity_unavailable)?;
+    let mut teams: Vec<(String, TeamRole)> = all_teams
+        .iter()
+        .filter_map(|t| t.role_of(username).map(|role| (t.name.clone(), role)))
+        .collect();
+    if !teams.iter().any(|(t, _)| rules::is_everyone(Some(t))) {
+        teams.insert(0, (EVERYONE.to_string(), TeamRole::Member));
+    }
+    let records = all_teams
+        .into_iter()
+        .filter(|t| !t.is_everyone() && t.role_of(username).is_some())
+        .collect();
     let identity = Identity {
         username: username.to_string(),
         user_type,
         attributes,
         teams,
+        records,
     };
     store_identity(state, key, identity.clone());
     Ok(identity)
@@ -416,11 +507,25 @@ async fn access_of_with(
     granted: &Scopes,
     fresh: bool,
 ) -> Result<Access, ApiError> {
+    if let AuthPrincipal::Execution(identity) = &principal {
+        let identity = if fresh {
+            Box::pin(crate::executor::callbacks::load_identity(
+                state,
+                identity.grant.id,
+                identity.grant.launch_id,
+            ))
+            .await?
+        } else {
+            (**identity).clone()
+        };
+        return Ok(crate::executor::callbacks::access(&identity, granted));
+    }
     let identity = match &principal {
         AuthPrincipal::User(user) => Some(user_identity(state, &user.username, fresh).await?),
         AuthPrincipal::Token(token) => token_identity(state, token, fresh).await?,
+        AuthPrincipal::Execution(_) => unreachable!("Execution principals resolved above"),
     };
-    let (username, is_admin, permissions, teams, attributes) = match identity {
+    let (username, is_admin, permissions, teams, attributes, records) = match identity {
         Some(identity) => {
             let effective = user_permissions(
                 identity.user_type.as_deref(),
@@ -433,6 +538,7 @@ async fn access_of_with(
                 intersect(&effective, granted),
                 identity.teams,
                 identity.attributes,
+                identity.records,
             )
         }
         // An unowned token (made locally): its own scopes (`*` kept: every scope, a plugin's
@@ -449,33 +555,187 @@ async fn access_of_with(
                 permissions,
                 vec![(EVERYONE.to_string(), TeamRole::Member)],
                 None,
+                Vec::new(),
             )
         }
     };
     let primary_team = rules::primary_team(attributes.as_ref(), &teams);
-    Ok(Access {
+    let grants = rules::TeamGrants::of(&teams, &records, Some(&primary_team));
+    let mut access = Access {
         auth: Some(principal),
+        credential: None,
         principal: rules::Principal {
             username,
             is_admin,
             permissions,
             teams,
+            grants: rules::TeamGrants::default(),
+            team_boundary: None,
         },
         primary_team,
         attributes,
         no_auth: false,
-    })
+        team_records: records,
+        api_execution: state.actions.api_execution(),
+    };
+    access.apply_grants(grants);
+    Ok(access)
 }
 
 /// Resolve the access of a request (`401` without valid credentials, `503` when they cannot be
 /// read). Under `--no-auth`: [`Access::everything`].
 pub async fn resolve(state: &AppState, headers: &HeaderMap) -> Result<Access, ApiError> {
+    if let Some(access) = crate::executor::callbacks::current(headers) {
+        return Ok(access);
+    }
     if state.config.no_auth {
         return Ok(Access::everything());
     }
     let principal = auth::load_user_or_token(state, headers).await?;
     let granted = auth::granted_scopes(state, headers, &principal).await?;
-    access_of(state, principal, &granted).await
+    let mut access = access_of(state, principal, &granted).await?;
+    if matches!(access.auth, Some(AuthPrincipal::User(_))) {
+        access.credential = auth::bound_credential(state, headers);
+    }
+    if !matches!(access.auth, Some(AuthPrincipal::Execution(_)))
+        && let Some(key) = scope_key(headers)
+    {
+        let mut scopes = state
+            .access_cache()
+            .scopes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if scopes.len() > 4096 {
+            scopes.retain(|_, (at, _)| at.elapsed() < IDENTITY_TTL);
+        }
+        scopes.insert(key, (Instant::now(), access.clone()));
+    }
+    Ok(access)
+}
+
+fn scope_key(headers: &HeaderMap) -> Option<[u8; 32]> {
+    use sha2::Digest;
+    let value = headers.get(axum::http::header::AUTHORIZATION)?;
+    Some(sha2::Sha256::digest(value.as_bytes()).into())
+}
+
+/// Whose teams decide the instance of a request, before its handler authorizes it: the access
+/// resolved for the request's credential at most [`IDENTITY_TTL`] ago, else resolved now (once
+/// per credential and window, so a handler's own check is not doubled on every request). `None`
+/// without credentials, with invalid ones (the handler answers that) and under `--no-auth`.
+///
+/// This only chooses and refuses instances ([`crate::routes::Ctx::instance_keys`]); every
+/// handler still authorizes the request itself.
+pub async fn instance_scope(state: &AppState, headers: &HeaderMap) -> Option<Access> {
+    if let Some(access) = crate::executor::callbacks::current(headers) {
+        return Some(access);
+    }
+    if state.config.no_auth {
+        return None;
+    }
+    let key = scope_key(headers)?;
+    let cached = state
+        .access_cache()
+        .scopes
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .filter(|(at, _)| at.elapsed() < IDENTITY_TTL)
+        .map(|(_, access)| access.clone());
+    match cached {
+        Some(access) => Some(access),
+        None => resolve(state, headers).await.ok(),
+    }
+}
+
+/// The isolated team `access` acts for when Python code runs on its behalf (5.1), for an object
+/// of `object_team` (a pipe's or a job's team; `None`: no object): see [`Access::acting_team`].
+pub fn acting_for(
+    state: &AppState,
+    access: &Access,
+    object_team: Option<&str>,
+) -> Option<Arc<meerschaum_connector::acting_team::ActingTeam>> {
+    let team = access.acting_team(object_team)?;
+    Some(Arc::new(meerschaum_connector::acting_team::ActingTeam::of(
+        &team,
+        &state.connectors(),
+    )))
+}
+
+/// Run every request of a caller who acts for an isolated team inside that team's scope
+/// ([`meerschaum_connector::acting_team`]), so the Python code it starts runs in the team's own
+/// workers (5.1). Other requests run as before.
+pub async fn acting_team_layer(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let caller = instance_scope(&state, req.headers()).await.map(Arc::new);
+    let acting = caller
+        .as_ref()
+        .and_then(|access| acting_for(&state, access, None));
+    crate::executor::context::scope(
+        caller,
+        meerschaum_connector::acting_team::scope(acting, next.run(req)),
+    )
+    .await
+}
+
+/// Why a request may not reach the Python API host (5.1): the host's `meerschaum` package
+/// predates the lookup check for isolated teams ([`crate::proxy::HostProxy::guards_teams`]), an
+/// isolated team is recorded, and the request may act for one: a bearer credential of a caller
+/// who acts for an isolated team, or a console session (the server cannot tell whose it is
+/// without the host). Such a host would serve those requests without the check, so they are
+/// refused (`503`) with the cause and the fix. `None`: forward as before (an up-to-date host, no
+/// isolated team, an anonymous request, or a caller who does not act for an isolated team).
+pub async fn outdated_host_refusal(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Option<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let host = state.host.as_ref()?;
+    if !meerschaum_core::team_scope::isolated_teams_recorded(&state.config.root_dir) {
+        return None;
+    }
+    // A host that does not answer is refused too: whether it would check is unknown.
+    if host.guards_teams(state.secret()).await == Some(true) {
+        return None;
+    }
+    let bearer = headers.contains_key(axum::http::header::AUTHORIZATION);
+    let session = headers
+        .get_all(axum::http::header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .any(|cookie| {
+            cookie
+                .split(';')
+                .any(|pair| pair.split('=').next().map(str::trim) == Some("mrsm-session-id"))
+        });
+    let acts_for_team = if bearer {
+        match instance_scope(state, headers).await {
+            Some(access) => acting_for(state, &access, None).is_some(),
+            // Invalid credentials: the host answers them as it always did (no team).
+            None => false,
+        }
+    } else {
+        false
+    };
+    if !(acts_for_team || session) {
+        return None;
+    }
+    Some(
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "The API host's Python package `meerschaum` predates the lookup check for isolated \
+                 teams, so plugin routes and pages are not served to requests that may act for \
+                 one. Install `meerschaum>={}` in the API server's Python environment (or set \
+                 MRSM_PYTHON to an interpreter that has it) and restart the server.",
+                meerschaum_core::python_guard::expected_version()
+            ),
+        )
+            .into_response(),
+    )
 }
 
 /// Resolve the access of a request and require `scopes` (see [`Access::require`]).
@@ -493,13 +753,27 @@ pub async fn require_fresh(
     headers: &HeaderMap,
     scopes: &[&str],
 ) -> Result<Access, ApiError> {
-    let caller = if state.config.no_auth {
+    let mut caller = if state.config.no_auth {
         Access::everything()
     } else {
-        let principal = auth::load_user_or_token(state, headers).await?;
-        let granted = auth::granted_scopes(state, headers, &principal).await?;
-        access_of_fresh(state, principal, &granted).await?
+        let principal = auth::load_user_or_token_fresh(state, headers).await?;
+        match principal {
+            AuthPrincipal::Execution(identity) => {
+                // The fresh loader just completed live grant/origin/team validation. Its
+                // remaining projection must not await or reuse request-local cached access.
+                // Re-decode here so a bearer expiring during that load is still refused.
+                let granted = auth::bearer_scopes(state, headers)?;
+                crate::executor::callbacks::access(&identity, &granted)
+            }
+            principal => {
+                let granted = auth::granted_scopes(state, headers, &principal).await?;
+                access_of_fresh(state, principal, &granted).await?
+            }
+        }
     };
+    if matches!(caller.auth, Some(AuthPrincipal::User(_))) {
+        caller.credential = auth::bound_credential(state, headers);
+    }
     caller.require(scopes, &[])?;
     Ok(caller)
 }
@@ -516,8 +790,8 @@ pub async fn require_with_aliases(
     Ok(access)
 }
 
-/// The access of a request with credentials, or `None` without (an anonymous caller of a route
-/// that serves one); invalid credentials are refused like on any route.
+/// Resolve supplied credentials; the legacy SDK's `Bearer None` means anonymous.
+/// All other invalid credentials are refused, including on public routes.
 pub async fn resolve_optional(
     state: &AppState,
     headers: &HeaderMap,
@@ -525,7 +799,10 @@ pub async fn resolve_optional(
     if state.config.no_auth {
         return Ok(Some(Access::everything()));
     }
-    if !headers.contains_key(axum::http::header::AUTHORIZATION) {
+    if headers
+        .get(axum::http::header::AUTHORIZATION)
+        .is_none_or(|value| value.as_bytes() == b"Bearer None")
+    {
         return Ok(None);
     }
     resolve(state, headers).await.map(Some)
@@ -734,6 +1011,16 @@ pub struct RefFilter {
     strict_generations: bool,
     hidden_seen: bool,
     client_refs: bool,
+    selected_engine: Arc<dyn crate::backends::EngineBackend>,
+    native_registry: Option<NativeFilter>,
+    fresh_metadata: bool,
+}
+
+struct NativeFilter {
+    logical: String,
+    connector: Arc<dyn InstanceConnector>,
+    service: Option<Access>,
+    loaded: Option<Option<Arc<crate::routes::engine::registry::NativeRegistry>>>,
 }
 
 impl RefFilter {
@@ -750,12 +1037,82 @@ impl RefFilter {
             strict_generations: false,
             hidden_seen: false,
             client_refs: false,
+            selected_engine: state.engine.clone(),
+            native_registry: None,
+            fresh_metadata: false,
         }
     }
 
     /// The caller's access.
     pub fn access(&self) -> &Access {
         &self.access
+    }
+
+    /// Administrator projection shortcuts are valid only within both independent principals.
+    pub fn unrestricted(&self) -> bool {
+        self.access.is_admin() && self.native_registry.is_none()
+    }
+
+    pub(crate) fn fresh_metadata(mut self) -> Self {
+        self.fresh_metadata = true;
+        self
+    }
+
+    pub(crate) fn with_selected_engine(
+        mut self,
+        backend: Arc<dyn crate::backends::EngineBackend>,
+    ) -> Self {
+        self.selected_engine = backend;
+        self
+    }
+
+    pub(crate) fn with_native_registry(
+        mut self,
+        logical: &str,
+        connector: Arc<dyn InstanceConnector>,
+        service: Option<Access>,
+    ) -> Self {
+        self.native_registry = Some(NativeFilter {
+            logical: logical.into(),
+            connector,
+            service,
+            loaded: None,
+        });
+        self
+    }
+
+    fn registry_connector(&self, instance: &str) -> Result<Arc<dyn InstanceConnector>, ApiError> {
+        if let Some(native) = &self.native_registry {
+            if instance != native.logical && instance != native.connector.connector_keys() {
+                return Err(ApiError::not_found());
+            }
+            guard::check_connector_teams(&self.state, &self.access, &native.logical)?;
+            let service = native.service.as_ref().ok_or_else(ApiError::not_found)?;
+            guard::check_connector_teams(&self.state, service, &native.connector.connector_keys())?;
+            return Ok(native.connector.clone());
+        }
+        let conn = self.state.get_api_connector(Some(instance))?;
+        guard::check_connector_teams(&self.state, &self.access, &conn.connector_keys())?;
+        Ok(conn)
+    }
+
+    async fn native_objects(
+        &mut self,
+    ) -> Option<Arc<crate::routes::engine::registry::NativeRegistry>> {
+        let native = self.native_registry.as_mut()?;
+        if native.loaded.is_none() {
+            native.loaded = Some(
+                crate::routes::engine::registry::NativeRegistry::load(
+                    &self.state,
+                    &native.logical,
+                    native.connector.clone(),
+                )
+                .await
+                .ok()
+                .map(Arc::new),
+            );
+        }
+        native.loaded.as_ref()?.clone()
     }
 
     /// The exact selected registry used to interpret local metadata references.
@@ -779,7 +1136,7 @@ impl RefFilter {
     /// Match every snapshot to a fresh, visible registration on this exact registry.
     /// Missing snapshots retain the legacy per-Pipe history policy.
     pub async fn pipeline_snapshots_visible(&mut self, selection: &serde_json::Value) -> bool {
-        if self.access.is_admin() && !self.strict_generations {
+        if self.unrestricted() && !self.strict_generations {
             return true;
         }
         let snapshots = match selection.get("pipeline_definitions") {
@@ -788,13 +1145,9 @@ impl RefFilter {
             Some(serde_json::Value::Array(snapshots)) => snapshots,
             _ => return false,
         };
-        let Ok(conn) = self.state.get_api_connector(Some(&self.default_instance)) else {
+        let Ok(conn) = self.registry_connector(&self.default_instance) else {
             return false;
         };
-        if guard::check_connector_teams(&self.state, &self.access, &conn.connector_keys()).is_err()
-        {
-            return false;
-        }
         if self.pipelines.is_none() {
             let mut identities: HashMap<String, Option<String>> = HashMap::new();
             let listing = conn
@@ -829,7 +1182,14 @@ impl RefFilter {
                         }
                         _ => continue,
                     };
-                    let visible_name = self.access.can_see(&parameters).then_some(name);
+                    let visible_name = (self.access.can_see(&parameters)
+                        && self.native_registry.as_ref().is_none_or(|native| {
+                            native
+                                .service
+                                .as_ref()
+                                .is_some_and(|service| service.can_see(&parameters))
+                        }))
+                    .then_some(name);
                     // A duplicate UUID is ambiguous even when its other registration is hidden.
                     identities
                         .entry(identity)
@@ -870,8 +1230,7 @@ impl RefFilter {
     /// as well as checking each event's pipe, since run-level events have no `pipe_ref`.
     pub async fn run_visible(&mut self, run_id: &str) -> bool {
         let records = self
-            .state
-            .engine
+            .selected_engine
             .get_runs(&crate::backends::RunsFilter {
                 run_id: Some(run_id.to_string()),
                 ..Default::default()
@@ -884,6 +1243,18 @@ impl RefFilter {
     }
 
     async fn entry(&mut self, pipe_ref: &str) -> Option<Option<IndexedPipe>> {
+        if self.native_registry.is_some() {
+            let registry = self.native_objects().await?;
+            let object = registry.object(pipe_ref).ok()?;
+            let pipe = &object.logical;
+            return Some(Some(IndexedPipe {
+                connector_keys: pipe.connector_keys().into(),
+                metric_key: pipe.metric_key().into(),
+                location_key: pipe.location_key().map(str::to_string),
+                parameters: pipe.raw_parameters().clone(),
+                targets: pipe_targets(pipe),
+            }));
+        }
         let parts: Vec<&str> = pipe_ref.split('|').collect();
         let instance = if parts.len() == 4 && !(self.client_refs && parts[0].starts_with("api:")) {
             parts[0].to_string()
@@ -891,7 +1262,16 @@ impl RefFilter {
             self.default_instance.clone()
         };
         if !self.indexes.contains_key(&instance) {
-            let index = pipe_index(&self.state, Some(&instance)).await.ok();
+            let index = match self.registry_connector(&instance) {
+                Ok(conn) if self.fresh_metadata => self
+                    .state
+                    .pipes(Some(&instance), true)
+                    .await
+                    .ok()
+                    .map(|dict| Arc::new(index_from_dict(&instance, &dict, conn.as_ref()))),
+                Ok(_) => pipe_index(&self.state, Some(&instance)).await.ok(),
+                Err(_) => None,
+            };
             self.indexes.insert(instance.clone(), index);
         }
         let index = self.indexes.get(&instance)?.as_ref()?;
@@ -900,8 +1280,24 @@ impl RefFilter {
 
     /// Whether the caller may see the pipe `pipe_ref` names.
     pub async fn visible(&mut self, pipe_ref: &str) -> bool {
-        if self.access.is_admin() {
+        if self.unrestricted() {
             return true;
+        }
+        if self.native_registry.is_some() {
+            let visible = match self.native_objects().await {
+                Some(registry) => self
+                    .native_registry
+                    .as_ref()
+                    .and_then(|native| native.service.as_ref())
+                    .is_some_and(|service| {
+                        registry
+                            .check(&self.state, &self.access, service, pipe_ref, false)
+                            .is_ok()
+                    }),
+                None => false,
+            };
+            self.hidden_seen |= !visible;
+            return visible;
         }
         let visible = match self.entry(pipe_ref).await {
             None => false,
@@ -917,8 +1313,23 @@ impl RefFilter {
     pub async fn editable(&mut self, pipe_ref: &str) -> (bool, bool) {
         let entry = self.entry(pipe_ref).await;
         let locked = matches!(&entry, Some(Some(p)) if rules::Locks::from_parameters(&p.parameters).contains(rules::Lock::Sync));
-        if self.access.is_admin() {
+        if self.unrestricted() {
             return (true, locked);
+        }
+        if self.native_registry.is_some() {
+            let editable = match self.native_objects().await {
+                Some(registry) => self
+                    .native_registry
+                    .as_ref()
+                    .and_then(|native| native.service.as_ref())
+                    .is_some_and(|service| {
+                        registry
+                            .check(&self.state, &self.access, service, pipe_ref, true)
+                            .is_ok()
+                    }),
+                None => false,
+            };
+            return (editable, locked);
         }
         let editable = match entry {
             None => false,

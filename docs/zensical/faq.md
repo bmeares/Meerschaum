@@ -9,7 +9,7 @@ hide:
 Below is a list of common questions and issues you may encounter. If you have suggestions, please join the [FAQ Suggestions discussion on the GitHub repository](https://github.com/bmeares/Meerschaum/discussions/46)!
 
 ??? faq "How do I upgrade to the latest version?"
-    You can install the latest version of Meerschaum with `pip install --upgrade meerschaum` or the command `mrsm upgrade mrsm`, which upgrades the installation `mrsm` runs from (pip, uv, pipx, Cargo or a downloaded binary) and, when Docker is available, pulls the stack's images. Inside a Docker container, pull the new image and recreate the container instead (see the [migration guide](/reference/migrating-to-v5/#upgrading-an-installation)).
+    You can install the latest version of Meerschaum with `pip install --upgrade meerschaum` or the command `mrsm upgrade mrsm`, which upgrades the installation `mrsm` runs from (pip, uv, pipx, Cargo or a downloaded binary) where it is installed and, when Docker is available and you use the stack, asks whether to pull the stack's new images and bring it up (`--no-pull` skips the pull). Inside a Docker container, pull the new image and recreate the container instead (see the [migration guide](/reference/migrating-to-v5/#upgrading-an-installation)).
 
 ??? faq "`mrsm` doesn't work!"
     You can invoke `mrsm` directly with `python -m meerschaum`. Check that your `PATH` includes scripts installed by `pip`, such as `~/.local/bin`.

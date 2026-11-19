@@ -15,6 +15,12 @@
 //! server's and the console's to write: a client cannot choose it ([`JobAccess::stamp`] replaces
 //! whatever a request carried).
 //!
+//! **The isolated team a job runs for** (5.1, [`TEAM_SCOPE_KEY`]) follows from its `team` and is
+//! recorded by the job's first team-scoped launch (`meerschaum_jobs::daemon`), never by whoever
+//! creates the job: [`JobAccess::stamp`] and a new job's creation
+//! (`meerschaum_jobs::Job::new`) drop it from the properties they are given
+//! ([`strip_server_only`]).
+//!
 //! **Visibility** ([`can_see_job`]): administrators see every job, the owner sees their own, and
 //!
 //! - a job of team `T` is visible to the members (and managers) of `T`; a job of Everyone (no
@@ -44,8 +50,22 @@ pub use crate::access::EVERYONE;
 /// The property naming the user who started a job through the API server or the console.
 pub const OWNER_KEY: &str = "owner";
 
+/// Private server registration evidence for retained job ownership; never a public property.
+pub const OWNER_BINDING_KEY: &str = "_mrsm_owner_binding";
+
+/// Private original team UUID (`null`: Everyone; absent: legacy provenance is unknown).
+pub const TEAM_ID_KEY: &str = "_mrsm_team_id";
+
 /// The property naming the job's team (absent or `null`: Everyone).
 pub const TEAM_KEY: &str = "team";
+
+/// The property that marks a job a member of a team that runs code started (5.1, team
+/// execution): its launch sandboxes it at the "filesystem and sockets" level
+/// (`require_sockets`, whatever `python_team_sandbox` says) and never runs it without its team's
+/// scope. The API server and the console write it. It is not one of the [`SERVER_ONLY_KEYS`]: a
+/// job's creator who sets it only makes that job stricter, and the server's own job creation
+/// must keep it.
+pub const TEAM_EXECUTION_KEY: &str = "mrsm_team_execution";
 
 /// The property in which console runs recorded their creator before 5.0.0rc15 (still written,
 /// so an older console or server sharing the root keeps its rule).
@@ -53,6 +73,25 @@ pub const LEGACY_OWNER_KEY: &str = "mrsm_owner";
 
 /// The property describing an execution (`{"kind": ..., "origin": ..., ...}`).
 pub const EXECUTION_KEY: &str = "mrsm_execution";
+
+/// The property that ties a job to its isolated team's scope for good (5.1): the scope's key,
+/// written by the job's first team-scoped launch, never taken from a request (see the module
+/// documentation).
+pub const TEAM_SCOPE_KEY: &str = "team_scope";
+
+/// The properties only the job's own launch writes (5.1). A client, the console or plugin code
+/// creating a job never sets them: [`strip_server_only`].
+pub const SERVER_ONLY_KEYS: &[&str] = &[TEAM_SCOPE_KEY];
+
+/// Drop the [`SERVER_ONLY_KEYS`] from the properties a job is created with; `true` when one was
+/// there.
+pub fn strip_server_only(props: &mut Map) -> bool {
+    let mut stripped = false;
+    for key in SERVER_ONLY_KEYS {
+        stripped |= props.shift_remove(*key).is_some();
+    }
+    stripped
+}
 
 /// The `mrsm_execution.kind` of the console's automatic runs.
 pub const TEMPORARY_KIND: &str = "temporary_execution";
@@ -116,9 +155,11 @@ impl JobAccess {
     }
 
     /// Record who started a job: `owner` and `team` (Everyone is stored as `null`) replace
-    /// whatever `props` carried (a client never chooses them). The pre-rc15 `mrsm_owner` is kept
-    /// in step.
+    /// whatever `props` carried (a client never chooses them), and the [`SERVER_ONLY_KEYS`] are
+    /// dropped. The pre-rc15 `mrsm_owner` is kept in step.
     pub fn stamp(props: &mut Map, owner: Option<&str>, team: Option<&str>) {
+        // 5.1: the isolated team a job runs for follows from `team`; a request never names it.
+        strip_server_only(props);
         let owner = owner.map(str::trim).filter(|o| !o.is_empty());
         props.insert(
             OWNER_KEY.to_string(),
@@ -163,6 +204,9 @@ impl JobAccess {
 
 /// Whether `principal` may see the job `job` describes (see the module documentation).
 pub fn can_see_job(principal: &Principal, job: &JobAccess) -> bool {
+    if !principal.permits_team(job.team.as_deref()) {
+        return false;
+    }
     if principal.is_admin || job.is_owner(&principal.username) {
         return true;
     }
@@ -295,7 +339,10 @@ mod tests {
 
     #[test]
     fn a_client_never_chooses_the_record() {
-        let mut p = props(r#"{"owner": "admin", "team": "Ops", "mrsm_owner": "admin"}"#);
+        // 5.1: nor the isolated team's scope a job runs with.
+        let mut p = props(
+            r#"{"owner": "admin", "team": "Ops", "mrsm_owner": "admin", "team_scope": "id-ops"}"#,
+        );
         JobAccess::stamp(&mut p, Some("bob"), Some("Data"));
         assert_eq!(
             Value::Map(p.clone()).json_dumps(),

@@ -7,8 +7,13 @@ The console's Plugins page: the plugins installed on this server (Installed) and
 published to this API's repository (Repository). Administrators update, uninstall and install
 plugins with the usual actions (`install plugins`, `uninstall plugins`), run as jobs. The
 administrators who may use the web terminal also create plugins (New plugin: `bootstrap
-plugins`'s choices and files, `create_new_plugin`) and edit their files in the source view
-(`plugin_sources.save_source`).
+plugins`'s choices and files, `create_new_plugin`, or an upload, `plugin_upload`) and edit their
+files in the source view (`plugin_sources.save_source`).
+
+Teams: a walled-off viewer sees only the plugins of their teams (`can_see_plugin`), and the
+members of a team that may manage plugins (`plugins_write`) install, create, upload, edit,
+update, publish and uninstall their team's plugins (`may_manage_plugins`, `may_manage_plugin`,
+`plugin_action_refusal`); what they add is recorded as their team's (`claim_plugin`).
 """
 
 from __future__ import annotations
@@ -35,6 +40,224 @@ PLUGINS_GRID_COLUMNS: int = 3
 #: The repository keys an install from this server's own repository records as its origin: a
 #: connector the console defines for that job only (`MRSM_API_THIS_SERVER` = the server's URL).
 THIS_SERVER_REPOSITORY: str = 'api:this_server'
+
+
+########################################################################################
+# Who may see and manage which plugins.
+########################################################################################
+
+#: Why a viewer may not manage plugins at all, and why not this one.
+MANAGE_REFUSAL: str = 'Only administrators and team plugin managers can manage plugins.'
+NO_WRITING_TEAM: str = 'None of your teams may manage plugins.'
+
+
+def foreign_plugin_message(name: str) -> str:
+    """Why a team's plugin manager may not touch an installed plugin of someone else's."""
+    return f"Plugin '{name}' is already installed and does not belong to your team."
+
+
+def _manages_everything(viewer: Any) -> bool:
+    """Administrators (and everyone under `--no-auth`) manage every plugin."""
+    return bool(viewer is not None and (viewer.no_auth or (viewer.signed_in and viewer.is_admin)))
+
+
+def can_see_plugin(viewer: Any, name: Any) -> bool:
+    """
+    Whether `viewer` may see the plugin `name`: every plugin, unless they are walled off
+    (`Viewer.is_isolated`), where it is the plugins granted to or installed by their teams.
+    """
+    if _manages_everything(viewer):
+        return True
+    if viewer is None or not viewer.signed_in:
+        return False
+    return bool(viewer.can_use_plugin(str(name)))
+
+
+def visible_plugin_names(viewer: Any, names: Any) -> List[str]:
+    """The plugin names among `names` that `viewer` may see, in their order."""
+    return [str(name) for name in (names or []) if can_see_plugin(viewer, name)]
+
+
+def team_plugins(viewer: Any) -> set:
+    """The plugins that belong to the viewer's teams (their teams' `plugins` lists)."""
+    return {str(name) for name in ((getattr(viewer, 'grants', None) or {}).get('plugins', None) or [])}
+
+
+def _console_is_read_only() -> bool:
+    """Whether non-administrators may not act from the console (`--secure`)."""
+    try:
+        from meerschaum.api.dash import access
+        return bool(access._secure())
+    except Exception:
+        return True
+
+
+def may_manage_plugins(viewer: Any) -> bool:
+    """
+    Whether `viewer` may add plugins to the server (install from the repository, create, upload):
+    administrators, and the members of a team that may manage plugins (`plugins_write`), who
+    still read plugins (`plugins:read`) on a server that lets non-administrators act.
+    """
+    if _manages_everything(viewer):
+        return True
+    if viewer is None or not viewer.signed_in or not viewer.can('plugins:read'):
+        return False
+    if not viewer.can_write_plugins:
+        return False
+    return not _console_is_read_only()
+
+
+def may_manage_plugin(viewer: Any, name: Any) -> bool:
+    """
+    Whether `viewer` may reinstall, update, uninstall, read and edit the installed source of,
+    and publish the plugin `name`: administrators, and a team's plugin managers for the plugins
+    of their teams.
+    """
+    if _manages_everything(viewer):
+        return True
+    return may_manage_plugins(viewer) and str(name) in team_plugins(viewer)
+
+
+def manageable_plugin_names(viewer: Any, names: Any) -> List[str]:
+    """The plugin names among `names` that `viewer` may manage, in their order."""
+    return [str(name) for name in (names or []) if may_manage_plugin(viewer, name)]
+
+
+def may_install_plugin(viewer: Any, name: Any, installed: Any) -> bool:
+    """
+    Whether `viewer` may install the repository's plugin `name` (`installed`: the names
+    installed now): one they may see, that is not installed or is their team's.
+    """
+    if _manages_everything(viewer):
+        return True
+    if not may_manage_plugins(viewer) or not can_see_plugin(viewer, name):
+        return False
+    return str(name) not in set(installed or []) or may_manage_plugin(viewer, name)
+
+
+def plugin_action_refusal(
+    viewer: Any,
+    action: str,
+    name: Any,
+    installed: Optional[Any] = None,
+) -> Optional[str]:
+    """
+    Why `viewer` may not run a plugin action (`install`, `reinstall`, `update`, `uninstall`) on
+    `name`, or `None` when they may. `installed` is the names installed now (read when omitted).
+    """
+    if _manages_everything(viewer):
+        return None
+    if not may_manage_plugins(viewer):
+        return MANAGE_REFUSAL
+    name = str(name)
+    if not can_see_plugin(viewer, name):
+        return f"Plugin '{name}' is not available."
+    if may_manage_plugin(viewer, name):
+        return None
+    if installed is None:
+        installed = _discover_plugin_files()
+    if name in set(installed):
+        return foreign_plugin_message(name)
+    if action == 'install':
+        return None
+    return f"Plugin '{name}' does not belong to your team."
+
+
+def _team_attributes(team: str, conn: Any = None) -> Tuple[Any, Optional[Dict[str, Any]]]:
+    """A team and its attributes read now (`None` when the team does not exist)."""
+    team_object = mrsm.Team(str(team), instance=(conn if conn is not None else get_api_connector()))
+    if not team_object.exists():
+        return team_object, None
+    return team_object, team_object.attributes
+
+
+def writing_team(viewer: Any, conn: Any = None) -> Optional[str]:
+    """
+    The team a non-administrator's new plugins are recorded for: their primary team if it may
+    manage plugins (`plugins_write`, read now), else the first of their teams that may.
+    """
+    teams = list(getattr(viewer, 'own_teams', None) or [])
+    primary = getattr(viewer, 'primary_team', None)
+    if primary in teams:
+        teams = [primary] + [team for team in teams if team != primary]
+    for team in teams:
+        try:
+            _, attributes = _team_attributes(team, conn)
+        except Exception:
+            continue
+        if attributes is not None and attributes.get('plugins_write', False) is True:
+            return str(team)
+    return None
+
+
+def _forget_viewers() -> None:
+    try:
+        from meerschaum.api.dash import access
+        access.forget()
+    except Exception:
+        pass
+
+
+def claim_plugin(viewer: Any, name: Any, conn: Any = None) -> SuccessTuple:
+    """
+    Record the plugin `name`, which `viewer` just installed, created or uploaded, as their
+    team's (`writing_team`: its `plugins` attribute, read fresh), so its plugin managers manage
+    it. Administrators record nothing.
+    """
+    if _manages_everything(viewer):
+        return True, ''
+    name = str(name)
+    if not is_safe_plugin_name(name):
+        return False, f"Invalid plugin name '{name}'."
+    if not may_manage_plugins(viewer):
+        return False, MANAGE_REFUSAL
+    try:
+        team = writing_team(viewer, conn)
+        if team is None:
+            return False, NO_WRITING_TEAM
+        team_object, attributes = _team_attributes(team, conn)
+        if attributes is None:
+            return False, NO_WRITING_TEAM
+        listed = [str(item) for item in (attributes.get('plugins', None) or [])]
+        if name not in listed:
+            attributes['plugins'] = listed + [name]
+            success, message = team_object.edit()
+            if not success:
+                return False, f"Plugin '{name}' could not be recorded for team '{team}': {message}"
+    except Exception as e:
+        return False, f"Plugin '{name}' could not be recorded for your team: {e}"
+    finally:
+        _forget_viewers()
+    return True, f"Plugin '{name}' belongs to team '{team}'."
+
+
+def release_plugin(viewer: Any, name: Any, conn: Any = None) -> SuccessTuple:
+    """
+    Take the plugin `name`, which `viewer` just uninstalled, off the `plugins` lists of their
+    teams that may manage plugins. Administrators change nothing.
+    """
+    if _manages_everything(viewer):
+        return True, ''
+    name = str(name)
+    if not may_manage_plugins(viewer):
+        return False, MANAGE_REFUSAL
+    try:
+        for team in list(getattr(viewer, 'own_teams', None) or []):
+            team_object, attributes = _team_attributes(team, conn)
+            if attributes is None or attributes.get('plugins_write', False) is not True:
+                continue
+            listed = [str(item) for item in (attributes.get('plugins', None) or [])]
+            if name not in listed:
+                continue
+            attributes['plugins'] = [item for item in listed if item != name]
+            success, message = team_object.edit()
+            if not success:
+                return False, f"Plugin '{name}' is still listed for team '{team}': {message}"
+    except Exception as e:
+        return False, f"Plugin '{name}' is still listed for your team: {e}"
+    finally:
+        _forget_viewers()
+    return True, ''
 
 
 ########################################################################################
@@ -242,9 +465,19 @@ def packages_label(plugin: Dict[str, Any]) -> Tuple[str, bool]:
     return f"{len(required)} installed" if len(required) != 1 else '1 installed', False
 
 
-def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = False) -> Any:
-    """The Installed tab's table."""
+def build_installed_plugins_table(
+    plugins: List[Dict[str, Any]],
+    admin: bool = False,
+    manageable: Optional[Any] = None,
+) -> Any:
+    """
+    The Installed tab's table. A plugin's page link and its Update and Uninstall are shown for
+    every plugin to administrators (`admin`), else for the plugins named in `manageable` (a
+    team's plugin managers: `manageable_plugin_names`).
+    """
     from meerschaum.api.dash.plugin_sources import language_logo
+    manageable = {plugin['name'] for plugin in plugins} if admin else set(manageable or [])
+    admin = bool(manageable)
     header = [
         html.Th('Plugin'),
         html.Th('Version', className='d-none d-sm-table-cell'),
@@ -257,6 +490,7 @@ def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = F
     rows = []
     for plugin in plugins:
         name = plugin['name']
+        managed = name in manageable
         packages_text, packages_missing = packages_label(plugin)
         provides = [dbc.Badge(item, color='secondary', class_name='me-1') for item in plugin['provides']]
         if plugin.get('import_error'):
@@ -268,7 +502,7 @@ def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = F
             html.Td([
                 (dcc.Link(name, href='/dash/plugins/installed/' + name,
                           className='console-name-link fw-semibold')
-                 if admin else html.Span(name, className='fw-semibold')),
+                 if managed else html.Span(name, className='fw-semibold')),
                 html.Div(
                     [plugin['version'] or '', ' · ' if plugin['version'] else '', language_logo(plugin['kind'])],
                     className='text-muted small d-sm-none plugin-mobile-meta',
@@ -288,7 +522,9 @@ def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = F
             ),
         ]
         if admin:
-            cells.append(html.Td(html.Div(plugin_action_buttons(plugin), className='plugin-row-actions')))
+            cells.append(html.Td(html.Div(
+                plugin_action_buttons(plugin) if managed else [], className='plugin-row-actions',
+            )))
         rows.append(html.Tr(cells, id={'type': 'installed-plugin-row', 'index': name}))
     return html.Div(
         [
@@ -299,7 +535,7 @@ def build_installed_plugins_table(plugins: List[Dict[str, Any]], admin: bool = F
                 class_name='console-table plugins-table',
                 id='installed-plugins-table',
             ),
-        ] + ([update_check_store(plugins)] if admin else []),
+        ] + ([update_check_store([p for p in plugins if p['name'] in manageable])] if admin else []),
         className='console-table-scroll',
     )
 
@@ -433,15 +669,20 @@ def is_newer_version(remote: Optional[str], installed: Optional[str]) -> bool:
         return False
 
 
-def plugin_update_versions(names: List[str]) -> Dict[str, str]:
+def plugin_update_versions(names: List[str], viewer: Any = None) -> Dict[str, str]:
     """
     `{name: newer version}` for the installed plugins among `names` whose origin repository has a
-    newer version than the one installed (read fresh). Answers within
+    newer version than the one installed (read fresh); with a `viewer`, only the plugins they
+    may manage (`may_manage_plugin`) are asked about. Answers within
     `REMOTE_VERSION_TIMEOUT_SECONDS`: a repository still busy offers no update this time, its
     request stays the one in flight, and requests that have not started are cancelled.
     """
     from concurrent.futures import wait
-    wanted = set(names or [])
+    wanted = {str(name) for name in (names or [])}
+    if viewer is not None:
+        wanted = set(manageable_plugin_names(viewer, sorted(wanted)))
+    if not wanted:
+        return {}
     installed = {
         plugin['name']: plugin for plugin in get_installed_plugins(check_packages=False)
         if plugin['name'] in wanted and plugin.get('origin')
@@ -464,10 +705,18 @@ def plugin_update_versions(names: List[str]) -> Dict[str, str]:
     return updates
 
 
-def build_installed_plugins_tab(admin: bool = False) -> Any:
-    """The Installed tab: the table, or a short empty state."""
+def build_installed_plugins_tab(admin: bool = False, viewer: Any = None) -> Any:
+    """
+    The Installed tab: the table, or a short empty state. With a `viewer`, the plugins they may
+    see (`can_see_plugin`), with actions on the ones they may manage.
+    """
+    manageable = None
     try:
         plugins = get_installed_plugins()
+        if viewer is not None:
+            plugins = [plugin for plugin in plugins if can_see_plugin(viewer, plugin['name'])]
+            admin = _manages_everything(viewer)
+            manageable = manageable_plugin_names(viewer, [plugin['name'] for plugin in plugins])
     except Exception as e:
         from meerschaum.api.dash.components import alert_from_success_tuple
         return alert_from_success_tuple((False, f"Failed to read the installed plugins: {e}"))
@@ -479,7 +728,7 @@ def build_installed_plugins_tab(admin: bool = False) -> Any:
             ],
             className='console-empty',
         )
-    return build_installed_plugins_table(plugins, admin=admin)
+    return build_installed_plugins_table(plugins, admin=admin, manageable=manageable)
 
 
 ########################################################################################
@@ -566,21 +815,27 @@ def start_plugin_run(
     sysargs: List[str],
     username: Optional[str],
     env: Optional[Dict[str, str]] = None,
+    execution: Optional[Dict[str, Any]] = None,
 ) -> Tuple[SuccessTuple, Optional[str]]:
     """
     Run a plugin action as one of the console's runs (an `execute-*` job owned by `username`,
     listed under Jobs > Runs and cleaned up like the console's other runs). Returns the start
-    result and the job's name.
+    result and the job's name. `execution` adds to the job's `mrsm_execution` record (the
+    console's own note of the plugin and action the run is for: `plugin_run_record`).
+
+    The job is started by this host (`Job(...).start()`), not through the API's `/execute`
+    routes, so the caller decides who may run it (`plugin_action_refusal`).
     """
     import uuid
     from meerschaum.jobs import Job
     name = 'execute-' + uuid.uuid4().hex[:8]
-    execution = {
+    record = {
         'kind': 'temporary_execution',
         'origin': 'console_plugins',
         'owner': username,
         'run_id': str(uuid.uuid4()),
     }
+    execution = {**(execution or {}), **record}
     properties = {'mrsm_execution': execution}
     if username:
         ### The run is the user's, in their primary team (AC9).
@@ -594,6 +849,31 @@ def start_plugin_run(
         return (False, f"Failed to start '{' '.join(sysargs)}': {e}"), None
 
 
+def plugin_run_record(job: Any, username: Optional[str]) -> Optional[Dict[str, str]]:
+    """
+    `{plugin, action}` of a plugin run this console started for `username`, from the job's own
+    record and arguments (never from the browser): `None` for any other job.
+    """
+    try:
+        properties = (job.daemon.properties if hasattr(job, 'daemon')
+                      else job.get_daemon_properties()) or {}
+        record = properties.get('mrsm_execution', None) or {}
+        sysargs = [str(arg) for arg in (job.sysargs or [])]
+    except Exception:
+        return None
+    if not isinstance(record, dict) or record.get('origin') != 'console_plugins':
+        return None
+    if (record.get('owner') or None) != (username or None):
+        return None
+    plugin, action = record.get('plugin'), record.get('action')
+    if not is_safe_plugin_name(plugin) or action not in ('install', 'reinstall', 'update', 'uninstall'):
+        return None
+    verb = 'uninstall' if action == 'uninstall' else 'install'
+    if sysargs[:3] != [verb, 'plugins', str(plugin)]:
+        return None
+    return {'plugin': str(plugin), 'action': str(action)}
+
+
 ########################################################################################
 # The repository (plugins published to this API).
 ########################################################################################
@@ -605,11 +885,14 @@ def _build_plugin_card(
     detail: bool = False,
     admin: bool = False,
     installed: Optional[Dict[str, str]] = None,
+    can_install: Optional[bool] = None,
 ) -> dbc.Card:
     """
     Build a single plugin card. If ``detail`` is True, render the larger,
-    self-contained plugin detail view with an install snippet.
+    self-contained plugin detail view with an install snippet. Install (or Reinstall) is shown
+    when ``can_install`` (by default, to administrators: ``admin``).
     """
+    can_install = bool(admin) if can_install is None else bool(can_install)
     conn = get_api_connector()
     plugin = Plugin(plugin_name)
     attrs = conn.get_plugin_attributes(plugin, debug=debug) or {}
@@ -724,7 +1007,7 @@ def _build_plugin_card(
             },
             class_name='plugin-card-install',
         )
-        if admin else None
+        if can_install else None
     )
     download_link = html.A(
         '⬇️ Download',
@@ -760,16 +1043,22 @@ def get_plugins_cards(
     page: int = 1,
     per_page: int = PLUGINS_PER_PAGE,
     admin: bool = False,
+    viewer: Any = None,
 ) -> Tuple[List[dbc.Card], List[SuccessTuple], int, int]:
     """
     Return the cards, alerts, total page count, and total plugin count
-    for the plugins listing.
+    for the plugins listing. With a ``viewer``, only the plugins they may see are listed and
+    counted (``can_see_plugin``), and Install is offered where they may (``may_install_plugin``).
     """
     alerts: List[SuccessTuple] = []
     if session_data is None:
         session_data = {}
 
     all_names = sorted(get_api_connector().get_plugins(search_term=search_term) or [])
+    if viewer is not None:
+        all_names = visible_plugin_names(viewer, all_names)
+        admin = _manages_everything(viewer)
+    may_install = admin or (viewer is not None and may_manage_plugins(viewer))
     total = len(all_names)
     if per_page <= 0:
         per_page = PLUGINS_PER_PAGE
@@ -778,17 +1067,23 @@ def get_plugins_cards(
     start = (page - 1) * per_page
     page_names = all_names[start:start + per_page]
 
-    installed = {}
-    if admin:
-        try:
-            installed = {p['name']: p.get('version') for p in get_installed_plugins(check_packages=False)}
-        except Exception:
-            installed = {}
+    installed = _installed_versions() if may_install else {}
     cards = [
-        _build_plugin_card(name, session_data, admin=admin, installed=installed)
+        _build_plugin_card(
+            name, session_data, admin=admin, installed=installed,
+            can_install=(admin or (may_install and may_install_plugin(viewer, name, installed))),
+        )
         for name in page_names
     ]
     return cards, alerts, total_pages, total
+
+
+def _installed_versions() -> Dict[str, Any]:
+    """`{name: version}` of the installed plugins (`{}` when they cannot be read)."""
+    try:
+        return {p['name']: p.get('version') for p in get_installed_plugins(check_packages=False)}
+    except Exception:
+        return {}
 
 
 def build_plugins_listing(
@@ -796,6 +1091,7 @@ def build_plugins_listing(
     session_data: Optional[Dict[str, Any]],
     page: int = 1,
     admin: bool = False,
+    viewer: Any = None,
 ) -> Tuple[Any, int, int]:
     """
     Build the repository listing (summary + cards grid) and return it along with the total page
@@ -807,6 +1103,7 @@ def build_plugins_listing(
         session_data=session_data,
         page=page,
         admin=admin,
+        viewer=viewer,
     )
 
     if not cards and not search_term:
@@ -857,9 +1154,11 @@ def build_plugin_detail(
     plugin_name: str,
     session_data: Optional[Dict[str, Any]],
     admin: bool = False,
+    viewer: Any = None,
 ) -> Any:
     """
-    Build the detail view for a single plugin (shareable URL).
+    Build the detail view for a single plugin (shareable URL). A plugin the ``viewer`` may not
+    see is not found, like one that is not published.
     """
     if session_data is None:
         session_data = {}
@@ -872,7 +1171,10 @@ def build_plugin_detail(
         class_name='plugin-back-button',
     )
 
-    existing = get_api_connector().get_plugins(search_term=plugin_name) or []
+    if viewer is not None:
+        admin = _manages_everything(viewer)
+    hidden = viewer is not None and not can_see_plugin(viewer, plugin_name)
+    existing = [] if hidden else (get_api_connector().get_plugins(search_term=plugin_name) or [])
     if plugin_name not in existing:
         return html.Div([
             back_button,
@@ -881,15 +1183,14 @@ def build_plugin_detail(
             html.H3(f"404: Plugin '{plugin_name}' not found."),
         ], className='plugin-detail-wrapper')
 
-    installed = {}
-    if admin:
-        try:
-            installed = {p['name']: p.get('version') for p in get_installed_plugins(check_packages=False)}
-        except Exception:
-            installed = {}
+    may_install = admin or (viewer is not None and may_manage_plugins(viewer))
+    installed = _installed_versions() if may_install else {}
     return html.Div([
         back_button,
-        _build_plugin_card(plugin_name, session_data, detail=True, admin=admin, installed=installed),
+        _build_plugin_card(
+            plugin_name, session_data, detail=True, admin=admin, installed=installed,
+            can_install=(admin or (may_install and may_install_plugin(viewer, plugin_name, installed))),
+        ),
         _source_browser('repository', plugin_name, session_data),
     ], className='plugin-detail-wrapper')
 
@@ -955,18 +1256,28 @@ def create_new_plugin(
     Create a plugin with `bootstrap plugins`'s own scaffold (`_core.bootstrap_plugin`: the same
     checks of the name, features and action, and the same files; a plugin of that name is
     refused, nothing is overwritten). Returns `(success, message, URL of its source opened for
-    editing)`. Only authors (`plugin_sources.authoring_refusal`, read fresh) may.
+    editing)`. Only authors (`plugin_sources.authoring_refusal`, read fresh) may; a
+    non-administrator's plugin is recorded as their team's (`claim_plugin`).
     """
-    from meerschaum.api.dash.plugin_sources import authoring_refusal
+    from meerschaum.api.dash.plugin_sources import authoring_refusal, source_viewer
     refusal = authoring_refusal(session)
     if refusal:
         return False, refusal, None
+    try:
+        who = source_viewer(session)
+    except Exception:
+        return False, MANAGE_REFUSAL, None
     name = str(name or '').strip()
     if not name:
         return False, 'Enter the name of your new plugin.', None
     if not is_safe_plugin_name(name):
         return False, f"Invalid plugin name: '{name}' (use letters, digits, '_' and '-').", None
     features = [str(feature) for feature in (features or []) if feature]
+    try:
+        if name in _discover_plugin_files() and not may_manage_plugin(who, name):
+            return False, foreign_plugin_message(name), None
+    except Exception as e:
+        return False, f"Failed to create plugin '{name}': {e}", None
     try:
         from meerschaum import _core
         success, message, created = _core.bootstrap_plugin(
@@ -982,6 +1293,9 @@ def create_new_plugin(
         return False, f"Failed to create plugin '{name}': {e}", None
     if not success or not created:
         return False, message, None
+    claimed, claim_message = claim_plugin(who, name)
+    if not claimed:
+        message = f"{message} {claim_message}"
     return True, message, plugin_url(name, created.get('source'), edit=True, created=True)
 
 
@@ -993,19 +1307,29 @@ def build_installed_plugin_detail(
     created: bool = False,
 ) -> Any:
     """
-    An installed plugin's metadata and source, restricted to session administrators (the
-    authors among them edit its files: `selected` opened for editing when `edit`, as after New
-    plugin, which also passes `created`).
+    An installed plugin's metadata and source, restricted to those who may manage it
+    (`may_manage_plugin`: administrators, and its team's plugin managers; the authors among them
+    edit its files: `selected` opened for editing when `edit`, as after New plugin, which also
+    passes `created`). A plugin the viewer may not see is not installed, as far as they are told.
     """
-    from meerschaum.api.dash.plugin_sources import may_read_source, language_logo
+    from meerschaum.api.dash.plugin_sources import may_read_source, language_logo, source_viewer
     back = dcc.Link('← All plugins', href='/dash/plugins', className='plugin-back-link')
-    if not may_read_source('installed', session):
-        return html.Div([back, html.H5('Installed source is available to administrators.')],
-                        className='console-empty')
+    missing = html.Div([back, html.H5('This plugin is not installed.')], className='console-empty')
+    try:
+        who = source_viewer(session)
+    except Exception:
+        return missing
+    if not is_safe_plugin_name(name) or not can_see_plugin(who, name):
+        return missing
     installed = next((plugin for plugin in get_installed_plugins(check_packages=False)
                       if plugin['name'] == name), None)
     if not installed:
-        return html.Div([back, html.H5('This plugin is not installed.')], className='console-empty')
+        return missing
+    if not may_read_source('installed', session, name):
+        return html.Div(
+            [back, html.H5("Installed source is available to administrators and the plugin's team.")],
+            className='console-empty',
+        )
     from meerschaum.api.dash.connector_listing import mask_text
     description = installed.get('description') or _installed_description(name,session)
     actions = plugin_action_buttons(installed, size='md')

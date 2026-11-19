@@ -43,8 +43,22 @@ def connector_allows(viewer: Any, connector_keys: str, team: Optional[str]) -> S
     """
     if viewer.no_auth or viewer.is_admin:
         return True, ''
+    connector_keys = str(connector_keys)
+    ### A walled-off viewer may use only what their teams hold or were granted.
+    ### (A plugin needs a grant; a label that names no connector of the server's is anyone's.)
+    if viewer.is_isolated:
+        from meerschaum.api.dash.connector_listing import connector_team_allows
+        from meerschaum.api.dash.team_setup import connector_attributes
+        if connector_keys.startswith('plugin:'):
+            plugin = connector_keys.split(':', 1)[1]
+            if not viewer.can_use_plugin(plugin):
+                return False, f"The plugin '{plugin}' is not available to your teams."
+        elif connector_attributes(connector_keys) and not connector_team_allows(connector_keys, viewer):
+            return False, f"The connector '{connector_keys}' is not available to your teams."
+    if connector_keys in set((viewer.grants or {}).get('connectors', None) or []):
+        return True, ''
     try:
-        connector = mrsm.get_connector(str(connector_keys))
+        connector = mrsm.get_connector(connector_keys)
     except Exception:
         return True, ''
     teams = getattr(connector, 'teams', None)

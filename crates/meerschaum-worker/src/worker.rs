@@ -1,12 +1,15 @@
 //! One Python worker process and its connection.
 //!
-//! [`Worker::spawn`] binds a private socket, starts `python -m meerschaum.worker --socket PATH`,
-//! accepts its connection and checks the `hello` handshake (protocol version). A reader task
+//! [`Worker::spawn`] creates the worker's channel (on Unix a socket pair whose other end the
+//! worker inherits, `--socket fd:<n>`: nothing listens, so no other process can connect in its
+//! place; a named pipe on Windows), starts `python -m meerschaum.worker --socket ADDRESS` and
+//! checks the `hello` handshake (protocol version). A reader task
 //! demultiplexes the worker's messages: `chunk` / `result` / `error` go to the waiting call,
 //! `callback` runs the installed [`CallbackHandler`] and answers with `cb_result`. When the
 //! process dies, every pending call fails with [`WorkerError::Crashed`] and nothing else.
 
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -23,7 +26,7 @@ use crate::callback::{CallbackHandler, CallbackRequest};
 use crate::chunk::FetchChunk;
 use crate::error::{PyErrorKind, WorkerError, WorkerResult};
 use crate::protocol::{Msg, PROTOCOL_VERSION, read_envelope, wire_map_to_core, write_envelope};
-use crate::transport::{Listener, ReadHalf, WriteHalf};
+use crate::transport::{Channel, ReadHalf, WriteHalf};
 
 /// How worker processes are started.
 #[derive(Debug, Clone)]
@@ -36,6 +39,9 @@ pub struct WorkerOptions {
     pub env: Vec<(String, String)>,
     /// Environment variables to remove.
     pub env_remove: Vec<String>,
+    /// Start from an empty environment: the worker gets [`WorkerOptions::env`] only (5.1: an
+    /// isolated team's workers, whose environment is an allowlist).
+    pub env_clear: bool,
     /// The working directory.
     pub current_dir: Option<PathBuf>,
     /// How long to wait, in all, for the worker to connect and say hello (`MRSM_WORKER_STARTUP_TIMEOUT`
@@ -54,6 +60,135 @@ pub struct WorkerOptions {
     pub quiet: bool,
     /// The defaults used to rebuild pipes sent back by the worker.
     pub pipe_defaults: PipeDefaults,
+    /// What a worker must prove in its handshake before it receives a call (5.1: an isolated
+    /// team's worker; [`TeamExpectation::from_process_env`] by default, so a team job's workers
+    /// are checked too). `None`: nothing (the shared pool).
+    pub team: Option<TeamExpectation>,
+}
+
+/// Select the host-prepared native trampoline before Python preflight, entry-point discovery
+/// or startup. No interpreter or executable from a persisted job environment is trusted here.
+pub(crate) fn python_launcher(
+    options: &WorkerOptions,
+) -> WorkerResult<(PathBuf, Vec<String>, bool)> {
+    use meerschaum_core::team_scope::sandbox::{self, runtime};
+    let spec_path = if options
+        .env_remove
+        .iter()
+        .any(|name| name == sandbox::SPEC_VAR)
+    {
+        None
+    } else {
+        options
+            .env
+            .iter()
+            .rev()
+            .find(|(name, _)| name == sandbox::SPEC_VAR)
+            .map(|(_, value)| PathBuf::from(value))
+            .or_else(|| {
+                (!options.env_clear)
+                    .then(|| std::env::var_os(sandbox::SPEC_VAR).map(PathBuf::from))
+                    .flatten()
+            })
+    };
+    let Some(path) = spec_path.filter(|path| !path.as_os_str().is_empty()) else {
+        use meerschaum_core::team_scope::source_namespace;
+        let selected = if options
+            .env_remove
+            .iter()
+            .any(|key| key == source_namespace::ENV)
+        {
+            None
+        } else {
+            options
+                .env
+                .iter()
+                .rev()
+                .find(|(key, _)| key == source_namespace::ENV)
+                .map(|(_, path)| PathBuf::from(path))
+                .or_else(|| {
+                    (!options.env_clear)
+                        .then(|| std::env::var_os(source_namespace::ENV).map(PathBuf::from))
+                        .flatten()
+                })
+        };
+        let retained = source_namespace::launch().map_err(WorkerError::Refused)?;
+        let launch = match retained {
+            Some(launch) => {
+                let fixed = launch
+                    .namespace
+                    .cache
+                    .parent()
+                    .ok_or_else(|| {
+                        WorkerError::Refused("The captured Team source context is invalid.".into())
+                    })?
+                    .join(source_namespace::FILE);
+                if selected.as_ref().is_some_and(|selected| selected != &fixed) {
+                    return Err(WorkerError::Refused(
+                        "A later environment cannot replace the captured Team source context."
+                            .into(),
+                    ));
+                }
+                Some(launch.clone())
+            }
+            None => {
+                if selected.is_some() && source_namespace::is_captured() {
+                    return Err(WorkerError::Refused("A later environment cannot add a Team source context to this native process.".into()));
+                }
+                selected
+                    .as_deref()
+                    .map(source_namespace::Launch::read)
+                    .transpose()
+                    .map_err(WorkerError::Refused)?
+            }
+        };
+        if let Some(launch) = launch {
+            let root = options
+                .env
+                .iter()
+                .rev()
+                .find(|(key, _)| key == "MRSM_ROOT_DIR")
+                .map(|(_, root)| PathBuf::from(root))
+                .or_else(|| {
+                    (!options.env_clear)
+                        .then(|| std::env::var_os("MRSM_ROOT_DIR").map(PathBuf::from))
+                        .flatten()
+                });
+            if root.as_deref() != Some(launch.namespace.root.as_path()) {
+                return Err(WorkerError::Refused(
+                    "A Team source launch cannot change its durable runtime root.".into(),
+                ));
+            }
+            return Ok((
+                launch.runtime.launcher,
+                vec![
+                    source_namespace::PYTHON_CHILD.into(),
+                    options.python.to_string_lossy().into_owned(),
+                ],
+                true,
+            ));
+        }
+        return Ok((options.python.clone(), Vec::new(), false));
+    };
+    let spec = sandbox::Spec::read(&path).map_err(|_| {
+        WorkerError::Refused("The isolated worker's host sandbox is unavailable.".into())
+    })?;
+    let runtime = spec.runtime.ok_or_else(|| WorkerError::Refused("The isolated worker has no host-prepared native runtime. Restart it through a trusted standalone mrsm host.".into()))?;
+    if !runtime.launcher.is_absolute()
+        || std::fs::canonicalize(&runtime.launcher).ok().as_ref() != Some(&runtime.launcher)
+    {
+        return Err(WorkerError::Refused(
+            "The isolated worker's native launcher has no canonical provenance.".into(),
+        ));
+    }
+    Ok((
+        runtime.launcher,
+        vec![
+            runtime::PYTHON_CHILD.into(),
+            options.python.to_string_lossy().into_owned(),
+        ],
+        true,
+    ))
 }
 
 /// Whether a start already had the same-major warning enabled (one per program).
@@ -211,6 +346,7 @@ impl Default for WorkerOptions {
             module: "meerschaum.worker".into(),
             env: Vec::new(),
             env_remove: Vec::new(),
+            env_clear: false,
             current_dir: None,
             startup_timeout: startup_timeout_default(),
             preflight_timeout: PREFLIGHT_TIMEOUT,
@@ -218,6 +354,7 @@ impl Default for WorkerOptions {
             quiet: false,
             inherit_stdin: false,
             pipe_defaults: PipeDefaults::default(),
+            team: TeamExpectation::from_process_env(),
         }
     }
 }
@@ -235,6 +372,227 @@ pub struct Hello {
     pub meerschaum: String,
     /// The MessagePack implementation (`msgpack` or `stdlib`).
     pub msgpack: String,
+    /// What the worker can do (5.1: [`TEAM_SCOPE_CAPABILITY`]); empty for an older package.
+    pub capabilities: Vec<String>,
+    /// The proof a worker started for an isolated team gives that it loaded the team's
+    /// configuration (5.1); `None` otherwise or from an older package.
+    pub team_scope: Option<TeamReport>,
+}
+
+/// The capability a worker that can run an isolated team's code reports in its `hello` (5.1).
+pub const TEAM_SCOPE_CAPABILITY: &str = "team_scope";
+/// The variable naming the fingerprint of an isolated team's configuration in its processes.
+pub const TEAM_FINGERPRINT_VAR: &str = "MRSM_TEAM_FINGERPRINT";
+
+/// What a worker started for an isolated team reports in its `hello` (5.1), read back from the
+/// configuration it loaded.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TeamReport {
+    /// The team it was started for (`MRSM_TEAM_SCOPE`).
+    pub team: String,
+    /// The fingerprint of the configuration it was given (`MRSM_TEAM_FINGERPRINT`).
+    pub fingerprint: String,
+    /// The configuration file it read (`MRSM_CONFIG_FILE`).
+    pub config_file: String,
+    /// The connectors (`type:label`) its loaded configuration defines.
+    pub connectors: Vec<String>,
+    /// Its filesystem sandbox (5.1), applied at start-up before any plugin was imported; `None`
+    /// when it reported none (not started under one, or an older package).
+    pub sandbox: Option<meerschaum_core::team_scope::sandbox::Report>,
+}
+
+/// What a worker must prove before it serves an isolated team (5.1): a worker that does not
+/// report [`TEAM_SCOPE_CAPABILITY`] (an older `meerschaum` package, which would ignore the team's
+/// configuration and load the default connectors), reports another team or configuration, or
+/// defines a connector outside the team's set is stopped before it receives any call.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TeamExpectation {
+    /// The team.
+    pub team: String,
+    /// The fingerprint of the team's configuration (empty: not checked).
+    pub fingerprint: String,
+    /// The connectors the team may have.
+    pub connectors: std::collections::BTreeSet<String>,
+    /// The filesystem sandbox the worker must report (5.1; `None`: not checked, the `off` mode).
+    /// In `require` mode a worker whose report is missing, not enforced or whose canary read
+    /// succeeded is stopped; in `auto` mode one that is not enforced is accepted (with a warning,
+    /// once per reason) but one that claims enforcement without denying the canary is stopped.
+    pub sandbox: Option<meerschaum_core::team_scope::sandbox::Mode>,
+}
+
+impl TeamExpectation {
+    /// The expectation of a process started for an isolated team (a team job's `mrsm`: its
+    /// `MRSM_TEAM_SCOPE` is set): its workers must load the same team's configuration and define
+    /// no connector its own configuration does not. `None` in any other process.
+    pub fn from_process_env() -> Option<TeamExpectation> {
+        static EXPECTED: std::sync::OnceLock<Option<TeamExpectation>> = std::sync::OnceLock::new();
+        EXPECTED
+            .get_or_init(|| {
+                let team = std::env::var(meerschaum_core::team_scope::TEAM_SCOPE_VAR)
+                    .ok()
+                    .filter(|t| !t.trim().is_empty())?;
+                let mut options = meerschaum_core::config::ConfigOptions::from_process();
+                options.allow_writes = false;
+                let connectors = meerschaum_core::Config::new(options)
+                    .ok()
+                    .and_then(|config| config.get(&["meerschaum", "connectors"]))
+                    .map(|v| defined_connectors(&v.to_map()))
+                    .unwrap_or_default();
+                Some(TeamExpectation {
+                    team,
+                    fingerprint: std::env::var(TEAM_FINGERPRINT_VAR).unwrap_or_default(),
+                    connectors,
+                    sandbox: meerschaum_core::team_scope::sandbox::mode_from_env(),
+                })
+            })
+            .clone()
+    }
+
+    /// `Err` (why, and the fix) unless `hello` proves the worker loaded this team's configuration.
+    pub fn check(&self, hello: &Hello, python: &Path) -> Result<(), String> {
+        let version = meerschaum_core::python_guard::expected_version();
+        let Some(report) = &hello.team_scope else {
+            if !hello
+                .capabilities
+                .iter()
+                .any(|c| c == TEAM_SCOPE_CAPABILITY)
+            {
+                return Err(format!(
+                    "The Python worker for the isolated team '{team}' was stopped before running \
+                     any of the team's code: its `meerschaum` package ({found}, at `{python}`) \
+                     predates team-scoped workers and would not apply the team's configuration (it \
+                     would load the default connectors). Install `meerschaum>={version}` in that \
+                     interpreter (`{python} -m pip install 'meerschaum=={version}'`) or set \
+                     MRSM_PYTHON to an interpreter that has it.",
+                    team = self.team,
+                    found = if hello.meerschaum.is_empty() {
+                        "an unknown version"
+                    } else {
+                        hello.meerschaum.as_str()
+                    },
+                    python = python.display(),
+                ));
+            }
+            return Err(format!(
+                "The Python worker for the isolated team '{}' was stopped before running any of \
+                 the team's code: it did not report the team's configuration (was it started \
+                 without `MRSM_TEAM_SCOPE`?).",
+                self.team
+            ));
+        };
+        let refuse = |why: String| {
+            Err(format!(
+                "The Python worker for the isolated team '{}' was stopped before running any of \
+                 the team's code: {why}.",
+                self.team
+            ))
+        };
+        if report.team != self.team {
+            return refuse(format!("it loaded the scope of team '{}'", report.team));
+        }
+        if !self.fingerprint.is_empty() && report.fingerprint != self.fingerprint {
+            return refuse("it loaded another version of the team's configuration".into());
+        }
+        let outside: Vec<&String> = report
+            .connectors
+            .iter()
+            .filter(|k| !self.connectors.contains(*k))
+            .collect();
+        if !outside.is_empty() {
+            return refuse(format!(
+                "its configuration defines connectors the team was not given ({})",
+                outside
+                    .iter()
+                    .map(|k| k.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if let Some(mode) = self.sandbox {
+            use meerschaum_core::team_scope::sandbox::{Mode, Report};
+            let sandbox = report.sandbox.clone().unwrap_or_else(|| {
+                Report::not_enforced(
+                    mode,
+                    format!(
+                        "the worker reported no sandbox (its `meerschaum` package, {}, at `{}`, \
+                         may predate it)",
+                        if hello.meerschaum.is_empty() {
+                            "an unknown version"
+                        } else {
+                            hello.meerschaum.as_str()
+                        },
+                        python.display()
+                    ),
+                )
+            });
+            // The server's mode decides, whatever the worker says it ran in.
+            let judged = Report {
+                mode: if mode == Mode::Off {
+                    mode
+                } else {
+                    mode.stricter(sandbox.mode)
+                },
+                ..sandbox.clone()
+            };
+            if let Err(why) = judged.verdict() {
+                return refuse(why);
+            }
+            record_sandbox(&self.team, &sandbox);
+        }
+        Ok(())
+    }
+}
+
+/// The last sandbox report of each isolated team's workers in this process (5.1), for status.
+static SANDBOX_REPORTS: std::sync::Mutex<
+    std::collections::BTreeMap<String, meerschaum_core::team_scope::sandbox::Report>,
+> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn record_sandbox(team: &str, report: &meerschaum_core::team_scope::sandbox::Report) {
+    if !report.enforced {
+        static WARNED: std::sync::Mutex<std::collections::BTreeSet<String>> =
+            std::sync::Mutex::new(std::collections::BTreeSet::new());
+        let reason = report.reason.clone().unwrap_or_default();
+        if WARNED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(reason.clone())
+        {
+            tracing::warn!(
+                "Isolated teams' workers run without the filesystem sandbox \
+                 (`system.engine.python_team_sandbox: auto`): {reason}. They can read whatever \
+                 the server's operating-system user can read."
+            );
+        }
+    }
+    SANDBOX_REPORTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(team.to_string(), report.clone());
+}
+
+/// The last sandbox report of each isolated team whose worker started in this process (5.1).
+pub fn sandbox_reports()
+-> std::collections::BTreeMap<String, meerschaum_core::team_scope::sandbox::Report> {
+    SANDBOX_REPORTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// The connectors (`type:label`, not `default`) a `meerschaum:connectors` map defines.
+pub fn defined_connectors(connectors: &meerschaum_core::Map) -> std::collections::BTreeSet<String> {
+    connectors
+        .iter()
+        .flat_map(|(typ, labels)| {
+            labels
+                .to_map()
+                .into_iter()
+                .filter(|(label, attrs)| label != "default" && attrs.truthy())
+                .map(|(label, _)| format!("{typ}:{label}"))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Options for one call.
@@ -287,7 +645,7 @@ pub struct Worker {
     child: Arc<tokio::sync::Mutex<Option<Child>>>,
     dead_rx: watch::Receiver<bool>,
     reader: tokio::task::JoinHandle<()>,
-    _listener: Listener,
+    _channel: Channel,
 }
 
 impl std::fmt::Debug for Worker {
@@ -313,12 +671,49 @@ fn hello_from(msg: &Msg) -> WorkerResult<Hello> {
             got: protocol,
         });
     }
+    let strings = |v: Option<&Wire>| -> Vec<String> {
+        match v {
+            Some(Wire::Array(items)) => items
+                .iter()
+                .filter_map(|i| i.as_str().map(str::to_string))
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    let team_scope = match msg.get("team_scope") {
+        Some(Wire::Map(entries)) => {
+            let field = |name: &str| {
+                entries
+                    .iter()
+                    .find(|(k, _)| k.as_str() == Some(name))
+                    .map(|(_, v)| v)
+            };
+            let text = |name: &str| {
+                field(name)
+                    .and_then(Wire::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            Some(TeamReport {
+                team: text("team"),
+                fingerprint: text("fingerprint"),
+                config_file: text("config_file"),
+                connectors: strings(field("connectors")),
+                sandbox: field("sandbox")
+                    .filter(|v| !v.is_nil())
+                    .and_then(|v| serde_json::from_value(crate::protocol::wire_to_json(v)).ok()),
+            })
+        }
+        _ => None,
+    };
     Ok(Hello {
         protocol,
         pid: msg.u64("pid").unwrap_or(0) as u32,
         python: msg.str("python").unwrap_or_default().to_string(),
         meerschaum: msg.str("meerschaum").unwrap_or_default().to_string(),
         msgpack: msg.str("msgpack").unwrap_or_default().to_string(),
+        capabilities: strings(msg.get("capabilities")),
+        team_scope,
     })
 }
 
@@ -417,7 +812,9 @@ async fn preflight(opts: &WorkerOptions) -> WorkerResult<()> {
         "Install the matching release (`{python} -m pip install 'meerschaum=={version}'`) or set \
          MRSM_PYTHON to an interpreter that has it."
     );
-    let mut cmd = Command::new(&opts.python);
+    let (program, prefix, confined) = python_launcher(opts)?;
+    let mut cmd = Command::new(program);
+    cmd.args(prefix);
     cmd.arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG)
         .arg("-c")
         .arg(format!(
@@ -429,11 +826,17 @@ async fn preflight(opts: &WorkerOptions) -> WorkerResult<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if opts.env_clear {
+        cmd.env_clear();
+    }
     for k in &opts.env_remove {
         cmd.env_remove(k);
     }
     cmd.envs(meerschaum_core::python_guard::expect_env());
     cmd.envs(opts.env.iter().map(|(k, v)| (k, v)));
+    if confined {
+        meerschaum_core::team_scope::sandbox::runtime::sanitize_command(cmd.as_std_mut());
+    }
     if let Some(dir) = &opts.current_dir {
         cmd.current_dir(dir);
     }
@@ -538,23 +941,28 @@ impl Worker {
         {
             hook();
         }
-        let listener = Listener::bind(opts.socket_dir.as_deref())?;
-        let mut cmd = Command::new(&opts.python);
+        let mut channel = Channel::new(opts.socket_dir.as_deref())?;
+        let (program, prefix, confined) = python_launcher(opts)?;
+        let mut cmd = Command::new(program);
+        cmd.args(prefix);
         // `-P`: the working directory (the user's, a project's) stays off `sys.path`, where a
         // `meerschaum.py` or `meerschaum/` would replace the package (`-c` and `-m` both put it
         // first). Plugins are imported through the plugins directory, never the working one.
         cmd.arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG);
         if opts.module == "meerschaum.worker" {
+            // 5.1: an isolated team's worker restricts itself to its sandbox right after the
+            // guard, before the host imports anything of the package (`MRSM_TEAM_SANDBOX`).
             cmd.arg("-c").arg(format!(
-                "{}\n_mrsm_guard()\n{}",
+                "{}\n_mrsm_guard()\n{}\n_mrsm_sandbox()\n{}",
                 meerschaum_core::python_guard::SCRIPT,
+                include_str!("../python/sandbox.py"),
                 include_str!("../python/host.py")
             ));
         } else {
             cmd.arg("-m").arg(&opts.module);
         }
         cmd.arg("--socket")
-            .arg(listener.address())
+            .arg(channel.address())
             .stdin(if opts.inherit_stdin {
                 Stdio::inherit()
             } else {
@@ -566,6 +974,13 @@ impl Worker {
         } else if OUTPUT_HOOK.get().is_some() {
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
             cmd.env("PYTHONUNBUFFERED", "1");
+        }
+        if opts.env_clear {
+            // Before the variables this function sets (`PYTHONUNBUFFERED`, the guard's).
+            cmd.env_clear();
+            if OUTPUT_HOOK.get().is_some() && !opts.quiet {
+                cmd.env("PYTHONUNBUFFERED", "1");
+            }
         }
         for k in &opts.env_remove {
             cmd.env_remove(k);
@@ -579,12 +994,35 @@ impl Worker {
             }
         }
         cmd.envs(opts.env.iter().map(|(k, v)| (k, v)));
+        if confined {
+            meerschaum_core::team_scope::sandbox::runtime::sanitize_command(cmd.as_std_mut());
+        }
+        // The shell forwards these pipes verbatim to its terminal, around live progress.
+        // Tell the embedded host where they end so SDK prompts can still move the cursor.
+        // Set this after the caller's environment, and consume it before importing plugins.
+        for (name, terminal) in [
+            (
+                "_MRSM_FORWARDED_STDOUT_TTY",
+                std::io::stdout().is_terminal(),
+            ),
+            (
+                "_MRSM_FORWARDED_STDERR_TTY",
+                std::io::stderr().is_terminal(),
+            ),
+        ] {
+            cmd.env_remove(name);
+            if OUTPUT_HOOK.get().is_some() && !opts.quiet && terminal {
+                cmd.env(name, "1");
+            }
+        }
         if let Some(dir) = &opts.current_dir {
             cmd.current_dir(dir);
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| WorkerError::Spawn(format!("{}: {e}", opts.python.display())))?;
+        channel.prepare(&mut cmd);
+        let spawned = cmd.spawn();
+        channel.spawned();
+        let mut child =
+            spawned.map_err(|e| WorkerError::Spawn(format!("{}: {e}", opts.python.display())))?;
         if let Some(&hook) = OUTPUT_HOOK.get() {
             if let Some(stdout) = child.stdout.take() {
                 tokio::spawn(forward_output(stdout, false, hook));
@@ -616,8 +1054,42 @@ impl Worker {
                 ),
             )
         };
+        // Why a worker that exited before its `hello` did (its output is above).
+        let exited = |status: std::io::Result<std::process::ExitStatus>| -> WorkerError {
+            if status
+                .as_ref()
+                .is_ok_and(|s| s.code() == Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE))
+                && opts.module == "meerschaum.worker"
+            {
+                // The host said why on stderr (the preflight normally catches this first, with
+                // the message in the error). Do not start another one for this interpreter until
+                // `clear_refusals` (`reload`).
+                return refuse(
+                    &opts.python,
+                    format!(
+                        "The Python worker host started by `{python}` refused to start (its \
+                         message is above): the `meerschaum` package it would import does not \
+                         fit this program ({version}). Install the matching release \
+                         (`{python} -m pip install 'meerschaum=={version}'`) or set MRSM_PYTHON \
+                         to an interpreter that has it.",
+                        python = opts.python.display(),
+                        version = meerschaum_core::python_guard::expected_version(),
+                    ),
+                );
+            }
+            WorkerError::Spawn(format!(
+                "the worker started by `{python}` exited before connecting ({status}); its \
+                 output is above. Check that `{python} -c 'import meerschaum.worker'` works, or \
+                 set MRSM_PYTHON to an interpreter with `meerschaum=={version}`",
+                python = opts.python.display(),
+                status = status
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|e| e.to_string()),
+                version = meerschaum_core::python_guard::expected_version(),
+            ))
+        };
         let accepted = tokio::select! {
-            res = tokio::time::timeout_at(deadline, listener.accept()) => match res {
+            res = tokio::time::timeout_at(deadline, channel.connect()) => match res {
                 Ok(Ok(halves)) => halves,
                 Ok(Err(e)) => return Err(WorkerError::Io(e)),
                 Err(_) => {
@@ -625,42 +1097,39 @@ impl Worker {
                     return Err(silent("did not connect"));
                 }
             },
-            status = child.wait() => {
-                if status.as_ref().is_ok_and(|s| {
-                    s.code() == Some(meerschaum_core::python_guard::REFUSED_EXIT_CODE)
-                }) && opts.module == "meerschaum.worker" {
-                    // The host said why on stderr (the preflight normally catches this first,
-                    // with the message in the error). Do not start another one for this
-                    // interpreter until `clear_refusals` (`reload`).
-                    return Err(refuse(
-                        &opts.python,
-                        format!(
-                            "The Python worker host started by `{python}` refused to start \
-                             (its message is above): the `meerschaum` package it would import \
-                             does not fit this program ({version}). Install the matching \
-                             release (`{python} -m pip install 'meerschaum=={version}'`) or set \
-                             MRSM_PYTHON to an interpreter that has it.",
-                            python = opts.python.display(),
-                            version = meerschaum_core::python_guard::expected_version(),
-                        ),
-                    ));
-                }
-                return Err(WorkerError::Spawn(format!(
-                    "the worker started by `{python}` exited before connecting ({status}); its \
-                     output is above. Check that `{python} -c 'import meerschaum.worker'` works, \
-                     or set MRSM_PYTHON to an interpreter with `meerschaum=={version}`",
-                    python = opts.python.display(),
-                    status = status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string()),
-                    version = meerschaum_core::python_guard::expected_version(),
-                )));
-            }
+            status = child.wait() => return Err(exited(status)),
         };
         let (mut reader, writer): (ReadHalf, WriteHalf) = accepted;
-        let hello = match tokio::time::timeout_at(deadline, read_envelope(&mut reader)).await {
-            Ok(Ok(env)) => hello_from(&env.msg),
-            Ok(Err(e)) => Err(WorkerError::Handshake(e.to_string())),
-            Err(_) => Err(silent("connected but sent no `hello`")),
+        let hello = tokio::select! {
+            res = tokio::time::timeout_at(deadline, read_envelope(&mut reader)) => match res {
+                Ok(Ok(env)) => hello_from(&env.msg),
+                Ok(Err(e)) => {
+                    // The channel closed: a worker that exited (a refusal, a crash) says why
+                    // by its exit status.
+                    match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+                        Ok(status) => return Err(exited(status)),
+                        Err(_) => Err(WorkerError::Handshake(e.to_string())),
+                    }
+                }
+                // On Unix the channel is inherited, not connected: a worker that never speaks
+                // never connected.
+                Err(_) => Err(silent(if cfg!(unix) {
+                    "did not connect"
+                } else {
+                    "connected but sent no `hello`"
+                })),
+            },
+            status = child.wait() => return Err(exited(status)),
         };
+        // 5.1: an isolated team's worker proves it loaded the team's configuration before it
+        // receives anything; one that cannot (an older package) is stopped.
+        let hello = hello.and_then(|h| match &opts.team {
+            Some(expected) => expected
+                .check(&h, &opts.python)
+                .map(|()| h)
+                .map_err(WorkerError::Refused),
+            None => Ok(h),
+        });
         let hello = match hello {
             Ok(h) => h,
             Err(e) => {
@@ -687,7 +1156,7 @@ impl Worker {
             child: Arc::new(tokio::sync::Mutex::new(Some(child))),
             dead_rx,
             reader: reader_task,
-            _listener: listener,
+            _channel: channel,
         })
     }
 

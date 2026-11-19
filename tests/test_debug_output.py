@@ -33,6 +33,24 @@ def test_dprint_writes_to_stderr(capfd):
     assert match.group('module') == __name__
 
 
+@pytest.mark.parametrize('microsecond', [0, 400, 999_000])
+def test_dprint_header_keeps_milliseconds_on_a_whole_second(capfd, monkeypatch, microsecond):
+    """
+    A timestamp that lands on a whole second has no fraction in `isoformat()`: the header must still
+    read `HH:MM:SS.mmm`.
+    """
+    from datetime import datetime
+    import meerschaum.utils.dtypes as dtypes
+    from meerschaum.utils.debug import dprint
+    moment = datetime(2024, 1, 2, 17, 40, 5, microsecond)
+    monkeypatch.setattr(dtypes, 'get_current_timestamp', lambda *args, **kwargs: moment)
+    dprint("whole second")
+    _, err = capfd.readouterr()
+    expected = '17:40:05.' + f'{microsecond // 1000:03d}' + ' | '
+    assert expected in err, err
+    assert HEADER.search(err) is not None, err
+
+
 def test_dprint_takes_the_rust_caller(capfd):
     from meerschaum.utils.debug import dprint
     dprint("from rust", _package='meerschaum_core::debug', _lineno=7)

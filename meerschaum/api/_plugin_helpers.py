@@ -77,6 +77,10 @@ def _session_username(request: Any) -> Optional[str]:
 
 
 def _session_user_sync(request: Any):
+    from meerschaum.api._extension_user import extension_session_user
+    handled, projected = extension_session_user(request)
+    if handled:
+        return projected
     from meerschaum.api import get_api_connector
     from meerschaum.core import User
     username = _session_username(request)

@@ -17,7 +17,8 @@ use axum::http::Request;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use chrono::{DateTime, NaiveDateTime};
-use meerschaum_core::{Map, Value};
+use meerschaum_connector::InstanceConnector;
+use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_server::{AppState, ServerConfig};
 use regex::Regex;
 use serde_json::{Value as Json, json};
@@ -149,7 +150,12 @@ fn v4_view(v: Json, owner: &str) -> Json {
 /// recording's user had every scope (v4: no `scopes` attribute), while an rc15 user without
 /// permissions of their own has the default role (`editor`), which creates no jobs and deletes no
 /// accounts. `(step, status, detail)`.
+const PROTECTED_TABLE_DETAIL: &str =
+    "Refusing to target 'mrsm_users': it is one of Meerschaum's internal tables.";
 const RC15_EXPECTED: &[(&str, u16, &str)] = &[
+    ("register_protected_target", 403, PROTECTED_TABLE_DETAIL),
+    ("sync_protected", 403, PROTECTED_TABLE_DETAIL),
+    ("delete_protected_target", 403, PROTECTED_TABLE_DETAIL),
     (
         "user_create_job_denied",
         403,
@@ -197,7 +203,7 @@ fn seeded_state(fixture: &Json, root: &std::path::Path) -> (AppState, Arc<common
 async fn replay_python_contract() {
     let fixture: Json = serde_json::from_str(FIXTURE).expect("fixture");
     let root = tempfile::tempdir().unwrap();
-    let (state, _instance) = seeded_state(&fixture, root.path());
+    let (state, instance) = seeded_state(&fixture, root.path());
     let version = state.config.version.clone();
     let app = meerschaum_server::app(state);
     let mut slots = Slots::default();
@@ -239,6 +245,19 @@ async fn replay_python_contract() {
             _ => Body::empty(),
         };
         let resp = common::send(&app, b.body(body).unwrap()).await;
+        if step == "register_protected_target" {
+            // The remaining exchanges exercise an invalid registration left by an older server.
+            let legacy = Pipe::builder("demo", "evil")
+                .instance("sql:fixture")
+                .parameters(
+                    Value::from_json_str(r#"{"target":"mrsm_users"}"#)
+                        .unwrap()
+                        .to_map(),
+                )
+                .build()
+                .unwrap();
+            assert!(instance.register_pipe(&legacy).await.success);
+        }
         let mode = ex["compare"].as_str().unwrap_or("exact");
         *counts.entry(mode.to_string()).or_default() += 1;
 

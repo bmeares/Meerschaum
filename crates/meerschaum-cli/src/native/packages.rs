@@ -236,7 +236,7 @@ pub fn upgrade_packages(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 
 /// `is_docker_available()`: `docker ps` succeeds.
 fn docker_available() -> bool {
-    Command::new("docker")
+    meerschaum_core::child_env::scrubbed(Command::new("docker"))
         .arg("ps")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -245,19 +245,214 @@ fn docker_available() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Upgrade the active installation, then optionally refresh its Docker stack.
-pub fn upgrade_meerschaum(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let result = super::self_upgrade::upgrade(args, rt)?;
-    if result.success && docker_available() {
-        let (force, yes, noask) = (flag(args, "force"), flag(args, "yes"), flag(args, "noask"));
-        let debug = flag(args, "debug");
-        run_stack(rt, &["pull"], debug);
-        if force || yes_no(rt, "Bring up the stack after upgrading?", "n", yes, noask)? {
-            super::extensions::without_stack_hint(|| run_stack(rt, &["up", "-d"], debug));
-            offer_extension_upgrade(rt, yes, noask, debug);
+/// The question about the stack's images (default yes: v4 always pulled).
+pub(super) const PULL_QUESTION: &str = "Pull the stack's new Docker images?";
+/// v4's question about the stack (default no; `--force` answers yes).
+pub(super) const UP_QUESTION: &str = "Bring up the stack after upgrading?";
+
+/// What [`UpgradeSteps::plan`] found.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum PlanOutcome {
+    /// Refused or cancelled: nothing changed, nothing else is asked or run.
+    Stop(SuccessTuple),
+    /// Nothing to install (the release is already installed); the stack steps may still run.
+    Current(SuccessTuple),
+    /// An approved installation is ready to run.
+    Ready,
+}
+
+/// The flags of `upgrade meerschaum` that shape its questions.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct UpgradeFlags {
+    pub yes: bool,
+    pub noask: bool,
+    pub force: bool,
+    /// `--no-pull`: skip pulling the stack's images without asking.
+    pub no_pull: bool,
+}
+
+/// The steps of `upgrade meerschaum`, so that their order can be tested with a fake.
+pub(super) trait UpgradeSteps {
+    /// Choose the release and the installer, refuse what cannot be upgraded, and ask "Upgrade
+    /// this installation?" (and whether to align a selected Python host). Nothing slow runs.
+    fn plan(&mut self) -> PlanOutcome;
+    /// Docker answers and this root has a stack (`mrsm stack` wrote its compose file).
+    fn stack_applies(&mut self) -> bool;
+    /// `yes_no(question, default, yes, noask)`.
+    fn ask(
+        &mut self,
+        question: &str,
+        default: &str,
+        yes: bool,
+        noask: bool,
+    ) -> Result<bool, crate::builtin::ActionError>;
+    /// Download, install and verify the approved installation.
+    fn install(&mut self) -> SuccessTuple;
+    /// `stack pull`: success.
+    fn pull(&mut self) -> bool;
+    /// `stack up -d`: success.
+    fn up(&mut self) -> bool;
+    /// After a successful `stack up`: offer the extension updates the new images ship.
+    fn after_up(&mut self);
+    /// Print a result on its own (the installation's, before the stack steps).
+    fn report(&mut self, result: &SuccessTuple);
+    fn info(&mut self, text: &str);
+    fn warn(&mut self, text: &str);
+}
+
+/// `upgrade meerschaum`: every question first (the installation, then the stack's images, then
+/// bringing the stack up), then the work, unattended: install, pull, bring up. The stack steps
+/// never run after a refused, cancelled or failed installation, and a failed pull never turns
+/// a successful installation into a failure.
+pub(super) fn run_upgrade(
+    steps: &mut impl UpgradeSteps,
+    flags: UpgradeFlags,
+) -> Result<SuccessTuple, crate::builtin::ActionError> {
+    let planned = steps.plan();
+    if let PlanOutcome::Stop(result) = planned {
+        return Ok(result);
+    }
+    let (pull, up) = if steps.stack_applies() {
+        let pull = !flags.no_pull && steps.ask(PULL_QUESTION, "y", flags.yes, flags.noask)?;
+        let up = flags.force || steps.ask(UP_QUESTION, "n", flags.yes, flags.noask)?;
+        (pull, up)
+    } else {
+        (false, false)
+    };
+    let installed = match planned {
+        PlanOutcome::Current(result) => result,
+        _ => steps.install(),
+    };
+    if !installed.success || !(pull || up) {
+        return Ok(installed);
+    }
+    steps.report(&installed);
+    let mut outcome = Vec::new();
+    let pulled = pull.then(|| steps.pull());
+    match pulled {
+        Some(true) => outcome.push("Pulled the stack's new images."),
+        Some(false) => {
+            steps.warn(
+                "Failed to pull the stack's new Docker images. Meerschaum itself was upgraded; retry with `mrsm stack pull`.",
+            );
+            outcome.push("Pulling the stack's new images failed (retry with `mrsm stack pull`).");
+        }
+        None => {}
+    }
+    if up {
+        if pulled == Some(false) {
+            steps.info(
+                "Not bringing up the stack, because pulling its images failed. Run `mrsm stack pull`, then `mrsm stack up -d`.",
+            );
+            outcome.push("The stack was not brought up.");
+        } else {
+            if pulled.is_none() {
+                steps.info(
+                    "Bringing up the stack with the images already on this host (no new images were pulled).",
+                );
+            }
+            if steps.up() {
+                outcome.push("Brought up the stack.");
+                steps.after_up();
+            } else {
+                steps.warn("Failed to bring up the stack. Retry with `mrsm stack up -d`.");
+                outcome.push("Bringing up the stack failed (retry with `mrsm stack up -d`).");
+            }
         }
     }
-    Ok(result)
+    Ok(SuccessTuple::ok(format!(
+        "Meerschaum is upgraded. {}",
+        outcome.join(" ")
+    )))
+}
+
+/// The real steps: the installation planner, the stack and the terminal.
+struct LiveSteps<'a, 'r> {
+    rt: &'a mut Runtime<'r>,
+    args: &'a ArgsMap,
+    job: Option<super::self_upgrade::Job>,
+    flags: UpgradeFlags,
+    debug: bool,
+}
+
+impl UpgradeSteps for LiveSteps<'_, '_> {
+    fn plan(&mut self) -> PlanOutcome {
+        use super::self_upgrade::Planned;
+        match super::self_upgrade::plan(self.args, self.rt) {
+            Planned::Stop(result) => PlanOutcome::Stop(result),
+            Planned::Current(result) => PlanOutcome::Current(result),
+            Planned::Ready(job) => {
+                self.job = Some(*job);
+                PlanOutcome::Ready
+            }
+        }
+    }
+
+    fn stack_applies(&mut self) -> bool {
+        // A root that never used the stack has no compose file: nothing to pull or bring up,
+        // and `mrsm stack` would write one first.
+        self.rt.config().paths().path("STACK_COMPOSE_PATH").exists() && docker_available()
+    }
+
+    fn ask(
+        &mut self,
+        question: &str,
+        default: &str,
+        yes: bool,
+        noask: bool,
+    ) -> Result<bool, crate::builtin::ActionError> {
+        yes_no(self.rt, question, default, yes, noask)
+    }
+
+    fn install(&mut self) -> SuccessTuple {
+        match self.job.take() {
+            Some(job) => super::self_upgrade::execute(job, self.rt),
+            None => SuccessTuple::fail("No installation was planned."),
+        }
+    }
+
+    fn pull(&mut self) -> bool {
+        run_stack(self.rt, &["pull"], self.debug)
+    }
+
+    fn up(&mut self) -> bool {
+        let (rt, debug) = (&mut *self.rt, self.debug);
+        super::extensions::without_stack_hint(|| run_stack(rt, &["up", "-d"], debug))
+    }
+
+    fn after_up(&mut self) {
+        offer_extension_upgrade(self.rt, self.flags.yes, self.flags.noask, self.debug);
+    }
+
+    fn report(&mut self, result: &SuccessTuple) {
+        super::print_tuple(self.rt, result, Default::default());
+    }
+
+    fn info(&mut self, text: &str) {
+        super::info(self.rt, text);
+    }
+
+    fn warn(&mut self, text: &str) {
+        warn(self.rt, text);
+    }
+}
+
+/// Upgrade the active installation, then optionally refresh its Docker stack.
+pub fn upgrade_meerschaum(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let flags = UpgradeFlags {
+        yes: flag(args, "yes"),
+        noask: flag(args, "noask"),
+        force: flag(args, "force"),
+        no_pull: flag(args, "no_pull"),
+    };
+    let mut steps = LiveSteps {
+        rt,
+        args,
+        job: None,
+        flags,
+        debug: flag(args, "debug"),
+    };
+    run_upgrade(&mut steps, flags)
 }
 
 /// v5: once the stack is up again, wait (bounded) for its database to be healthy and offer
@@ -303,7 +498,7 @@ fn wait_for_stack_db(rt: &mut Runtime<'_>, limit: std::time::Duration) -> bool {
         .unwrap_or_else(|| "mrsm".into());
     let start = std::time::Instant::now();
     loop {
-        let ids = Command::new("docker")
+        let ids = meerschaum_core::child_env::scrubbed(Command::new("docker"))
             .args([
                 "ps",
                 "-q",
@@ -320,7 +515,7 @@ fn wait_for_stack_db(rt: &mut Runtime<'_>, limit: std::time::Duration) -> bool {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default();
         let state = ids.lines().next().and_then(|id| {
-            Command::new("docker")
+            meerschaum_core::child_env::scrubbed(Command::new("docker"))
                 .args([
                     "inspect",
                     "-f",
@@ -344,14 +539,14 @@ fn wait_for_stack_db(rt: &mut Runtime<'_>, limit: std::time::Duration) -> bool {
     }
 }
 
-/// `actions['stack'](words, debug=debug)`; the result is ignored, as in v4.
-pub(super) fn run_stack(rt: &mut Runtime<'_>, words: &[&str], debug: bool) {
+/// `actions['stack'](words, debug=debug)`: whether it succeeded (v4 ignores the result).
+pub(super) fn run_stack(rt: &mut Runtime<'_>, words: &[&str], debug: bool) -> bool {
     let mut stack_args = ArgsMap::new();
     let mut action = vec!["stack".to_string()];
     action.extend(words.iter().map(|w| (*w).to_string()));
     stack_args.insert("action".into(), PyValue::str_list(&action));
     stack_args.insert("debug".into(), PyValue::Bool(debug));
-    let _ = crate::dispatch::entry_with_args(stack_args, rt, 1);
+    crate::dispatch::entry_with_args(stack_args, rt, 1).success
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -383,7 +578,7 @@ for name in sys.argv[1:]:
     except Exception:
         pass
 ";
-    let output = Command::new(&interpreter.executable)
+    let output = meerschaum_core::child_env::scrubbed(Command::new(&interpreter.executable))
         .args(["-c", PROBE])
         .args(import_names)
         .env("PYTHONSAFEPATH", "1")
@@ -511,5 +706,344 @@ mod tests {
             assert!(packages_table::group(group).is_some(), "{group}");
         }
         assert!(packages_table::group("bogus").is_none());
+    }
+
+    /// A fake `upgrade meerschaum`: questions are answered from a script (emulating `yes_no`:
+    /// `--yes` answers yes and `--noask` the default, without asking), and every step is recorded.
+    struct Fake {
+        plan: PlanOutcome,
+        stack: bool,
+        answers: Vec<bool>,
+        install_ok: bool,
+        pull_ok: bool,
+        up_ok: bool,
+        events: Vec<String>,
+    }
+
+    impl Fake {
+        fn new(stack: bool, answers: &[bool]) -> Self {
+            Fake {
+                plan: PlanOutcome::Ready,
+                stack,
+                answers: answers.to_vec(),
+                install_ok: true,
+                pull_ok: true,
+                up_ok: true,
+                events: Vec::new(),
+            }
+        }
+    }
+
+    impl UpgradeSteps for Fake {
+        fn plan(&mut self) -> PlanOutcome {
+            self.events.push("plan".into());
+            self.plan.clone()
+        }
+        fn stack_applies(&mut self) -> bool {
+            self.stack
+        }
+        fn ask(
+            &mut self,
+            question: &str,
+            default: &str,
+            yes: bool,
+            noask: bool,
+        ) -> Result<bool, crate::builtin::ActionError> {
+            let answer = if yes {
+                true
+            } else if noask {
+                default == "y"
+            } else {
+                assert!(!self.answers.is_empty(), "unexpected question {question}");
+                self.answers.remove(0)
+            };
+            let short = if question == PULL_QUESTION {
+                "pull"
+            } else {
+                "up"
+            };
+            self.events.push(format!("ask {short}={answer}"));
+            Ok(answer)
+        }
+        fn install(&mut self) -> SuccessTuple {
+            self.events.push("install".into());
+            if self.install_ok {
+                SuccessTuple::ok("Installed Meerschaum 5.1.0.")
+            } else {
+                SuccessTuple::fail("Failed to upgrade Meerschaum.")
+            }
+        }
+        fn pull(&mut self) -> bool {
+            self.events.push("pull".into());
+            self.pull_ok
+        }
+        fn up(&mut self) -> bool {
+            self.events.push("up".into());
+            self.up_ok
+        }
+        fn after_up(&mut self) {
+            self.events.push("extensions".into());
+        }
+        fn report(&mut self, result: &SuccessTuple) {
+            self.events.push(format!("report {}", result.message));
+        }
+        fn info(&mut self, text: &str) {
+            self.events.push(format!("info {text}"));
+        }
+        fn warn(&mut self, text: &str) {
+            self.events.push(format!("warn {text}"));
+        }
+    }
+
+    fn flags(yes: bool, noask: bool, force: bool, no_pull: bool) -> UpgradeFlags {
+        UpgradeFlags {
+            yes,
+            noask,
+            force,
+            no_pull,
+        }
+    }
+
+    /// The steps that ran, without the messages' text.
+    fn steps(fake: &Fake) -> Vec<&str> {
+        fake.events
+            .iter()
+            .map(|e| match e.split_once(' ') {
+                Some((head, _)) if head != "ask" => head,
+                _ => e.as_str(),
+            })
+            .collect()
+    }
+
+    /// No slow step (install, pull, up) starts before the last answer.
+    fn assert_questions_first(fake: &Fake) {
+        let last_question = fake.events.iter().rposition(|e| e.starts_with("ask "));
+        let first_work = fake
+            .events
+            .iter()
+            .position(|e| matches!(e.as_str(), "install" | "pull" | "up"));
+        if let (Some(q), Some(w)) = (last_question, first_work) {
+            assert!(q < w, "{:?}", fake.events);
+        }
+    }
+
+    #[test]
+    fn every_question_comes_before_any_work() {
+        // (stack, scripted answers, flags) -> the exact steps.
+        let cases: &[(bool, &[bool], UpgradeFlags, &[&str])] = &[
+            // Interactive: pull yes, up yes.
+            (
+                true,
+                &[true, true],
+                flags(false, false, false, false),
+                &[
+                    "plan",
+                    "ask pull=true",
+                    "ask up=true",
+                    "install",
+                    "report",
+                    "pull",
+                    "up",
+                    "extensions",
+                ],
+            ),
+            // Pull yes, up no (the default).
+            (
+                true,
+                &[true, false],
+                flags(false, false, false, false),
+                &[
+                    "plan",
+                    "ask pull=true",
+                    "ask up=false",
+                    "install",
+                    "report",
+                    "pull",
+                ],
+            ),
+            // Pull no, up yes: brought up with the existing images, and it says so.
+            (
+                true,
+                &[false, true],
+                flags(false, false, false, false),
+                &[
+                    "plan",
+                    "ask pull=false",
+                    "ask up=true",
+                    "install",
+                    "report",
+                    "info",
+                    "up",
+                    "extensions",
+                ],
+            ),
+            // Neither: just the installation, its result is the action's result.
+            (
+                true,
+                &[false, false],
+                flags(false, false, false, false),
+                &["plan", "ask pull=false", "ask up=false", "install"],
+            ),
+            // `--yes`: pull and up without asking.
+            (
+                true,
+                &[],
+                flags(true, false, false, false),
+                &[
+                    "plan",
+                    "ask pull=true",
+                    "ask up=true",
+                    "install",
+                    "report",
+                    "pull",
+                    "up",
+                    "extensions",
+                ],
+            ),
+            // `--noask`: the defaults (pull yes, up no).
+            (
+                true,
+                &[],
+                flags(false, true, false, false),
+                &[
+                    "plan",
+                    "ask pull=true",
+                    "ask up=false",
+                    "install",
+                    "report",
+                    "pull",
+                ],
+            ),
+            // `--force`: up without asking (v4); the pull question is still asked.
+            (
+                true,
+                &[true],
+                flags(false, false, true, false),
+                &[
+                    "plan",
+                    "ask pull=true",
+                    "install",
+                    "report",
+                    "pull",
+                    "up",
+                    "extensions",
+                ],
+            ),
+            // `--no-pull`: never asked, never pulled.
+            (
+                true,
+                &[false],
+                flags(false, false, false, true),
+                &["plan", "ask up=false", "install"],
+            ),
+            (
+                true,
+                &[],
+                flags(true, false, false, true),
+                &[
+                    "plan",
+                    "ask up=true",
+                    "install",
+                    "report",
+                    "info",
+                    "up",
+                    "extensions",
+                ],
+            ),
+            (
+                true,
+                &[],
+                flags(false, true, true, true),
+                &["plan", "install", "report", "info", "up", "extensions"],
+            ),
+            // No stack on this root (or no Docker): no stack question at all.
+            (
+                false,
+                &[],
+                flags(false, false, false, false),
+                &["plan", "install"],
+            ),
+            (
+                false,
+                &[],
+                flags(true, false, true, false),
+                &["plan", "install"],
+            ),
+        ];
+        for (stack, answers, flags, expected) in cases {
+            let mut fake = Fake::new(*stack, answers);
+            let result = run_upgrade(&mut fake, *flags).unwrap();
+            assert!(result.success, "{result:?}");
+            assert_eq!(steps(&fake), *expected, "{flags:?} {answers:?}");
+            assert!(fake.answers.is_empty(), "unused answers: {flags:?}");
+            assert_questions_first(&fake);
+        }
+    }
+
+    #[test]
+    fn a_refused_cancelled_or_failed_installation_runs_no_stack_step() {
+        // Refused or cancelled while planning: nothing else is asked.
+        let mut fake = Fake::new(true, &[]);
+        fake.plan = PlanOutcome::Stop(SuccessTuple::fail("Upgrade cancelled."));
+        let result = run_upgrade(&mut fake, flags(true, false, true, false)).unwrap();
+        assert!(!result.success);
+        assert_eq!(steps(&fake), ["plan"]);
+        // The installation fails after the questions: no pull, no up, its failure is the result.
+        let mut fake = Fake::new(true, &[]);
+        fake.install_ok = false;
+        let result = run_upgrade(&mut fake, flags(true, false, false, false)).unwrap();
+        assert_eq!(result.message, "Failed to upgrade Meerschaum.");
+        assert_eq!(
+            steps(&fake),
+            ["plan", "ask pull=true", "ask up=true", "install"]
+        );
+    }
+
+    #[test]
+    fn a_failed_pull_is_reported_after_the_installation_and_skips_the_stack() {
+        let mut fake = Fake::new(true, &[]);
+        fake.pull_ok = false;
+        let result = run_upgrade(&mut fake, flags(true, false, false, false)).unwrap();
+        // The upgrade itself succeeded and says so first.
+        assert!(result.success, "{result:?}");
+        assert_eq!(
+            fake.events[..5],
+            [
+                "plan",
+                "ask pull=true",
+                "ask up=true",
+                "install",
+                "report Installed Meerschaum 5.1.0."
+            ]
+        );
+        assert_eq!(steps(&fake)[5..], ["pull", "warn", "info"]);
+        assert!(fake.events[6].contains("Meerschaum itself was upgraded"));
+        assert!(
+            fake.events[7].contains("Not bringing up the stack, because pulling its images failed")
+        );
+        assert!(
+            result.message.contains("The stack was not brought up."),
+            "{}",
+            result.message
+        );
+        // A failed `stack up` is reported the same way, without failing the upgrade.
+        let mut fake = Fake::new(true, &[]);
+        fake.up_ok = false;
+        let result = run_upgrade(&mut fake, flags(true, false, false, false)).unwrap();
+        assert!(result.success);
+        assert_eq!(steps(&fake)[4..], ["report", "pull", "up", "warn"]);
+    }
+
+    #[test]
+    fn an_installation_that_is_already_current_still_offers_the_stack_steps() {
+        let mut fake = Fake::new(true, &[true, false]);
+        fake.plan =
+            PlanOutcome::Current(SuccessTuple::ok("Meerschaum 5.1.0 is already installed."));
+        let result = run_upgrade(&mut fake, flags(false, false, false, false)).unwrap();
+        assert!(result.success);
+        assert_eq!(
+            steps(&fake),
+            ["plan", "ask pull=true", "ask up=false", "report", "pull"]
+        );
     }
 }

@@ -392,8 +392,7 @@ async fn shared_pipe_cache_and_delete_cache() {
     .await;
     assert_eq!(types.json()["x"], "int64");
 
-    // `get_pipe(refresh=False)` hands out the shared handle: its columns-types cache survives
-    // a schema change until `DELETE .../cache`.
+    // `get_pipe(refresh=False)` hands out the shared handle.
     let h1 = state
         .get_pipe("a", "b", Some("c"), None, false)
         .await
@@ -411,22 +410,25 @@ async fn shared_pipe_cache_and_delete_cache() {
 
     let r = send(&app, sync(r#"[{"ts": "2024-01-02", "x": 1, "y": "z"}]"#)).await;
     assert!(r.json()[0].as_bool().unwrap());
-    let stale = send(
+    let updated = send(
         &app,
         req("GET", "/pipes/a/b/c/columns/types", Some(&admin), None),
     )
     .await;
-    assert!(
-        stale.json().get("y").is_none(),
-        "cached for 60 s: {}",
-        stale.text()
-    );
+    assert_eq!(updated.json()["y"], "string", "{}", updated.text());
+    let current = state
+        .get_pipe("a", "b", Some("c"), None, false)
+        .await
+        .unwrap();
+    let max_age = state.config.columns_types_cache_seconds;
+    assert!(current.cached_columns_types(max_age).is_some());
     let r = send(
         &app,
         req("DELETE", "/pipes/a/b/c/cache", Some(&admin), None),
     )
     .await;
     assert_eq!(r.json(), json!([true, "Success"]));
+    assert!(current.cached_columns_types(max_age).is_none());
     let fresh = send(
         &app,
         req("GET", "/pipes/a/b/c/columns/types", Some(&admin), None),
@@ -1046,9 +1048,25 @@ fn jobs_scope_app() -> (axum::Router, Arc<common::MemoryInstance>, tempfile::Tem
     let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
         .jobs(Arc::new(FakeJobs))
+        .actions(Arc::new(ShowAction))
         .build()
         .unwrap();
     (meerschaum_server::app(state), instance, dir)
+}
+
+/// The dispatcher's view for [`jobs_scope_app`]: `show` is an action, so a non-administrator who
+/// could run the job `j` (`show version`) may answer its prompts (5.1: a job whose command they
+/// could not run, such as a shell's, they may not; `p5_job_access.rs`).
+struct ShowAction;
+
+#[async_trait]
+impl meerschaum_server::backends::ActionsBackend for ShowAction {
+    fn list(&self) -> Vec<String> {
+        vec!["show".into()]
+    }
+    async fn execute(&self, _: &str, _: Map) -> SuccessTuple {
+        SuccessTuple::success()
+    }
 }
 
 /// Register a token with `scopes` (JSON text) as the admin; returns its API key header and the

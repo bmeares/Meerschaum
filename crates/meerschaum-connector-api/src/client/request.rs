@@ -8,6 +8,25 @@ use crate::wire::{QueryValue, encode_form, encode_query};
 
 use super::APIConnector;
 
+tokio::task_local! {
+    static AUTHENTICATION_HANDSHAKE: (usize, &'static str);
+}
+
+/// Only the fixed native login helper can enter this exception. Public request options,
+/// paths, headers and bodies cannot claim an authentication-only operation.
+pub(super) async fn authentication_handshake<F: std::future::Future>(
+    client: &APIConnector,
+    path: &'static str,
+    future: F,
+) -> F::Output {
+    AUTHENTICATION_HANDSHAKE
+        .scope(
+            (std::sync::Arc::as_ptr(&client.auth) as usize, path),
+            future,
+        )
+        .await
+}
+
 /// An HTTP method (`METHODS` in `_request.py`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
@@ -266,6 +285,16 @@ pub fn encode_path(path: &str) -> String {
 }
 
 impl APIConnector {
+    /// Copy the connection with a stricter maximum size for one protocol response.
+    pub fn with_response_byte_limit(&self, limit: usize) -> Self {
+        let mut bounded = self.clone();
+        bounded.response_limit = Some(
+            self.response_limit
+                .map_or(limit, |current| current.min(limit)),
+        );
+        bounded
+    }
+
     /// The full request URL for a relative path and an encoded query.
     pub fn request_url(&self, r_url: &str, query: &[(String, QueryValue)]) -> String {
         let pairs: Vec<(&str, QueryValue)> =
@@ -292,7 +321,20 @@ impl APIConnector {
         r_url: &str,
         opts: RequestOptions,
     ) -> ConnectorResult<ApiResponse> {
-        let replay = (opts.use_token && method.is_safe()).then(|| opts.clone());
+        if meerschaum_connector::mutation::current().is_some() && !method.is_safe() {
+            let handshake = method == Method::Post
+                && !opts.use_token
+                && AUTHENTICATION_HANDSHAKE
+                    .try_with(|(identity, path)| {
+                        *identity == std::sync::Arc::as_ptr(&self.auth) as usize && *path == r_url
+                    })
+                    .unwrap_or(false);
+            if !handshake {
+                return Err(ConnectorError::NotImplemented("Scoped API writes require a bound native or forwarding mutation capability; the original authority cannot be transferred by HTTP.".into()));
+            }
+        }
+        let replay = (self.request_authentication.is_none() && opts.use_token && method.is_safe())
+            .then(|| opts.clone());
         let (response, sent) = self.send_request(method, r_url, opts).await?;
         if response.status != 401 {
             return Ok(response);
@@ -352,7 +394,7 @@ impl APIConnector {
         for (k, v) in &opts.headers {
             req = req.header(k.as_str(), v.as_str());
         }
-        if opts.use_token {
+        if opts.use_token && self.request_authentication.is_none() {
             // PARITY: an unavailable token is sent as `Bearer None` (`f'Bearer {self.token}'`).
             // Boxed: `token()` may log in, which posts through `make_request`.
             let token = Box::pin(self.token()).await;
@@ -380,10 +422,46 @@ impl APIConnector {
                 data,
             } => {
                 let part = reqwest::multipart::Part::bytes(data).file_name(file_name);
-                req.multipart(reqwest::multipart::Form::new().part(field, part))
+                let form = reqwest::multipart::Form::new().part(field, part);
+                if self.request_authentication.is_some() {
+                    // Use reqwest's own multipart encoder, buffering within the signed-body
+                    // allowance so authentication binds the exact boundary and file bytes.
+                    use futures_util::StreamExt;
+                    let boundary = form.boundary().to_string();
+                    let stream = form.into_stream();
+                    futures_util::pin_mut!(stream);
+                    let mut bytes = Vec::new();
+                    while let Some(chunk) = stream.next().await {
+                        let chunk = chunk.map_err(|_| {
+                            ConnectorError::Invalid(
+                                "Could not encode the authenticated upload.".into(),
+                            )
+                        })?;
+                        if chunk.len()
+                            > super::authentication::MAX_AUTHENTICATED_REQUEST_BYTES
+                                .saturating_sub(bytes.len())
+                        {
+                            return Err(ConnectorError::Invalid(
+                                "An authenticated API upload exceeds its size limit.".into(),
+                            ));
+                        }
+                        bytes.extend_from_slice(&chunk);
+                    }
+                    req.header(
+                        "Content-Type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(bytes)
+                } else {
+                    req.multipart(form)
+                }
             }
         };
-        let response = req.send().await.map_err(|e| {
+        let mut request = req
+            .build()
+            .map_err(|e| ConnectorError::Backend(e.to_string()))?;
+        self.authenticate_request(&mut request)?;
+        let response = self.http.execute(request).await.map_err(|e| {
             if let Some(message) = self.connect_failure(&e) {
                 return ConnectorError::Backend(message);
             }
@@ -402,11 +480,7 @@ impl APIConnector {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| ConnectorError::Backend(e.to_string()))?
-            .to_vec();
+        let bytes = self.response_bytes(response).await?;
         Ok((
             ApiResponse {
                 status,
@@ -415,6 +489,44 @@ impl APIConnector {
             },
             sent,
         ))
+    }
+
+    /// Read a finite response, enforcing the host's limit for per-request authentication.
+    pub(crate) async fn response_bytes(
+        &self,
+        response: reqwest::Response,
+    ) -> ConnectorResult<Vec<u8>> {
+        if let Some(limit) = self.response_limit {
+            if response
+                .content_length()
+                .is_some_and(|length| length > limit as u64)
+            {
+                return Err(ConnectorError::Backend(
+                    "The API response exceeds its configured size limit.".into(),
+                ));
+            }
+            use futures_util::StreamExt;
+            let mut stream = response.bytes_stream();
+            let mut bytes = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|_| {
+                    ConnectorError::Backend("Could not read the API response.".into())
+                })?;
+                if chunk.len() > limit.saturating_sub(bytes.len()) {
+                    return Err(ConnectorError::Backend(
+                        "The API response exceeds its configured size limit.".into(),
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(bytes)
+        } else {
+            Ok(response
+                .bytes()
+                .await
+                .map_err(|e| ConnectorError::Backend(e.to_string()))?
+                .to_vec())
+        }
     }
 
     /// `get(r_url, **kwargs)`.

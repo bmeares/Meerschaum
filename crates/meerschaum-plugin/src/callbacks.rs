@@ -73,6 +73,17 @@ impl Bound {
         Bound::Datetime(datetime.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false))
     }
 
+    /// Encode this bound as a typed SQL parameter value for [`crate::host::read_sql_with`],
+    /// [`crate::host::exec_sql_with`], and [`Transaction`] queries: integer bounds stay JSON
+    /// integers; datetime bounds travel as typed `timestamptz` parameters so PostgreSQL accepts
+    /// `WHERE time >= :begin` without casts.
+    pub fn to_sql_param(&self) -> Value {
+        match self {
+            Bound::Int(i) => json!(i),
+            Bound::Datetime(s) => json!({"$mrsm_sql": "timestamptz", "value": s}),
+        }
+    }
+
     fn json(bound: Option<&Bound>) -> Value {
         match bound {
             None => Value::Null,
@@ -151,6 +162,10 @@ pub mod method {
     pub const GET_COLUMNS_TYPES: &str = "get_columns_types";
     /// `{}` -> whether the Pipe's table exists.
     pub const EXISTS: &str = "exists";
+    /// `{}` -> the Pipe's registered integer id (`i64`) or `null` when unregistered.
+    pub const GET_PIPE_ID: &str = "get_pipe_id";
+    /// `{}` -> whether the Pipe is registered on its instance (`bool`).
+    pub const IS_REGISTERED: &str = "is_registered";
     /// `{}` -> a success tuple (registers the Pipe with the view's parameters).
     pub const REGISTER: &str = "register";
     /// `{"connector_keys", "metric_key", "location_key", "instance_keys"}` -> Pipe metadata
@@ -158,8 +173,24 @@ pub mod method {
     pub const PIPE: &str = "pipe";
     /// `{"connector_keys", "query"}` -> the result frame in the stream.
     pub const READ_SQL: &str = "read_sql";
+    /// `{"connector_keys", "query", "params"}` -> the result frame in the stream.
+    pub const READ_SQL_WITH: &str = "read_sql_with";
     /// `{"connector_keys", "query"}` -> a success tuple.
     pub const EXEC_SQL: &str = "exec_sql";
+    /// `{"connector_keys", "query", "params"}` -> a success tuple.
+    pub const EXEC_SQL_WITH: &str = "exec_sql_with";
+    /// `{}` -> the resolved `MRSM_ROOT_DIR` path of the current call (`String`).
+    pub const ROOT_DIR: &str = "root_dir";
+    /// `{"connector_keys", "lock_key"}` -> `{"tx_id": u64}`.
+    pub const TX_BEGIN: &str = "tx_begin";
+    /// `{"tx_id", "query", "params"}` -> the result frame in the stream.
+    pub const TX_READ_SQL: &str = "tx_read_sql";
+    /// `{"tx_id", "query", "params"}` -> a success tuple.
+    pub const TX_EXEC_SQL: &str = "tx_exec_sql";
+    /// `{"tx_id"}` -> a success tuple.
+    pub const TX_COMMIT: &str = "tx_commit";
+    /// `{"tx_id"}` -> a success tuple.
+    pub const TX_ROLLBACK: &str = "tx_rollback";
     /// `{}` -> the plugin's config section (`plugins:<name>`) or `null`.
     pub const PLUGIN_CONFIG: &str = "plugin_config";
     /// `{"config"}` -> a success tuple.
@@ -182,6 +213,8 @@ pub mod method {
     /// host).
     pub(crate) fn minimum_version(method: &str) -> &'static str {
         match method {
+            GET_PIPE_ID | IS_REGISTERED | READ_SQL_WITH | EXEC_SQL_WITH | ROOT_DIR | TX_BEGIN
+            | TX_READ_SQL | TX_EXEC_SQL | TX_COMMIT | TX_ROLLBACK => "5.1.0",
             MINT_TOKEN | REVOKE_TOKEN | DRAINING => "5.0.0rc34",
             _ => "5.0.0rc15",
         }
@@ -796,10 +829,149 @@ impl<'a> Pipe<'a> {
         Ok(value.as_bool().unwrap_or(false))
     }
 
+    /// The Pipe's registered id on its instance (`None` when unregistered), matching Python's
+    /// `pipe.get_id()` / `pipe.id`.
+    pub fn id(&self) -> Result<Option<i64>> {
+        let (value, _) = self.call(method::GET_PIPE_ID, json!({}), None)?;
+        match value {
+            Value::Null => Ok(None),
+            Value::Number(n) => n
+                .as_i64()
+                .map(Some)
+                .ok_or_else(|| error(format!("pipe id '{n}' is not a 64-bit integer"))),
+            Value::String(s) => s
+                .parse::<i64>()
+                .map(Some)
+                .map_err(|_| error(format!("pipe id '{s}' is not an integer"))),
+            other => Err(error(format!("invalid pipe id returned by host: {other}"))),
+        }
+    }
+
+    /// Whether the Pipe is registered on its instance (distinguishes registered-with-empty-params
+    /// from unregistered, and works for both integer and string pipe ids).
+    pub fn is_registered(&self) -> Result<bool> {
+        let (value, _) = self.call(method::IS_REGISTERED, json!({}), None)?;
+        Ok(value.as_bool().unwrap_or(false))
+    }
+
     /// Register the Pipe on its instance with this view's parameters.
     pub fn register(&self) -> Result<SuccessTuple> {
         tuple(self.call(method::REGISTER, json!({}), None)?.0)
     }
+}
+
+/// An active host-managed SQL transaction opened by [`crate::host::transaction`]. Statements run
+/// inside the same database transaction (holding any requested advisory lock); returning `Ok` from
+/// the closure commits, while returning `Err` or panicking rolls back automatically.
+pub struct Transaction {
+    tx_id: u64,
+    host_generation: u64,
+    finished: Cell<bool>,
+    _thread: PhantomData<Rc<()>>,
+}
+
+impl Transaction {
+    fn call(&self, method: &str, mut args: Value) -> Result<(Value, Option<Frame>)> {
+        if self.finished.get() {
+            return Err(error("this SQL transaction has already finished"));
+        }
+        if let Some(obj) = args.as_object_mut() {
+            obj.insert("tx_id".into(), json!(self.tx_id));
+        }
+        invoke(Some(self.host_generation), method, None, args, None, false)
+    }
+
+    /// Run a query inside this transaction and return its rows.
+    pub fn read_sql(&self, query: &str) -> Result<Frame> {
+        self.read_sql_with(query, &json!({}))
+    }
+
+    /// Run a parameterized query (`:name` binds) inside this transaction and return its rows.
+    pub fn read_sql_with(&self, query: &str, params: &Value) -> Result<Frame> {
+        let (_, data) = self.call(
+            method::TX_READ_SQL,
+            json!({"query": query, "params": params}),
+        )?;
+        Ok(data.unwrap_or_else(Frame::empty))
+    }
+
+    /// Execute a statement inside this transaction.
+    pub fn exec_sql(&self, query: &str) -> Result<SuccessTuple> {
+        self.exec_sql_with(query, &json!({}))
+    }
+
+    /// Execute a parameterized statement (`:name` binds) inside this transaction.
+    pub fn exec_sql_with(&self, query: &str, params: &Value) -> Result<SuccessTuple> {
+        let (value, _) = self.call(
+            method::TX_EXEC_SQL,
+            json!({"query": query, "params": params}),
+        )?;
+        tuple(value)
+    }
+
+    fn commit(&self) -> Result<()> {
+        if self.finished.replace(true) {
+            return Ok(());
+        }
+        let (value, _) = invoke(
+            Some(self.host_generation),
+            method::TX_COMMIT,
+            None,
+            json!({"tx_id": self.tx_id}),
+            None,
+            false,
+        )?;
+        let res = tuple(value)?;
+        if res.success {
+            Ok(())
+        } else {
+            Err(error(res.message))
+        }
+    }
+
+    fn rollback(&self) {
+        if self.finished.replace(true) {
+            return;
+        }
+        let _ = invoke(
+            Some(self.host_generation),
+            method::TX_ROLLBACK,
+            None,
+            json!({"tx_id": self.tx_id}),
+            None,
+            false,
+        );
+    }
+}
+
+impl Drop for Transaction {
+    fn drop(&mut self) {
+        self.rollback();
+    }
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
+        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((triple >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(triple & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 /// Host calls that are not about one Pipe. Each works during a plugin call (fetch, sync, hooks,
@@ -847,6 +1019,24 @@ pub(crate) mod calls {
         Ok(data.unwrap_or_else(Frame::empty))
     }
 
+    /// Run a parameterized query (`:name` binds) on a SQL connector and return its rows.
+    ///
+    /// `params` is a JSON object mapping parameter names to values: scalars, `null`, arrays (bound
+    /// as native PostgreSQL arrays for `= ANY(:ids)`), or typed values built with
+    /// [`Bound::to_sql_param`], [`sql_timestamptz`], [`sql_timestamp`], [`sql_date`],
+    /// [`sql_bytes`], or [`sql_json`].
+    pub fn read_sql_with(connector_keys: &str, query: &str, params: &Value) -> Result<Frame> {
+        let (_, data) = invoke(
+            None,
+            method::READ_SQL_WITH,
+            None,
+            json!({"connector_keys": connector_keys, "query": query, "params": params}),
+            None,
+            false,
+        )?;
+        Ok(data.unwrap_or_else(Frame::empty))
+    }
+
     /// Execute a statement on a SQL connector (no rows back).
     pub fn exec_sql(connector_keys: &str, query: &str) -> Result<SuccessTuple> {
         let (value, _) = invoke(
@@ -858,6 +1048,106 @@ pub(crate) mod calls {
             false,
         )?;
         tuple(value)
+    }
+
+    /// Execute a parameterized statement (`:name` binds) on a SQL connector (no rows back).
+    pub fn exec_sql_with(
+        connector_keys: &str,
+        query: &str,
+        params: &Value,
+    ) -> Result<SuccessTuple> {
+        let (value, _) = invoke(
+            None,
+            method::EXEC_SQL_WITH,
+            None,
+            json!({"connector_keys": connector_keys, "query": query, "params": params}),
+            None,
+            false,
+        )?;
+        tuple(value)
+    }
+
+    /// Run `f` inside a host-managed SQL transaction on `connector_keys`.
+    ///
+    /// When `lock_key` is `Some(key)`, the host acquires a transaction-scoped advisory lock before
+    /// invoking `f`: `pg_advisory_xact_lock` on PostgreSQL-family databases and `BEGIN IMMEDIATE`
+    /// on SQLite/GeoPackage. Returning `Ok(value)` commits the transaction; returning `Err` or
+    /// panicking rolls it back automatically and releases the lock.
+    ///
+    /// Statements inside `f` should run through the passed [`Transaction`] (`tx.read_sql_with`,
+    /// `tx.exec_sql_with`) rather than opening a second pooled connection via [`read_sql`].
+    pub fn transaction<T, F>(connector_keys: &str, lock_key: Option<&str>, f: F) -> Result<T>
+    where
+        F: FnOnce(&Transaction) -> Result<T>,
+    {
+        let generation = HOST
+            .with(|slot| slot.get().map(|h| h.generation))
+            .ok_or_else(|| error(UNAVAILABLE))?;
+        let (value, _) = invoke(
+            Some(generation),
+            method::TX_BEGIN,
+            None,
+            json!({"connector_keys": connector_keys, "lock_key": lock_key}),
+            None,
+            false,
+        )?;
+        let tx_id = value["tx_id"]
+            .as_u64()
+            .ok_or_else(|| error("host returned no transaction id"))?;
+        let tx = Transaction {
+            tx_id,
+            host_generation: generation,
+            finished: Cell::new(false),
+            _thread: PhantomData,
+        };
+        match f(&tx) {
+            Ok(out) => {
+                tx.commit()?;
+                Ok(out)
+            }
+            Err(err) => {
+                tx.rollback();
+                Err(err)
+            }
+        }
+    }
+
+    /// The resolved Meerschaum root directory (`MRSM_ROOT_DIR`) of the current call (reflecting
+    /// Compose's project root under `run_in_process`, not merely the process environment).
+    pub fn root_dir() -> Result<std::path::PathBuf> {
+        let (value, _) = invoke(None, method::ROOT_DIR, None, json!({}), None, false)?;
+        value
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| error("host returned no root_dir"))
+    }
+
+    /// Encode a datetime (`DateTime<Utc>`, `NaiveDateTime`, [`Bound`], or ISO-8601 string) as a
+    /// typed `timestamptz` SQL parameter for [`read_sql_with`] / [`exec_sql_with`].
+    pub fn sql_timestamptz(value: impl Into<Bound>) -> Value {
+        value.into().to_sql_param()
+    }
+
+    /// Encode an ISO-8601 timestamp as a typed naive `timestamp` SQL parameter.
+    pub fn sql_timestamp(iso: &str) -> Value {
+        json!({"$mrsm_sql": "timestamp", "value": iso})
+    }
+
+    /// Encode a `YYYY-MM-DD` date string as a typed `date` SQL parameter.
+    pub fn sql_date(iso: &str) -> Value {
+        json!({"$mrsm_sql": "date", "value": iso})
+    }
+
+    /// Encode binary data as a typed `bytes` (`BYTEA` / `BLOB`) SQL parameter.
+    pub fn sql_bytes(bytes: &[u8]) -> Value {
+        json!({"$mrsm_sql": "bytes", "value": encode_base64(bytes)})
+    }
+
+    /// Encode any JSON value explicitly as a `json` / `jsonb` SQL parameter (for passing a JSON
+    /// array into a `jsonb` column instead of binding it as a SQL array).
+    pub fn sql_json(value: Value) -> Value {
+        json!({"$mrsm_sql": "json", "value": value})
     }
 
     /// This plugin's configuration (`plugins:<name>` in the Meerschaum config, the section
@@ -1365,5 +1655,178 @@ mod tests {
             Query::new().begin(1).limit(2).order("desc").args()["order"],
             "desc"
         );
+        assert_eq!(
+            bound.to_sql_param(),
+            json!({"$mrsm_sql": "timestamptz", "value": "2024-03-01T10:30:00+00:00"})
+        );
+        assert_eq!(Bound::Int(5).to_sql_param(), json!(5));
+        assert_eq!(
+            crate::host::sql_bytes(b"hello"),
+            json!({"$mrsm_sql": "bytes", "value": "aGVsbG8="})
+        );
+    }
+
+    #[test]
+    fn v5_1_host_calls_round_trip_sql_params_root_dir_pipe_id_and_transactions() {
+        use std::sync::Mutex;
+        struct RecordingHost {
+            calls: Mutex<Vec<HostCall>>,
+            next_tx: Mutex<u64>,
+            pipe_id: Mutex<Value>,
+        }
+        impl HostServices for RecordingHost {
+            fn call(&self, _: &Request, _: &str, _: Option<Frame>) -> Result<Value> {
+                unreachable!()
+            }
+            fn host_call(
+                &self,
+                _: &Request,
+                call: &HostCall,
+                _: Option<PipeInput>,
+            ) -> Result<HostReply> {
+                self.calls.lock().unwrap().push(call.clone());
+                match call.method.as_str() {
+                    method::ROOT_DIR => Ok(HostReply::json(json!("/srv/sra/root"))),
+                    method::GET_PIPE_ID => {
+                        Ok(HostReply::json(self.pipe_id.lock().unwrap().clone()))
+                    }
+                    method::IS_REGISTERED => {
+                        let reg = !self.pipe_id.lock().unwrap().is_null();
+                        Ok(HostReply::json(json!(reg)))
+                    }
+                    method::READ_SQL_WITH | method::TX_READ_SQL => {
+                        Ok(HostReply::data(Some(Frame::empty())))
+                    }
+                    method::EXEC_SQL_WITH | method::TX_EXEC_SQL => {
+                        Ok(HostReply::json(json!([true, "ok"])))
+                    }
+                    method::TX_BEGIN => {
+                        let mut id = self.next_tx.lock().unwrap();
+                        *id += 1;
+                        Ok(HostReply::json(json!({"tx_id": *id})))
+                    }
+                    method::TX_COMMIT | method::TX_ROLLBACK => {
+                        Ok(HostReply::json(json!([true, "done"])))
+                    }
+                    other => Err(crate::Error::Unsupported(other.into())),
+                }
+            }
+        }
+        let host = RecordingHost {
+            calls: Mutex::new(Vec::new()),
+            next_tx: Mutex::new(0),
+            pipe_id: Mutex::new(Value::Null),
+        };
+        let request = request();
+        with_host(&host, &request, || {
+            assert_eq!(
+                crate::host::root_dir().unwrap(),
+                std::path::PathBuf::from("/srv/sra/root")
+            );
+            let pipe = request.pipe().unwrap();
+            assert_eq!(pipe.id().unwrap(), None);
+            assert!(!pipe.is_registered().unwrap());
+            *host.pipe_id.lock().unwrap() = json!(42);
+            assert_eq!(pipe.id().unwrap(), Some(42));
+            assert!(pipe.is_registered().unwrap());
+
+            let params = json!({
+                "ids": ["a", "b"],
+                "begin": crate::host::sql_timestamptz("2026-09-25T17:00:00+00:00"),
+            });
+            let _ = crate::host::read_sql_with("sql:main", "SELECT :ids, :begin", &params).unwrap();
+            assert!(
+                crate::host::exec_sql_with(
+                    "sql:main",
+                    "DELETE FROM t WHERE id = ANY(:ids)",
+                    &params
+                )
+                .unwrap()
+                .success
+            );
+
+            // Commit on Ok.
+            let committed = crate::host::transaction("sql:main", Some("cmdq:c1"), |tx| {
+                let _ = tx.read_sql_with("SELECT 1 WHERE id = :id", &json!({"id": 1}))?;
+                let res = tx.exec_sql_with("INSERT INTO q VALUES (:id)", &json!({"id": 2}))?;
+                assert!(res.success);
+                Ok(99_i64)
+            })
+            .unwrap();
+            assert_eq!(committed, 99);
+
+            // Rollback on Err.
+            let err = crate::host::transaction::<(), _>("sql:main", None, |tx| {
+                let _ = tx.exec_sql("INSERT INTO q VALUES (3)")?;
+                Err(error("boom"))
+            })
+            .unwrap_err();
+            assert!(err.to_string().contains("boom"));
+
+            // Rollback automatically on panic unwind via RAII Drop.
+            let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = crate::host::transaction::<(), _>("sql:main", Some("cmdq:c2"), |tx| {
+                    let _ = tx.exec_sql("INSERT INTO q VALUES (4)")?;
+                    panic!("panic inside tx");
+                });
+            }));
+            assert!(panicked.is_err());
+        });
+
+        let calls = host.calls.lock().unwrap();
+        let names: Vec<&str> = calls.iter().map(|c| c.method.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "root_dir",
+                "get_pipe_id",
+                "is_registered",
+                "get_pipe_id",
+                "is_registered",
+                "read_sql_with",
+                "exec_sql_with",
+                "tx_begin",
+                "tx_read_sql",
+                "tx_exec_sql",
+                "tx_commit",
+                "tx_begin",
+                "tx_exec_sql",
+                "tx_rollback",
+                "tx_begin",
+                "tx_exec_sql",
+                "tx_rollback",
+            ]
+        );
+        assert_eq!(calls[7].arg("lock_key"), &json!("cmdq:c1"));
+        assert_eq!(calls[11].arg("lock_key"), &Value::Null);
+        assert_eq!(calls[14].arg("lock_key"), &json!("cmdq:c2"));
+    }
+
+    #[test]
+    fn older_hosts_name_5_1_0_for_new_host_calls() {
+        struct Old;
+        impl HostServices for Old {
+            fn call(&self, _: &Request, method: &str, _: Option<Frame>) -> Result<Value> {
+                Err(crate::Error::Unsupported(method.into()))
+            }
+        }
+        let request = request();
+        with_host(&Old, &request, || {
+            let pipe = request.pipe().unwrap();
+            for err in [
+                crate::host::root_dir().unwrap_err(),
+                crate::host::read_sql_with("sql:main", "SELECT 1", &json!({})).unwrap_err(),
+                crate::host::exec_sql_with("sql:main", "SELECT 1", &json!({})).unwrap_err(),
+                pipe.id().unwrap_err(),
+                pipe.is_registered().unwrap_err(),
+                crate::host::transaction::<(), _>("sql:main", None, |_| Ok(())).unwrap_err(),
+            ] {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("upgrade Meerschaum to 5.1.0 or later"),
+                    "{msg}"
+                );
+            }
+        });
     }
 }

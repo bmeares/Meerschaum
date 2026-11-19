@@ -80,6 +80,17 @@ def test_ownership_properties_record_who_started_a_job(make_job):
     assert (again.owner, again.team) == ('alice', 'Data')
 
 
+def test_a_new_job_never_takes_its_team_scope_from_its_creator(make_job):
+    """
+    5.1: the isolated team a job runs for is recorded by its first launch, from its `team`:
+    the properties a job is created with (a client's, plugin code's) never name it.
+    """
+    job = make_job({**ownership_properties('alice', 'Data'), 'team_scope': 'id-another-team'})
+    assert 'team_scope' not in job.daemon.properties
+    assert 'team_scope' not in (Job(job.name, executor_keys='local').daemon.read_properties() or {})
+    assert job.team == 'Data'
+
+
 def test_filter_visible_jobs_applies_the_team_rule(make_job):
     from meerschaum.core.access import Principal
     local = make_job()

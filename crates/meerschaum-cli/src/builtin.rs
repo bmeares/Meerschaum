@@ -266,6 +266,12 @@ pub fn show_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         } else {
             map.into_iter().filter(|(k, _)| k != symlinks_key).collect()
         };
+        // 5.1: a value a secret reference produced is masked, whatever its key.
+        let to_print = match meerschaum_core::config::secrets::mask_known_in(&Value::Map(to_print))
+        {
+            Value::Map(m) => m,
+            _ => Map::new(),
+        };
         if nopretty {
             return Ok(Some(format!(
                 "{}\n",
@@ -327,6 +333,30 @@ pub fn installed_plugin_listing(
 
 /// `show plugins` (installed plugins only; `all` and `<username>` need a repository).
 pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    if words(args, "action") == [meerschaum_server::executor::extensions::ACTION] {
+        let bytes = crate::executor_extensions::run(rt)
+            .map_err(|message| ActionError::new("PermissionError", message))?;
+        return Ok(SuccessTuple::ok(String::from_utf8(bytes).map_err(
+            |_| ActionError::new("ValueError", "Invalid confined extension result."),
+        )?));
+    }
+    if words(args, "action") == [meerschaum_server::executor::registration::ACTION] {
+        let bytes = crate::executor_registration::run(rt)
+            .map_err(|message| ActionError::new("PermissionError", message))?;
+        return Ok(SuccessTuple::ok(String::from_utf8(bytes).map_err(
+            |_| ActionError::new("ValueError", "Invalid confined registration result."),
+        )?));
+    }
+    if flag(args, "plugin_manifest") {
+        let bytes = crate::executor_plugin_producer::from_runtime(rt)
+            .map_err(|message| ActionError::new("PermissionError", message))?;
+        return Ok(SuccessTuple {
+            success: true,
+            message: String::from_utf8(bytes).map_err(|_| {
+                ActionError::new("ValueError", "Invalid confined plugin metadata encoding.")
+            })?,
+        });
+    }
     // `parse_repo_keys(repository)` raises for non-API repositories.
     crate::native::show::repo_keys(args, rt)?;
     let action = words(args, "action");
@@ -595,7 +625,10 @@ pub fn sh(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         command.push("-c".into());
         command.push(crate::shlex::join(&cmd_list));
     }
+    // A command the user asked for keeps the whole environment (5.1): it may run `mrsm` again
+    // or read `MRSM_<TYPE>_<LABEL>`, and whoever typed it can read the same data.
     let spec = CommandSpec {
+        scrub_secrets: false,
         program: command[0].clone(),
         args: command[1..].to_vec(),
         ..CommandSpec::default()

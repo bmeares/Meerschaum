@@ -75,7 +75,7 @@ pub async fn read(name: &str, vars: &Map, cx: &ToolCx<'_>) -> Result<String, Too
             // A connector reserved for other teams is not listed (rc15).
             let caller = super::tools::caller_access(cx).await?;
             let mut keys = Vec::new();
-            for (typ, labels) in &cx.state.config.connectors {
+            for (typ, labels) in cx.state.connectors().iter() {
                 let Some(labels) = labels.as_map() else {
                     continue;
                 };

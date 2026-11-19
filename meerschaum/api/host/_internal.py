@@ -113,11 +113,19 @@ def registry_document(app) -> Dict[str, Any]:
 
 def status_document() -> Dict[str, Any]:
     """
-    Return the host's status: whether the web console is mounted (see `console_status()`).
+    Return the host's status: whether the web console is mounted (see `console_status()`), its
+    version and what it can do (`capabilities`).
     """
     from meerschaum.api.host.dash import console_status
     from meerschaum import __version__
-    return {'console': console_status(), 'version': __version__}
+    from meerschaum._internal.team_scope import CAPABILITY
+    ### 5.1: `team_scope`: this host applies the lookup check to isolated teams' requests; the
+    ### server refuses those requests to a host that does not say so.
+    return {
+        'console': console_status(),
+        'version': __version__,
+        'capabilities': [CAPABILITY],
+    }
 
 
 def register(app) -> None:

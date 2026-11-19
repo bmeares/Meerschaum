@@ -177,9 +177,17 @@ fn daemon_flags(config: &Map, command: &[String]) -> Vec<String> {
     out
 }
 
+/// Whether the project opts out of jobs with an explicitly empty mapping (`jobs: {}`).
+///
+/// A missing or null `jobs:` still means the default syncing jobs.
+pub fn jobs_disabled(config: &Map) -> bool {
+    matches!(config.get("jobs"), Some(Value::Map(jobs)) if jobs.is_empty())
+}
+
 /// `get_jobs_commands(compose_config)`: the jobs `compose up` starts, by name.
 ///
 /// `pipes` are the project's defined pipes (only used when no explicit `jobs:` are configured).
+/// `jobs: {}` starts none.
 pub fn get_jobs_commands(
     config: &Map,
     pipes: &[Pipe],
@@ -187,6 +195,9 @@ pub fn get_jobs_commands(
 ) -> Result<IndexMap<String, Vec<String>>, ComposeError> {
     let project_name = py_str(&get_project_name(config, msgs)?);
     let mut jobs = IndexMap::new();
+    if jobs_disabled(config) {
+        return Ok(jobs);
+    }
     if let Some(explicit) = config.get("jobs").filter(|v| v.truthy()) {
         let Value::Map(explicit) = explicit else {
             return Err(ComposeError::type_error(format!(
@@ -342,6 +353,22 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_jobs_mapping_starts_no_jobs() {
+        let disabled = config(r#"{"project_name": "p", "jobs": {}}"#);
+        assert!(jobs_disabled(&disabled));
+        assert!(
+            get_jobs_commands(&disabled, &[], &mut Messages::default())
+                .unwrap()
+                .is_empty()
+        );
+        // Missing and null keep the default syncing jobs.
+        assert!(!jobs_disabled(&config(r#"{"project_name": "p"}"#)));
+        assert!(!jobs_disabled(&config(
+            r#"{"project_name": "p", "jobs": null}"#
+        )));
+    }
+
+    #[test]
     fn explicit_jobs_keep_established_flags() {
         let cfg =
             config(r#"{"project_name": "test-project", "jobs": {"api": "start api --port 9000"}}"#);
@@ -398,6 +425,24 @@ mod tests {
         assert_eq!(
             command_signature(&stripped),
             command_signature(&cmds["timed"])
+        );
+    }
+
+    #[test]
+    fn a_schedule_with_a_time_zone_passes_through() {
+        // `schedule:` uses the `-s` grammar: the `tz` and `jitter` clauses reach the job as one
+        // argument, unchanged.
+        let schedule = "daily starting 21:00 tz America/New_York jitter 5 minutes";
+        let cfg = config(&format!(
+            r#"{{"project_name": "p", "jobs": {{"nightly": "sync pipes -s '{schedule}'"}}}}"#
+        ));
+        let cmds = get_jobs_commands(&cfg, &[], &mut Messages::default()).unwrap();
+        assert!(
+            cmds["nightly"]
+                .windows(2)
+                .any(|w| w[0] == "-s" && w[1] == schedule),
+            "{:?}",
+            cmds["nightly"]
         );
     }
 

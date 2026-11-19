@@ -213,7 +213,7 @@ def test_connector_and_plugin_inspection_obey_roles(inspection_server,browser,wi
                 tab.page.locator('#plugin-source-content').scroll_into_view_if_needed()
                 tab.page.screenshot(path=str(artifacts()/f'installed-source-{width}.png'))
             else:
-                tab.page.get_by_text('Installed source is available to administrators.').wait_for()
+                tab.page.get_by_text('Installed source is available to administrators').wait_for()
                 assert tab.page.locator('#plugin-source-content').count() == 0
             tab.goto('/dash/plugins/rc16_repository','#plugins-content-div')
             tab.page.wait_for_function("document.getElementById('plugin-source-content')?.textContent.includes('42')")

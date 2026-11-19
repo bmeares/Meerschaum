@@ -18,6 +18,26 @@ use crate::dispatch::{self, Runtime};
 /// `mrsm -m ...`, and the leading `-m meerschaum` of a systemd unit is removed inside
 /// `systemd_job::run_if_requested_with`.
 pub fn run(sysargs: &[String]) -> i32 {
+    // A restricted web terminal's process (and every `mrsm` it starts) is restricted from the
+    // start: the environment is read once, before anything runs.
+    crate::shell::restricted::init();
+    if let Some(code) = crate::executor_terminal_guard::run_if_requested(sysargs) {
+        return code;
+    }
+    // A genuine host-created lifecycle wrapper must run before command confinement so it
+    // can maintain its own job files. Dispatch it immediately: its user command arguments
+    // must never select a completion/probe branch in this unsandboxed wrapper process.
+    if meerschaum_jobs::supervisor::trusted_launch(sysargs) {
+        meerschaum_jobs::supervisor::run_if_requested_with(sysargs);
+        meerschaum_jobs::systemd_job::run_if_requested_with(sysargs);
+        eprintln!("The trusted job lifecycle wrapper could not start.");
+        return 1;
+    }
+    // Every other marked process is a command, including one whose arguments name an
+    // internal supervisor or probe. No argument can select startup code outside its boundary.
+    if let Some(rc) = crate::team_sandbox::enforce_if_team_process() {
+        return rc;
+    }
     // A shell completion request (`_MRSM_COMPLETE`, see `completions`) is answered before anything
     // else: no logging, no config writes, no plugins, no runtime.
     if let Some(rc) = crate::completions::answer_if_requested() {
@@ -26,8 +46,24 @@ pub fn run(sysargs: &[String]) -> i32 {
     if let Some(rc) = crate::completions::print_script_if_requested(sysargs) {
         return rc;
     }
+    // 5.1: the API server's sandbox probe (what a team process would enforce here) restricts
+    // the process started for it and prints its report.
+    if let Some(rc) = meerschaum_core::team_scope::sandbox::probe_if_requested(sysargs) {
+        return rc;
+    }
     meerschaum_jobs::supervisor::run_if_requested_with(sysargs);
     meerschaum_jobs::systemd_job::run_if_requested_with(sysargs);
+    // 5.1: a process started to probe a team's sandbox reports it and exits.
+    if let Some(rc) = crate::team_execution::probe_if_requested() {
+        return rc;
+    }
+    if let Some(rc) = crate::team_sandbox::exec_python_if_requested(sysargs) {
+        return rc;
+    }
+    // Administrator DNS pinning runs without reading config or discovering plugins.
+    if let Some(rc) = crate::executor_stack::resolve_if_requested(sysargs) {
+        return rc;
+    }
     // The syncs this process records in pipes' sync statuses come from the command line
     // (`mrsm start api` switches to `api` while it serves). The previous role comes back when
     // the command line returns: Python's `_native.main()` runs it inside a Python process, whose
@@ -137,9 +173,20 @@ fn take_entry_child_env() {
 pub const RESTART_SHELL: i32 = 75;
 
 pub fn run_main() -> ExitCode {
+    let arguments = process_args();
+    if let Some((first, rest)) = arguments.split_first()
+        && first == crate::executor_terminal_guard::TEAM_EXEC_ARG
+    {
+        let error = crate::executor_terminal_guard::exec_team_shell(rest);
+        eprintln!("The Team terminal could not seal its standard streams: {error}");
+        return exit_code(1);
+    }
+    // Only this compiled standalone entry point establishes a native launcher. A failed
+    // registration leaves isolated Python launches unavailable; ordinary commands still work.
+    let _ = meerschaum_core::self_exe::register_native_current_executable();
     drop_handover_guard();
     take_entry_child_env();
-    let code = run(&process_args());
+    let code = run(&arguments);
     if code == RESTART_SHELL {
         let (program, leading) = meerschaum_core::self_exe::self_program();
         let mut command = std::process::Command::new(program);

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 
-from meerschaum.api.dash.plugin_sources import may_read_source, source_viewer
+from meerschaum.api.dash.plugin_sources import source_viewer
 
 _AUTH_FIELDS = ('username', 'password', 'client_id', 'client_secret', 'api_key')
 _LOCK = threading.Lock()
@@ -19,21 +19,50 @@ class PublishError(ValueError):
     """A local validation error whose message is safe to show in the dialog."""
 
 
-def repositories(session):
-    """Configured API repositories visible to an administrator; no credentials go to Dash."""
-    if not may_read_source('installed', session):
+#: Why a session may not publish an installed plugin.
+PUBLISH_REFUSAL = 'Only administrators and team plugin managers can publish installed plugins.'
+
+
+def may_publish(session, name=None):
+    """
+    Whether this session, read fresh, may publish the installed plugin `name` (those who may
+    manage it: `plugins.may_manage_plugin`); without a name, whether it may publish at all.
+    """
+    from meerschaum.api.dash import plugins as pages
+    try:
+        who = source_viewer(session)
+    except Exception:
+        return False
+    if who.no_auth:
+        return True
+    if not who.signed_in or not who.can('plugins:read'):
+        return False
+    if name is None:
+        return pages.may_manage_plugins(who)
+    return (pages.is_safe_plugin_name(name) and pages.can_see_plugin(who, name)
+            and pages.may_manage_plugin(who, name))
+
+
+def repositories(session, name=None):
+    """
+    Configured API repositories visible to who may publish (`may_publish`; the connectors their
+    account may see); no credentials go to Dash.
+    """
+    if not may_publish(session, name):
         return []
     from meerschaum.api.dash.connector_listing import list_connectors
     return [row['keys'] for row in list_connectors(source_viewer(session)) if row['type'] == 'api']
 
 
 def _key(context, repository, session):
-    if not isinstance(context, dict) or not may_read_source('installed', session):
-        raise PermissionError('Only administrators can publish installed plugins.')
+    if not isinstance(context, dict) or not may_publish(session):
+        raise PermissionError(PUBLISH_REFUSAL)
     from meerschaum.api.dash.plugins import _discover_plugin_files
-    if context.get('name') not in _discover_plugin_files():
+    name = context.get('name')
+    ### A plugin the session may not manage is not told apart from one that is not installed.
+    if name not in _discover_plugin_files() or not may_publish(session, name):
         raise PublishError('This plugin is not installed.')
-    if repository not in repositories(session):
+    if repository not in repositories(session, name):
         raise PublishError('Select a configured API repository.')
     from meerschaum.api.dash.sessions import valid_session_id
     session_id = valid_session_id((session or {}).get('session-id'))
@@ -236,7 +265,7 @@ def publish(context, repository, session, browser=None):
 
 
 def build_publish_dialog(name, origin, session):
-    choices = repositories(session)
+    choices = repositories(session, name)
     selected = origin if origin in choices else (choices[0] if choices else None)
     def field(label, identifier, secret=False):
         return html.Div([

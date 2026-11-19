@@ -107,21 +107,24 @@ def console_available() -> bool:
 
 def build_app(load_plugins: bool = True, debug: bool = False):
     """
-    Build the host's FastAPI app: run the API plugins, mount the Dash console (the one app plugin pages register into), and add
-    the internal MCP routes. Requires host mode (`MRSM_API_HOST=1` before `meerschaum.api` is
-    imported).
+    Build the standalone FastAPI host for embedding and plugin tests. The app runs API plugins,
+    mounts the Dash console and registers the internal MCP routes. Set `MRSM_API_HOST=1` before
+    importing `meerschaum.api`.
 
     Returns
     -------
     The FastAPI app (`meerschaum.api.app`).
     """
     from meerschaum.api.host._app import build_app as _build_app
-    return _build_app(load_plugins=load_plugins, debug=debug)
+    return _build_app(load_plugins=load_plugins, debug=debug, supervised=False)
 
 
 def run(socket_path: str, debug: bool = False) -> None:
     """
-    Serve the host on a Unix socket with uvicorn until interrupted.
+    Serve the host on a Unix socket with uvicorn until interrupted. If
+    `MRSM_API_HOST_PROXY_TOKEN` is set (the Rust server sets it for every host it starts), every
+    request and websocket handshake without the matching `X-Mrsm-Host-Proxy-Token` header is
+    refused, as on TCP.
     """
     from meerschaum.api.host._app import run as _run
     _run(socket_path, debug=debug)

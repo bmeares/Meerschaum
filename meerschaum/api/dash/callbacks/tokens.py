@@ -28,6 +28,11 @@ from meerschaum.api.dash.tokens import (
     build_tokens_register_output_modal,
     check_token_access,
 )
+from meerschaum.api.dash.mcp_details import (
+    FILL_SNIPPETS_JS,
+    KEY_CLIPBOARD_KIND,
+    mcp_component_id,
+)
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.daemon import get_new_daemon_name
 from meerschaum.core import Token
@@ -77,17 +82,84 @@ def refresh_tokens_button_click(
 
 @dash_app.callback(
     Output('tokens-register-input-modal', 'is_open'),
+    Output('tokens-register-input-modal', 'children', allow_duplicate=True),
     Input('tokens-create-button', 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def create_tokens_button_click(n_clicks: Optional[int]):
+def create_tokens_button_click(
+    n_clicks: Optional[int],
+    session_data: Optional[Dict[str, Any]] = None,
+):
     """
-    Open the tokens registration modal when New token is clicked.
+    Open the tokens registration modal when New token is clicked, with the ordinary form
+    (New agent token may have left its own there).
     """
     if not n_clicks:
         raise PreventUpdate
 
+    return True, _register_form(session_data, agent=False)
+
+
+def _register_form(session_data: Optional[Dict[str, Any]], agent: bool) -> Any:
+    """The New token (or New agent token) form for the session's user, if there is one."""
+    from meerschaum.api.dash.access import get_viewer
+    viewer = get_viewer(session_data)
+    if not (viewer.signed_in or viewer.no_auth):
+        return dash.no_update
+    session_id = (session_data or {}).get('session-id', None)
+    user = get_user_from_session(session_id) if session_id is not None else None
+    return build_tokens_register_input_modal(user, agent=agent)
+
+
+### The MCP client pickers ("Connect an agent" and the token-created dialog) fill their snippets
+### in the browser, which knows the server's public URL.
+dash_app.clientside_callback(
+    FILL_SNIPPETS_JS,
+    Output({'type': 'mcp-url', 'index': MATCH}, 'children'),
+    Output({'type': 'mcp-label-0', 'index': MATCH}, 'children'),
+    Output({'type': 'mcp-code-0', 'index': MATCH}, 'children'),
+    Output({'type': 'mcp-label-1', 'index': MATCH}, 'children'),
+    Output({'type': 'mcp-code-1', 'index': MATCH}, 'children'),
+    Output({'type': 'mcp-block-1', 'index': MATCH}, 'style'),
+    Input({'type': 'mcp-client', 'index': MATCH}, 'value'),
+    Input({'type': 'mcp-templates', 'index': MATCH}, 'data'),
+    Input({'type': 'mcp-key', 'index': MATCH}, 'data'),
+)
+
+
+@dash_app.callback(
+    Output('tokens-mcp-modal', 'is_open'),
+    Input('tokens-mcp-button', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def connect_agent_button_click(n_clicks: Optional[int]):
+    """
+    Open the "Connect an agent" dialog.
+    """
+    if not n_clicks:
+        raise PreventUpdate
     return True
+
+
+@dash_app.callback(
+    Output('tokens-mcp-modal', 'is_open', allow_duplicate=True),
+    Output('tokens-register-input-modal', 'is_open', allow_duplicate=True),
+    Output('tokens-register-input-modal', 'children', allow_duplicate=True),
+    Input('tokens-mcp-new-token-button', 'n_clicks'),
+    State('session-store', 'data'),
+    prevent_initial_call=True,
+)
+def new_agent_token_button_click(
+    n_clicks: Optional[int],
+    session_data: Optional[Dict[str, Any]] = None,
+):
+    """
+    Swap the "Connect an agent" dialog for the New agent token form (read-only scopes).
+    """
+    if not n_clicks:
+        raise PreventUpdate
+    return False, True, _register_form(session_data, agent=True)
 
 
 @dash_app.callback(
@@ -288,13 +360,15 @@ def copy_token_button_click(
     Output('tokens-close-register-output-modal-button', 'disabled'),
     Output('tokens-register-output-modal', 'backdrop'),
     Input('tokens-register-clipboard', 'n_clicks'),
+    Input(mcp_component_id(KEY_CLIPBOARD_KIND, ALL), 'n_clicks'),
     prevent_initial_call=True,
 )
-def enable_close_button(n_clicks):
+def enable_close_button(n_clicks, mcp_n_clicks=None):
     """
-    Enable the close button once the token has been copied.
+    Enable the close button once the token has been copied: its details, or an MCP snippet's
+    block which carries the API key (no such block exists without a key).
     """
-    if not n_clicks:
+    if not n_clicks and not any(mcp_n_clicks or []):
         raise PreventUpdate
     return False, True
 

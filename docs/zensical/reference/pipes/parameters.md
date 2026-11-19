@@ -122,6 +122,7 @@ See [`columns`](#columns) for the available index roles and [dtypes](/reference/
 | Parameter | Purpose | Section |
 |---|---|---|
 | `upsert` | Update existing rows in place via a unique index | [`upsert`](#upsert) |
+| `upsert_changed_only` | Skip the update of rows an upsert would leave unchanged (PostgreSQL family) | [`upsert_changed_only`](#upsert_changed_only) |
 | `autoincrement` | Add an auto-incrementing integer primary key | [`autoincrement`](#autoincrement) |
 | `autotime` | Auto-populate a `datetime` timestamp on insert | [`autotime`](#autotime) |
 | `static` | Never alter the schema (no new columns) | [`static`](#static) |
@@ -749,6 +750,14 @@ parameters:
     max_bytes: 8388608
 ```
 
+## `sync`
+
+- `sync.strategy` selects how an automatically synced pipe reads its source. The default is `backtrack`.
+- `sync.immutable: true` declares permanent row keys and values and enables the strategies that rely on immutability. Both `backtrack` and `naive` also support mutable pipes.
+- `sync.lookback_days` sets the number of UTC days checked by bounded corrective strategies. The default is 30.
+
+See [Immutable synchronization strategies](syncing.md#immutable-synchronization-strategies) for supported strategy names and connector requirements.
+
 ## `tags`
 
 A list of a pipe's [tags](/reference/pipes/tags/), e.g.:
@@ -766,6 +775,8 @@ tags:
 Setting `upsert` to `true` enables high-performance syncs by combining inserts and updates into a single transaction.
 
 Upserts rely on unique constraints on indices and as such should be used in situations where a table's schema is fixed. Rows whose index columns are `NULL` upsert in place too (see [`null_indices`](#null_indices)). To replace a whole window of rows instead of upserting into it, see [Replacing a window](/reference/pipes/syncing/#replacing-a-window).
+
+On PostgreSQL-family instances, [`upsert_changed_only`](#upsert_changed_only) skips the rewrite of rows whose values did not change.
 
 !!! warning
     Ensure your instance connector supports upserts before enabling `upsert` (e.g. `SQLConnector`).
@@ -792,6 +803,60 @@ Upserts rely on unique constraints on indices and as such should be used in situ
     )
     #  🎉 Upserted 2 rows.
     ```
+
+---------------
+
+## `upsert_changed_only`
+
+Set `upsert_changed_only` to `true` (default `false`) to make an [`upsert`](#upsert) skip the rows whose values would not change. It has an effect only together with `upsert: true` on the PostgreSQL family of instance flavors: PostgreSQL, PostGIS, TimescaleDB, TimescaleDB-HA and Citus. Every other flavor ignores it (MySQL and MariaDB already leave identical rows alone).
+
+An upsert normally rewrites every row whose key already exists, even when the incoming values are identical. With `upsert_changed_only`, the update runs only for rows whose value columns differ (`ON CONFLICT ... DO UPDATE ... WHERE (stored values) IS DISTINCT FROM (new values)`). New rows are inserted and changed rows updated as before.
+
+This matters for a pipe that re-reads an overlapping window on every sync, for example a SQL pipe with a large `fetch:backtrack_minutes` on a short schedule: rewriting the same rows each time produces WAL, dead tuples and autovacuum work without changing any data. A row the guard skips is still row-locked by the upsert, which writes a small WAL record and dirties the page, so the saving is in row versions, dead tuples and index churn, not in locks; concurrent writers on the same keys still wait as before. It helps most for SQL pipes synced in place (the source is on the same instance). A sync of a DataFrame already drops identical rows before writing, unless `check_existing` is off.
+
+=== "Python"
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'sql:source', 'readings',
+        instance = 'sql:local',
+        columns = {'datetime': 'ts', 'id': 'sensor_id'},
+        parameters = {
+            'upsert': True,
+            'upsert_changed_only': True,
+            'fetch': {'backtrack_minutes': 1440},
+        },
+    )
+    ```
+
+=== "YAML"
+
+    ```yaml
+    upsert: true
+    upsert_changed_only: true
+    fetch:
+      backtrack_minutes: 1440
+    ```
+
+Values are compared as follows:
+
+- Numbers compare by value (`1.50` and `1.5` are the same), and `NULL` equals `NULL`.
+- `json` columns compare by their text, so a change in formatting or key order counts as a change; `jsonb` columns compare by value.
+- PostGIS `geometry` and `geography` compare exactly, including the SRID.
+- Types without a plain equality compare by their text form.
+- A text column under a nondeterministic collation (for example a case-insensitive ICU collation) follows that collation, so a change it treats as equal is skipped.
+
+Rows with `NULL` index values (see [`null_indices`](#null_indices)) are handled the same way: unchanged ones are skipped.
+
+The sync message (`Upserted N rows.`) counts the rows actually written, inserted plus changed. A sync that changes nothing reports 0 rows and is still a success.
+
+!!! warning
+    The parameter is opt-in because unchanged rows are no longer written. An `UPDATE` trigger, or an "updated at" column that one maintains, does not fire for them, and consumers that expect a change for every synced row (for example logical replication) see fewer events.
+
+!!! note
+    On TimescaleDB, an upsert into a compressed chunk still decompresses the affected data to check the keys. `upsert_changed_only` does not avoid that cost.
 
 ---------------
 

@@ -1,5 +1,6 @@
 //! The extension-host reverse proxy (§7.3): every request no Rust route matches is forwarded to
-//! the Python API host over a Unix socket (TCP loopback with a per-start token on Windows) with
+//! the Python API host over a Unix socket (TCP loopback on Windows), with the host's per-start
+//! token (`crate::host::PROXY_TOKEN_HEADER`) and
 //! its method, path, query, headers, cookies and body unchanged. Bodies stream in both
 //! directions, and `Upgrade` requests (websockets) are bridged byte-for-byte after the host
 //! answers `101 Switching Protocols`.
@@ -119,7 +120,7 @@ pub async fn connect_host(_socket: &Path) -> std::io::Result<HostStream> {
 /// Connect to the API host at `endpoint`.
 pub async fn connect_endpoint(endpoint: &HostEndpoint) -> std::io::Result<HostStream> {
     match endpoint {
-        HostEndpoint::Unix(socket) => connect_host(socket).await,
+        HostEndpoint::Unix { socket, .. } => connect_host(socket).await,
         HostEndpoint::Tcp { addr, .. } => {
             let stream = tokio::net::TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
@@ -137,6 +138,9 @@ pub struct HostProxy {
     console: Arc<std::sync::Mutex<ConsoleStatus>>,
     /// Whether the unavailable console was already reported in the log.
     warned: Arc<AtomicBool>,
+    /// Whether the host applies the lookup check to isolated teams' requests (5.1, its status
+    /// reports the `team_scope` capability), per host process (keyed by its start count).
+    team_guard: Arc<std::sync::Mutex<Option<(usize, bool)>>>,
     /// `api:limits:proxy_bytes`: the largest forwarded request body (`None`: no limit).
     body_limit: Option<usize>,
     /// `api:host:response_seconds`: the longest wait for the host's response headers.
@@ -269,6 +273,7 @@ impl HostProxy {
             supervisor: None,
             console: Arc::default(),
             warned: Arc::default(),
+            team_guard: Arc::default(),
             body_limit: Some(crate::config::DEFAULT_PROXY_BYTES),
             response_timeout: Some(Duration::from_secs(
                 crate::config::DEFAULT_HOST_RESPONSE_SECONDS,
@@ -327,7 +332,7 @@ impl HostProxy {
     pub fn endpoint(&self) -> HostEndpoint {
         match &self.supervisor {
             Some(supervisor) => supervisor.endpoint(),
-            None => HostEndpoint::Unix(self.socket.clone()),
+            None => HostEndpoint::from(self.socket.clone()),
         }
     }
 
@@ -382,6 +387,44 @@ impl HostProxy {
         }
         self.set_console_status(status.clone());
         status
+    }
+
+    /// Whether the current host process applies the lookup check to isolated teams' requests
+    /// (5.1): its status reports the `team_scope` capability. `Some(false)` for a host whose
+    /// `meerschaum` package predates it; `None` while the host does not answer (not asked again
+    /// until it does).
+    pub async fn guards_teams(&self, secret: &[u8]) -> Option<bool> {
+        let starts = self.supervisor.as_ref().map_or(0, |s| s.starts());
+        if let Some((at, known)) = *self
+            .team_guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            && at == starts
+        {
+            return Some(known);
+        }
+        let status = self.internal_get(STATUS_PATH, secret).await?;
+        let guards = status
+            .get("capabilities")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|caps| caps.iter().any(|c| c.as_str() == Some("team_scope")));
+        if !guards {
+            tracing::warn!(
+                "The Python API host's `meerschaum` package ({}) predates the lookup check for \
+                 isolated teams: their requests to plugin routes and pages are refused until it \
+                 is {} or newer.",
+                status
+                    .get("version")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("an unknown version"),
+                meerschaum_core::python_guard::expected_version(),
+            );
+        }
+        *self
+            .team_guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((starts, guards));
+        Some(guards)
     }
 
     /// The console status, asking the host first when it was not asked yet.
@@ -512,8 +555,8 @@ impl HostProxy {
             .parse::<Uri>()
             .unwrap_or_else(|_| Uri::from_static("/"));
         strip_hop_by_hop(&mut parts.headers, is_upgrade);
-        // The per-start token of the TCP transport is the proxy's alone: a client's copy is
-        // dropped, ours added.
+        // The host's per-start token is the proxy's alone: a client's copy is dropped, ours
+        // added.
         parts.headers.remove(PROXY_TOKEN_HEADER);
         if let Some(token) = endpoint.token()
             && let Ok(v) = token.parse()

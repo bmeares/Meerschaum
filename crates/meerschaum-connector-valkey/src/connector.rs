@@ -137,6 +137,9 @@ impl ValkeyConnector {
 
     /// Connect with the given attributes (`host` is required unless `uri` is given).
     pub async fn connect(label: &str, attributes: Map) -> ConnectorResult<ValkeyConnector> {
+        // 5.1: an unresolved secret reference fails here, naming the reference and the key.
+        meerschaum_core::config::secrets::check_connector_attributes("valkey", label, &attributes)
+            .map_err(ConnectorError::Invalid)?;
         if !attributes.contains_key("uri") && !attributes.contains_key("host") {
             return Err(ConnectorError::Invalid(format!(
                 "Missing required attribute 'host' for connector 'valkey:{label}'."

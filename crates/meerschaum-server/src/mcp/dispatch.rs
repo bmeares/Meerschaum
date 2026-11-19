@@ -89,6 +89,7 @@ impl McpServer {
             .into_iter()
             .filter(|t| {
                 has_scope(&caller.scopes, &t.scopes)
+                    && caller.may_use(t.source)
                     && (t.read_only || !self.config.read_only)
                     && tool_group_served(state, caller, t)
             })
@@ -100,7 +101,7 @@ impl McpServer {
         all_resources(self)
             .await
             .into_iter()
-            .filter(|r| has_scope(&caller.scopes, &r.scopes))
+            .filter(|r| has_scope(&caller.scopes, &r.scopes) && caller.may_use(r.source))
             .collect()
     }
 
@@ -113,6 +114,7 @@ impl McpServer {
             .into_iter()
             .filter(|p| {
                 has_scope(&caller.scopes, &p.scopes)
+                    && caller.may_use(p.source)
                     && !(read_only
                         && p.scopes.iter().any(|sc| {
                             [":write", ":delete", ":drop", ":execute"]
@@ -290,7 +292,7 @@ impl McpServer {
         let Some(tool) = all_tools(self).await.into_iter().find(|t| t.name == name) else {
             return tool_error(id, format!("Unknown tool: '{name}'."));
         };
-        if !has_scope(&caller.scopes, &tool.scopes) {
+        if !has_scope(&caller.scopes, &tool.scopes) || !caller.may_use(tool.source) {
             return tool_error(
                 id,
                 format!(
@@ -313,9 +315,25 @@ impl McpServer {
                 format!("'{name}' is not available on this server (its routes are not served)."),
             );
         }
-        let Value::Map(arguments) = arguments else {
+        let Value::Map(mut arguments) = arguments else {
             return tool_error(id, "Tool arguments must be an object.");
         };
+        // The caller's teams decide the instance: one they name must be theirs to use, and a
+        // call that names none uses their team's default instance (5.1).
+        if tool.source == Source::Builtin && caller.api {
+            let requested = arguments
+                .get("instance_keys")
+                .filter(|v| !v.is_null())
+                .map(Value::py_str)
+                .filter(|keys| !keys.is_empty());
+            match caller.scope_instance(state, requested.as_deref()) {
+                Err(refusal) => return tool_error(id, refusal),
+                Ok(Some(keys)) if requested.is_none() => {
+                    arguments.insert("instance_keys".into(), Value::Str(keys));
+                }
+                Ok(_) => {}
+            }
+        }
         for required in tool.required() {
             if !arguments.contains_key(&required) {
                 return tool_error(id, format!("Missing required argument '{required}'."));

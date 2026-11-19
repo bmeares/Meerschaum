@@ -37,6 +37,22 @@ RUN mkdir -p /plugin/src \
   && touch /plugin/src/lib.rs \
   && CARGO_HOME=/plugin-cargo cargo fetch --manifest-path /plugin/Cargo.toml
 
+### Administrator-built immutable compiler material. The generated-source lock is
+### reviewed with the release; only this build stage fetches its exact dependencies.
+### Runtime compilation uses the fixed protected policy and frozen vendor tree.
+FROM plugin-dependencies AS confined-compiler
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 \
+  && dnf clean all
+COPY scripts/docker/native_compiler_snapshot.py scripts/docker/build_native_compiler_bundle.py /compiler-tools/
+COPY scripts/docker/compiler_source/ /compiler-source/
+COPY Cargo.toml /compiler-workspace.toml
+RUN CARGO_HOME=/plugin-cargo cargo vendor --locked --versioned-dirs \
+      --manifest-path /compiler-source/Cargo.toml /compiler-vendor > /compiler-vendor-config.toml \
+  && python3 /compiler-tools/build_native_compiler_bundle.py \
+      --toolchain "$(rustc --print sysroot)" --vendor /compiler-vendor \
+      --lock /compiler-source/Cargo.lock --manifest /compiler-workspace.toml \
+      --settings /usr/local/rustup/settings.toml --output /confined-compiler
+
 FROM rust-toolchain AS source-builder
 
 COPY Cargo.toml Cargo.lock ./
@@ -72,6 +88,16 @@ FROM scratch AS wheel-artifacts
 COPY --from=sdk /wheels /out/wheels
 FROM native-${sdk_source} AS native-selected
 FROM wheel-${sdk_source} AS wheel-selected
+
+### Hash the completed native installation with builder-only Python. The runtime
+### receives only the fixed manifest, never this tool or the builder interpreter.
+FROM fedora:44 AS factory-manifest-tools
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 \
+  && dnf clean all
+COPY scripts/docker/write_native_factory_manifest.py /factory-tools/
+COPY Cargo.toml /factory-workspace.toml
+ARG TARGETARCH
+ARG mrsm_uid=1000
 
 ### ---------------------------------------------------------------------------------------------
 ### py-slim: the wheel with no extras, installed into /install.
@@ -266,9 +292,12 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       "/rootfs$mrsm_root_dir"
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/bashrc /rootfs/home/$mrsm_user/.bashrc
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/tmux.conf /rootfs/home/$mrsm_user/.tmux.conf
+RUN install -d -m 0755 -o 0 -g 0 /rootfs/var/lib/meerschaum \
+  && install -d -m 0700 -o 1000 -g 1000 /rootfs/var/lib/meerschaum/factory
 COPY --from=py-full /install/ /rootfs/usr/local/
 COPY --from=native-selected /out/mrsm /rootfs/usr/local/bin/mrsm
-COPY --from=rust-toolchain /usr/local/rustup/ /rootfs/usr/local/rustup/
+COPY --from=confined-compiler /confined-compiler/rootfs/ /rootfs/
+COPY --from=confined-compiler /confined-compiler/compat/ /rootfs/
 COPY --from=rust-toolchain /usr/local/cargo/bin/ /rootfs/usr/local/cargo/bin/
 RUN install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user/.cargo"
 COPY --chown=$mrsm_uid:$mrsm_gid --from=plugin-dependencies /plugin-cargo/registry/ /rootfs/home/$mrsm_user/.cargo/registry/
@@ -289,6 +318,21 @@ RUN mkdir -p /rootfs/tmp/mrsm-warm/root /rootfs/tmp/mrsm-warm/plugins \
   status=$?; rm -rf /rootfs/tmp/mrsm-warm; exit $status
 COPY --from=duckdb-driver /out/ /rootfs/
 COPY --from=full-duckdb-driver /out/ /rootfs/
+
+FROM factory-manifest-tools AS full-attested-rootfs
+COPY --from=full-rootfs /rootfs/ /rootfs/
+RUN set -eu; \
+    case "$TARGETARCH" in amd64) architecture=x86_64 ;; arm64) architecture=aarch64 ;; *) exit 1 ;; esac; \
+    sdk_root=; \
+    for candidate in /rootfs/usr/local/lib/python*/site-packages /rootfs/usr/local/lib64/python*/site-packages; do \
+      if [ -f "$candidate/meerschaum/__init__.py" ]; then \
+        test -z "$sdk_root"; sdk_root="${candidate#/rootfs}"; \
+      fi; \
+    done; \
+    test -n "$sdk_root"; \
+    release="$(python3 -c 'import tomllib; print(tomllib.load(open("/factory-workspace.toml", "rb"))["workspace"]["package"]["version"])')"; \
+    python3 /factory-tools/write_native_factory_manifest.py --rootfs /rootfs \
+      --release "$release" --architecture "$architecture" --sdk-root "$sdk_root" --runtime-uid "$mrsm_uid"
 
 
 ### ---------------------------------------------------------------------------------------------
@@ -324,7 +368,7 @@ ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.
     PYTHONPYCACHEPREFIX=/home/$mrsm_user/.cache/pycache \
     LANG=C.UTF-8
 
-COPY --from=full-rootfs /rootfs/ /
+COPY --from=full-attested-rootfs /rootfs/ /
 
 USER $MRSM_UID:$MRSM_GID
 WORKDIR $MRSM_WORK_DIR
@@ -345,6 +389,8 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
   && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
   && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir"
+RUN install -d -m 0755 -o 0 -g 0 /rootfs/var/lib/meerschaum \
+  && install -d -m 0700 -o 1000 -g 1000 /rootfs/var/lib/meerschaum/factory
 COPY --from=native-selected /out/mrsm /rootfs/usr/local/bin/mrsm
 COPY --from=duckdb-driver /out/ /rootfs/
 
@@ -354,10 +400,27 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       gcc gcc-c++ make cmake pkgconf-pkg-config openssl-devel git-core \
   && dnf --installroot=/rootfs --use-host-config clean all \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/usr/share/locale/*
-COPY --from=rust-toolchain /usr/local/rustup/ /rootfs/usr/local/rustup/
+COPY --from=confined-compiler /confined-compiler/rootfs/ /rootfs/
+COPY --from=confined-compiler /confined-compiler/compat/ /rootfs/
 COPY --from=rust-toolchain /usr/local/cargo/bin/ /rootfs/usr/local/cargo/bin/
 RUN install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user/.cargo"
 COPY --chown=$mrsm_uid:$mrsm_gid --from=plugin-dependencies /plugin-cargo/registry/ /rootfs/home/$mrsm_user/.cargo/registry/
+
+FROM factory-manifest-tools AS rust-attested-rootfs
+COPY --from=rust-rootfs /rootfs/ /rootfs/
+RUN set -eu; \
+    case "$TARGETARCH" in amd64) architecture=x86_64 ;; arm64) architecture=aarch64 ;; *) exit 1 ;; esac; \
+    release="$(python3 -c 'import tomllib; print(tomllib.load(open("/factory-workspace.toml", "rb"))["workspace"]["package"]["version"])')"; \
+    python3 /factory-tools/write_native_factory_manifest.py --rootfs /rootfs \
+      --release "$release" --architecture "$architecture" --runtime-uid "$mrsm_uid"
+
+FROM factory-manifest-tools AS rust-full-attested-rootfs
+COPY --from=rust-full-rootfs /rootfs/ /rootfs/
+RUN set -eu; \
+    case "$TARGETARCH" in amd64) architecture=x86_64 ;; arm64) architecture=aarch64 ;; *) exit 1 ;; esac; \
+    release="$(python3 -c 'import tomllib; print(tomllib.load(open("/factory-workspace.toml", "rb"))["workspace"]["package"]["version"])')"; \
+    python3 /factory-tools/write_native_factory_manifest.py --rootfs /rootfs \
+      --release "$release" --architecture "$architecture" --runtime-uid "$mrsm_uid"
 
 
 FROM scratch AS rust
@@ -367,7 +430,7 @@ ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.
     MRSM_UID=$mrsm_uid MRSM_GID=$mrsm_gid MRSM_ROOT_DIR=$mrsm_root_dir \
     MRSM_WORK_DIR=$mrsm_root_dir MRSM_RUNTIME=docker \
     HOME=/home/$mrsm_user MRSM_HOME=/home/$mrsm_user PATH=/usr/local/bin:/usr/bin LANG=C.UTF-8
-COPY --from=rust-rootfs /rootfs/ /
+COPY --from=rust-attested-rootfs /rootfs/ /
 USER $MRSM_UID:$MRSM_GID
 WORKDIR $MRSM_ROOT_DIR
 VOLUME $MRSM_ROOT_DIR
@@ -382,7 +445,7 @@ ENV MRSM_DUCKDB_LIB=${duckdb_driver:+/usr/local/lib/meerschaum/duckdb/libduckdb.
     HOME=/home/$mrsm_user MRSM_HOME=/home/$mrsm_user \
     RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/home/$mrsm_user/.cargo \
     PATH=/usr/local/cargo/bin:/usr/local/bin:/usr/bin LANG=C.UTF-8
-COPY --from=rust-full-rootfs /rootfs/ /
+COPY --from=rust-full-attested-rootfs /rootfs/ /
 USER $MRSM_UID:$MRSM_GID
 WORKDIR $MRSM_ROOT_DIR
 VOLUME $MRSM_ROOT_DIR

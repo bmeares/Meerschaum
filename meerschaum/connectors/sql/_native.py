@@ -275,6 +275,182 @@ def _inline_as_literal(value: Any, flavor: str) -> bool:
     return isinstance(value, (decimal.Decimal, uuid.UUID))
 
 
+def _pg_item(value: Any, flavor: str) -> Optional[str]:
+    """
+    One element of a list or tuple parameter as psycopg2 renders it (the driver of 4.x), or
+    `None` for a value psycopg2 does not adapt (a dict, a set, ...).
+    """
+    import datetime
+    import decimal
+    import math
+    import uuid
+    if value is None:
+        return 'NULL'
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, int):
+        text = str(value)
+        return ' ' + text if text.startswith('-') else text
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "'NaN'::float"
+        if math.isinf(value):
+            return "'Infinity'::float" if value > 0 else "'-Infinity'::float"
+        text = repr(value)
+        return ' ' + text if text.startswith('-') else text
+    if isinstance(value, decimal.Decimal):
+        if not value.is_finite():
+            return "'NaN'::numeric"
+        text = str(value)
+        return ' ' + text if text.startswith('-') else text
+    if isinstance(value, str):
+        return _pg_literal(value, flavor)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "'\\x" + bytes(value).hex() + "'::bytea"
+    if isinstance(value, datetime.datetime):
+        aware = value.tzinfo is not None and value.utcoffset() is not None
+        return f"'{value.isoformat()}'::" + ('timestamptz' if aware else 'timestamp')
+    if isinstance(value, datetime.date):
+        return f"'{value.isoformat()}'::date"
+    if isinstance(value, datetime.time):
+        aware = value.tzinfo is not None and value.utcoffset() is not None
+        return f"'{value.isoformat()}'::" + ('timetz' if aware else 'time')
+    if isinstance(value, datetime.timedelta):
+        return "'%d days %d.%06d seconds'::interval" % (
+            value.days, value.seconds, value.microseconds,
+        )
+    if isinstance(value, uuid.UUID):
+        return f"'{value}'::uuid"
+    if isinstance(value, tuple):
+        return _pg_sequence(value, flavor)
+    if isinstance(value, list):
+        return _pg_list(value, flavor, top=False)
+    if type(value).__module__.startswith('numpy') and hasattr(value, 'item'):
+        item = value.item()
+        if item is not value and not type(item).__module__.startswith('numpy'):
+            return _pg_item(item, flavor)
+    return None
+
+
+def _pg_list(value: List[Any], flavor: str, top: bool = True) -> Optional[str]:
+    """
+    A list parameter as psycopg2 renders it: `ARRAY[...]` (a nested list is `[...]` inside it),
+    `'{}'` when empty and `'{NULL,...}'` when every element is `None` (both untyped, so they take
+    the type the statement needs, `= ANY(:ids)` against any column).
+    """
+    if not value:
+        return "'{}'"
+    items = []
+    for element in value:
+        item = _pg_item(element, flavor)
+        if item is None:
+            return None
+        items.append(item)
+    if all(element is None for element in value):
+        return "'{" + ','.join('NULL' for _ in value) + "}'"
+    body = '[' + ','.join(items) + ']'
+    return 'ARRAY' + body if top else body
+
+
+def _pg_sequence(value: Tuple[Any, ...], flavor: str) -> Optional[str]:
+    """A tuple parameter as psycopg2 renders it: `(a, b)` (a row, or the list of `IN :x`)."""
+    items = []
+    for element in value:
+        item = _pg_item(element, flavor)
+        if item is None:
+            return None
+        items.append(item)
+    return '(' + ', '.join(items) + ')'
+
+
+def _container_sql(value: Any, flavor: str, out: List[Any]) -> Optional[str]:
+    """
+    The SQL standing for a list or tuple parameter where the 4.x driver expanded it, or `None`
+    to bind it as one value:
+
+    - PostgreSQL family: psycopg2's text (`ARRAY[1,2]`, `'{}'`, `(1, 2)`), so that a list of
+      scalars is an array of the element type psycopg2 gave it (`id = ANY(:ids)`, an insert into
+      an array column) and a tuple a row (`id IN :ids`). A list holding a dict (or another value
+      psycopg2 does not adapt) binds as before (JSON).
+    - MySQL / MariaDB: `(?, ?)` with each element bound, as PyMySQL / mysqlclient expanded a list
+      or tuple (`id IN :ids`).
+    - DuckDB: a list or tuple is a `[...]` list and a dict a `{'key': ...}` struct, each element
+      bound, as the `duckdb` package bound them (`id IN :ids`, a `LIST` / `STRUCT` value).
+    """
+    if flavor == 'duckdb':
+        return _duckdb_container(value, flavor, out)
+    if not isinstance(value, (list, tuple)):
+        return None
+    if flavor in _PG_FAMILY:
+        if isinstance(value, list):
+            return _pg_list(value, flavor)
+        return _pg_sequence(value, flavor)
+    if flavor in ('mysql', 'mariadb'):
+        if any(isinstance(element, (list, tuple, dict, set)) for element in value):
+            return None
+        pieces = []
+        for element in value:
+            out.append(element)
+            pieces.append(_placeholder(flavor, len(out)))
+        return '(' + ','.join(pieces) + ')'
+    return None
+
+
+def _duckdb_container(value: Any, flavor: str, out: List[Any]) -> Optional[str]:
+    """
+    A DuckDB list (`[$1, $2]`) for a list or tuple, a struct (`{'a': $1}`) for a dict with text
+    keys (nested ones too), binding the elements into `out`; `None` for anything else (or a
+    container holding a set or an empty dict), which binds as one value. `out` is only extended
+    when the whole value expands.
+    """
+    if not isinstance(value, (list, tuple, dict)):
+        return None
+    staged: List[Any] = []
+
+    def render(item: Any) -> Optional[str]:
+        if isinstance(item, (list, tuple)):
+            parts = [render(element) for element in item]
+            if any(part is None for part in parts):
+                return None
+            return '[' + ', '.join(parts) + ']'
+        if isinstance(item, dict):
+            if not item or not all(isinstance(key, str) for key in item):
+                return None
+            parts = []
+            for key, element in item.items():
+                part = render(element)
+                if part is None:
+                    return None
+                parts.append("'" + key.replace("'", "''") + "': " + part)
+            return '{' + ', '.join(parts) + '}'
+        if isinstance(item, set):
+            return None
+        staged.append(item)
+        return _placeholder(flavor, len(out) + len(staged))
+
+    sql = render(value)
+    if sql is None:
+        return None
+    out.extend(staged)
+    return sql
+
+
+def _expands(value: Any, flavor: str) -> bool:
+    """Whether a parameter value is written into the statement rather than bound as one value."""
+    return _inline_as_literal(value, flavor) or _container_sql(value, flavor, []) is not None
+
+
+def _value_sql(value: Any, flavor: str, out: List[Any]) -> str:
+    """The SQL standing for one parameter value; the values it binds are appended to `out`."""
+    if _inline_as_literal(value, flavor):
+        return _pg_literal(str(value), flavor)
+    container = _container_sql(value, flavor, out)
+    if container is not None:
+        return container
+    out.append(value)
+    return _placeholder(flavor, len(out))
+
+
 def _scan(sql: str) -> Iterator[Tuple[int, str]]:
     """
     Yield `(position, character)` for each character of `sql` outside string literals, quoted
@@ -366,12 +542,7 @@ def _bind_named(
     last = 0
     for match in regex.finditer(sql):
         pieces.append(text_of(sql[last:match.start()]))
-        value = values[match.group(1)]
-        if _inline_as_literal(value, flavor):
-            pieces.append(_pg_literal(str(value), flavor))
-        else:
-            out.append(value)
-            pieces.append(_placeholder(flavor, len(out)))
+        pieces.append(_value_sql(values[match.group(1)], flavor, out))
         last = match.end()
     pieces.append(text_of(sql[last:]))
     return ''.join(pieces), out
@@ -398,11 +569,7 @@ def _bind_positional(sql: str, values: Sequence[Any], flavor: str) -> Tuple[str,
     unescape = (lambda text: text.replace('%%', '%')) if chosen == '%s' else (lambda text: text)
     for pos, value in zip(markers[chosen], values):
         pieces.append(unescape(sql[last:pos]))
-        if _inline_as_literal(value, flavor):
-            pieces.append(_pg_literal(str(value), flavor))
-        else:
-            out.append(value)
-            pieces.append(_placeholder(flavor, len(out)))
+        pieces.append(_value_sql(value, flavor, out))
         last = pos + width
     pieces.append(unescape(sql[last:]))
     return ''.join(pieces), out
@@ -470,7 +637,7 @@ def prepare(connector: Any, query: Any, params: Any = None) -> PreparedStatement
             merged = {**compiled_params, **values}
             text, ordered = _bind_named(sql, merged, flavor, compiled)
             sets.append(ordered)
-        if flavor in _PG_FAMILY and any(_inline_as_literal(v, flavor) for p in params for v in p.values()):
+        if any(_expands(v, flavor) for p in params for v in p.values()):
             ### Inlined text differs per row: one statement per parameter set.
             statements = []
             for values in params:

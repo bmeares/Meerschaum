@@ -55,10 +55,36 @@ def retry_connect(
     -------
     Whether a connection could be made.
 
+    Notes
+    -----
+    `sql` (every flavor with a native driver), `valkey` and `api` connectors are retried in
+    this process by the Rust core, with no child process, temporary file or Python package.
+    Any other connector (a plugin's, or one without a usable driver) is retried in a child
+    Python process.
+
     """
+    target = _native_target(connector, debug=debug)
+    if target is not None:
+        from meerschaum import _core
+        return bool(_core.retry_connect_native(
+            target,
+            str(connector),
+            int(max_retries),
+            float(retry_wait),
+            str(retry_wait),
+            int(workers or 0),
+            bool(warn),
+            bool(print_on_connect),
+            bool(enforce_chaining),
+            bool(enforce_login),
+            bool(warn) and connector.__dict__.get('_warn', None) is not False,
+            bool(debug),
+        ))
+
     import json
+    import os
+    import tempfile
     from meerschaum.utils.venv import venv_exec
-    from meerschaum.utils.packages import attempt_import
 
     kw = {
         'connector_meta': connector.meta,
@@ -72,16 +98,67 @@ def retry_connect(
         'debug': debug,
     }
 
-    dill = attempt_import('dill', lazy=False)
-    code = (
-        "import sys, json\n"
-        + "from meerschaum.utils.typing import Optional, Dict, Any\n\n"
-        + dill.source.getsource(_wrap_retry_connect) + '\n\n'
-        + f"kw = json.loads({json.dumps(json.dumps(kw))})\n"
-        + "success = _wrap_retry_connect(**kw)\n"
-        + "sys.exit((0 if success else 1))"
-    )
-    return venv_exec(code, venv=None, debug=debug)
+    ### The connector's attributes (its password among them) travel in an owner-only file the
+    ### child reads and removes, never on its command line, where `ps` would show them (5.1).
+    fd, kw_path = tempfile.mkstemp(prefix='mrsm-retry-', suffix='.json')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as kw_file:
+            json.dump(kw, kw_file)
+        code = (
+            "import sys, json, os\n"
+            ### The child imports the helper (no source text, no `dill`: the base wheel has no
+            ### runtime dependencies).
+            + "from meerschaum.connectors.poll import _wrap_retry_connect\n\n"
+            + f"_kw_path = {kw_path!r}\n"
+            + "with open(_kw_path, 'r', encoding='utf-8') as _kw_file:\n"
+            + "    kw = json.load(_kw_file)\n"
+            + "os.remove(_kw_path)\n"
+            + "success = _wrap_retry_connect(**kw)\n"
+            + "sys.exit((0 if success else 1))"
+        )
+        return venv_exec(code, venv=None, debug=debug)
+    finally:
+        try:
+            os.remove(kw_path)
+        except FileNotFoundError:
+            pass
+
+
+def _native_target(connector: Any, debug: bool = False) -> Optional[Any]:
+    """
+    The `meerschaum._core` connector the Rust retry loop runs against, or `None` when the
+    connector is not one the core implements (a plugin's connector) or its driver cannot be
+    built here (a flavor whose native library is missing); the reason is a debug message.
+    """
+    def _fallback(reason: str) -> None:
+        if debug:
+            from meerschaum.utils.debug import dprint
+            dprint(f"`retry_connect()` keeps to a child process for '{connector}': {reason}.")
+
+    connector_type = getattr(connector, 'type', None)
+    try:
+        from meerschaum import _core
+        if not hasattr(_core, 'retry_connect_native'):
+            _fallback("the extension has no native retry loop")
+            return None
+        if connector_type == 'sql':
+            from meerschaum.connectors.sql import SQLConnector
+            if isinstance(connector, SQLConnector):
+                ### Without the default-schema lookup, which would connect (and fail) first.
+                return connector._core_connector(discover_schema=False)
+        elif connector_type == 'valkey':
+            from meerschaum.connectors.valkey import ValkeyConnector
+            if isinstance(connector, ValkeyConnector):
+                return connector._rust_client()
+        elif connector_type == 'api':
+            from meerschaum.connectors.api import APIConnector
+            if isinstance(connector, APIConnector):
+                return connector._rust_client()
+    except Exception as e:
+        _fallback(str(e))
+        return None
+    _fallback("the core does not implement this connector")
+    return None
 
 
 def _wrap_retry_connect(

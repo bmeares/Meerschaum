@@ -9,7 +9,7 @@ use meerschaum_core::Value;
 use serde_json::{Value as Json, json};
 
 use super::{Ctx, body_bytes};
-use crate::auth::{is_user_allowed_to_execute, scoped_auth_if_private};
+use crate::auth::{is_user_allowed_to_execute_action, scoped_auth_if_private};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{ok_json, to_core, tuple, tuple_response};
@@ -50,7 +50,7 @@ async fn do_action_legacy(ctx: Ctx, Path(action): Path<String>, body: Body) -> A
         }
     };
     if !caller.no_auth && !caller.full_admin() {
-        let allowed = is_user_allowed_to_execute(&ctx.state, principal.as_ref()).await;
+        let allowed = is_user_allowed_to_execute_action(&ctx.state, principal.as_ref()).await;
         if !allowed.success {
             return Ok(tuple_response(&allowed));
         }
@@ -60,7 +60,14 @@ async fn do_action_legacy(ctx: Ctx, Path(action): Path<String>, body: Body) -> A
     }
     if !caller.no_auth && !caller.full_admin() {
         let sysargs = crate::execute_access::sysargs_of_keywords(&action, &keywords);
-        if let Err(message) = crate::execute_policy::check_non_admin(&sysargs) {
+        if let Err(message) = crate::execute_policy::check_command(
+            &ctx.state,
+            &caller,
+            &sysargs,
+            crate::execute_policy::Place::Server,
+        )
+        .await
+        {
             return Ok(tuple(false, message));
         }
         if let Err(e) = crate::execute_access::check(&ctx.state, &caller, &sysargs).await {
@@ -77,7 +84,13 @@ async fn do_action_legacy(ctx: Ctx, Path(action): Path<String>, body: Body) -> A
         .shift_remove("debug")
         .unwrap_or(Value::Bool(ctx.state.config.debug));
     keywords.insert("debug".into(), debug);
-    Ok(tuple_response(
-        &ctx.state.actions.execute(&action, keywords).await,
-    ))
+    let graph = crate::executor::pipe_operation::DirectAction::graph_candidate(&action, &keywords);
+    let execute = ctx.state.actions.execute(&action, keywords);
+    let status = if !caller.no_auth && !caller.full_admin() && graph {
+        crate::executor::context::direct_action_scope(&ctx.state, &ctx.headers, &caller, execute)
+            .await?
+    } else {
+        execute.await
+    };
+    Ok(tuple_response(&status))
 }

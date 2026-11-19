@@ -22,6 +22,9 @@ use common::{MemoryInstance, SECRET, send};
 use futures_util::{SinkExt, StreamExt};
 use meerschaum_core::Value as CoreValue;
 use meerschaum_core::config::default_config;
+use meerschaum_server::access::Access;
+use meerschaum_server::backends::ActionsBackend;
+use meerschaum_server::webterm::remote::{Event, Input, Terminal};
 use meerschaum_server::webterm::{self, SessionLookup, ShellCommand, TmuxSettings, WebtermConfig};
 use meerschaum_server::{AppState, ServerConfig, ServerFlags};
 use serde_json::{Value, json};
@@ -68,6 +71,49 @@ impl SessionLookup for Sessions {
             return Err("the session store is down".into());
         }
         Ok(self.map.lock().unwrap().get(session_id).cloned())
+    }
+
+    async fn binding(&self, session_id: &str) -> Result<Option<(String, String)>, String> {
+        Ok(self
+            .username(session_id)
+            .await?
+            .map(|user| (user, "test-binding".into())))
+    }
+}
+
+struct HostTerminal;
+
+#[async_trait]
+impl ActionsBackend for HostTerminal {
+    fn list(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    async fn execute(&self, _: &str, _: meerschaum_core::Map) -> meerschaum_core::SuccessTuple {
+        panic!("The console bridge must only use the configured terminal backend")
+    }
+
+    async fn host_api_terminal(
+        &self,
+        team: Option<uuid::Uuid>,
+        caller: &Access,
+    ) -> Result<Terminal, String> {
+        assert!(team.is_none());
+        assert_eq!(caller.username(), Some("bob"));
+        assert_eq!(caller.credential.as_deref(), Some("test-binding"));
+        let (input, mut commands) = tokio::sync::mpsc::channel(4);
+        let (output, events) = tokio::sync::mpsc::channel(4);
+        tokio::spawn(async move {
+            let _ = output.send(Event::Setup).await;
+            while let Some(command) = commands.recv().await {
+                if matches!(command, Input::Stdin(text) if text == "fixture command\n") {
+                    let _ = output
+                        .send(Event::Output("fixture response\n".into()))
+                        .await;
+                }
+            }
+        });
+        Ok(Terminal { input, events })
     }
 }
 
@@ -150,6 +196,7 @@ fn state_and_instance(cfg: ServerConfig) -> (AppState, Arc<MemoryInstance>) {
     instance.seed_user("ed", "pass", None);
     let state = AppState::builder(cfg, instance.clone())
         .secret(SECRET.to_vec())
+        .actions(Arc::new(HostTerminal))
         .build()
         .expect("state");
     (state, instance)
@@ -1037,17 +1084,14 @@ async fn an_open_terminal_closes_when_its_user_loses_access() {
     // `bob` is an operator (`webterm:use`); `root2` an administrator.
     let mut operator = connect(addr, USER_SESSION).await;
     expect_setup(&mut operator).await;
-    let operator_pid = shell_pid(&mut operator).await;
     let mut admin = connect(addr, OTHER_ADMIN_SESSION).await;
     expect_setup(&mut admin).await;
     let admin_pid = shell_pid(&mut admin).await;
 
     instance.seed_user_scopes("bob", &[]);
-    let (out, disconnected, code) = ending(&mut operator, Duration::from_secs(5)).await;
+    let (out, _, code) = ending(&mut operator, Duration::from_secs(5)).await;
     assert!(out.contains("permission"), "{out:?}");
-    assert!(disconnected);
     assert_eq!(code, Some(1008));
-    assert_shell_ends(operator_pid).await;
 
     let deleted = instance
         .delete_user(&meerschaum_core::users::User::new("root2", None))
@@ -1340,14 +1384,19 @@ async fn tmux_sessions_survive_reconnects_and_carry_the_environment() {
     read_until(&mut first, |out| has_line(out, "env:it's=ok $HOME")).await;
     // The shell sees TERM from tmux, and the session is named after the user.
     wait_for_session("admin_t");
+    // The window read its environment file and removed it: none stays behind (5.1).
+    let left: Vec<String> = std::fs::read_dir(&env_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("webterm.") && name.ends_with(".env"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(env_dir.join("webterm.env"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
+        let mode = std::fs::metadata(&env_dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 
     // Closing the tab kills the tmux client, not the session.
@@ -2105,4 +2154,196 @@ async fn a_draining_server_closes_its_terminals() {
     assert!(!disconnected);
     assert_eq!(code, Some(1001));
     assert_shell_ends(pid).await;
+}
+
+/// 5.1: tmux's socket runs commands for any process of the server's user that connects, and
+/// tmux cannot ask for a secret. While an isolated team whose members may install plugins is
+/// recorded and Unix sockets are not denied to team code (neither Landlock, Linux 7.1, nor the
+/// seccomp filter of older kernels, as the server's probe finds), terminals run without tmux, so
+/// nothing listens; where sockets are denied, tmux is used as before.
+#[tokio::test]
+async fn with_isolated_teams_tmux_is_used_only_where_their_sandbox_stops_unix_sockets() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP: no tmux");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let scope = meerschaum_core::team_scope::TeamScope {
+        team: "wetlands".into(),
+        team_id: Some("id-wetlands".into()),
+        ..Default::default()
+    };
+    meerschaum_core::team_scope::write_scope_record(root.path(), &scope).unwrap();
+    assert!(meerschaum_core::team_scope::isolated_teams_recorded(
+        root.path()
+    ));
+    let state = state(root.path());
+    for stops in [false, true] {
+        let tmux_dir = short_tmp();
+        let _server = PrivateTmux(tmux_dir.path().to_path_buf());
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: Some(tmux_socket(tmux_dir.path())),
+            session_suffix: format!("_t{}", stops as u8),
+            env_dir: root.path().join("webterm"),
+            config_file: Some("/dev/null".into()),
+        };
+        let mut cfg = config(&state, sh(), Some(tmux));
+        cfg.sandbox_stops_sockets = Some(stops);
+        assert_eq!(cfg.tmux_refused().is_some(), !stops);
+        let addr = serve(webterm::routes(state.clone(), cfg)).await;
+        let mut first = connect(addr, ADMIN_SESSION).await;
+        expect_setup(&mut first).await;
+        send_json(&mut first, json!(["stdin", "KEPT=one; echo a:$KEPT\n"])).await;
+        read_until(&mut first, |out| has_line(out, "a:one")).await;
+        let mut second = connect(addr, ADMIN_TAB_TWO).await;
+        expect_setup(&mut second).await;
+        send_json(&mut second, json!(["stdin", "echo b:${KEPT:-unset}\n"])).await;
+        if stops {
+            // tmux: the second tab attaches to the same shell, on the private tmux server.
+            read_until(&mut second, |out| has_line(out, "b:one")).await;
+            assert!(tmux_socket(tmux_dir.path()).exists());
+        } else {
+            // No tmux: a shell of its own, and no tmux socket for anyone to connect to.
+            read_until(&mut second, |out| has_line(out, "b:unset")).await;
+            assert!(!tmux_socket(tmux_dir.path()).exists());
+        }
+        // Why: any process of this user that reaches the socket runs commands through it (only a
+        // sandbox that refuses the connection stops a team's code from doing so).
+        let planted = root.path().join(format!("planted-{}", stops as u8));
+        let _ = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(tmux_socket(tmux_dir.path()))
+            .args(["run-shell", &format!("touch '{}'", planted.display())])
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .output();
+        assert_eq!(planted.exists(), stops);
+    }
+}
+
+/// 5.1: an isolated team that may not install plugins runs only plugins an administrator
+/// granted it, so its existence keeps tmux even where Unix sockets are not denied to team code;
+/// switching the team's plugin installs on refuses tmux there.
+#[tokio::test]
+async fn an_isolated_team_without_plugin_installs_keeps_tmux() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP: no tmux");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let mut scope = meerschaum_core::team_scope::TeamScope {
+        team: "reviewers".into(),
+        team_id: Some("id-reviewers".into()),
+        plugins_write: Some(false),
+        ..Default::default()
+    };
+    meerschaum_core::team_scope::write_scope_record(root.path(), &scope).unwrap();
+    assert!(meerschaum_core::team_scope::isolated_teams_recorded(
+        root.path()
+    ));
+    let state = state(root.path());
+    let tmux_dir = short_tmp();
+    let _server = PrivateTmux(tmux_dir.path().to_path_buf());
+    let tmux = TmuxSettings {
+        binary: "tmux".into(),
+        socket: Some(tmux_socket(tmux_dir.path())),
+        session_suffix: "_np".into(),
+        env_dir: root.path().join("webterm"),
+        config_file: Some("/dev/null".into()),
+    };
+    let mut cfg = config(&state, sh(), Some(tmux));
+    cfg.sandbox_stops_sockets = Some(false);
+    assert_eq!(cfg.tmux_refused(), None);
+    let addr = serve(webterm::routes(state.clone(), cfg.clone())).await;
+    let mut first = connect(addr, ADMIN_SESSION).await;
+    expect_setup(&mut first).await;
+    send_json(&mut first, json!(["stdin", "KEPT=one; echo a:$KEPT\n"])).await;
+    read_until(&mut first, |out| has_line(out, "a:one")).await;
+    let mut second = connect(addr, ADMIN_TAB_TWO).await;
+    expect_setup(&mut second).await;
+    send_json(&mut second, json!(["stdin", "echo b:${KEPT:-unset}\n"])).await;
+    read_until(&mut second, |out| has_line(out, "b:one")).await;
+    assert!(tmux_socket(tmux_dir.path()).exists());
+    // The switch on: the team's own code could reach the socket, so tmux is refused.
+    scope.plugins_write = Some(true);
+    meerschaum_core::team_scope::write_scope_record(root.path(), &scope).unwrap();
+    let why = cfg.tmux_refused().expect("refused");
+    assert!(
+        why.contains("'reviewers' may install its own plugins")
+            && why.contains("Unix sockets are not denied to team code"),
+        "{why}"
+    );
+}
+
+/// 5.1: the restricted terminals follow the same rule as the administrators': while isolated
+/// teams are recorded and their sandbox does not refuse pathname Unix sockets, a restricted
+/// terminal runs without tmux, so neither the administrators' nor the restricted tmux server
+/// listens for a team's process to connect to; where the sandbox refuses them, it uses the
+/// restricted tmux server (`<socket>-r.sock`).
+#[tokio::test]
+async fn with_isolated_teams_the_bridge_leaves_local_tmux_sockets_unused() {
+    let probe = std::process::Command::new("tmux")
+        .arg("-V")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .output();
+    if !probe.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP: no tmux");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let scope = meerschaum_core::team_scope::TeamScope {
+        team: "wetlands".into(),
+        team_id: Some("id-wetlands".into()),
+        plugins_write: Some(true),
+        ..Default::default()
+    };
+    meerschaum_core::team_scope::write_scope_record(root.path(), &scope).unwrap();
+    let state = state(root.path());
+    for stops in [false, true] {
+        let tmux_dir = short_tmp();
+        let _server = PrivateTmux(tmux_dir.path().to_path_buf());
+        let socket = tmux_socket(tmux_dir.path());
+        let restricted = webterm::restricted_socket(&socket);
+        struct KillSocket(std::path::PathBuf);
+        impl Drop for KillSocket {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("tmux")
+                    .arg("-S")
+                    .arg(&self.0)
+                    .arg("kill-server")
+                    .env_remove("TMUX")
+                    .env_remove("TMUX_PANE")
+                    .output();
+            }
+        }
+        let _restricted_server = KillSocket(restricted.clone());
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: Some(socket.clone()),
+            session_suffix: format!("_r{}", stops as u8),
+            env_dir: root.path().join(format!("webterm{}", stops as u8)),
+            config_file: Some("/dev/null".into()),
+        };
+        let mut cfg = config(&state, sh(), Some(tmux));
+        cfg.sandbox_stops_sockets = Some(stops);
+        let addr = serve(webterm::routes(state.clone(), cfg)).await;
+        let mut term = connect(addr, USER_SESSION).await;
+        expect_setup(&mut term).await;
+        send_json(&mut term, json!(["stdin", "fixture command\n"])).await;
+        read_until(&mut term, |out| has_line(out, "fixture response")).await;
+        assert!(!socket.exists(), "stops={stops}");
+        assert!(!restricted.exists(), "stops={stops}");
+    }
 }

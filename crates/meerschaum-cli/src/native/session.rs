@@ -30,15 +30,16 @@
 //! signature changed.
 
 use meerschaum_worker::manifest::{
-    Manifest, ManifestSource, ensure_manifest_for, manifest_path, probe_entry_points,
-    rebuild_manifest_for, stale_plugins_for,
+    Manifest, ManifestSource, ensure_manifest_for, ensure_manifest_for_with_options, manifest_path,
+    probe_entry_points, read_cached_manifest_for, read_fresh_manifest_for, rebuild_manifest_for,
+    stale_plugins_for,
 };
-use meerschaum_worker::{PoolConfig, WorkerPool};
+use meerschaum_worker::{PoolConfig, PoolScope, TeamPools, WorkerPool};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use meerschaum_connector::InstanceConnector;
 use meerschaum_connector_sql::SqlConnector;
@@ -49,6 +50,7 @@ use meerschaum_core::config::Config;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{pyfmt, static_config};
 use meerschaum_plugin::NativePlugins;
+use meerschaum_plugin::source::compiler::{CompilerPolicy, SourceCompiler};
 
 use crate::builtin::ActionError;
 
@@ -125,6 +127,96 @@ pub struct Session {
     worker_python: Arc<Mutex<Option<String>>>,
     hook_results: Arc<Mutex<Vec<meerschaum_core::SuccessTuple>>>,
     manifests: Arc<Mutex<ManifestState>>,
+    /// Trusted host attachment; frozen before any manifest/discovery, shared by all children.
+    source_compiler: Arc<OnceLock<CompilerPolicy>>,
+    /// The isolated teams' pools and sessions of this process (5.1), shared by clones.
+    teams: Arc<TeamSessions>,
+    /// The team this session runs for (a team's session, [`Session::for_team`]).
+    team: Option<Arc<TeamBinding>>,
+}
+
+/// The isolated teams' sessions of a process (5.1): one per team, rebuilt when the team's
+/// configuration changes, with the pools under one limit.
+#[derive(Default)]
+struct TeamSessions {
+    pools: std::sync::OnceLock<TeamPools>,
+    sessions: Mutex<HashMap<String, (String, Session)>>,
+}
+
+/// What a team's session runs for.
+pub struct TeamBinding {
+    /// The team.
+    pub scope: meerschaum_core::team_scope::TeamScope,
+    /// The team's configuration (what its workers are started with), as a registry.
+    pub config: Arc<Config>,
+    /// The fingerprint of that configuration.
+    pub fingerprint: String,
+    /// The team's files (`team_scopes/<key>/`).
+    pub files: meerschaum_core::team_scope::ScopeFiles,
+    /// The environment of the team's processes.
+    pub env: Vec<(String, String)>,
+    /// The team's configuration, loaded once (every key), for [`TeamBinding::new_config`].
+    snapshot: Map,
+}
+
+impl TeamBinding {
+    /// A fresh registry of the team's configuration (what an action run for the team reads),
+    /// from the snapshot loaded when the team's session was built (no file is read again).
+    pub fn new_config(&self) -> Result<Config, ActionError> {
+        // The snapshot already holds the team's configuration file: without the patch
+        // variables, no lookup replays that patch to learn where a value came from.
+        let patch_variables: Vec<String> = meerschaum_core::config::environment::patch_variables()
+            .into_iter()
+            .flat_map(|(var, file_var)| [var, file_var])
+            .collect();
+        let env: Vec<(String, String)> = self
+            .env
+            .iter()
+            .filter(|(k, _)| !patch_variables.contains(k))
+            .cloned()
+            .collect();
+        let config = Config::new(meerschaum_core::config::ConfigOptions::with_env(env))
+            .map_err(|e| ActionError::new("ConfigError", e.to_string()))?;
+        config.set_config(self.snapshot.clone());
+        Ok(config)
+    }
+}
+
+/// How [`Session::for_team`] found the team's session.
+pub use meerschaum_worker::team::Lookup as TeamLookup;
+
+/// An in-flight background manifest refresh started for an interactive shell/webterm so the
+/// prompt opens immediately on cached metadata while stale plugins rebuild quietly off-thread.
+struct BackgroundManifestRefresh {
+    done: Condvar,
+    outcome: Mutex<Option<Result<(), (String, String)>>>,
+}
+
+impl BackgroundManifestRefresh {
+    fn new() -> Self {
+        Self {
+            done: Condvar::new(),
+            outcome: Mutex::new(None),
+        }
+    }
+
+    fn finish(&self, outcome: Result<(), ActionError>) {
+        let stored = outcome.map_err(|e| (e.class, e.message));
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(stored);
+        self.done.notify_all();
+    }
+
+    fn wait(&self) -> Result<(), ActionError> {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        while guard.is_none() {
+            guard = self.done.wait(guard).unwrap_or_else(|e| e.into_inner());
+        }
+        match guard.as_ref().expect("outcome populated") {
+            Ok(()) => Ok(()),
+            Err((class, message)) => Err(ActionError::new(class, message.clone())),
+        }
+    }
 }
 
 /// The session's plugin manifests and whether they were validated since the last
@@ -142,6 +234,11 @@ struct ManifestState {
     /// Read-only mode (`doctor`): the manifests are whatever the last command cached on disk,
     /// never validated, rebuilt or imported.
     cached_only: bool,
+    /// Bumped when `ManifestState` is reset or invalidated so stale background refreshes drop
+    /// their results cleanly.
+    generation: u64,
+    /// Active background manifest refresh started by [`Session::warm_manifest_for_shell`].
+    refreshing: Option<Arc<BackgroundManifestRefresh>>,
 }
 
 impl Default for Session {
@@ -172,6 +269,10 @@ impl Session {
     }
 
     fn from_runtime(rt: SessionRuntime) -> Session {
+        let source_compiler = Arc::new(OnceLock::new());
+        if let Some(policy) = crate::team_sandbox::source_compiler_policy() {
+            let _ = source_compiler.set(policy);
+        }
         Session {
             rt: Arc::new(rt),
             instances: Arc::new(Mutex::new(HashMap::new())),
@@ -183,7 +284,258 @@ impl Session {
             worker_python: Arc::new(Mutex::new(None)),
             hook_results: Arc::new(Mutex::new(Vec::new())),
             manifests: Arc::new(Mutex::new(ManifestState::default())),
+            source_compiler,
+            teams: Arc::new(TeamSessions::default()),
+            team: None,
         }
+    }
+
+    /// The team this session runs for (`None`: the server's own session).
+    pub fn team(&self) -> Option<&Arc<TeamBinding>> {
+        self.team.as_ref()
+    }
+
+    /// The isolated teams' pools of this process (5.1), created with the limit of `config`
+    /// (`system.engine.python_team_workers`) on first use.
+    pub fn team_pools(&self, config: &Config) -> TeamPools {
+        self.teams
+            .pools
+            .get_or_init(|| TeamPools::new(meerschaum_worker::pool::team_workers_limit(config)))
+            .clone()
+    }
+
+    /// The session of an isolated team (5.1): its own connectors and worker pool, built from the
+    /// team's configuration only ([`meerschaum_core::team_scope::team_config`] of the server's
+    /// `config`). Python code the session runs starts in workers that never receive the
+    /// server's configuration (`MRSM_CONFIG`, `MRSM_PATCH`, connector variables, config files)
+    /// nor any other server variable outside an allowlist
+    /// ([`meerschaum_core::team_scope::team_env`]), and whose callbacks may only touch the team's instances (and, with `member`, pipes that
+    /// member may change). Reused while the team's configuration is unchanged; a change (a
+    /// connector granted or revoked, a rename, a deletion, a rotated password) retires the
+    /// team's workers and builds a new session. Returns the session and how it was found.
+    pub fn for_team(
+        &self,
+        scope: &meerschaum_core::team_scope::TeamScope,
+        member: Option<meerschaum_core::access::Principal>,
+        config: &Config,
+    ) -> Result<(Session, TeamLookup), ActionError> {
+        scope
+            .check_host_execution(config)
+            .map_err(|message| ActionError::new("RuntimeError", message))?;
+        use meerschaum_core::team_scope as ts;
+        let io = |e: std::io::Error| ActionError::new("OSError", e.to_string());
+        // A connector another process registered (a team's database) since the last read.
+        config.refresh_connectors();
+        let team_map = ts::team_config(config, scope);
+        let fingerprint = ts::fingerprint(scope, &team_map);
+        let key = scope.key();
+        {
+            let sessions = self
+                .teams
+                .sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some((current, session)) = sessions.get(&key)
+                && *current == fingerprint
+            {
+                return Ok((session.clone(), TeamLookup::Warm));
+            }
+        }
+        let paths = config.paths();
+        let files =
+            ts::write_scope_files(&ts::scope_dir(&paths.root_dir, &key), &team_map).map_err(io)?;
+        ts::write_scope_record(&paths.root_dir, scope).map_err(io)?;
+        let mut base: Vec<(String, String)> = meerschaum_core::process_env::vars()
+            .into_iter()
+            .filter(|(k, _)| k != "MRSM_ROOT_DIR" && k != "MRSM_PLUGINS_DIR")
+            .collect();
+        base.push((
+            "MRSM_ROOT_DIR".into(),
+            paths.root_dir.to_string_lossy().into_owned(),
+        ));
+        if !paths.plugins_dirs.is_empty() {
+            let dirs: Vec<String> = paths
+                .plugins_dirs
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            base.push((
+                "MRSM_PLUGINS_DIR".into(),
+                serde_json::to_string(&dirs).unwrap_or_default(),
+            ));
+        }
+        // An allowlist (`meerschaum_core::team_scope::team_env`): nothing else of the server's
+        // environment (cloud credentials, tokens) reaches the team's workers.
+        let passthrough = ts::Passthrough::from_config(config);
+        passthrough.warn_refused();
+        let mut team_env = ts::team_env(&base, &[], &files, scope, &fingerprint, &passthrough);
+        // 5.1: the team's filesystem sandbox: each worker restricts itself to these rules before
+        // it imports anything of the team's (`system.engine.python_team_sandbox`). In `require`
+        // mode on a system without Landlock, nothing of the team's starts.
+        let sandbox = ts::sandbox::prepare(
+            config,
+            scope,
+            &files,
+            None,
+            &files.dir.join(ts::sandbox::SPEC_FILE),
+        )
+        .map_err(|e| ActionError::new("RuntimeError", e.to_string()))?;
+        if let Some(prepared) = &sandbox {
+            ts::sandbox::apply_env(&mut team_env, prepared);
+        }
+        let team_config = Arc::new(
+            Config::new(meerschaum_core::config::ConfigOptions::with_env(
+                team_env.clone(),
+            ))
+            .map_err(|e| ActionError::new("ConfigError", e.to_string()))?,
+        );
+        let configured: std::collections::BTreeSet<String> = config
+            .get(&["meerschaum", "connectors"])
+            .map(|v| v.to_map())
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|(typ, labels)| {
+                labels
+                    .to_map()
+                    .into_iter()
+                    .filter(|(label, attrs)| label != "default" && !attrs.is_null())
+                    .map(|(label, _)| format!("{typ}:{label}"))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        let mut child = Session {
+            rt: self.rt.clone(),
+            instances: Arc::new(Mutex::new(HashMap::new())),
+            registered: Arc::new(Mutex::new(HashSet::new())),
+            registered_only: Arc::new(AtomicBool::new(false)),
+            python_worker: self.python_worker.clone(),
+            pool: Arc::new(Mutex::new(None)),
+            worker_environment: Arc::new(Mutex::new(None)),
+            worker_python: self.worker_python.clone(),
+            hook_results: Arc::new(Mutex::new(Vec::new())),
+            manifests: self.manifests.clone(),
+            source_compiler: self.source_compiler.clone(),
+            teams: self.teams.clone(),
+            team: None,
+        };
+        let guard: Option<Arc<dyn meerschaum_worker::callback::CallbackGuard>> =
+            member.map(|member| {
+                Arc::new(TeamPipeGuard {
+                    instances: child.instances.clone(),
+                    member,
+                }) as Arc<dyn meerschaum_worker::callback::CallbackGuard>
+            });
+        let pool_scope = PoolScope {
+            scope: Arc::new(scope.clone()),
+            configured: Arc::new(configured),
+            guard,
+        };
+        let worker_python = self
+            .worker_python
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let (pool, lookup) = self.team_pools(config).get(&key, &fingerprint, |live| {
+            let mut settings = PoolConfig::for_team(&team_config, pool_scope, live);
+            // Workers start from an empty environment: the team's allowlisted one only.
+            settings.worker.env_clear = true;
+            settings.worker.env = team_env.clone();
+            // Each worker proves it loaded this configuration before it runs the team's code.
+            settings.worker.team = Some(meerschaum_worker::worker::TeamExpectation {
+                team: scope.team.clone(),
+                fingerprint: fingerprint.clone(),
+                connectors: scope.connectors.clone(),
+                sandbox: sandbox.as_ref().map(|p| p.mode),
+            });
+            // A sandboxed worker works in the team's temporary directory (the server's working
+            // directory is outside its rules).
+            if let Some(prepared) = &sandbox {
+                settings.worker.current_dir = Some(prepared.tmp_dir.clone());
+            }
+            if !std::env::var("MRSM_PYTHON").is_ok_and(|v| !v.trim().is_empty())
+                && let Some(python) = &worker_python
+            {
+                settings.worker.python = python.into();
+            }
+            settings
+        });
+        *child.pool.lock().unwrap_or_else(|e| e.into_inner()) = Some(pool);
+        // The keys of the team's configuration, loaded once: an action run for the team reads
+        // them from memory.
+        for key in team_map.keys() {
+            let _ = team_config.get(&[key.as_str()]);
+        }
+        let mut snapshot = team_config.snapshot();
+        // The values are substituted already; the originals would only slow every lookup (the
+        // team's configuration is never written back).
+        snapshot.shift_remove("_symlinks");
+        // The engine's settings (v5-only defaults, absent from a written `system` file) in the
+        // snapshot: each lookup of one finds it instead of re-substituting every default.
+        if let Some(Value::Map(engine)) = team_config
+            .defaults()
+            .get("system")
+            .and_then(|s| s.as_map())
+            .and_then(|s| s.get("engine"))
+            .cloned()
+            && let Some(Value::Map(system)) = snapshot.get_mut("system")
+        {
+            let merged = match system.get("engine") {
+                Some(Value::Map(own)) => apply_patch_maps(&engine, own),
+                _ => engine,
+            };
+            system.insert("engine".into(), Value::Map(merged));
+        }
+        child.team = Some(Arc::new(TeamBinding {
+            scope: scope.clone(),
+            config: team_config,
+            fingerprint: fingerprint.clone(),
+            files,
+            env: team_env,
+            snapshot,
+        }));
+        let lookup = match lookup {
+            TeamLookup::Warm => TeamLookup::Replaced,
+            other => other,
+        };
+        self.teams
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, (fingerprint, child.clone()));
+        Ok((child, lookup))
+    }
+
+    /// Retire the sessions (and workers) of the teams `keep` refuses (5.1: a deleted team's, or
+    /// one whose configuration changed). Returns the retired teams' keys.
+    pub fn retire_teams(&self, keep: impl Fn(&str, &str) -> bool) -> Vec<String> {
+        let mut retired = Vec::new();
+        let pools = self.teams.pools.get().cloned();
+        let mut sessions = self
+            .teams
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        sessions.retain(|key, (fingerprint, _)| {
+            let kept = keep(key, fingerprint);
+            if !kept {
+                retired.push(key.clone());
+                if let Some(pools) = &pools {
+                    pools.retire(key);
+                }
+            }
+            kept
+        });
+        retired
+    }
+
+    /// An already built connector of this session (never builds one).
+    pub fn cached_instance(&self, keys: &str) -> Option<Instance> {
+        self.instances
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&full_keys(keys))
+            .cloned()
     }
 
     /// Register a connector the host built for `keys` (`type:label`; a bare type means the
@@ -238,6 +590,36 @@ impl Session {
     /// empty and non-native connector types cannot be resolved. On by default.
     pub fn set_python_worker(&self, on: bool) {
         self.python_worker.store(on, Ordering::SeqCst);
+    }
+
+    /// Attach the trusted host's confined native-source compiler before any manifest or
+    /// native discovery. `None` explicitly refuses source compilation; it never selects
+    /// ambient Cargo. Clones and team children share this single immutable choice.
+    /// This Rust host API has no configuration, environment, job or Python selector.
+    pub fn set_source_compiler(
+        &self,
+        compiler: Option<Arc<dyn SourceCompiler>>,
+    ) -> Result<(), ActionError> {
+        let state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        if state.python.is_some()
+            || state.natives.is_some()
+            || state.native_signature.is_some()
+            || state.merged.is_some()
+            || state.validated
+        {
+            return Err(ActionError::new(
+                "RuntimeError",
+                "The source compiler must be attached before manifest initialization.",
+            ));
+        }
+        self.source_compiler
+            .set(CompilerPolicy::Confined(compiler))
+            .map_err(|_| {
+                ActionError::new(
+                    "RuntimeError",
+                    "The source compiler policy is already fixed for this session.",
+                )
+            })
     }
 
     /// Whether this session may start the Python worker ([`Session::set_python_worker`]).
@@ -317,16 +699,236 @@ impl Session {
                 {
                     settings.worker.python = python.into();
                 }
-                settings.worker.inherit_stdin = std::io::stdin().is_terminal();
+                settings.worker.inherit_stdin =
+                    std::io::stdin().is_terminal() || stdin_is_a_jobs_input();
                 WorkerPool::new(settings)
             })
             .clone()
+    }
+
+    fn wait_for_background_refresh(&self) -> Result<(), ActionError> {
+        let inflight = self
+            .manifests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .refreshing
+            .clone();
+        if let Some(refresh) = inflight {
+            return refresh.wait();
+        }
+        Ok(())
+    }
+
+    fn resolve_entry_points(
+        pool: &WorkerPool,
+        manifest_file: &std::path::Path,
+        root_dir: &std::path::Path,
+        force: bool,
+    ) -> Result<Vec<String>, ActionError> {
+        // v4 finds pip-installed plugins whatever the plugins directory holds: a cached probe of
+        // the interpreter (a few `stat` calls) says whether any exist, so an empty tree with no
+        // entry point still starts no Python.
+        let mut entry_points = probe_entry_points(pool, manifest_file, force);
+        // An executor's signed grant list also limits pip entry points. Its physical plugin
+        // directory view already limits ordinary Python and native discovery.
+        let inherited_grants = (!pool.config().worker.env_clear
+            && !pool
+                .config()
+                .worker
+                .env_remove
+                .iter()
+                .any(|key| key == "MRSM_EXECUTOR_PLUGINS"))
+        .then(|| std::env::var("MRSM_EXECUTOR_PLUGINS").ok())
+        .flatten();
+        if let Some(grants) = pool
+            .config()
+            .worker
+            .env
+            .iter()
+            .find(|(key, _)| key == "MRSM_EXECUTOR_PLUGINS")
+            .map(|(_, grants)| grants.as_str())
+            .or(inherited_grants.as_deref())
+        {
+            let grants: std::collections::BTreeSet<String> = serde_json::from_str(grants)
+                .map_err(|_| ActionError::new("RuntimeError", "Invalid executor plugin grants."))?;
+            entry_points.retain(|name| grants.contains(name));
+        }
+        if let Some(namespace) = meerschaum_core::team_scope::source_namespace::for_root(root_dir) {
+            entry_points.retain(|name| namespace.names.contains(name));
+        }
+        Ok(entry_points)
+    }
+
+    /// Warm the plugin manifest for an interactive shell / webterm without blocking the prompt
+    /// on a stale manifest rebuild.
+    ///
+    /// - When both Python and native manifest caches on disk are already current, loads them
+    ///   immediately (~10–15 ms, no Python worker, no native `.so` load) and marks the session
+    ///   validated.
+    /// - When either cache is stale or missing, populates the last cached manifest from disk for
+    ///   instant prompt completions and spawns a quiet background thread to rebuild the fresh
+    ///   manifest. Any subsequent blocking [`Session::manifest`] call joins that thread instead
+    ///   of starting a second rebuild.
+    pub fn warm_manifest_for_shell(&self, config: &Config) {
+        let compiler = self
+            .source_compiler
+            .get_or_init(|| crate::team_sandbox::source_compiler_policy().unwrap_or_default())
+            .clone();
+        let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        if (state.validated && state.merged.is_some()) || state.refreshing.is_some() {
+            return;
+        }
+        if state.cached_only || !self.worker_enabled() {
+            let _ = self.validate_manifests(&mut state, config, false);
+            return;
+        }
+        let paths = config.paths();
+        let root_dir = paths.root_dir.clone();
+        let plugins_dirs = paths.plugins_dirs.clone();
+        let pool = self.pool(config);
+        let manifest_file = manifest_path(&root_dir);
+        let native_cache = crate::native_plugins::cache_path(&root_dir);
+        let Ok(entry_points) = Self::resolve_entry_points(&pool, &manifest_file, &root_dir, false)
+        else {
+            return;
+        };
+        let fresh_python = read_fresh_manifest_for(&manifest_file, &plugins_dirs, &entry_points)
+            .ok()
+            .flatten();
+        let fresh_native = meerschaum_plugin::discovery::manifest_cache_ready_with_policy(
+            &plugins_dirs,
+            &native_cache,
+            &compiler,
+        );
+        if let Some(python) = fresh_python
+            && fresh_native
+        {
+            let python = Arc::new(python);
+            let signature = native_signature(&plugins_dirs, &native_cache, &compiler);
+            let (natives, error) =
+                match NativePlugins::open_with_policy(&plugins_dirs, &native_cache, &compiler) {
+                    Ok(natives) => (Arc::new(natives), None),
+                    Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
+                };
+            let mut merged = crate::native_plugins::merge(&python, &natives);
+            if let Some(error) = &error {
+                merged
+                    .load_errors
+                    .insert("native plugins".into(), error.clone());
+            }
+            state.python = Some(python);
+            state.natives = Some(natives);
+            state.native_signature = Some(signature);
+            state.native_error = error;
+            state.merged = Some(Arc::new(merged));
+            state.validated = true;
+            return;
+        }
+        // Slow path: serve cached metadata immediately and rebuild quietly in the background.
+        let fallback = crate::completions::cached_manifest_for(&root_dir, &plugins_dirs);
+        state.merged = Some(Arc::new(fallback));
+        let refresh = Arc::new(BackgroundManifestRefresh::new());
+        state.refreshing = Some(refresh.clone());
+        let expected_gen = state.generation;
+        drop(state);
+
+        let session = self.clone();
+        let bg_refresh = refresh.clone();
+        let spawned = std::thread::Builder::new()
+            .name("mrsm-manifest".into())
+            .spawn(move || {
+                let outcome = (|| -> Result<(), ActionError> {
+                    let (manifest, _source) = session
+                        .block_on(ensure_manifest_for_with_options(
+                            &pool,
+                            &manifest_file,
+                            &plugins_dirs,
+                            &entry_points,
+                            true,
+                        ))
+                        .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
+                    let python = Arc::new(manifest);
+                    let signature = native_signature(&plugins_dirs, &native_cache, &compiler);
+                    let (natives, error) = match NativePlugins::open_with_policy_quiet(
+                        &plugins_dirs,
+                        &native_cache,
+                        &compiler,
+                    ) {
+                        Ok(natives) => (Arc::new(natives), None),
+                        Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
+                    };
+                    let mut merged = crate::native_plugins::merge(&python, &natives);
+                    if let Some(error) = &error {
+                        merged
+                            .load_errors
+                            .insert("native plugins".into(), error.clone());
+                    }
+                    let mut state = session.manifests.lock().unwrap_or_else(|e| e.into_inner());
+                    if !state.cached_only && state.generation == expected_gen {
+                        state.python = Some(python);
+                        state.natives = Some(natives);
+                        state.native_signature = Some(signature);
+                        state.native_error = error;
+                        state.merged = Some(Arc::new(merged));
+                        state.validated = true;
+                    }
+                    if state
+                        .refreshing
+                        .as_ref()
+                        .is_some_and(|r| Arc::ptr_eq(r, &bg_refresh))
+                    {
+                        state.refreshing = None;
+                    }
+                    Ok(())
+                })();
+                if outcome.is_err() {
+                    let mut state = session.manifests.lock().unwrap_or_else(|e| e.into_inner());
+                    if state
+                        .refreshing
+                        .as_ref()
+                        .is_some_and(|r| Arc::ptr_eq(r, &bg_refresh))
+                    {
+                        state.refreshing = None;
+                    }
+                }
+                bg_refresh.finish(outcome);
+            });
+        if spawned.is_err() {
+            let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+            if state
+                .refreshing
+                .as_ref()
+                .is_some_and(|r| Arc::ptr_eq(r, &refresh))
+            {
+                state.refreshing = None;
+            }
+            drop(state);
+            refresh.finish(Ok(()));
+        }
+    }
+
+    /// Return the currently available plugin manifest without blocking on an in-flight
+    /// background shell refresh. Falls back to [`Session::manifest`] when no background refresh
+    /// is active.
+    pub fn manifest_nonblocking(&self, config: &Config) -> Option<Arc<Manifest>> {
+        let state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        if state.validated
+            && let Some(merged) = state.merged.clone()
+        {
+            return Some(merged);
+        }
+        if state.refreshing.is_some() {
+            return state.merged.clone();
+        }
+        drop(state);
+        self.manifest(config).ok()
     }
 
     /// The fingerprinted manifest (Python plugins merged with native plugins), validated at most
     /// once per [`Session::invalidate_manifest`]. Starts no Python for an empty plugin tree or
     /// an unchanged cache.
     pub fn manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        self.wait_for_background_refresh()?;
         let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
         let started = std::time::Instant::now();
         let validated = state.validated;
@@ -345,8 +947,11 @@ impl Session {
     /// manifests the last command cached on disk and never validates, rebuilds or imports
     /// anything; either way the manifest state is dropped, so the next call starts afresh.
     pub fn set_cached_manifest_only(&self, on: bool) {
-        *self.manifests.lock().unwrap_or_else(|e| e.into_inner()) = ManifestState {
+        let mut guard = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = guard.generation.wrapping_add(1);
+        *guard = ManifestState {
             cached_only: on,
+            generation,
             ..ManifestState::default()
         };
     }
@@ -362,10 +967,9 @@ impl Session {
     /// Re-arm the next [`Session::manifest`] call to validate the plugin trees again (one
     /// fingerprint walk). Cheap; the shell calls it after every command.
     pub fn invalidate_manifest(&self) {
-        self.manifests
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .validated = false;
+        let mut guard = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        guard.validated = false;
+        guard.generation = guard.generation.wrapping_add(1);
     }
 
     /// Validate the plugin trees now, rebuilding the manifest if a plugin changed.
@@ -379,7 +983,9 @@ impl Session {
     pub fn reload_plugins(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
         // A refused interpreter (a stale `meerschaum`) may have been fixed: ask it again.
         meerschaum_worker::worker::clear_refusals();
+        let _ = self.wait_for_background_refresh();
         let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
+        state.generation = state.generation.wrapping_add(1);
         self.validate_manifests(&mut state, config, true)?;
         Ok(state.merged.clone().expect("validated manifest"))
     }
@@ -390,19 +996,26 @@ impl Session {
         config: &Config,
         force: bool,
     ) -> Result<(), ActionError> {
+        // The manifests lock serializes the trusted setter against the first discovery.
+        // Keep this frozen even when cached-only mode later drops ManifestState.
+        let compiler = self
+            .source_compiler
+            .get_or_init(|| crate::team_sandbox::source_compiler_policy().unwrap_or_default());
         if !force && state.validated && state.merged.is_some() {
             return Ok(());
         }
         if state.cached_only {
             let paths = config.paths();
-            let python = Manifest::read(&manifest_path(&paths.root_dir))
-                .ok()
-                .flatten()
-                .unwrap_or_default();
+            let python =
+                read_cached_manifest_for(&manifest_path(&paths.root_dir), &paths.plugins_dirs)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
             state.python = Some(Arc::new(python));
             state.natives = Some(Arc::new(NativePlugins::empty()));
-            state.merged = Some(Arc::new(crate::completions::cached_manifest(
+            state.merged = Some(Arc::new(crate::completions::cached_manifest_for(
                 &paths.root_dir,
+                &paths.plugins_dirs,
             )));
             state.validated = true;
             return Ok(());
@@ -420,10 +1033,8 @@ impl Session {
         let manifest_file = manifest_path(&paths.root_dir);
         let previous = state.python.clone();
         let mut python_changed = state.merged.is_none();
-        // v4 finds pip-installed plugins whatever the plugins directory holds: a cached probe of
-        // the interpreter (a few `stat` calls) says whether any exist, so an empty tree with no
-        // entry point still starts no Python.
-        let entry_points = probe_entry_points(&pool, &manifest_file, force);
+        let entry_points =
+            Self::resolve_entry_points(&pool, &manifest_file, &paths.root_dir, force)?;
         let python = match previous.clone() {
             Some(cached)
                 if !force && !stale_plugins_for(&cached, &paths.plugins_dirs, &entry_points).0 =>
@@ -455,21 +1066,27 @@ impl Session {
                 {
                     self.block_on(pool.recycle());
                 }
+                // Team workers hold plugin modules too (5.1).
+                if previous.as_ref().is_some_and(|p| **p != manifest)
+                    && let Some(pools) = self.teams.pools.get().cloned()
+                {
+                    self.block_on(pools.recycle_all());
+                }
                 python_changed |= previous.as_ref().is_none_or(|p| **p != manifest);
                 Arc::new(manifest)
             }
         };
         python_changed |= force;
-        let signature = native_signature(&paths.plugins_dirs);
+        let native_cache = crate::native_plugins::cache_path(&paths.root_dir);
+        let signature = native_signature(&paths.plugins_dirs, &native_cache, compiler);
         if force || state.natives.is_none() || state.native_signature.as_ref() != Some(&signature) {
-            let (natives, error) = match NativePlugins::open(
-                &paths.plugins_dirs,
-                &crate::native_plugins::cache_path(&paths.root_dir),
-            ) {
-                Ok(natives) => (Arc::new(natives), None),
-                // A broken native plugin must not disable the Python plugins.
-                Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
-            };
+            let (natives, error) =
+                match NativePlugins::open_with_policy(&paths.plugins_dirs, &native_cache, compiler)
+                {
+                    Ok(natives) => (Arc::new(natives), None),
+                    // A broken native plugin must not disable the Python plugins.
+                    Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
+                };
             state.natives = Some(natives);
             state.native_signature = Some(signature);
             state.merged = None;
@@ -492,6 +1109,7 @@ impl Session {
 
     /// The Python-only manifest (what the Python worker adapters may claim).
     pub fn python_manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        self.wait_for_background_refresh()?;
         let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
         // Engine tasks call this per sync: whatever the session holds is current enough.
         if let Some(python) = state.python.clone() {
@@ -503,6 +1121,7 @@ impl Session {
 
     /// The native plugins (discovered with the manifest).
     pub fn native_plugins(&self, config: &Config) -> Result<Arc<NativePlugins>, ActionError> {
+        self.wait_for_background_refresh()?;
         let mut state = self.manifests.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(natives) = state.natives.clone() {
             return Ok(natives);
@@ -519,6 +1138,11 @@ impl Session {
         let pool = self.pool.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(pool) = pool {
             self.block_on(pool.shutdown());
+        }
+        if self.team.is_none()
+            && let Some(pools) = self.teams.pools.get().cloned()
+        {
+            self.block_on(pools.shutdown());
         }
     }
 
@@ -590,6 +1214,14 @@ impl Session {
     pub fn instance(&self, keys: &str, config: &Config) -> Result<Instance, ActionError> {
         let (typ, label) = split_keys(keys);
         let full = format!("{typ}:{label}");
+        // Read the exact descriptor before a cached native driver or default attributes can
+        // adopt these logical keys. API execution keeps the identity but carries no DB client.
+        if let Some(alias) =
+            meerschaum_connector_api::APIConnector::execution_alias_from_config(config, &full)
+                .map_err(|e| ActionError::new("InvalidAttributesError", e.to_string()))?
+        {
+            return Ok(Instance::Other(Arc::new(alias)));
+        }
         if let Some(i) = self
             .instances
             .lock()
@@ -692,6 +1324,18 @@ impl Session {
 
     /// A `sql:<label>` connector from the config registry.
     pub fn sql_connector(&self, label: &str, config: &Config) -> Result<SqlConnector, ActionError> {
+        if meerschaum_connector_api::APIConnector::execution_alias_from_config(
+            config,
+            &format!("sql:{label}"),
+        )
+        .map_err(|e| ActionError::new("InvalidAttributesError", e.to_string()))?
+        .is_some()
+        {
+            return Err(ActionError::new(
+                "InvalidAttributesError",
+                "This logical SQL connector uses the API; a native database client is unavailable.",
+            ));
+        }
         let spec = sql_spec(label, config)?;
         let settings = InstanceSettings::from_config(spec.flavor, config);
         let conn = self
@@ -748,8 +1392,16 @@ pub fn sql_spec(label: &str, config: &Config) -> Result<ConnectionSpec, ActionEr
 /// `type:label` with the default label filled in (the session's map key).
 /// What native plugin discovery sees (names, trees and skipped directories): when it is
 /// unchanged the opened [`NativePlugins`] and the warnings printed for it are still current.
-fn native_signature(plugins_dirs: &[std::path::PathBuf]) -> Vec<String> {
-    let discovery = meerschaum_plugin::discovery::discover_report(plugins_dirs);
+fn native_signature(
+    plugins_dirs: &[std::path::PathBuf],
+    cache: &std::path::Path,
+    compiler: &CompilerPolicy,
+) -> Vec<String> {
+    let discovery = meerschaum_plugin::discovery::discover_report_in_with_policy(
+        plugins_dirs,
+        &meerschaum_plugin::discovery::build_dir_for_cache(cache),
+        compiler,
+    );
     discovery
         .candidates
         .iter()
@@ -830,6 +1482,47 @@ fn sql_attributes(label: &str, attrs: &Map) -> Result<ConnectorAttributes, Actio
         }
     }
     Ok(ca)
+}
+
+/// What a callback from a team's plugin code may do to a pipe (5.1): what a member of the team
+/// may change through the API ([`meerschaum_core::access::can_edit`] of the pipe's stored
+/// access). A pipe that is not registered yet, or on an instance the session has not built, is
+/// left to the team's instance check.
+struct TeamPipeGuard {
+    instances: Arc<Mutex<HashMap<String, Instance>>>,
+    member: meerschaum_core::access::Principal,
+}
+
+#[meerschaum_connector::async_trait]
+impl meerschaum_worker::callback::CallbackGuard for TeamPipeGuard {
+    async fn check(&self, request: &meerschaum_worker::CallbackRequest) -> Result<(), String> {
+        let Some(pipe) = request.pipe.as_ref() else {
+            return Ok(());
+        };
+        let instance = self
+            .instances
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&full_keys(pipe.instance_keys()))
+            .cloned();
+        let Some(instance) = instance else {
+            return Ok(());
+        };
+        let conn = instance.conn();
+        let stored = match conn.get_pipe_attributes(pipe).await {
+            Ok(attributes) => attributes,
+            Err(_) => return Ok(()),
+        };
+        let Some(Value::Map(parameters)) = stored.get("parameters") else {
+            return Ok(());
+        };
+        let access = meerschaum_core::access::PipeAccess::from_parameters(parameters);
+        if meerschaum_core::access::can_edit(&self.member, &access) {
+            Ok(())
+        } else {
+            Err(format!("You may not change {pipe}."))
+        }
+    }
 }
 
 /// Builds `sql:<label>` connectors from the configured `meerschaum:connectors:sql` section
@@ -1028,6 +1721,36 @@ mod registration_tests {
     }
 
     #[test]
+    fn source_compiler_attachment_is_shared_and_frozen_before_manifest_initialization() {
+        let session = Session::new();
+        let cloned = session.clone();
+        session.set_source_compiler(None).unwrap();
+        assert!(cloned.set_source_compiler(None).is_err());
+        assert!(matches!(
+            cloned.source_compiler.get(),
+            Some(CompilerPolicy::Confined(None))
+        ));
+        let (_root, _plugins, config) = isolated_config();
+        session.set_python_worker(false);
+        session.manifest(&config).unwrap();
+        session.set_cached_manifest_only(false);
+        assert!(session.set_source_compiler(None).is_err());
+
+        let ambient = Session::new();
+        ambient.set_python_worker(false);
+        ambient.manifest(&config).unwrap();
+        assert!(matches!(
+            ambient.source_compiler.get(),
+            Some(CompilerPolicy::Ambient)
+        ));
+        ambient.set_cached_manifest_only(false);
+        assert!(
+            ambient.set_source_compiler(None).is_err(),
+            "Resetting manifest state must not reopen the compiler attachment"
+        );
+    }
+
+    #[test]
     fn shared_runtime_runs_futures() {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -1045,5 +1768,25 @@ mod registration_tests {
             inst.conn().pipe_exists(&pipe).await
         });
         assert!(matches!(exists, Ok(false)));
+    }
+}
+
+/// Whether this process runs as a job and reads the job's input FIFO: its Python workers read it
+/// too, so that a plugin's `input()` or `prompt()` is answered through `attach` like in v4 (where
+/// the action ran inside the daemon). Elsewhere a piped standard input stays the action's own.
+fn stdin_is_a_jobs_input() -> bool {
+    let sc = meerschaum_core::static_config::static_config();
+    if std::env::var_os(&sc.environment.daemon_id).is_none_or(|v| v.is_empty()) {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        rustix::fs::fstat(std::io::stdin()).is_ok_and(|st| {
+            rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Fifo
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        false
     }
 }

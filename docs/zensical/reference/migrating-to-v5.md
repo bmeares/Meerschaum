@@ -167,6 +167,42 @@ After verification, an interactive shell restarts with the updated engine. Other
 processes must be restarted separately. Containers are upgraded by replacing their image;
 see [Docker variants](stack/index.md#docker-images).
 
+**Questions first.** `mrsm upgrade mrsm` asks everything before it downloads or installs
+anything: "Upgrade this installation?", then, when Docker is available and the root has a stack
+(`mrsm stack` has written `stack/docker-compose.yaml`), "Pull the stack's new Docker images?"
+(default yes, as 4.x always pulled) and "Bring up the stack after upgrading?" (default no). The
+rest runs without asking again: the installation, the pull, then `stack up -d`. `--yes` answers
+yes to all three, `--noask` takes the defaults (upgrade, pull, do not bring up), `--force` brings
+the stack up without asking (as in 4.x), and `--no-pull` skips the pull without asking, for
+scripts. Bringing the stack up without pulling uses the images already on the host. When the
+installation fails or is cancelled, nothing is pulled or started; when only the pull fails, the
+installation's result is reported first and the stack is left as it was.
+
+**Where a Python installation is upgraded.** Meerschaum is upgraded where the interpreter
+imports it from today, never somewhere else: a virtual environment as before, a user-site
+installation (`pip install --user`) with `pip install --user` (uv has no user scheme), and a
+system location only when the current user can write it. Otherwise nothing is changed and the
+message names the location and the command to run instead (with `sudo`, or the system package
+manager for a copy it installed). An interpreter marked externally managed (PEP 668, as on
+Debian and Ubuntu) is refused for both the system and the user site, since pip refuses both, and
+the message gives the `--break-system-packages` command; passing
+`-A --break-system-packages` is consent to proceed. Editable (development) installations and
+copies installed by a package manager (an RPM, a Debian package, conda) are refused with how
+they are upgraded instead. After installing, the copy the interpreter imports must be the new
+one: if an older copy elsewhere shadows it (a stale `~/.local` copy in front of a system one),
+the message names both paths, and `mrsm doctor` reports the same condition.
+
+!!! warning "Upgrading a user-site installation from 5.0.x"
+    The upgrade code that runs is the installed one, so 5.0.x still has the bug fixed in 5.1.0:
+    when `uv` is installed, `mrsm upgrade mrsm` in a `pip install --user` installation tries to
+    install into the system site (for example `/usr/local/lib64/python3.15/site-packages/` on
+    Fedora) and fails with a permission error. Upgrade that installation to 5.1.0 with pip
+    instead (on Debian and Ubuntu add `--break-system-packages`, as for the first install):
+
+    ```bash
+    python3 -m pip install --user --upgrade meerschaum
+    ```
+
 </details>
 
 ## ⚙️ Configuration

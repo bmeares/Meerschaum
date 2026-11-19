@@ -221,8 +221,17 @@ mod imp {
 
         // This program again: the binary itself, or `python -m meerschaum` in the extension.
         let (program, leading) = meerschaum_core::self_exe::self_program();
-        let child_result = job.log_path.with_extension("child-result.json");
+        // 5.1: a sandboxed team job's command writes only in its work directory.
+        let work_dir = meerschaum_core::team_scope::sandbox::job_work_dir_from_env();
+        let child_result = match &work_dir {
+            Some(work) => work.join("child-result.json"),
+            None => job.log_path.with_extension("child-result.json"),
+        };
         let _ = fs::remove_file(&child_result);
+        let mut admission = admission;
+        if let (Some(work), Some(a)) = (&work_dir, admission.as_mut()) {
+            a.relocate_release(work);
+        }
         // The previous run's result must not stand in for this one: a wrapper killed before it
         // records a result (`TimeoutStopSec=`, the OOM killer) leaves none, and the executor
         // reads systemd's account of the run instead.
@@ -230,6 +239,7 @@ mod imp {
             let _ = fs::remove_file(path);
         }
         let mut cmd = Command::new(program);
+        cmd.env_remove(meerschaum_core::team_scope::sandbox::runtime::LIFECYCLE_VAR);
         cmd.args(leading)
             .args(args)
             .env(CHILD_ENV, "1")
@@ -316,6 +326,13 @@ mod imp {
             });
         }
 
+        // `<service>.stdin.block` while the job waits for input (see `crate::stdin_watch`).
+        let stdin_watch = job.stdin_path.as_ref().map(|fifo| {
+            let mut marker = fifo.clone().into_os_string();
+            marker.push(".block");
+            crate::stdin_watch::StdinWatch::spawn(fifo, std::path::Path::new(&marker), pid)
+        });
+        let nudger = stdin_watch.as_ref().map(|w| w.nudger());
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         let readers: Vec<Box<dyn Read + Send>> = vec![
             Box::new(child.stdout.take().expect("piped stdout")),
@@ -326,6 +343,7 @@ mod imp {
             let log = log.clone();
             let tx = tx.clone();
             let reset = reset.clone();
+            let nudger = nudger.clone();
             std::thread::spawn(move || {
                 let mut interceptor = Interceptor::new();
                 let mut buf = vec![0u8; 1024];
@@ -341,6 +359,10 @@ mod imp {
                     let prefix = l.get_timestamp_prefix_str();
                     let data = interceptor.transform(&buf[..n], &prefix);
                     let _ = l.write_raw(&data);
+                    drop(l);
+                    if let Some(n) = &nudger {
+                        n.nudge();
+                    }
                 }
                 let _ = tx.send(());
             });
@@ -349,6 +371,9 @@ mod imp {
 
         let status = child.wait();
         exited.store(true, Ordering::SeqCst);
+        if let Some(w) = &stdin_watch {
+            w.halt();
+        }
         if let Some(file) = &release_file {
             let _ = fs::remove_file(file);
         }

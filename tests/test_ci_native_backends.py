@@ -75,10 +75,14 @@ def test_native_connections_drop_ambient_credentials_and_use_distinct_valkey_dat
         'PATH': '/usr/bin', 'PGHOST': 'production', 'PGPASSWORD': 'secret',
         'MRSM_SQL_SRA': 'secret', 'MRSM_TEST_PG_URI': 'secret', 'VALKEY_URL': 'secret',
         'TMUX': '/user/server', 'TMUX_PANE': '%0', 'CARGO_TARGET_DIR': '/unrelated/target',
+        native_backends.SOURCE_PG_URI: 'ambient-connection',
+        **dict.fromkeys(native_backends.APPEND_URIS.values(), 'ambient-connection'),
     })
     assert not {'PGHOST', 'PGPASSWORD', 'MRSM_SQL_SRA', 'VALKEY_URL', 'TMUX', 'TMUX_PANE',
                 'CARGO_TARGET_DIR'} & env.keys()
     assert '127.0.0.1:43101/testdb' in env['MRSM_TEST_PG_URI']
+    assert native_backends.SOURCE_PG_URI not in env
+    assert not set(native_backends.APPEND_URIS.values()) & env.keys()
     assert env['MRSM_VALKEY_TEST_URL'] == 'redis://127.0.0.1:43104/12'
     assert env['MRSM_VALKEY_FIRST_USER_TEST_URL'] == 'redis://127.0.0.1:43104/13'
     with pytest.raises(ValueError, match='Refusing test service port'):

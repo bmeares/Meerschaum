@@ -142,7 +142,7 @@ fn python_version(rt: &mut Runtime<'_>, path: &Path, debug: bool) -> Option<Stri
     if debug {
         rt.print(&format!("Getting python version for {}\n", path.display()));
     }
-    let mut child = Command::new(path)
+    let mut child = meerschaum_core::child_env::scrubbed(Command::new(path))
         .arg("-V")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

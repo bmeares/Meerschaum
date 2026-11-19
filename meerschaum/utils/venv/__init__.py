@@ -35,6 +35,22 @@ threads_active_venvs: Dict[int, 'set[str]'] = {}
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
+def _venvs_cache_path() -> pathlib.Path:
+    """
+    Where the locks of virtual environments are kept: `<root>/.cache/venvs`, shared by every
+    process of the root. An isolated team's sandboxed process (5.1) keeps the locks of its own
+    environments in its cache directory (`XDG_CACHE_HOME`): it never takes, holds or writes a
+    lock the server's processes take.
+    """
+    import os
+    import meerschaum.config.paths as paths
+    if os.environ.get('MRSM_TEAM_SANDBOX') and os.environ.get('XDG_CACHE_HOME'):
+        path = pathlib.Path(os.environ['XDG_CACHE_HOME']) / 'mrsm_venvs'
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    return paths.VENVS_CACHE_RESOURCES_PATH
+
+
 def activate_venv(
     venv: Optional[str] = 'mrsm',
     color: bool = True,
@@ -71,7 +87,20 @@ def activate_venv(
     thread_id = get_ident()
     import sys
     import os
-    if venv is not None and init_if_not_exists:
+    # API-only execution uses host-prepared private sites. Import activation must never
+    # verify/recreate interpreters or implicitly launch an installer. Explicit installation
+    # remains a separate operation subject to the process's existing confinement.
+    if os.environ.get('MRSM_API_EXECUTION') == '1':
+        init_if_not_exists = False
+    ### 5.1: an isolated team's sandboxed process has virtual environments of its own
+    ### (`MRSM_VENVS_DIR`, seeded from the server's): a missing one is not created merely to be
+    ### activated (there is nothing in it); installing into it creates it.
+    sandboxed_missing = (
+        venv is not None
+        and bool(os.environ.get('MRSM_TEAM_SANDBOX'))
+        and not venv_exists(venv, debug=debug)
+    )
+    if venv is not None and init_if_not_exists and not sandboxed_missing:
         init_venv(venv=venv, debug=debug)
 
     with LOCKS['active_venvs']:
@@ -102,6 +131,19 @@ def activate_venv(
                 raise
             base_fallback = True
 
+        if (
+            not target_path.exists()
+            and venv is not None
+            and init_if_not_exists
+            and not sandboxed_missing
+        ):
+            init_venv(venv=venv, force=True, debug=debug)
+
+        if not target_path.exists():
+            if init_if_not_exists:
+                return False
+            raise EnvironmentError(f"Could not activate virtual environment '{venv}'.")
+
         if thread_id not in threads_active_venvs:
             threads_active_venvs[thread_id] = {}
         active_venvs.add(venv)
@@ -109,14 +151,6 @@ def activate_venv(
             threads_active_venvs[thread_id][venv] = 1
         else:
             threads_active_venvs[thread_id][venv] += 1
-
-        if not target_path.exists() and venv is not None and init_if_not_exists:
-            init_venv(venv=venv, force=True, debug=debug)
-
-        if not target_path.exists():
-            if init_if_not_exists:
-                return False
-            raise EnvironmentError(f"Could not activate virtual environment '{venv}'.")
 
         target = target_path.as_posix()
         if (
@@ -341,7 +375,7 @@ def _locked_venv_mutation(func):
 
         # Keep this distinct from the legacy existence-marker `<venv>.lock`: file locks
         # persist after release. Share the same object for recursive init / verify calls.
-        lock_path = paths.VENVS_CACHE_RESOURCES_PATH / (venv + '.mutation.lock')
+        lock_path = _venvs_cache_path() / (venv + '.mutation.lock')
         lock_key = str(lock_path.absolute())
         with _venv_mutation_locks_guard:
             thread_lock, process_lock = _venv_mutation_locks.setdefault(
@@ -410,10 +444,12 @@ def verify_venv(
             ### It might be a broken symlink, so skip on errors.
             if debug:
                 print(f"Getting python version for {python_path}")
+            from meerschaum.config.environment import get_child_env
             proc = run_process(
                 [str(python_path), '-V'],
                 as_proc=True,
                 capture_output=True,
+                env=get_child_env(),
             )
             stdout, stderr = proc.communicate(timeout=1.0)
         except Exception as e:
@@ -543,7 +579,7 @@ def init_venv(
     venv_path = paths.VIRTENV_RESOURCES_PATH / venv
     vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
-    lock_path = paths.VENVS_CACHE_RESOURCES_PATH / (venv + '.lock')
+    lock_path = _venvs_cache_path() / (venv + '.lock')
     work_dir_env_var = STATIC_CONFIG['environment']['work_dir']
 
     def update_lock(active: bool):
@@ -605,7 +641,7 @@ def init_venv(
         virtualenv = None
 
     _venv_success = False
-    temp_vtp = paths.VENVS_CACHE_RESOURCES_PATH / str(venv)
+    temp_vtp = _venvs_cache_path() / str(venv)
     ### NOTE: Disable site-packages movement for now.
     rename_vtp = False and vtp.exists() and not temp_vtp.exists()
 
@@ -866,6 +902,12 @@ def venv_target_path(
 
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
+        from meerschaum._internal.team_scope import in_team_process
+        if in_team_process() and inside_venv():
+            # Team workers have access to the interpreter's site-packages without being
+            # allowed to list its parent directories.
+            import sysconfig
+            return pathlib.Path(sysconfig.get_path('purelib'))
 
         ### Return the known value for the portable environment.
         environment_runtime = STATIC_CONFIG['environment']['runtime']

@@ -726,7 +726,7 @@ fn server_and_executor_attribute_errors_are_reported_at_their_lines() {
         ),
         (
             "#[make_connector(instance = false)]\nmod m { fn register_pipe() {} }",
-            "a source connector must define fetch, sync and/or subscribe",
+            "a connector must define fetch, sync, subscribe, test_connection, and/or #[method] custom methods",
         ),
     ] {
         let (_root, file, result) = prepare(source);

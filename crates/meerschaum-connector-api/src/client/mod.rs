@@ -13,8 +13,14 @@
 
 mod access;
 mod actions;
+pub mod authentication;
+mod batch_sender;
 mod chunked;
 mod engine;
+mod engine_target;
+mod execution_alias;
+mod graph_batch;
+mod graph_plan;
 mod instance;
 mod jobs;
 mod login;
@@ -22,6 +28,7 @@ mod misc;
 mod pipes;
 mod plugins;
 mod request;
+pub mod retry;
 mod sync_metrics;
 mod sync_status;
 mod tokens;
@@ -40,11 +47,24 @@ use meerschaum_core::{Map, Value};
 
 use crate::traits::{ConnectorError, ConnectorResult};
 
+pub use crate::graph_batch::{
+    BATCH_HEADER, BatchOutcome, BatchReceipt, BatchReply, BatchRequest, BatchSelector,
+    GRAPH_BATCH_PATH, MAX_BATCH_REPLY, MAX_BATCH_REQUEST,
+};
+pub use crate::graph_plan::{
+    GRAPH_PLAN_PATH, GraphBinding, GraphInstruction, GraphPlanReply, GraphPlanRequest,
+    MAX_GRAPH_PLAN_BYTES,
+};
 pub use access::{PipeAccessInfo, UserAccess, UserTeam};
 pub use engine::{EngineRunEventStream, FollowRunOptions};
 pub use jobs::LogsMonitor;
+mod log_channel;
+pub use log_channel::{LogChannel, LogMessage};
+mod socket;
+mod source_replace;
 pub use login::parse_expires;
 pub use request::{ApiResponse, Body, Method, RequestOptions};
+pub use socket::{AuthenticatedSocket, SocketMessage};
 
 /// `pipes:attributes:local_cache_timeout_seconds`.
 pub const ATTRIBUTES_CACHE_SECONDS: f64 = 600.0;
@@ -69,6 +89,10 @@ pub(crate) struct AuthState {
     /// [`RELOGIN_INTERVAL`] (stored credentials that no longer work never cause a login per
     /// request). An explicit `login()` always tries.
     pub(crate) login_failed_at: Option<std::time::Instant>,
+    /// The last login never reached the server (connection refused, timed out): the request
+    /// that needed the token fails with the same cause, so `token()` does not warn about the
+    /// credentials (v4's `login()` raised there and printed nothing).
+    pub(crate) login_unreachable: bool,
 }
 
 /// The least time between two fresh logins forced by refused JWTs: concurrent `401`s, or a
@@ -89,10 +113,15 @@ pub(crate) struct PipeCacheEntry {
 #[derive(Clone)]
 pub struct APIConnector {
     pub(crate) label: String,
+    pub(crate) logical_identity: Option<(String, String)>,
+    /// A credentialed Team worker addresses the upstream instance configured for its service.
+    team_data_instance: bool,
     pub(crate) attributes: Map,
     /// `protocol://host[:port]`.
     pub url: String,
     pub(crate) http: reqwest::Client,
+    pub(crate) request_authentication: Option<Arc<dyn authentication::RequestAuthentication>>,
+    pub(crate) response_limit: Option<usize>,
     /// `false` when the `verify` attribute is `false` (HTTP and websocket TLS accept any certificate).
     pub(crate) verify: bool,
     pub(crate) auth: Arc<tokio::sync::Mutex<AuthState>>,
@@ -116,7 +145,10 @@ impl std::fmt::Debug for APIConnector {
 
 impl std::fmt::Display for APIConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "api:{}", self.label)
+        match &self.logical_identity {
+            Some((typ, label)) => write!(f, "{typ}:{label}"),
+            None => write!(f, "api:{}", self.label),
+        }
     }
 }
 
@@ -133,6 +165,13 @@ impl APIConnector {
     /// `protocol`, `username` / `password`, `client_id` / `client_secret`, `api_key`,
     /// `instance_keys` and `verify`.
     pub fn new(label: Option<&str>, attributes: Map) -> ConnectorResult<APIConnector> {
+        // 5.1: an unresolved secret reference fails here, naming the reference and the key.
+        meerschaum_core::config::secrets::check_connector_attributes(
+            "api",
+            label.unwrap_or("main"),
+            &attributes,
+        )
+        .map_err(ConnectorError::Invalid)?;
         let mut attributes = attributes;
         let mut label = label.map(String::from);
         if let Some(uri) = attributes.get("uri").map(attr_str) {
@@ -198,11 +237,31 @@ impl APIConnector {
         let http = builder
             .build()
             .map_err(|e| ConnectorError::Backend(e.to_string()))?;
-        Ok(APIConnector {
+        let credential_file = match attributes.get("credential_file") {
+            None => None,
+            Some(Value::Str(path)) if !path.is_empty() => Some(std::path::PathBuf::from(path)),
+            Some(_) => {
+                return Err(ConnectorError::Invalid(
+                    "An API credential_file must be a nonempty file path.".into(),
+                ));
+            }
+        };
+        let team_data_instance = attributes
+            .get("instance_keys")
+            .and_then(Value::as_str)
+            .is_some_and(|keys| !keys.is_empty())
+            && meerschaum_core::team_scope::source_namespace::launch()
+                .map_err(ConnectorError::Invalid)?
+                .is_some();
+        let connector = APIConnector {
             label,
+            team_data_instance,
+            logical_identity: None,
             attributes,
             url,
             http,
+            request_authentication: None,
+            response_limit: None,
             verify,
             auth: Arc::new(tokio::sync::Mutex::new(AuthState::default())),
             login_gate: Arc::new(tokio::sync::Mutex::new(())),
@@ -210,7 +269,14 @@ impl APIConnector {
             job_metadata_cache: Arc::new(Mutex::new(HashMap::new())),
             timeout: Duration::from_secs(crate::routes::DEFAULT_TIMEOUT_SECONDS),
             sync_chunksize: DEFAULT_SYNC_CHUNKSIZE,
-        })
+        };
+        match credential_file {
+            Some(path) => connector.with_request_authentication(
+                Arc::new(authentication::CredentialFile::new(path)),
+                authentication::MAX_AUTHENTICATED_REQUEST_BYTES,
+            ),
+            None => Ok(connector),
+        }
     }
 
     /// `APIConnector.from_uri(uri, label)`.
@@ -226,6 +292,9 @@ impl APIConnector {
         config: &meerschaum_core::Config,
         label: &str,
     ) -> ConnectorResult<APIConnector> {
+        if let Some(alias) = Self::execution_alias_from_config(config, &format!("api:{label}"))? {
+            return Ok(alias);
+        }
         let base = config
             .get(&["meerschaum", "connectors", "api", "default"])
             .map(|v| v.to_map())
@@ -242,7 +311,9 @@ impl APIConnector {
 
     /// The label.
     pub fn label(&self) -> &str {
-        &self.label
+        self.logical_identity
+            .as_ref()
+            .map_or(&self.label, |(_, label)| label)
     }
 
     /// The attributes.

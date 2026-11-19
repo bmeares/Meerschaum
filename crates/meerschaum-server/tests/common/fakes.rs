@@ -110,8 +110,10 @@ impl PipelinesBackend for FakePlans {
     }
 }
 
-/// An engine store that cannot be read.
-pub struct BrokenStore;
+/// An engine store that refuses writes and can also fail its read preflight.
+pub struct BrokenStore {
+    pub allow_reads: bool,
+}
 
 #[async_trait]
 impl EngineBackend for BrokenStore {
@@ -134,6 +136,9 @@ impl EngineBackend for BrokenStore {
         SuccessTuple::fail("the instance refused the write: relation mrsm_engine_runs is locked")
     }
     async fn get_runs(&self, _: &RunsFilter) -> Result<Vec<RunRecord>, EngineStoreError> {
+        if self.allow_reads {
+            return Ok(Vec::new());
+        }
         Err(EngineStoreError::Failed(
             "connection to sql:secret-host refused".into(),
         ))

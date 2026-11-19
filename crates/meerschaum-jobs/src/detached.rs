@@ -83,10 +83,16 @@ pub struct Timestamps {
 }
 
 fn parse_naive(text: &str) -> Option<NaiveDateTime> {
-    // `datetime.isoformat()` omits the fraction when it is zero.
+    let trimmed = text.trim();
+    // `datetime.isoformat()` omits the fraction when it is zero; RFC 3339 (`Z`/offset) is also accepted.
     ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S"]
         .iter()
-        .find_map(|f| NaiveDateTime::parse_from_str(text.trim(), f).ok())
+        .find_map(|f| NaiveDateTime::parse_from_str(trimmed, f).ok())
+        .or_else(|| {
+            chrono::DateTime::parse_from_rfc3339(trimmed)
+                .ok()
+                .map(|dt| dt.naive_utc())
+        })
 }
 
 impl Timestamps {

@@ -161,6 +161,36 @@ class Viewer:
     primary_team: Optional[str] = None
     no_auth: bool = False
     principal: Any = None
+    #: What the viewer's teams grant and withhold (`meerschaum.core.access.team_grants`).
+    grants: Dict[str, Any] = field(default_factory=dict)
+    #: Fresh Main-only execution projection; never retained in the base Viewer cache.
+    native_execution: Any = None
+
+    @property
+    def is_isolated(self) -> bool:
+        """Whether the viewer is walled off from Everyone (all of their teams are isolated)."""
+        if self.is_admin or self.no_auth:
+            return False
+        return bool((self.grants or {}).get('isolated', False))
+
+    @property
+    def default_instance(self) -> Optional[str]:
+        """The default instance of the viewer's team, if it has one."""
+        instance = (self.grants or {}).get('instance', None)
+        return str(instance) if instance else None
+
+    def can_use_plugin(self, name: str) -> bool:
+        """Whether the viewer may see and use the plugin `name`."""
+        if not self.is_isolated:
+            return True
+        return str(name) in set((self.grants or {}).get('plugins', None) or [])
+
+    @property
+    def can_write_plugins(self) -> bool:
+        """Whether the viewer may install, edit, upload and uninstall plugins."""
+        if self.is_admin or self.no_auth:
+            return True
+        return bool(self.signed_in and (self.grants or {}).get('plugins_write', False))
 
     def can(self, permission: str) -> bool:
         """Whether the viewer holds `permission` (administrators hold every permission)."""
@@ -177,7 +207,7 @@ class Viewer:
     def in_team(self, team: Optional[str]) -> bool:
         """Whether the viewer is in `team` (everyone is in Everyone)."""
         if not team or str(team) == EVERYONE:
-            return True
+            return (not self.is_isolated) or self.teams.get(EVERYONE) == 'manager'
         return str(team) in self.teams
 
     @property
@@ -197,6 +227,7 @@ class Viewer:
             'permissions': sorted(self.permissions),
             'teams': dict(self.teams),
             'primary_team': self.primary_team,
+            'grants': dict(self.grants or {}),
         }
 
 
@@ -373,6 +404,7 @@ def _principal(viewer: Viewer) -> Any:
         permissions=sorted(viewer.permissions),
         teams=[(team, role) for team, role in viewer.teams.items()
                if team != EVERYONE or role == 'manager'],
+        grants=dict(viewer.grants or {}),
     )
 
 
@@ -383,6 +415,7 @@ def make_viewer(
     permissions: Optional[Iterable[str]] = None,
     teams: Optional[Dict[str, str]] = None,
     primary_team: Optional[str] = None,
+    grants: Optional[Dict[str, Any]] = None,
 ) -> Viewer:
     """
     A signed-in viewer with the given rights, without reading the instance (tests, and code that
@@ -396,6 +429,8 @@ def make_viewer(
         names = frozenset(str(permission) for permission in permissions)
     else:
         names = frozenset(role_permissions(role or default_role()))
+    if not admin and (grants or {}).get('isolated', False):
+        names = names - frozenset(core().withheld_permissions(grants))
     team_roles: Dict[str, str] = {EVERYONE: 'member'}
     for team, team_role in (teams or {}).items():
         name = EVERYONE if core().is_everyone(str(team)) else str(team)
@@ -410,15 +445,30 @@ def make_viewer(
         permissions=names,
         teams=team_roles,
         primary_team=primary_team,
+        grants=dict(grants or {}),
     )
     viewer.principal = _principal(viewer)
     return viewer
+
+
+def _team_grants(conn: Any, teams: Dict[str, str], primary: Optional[str]) -> Dict[str, Any]:
+    """The grants of a user's teams (`meerschaum.core.access.team_grants`)."""
+    pairs = [(team, role) for team, role in teams.items() if team != EVERYONE]
+    if not pairs:
+        return {}
+    return core().team_grants(pairs, conn.get_teams() or [], primary)
 
 
 def viewer_for(username: Optional[str]) -> Viewer:
     """The viewer for a username (its type, effective permissions and teams), read now."""
     from meerschaum.api import get_api_connector, no_auth
     from meerschaum.core import User
+    ### Connectors another process registered (a team's database) are picked up here: one `stat`.
+    try:
+        from meerschaum.api.dash.team_setup import refresh_connectors
+        refresh_connectors()
+    except Exception:
+        pass
     if no_auth:
         viewer = Viewer(username=username, signed_in=True, is_admin=True, no_auth=True,
                         permissions=frozenset(all_permissions()))
@@ -444,20 +494,31 @@ def viewer_for(username: Optional[str]) -> Viewer:
     user._attributes = attributes
     user.type = user_type
     is_admin = str(user_type or '').lower() == 'admin'
+    ### Fail closed: when the teams cannot be read the viewer is walled off (they see nothing of
+    ### Everyone's) instead of being treated as an ordinary member of Everyone.
     try:
         teams = _user_teams(conn, str(username))
+        primary = _primary_team(user, attributes, teams)
+        grants = {} if is_admin else _team_grants(conn, teams, primary)
     except Exception:
         teams = {EVERYONE: 'member'}
+        primary = EVERYONE
+        grants = {} if is_admin else {'isolated': True}
     permissions = frozenset(all_permissions()) if is_admin else _effective_permissions(
         user, user_type, attributes,
     )
+    if not is_admin and grants.get('isolated', False):
+        ### Actions and the terminal run with the server's credentials, outside the team's wall
+        ### (5.1: a team that runs code keeps them, as its own sandboxed processes).
+        permissions = permissions - frozenset(core().withheld_permissions(grants))
     viewer = Viewer(
         username=str(username),
         signed_in=True,
         is_admin=is_admin,
         permissions=permissions,
         teams=teams,
-        primary_team=_primary_team(user, attributes, teams),
+        primary_team=primary,
+        grants=grants,
     )
     viewer.principal = _principal(viewer)
     return viewer
@@ -466,7 +527,8 @@ def viewer_for(username: Optional[str]) -> Viewer:
 def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Viewer:
     """
     The viewer of a console session (`session_data` is the `session-store`'s data; by default the
-    current request's session). Cached for `VIEWER_TTL_SECONDS` per session.
+    current request's session). The base record is cached for `VIEWER_TTL_SECONDS`; an
+    API-only execution projection is refreshed from Main on every call.
     """
     from meerschaum.api import no_auth
     if no_auth:
@@ -482,7 +544,8 @@ def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Option
     with _viewer_lock:
         entry = _viewer_cache.get(session_id, None)
     if entry is not None and now - entry[0] < VIEWER_TTL_SECONDS:
-        return entry[1]
+        from meerschaum.api.dash._native_execution import project
+        return project(entry[1], session_id)
     from meerschaum.api.dash.sessions import get_username_from_session
     username = get_username_from_session(session_id)
     viewer = viewer_for(username) if username else ANONYMOUS
@@ -490,7 +553,8 @@ def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Option
         if len(_viewer_cache) > 4096:
             _viewer_cache.clear()
         _viewer_cache[session_id] = (now, viewer)
-    return viewer
+    from meerschaum.api.dash._native_execution import project
+    return project(viewer, session_id)
 
 
 def current_viewer() -> Viewer:
@@ -1085,7 +1149,7 @@ def _role_name(role: Any) -> str:
 
 def team_info(team: Any) -> Dict[str, Any]:
     """
-    `{name, id, builtin, members: {username: 'member' | 'manager'}}` of a team (`mrsm.Team`):
+    `{name, id, builtin, members: {username: 'member' | 'manager'}, attributes}` of a team (`mrsm.Team`):
     its listed members (Everyone lists only the users with a role of their own there).
     """
     name = str(getattr(team, 'name', team))
@@ -1100,6 +1164,7 @@ def team_info(team: Any) -> Dict[str, Any]:
         'id': (str(getattr(team, 'id', None) or '') or None),
         'builtin': builtin,
         'members': members,
+        'attributes': dict(getattr(team, 'attributes', None) or {}),
     }
 
 
@@ -1141,7 +1206,14 @@ def _result(value: Any, default_message: str) -> SuccessTuple:
 
 
 def create_team(name: str, conn: Any = None) -> SuccessTuple:
-    """Register a team (administrators only, checked by the caller)."""
+    """
+    Register a team (administrators only, checked by the caller). Connectors still reserved for
+    its name are never adopted.
+    """
+    from meerschaum.api.dash import team_setup
+    refused = team_setup.refuse_reserved(str(name))
+    if refused:
+        return False, refused
     try:
         return _result(_team(name, conn).register(), f"Created team '{name}'.")
     except Exception as e:
@@ -1149,19 +1221,56 @@ def create_team(name: str, conn: Any = None) -> SuccessTuple:
 
 
 def rename_team(name: str, new_name: str, conn: Any = None) -> SuccessTuple:
-    """Rename a team (its pipes and jobs follow)."""
+    """
+    Rename a team (its pipes, jobs and connector reservations follow). A name that connectors
+    are still reserved for is refused.
+    """
+    from meerschaum.api.dash import team_setup
+    if str(name).strip().lower() != str(new_name).strip().lower():
+        try:
+            exists = _team(new_name, conn).exists()
+        except Exception:
+            exists = False
+        refused = None if exists else team_setup.refuse_reserved(str(new_name))
+        if refused:
+            return False, refused
     try:
-        return _result(_team(name, conn).rename(str(new_name)), f"Renamed team '{name}' to '{new_name}'.")
+        success, message = _result(
+            _team(name, conn).rename(str(new_name)),
+            f"Renamed team '{name}' to '{new_name}'.",
+        )
     except Exception as e:
         return False, str(e)
+    if success:
+        note = team_setup.move_reservations(str(name), str(new_name))
+        if note:
+            message += '\n' + note
+    return success, message
 
 
 def delete_team(name: str, conn: Any = None) -> SuccessTuple:
-    """Delete a team (its pipes and jobs move to Everyone)."""
+    """
+    Delete a team (its pipes and jobs move to Everyone). Its connectors and databases stay, and
+    their reservations are retired so no later team of its name inherits them.
+    """
+    from meerschaum.api.dash import team_setup
     try:
-        return _result(_team(name, conn).delete(), f"Deleted team '{name}'.")
+        team = _team(name, conn)
+        team_id = None
+        try:
+            team_id = team.id
+        except Exception:
+            team_id = None
+        success, message = _result(team.delete(), f"Deleted team '{name}'.")
     except Exception as e:
         return False, str(e)
+    if success:
+        note = team_setup.move_reservations(
+            str(name), team_setup.retired_reservation(str(name), str(team_id) if team_id else None),
+        )
+        if note:
+            message += '\n' + note
+    return success, message
 
 
 def set_team_member(team: str, username: str, role: Optional[str], conn: Any = None) -> SuccessTuple:

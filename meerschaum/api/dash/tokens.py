@@ -532,11 +532,22 @@ def default_token_scopes(user: Optional[mrsm.core.User] = None) -> Tuple[bool, L
     return False, [scope for scope in all_scopes if scope in viewer.permissions]
 
 
-def build_tokens_register_input_modal(user: Optional[mrsm.core.User] = None) -> dbc.Modal:
+def build_tokens_register_input_modal(
+    user: Optional[mrsm.core.User] = None,
+    agent: bool = False,
+) -> dbc.Modal:
     """
     Return the layout for the tokens register input modal (for `user`, the session's user).
+    With `agent`, the form starts as an AI agent's token: the label `agent` and the read-only
+    scopes of `meerschaum.api.dash.mcp_details.AGENT_TOKEN_SCOPES` the user holds.
     """
     grant_all, own_scopes = default_token_scopes(user)
+    label = get_new_daemon_name()
+    title = "New token"
+    if agent:
+        from meerschaum.api.dash.mcp_details import agent_token_scopes, AGENT_TOKEN_LABEL
+        grant_all, own_scopes = False, agent_token_scopes(own_scopes)
+        label, title = AGENT_TOKEN_LABEL, "New agent token"
     now = datetime.now(timezone.utc)
     default_expiration_days = mrsm.get_config(
         'api', 'tokens', 'default_expiration_days',
@@ -548,10 +559,10 @@ def build_tokens_register_input_modal(user: Optional[mrsm.core.User] = None) -> 
     min_date_allowed = round_time(now + timedelta(days=1), timedelta(days=1))
 
     return [
-        dbc.ModalHeader(dbc.ModalTitle("New token")),
+        dbc.ModalHeader(dbc.ModalTitle(title)),
         dbc.ModalBody(
             build_token_form(
-                label=get_new_daemon_name(),
+                label=label,
                 expiration=default_expiration,
                 min_date_allowed=min_date_allowed,
                 grant_all=grant_all,
@@ -603,6 +614,21 @@ def build_tokens_register_output_modal(token: Token) -> List[Any]:
     """
     success, msg = token.register(debug=debug)
     details = token_registration_details(token) if success else {}
+    ### The API key exists only now: inline it in each client's MCP configuration.
+    from meerschaum.api.dash.mcp_details import mcp_is_served, build_mcp_client_picker
+    mcp_children = (
+        [
+            html.Div(
+                [
+                    html.H5("Connect an agent"),
+                    build_mcp_client_picker('registered', api_key=details.get('API Key')),
+                ],
+                className='mcp-details-registered',
+            ),
+        ]
+        if success and mcp_is_served()
+        else []
+    )
     header_text = (
         "Registered token "
         if success
@@ -631,7 +657,7 @@ def build_tokens_register_output_modal(token: Token) -> List[Any]:
             ),
             build_register_table_from_token(token, details),
             dcc.Store(id='tokens-register-details', data=details),
-        ]
+        ] + mcp_children
         if success
         else alert_from_success_tuple((False, msg))
     )

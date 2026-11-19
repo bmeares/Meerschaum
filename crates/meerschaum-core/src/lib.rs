@@ -35,10 +35,12 @@
 
 pub mod access;
 pub mod chain;
+pub mod child_env;
 pub mod config;
 pub mod connect;
 pub mod debug;
 pub mod dtypes;
+pub mod execution;
 pub mod holder;
 pub mod job_access;
 pub mod pipe;
@@ -51,6 +53,7 @@ pub mod self_exe;
 pub mod shlex;
 pub mod static_config;
 pub mod success;
+pub mod team_scope;
 pub mod template;
 pub mod users;
 pub mod value;

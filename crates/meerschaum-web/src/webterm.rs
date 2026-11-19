@@ -52,6 +52,24 @@ struct Lookup(Arc<dyn sessions::SessionStore>, AppState);
 
 #[async_trait::async_trait]
 impl SessionLookup for Lookup {
+    async fn binding(&self, session_id: &str) -> Result<Option<(String, String)>, String> {
+        if uuid::Uuid::parse_str(session_id).is_err() {
+            return Ok(None);
+        }
+        let Some(data) = self.0.get(session_id).await? else {
+            return Ok(None);
+        };
+        let Some(username) = bound_username(&self.1, &data)
+            .await
+            .map_err(|e| e.detail_text())?
+        else {
+            return Ok(None);
+        };
+        Ok(data["credential"]
+            .as_str()
+            .map(|credential| (username, credential.to_string())))
+    }
+
     async fn username(&self, session_id: &str) -> Result<Option<String>, String> {
         // Session ids are UUIDs, like the cookie's.
         if uuid::Uuid::parse_str(session_id).is_err() {

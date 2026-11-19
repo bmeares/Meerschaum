@@ -1130,19 +1130,32 @@ def _policy_allows(sysargs: List[str], username: Optional[str]) -> SuccessTuple:
     Ask the server whether this user may run `sysargs` (`POST /execute/validate`): what a
     non-administrator may run from the console, the same rule as the console's Exec.
     """
+    allowed, message, _ = _policy_answer(sysargs, username)
+    return allowed, message
+
+
+def _policy_answer(sysargs: List[str], username: Optional[str]) -> Tuple[bool, str, bool]:
+    """
+    `_policy_allows`, and whether the server allows the command only as team execution (5.1:
+    the job must then carry `mrsm_team_execution`, so that it runs only in the team's sandbox).
+    """
     from meerschaum.api.dash import execute as _execute
     if not _execute.server_url():
-        return False, "The console has no server to check this command with."
+        return False, "The console has no server to check this command with.", False
     try:
         allowed = _execute.execution_request('/execute/validate', username, method='POST',
                                              body={'sysargs': sysargs})
     except Exception as exc:
-        return False, f"The server refused this command: {exc}"
+        return False, f"The server refused this command: {exc}", False
     if isinstance(allowed, dict):
-        return bool(allowed.get('success')), str(allowed.get('message', allowed.get('msg', '')))
+        return (
+            bool(allowed.get('success')),
+            str(allowed.get('message', allowed.get('msg', ''))),
+            bool(allowed.get('team_execution', False)),
+        )
     if isinstance(allowed, (list, tuple)) and len(allowed) == 2:
-        return bool(allowed[0]), str(allowed[1])
-    return False, "The server cannot authorize this command."
+        return bool(allowed[0]), str(allowed[1]), False
+    return False, "The server cannot authorize this command.", False
 
 
 def create_job_from_form(
@@ -1167,8 +1180,9 @@ def create_job_from_form(
     valid, message = validate_new_job_name(name, existing=existing)
     if not valid:
         return False, message
+    team_execution = False
     if not no_auth and not creator.is_admin:
-        allowed, message = _policy_allows(sysargs, creator.username)
+        allowed, message, team_execution = _policy_answer(sysargs, creator.username)
         if not allowed:
             return False, message or "You may not run this command as a job."
     try:
@@ -1176,14 +1190,18 @@ def create_job_from_form(
         from meerschaum.jobs import ownership_properties
         from meerschaum.api.dash.access import get_viewer
         viewer = get_viewer(session_id=session_id)
+        properties = ownership_properties(
+            None if viewer.no_auth else viewer.username,
+            None if viewer.no_auth else viewer.primary_team,
+        )
+        if team_execution:
+            ### 5.1: allowed only as team execution: the job runs only in the team's sandbox.
+            properties['mrsm_team_execution'] = True
         job = Job(
             name.strip(),
             sysargs,
             executor_keys=CONSOLE_EXECUTOR_KEYS,
-            _properties=ownership_properties(
-                None if viewer.no_auth else viewer.username,
-                None if viewer.no_auth else viewer.primary_team,
-            ),
+            _properties=properties,
         )
     except Exception as e:
         return False, str(e)

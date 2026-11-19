@@ -10,6 +10,13 @@ use syn::{
     spanned::Spanned,
 };
 
+#[path = "single_file_markers.rs"]
+mod markers;
+use markers::{
+    bool_option, host_scopes_option, plugin_argument, prompt_entry, reject_misplaced_marker,
+    resource_entry, route_entry, server_items, server_markers, string_literal, text_option,
+    tool_entry, unknown_option,
+};
 struct Edit(Range<usize>, String);
 
 fn diagnostic(file: &Path, span: Span, message: impl std::fmt::Display) -> crate::Error {
@@ -176,6 +183,8 @@ enum Kind {
     InstanceData,
     /// Instance methods answering a JSON value (`pipe_exists`, `fetch_pipes_keys`, ...).
     InstanceValue,
+    /// Custom connector methods marked with `#[method]` inside `#[make_connector]`.
+    CustomMethod,
 }
 
 impl Kind {
@@ -220,6 +229,9 @@ impl Kind {
             Kind::Page => "pages accept page: &PageRequest",
             Kind::InstanceSuccess | Kind::InstanceData | Kind::InstanceValue => {
                 "instance methods accept pipe: &Pipe, connector: &Connector, data: Option<Frame> (or Vec<Value>), context: &Value, and the call's fields (query, options, params, begin, end, select_columns, omit_columns, limit, order, check_existing, chunksize, extra, newest, patch, no_policy, full, chunk_minutes, holder, ttl_seconds)"
+            }
+            Kind::CustomMethod => {
+                "custom connector methods accept connector: &Connector, pipe: &Pipe, kwargs: &Value, and context: &Value"
             }
             _ => {
                 "use pipe: &Pipe, connector: &Connector, kwargs: &Value, begin/end: Option<Bound> (fetch/sync), or data: Option<Frame> (sync)"
@@ -326,7 +338,9 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
     for (param, arg) in parameters(file, function)? {
         let param = param.as_str();
         let (expected, valid, value) = match param {
-            "pipe" if kind.data() || kind.hook() || kind.instance() => {
+            "pipe"
+                if kind.data() || kind.hook() || kind.instance() || kind == Kind::CustomMethod =>
+            {
                 needs_pipe = true;
                 (
                     "&Pipe",
@@ -334,7 +348,7 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
                     "&__mrsm_pipe".to_owned(),
                 )
             }
-            "connector" if kind.data() || kind.instance() => {
+            "connector" if kind.data() || kind.instance() || kind == Kind::CustomMethod => {
                 needs_connector = true;
                 (
                     "&Connector",
@@ -428,7 +442,7 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
                     )
                 }
             }
-            "context" if kind.instance() => (
+            "context" if kind.instance() || kind == Kind::CustomMethod => (
                 "&Value",
                 reference_type(&arg.ty, "Value"),
                 "&__mrsm_request.context".to_owned(),
@@ -533,7 +547,7 @@ fn adapter(file: &Path, function: &ItemFn, kind: Kind, id: &str) -> Result<Strin
         Kind::InstanceData => format!(
             "meerschaum_plugin::sdk::FetchOutput::into_frame({call}).map(meerschaum_plugin::Reply::data)"
         ),
-        Kind::InstanceValue => {
+        Kind::InstanceValue | Kind::CustomMethod => {
             let q = if returns_result(sig) { "?" } else { "" };
             format!(
                 "let __mrsm_value = {call}{q}; meerschaum_plugin::serde_json::to_value(__mrsm_value).map(meerschaum_plugin::Reply::json).map_err(|e| meerschaum_plugin::Error::Message(e.to_string()))"
@@ -863,11 +877,18 @@ impl Generated {
                 ack = format!("Some(user::{forward})");
                 continue;
             }
+            let method_attr = function.attrs.iter().find(|a| a.path().is_ident("method"));
+            if let Some(attr) = method_attr {
+                clear_attribute(source, attr, &mut self.edits);
+            }
             let kind = match connector_kind(&method) {
-                Some(Kind::Subscribe) if !streaming => None,
+                Some(Kind::Subscribe) if !streaming => method_attr.map(|_| Kind::CustomMethod),
                 Some(kind) => Some(kind),
-                None if instance => instance_kind(&method),
-                None => None,
+                None if instance => {
+                    instance_kind(&method).or_else(|| method_attr.map(|_| Kind::CustomMethod))
+                }
+                None if method == "test_connection" => Some(Kind::InstanceValue),
+                None => method_attr.map(|_| Kind::CustomMethod),
             };
             let Some(kind) = kind else {
                 continue;
@@ -913,10 +934,7 @@ impl Generated {
                     ),
                 ));
             }
-        } else if !methods
-            .iter()
-            .any(|m| m == "fetch" || m == "sync" || m == "subscribe")
-        {
+        } else if methods.is_empty() {
             // Say why a `subscribe` here is not the streaming one.
             if let Some(function) = subscribe {
                 adapter(file, function, Kind::Subscribe, "__mrsm_subscribe")?;
@@ -929,7 +947,7 @@ impl Generated {
             return Err(diagnostic(
                 file,
                 module.span(),
-                "a source connector must define fetch, sync and/or subscribe",
+                "a connector must define fetch, sync, subscribe, test_connection, and/or #[method] custom methods",
             ));
         }
         let dispatch = dispatch.replace("__MRSM_ACK__", &ack);
@@ -1481,723 +1499,6 @@ fn executor_adapter(file: &Path, function: &ItemFn, id: &str) -> Result<String> 
     ))
 }
 
-/// The `key = value` options (and positional values) of a server marker.
-fn server_items(file: &Path, attr: &Attribute) -> Result<Vec<ArgumentItem>> {
-    let marker = attr.path().to_token_stream().to_string();
-    match &attr.meta {
-        syn::Meta::Path(_) => Ok(Vec::new()),
-        syn::Meta::List(_) => {
-            let items = attr
-                .parse_args_with(
-                    syn::punctuated::Punctuated::<ArgumentItem, syn::Token![,]>::parse_terminated,
-                )
-                .map_err(|e| diagnostic(file, e.span(), format!("invalid #[{marker}]: {e}")))?;
-            let mut seen = HashSet::new();
-            for item in &items {
-                if let Some(key) = &item.key {
-                    let key = key.unraw().to_string();
-                    if !seen.insert(key.clone()) {
-                        return Err(diagnostic(
-                            file,
-                            key_span(item),
-                            format!("duplicate option '{key}'"),
-                        ));
-                    }
-                }
-            }
-            Ok(items.into_iter().collect())
-        }
-        syn::Meta::NameValue(_) => Err(diagnostic(
-            file,
-            attr.span(),
-            format!("use #[{marker}(...)]"),
-        )),
-    }
-}
-
-/// A string literal option.
-fn text_option(file: &Path, item: &ArgumentItem, key: &str) -> Result<String> {
-    string_literal(&item.value).ok_or_else(|| {
-        diagnostic(
-            file,
-            item.value.span(),
-            format!("{key} must be a string literal"),
-        )
-    })
-}
-
-/// A `true` / `false` option.
-fn bool_option(file: &Path, item: &ArgumentItem, key: &str) -> Result<bool> {
-    match &item.value {
-        Expr::Lit(syn::ExprLit {
-            lit: Lit::Bool(b), ..
-        }) => Ok(b.value),
-        other => Err(diagnostic(
-            file,
-            other.span(),
-            format!("{key} must be true or false"),
-        )),
-    }
-}
-
-/// A `["a", "b"]` option.
-fn strings_option(file: &Path, item: &ArgumentItem, key: &str) -> Result<Vec<String>> {
-    let invalid = |span: Span| {
-        diagnostic(
-            file,
-            span,
-            format!("{key} must be an array of string literals"),
-        )
-    };
-    let Expr::Array(array) = &item.value else {
-        return Err(invalid(item.value.span()));
-    };
-    array
-        .elems
-        .iter()
-        .map(|e| string_literal(e).ok_or_else(|| invalid(e.span())))
-        .collect()
-}
-
-/// `host_scopes = ["pipes:read", ...]`: named scopes only (`*` would give anonymous callers the
-/// whole host).
-fn host_scopes_option(file: &Path, item: &ArgumentItem) -> Result<Vec<String>> {
-    let scopes = strings_option(file, item, "host_scopes")?;
-    if scopes.iter().any(|s| s == "*") {
-        return Err(diagnostic(
-            file,
-            item.value.span(),
-            "host_scopes names scopes such as \"pipes:read\"; \"*\" is not accepted",
-        ));
-    }
-    Ok(scopes)
-}
-
-/// A JSON option written as a string literal (`r#"{...}"#`).
-fn json_option(file: &Path, item: &ArgumentItem, key: &str) -> Result<Value> {
-    let text = text_option(file, item, key)?;
-    serde_json::from_str(&text).map_err(|e| {
-        diagnostic(
-            file,
-            item.value.span(),
-            format!("{key} is not valid JSON: {e}"),
-        )
-    })
-}
-
-fn unknown_option(file: &Path, item: &ArgumentItem, marker: &str, expected: &str) -> crate::Error {
-    match &item.key {
-        Some(key) => diagnostic(
-            file,
-            key_span(item),
-            format!(
-                "unknown #[{marker}] option '{}'; expected {expected}",
-                key.unraw()
-            ),
-        ),
-        None => diagnostic(
-            file,
-            item.value.span(),
-            format!("#[{marker}] takes only key = value options ({expected})"),
-        ),
-    }
-}
-
-/// `#[api_route(GET, "/path/{id}", scopes = [...], public = true, name = "...")]`.
-fn route_entry(file: &Path, attr: &Attribute, rust_name: &str, doc: &str) -> Result<Value> {
-    let items = server_items(file, attr)?;
-    let positional: Vec<&ArgumentItem> = items.iter().filter(|i| i.key.is_none()).collect();
-    let (method, path) = match positional.as_slice() {
-        [path] => ("GET".to_owned(), *path),
-        [method, path] => {
-            let text = match &method.value {
-                Expr::Path(p) => p.path.get_ident().map(|i| i.to_string()),
-                other => string_literal(other),
-            }
-            .filter(|m| m == "*" || (!m.is_empty() && m.chars().all(|c| c.is_ascii_alphabetic())))
-            .ok_or_else(|| {
-                diagnostic(
-                    file,
-                    method.value.span(),
-                    "the method is an HTTP method such as GET or \"POST\", or \"*\" for any method",
-                )
-            })?;
-            (text.to_uppercase(), *path)
-        }
-        _ => {
-            return Err(diagnostic(
-                file,
-                attr.span(),
-                "use #[api_route(GET, \"/my/path/{id}\")] (the method defaults to GET)",
-            ));
-        }
-    };
-    let path = string_literal(&path.value)
-        .filter(|p| p.starts_with('/'))
-        .ok_or_else(|| {
-            diagnostic(
-                file,
-                path.value.span(),
-                "the path is a string literal starting with '/'",
-            )
-        })?;
-    // The server's own rules: a refused path would only be a notice at `mrsm start api`.
-    if let Err(reason) = crate::api::check_route_path(&path) {
-        return Err(diagnostic(
-            file,
-            positional[positional.len() - 1].value.span(),
-            format!("the route path {path:?} is refused: {reason}"),
-        ));
-    }
-    let mut entry = json!({"name": rust_name, "method": method, "path": path,
-        "scopes": [], "public": false});
-    for item in items.iter().filter(|i| i.key.is_some()) {
-        let key = item
-            .key
-            .as_ref()
-            .map(|k| k.unraw().to_string())
-            .unwrap_or_default();
-        match key.as_str() {
-            "name" => entry["name"] = json!(text_option(file, item, &key)?),
-            "scopes" => entry["scopes"] = json!(strings_option(file, item, &key)?),
-            "public" => entry["public"] = json!(bool_option(file, item, &key)?),
-            "host_scopes" => entry["host_scopes"] = json!(host_scopes_option(file, item)?),
-            "description" => entry["description"] = json!(text_option(file, item, &key)?),
-            _ => {
-                return Err(unknown_option(
-                    file,
-                    item,
-                    "api_route",
-                    "name, scopes, public, host_scopes or description",
-                ));
-            }
-        }
-    }
-    if entry["public"] == true && entry["scopes"].as_array().is_some_and(|s| !s.is_empty()) {
-        return Err(diagnostic(
-            file,
-            attr.span(),
-            "a public route needs no credentials, so it cannot require scopes",
-        ));
-    }
-    if entry.get("description").is_none() && !doc.is_empty() {
-        entry["description"] = json!(doc);
-    }
-    Ok(entry)
-}
-
-/// The description of an MCP entry: `description = "..."` or the function's doc comment.
-fn described(
-    file: &Path,
-    attr: &Attribute,
-    entry: &mut Value,
-    doc: &str,
-    required: bool,
-) -> Result<()> {
-    if entry.get("description").is_none() {
-        if !doc.is_empty() {
-            entry["description"] = json!(doc);
-        } else if required {
-            let marker = attr.path().to_token_stream().to_string();
-            return Err(diagnostic(
-                file,
-                attr.span(),
-                format!("#[{marker}] needs a description: a doc comment or description = \"...\""),
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// `#[mcp_tool(description = "...", input_schema = r#"{...}"#, read_only = true, ...)]`.
-fn tool_entry(file: &Path, attr: &Attribute, rust_name: &str, doc: &str) -> Result<Value> {
-    let mut entry = json!({"name": rust_name,
-        "input_schema": {"type": "object", "properties": {}}, "scopes": []});
-    for item in server_items(file, attr)? {
-        let key = item
-            .key
-            .as_ref()
-            .map(|k| k.unraw().to_string())
-            .unwrap_or_default();
-        match key.as_str() {
-            "name" | "description" | "title" => {
-                entry[&key] = json!(text_option(file, &item, &key)?)
-            }
-            "scopes" => entry["scopes"] = json!(strings_option(file, &item, &key)?),
-            "input_schema" | "output_schema" => {
-                let schema = json_option(file, &item, &key)?;
-                if !schema.is_object() {
-                    return Err(diagnostic(
-                        file,
-                        item.value.span(),
-                        format!("{key} must be a JSON object"),
-                    ));
-                }
-                jsonschema::validator_for(&schema).map_err(|e| {
-                    diagnostic(
-                        file,
-                        item.value.span(),
-                        format!("{key} is not a valid JSON Schema: {e}"),
-                    )
-                })?;
-                entry[&key] = schema;
-            }
-            "annotations" => {
-                let annotations = json_option(file, &item, &key)?;
-                if !annotations.is_object() {
-                    return Err(diagnostic(
-                        file,
-                        item.value.span(),
-                        "annotations must be a JSON object",
-                    ));
-                }
-                let mut merged = annotations;
-                if let Some(read_only) = entry["annotations"].get("readOnlyHint") {
-                    merged["readOnlyHint"] = read_only.clone();
-                }
-                entry["annotations"] = merged;
-            }
-            "read_only" => {
-                if !entry["annotations"].is_object() {
-                    entry["annotations"] = json!({});
-                }
-                entry["annotations"]["readOnlyHint"] = json!(bool_option(file, &item, &key)?);
-            }
-            _ => {
-                return Err(unknown_option(
-                    file,
-                    &item,
-                    "mcp_tool",
-                    "name, description, title, input_schema, output_schema, scopes, read_only or annotations",
-                ));
-            }
-        }
-    }
-    described(file, attr, &mut entry, doc, true)?;
-    Ok(entry)
-}
-
-/// `#[mcp_resource(uri = "x://logo")]` or `#[mcp_resource(uri_template = "x://items/{id}")]`.
-fn resource_entry(file: &Path, attr: &Attribute, rust_name: &str, doc: &str) -> Result<Value> {
-    let mut entry = json!({"name": rust_name, "scopes": []});
-    for item in server_items(file, attr)? {
-        let key = item
-            .key
-            .as_ref()
-            .map(|k| k.unraw().to_string())
-            .unwrap_or_default();
-        match key.as_str() {
-            "name" | "description" | "title" | "uri" | "uri_template" | "mime_type" => {
-                entry[&key] = json!(text_option(file, &item, &key)?)
-            }
-            "scopes" => entry["scopes"] = json!(strings_option(file, &item, &key)?),
-            _ => {
-                return Err(unknown_option(
-                    file,
-                    &item,
-                    "mcp_resource",
-                    "uri or uri_template, name, description, title, mime_type or scopes",
-                ));
-            }
-        }
-    }
-    if entry.get("uri").is_some() == entry.get("uri_template").is_some() {
-        return Err(diagnostic(
-            file,
-            attr.span(),
-            "#[mcp_resource] needs exactly one of uri = \"...\" or uri_template = \"...\"",
-        ));
-    }
-    described(file, attr, &mut entry, doc, true)?;
-    Ok(entry)
-}
-
-/// `#[mcp_prompt(description = "...", arguments = ["who"])]`: listed arguments are required;
-/// `arguments = r#"[{"name": "who", "description": "...", "required": false}]"#` spells them out.
-fn prompt_entry(file: &Path, attr: &Attribute, rust_name: &str, doc: &str) -> Result<Value> {
-    let mut entry = json!({"name": rust_name, "arguments": [], "scopes": []});
-    for item in server_items(file, attr)? {
-        let key = item
-            .key
-            .as_ref()
-            .map(|k| k.unraw().to_string())
-            .unwrap_or_default();
-        match key.as_str() {
-            "name" | "description" | "title" => {
-                entry[&key] = json!(text_option(file, &item, &key)?)
-            }
-            "scopes" => entry["scopes"] = json!(strings_option(file, &item, &key)?),
-            "arguments" => {
-                entry["arguments"] = if matches!(item.value, Expr::Array(_)) {
-                    strings_option(file, &item, &key)?
-                        .into_iter()
-                        .map(|name| json!({"name": name, "required": true}))
-                        .collect()
-                } else {
-                    let arguments = json_option(file, &item, &key)?;
-                    let valid = arguments
-                        .as_array()
-                        .is_some_and(|items| items.iter().all(|a| a["name"].is_string()));
-                    if !valid {
-                        return Err(diagnostic(
-                            file,
-                            item.value.span(),
-                            "arguments must be [\"name\", ...] or a JSON array of {\"name\", \"description\"?, \"required\"?}",
-                        ));
-                    }
-                    arguments
-                };
-            }
-            _ => {
-                return Err(unknown_option(
-                    file,
-                    &item,
-                    "mcp_prompt",
-                    "name, description, title, arguments or scopes",
-                ));
-            }
-        }
-    }
-    described(file, attr, &mut entry, doc, false)?;
-    Ok(entry)
-}
-
-/// `#[api_route]` / `#[mcp_tool]` / `#[mcp_resource]` / `#[mcp_prompt]` on a function.
-fn server_markers(attrs: &[Attribute]) -> Vec<(&Attribute, Kind)> {
-    attrs
-        .iter()
-        .filter_map(|attr| {
-            let kind = match attr.path().get_ident()?.to_string().as_str() {
-                "api_route" => Kind::Route,
-                "mcp_tool" => Kind::Tool,
-                "mcp_resource" => Kind::Resource,
-                "mcp_prompt" => Kind::Prompt,
-                "web_page" => Kind::Page,
-                _ => return None,
-            };
-            Some((attr, kind))
-        })
-        .collect()
-}
-
-/// Item markers and where each belongs. A function may stack `make_action`, the hooks, a route
-/// and MCP entries, as Python's decorators stack.
-const ITEM_MARKERS: &[(&str, &str)] = &[
-    ("make_action", "a top-level function"),
-    ("make_connector", "a top-level inline module"),
-    ("make_executor", "a top-level inline module"),
-    ("pre_sync_hook", "a top-level function"),
-    ("post_sync_hook", "a top-level function"),
-    ("api_route", "a top-level function"),
-    ("mcp_tool", "a top-level function"),
-    ("mcp_resource", "a top-level function"),
-    ("mcp_prompt", "a top-level function"),
-    ("web_page", "a top-level function"),
-];
-
-/// Reject misplaced annotations rather than silently treating them as helpers.
-fn reject_misplaced_marker(file: &Path, item: &Item, top_level: bool) -> Result<()> {
-    let attrs = match item {
-        Item::Fn(i) => &i.attrs,
-        Item::Mod(i) => &i.attrs,
-        Item::Struct(i) => &i.attrs,
-        Item::Enum(i) => &i.attrs,
-        Item::Impl(i) => &i.attrs,
-        Item::Use(i) => &i.attrs,
-        Item::Const(i) => &i.attrs,
-        Item::Static(i) => &i.attrs,
-        Item::Trait(i) => &i.attrs,
-        Item::Type(i) => &i.attrs,
-        _ => return Ok(()),
-    };
-    for attr in attrs {
-        if attr.path().is_ident("add_plugin_argument")
-            && !(top_level && matches!(item, Item::Fn(_)))
-        {
-            return Err(diagnostic(
-                file,
-                attr.span(),
-                "#[add_plugin_argument] belongs on a top-level function or at the top of the file as #![add_plugin_argument(...)]",
-            ));
-        }
-        let Some((name, place)) = ITEM_MARKERS.iter().find(|(m, _)| attr.path().is_ident(m)) else {
-            continue;
-        };
-        let placed = match *name {
-            "make_connector" | "make_executor" => matches!(item, Item::Mod(_)),
-            _ => matches!(item, Item::Fn(_)),
-        };
-        if !top_level || !placed {
-            return Err(diagnostic(
-                file,
-                attr.span(),
-                format!("#[{name}] belongs on {place}"),
-            ));
-        }
-        if attrs.iter().filter(|a| a.path().is_ident(name)).count() != 1 {
-            return Err(diagnostic(
-                file,
-                attr.span(),
-                format!("duplicate #[{name}]"),
-            ));
-        }
-        if (*name == "pre_sync_hook" || *name == "post_sync_hook")
-            && !matches!(attr.meta, syn::Meta::Path(_))
-        {
-            return Err(diagnostic(
-                file,
-                attr.span(),
-                format!("#[{name}] takes no options"),
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// One `add_plugin_argument` entry: a positional option string or `key = value`.
-struct ArgumentItem {
-    key: Option<syn::Ident>,
-    value: Expr,
-}
-impl syn::parse::Parse for ArgumentItem {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        // `type` and `const` are keywords, so keys are parsed as any identifier.
-        if input.peek(syn::Ident::peek_any) && input.peek2(syn::Token![=]) {
-            let key = syn::Ident::parse_any(input)?;
-            input.parse::<syn::Token![=]>()?;
-            return Ok(Self {
-                key: Some(key),
-                value: input.parse()?,
-            });
-        }
-        Ok(Self {
-            key: None,
-            value: input.parse()?,
-        })
-    }
-}
-
-/// A literal as JSON: strings, integers, floats (optionally negated) and booleans.
-fn literal_json(expr: &Expr) -> Option<Value> {
-    match expr {
-        Expr::Lit(lit) => match &lit.lit {
-            Lit::Str(s) => Some(json!(s.value())),
-            Lit::Int(i) => i.base10_parse::<i64>().ok().map(Value::from),
-            Lit::Float(f) => f.base10_parse::<f64>().ok().map(Value::from),
-            Lit::Bool(b) => Some(json!(b.value)),
-            _ => None,
-        },
-        Expr::Unary(unary) if matches!(unary.op, syn::UnOp::Neg(_)) => {
-            match literal_json(&unary.expr)? {
-                Value::Number(n) if n.is_i64() => n.as_i64().map(|i| json!(-i)),
-                Value::Number(n) => n.as_f64().map(|f| json!(-f)),
-                _ => None,
-            }
-        }
-        Expr::Paren(paren) => literal_json(&paren.expr),
-        _ => None,
-    }
-}
-
-fn string_literal(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Lit(syn::ExprLit {
-            lit: Lit::Str(s), ..
-        }) => Some(s.value()),
-        _ => None,
-    }
-}
-
-/// argparse's action classes, as the Python worker's manifest names them.
-fn argparse_action(action: &str) -> Option<&'static str> {
-    Some(match action {
-        "store" => "_StoreAction",
-        "store_true" => "_StoreTrueAction",
-        "store_false" => "_StoreFalseAction",
-        "store_const" => "_StoreConstAction",
-        "append" => "_AppendAction",
-        "append_const" => "_AppendConstAction",
-        "count" => "_CountAction",
-        _ => return None,
-    })
-}
-
-/// `#[add_plugin_argument("--flag", "-f", action = "store_true", help = "...")]`: the manifest
-/// entry Python's `add_plugin_argument` (argparse's `add_argument`) records.
-fn plugin_argument(file: &Path, attr: &Attribute) -> Result<Value> {
-    let fail = |span: Span, message: String| diagnostic(file, span, message);
-    let items = attr
-        .parse_args_with(
-            syn::punctuated::Punctuated::<ArgumentItem, syn::Token![,]>::parse_terminated,
-        )
-        .map_err(|e| fail(e.span(), format!("invalid add_plugin_argument: {e}")))?;
-    let mut options = Vec::new();
-    let mut action = "store".to_owned();
-    let (mut dest, mut help, mut metavar) = (None, None, Value::Null);
-    let (mut default, mut constant, mut type_name, mut choices) =
-        (None, None, Value::Null, Value::Null);
-    let mut required = false;
-    let mut seen = HashSet::new();
-    for item in &items {
-        let span = item.value.span();
-        let Some(key) = &item.key else {
-            let option = string_literal(&item.value)
-                .filter(|o| o.len() > 1 && o.starts_with('-') && !o.contains(char::is_whitespace))
-                .ok_or_else(|| {
-                    fail(
-                        span,
-                        "option strings are quoted flags such as \"--name\" or \"-n\"".into(),
-                    )
-                })?;
-            options.push(option);
-            continue;
-        };
-        let key = key.unraw().to_string();
-        if !seen.insert(key.clone()) {
-            return Err(fail(key_span(item), format!("duplicate option '{key}'")));
-        }
-        let text = || {
-            string_literal(&item.value)
-                .ok_or_else(|| fail(span, format!("{key} must be a string literal")))
-        };
-        match key.as_str() {
-            "action" => action = text()?,
-            "help" => help = Some(text()?),
-            "dest" => dest = Some(text()?),
-            "metavar" => metavar = json!(text()?),
-            "default" => {
-                default = Some(literal_json(&item.value).ok_or_else(|| {
-                    fail(
-                        span,
-                        "default must be a string, number or bool literal".into(),
-                    )
-                })?)
-            }
-            "const" => {
-                constant = Some(literal_json(&item.value).ok_or_else(|| {
-                    fail(
-                        span,
-                        "const must be a string, number or bool literal".into(),
-                    )
-                })?)
-            }
-            "type" => {
-                let name = match &item.value {
-                    Expr::Path(path) => path.path.get_ident().map(|i| i.to_string()),
-                    other => string_literal(other),
-                };
-                type_name = match name.as_deref() {
-                    Some(name @ ("int" | "float" | "str")) => json!(name),
-                    _ => return Err(fail(span, "type must be int, float or str".into())),
-                };
-            }
-            "choices" => {
-                let Expr::Array(array) = &item.value else {
-                    return Err(fail(span, "choices must be an array of literals".into()));
-                };
-                choices = array
-                    .elems
-                    .iter()
-                    .map(|e| {
-                        literal_json(e)
-                            .ok_or_else(|| fail(e.span(), "choices must be literals".into()))
-                    })
-                    .collect::<Result<Vec<_>>>()?
-                    .into();
-            }
-            "required" => {
-                required = matches!(&item.value, Expr::Lit(syn::ExprLit { lit: Lit::Bool(b), .. }) if b.value);
-                if !matches!(
-                    &item.value,
-                    Expr::Lit(syn::ExprLit {
-                        lit: Lit::Bool(_),
-                        ..
-                    })
-                ) {
-                    return Err(fail(span, "required must be true or false".into()));
-                }
-            }
-            "nargs" => {
-                return Err(fail(
-                    key_span(item),
-                    "nargs is unsupported; use action = \"append\" to collect several values"
-                        .into(),
-                ));
-            }
-            other => {
-                return Err(fail(
-                    key_span(item),
-                    format!(
-                        "unknown option '{other}'; expected action, help, dest, default, type, choices, metavar, const or required"
-                    ),
-                ));
-            }
-        }
-    }
-    if options.is_empty() {
-        return Err(fail(
-            attr.span(),
-            "add_plugin_argument needs at least one flag such as \"--name\"".into(),
-        ));
-    }
-    let class = argparse_action(&action).ok_or_else(|| {
-        fail(
-            attr.span(),
-            format!(
-                "unsupported action '{action}'; use store, store_true, store_false, store_const, append, append_const or count"
-            ),
-        )
-    })?;
-    let takes_value = matches!(action.as_str(), "store" | "append");
-    if !takes_value && (!type_name.is_null() || !choices.is_null() || !metavar.is_null()) {
-        return Err(fail(
-            attr.span(),
-            format!("type, choices and metavar need a value-taking action, not '{action}'"),
-        ));
-    }
-    if constant.is_some() != matches!(action.as_str(), "store_const" | "append_const") {
-        return Err(fail(
-            attr.span(),
-            "const is required by (and only allowed for) store_const and append_const".into(),
-        ));
-    }
-    // argparse: the first long option names the attribute, dashes become underscores.
-    let dest = dest.unwrap_or_else(|| {
-        options
-            .iter()
-            .find(|o| o.starts_with("--"))
-            .unwrap_or(&options[0])
-            .trim_start_matches('-')
-            .replace('-', "_")
-    });
-    if dest.is_empty() || !dest.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(fail(
-            attr.span(),
-            format!("'{dest}' is not a valid argument name; set dest = \"...\""),
-        ));
-    }
-    let (default, constant) = match action.as_str() {
-        "store_true" => (default.unwrap_or(json!(false)), json!(true)),
-        "store_false" => (default.unwrap_or(json!(true)), json!(false)),
-        _ => (
-            default.unwrap_or(Value::Null),
-            constant.unwrap_or(Value::Null),
-        ),
-    };
-    Ok(json!({
-        "option_strings": options, "dest": dest, "action": class, "nargs": null,
-        "const": constant, "default": default, "type": type_name, "choices": choices,
-        "required": required, "help": help, "metavar": metavar,
-    }))
-}
-
-fn key_span(item: &ArgumentItem) -> Span {
-    item.key
-        .as_ref()
-        .map(|k| k.span())
-        .unwrap_or_else(|| item.value.span())
-}
-
 /// What a single-file plugin declares about itself: `const VERSION: &str = "1.2.0";` and
 /// `const REQUIRED: &[&str] = &["package", "plugin:name"];`, the Rust spelling of Python's
 /// `__version__` and `required`.
@@ -2276,6 +1577,10 @@ pub(crate) fn metadata(file: &Path) -> Result<SingleFileMetadata> {
 
 /// Optional Cargo dependencies in a Rust doc-comment fence; never infer dependencies from use.
 fn dependencies(parsed: &syn::File, file: &Path) -> Result<toml::Table> {
+    dependencies_for(parsed, file, false)
+}
+
+fn dependencies_for(parsed: &syn::File, file: &Path, confined: bool) -> Result<toml::Table> {
     let mut block = None;
     let mut current: Option<String> = None;
     let doc_lines: Vec<String> = parsed
@@ -2342,6 +1647,24 @@ fn dependencies(parsed: &syn::File, file: &Path) -> Result<toml::Table> {
             )));
         }
         if let Some(table) = spec.as_table_mut() {
+            if confined
+                && [
+                    "path",
+                    "git",
+                    "branch",
+                    "tag",
+                    "rev",
+                    "registry",
+                    "index",
+                    "workspace",
+                ]
+                .iter()
+                .any(|key| table.contains_key(*key))
+            {
+                return Err(error(format!(
+                    "confined dependency '{name}' must use the host's pinned offline registry inputs"
+                )));
+            }
             if table.contains_key("workspace")
                 || table.get("optional").and_then(toml::Value::as_bool) == Some(true)
             {
@@ -2370,6 +1693,15 @@ fn dependencies(parsed: &syn::File, file: &Path) -> Result<toml::Table> {
 /// Generate the crate for `file` into `directory` and return what the file declares about
 /// itself (its version is the plugin's version).
 pub(crate) fn prepare(file: &Path, name: &str, directory: &Path) -> Result<SingleFileMetadata> {
+    prepare_with_compiler(file, name, directory, None)
+}
+
+pub(crate) fn prepare_with_compiler(
+    file: &Path,
+    name: &str,
+    directory: &Path,
+    compiler: Option<&dyn crate::source::compiler::SourceCompiler>,
+) -> Result<SingleFileMetadata> {
     let source = std::fs::read_to_string(file).map_err(error)?;
     let parsed = syn::parse_file(&source)
         .map_err(|e| diagnostic(file, e.span(), format!("invalid Rust plugin: {e}")))?;
@@ -2615,7 +1947,11 @@ strip = "debuginfo"
 "#
     ))
     .map_err(error)?;
-    let mut deps = dependencies(&parsed, file)?;
+    let mut deps = if compiler.is_some() {
+        dependencies_for(&parsed, file, true)?
+    } else {
+        dependencies(&parsed, file)?
+    };
     // Users may enable Serde features, but the runtime's JSON semantics remain required.
     if let Some(json) = deps.get_mut("serde_json") {
         let mut spec = if let Some(version) = json.as_str() {
@@ -2637,6 +1973,9 @@ strip = "debuginfo"
         *json = toml::Value::Table(spec);
     }
     cargo["dependencies"].as_table_mut().unwrap().extend(deps);
+    let lock = compiler
+        .map(|compiler| compiler.lockfile(name).map_err(error))
+        .transpose()?;
     std::fs::create_dir_all(directory).map_err(error)?;
     for (filename, contents) in [
         (
@@ -2667,6 +2006,12 @@ strip = "debuginfo"
             std::fs::write(path, contents).map_err(error)?;
         }
     }
+    if let Some(lock) = lock {
+        let path = directory.join("Cargo.lock");
+        if std::fs::read_to_string(&path).ok().as_ref() != Some(&lock) {
+            std::fs::write(path, lock).map_err(error)?;
+        }
+    }
     Ok(declared)
 }
 
@@ -2677,235 +2022,5 @@ strip = "debuginfo"
 mod runtime;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// An empty `Vec` is zero rows (`[]` on the rows ABI); only an `Option` input's `None` is
-    /// no data (`null`), as v4 tells a `fetch()` returning `[]` from one returning `None`.
-    #[test]
-    fn runtime_empty_rows_are_zero_rows_and_none_is_no_data() {
-        use runtime::sdk::FetchOutput;
-        let empty = Vec::<Value>::new().into_frame().unwrap().unwrap();
-        assert_eq!(empty.height(), 0);
-        let some = Some(Vec::<Value>::new()).into_frame().unwrap();
-        assert_eq!(some.map(|f| f.height()), Some(0));
-        assert!(None::<Vec<Value>>.into_frame().unwrap().is_none());
-        assert!(None::<runtime::Frame>.into_frame().unwrap().is_none());
-        assert!(Some(vec![json!(1)]).into_frame().is_err());
-    }
-
-    #[test]
-    fn dependency_blocks_accept_cargo_forms_and_ignore_code_strings() {
-        let parsed = syn::parse_file(
-            r#"//! ```cargo
-//! [dependencies]
-//! regex = "1"
-//! uuid = { version = "1", features = ["v4"], default-features = false }
-//! ```
-fn helper() {}
-"#,
-        )
-        .unwrap();
-        let deps = dependencies(&parsed, Path::new("example.rs")).unwrap();
-        assert_eq!(deps["regex"].as_str(), Some("1"));
-        assert_eq!(deps["uuid"]["features"][0].as_str(), Some("v4"));
-        let parsed = syn::parse_file(
-            "const EXAMPLE: &str = r#\"\n//! ```cargo\n//! bad = true\n//! ```\n\"#;",
-        )
-        .unwrap();
-        assert!(
-            dependencies(&parsed, Path::new("example.rs"))
-                .unwrap()
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn invalid_dependency_blocks_fail_before_building() {
-        for (block, expected) in [
-            ("//! ```cargo\n//! [dependencies]", "unclosed"),
-            (
-                "//! ```cargo\n//! [dependencies]\n//! x = \n//! ```",
-                "invalid Cargo",
-            ),
-            (
-                "//! ```cargo\n//! [package]\n//! name = 'oops'\n//! ```",
-                "only [dependencies]",
-            ),
-            (
-                "//! ```cargo\n//! [dependencies]\n//! x = true\n//! ```",
-                "version string",
-            ),
-            (
-                "//! ```cargo\n//! [dependencies]\n//! x = { workspace = true }\n//! ```",
-                "workspace or optional",
-            ),
-            (
-                "//! ```cargo\n//! [dependencies]\n//! meerschaum-plugin = '5'\n//! ```",
-                "supplied by Meerschaum",
-            ),
-            ("//! ```cargo\n//! ```\n//! ```cargo\n//! ```", "only one"),
-        ] {
-            let parsed = syn::parse_file(block).unwrap();
-            let err = dependencies(&parsed, Path::new("example.rs"))
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains(expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn transformed_source_preserves_lines_and_only_strips_shorthand_attributes() {
-        let root = tempfile::tempdir().unwrap();
-        let file = root.path().join("sample.rs");
-        let source = "//! Introductory notes.\n#[make_action(\n name = \"greet\"\n)]\nfn hello() {}\n#[make_connector]\nmod readings {\n    #![allow(dead_code)]\n    fn fetch() -> Vec<Value> { vec![] }\n}\n";
-        std::fs::write(&file, source).unwrap();
-        let output = root.path().join("generated");
-        prepare(&file, "sample", &output).unwrap();
-        let transformed = std::fs::read_to_string(output.join("user.rs")).unwrap();
-        assert!(!transformed.contains("#[make_action"));
-        assert!(!transformed.contains("#[make_connector"));
-        assert!(transformed.lines().nth(4).unwrap().starts_with("fn hello"));
-        assert!(transformed.lines().nth(8).unwrap().contains("fn fetch"));
-        assert!(syn::parse_file(&transformed).is_ok());
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
-    }
-    #[test]
-    fn generated_source_keeps_doc_comment_text_inside_raw_strings() {
-        let root = tempfile::tempdir().unwrap();
-        let file = root.path().join("sample.rs");
-        let source = r##"//! Actual file documentation.
-#[make_action]
-fn hello() {
-    let example = r#"
-//! ```cargo
-//! this is an example, not a dependency
-//! ```
-"#;
-    assert!(example.contains("//! this is an example"));
-}
-"##;
-        std::fs::write(&file, source).unwrap();
-        let output = root.path().join("generated");
-        prepare(&file, "sample", &output).unwrap();
-        let transformed = std::fs::read_to_string(output.join("user.rs")).unwrap();
-        assert!(transformed.contains("//! this is an example, not a dependency"));
-        assert!(transformed.starts_with("//  Actual file documentation."));
-    }
-}
-
-#[cfg(test)]
-mod runtime_tests {
-    use super::runtime::{self, executor::ExecutorReply};
-    use serde_json::{Value, json};
-
-    #[test]
-    fn bounds_convert_iso_timestamps_without_chrono() {
-        use runtime::Bound;
-        let at = |text: &str| Bound::from(text).timestamp();
-        assert_eq!(at("1970-01-01T00:00:00Z").unwrap(), 0);
-        assert_eq!(at("2024-03-01T12:30:00+02:00").unwrap(), 1_709_289_000);
-        assert_eq!(at("2024-03-01 10:30:00").unwrap(), 1_709_289_000);
-        assert_eq!(
-            at("2024-03-01T10:30:00.250000+00:00").unwrap(),
-            1_709_289_000
-        );
-        assert_eq!(
-            Bound::from("2024-03-01T10:30:00.250Z")
-                .timestamp_millis()
-                .unwrap(),
-            1_709_289_000_250
-        );
-        assert_eq!(at("2024-03-01").unwrap(), 1_709_251_200);
-        assert_eq!(at("1969-12-31T23:59:59-0000").unwrap(), -1);
-        for bad in ["soon", "2024-13-01", "2024-01-01T10:30:00+5", ""] {
-            assert!(at(bad).is_err(), "{bad}");
-        }
-        assert!(Bound::Int(3).timestamp().is_err());
-        assert_eq!(Bound::Int(3).as_int(), Some(3));
-        assert_eq!(
-            Bound::from_timestamp(1_709_289_000),
-            Bound::Datetime("2024-03-01T10:30:00+00:00".into())
-        );
-        assert_eq!(
-            Bound::from_timestamp(-1).to_string(),
-            "1969-12-31T23:59:59+00:00"
-        );
-        for seconds in [0, 951_782_400, 1_709_289_000, 4_102_444_800, -86_400 * 366] {
-            assert_eq!(Bound::from_timestamp(seconds).timestamp().unwrap(), seconds);
-        }
-    }
-
-    #[test]
-    fn base64_round_trips_every_length() {
-        for n in 0..16 {
-            let bytes: Vec<u8> = (0..n).map(|i| (i * 37 + 200) as u8).collect();
-            let text = runtime::base64::encode(&bytes);
-            assert_eq!(text.len() % 4, 0);
-            assert_eq!(runtime::base64::decode(&text).unwrap(), bytes);
-        }
-        assert_eq!(runtime::base64::encode(&[0, 159, 146, 150]), "AJ+Slg==");
-        assert!(runtime::base64::decode("a*b").is_err());
-    }
-
-    fn request(method: &str, context: Value) -> runtime::Request {
-        runtime::Request {
-            method: format!("executor.{method}"),
-            connector_type: "memory".into(),
-            label: "x".into(),
-            config: Value::Null,
-            context,
-            kwargs: json!({}),
-        }
-    }
-
-    fn methods(
-        method: &str,
-        _: &runtime::executor::ExecutorInfo,
-        context: &Value,
-    ) -> runtime::Result<ExecutorReply> {
-        match method {
-            "get_job_names" => Ok(ExecutorReply::Value(json!(["a", "b"]))),
-            "get_job_metadata" if context["name"] == "a" => Ok(ExecutorReply::Value(
-                json!({"daemon": {"status": "paused", "properties": {"process": {"ended": "e"}}}}),
-            )),
-            "get_job_metadata" => Ok(ExecutorReply::Value(Value::Null)),
-            other => Err(runtime::executor::unsupported(other)),
-        }
-    }
-
-    #[test]
-    fn executor_defaults_derive_from_names_and_metadata() {
-        let call = |method: &str, context: Value| {
-            runtime::executor::dispatch(&request(method, context), methods).map(|r| r.value)
-        };
-        assert_eq!(
-            call("get_job_exists", json!({"name": "b"})).unwrap(),
-            json!(true)
-        );
-        assert_eq!(
-            call("get_job_status", json!({"name": "a"})).unwrap(),
-            json!("paused")
-        );
-        assert_eq!(
-            call("get_job_status", json!({"name": "b"})).unwrap(),
-            json!("stopped")
-        );
-        assert_eq!(
-            call("get_job_ended", json!({"name": "a"})).unwrap(),
-            json!("e")
-        );
-        assert_eq!(
-            call("get_jobs", json!({})).unwrap(),
-            json!({"a": {"daemon": {"status": "paused", "properties": {"process": {"ended": "e"}}}}})
-        );
-        assert!(matches!(
-            call("stop_job", json!({"name": "a"})),
-            Err(runtime::Error::Unsupported(m)) if m == "`stop_job` is not supported by this executor."
-        ));
-        assert!(matches!(
-            call("monitor_logs", json!({"name": "a"})),
-            Err(runtime::Error::Unsupported(_))
-        ));
-    }
-}
+#[path = "single_file_tests.rs"]
+mod tests_suite;

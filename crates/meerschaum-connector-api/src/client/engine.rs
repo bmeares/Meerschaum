@@ -19,6 +19,16 @@ use crate::wire::QueryValue;
 use super::{APIConnector, Body, Method, RequestOptions};
 
 impl APIConnector {
+    fn engine_options(&self, mut options: RequestOptions) -> RequestOptions {
+        if self.logical_identity.is_some() {
+            options.query.retain(|(key, _)| key != "instance_keys");
+            options
+                .query
+                .push(("instance_keys".into(), self.to_string().into()));
+        }
+        options
+    }
+
     /// Fresh, caller-filtered history-generation authority. Older servers prove nothing.
     pub async fn get_remote_run_generations(
         &self,
@@ -30,14 +40,14 @@ impl APIConnector {
             let response = self
                 .post(
                     routes::ENGINE_RUN_GENERATIONS,
-                    RequestOptions {
+                    self.engine_options(RequestOptions {
                         query: vec![(
                             "instance_keys".into(),
                             QueryValue::opt(self.instance_keys()),
                         )],
                         body: Body::Json(serde_json::json!({"run_ids":chunk}).to_string()),
                         ..Default::default()
-                    },
+                    }),
                 )
                 .await?;
             if matches!(response.status, 404 | 405) {
@@ -82,7 +92,8 @@ impl APIConnector {
                 path,
                 RequestOptions {
                     body: Body::Json(body),
-                    headers: if path == routes::ENGINE_RUNS {
+                    query: self.engine_options(RequestOptions::default()).query,
+                    headers: if path == routes::ENGINE_RUNS && self.logical_identity.is_none() {
                         vec![(
                             engine_pipes::CLIENT_INSTANCE_HEADER.into(),
                             self.to_string(),
@@ -121,7 +132,7 @@ impl APIConnector {
             ),
         ]);
         let j = self
-            .get(routes::ENGINE_LEDGER, opts)
+            .get(routes::ENGINE_LEDGER, self.engine_options(opts))
             .await?
             .envelope_field("entries")?;
         Ok(serde_json::from_value(j)?)
@@ -138,7 +149,7 @@ impl APIConnector {
         let r = self
             .get(
                 routes::ENGINE_STATE,
-                RequestOptions::query(vec![("pipe_ref", pipe_ref.into())]),
+                self.engine_options(RequestOptions::query(vec![("pipe_ref", pipe_ref.into())])),
             )
             .await?;
         if r.status == 404 {
@@ -177,7 +188,7 @@ impl APIConnector {
             ),
         ]);
         let j = self
-            .get(routes::ENGINE_RUNS, opts)
+            .get(routes::ENGINE_RUNS, self.engine_options(opts))
             .await?
             .envelope_field("runs")?;
         Ok(serde_json::from_value(j)?)
@@ -194,7 +205,9 @@ impl APIConnector {
             routes::ENGINE_RUNS,
             crate::wire::quote_plus(run_id).replace('+', "%20")
         );
-        let r = self.get(&path, RequestOptions::default()).await?;
+        let r = self
+            .get(&path, self.engine_options(RequestOptions::default()))
+            .await?;
         if r.status == 404 {
             return Ok(None);
         }
@@ -227,7 +240,7 @@ impl APIConnector {
                 route,
                 RequestOptions {
                     body: Body::Json(serde_json::to_string(req)?),
-                    query: if pipeline_metadata {
+                    query: if pipeline_metadata || self.logical_identity.is_some() {
                         vec![(
                             "instance_keys".into(),
                             QueryValue::opt(self.instance_keys()),
@@ -271,8 +284,10 @@ impl APIConnector {
                 &routes::engine_pipe_path(metric_key, op),
                 RequestOptions {
                     body: body.map(Body::Json).unwrap_or_default(),
+                    query: self.engine_options(RequestOptions::default()).query,
                     headers: if matches!(metric_key, "engine_nodes" | "engine_runs")
                         && op == "write"
+                        && self.logical_identity.is_none()
                     {
                         vec![(
                             engine_pipes::CLIENT_INSTANCE_HEADER.into(),
@@ -425,6 +440,7 @@ struct Follow {
 struct SseFrame {
     event: Option<String>,
     data: Vec<String>,
+    bytes: usize,
 }
 
 /// Whether a failed (re)connect is final: the run or the route is not there, or the client
@@ -465,17 +481,26 @@ impl Follow {
             req = req.header("Last-Event-ID", seq.to_string());
         }
         // Boxed: `token()` may log in, which posts through `make_request`.
-        let token = Box::pin(self.conn.token())
-            .await
-            .unwrap_or_else(|| "None".into());
-        req = req.header("Authorization", format!("Bearer {token}"));
-        let response = req
-            .send()
+        if self.conn.request_authentication.is_none() {
+            let token = Box::pin(self.conn.token())
+                .await
+                .unwrap_or_else(|| "None".into());
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        let mut request = req
+            .build()
+            .map_err(|e| ConnectorError::Backend(e.to_string()))?;
+        self.conn.authenticate_request(&mut request)?;
+        let response = self
+            .conn
+            .http
+            .execute(request)
             .await
             .map_err(|e| ConnectorError::Backend(e.to_string()))?;
         let status = response.status().as_u16();
         if status != 200 {
-            let body = response.text().await.unwrap_or_default();
+            let body =
+                String::from_utf8_lossy(&self.conn.response_bytes(response).await?).into_owned();
             return Err(ConnectorError::Http { status, body });
         }
         use futures_util::StreamExt;
@@ -492,6 +517,18 @@ impl Follow {
 
     /// Feed one line of the body; an event when the line ends one.
     fn line(&mut self, line: &str) -> Option<ConnectorResult<EngineRunEvent>> {
+        self.frame.bytes = self.frame.bytes.saturating_add(line.len());
+        if self
+            .conn
+            .response_limit
+            .is_some_and(|limit| self.frame.bytes > limit)
+        {
+            self.done = true;
+            self.body = None;
+            return Some(Err(ConnectorError::Backend(
+                "An API event exceeds its configured size limit.".into(),
+            )));
+        }
         if line.is_empty() {
             let frame = std::mem::take(&mut self.frame);
             if frame.data.is_empty() {
@@ -554,7 +591,20 @@ impl Follow {
                 None => None,
             };
             match chunk {
-                Some(Ok(bytes)) => self.buf.extend_from_slice(&bytes),
+                Some(Ok(bytes)) => {
+                    if self
+                        .conn
+                        .response_limit
+                        .is_some_and(|limit| bytes.len() > limit.saturating_sub(self.buf.len()))
+                    {
+                        self.done = true;
+                        self.body = None;
+                        return Some(Err(ConnectorError::Backend(
+                            "An API event exceeds its configured size limit.".into(),
+                        )));
+                    }
+                    self.buf.extend_from_slice(&bytes);
+                }
                 // The connection dropped (or the server ended the stream early): resume after
                 // the last delivered event, pausing longer after each failure in a row.
                 Some(Err(_)) | None => {

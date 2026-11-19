@@ -121,6 +121,9 @@ def test_saved_pipeline_over_api_keeps_current_nonadmin_history_and_events(tmp_p
     server = Server('history-api', native=False, args=['--no-dash'], config={
         'api': {'permissions': {'actions': {'non_admin': True}}},
     })
+    config = json.loads(server.env['MRSM_CONFIG'])
+    config['api']['execution'] = {'callback_url': server.base_url}
+    server.env['MRSM_CONFIG'] = json.dumps(config)
     try:
         server.start()
         admin_uri = f'http://{USERNAME}:{PASSWORD}@127.0.0.1:{server.port}'

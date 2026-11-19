@@ -21,14 +21,18 @@ TARGET = 'x86_64-unknown-linux-gnu'
 FILES = {'build-info.json', f'{PLUGIN}/plugin.toml', f'{PLUGIN}/lib{PLUGIN}.so'}
 
 
-def select_sdk(messages: Path, binary: Path, profile: str, repo: Path = REPO) -> Path:
-    """Accept only SDK artifacts emitted by the successful build which produced this CLI."""
+def select_sdk(
+    messages: Path, binary: Path, profile: str, repo: Path = REPO,
+) -> tuple[Path, list[Path]]:
+    """Return the SDK and dependency search paths from the CLI's Cargo build."""
     events = [json.loads(line) for line in messages.read_text().splitlines() if line.strip()]
     if not any(event.get('reason') == 'build-finished' and event.get('success') is True
                for event in events):
         raise artifacts.ArtifactError('The CLI Cargo build did not finish successfully.')
     sdk_source = (repo / 'crates/meerschaum-plugin/src/lib.rs').resolve()
+    profile_dir = (repo / 'target' / profile).resolve()
     libraries = set()
+    dependency_dirs = set()
     cli_seen = False
     for event in events:
         if event.get('reason') != 'compiler-artifact':
@@ -36,22 +40,29 @@ def select_sdk(messages: Path, binary: Path, profile: str, repo: Path = REPO) ->
         target = event.get('target', {})
         if target.get('name') == 'mrsm' and 'bin' in target.get('kind', []):
             cli_seen |= Path(event.get('executable') or '').resolve() == binary.resolve()
+        outputs = [Path(name) for name in event.get('filenames', [])]
         if (target.get('name') == 'meerschaum_plugin'
                 and Path(target.get('src_path', '')).resolve() == sdk_source):
-            libraries.update(Path(name).resolve() for name in event.get('filenames', [])
-                             if name.endswith('.rlib'))
+            libraries.update(path for path in outputs if path.suffix == '.rlib')
+        # Before Cargo 1.100 everything lived under deps/. Newer Cargo writes
+        # intermediate libraries into separate per-package directories.
+        dependency_dirs.update(
+            path.resolve().parent for path in outputs
+            if path.suffix in ('.rlib', '.rmeta', '.so')
+            and not path.is_symlink() and path.resolve().is_relative_to(profile_dir)
+            and path.is_file()
+        )
     if not cli_seen or len(libraries) != 1:
         raise artifacts.ArtifactError('Expected the matching CLI and one workspace SDK artifact.')
     sdk = libraries.pop()
-    if (sdk.parent != (repo / 'target' / profile / 'deps').resolve()
-            or not sdk.is_file() or sdk.is_symlink()
-            or not binary.is_file() or binary.is_symlink()):
+    if (not sdk.resolve().is_relative_to(profile_dir) or not sdk.is_file() or sdk.is_symlink()
+            or binary.resolve().parent != profile_dir or not binary.is_file() or binary.is_symlink()):
         raise artifacts.ArtifactError('Missing or incorrect-profile CLI/SDK artifact.')
-    return sdk
+    return sdk.resolve(), sorted(dependency_dirs)
 
 
 def build(messages: Path, binary: Path, output: Path, profile: str, repo: Path = REPO) -> None:
-    sdk = select_sdk(messages, binary, profile, repo)
+    sdk, dependency_dirs = select_sdk(messages, binary, profile, repo)
     source = repo / 'tests/plugins' / PLUGIN
     destination = output / PLUGIN
     destination.mkdir(parents=True, exist_ok=False)
@@ -60,10 +71,12 @@ def build(messages: Path, binary: Path, output: Path, profile: str, repo: Path =
     env = {key: value for key, value in os.environ.items() if key not in ('TMUX', 'TMUX_PANE')}
     env.update(CARGO_PKG_NAME=PLUGIN, CARGO_PKG_VERSION=metadata['version'])
     command = ['rustc', '--edition', '2024', '--crate-type', 'cdylib', '--crate-name', PLUGIN,
-               '-L', f'dependency={sdk.parent}', '--extern', f'meerschaum_plugin={sdk}',
+               '--extern', f'meerschaum_plugin={sdk}',
                '-C', 'debuginfo=0', '-C', 'strip=symbols',
                '-C', f'opt-level={3 if profile == "release" else 1}',
                '-o', str(destination / f'lib{PLUGIN}.so'), str(source / 'plugin.rs')]
+    for directory in dependency_dirs:
+        command.extend(('-L', f'dependency={directory}'))
     if profile == 'release':
         command += ['-C', 'lto=thin']
     subprocess.run(command, cwd=repo, env=env, check=True)

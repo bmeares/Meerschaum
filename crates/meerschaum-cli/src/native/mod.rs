@@ -28,7 +28,9 @@ pub mod drivers;
 pub mod editor;
 pub mod engine_views;
 pub mod extensions;
+pub mod graph_plan;
 pub mod gui;
+pub mod install_target;
 pub mod jobs;
 pub mod jobs_laps;
 pub mod lifecycle;
@@ -51,8 +53,11 @@ pub mod rich_json;
 pub mod self_upgrade;
 pub mod session;
 pub mod show;
+pub mod stack_readonly;
+pub mod stack_secrets;
 pub mod subactions;
 pub mod sync;
+pub mod team_setup;
 pub mod teams;
 pub mod terminal;
 pub mod tokens;
@@ -61,6 +66,7 @@ pub mod users;
 pub mod venv_admin;
 pub mod venvs;
 pub mod verify;
+pub mod verify_plan;
 pub mod verify_schema;
 
 use meerschaum_core::value::{Map, Value};
@@ -72,7 +78,7 @@ use crate::format::TupleArgs;
 use crate::format::rich::pretty::PyObj;
 use crate::value::{ArgsMap, PyValue};
 
-pub use session::{Instance, Session};
+pub use session::{Instance, Session, TeamBinding, TeamLookup};
 /// The engine registry builder (native connectors, worker pool, native plugins), for hosts
 /// such as `meerschaum-py`: `meerschaum_cli::native::engine_registry(..)`, or
 /// `registry_with(.., RegistryOptions { overrides, .. })` with the host's own connectors.
@@ -96,6 +102,7 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_analyze_pipelines" => pipelines::run("analyze", args, rt),
         "_register_pipelines" => pipelines::run("register", args, rt),
         "_bootstrap_pipelines" => pipelines::run("bootstrap", args, rt),
+        "_bootstrap_teams" => team_setup::bootstrap_teams(args, rt),
         "_edit_pipelines" => pipelines::run("edit", args, rt),
         "_plan_pipelines" => pipelines::run("plan", args, rt),
         "_sync_pipelines" => pipelines::run("sync", args, rt),
@@ -364,7 +371,11 @@ pub fn prompt(rt: &mut Runtime<'_>, question: &str, icon: bool, noask: bool) -> 
     }
     let q = question_text(rt, question, icon);
     crate::format::progress::suspend();
+    // Inside a job on a system where the supervisor cannot see the wait (not Linux), the
+    // prompt announces it (`input.stdin.block`) for `attach`.
+    let announced = meerschaum_jobs::stdin_watch::announce_wait();
     let answer = rt.host.read_line_interruptible(&q);
+    drop(announced);
     crate::format::progress::resume(true);
     if terminal::take_interrupt() {
         std::panic::resume_unwind(Box::new(crate::shell::interrupt::Interrupted));

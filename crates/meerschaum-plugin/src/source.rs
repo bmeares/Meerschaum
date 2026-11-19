@@ -10,10 +10,13 @@
 use crate::{Result, error};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+pub mod compiler;
+use compiler::{CompileRequest, SourceCompiler};
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::Arc,
     time::SystemTime,
 };
 
@@ -31,6 +34,16 @@ pub struct SourceBuild {
     pub shared_target: Option<PathBuf>,
     /// The source fingerprint to stamp after a successful build.
     pub fingerprint: String,
+    /// Only a trusted discovery constructor attaches this in-memory compiler policy.
+    #[serde(skip)]
+    pub compiler: Option<Arc<dyn SourceCompiler>>,
+    /// A cached build cannot recover its skipped policy by finding ambient Cargo.
+    #[serde(default, skip_serializing_if = "compiler_not_required")]
+    pub compiler_required: bool,
+}
+
+fn compiler_not_required(required: &bool) -> bool {
+    !required
 }
 
 /// The directory below the Meerschaum root's `cache` directory that holds the build output.
@@ -143,6 +156,22 @@ pub fn source_fingerprint(directory: &Path) -> Result<String> {
     hash_sources(directory, true)
 }
 
+pub(crate) fn build_fingerprint(
+    directory: &Path,
+    compiler: Option<&dyn SourceCompiler>,
+) -> Result<String> {
+    let source = source_fingerprint(directory)?;
+    let Some(compiler) = compiler else {
+        return Ok(source);
+    };
+    let mut hash = Sha256::new();
+    hash.update(b"mrsm-owned-source-compiler-v1\0");
+    hash.update(source.as_bytes());
+    hash.update([0]);
+    hash.update(compiler.identity().as_bytes());
+    Ok(hex::encode(hash.finalize()))
+}
+
 fn hash_sources(directory: &Path, include_lock: bool) -> Result<String> {
     let mut hash = Sha256::new();
     hash.update(b"mrsm-source-plugin-v1\0");
@@ -229,13 +258,15 @@ pub fn build(
     spec: &SourceBuild,
     library: &Path,
 ) -> std::result::Result<String, String> {
+    if spec.compiler_required && spec.compiler.is_none() {
+        return Err("The confined build lost its host-owned compiler policy.".into());
+    }
     let directory = spec.manifest_path.parent().unwrap_or(Path::new("."));
     let before = hash_sources(directory, false).map_err(|e| e.to_string())?;
     let result = run_cargo(name, spec, library);
     let fingerprint = match hash_sources(directory, false) {
-        Ok(after) if after == before => {
-            source_fingerprint(directory).unwrap_or_else(|_| spec.fingerprint.clone())
-        }
+        Ok(after) if after == before => build_fingerprint(directory, spec.compiler.as_deref())
+            .unwrap_or_else(|_| spec.fingerprint.clone()),
         _ => spec.fingerprint.clone(),
     };
     match result {
@@ -257,17 +288,28 @@ pub fn build(
 
 fn run_cargo(name: &str, spec: &SourceBuild, library: &Path) -> std::result::Result<(), String> {
     eprintln!("Building native plugin '{name}' (cargo build --release)...");
-    let output = Command::new(&spec.cargo)
-        .args(["build", "--release", "--manifest-path"])
-        .arg(&spec.manifest_path)
-        .arg("--target-dir")
-        .arg(spec.shared_target.as_ref().unwrap_or(&spec.target_dir))
-        .env("CARGO_INCREMENTAL", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("could not run '{}': {e}", spec.cargo.display()))?;
+    let output = if let Some(compiler) = &spec.compiler {
+        if spec.cargo != compiler.cargo() {
+            return Err("The confined build selected another Cargo executable.".into());
+        }
+        compiler.compile(&CompileRequest {
+            name,
+            manifest: &spec.manifest_path,
+            target: spec.shared_target.as_deref().unwrap_or(&spec.target_dir),
+        })?
+    } else {
+        meerschaum_core::child_env::scrubbed(Command::new(&spec.cargo))
+            .args(["build", "--release", "--manifest-path"])
+            .arg(&spec.manifest_path)
+            .arg("--target-dir")
+            .arg(spec.shared_target.as_ref().unwrap_or(&spec.target_dir))
+            .env("CARGO_INCREMENTAL", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("could not run '{}': {e}", spec.cargo.display()))?
+    };
     if !output.status.success() {
         let directory = spec.manifest_path.parent().unwrap_or(Path::new("."));
         let stderr = String::from_utf8_lossy(&output.stderr);

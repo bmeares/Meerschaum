@@ -554,7 +554,7 @@ async fn v5_routes_answer_success_and_message_with_real_status_codes() {
 
 #[tokio::test]
 async fn failures_name_what_failed_only_to_administrators() {
-    let a = build(|_| {}, Some(Arc::new(BrokenStore)));
+    let a = build(|_| {}, Some(Arc::new(BrokenStore { allow_reads: false })));
     let admin = login(&a.app, "admin", "pass", None).await;
     let ron = login(&a.app, "ron", "pass", None).await;
     let r = send(&a.app, req("GET", "/engine/runs", Some(&admin), None)).await;
@@ -575,7 +575,9 @@ async fn failures_name_what_failed_only_to_administrators() {
         meerschaum_server::envelope::GENERIC_FAILURE
     );
     assert!(!r.text().contains("secret-host"));
-    // A failed write is a failure with the store's message (for an administrator).
+    // Reach the failed write after the successful run ownership lookup.
+    let a = build(|_| {}, Some(Arc::new(BrokenStore { allow_reads: true })));
+    let admin = login(&a.app, "admin", "pass", None).await;
     let r = send(
         &a.app,
         req(
@@ -648,7 +650,7 @@ async fn engine_reads_need_only_pipes_read_and_failed_reads_are_errors() {
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text());
     // A store that cannot be read: an error, never "no runs" or "not found".
-    let b = build(|_| {}, Some(Arc::new(BrokenStore)));
+    let b = build(|_| {}, Some(Arc::new(BrokenStore { allow_reads: false })));
     let admin = login(&b.app, "admin", "pass", None).await;
     let r = send(
         &b.app,
@@ -1021,9 +1023,9 @@ async fn login_and_scoped_requests_fail_closed_when_permissions_cannot_be_read()
     // An API key's scopes are read on every request: refused.
     let r = send(&a.app, req("GET", "/pipes/keys", Some(&key), None)).await;
     assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.text());
-    // A JWT carries its scopes; what needs a fresh read refuses.
+    // Pipe metadata also requires fresh authorization for JWTs.
     let r = send(&a.app, req("GET", "/pipes/keys", Some(&ron), None)).await;
-    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.text());
     let r = send(
         &a.app,
         req(

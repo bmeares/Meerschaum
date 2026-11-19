@@ -18,6 +18,19 @@ from meerschaum.utils.typing import List, Union, Dict, Any, Optional
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum import _core
 
+# Exact native controls, never MRSM_<TYPE>_<LABEL> connector declarations. Keep in sync
+# with meerschaum_core::config::NATIVE_EXECUTION_ENV_VARS (no prefix-wide exclusions).
+_NATIVE_EXECUTION_ENV_VARS = frozenset({
+    'MRSM_API_HOST', 'MRSM_API_HOST_CONFIG', 'MRSM_API_HOST_PARENT_PIPE',
+    'MRSM_API_HOST_PROXY_TOKEN', 'MRSM_API_HOST_TRANSPORT',
+    'MRSM_API_EXECUTION', 'MRSM_METADATA_EXECUTION', 'MRSM_NATIVE_JOB_LIFECYCLE',
+    'MRSM_TEAM_SCOPE', 'MRSM_TEAM_SANDBOX', 'MRSM_TEAM_FINGERPRINT', 'MRSM_TEAM_PROBE',
+    'MRSM_EXECUTOR_PLUGINS', 'MRSM_TERMINAL_LAUNCH', 'MRSM_WEBTERM_STATE_DIR',
+    'MRSM_BIN_EXEC', 'MRSM_JOB_RESULT_PATH', 'MRSM_JOB_SUPERVISOR', 'MRSM_JOB_PROGRAM',
+    'MRSM_JOB_STARTUP_RELEASE', 'MRSM_JOB_START_KIND', 'MRSM_JOB_LAPS_PATH',
+    'MRSM_JOB_LAPS_PARENT', 'MRSM_SYSTEMD_JOB_CHILD',
+})
+
 ### Serialize the process-global swap of `os.environ` and `meerschaum.config.paths`
 ### globals performed by `replace_env`. A daemon process runs several threads
 ### concurrently (the job target plus the `check-jobs` `RepeatTimer`), so two
@@ -30,12 +43,13 @@ def apply_environment_patches(env: Optional[Dict[str, Any]] = None) -> None:
     """
     Apply patches defined in `MRSM_CONFIG` and `MRSM_PATCH`.
     """
-    config_var = STATIC_CONFIG['environment']['config']
-    patch_var = STATIC_CONFIG['environment']['patch']
+    names = STATIC_CONFIG['environment']
+    ### 5.1: `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` name files holding what the variables would.
+    variables = (names['config'], names['patch'], names['config_file'], names['patch_file'])
     ### Nothing to apply: do not touch the native registry (importing `meerschaum.config` runs
     ### this, and a bare import must not load the extension).
     _env = env if env is not None else os.environ
-    if config_var not in _env and patch_var not in _env:
+    if not any(variable in _env for variable in variables):
         return
     return _core.apply_environment_patches(env)
 
@@ -130,11 +144,38 @@ def get_connector_env_vars(env: Optional[Dict[str, Any]] = None) -> List[str]:
         matched = re.match(uri_regex, env_var)
         if matched is None:
             continue
-        if env_var in STATIC_CONFIG['environment'].values():
+        if env_var in STATIC_CONFIG['environment'].values() or env_var in _NATIVE_EXECUTION_ENV_VARS:
             continue
         env_vars.append(env_var)
 
     return env_vars
+
+
+def get_child_env(env: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """
+    Return the environment for an incidental process Meerschaum starts that is not Meerschaum
+    itself (a package installer, an editor, a version probe, ...): `env` (default `os.environ`)
+    without `MRSM_CONFIG`, `MRSM_PATCH`, their `_FILE` forms and every `MRSM_<TYPE>_<LABEL>`
+    connector variable (one whose value is a URI or a JSON object), which hold credentials (5.1).
+    Commands the user asks Meerschaum to run (`sh`, `os`, `!command`, a job's command) keep the
+    whole environment. The running process's own environment is never changed. The Rust crates
+    follow the same rule (`meerschaum_core::child_env`).
+
+    Examples
+    --------
+    >>> get_child_env({'PATH': '/bin', 'MRSM_SQL_MAIN': 'postgresql://u:p@h/db'})
+    {'PATH': '/bin'}
+    """
+    env = dict(env if env is not None else os.environ)
+    names = STATIC_CONFIG['environment']
+    secret = {names['config'], names['patch'], names['config_file'], names['patch_file']}
+    ### A connector variable defines a connector by URI or JSON; another `MRSM_X_Y` is kept.
+    secret.update(
+        key
+        for key in get_connector_env_vars(env)
+        if '://' in str(env[key]) or str(env[key]).strip().startswith('{')
+    )
+    return {key: str(value) for key, value in env.items() if key not in secret}
 
 
 def apply_connector_uri(env_var: str, env: Optional[Dict[str, Any]] = None) -> None:

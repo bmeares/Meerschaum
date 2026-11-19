@@ -236,7 +236,11 @@ pub async fn persist_new_special_columns<C: InstanceConnector + ?Sized>(
     let mut patch = Map::new();
     patch.insert("dtypes".into(), Value::Map(merged));
     pipe.update_parameters(patch);
-    if registered && !pipe.temporary {
+    // A confined execution transport carries data to Main. Main infers and persists
+    // metadata from that data under its captured mutation authority; a worker's PATCH
+    // cannot stand in for that native transition. Keep the local dtype hints for
+    // serialization, without rewriting the accepted definition from this process.
+    if registered && !pipe.temporary && !conn.server_filters_existing_rows() {
         let res = conn.edit_pipe(pipe, false).await;
         // A `parameters` lock keeps the parameters as they are; the sync goes on.
         if !res.success && !crate::locks::refused_by_lock(&res) {
@@ -556,6 +560,12 @@ pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
                                 "registration_time": ["registration_id", "ts_us"]},
                     "upsert": true}"#
         }
+        "engine_sync_corrections" => {
+            r#"{"columns": {"primary": "checkpoint"},
+                    "dtypes": {"checkpoint": "string", "pipe_ref": "string"},
+                    "indices": {"correction_pipe": ["pipe_ref"]},
+                    "upsert": true}"#
+        }
         "engine_sync_status" => {
             r#"{"columns": {"primary": "pipe_ref"},
                     "dtypes": {"pipe_ref": "string", "registration_id":"string", "connector_keys": "string",
@@ -617,6 +627,7 @@ pub async fn forget_engine_state<C: InstanceConnector + ?Sized>(
         ("engine_cursors", "child_ref"),
         ("engine_state", "pipe_ref"),
         ("engine_sync_status", "pipe_ref"),
+        ("engine_sync_corrections", "pipe_ref"),
     ] {
         let Ok(Some(state_pipe)) = conn.engine_state_pipe(pipe.instance_keys(), metric).await
         else {

@@ -20,6 +20,16 @@ import pytest
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
+def sandbox_main_db(root: pathlib.Path) -> pathlib.Path:
+    """The SQLite file `sql:main` is inside a sandbox."""
+    return pathlib.Path(root) / 'sql_main.db'
+
+
+def sandbox_sql_main(root: pathlib.Path) -> str:
+    """`MRSM_SQL_MAIN` for a sandbox: a SQLite file under its root, never a network database."""
+    return json.dumps({'flavor': 'sqlite', 'database': str(sandbox_main_db(root))})
+
+
 def make_env(root: pathlib.Path, plugins: pathlib.Path, host_mode: bool = True) -> dict:
     env = {
         key: val
@@ -33,6 +43,10 @@ def make_env(root: pathlib.Path, plugins: pathlib.Path, host_mode: bool = True) 
         'MRSM_NO_AUTO_INSTALL': '1',
         'PYTHONDONTWRITEBYTECODE': '1',
         'MRSM_SQL_APIHOSTTEST': f"sqlite:///{root / 'instance.db'}",
+        ### Whatever resolves `sql:main` (its default is a database on localhost:5432) gets a
+        ### throwaway SQLite file inside the sandbox root: a test never reaches a network database
+        ### it did not create, and code that needs a working `sql:main` still works.
+        'MRSM_SQL_MAIN': sandbox_sql_main(root),
         'MRSM_API_HOST_CONFIG': json.dumps({'mrsm_instance': 'sql:apihosttest'}),
     })
     ### Starlette 1.9 warns when `starlette.testclient` falls back to `httpx` (it wants `httpx2`,

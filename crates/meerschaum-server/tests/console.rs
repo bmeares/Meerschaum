@@ -418,9 +418,9 @@ impl FakeLauncher {
                 })
             }
             #[cfg(unix)]
-            HostEndpoint::Unix(socket) => serve_unix(socket, app).await,
+            HostEndpoint::Unix { socket, .. } => serve_unix(socket, app).await,
             #[cfg(not(unix))]
-            HostEndpoint::Unix(_) => {
+            HostEndpoint::Unix { .. } => {
                 return Err(std::io::Error::other("no Unix sockets here"));
             }
         };
@@ -1157,4 +1157,95 @@ async fn rc6_successful_output_lasts_24_hours_and_failures_last_seven_days() {
     .await;
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(jobs.deleted.lock().unwrap().len(), 1);
+}
+
+/// 5.1: a host whose `meerschaum` package predates the lookup check for isolated teams (its status
+/// reports no `team_scope` capability) is not sent requests that may act for an isolated team
+/// while one is recorded: a console session, whose owner the server cannot tell, is refused with
+/// the cause and the fix; an administrator's bearer request, an up-to-date host and a root without
+/// isolated teams are served as before.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_outdated_host_is_not_sent_requests_that_may_act_for_an_isolated_team() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("host.sock");
+    let seen = Arc::new(Seen::default());
+    let _host = serve_unix(&socket, host_app(Some(mounted()), None, seen.clone())).await;
+    let (app, state, _root) = app_with(Some(HostProxy::new(&socket)), |_| {});
+    let session = || {
+        axum::http::Request::builder()
+            .method("GET")
+            .uri("/dash/pipes")
+            .header(
+                "cookie",
+                "a=1; mrsm-session-id=7b0c3a52-5a5b-4d5e-9d0c-2f3f1f1f1f1f",
+            )
+            .body(Body::empty())
+            .unwrap()
+    };
+    // No isolated team: served as before.
+    let r = send(&app, session()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    // An isolated team is recorded: the session is refused, never forwarded.
+    meerschaum_core::team_scope::write_scope_record(
+        &state.config.root_dir,
+        &meerschaum_core::team_scope::TeamScope {
+            team: "wetlands".into(),
+            team_id: Some("id-w".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let before = seen.dash_calls.load(Ordering::SeqCst);
+    let r = send(&app, session()).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    let text = r.text();
+    assert!(text.contains("predates the lookup check"), "{text}");
+    assert!(text.contains("meerschaum>="), "{text}");
+    assert_eq!(seen.dash_calls.load(Ordering::SeqCst), before);
+    // A plugin route too.
+    let r = send(
+        &app,
+        axum::http::Request::builder()
+            .uri("/tpr/plugin/route")
+            .header(
+                "cookie",
+                "mrsm-session-id=7b0c3a52-5a5b-4d5e-9d0c-2f3f1f1f1f1f",
+            )
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    // An administrator's bearer request does not act for a team: forwarded (the fake host has
+    // no such route and answers 404 itself).
+    let token = common::login(&app, "admin", "pass", None).await;
+    let r = send(&app, req("GET", "/tpr/plugin/route", Some(&token), None)).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text());
+    // An anonymous request (no session, no credential) is the host's as before.
+    let r = send(&app, req("GET", "/dash/pipes", None, None)).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // An up-to-date host: served.
+    let socket = dir.path().join("host2.sock");
+    let mut status = mounted();
+    status["capabilities"] = json!(["team_scope"]);
+    let _host2 = serve_unix(
+        &socket,
+        host_app(Some(status), None, Arc::new(Seen::default())),
+    )
+    .await;
+    let (app, state, _root2) = app_with(Some(HostProxy::new(&socket)), |_| {});
+    meerschaum_core::team_scope::write_scope_record(
+        &state.config.root_dir,
+        &meerschaum_core::team_scope::TeamScope {
+            team: "wetlands".into(),
+            team_id: Some("id-w".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let r = send(&app, session()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
 }

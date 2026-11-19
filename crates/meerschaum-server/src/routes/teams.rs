@@ -4,18 +4,20 @@
 //!
 //! | Route | Scopes | Who | What it does |
 //! |---|---|---|---|
-//! | `GET /teams` | `users:read` | anyone | Every team (`teams`): Everyone first, then by name |
+//! | `GET /teams` | `users:read` | anyone | Every team (`teams`): Everyone first, then by name (a walled-off caller: their own teams) |
 //! | `GET /teams/{name}` | `users:read` | anyone | One team (`team`); `?counts=true` adds its `pipes` and `jobs` counts |
-//! | `POST /teams/{name}/register` | `users:write` | administrators | A new team (`members`, `managers`, `attributes`) |
+//! | `POST /teams/{name}/register` | `users:write` | administrators | A new team (`members`, `managers`, `attributes`; `adopt` to take a connector reserved for that name) |
 //! | `PATCH /teams/{name}/edit` | `users:write` | administrators; the team's managers for members | Change members (`members`, `add_members`, `remove_members`), `managers`, `attributes` |
-//! | `POST /teams/{name}/rename` | `users:write` | administrators | Rename (`{"name": new}`): in its pipes, saved Pipelines, primary teams and jobs too |
-//! | `DELETE /teams/{name}/delete` | `users:write` | administrators | Delete: its pipes, saved Pipelines and jobs move to Everyone |
+//! | `POST /teams/{name}/rename` | `users:write` | administrators | Rename (`{"name": new}`, `adopt`): in its pipes, saved Pipelines, primary teams, jobs and connector reservations too |
+//! | `DELETE /teams/{name}/delete` | `users:write` | administrators | Delete: its pipes, saved Pipelines and jobs move to Everyone (its Grafana organization and connector reservations are retired) |
 //!
 //! A team is `{"id", "name", "members": {username: "member" | "manager"}, "managers": [...],
 //! "attributes": {...}}` (managers are members too). The built-in team Everyone has every user
 //! as a member; its record lists only the users with a role of their own (its managers); it
 //! cannot be registered, renamed or deleted. A team's managers add and remove its members but
-//! neither choose its managers nor change its attributes.
+//! neither choose its managers nor change its attributes. A team's `attributes` hold its settings
+//! (`isolated`, `instance`, `connectors`, `plugins`, `plugins_write`, `database`, `grafana`): its
+//! members and administrators read them; nobody else does.
 
 use axum::Router;
 use axum::body::Body;
@@ -111,6 +113,30 @@ fn attributes(body: &Json) -> Result<Option<Map>, ApiError> {
     }
 }
 
+/// A connector reserved for a team named `name` that does not exist (a deleted or renamed team's,
+/// or one written by hand) is not handed to a new team of that name, nor to a team renamed to it,
+/// unless an administrator asks for it (`"adopt": true`).
+fn refuse_reserved(state: &AppState, name: &str, body: &Json) -> Result<(), ApiError> {
+    if body.get("adopt").and_then(Json::as_bool) == Some(true) {
+        return Ok(());
+    }
+    let reserved = meerschaum_core::access::reserved_for(&state.connectors(), name);
+    if reserved.is_empty() {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        409,
+        format!(
+            "The connector{} {} {} reserved for a team named '{name}' that does not exist (it \
+             may hold another team's data). Give the team another name, remove the connector's \
+             `teams`, or send `\"adopt\": true` to let the team use it.",
+            if reserved.len() == 1 { "" } else { "s" },
+            reserved.join(", "),
+            if reserved.len() == 1 { "is" } else { "are" },
+        ),
+    ))
+}
+
 async fn team_or_404(state: &AppState, name: &str) -> Result<Team, ApiError> {
     state
         .instance()
@@ -130,20 +156,45 @@ fn require_admin(caller: &Access, what: &str) -> Result<(), ApiError> {
     ))
 }
 
+/// A team as `caller` may read it: its settings (`attributes`: the database, connectors and
+/// plugins it was given) are for its members and administrators.
+fn visible_team(caller: &Access, mut team: Team) -> Team {
+    let privileged = caller.no_auth || caller.is_admin();
+    let member = !team.is_everyone() && caller.in_team(Some(&team.name));
+    if !(privileged || member) {
+        team.attributes = Map::new();
+    }
+    team
+}
+
 /// After a change of teams: who is in which team is read again.
 fn forget(state: &AppState) {
     state.access_cache().forget_identities();
+    // 5.1: a team's processes are probed again after any change of teams.
+    state.team_execution_probes.clear();
     state.access_cache().forget_pipes();
+    let events = state.team_events.clone();
+    tokio::spawn(async move {
+        if let Err(error) = events.changed().await {
+            tracing::warn!("{error}");
+        }
+    });
 }
 
 async fn list(ctx: Ctx) -> ApiResult {
-    access::require(&ctx.state, &ctx.headers, &["users:read"]).await?;
-    let teams = ctx
+    let caller = access::require(&ctx.state, &ctx.headers, &["users:read"]).await?;
+    let mut teams = ctx
         .state
         .instance()
         .get_teams()
         .await
         .map_err(|e| failed("get_teams", e))?;
+    // A walled-off caller sees their own teams only.
+    teams.retain(|team| rules::can_see_team(&caller.principal, &team.name));
+    let teams: Vec<Team> = teams
+        .into_iter()
+        .map(|team| visible_team(&caller, team))
+        .collect();
     let n = teams.len();
     Ok(envelope::ok_with(
         format!("Found {n} team{}.", if n == 1 { "" } else { "s" }),
@@ -155,6 +206,10 @@ async fn list(ctx: Ctx) -> ApiResult {
 async fn detail(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["users:read"]).await?;
     let team = team_or_404(&ctx.state, &name).await?;
+    if !rules::can_see_team(&caller.principal, &team.name) {
+        return Err(ApiError::new(404, format!("Team '{name}' does not exist.")));
+    }
+    let team = visible_team(&caller, team);
     let mut fields = JsonMap::new();
     fields.insert("team".into(), team_json(&team));
     if ctx.query.bool("counts", false)? {
@@ -208,6 +263,7 @@ async fn register(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     {
         return Err(ApiError::new(409, format!("Team '{name}' already exists.")));
     }
+    refuse_reserved(&ctx.state, &name, &body)?;
     let res = conn.register_team(&mut team).await;
     forget(&ctx.state);
     if !res.success {
@@ -322,6 +378,17 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
         return Err(ApiError::new(400, "Give the team's new `name`."));
     };
     let team = team_or_404(&ctx.state, &name).await?;
+    if !meerschaum_core::access::same_team(Some(&team.name), Some(&new_name))
+        && ctx
+            .state
+            .instance()
+            .get_team(&new_name)
+            .await
+            .map_err(|e| failed("get_team", e))?
+            .is_none()
+    {
+        refuse_reserved(&ctx.state, &new_name, &body)?;
+    }
     let res = ctx
         .state
         .instance()
@@ -333,9 +400,14 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     }
     let jobs = ctx.state.jobs.retag_team(&team.name, Some(&new_name)).await;
     let renamed = team_or_404(&ctx.state, &new_name).await?;
+    // The team's Grafana organization follows (best effort).
+    let followed = ctx.state.team_events.renamed(&renamed, &team.name).await;
     let mut fields = JsonMap::new();
     fields.insert("team".into(), team_json(&renamed));
     fields.insert("jobs".into(), json!(jobs));
+    if let Err(note) = followed {
+        fields.insert("notes".into(), json!([note]));
+    }
     Ok(envelope::ok(res.message, fields))
 }
 
@@ -355,7 +427,14 @@ async fn remove(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         return Err(ApiError::new(400, res.message));
     }
     let jobs = ctx.state.jobs.retag_team(&team.name, None).await;
-    Ok(envelope::ok_with(res.message, "jobs", json!(jobs)))
+    // The team's Grafana organization is retired (best effort).
+    let followed = ctx.state.team_events.deleted(&team).await;
+    let mut fields = JsonMap::new();
+    fields.insert("jobs".into(), json!(jobs));
+    if let Err(note) = followed {
+        fields.insert("notes".into(), json!([note]));
+    }
+    Ok(envelope::ok(res.message, fields))
 }
 
 /// A user's teams as JSON (`[{"name", "role"}]`, Everyone first).

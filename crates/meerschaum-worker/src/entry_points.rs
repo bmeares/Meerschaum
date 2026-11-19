@@ -245,6 +245,8 @@ fn environment_identity(options: &WorkerOptions) -> String {
             String::new()
         } else if let Some((_, v)) = options.env.iter().rev().find(|(k, _)| k == name) {
             v.clone()
+        } else if options.env_clear {
+            String::new()
         } else {
             std::env::var(name).unwrap_or_default()
         };
@@ -257,7 +259,9 @@ fn environment_identity(options: &WorkerOptions) -> String {
 type ProbeOutput = (Vec<(String, i64)>, Vec<String>);
 
 fn run_probe(options: &WorkerOptions) -> Option<ProbeOutput> {
-    let mut command = Command::new(&options.python);
+    let (program, prefix, confined) = crate::worker::python_launcher(options).ok()?;
+    let mut command = Command::new(program);
+    command.args(prefix);
     command
         .arg(meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG)
         .arg("-c")
@@ -265,10 +269,16 @@ fn run_probe(options: &WorkerOptions) -> Option<ProbeOutput> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    if options.env_clear {
+        command.env_clear();
+    }
     for key in &options.env_remove {
         command.env_remove(key);
     }
     command.envs(options.env.iter().map(|(k, v)| (k, v)));
+    if confined {
+        meerschaum_core::team_scope::sandbox::runtime::sanitize_command(&mut command);
+    }
     if let Some(dir) = &options.current_dir {
         command.current_dir(dir);
     }

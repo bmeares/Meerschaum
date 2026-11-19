@@ -61,10 +61,30 @@ struct Actions;
 #[async_trait]
 impl ActionsBackend for Actions {
     fn list(&self) -> Vec<String> {
-        ["show", "sync", "sh", "python", "edit"]
-            .iter()
-            .map(|a| a.to_string())
-            .collect()
+        [
+            "show",
+            "sync",
+            "sh",
+            "python",
+            "edit",
+            "verify",
+            "deduplicate",
+            "clear",
+            "drop",
+            "delete",
+            "lock",
+            "unlock",
+            "partition",
+            "tag",
+            "copy",
+            "register",
+            "index",
+            "start",
+            "help",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect()
     }
     async fn execute(&self, action: &str, _keywords: Map) -> SuccessTuple {
         SuccessTuple::ok(format!("ran {action}"))
@@ -1338,14 +1358,9 @@ async fn edited_permission_grids_do_not_regain_unchecked_permissions() {
     )
     .await;
     assert!(tuple_of(&r).0, "{}", r.text());
-    let caller = Caller::api(
-        Scopes::List(vec!["pipes:register".into()]),
-        Some(Principal::User(User::new("ed", None))),
-    );
-    let r = tool(
+    let r = register_mcp_pipe(
         &f,
-        &caller,
-        "register_pipe",
+        &fresh,
         json!({"connector_keys": "plugin:data", "metric_key": "grid-mcp"}),
     )
     .await;
@@ -1418,7 +1433,7 @@ async fn a_credential_never_holds_more_than_its_owner() {
     .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
     assert_eq!(message(&r), "Missing required scope: 'actions:execute'");
-    // An administrator's narrow key holds its scopes only (and sees every pipe).
+    // The narrow key has pipes:read and can list pipes visible to Everyone.
     let r = call(
         &f,
         "POST",
@@ -1428,7 +1443,10 @@ async fn a_credential_never_holds_more_than_its_owner() {
     )
     .await;
     let ro = format!("Bearer {}", r.json()["api_key"].as_str().unwrap());
-    assert_eq!(listed(&get(&f, &ro, "/pipes/keys").await).len(), 5);
+    assert_eq!(
+        listed(&get(&f, &ro, "/pipes/keys").await),
+        names(&[PUBLIC, LEGACY])
+    );
     let r = call(
         &f,
         "PATCH",
@@ -1842,10 +1860,9 @@ async fn definitions_use_the_sources_visibility_byte_limit_and_instance_policy()
     .await;
     assert!(tuple_of(&r).0, "{}", r.text());
     // MCP registration shares the same source guard.
-    let r = tool(
+    let r = register_mcp_pipe(
         &f,
-        &caller("otto", Role::Operator),
-        "register_pipe",
+        &otto,
         json!({"connector_keys": "sql:other", "metric_key": "mcp_source", "parameters": {
             "fetch": {"definition": "SELECT * FROM plugin_shared_legacy"}
         }}),
@@ -2224,6 +2241,25 @@ async fn tool(f: &Fixture, caller: &Caller, name: &str, arguments: Json) -> Resu
         .await
         .expect("a reply");
     let reply = serde_json::to_value(reply).unwrap();
+    tool_result(reply)
+}
+
+async fn register_mcp_pipe(f: &Fixture, auth: &str, arguments: Json) -> Result<Json, String> {
+    // Registration revalidates the original HTTP credential after the connector hook.
+    let reply = call(
+        f,
+        "POST",
+        auth,
+        "/mcp",
+        Some(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {"name": "register_pipe", "arguments": arguments}})),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    tool_result(reply.json())
+}
+
+fn tool_result(reply: Json) -> Result<Json, String> {
     let result = &reply["result"];
     let text = result["content"][0]["text"]
         .as_str()
@@ -2291,10 +2327,9 @@ async fn mcp_tools_apply_the_same_rules() {
     assert!(!r.to_string().contains("sql:secure"), "{r}");
     let r = tool(&f, &ed, "list_connectors", json!({})).await.unwrap();
     assert!(r.to_string().contains("sql:secure"), "{r}");
-    let r = tool(
+    let r = register_mcp_pipe(
         &f,
-        &otto,
-        "register_pipe",
+        &token(&f, "otto").await,
         json!({"connector_keys": "sql:secure", "metric_key": "z"}),
     )
     .await;
@@ -2558,4 +2593,486 @@ async fn plugin_upload_tokens_use_current_owner_permissions_and_keep_ownership()
             StatusCode::FORBIDDEN
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// 5.1: isolated teams
+// ---------------------------------------------------------------------------------------------
+
+const MARSH: (&str, &str) = ("plugin:wet", "marsh");
+
+/// The fixture plus an isolated team `Wet` (granted `sql:secure`, which is also its default
+/// instance, and the plugin `noaa`) with `wren` (an operator) and `wade` (its manager), and one
+/// pipe of that team.
+async fn isolated_fixture() -> Fixture {
+    let f = fixture().await;
+    f.instance.seed_user("wren", "pw", None);
+    f.instance
+        .seed_user_attributes("wren", map(json!({"role": "operator"})));
+    f.instance.seed_user("wade", "pw", None);
+    f.instance.seed_user_attributes("wade", map(json!({})));
+    let mut wet = Team::new("Wet");
+    wet.add_member("wren", TeamRole::Member);
+    wet.add_member("wade", TeamRole::Manager);
+    wet.attributes = map(json!({
+        "isolated": true,
+        "instance": "sql:secure",
+        "connectors": ["sql:secure"],
+        "plugins": ["noaa"],
+    }));
+    let res = f.instance.register_team(&mut wet).await;
+    assert!(res.success, "{res}");
+    register(&f.instance, MARSH, json!({"access": {"team": "Wet"}})).await;
+    f
+}
+
+#[tokio::test]
+async fn members_of_an_isolated_team_see_only_their_team() {
+    let f = isolated_fixture().await;
+    let wren = token(&f, "wren").await;
+    let ed = token(&f, "ed").await;
+    let admin = token(&f, "admin").await;
+
+    // Pipes: their team's only. Everyone's legacy pipe and a pipe another team shares with
+    // "everyone" are hidden; other users are unaffected.
+    assert_eq!(
+        listed(&get(&f, &wren, "/pipes/keys").await),
+        BTreeSet::from(["plugin:wet|marsh".to_string()])
+    );
+    let seen_by_ed = listed(&get(&f, &ed, "/pipes/keys").await);
+    assert!(
+        seen_by_ed.contains("plugin:shared|legacy") && seen_by_ed.contains("plugin:ops|public")
+    );
+    assert!(!seen_by_ed.contains("plugin:wet|marsh"));
+    for hidden in [LEGACY, PUBLIC, TEMPERATURE] {
+        let r = get(&f, &wren, &url(hidden, "/attributes")).await;
+        assert_ne!(r.status, StatusCode::OK, "{hidden:?}: {}", r.text());
+    }
+    assert_eq!(
+        get(&f, &wren, &url(MARSH, "/attributes")).await.status,
+        StatusCode::OK
+    );
+
+    // Connectors: what the team was granted, not the unrestricted ones.
+    let connectors = get(&f, &wren, "/connectors").await;
+    assert_eq!(connectors.status, StatusCode::OK, "{}", connectors.text());
+    assert_eq!(connectors.json()["sql"], json!(["secure"]));
+
+    // The instance: the team's default when none is named; another is refused.
+    let r = get(&f, &wren, "/pipes/keys?instance_keys=sql:main").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    assert!(
+        message(&r).contains("not available to your teams"),
+        "{}",
+        r.text()
+    );
+    assert_eq!(
+        get(&f, &wren, "/pipes/keys?instance_keys=sql:secure")
+            .await
+            .status,
+        StatusCode::OK
+    );
+
+    // Registering on a connector the team does not hold is refused.
+    let r = call(
+        &f,
+        "POST",
+        &wren,
+        &url(("sql:main", "x"), "/register"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+
+    // Teams and accounts: their own.
+    let teams = get(&f, &wren, "/teams").await.json();
+    let names: Vec<&str> = teams["teams"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Wet"]);
+    assert_eq!(
+        get(&f, &wren, "/teams/Data").await.status,
+        StatusCode::NOT_FOUND
+    );
+    let users = get(&f, &wren, "/users/permissions").await.json();
+    let mut usernames: Vec<&str> = users["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| u["username"].as_str().unwrap())
+        .collect();
+    usernames.sort_unstable();
+    assert_eq!(usernames, ["wade", "wren"]);
+    assert_eq!(
+        get(&f, &wren, "/users/ed/permissions").await.status,
+        StatusCode::NOT_FOUND
+    );
+
+    // An operator's actions and terminal act with the server's credentials: withheld.
+    let own = get(&f, &wren, "/users/wren/permissions").await.json();
+    assert_eq!(own["user"]["role"], json!("operator"));
+    let r = call(
+        &f,
+        "POST",
+        &wren,
+        "/actions/show",
+        Some(json!({"action": ["pipes"]})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+
+    // A team's settings are its members' and the administrators' to read.
+    let as_member = get(&f, &wren, "/teams/Wet").await.json();
+    assert_eq!(as_member["team"]["attributes"]["isolated"], json!(true));
+    let as_outsider = get(&f, &ed, "/teams/Wet").await.json();
+    assert_eq!(as_outsider["team"]["attributes"], json!({}));
+    let as_admin = get(&f, &admin, "/teams/Wet").await.json();
+    assert_eq!(
+        as_admin["team"]["attributes"]["instance"],
+        json!("sql:secure")
+    );
+}
+
+#[tokio::test]
+async fn mcp_follows_the_isolated_team() {
+    let f = isolated_fixture().await;
+    let access = meerschaum_server::access::access_of(
+        &f.state,
+        Principal::User(User::new("wren", None)),
+        &Scopes::List(vec!["*".into()]),
+    )
+    .await
+    .unwrap();
+    assert!(access.principal.is_isolated());
+    let mut caller = Caller::api(access.scopes(), access.auth.clone());
+    caller.plugins_hidden = true;
+    caller.team_principal = Some(access.principal.clone());
+
+    // Without an instance, the team's default; pipes of the team only.
+    let pipes = tool(&f, &caller, "list_pipes", json!({})).await.unwrap();
+    let text = pipes.to_string();
+    assert!(text.contains("marsh"), "{text}");
+    assert!(
+        !text.contains("legacy") && !text.contains("temperature"),
+        "{text}"
+    );
+    // Another instance is refused.
+    let refused = tool(
+        &f,
+        &caller,
+        "list_pipes",
+        json!({"instance_keys": "sql:main"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.contains("not available to your teams"), "{refused}");
+    // An unrestricted connector is not theirs to query.
+    let refused = tool(
+        &f,
+        &caller,
+        "read_sql",
+        json!({"connector_keys": "sql:main", "query": "SELECT 1"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.contains("not available to your teams"), "{refused}");
+    // Plugin entries are hidden from a walled-off caller.
+    assert!(caller.may_use(meerschaum_server::mcp::registry::Source::Builtin));
+    assert!(!caller.may_use(meerschaum_server::mcp::registry::Source::Host));
+    assert!(!caller.may_use(meerschaum_server::mcp::registry::Source::Native));
+}
+
+/// 5.1, deny by default: each command a non-administrator may run, through
+/// `POST /execute/validate` (the decision `POST /execute`, `POST /jobs`, `POST /actions`, MCP and
+/// the restricted web terminal share), on the objects they may act on with the route's
+/// permission, refused on the others; every other command refused; administrators unaffected.
+#[tokio::test]
+async fn non_administrators_run_only_the_allowed_commands_on_their_own_objects() {
+    let f = fixture().await;
+    let admin = token(&f, "admin").await;
+    let opal = token(&f, "opal").await; // Operator, Data.
+    let oscar = token(&f, "oscar").await; // Every permission, Ops.
+    let validate = |auth: String, sysargs: Vec<&str>| {
+        let f = &f;
+        let sysargs: Vec<String> = sysargs.iter().map(|s| s.to_string()).collect();
+        async move {
+            call(
+                f,
+                "POST",
+                &auth,
+                "/execute/validate",
+                Some(json!({"sysargs": sysargs})),
+            )
+            .await
+        }
+    };
+    let status = |auth: &String, sysargs: Vec<&str>| {
+        let future = validate(auth.clone(), sysargs);
+        async move { future.await.status }
+    };
+    let ok = StatusCode::OK;
+    let no = StatusCode::FORBIDDEN;
+    let data = ["-c", TEMPERATURE.0, "-m", TEMPERATURE.1];
+    let ops = ["-c", PRESSURE.0, "-m", PRESSURE.1];
+    let with = |words: &[&str], keys: &[&str]| -> Vec<String> {
+        words.iter().chain(keys).map(|s| s.to_string()).collect()
+    };
+
+    // Informational commands reveal nothing about anyone's objects.
+    for sysargs in [
+        vec!["show", "version"],
+        vec!["show", "help"],
+        vec!["show", "actions"],
+        vec!["show", "arguments"],
+        vec!["show", "schedules", "every 1 minute"],
+        vec!["help"],
+    ] {
+        assert_eq!(status(&opal, sysargs.clone()).await, ok, "{sysargs:?}");
+    }
+
+    // Reads (`pipes:read`): the selected pipes must be readable.
+    for sub in [
+        "pipes",
+        "data",
+        "columns",
+        "rowcounts",
+        "sizes",
+        "partitions",
+        "targets",
+        "tags",
+    ] {
+        let words = ["show", sub];
+        let mine = with(&words, &data);
+        let theirs = with(&words, &ops);
+        let mine: Vec<&str> = mine.iter().map(String::as_str).collect();
+        let theirs: Vec<&str> = theirs.iter().map(String::as_str).collect();
+        assert_eq!(status(&opal, mine.clone()).await, ok, "{mine:?}");
+        assert_eq!(status(&opal, theirs.clone()).await, no, "{theirs:?}");
+    }
+    // Writes (`pipes:write`): the selected pipes must be changeable.
+    for words in [
+        &["sync", "pipes"][..],
+        &["verify", "pipes"],
+        &["verify", "rowcounts"],
+        &["verify", "schemas"],
+        &["deduplicate", "pipes"],
+        &["edit", "pipes", "-P", "{\"tags\": [\"daily\"]}"],
+        &["partition", "pipes"],
+        &["tag", "pipes", "daily"],
+    ] {
+        let mine = with(words, &data);
+        let theirs = with(words, &ops);
+        let mine: Vec<&str> = mine.iter().map(String::as_str).collect();
+        let theirs: Vec<&str> = theirs.iter().map(String::as_str).collect();
+        assert_eq!(status(&opal, mine.clone()).await, ok, "{mine:?}");
+        assert_eq!(status(&opal, theirs.clone()).await, no, "{theirs:?}");
+    }
+    // Locks need the owner, a manager or an administrator (`pipes:write`).
+    let lock: Vec<&str> = ["lock", "pipes"].iter().chain(&data).copied().collect();
+    assert_eq!(status(&opal, lock).await, no);
+    // Deleting needs `pipes:delete` / `pipes:drop` (an Operator has neither) on changeable pipes.
+    for words in [
+        &["clear", "pipes"][..],
+        &["drop", "pipes"],
+        &["delete", "pipes"],
+    ] {
+        let mine = with(words, &data);
+        let mine: Vec<&str> = mine.iter().map(String::as_str).collect();
+        let r = validate(opal.clone(), mine.clone()).await;
+        assert_eq!(r.status, no, "{mine:?}");
+        assert!(
+            message(&r).contains("Missing required scope"),
+            "{}",
+            message(&r)
+        );
+        let theirs = with(words, &data);
+        let ops_own = with(words, &ops);
+        let theirs: Vec<&str> = theirs.iter().map(String::as_str).collect();
+        let ops_own: Vec<&str> = ops_own.iter().map(String::as_str).collect();
+        assert_eq!(status(&oscar, ops_own.clone()).await, ok, "{ops_own:?}");
+        assert_eq!(status(&oscar, theirs.clone()).await, no, "{theirs:?}");
+    }
+    // The route's permission, not only visibility: a key without `pipes:read` / `pipes:write`.
+    let narrow = key_for(
+        &f,
+        "opal",
+        &["actions:execute", "jobs:execute", "jobs:write"],
+    )
+    .await;
+    let show: Vec<&str> = ["show", "pipes"].iter().chain(&data).copied().collect();
+    let edit: Vec<&str> = ["edit", "pipes", "-P", "{}"]
+        .iter()
+        .chain(&data)
+        .copied()
+        .collect();
+    for (sysargs, scope) in [(show, "pipes:read"), (edit, "pipes:write")] {
+        let r = validate(narrow.clone(), sysargs).await;
+        assert_eq!(r.status, no);
+        assert!(message(&r).contains(scope), "{}", message(&r));
+    }
+
+    // Pipelines: named, visible, with their members (read) or changeable members (the others).
+    let register = |auth: String, name: &'static str, targets: Vec<String>| {
+        let f = &f;
+        async move {
+            let body = json!({"pipeline": {"name": name, "targets": targets}});
+            let r = call(
+                f,
+                "POST",
+                &auth,
+                &format!("/pipelines/{name}/register"),
+                Some(body),
+            )
+            .await;
+            assert_eq!(r.status, StatusCode::OK, "{name}: {}", r.text());
+        }
+    };
+    register(opal.clone(), "data-line", vec![pipe_ref(TEMPERATURE)]).await;
+    register(oscar.clone(), "ops-line", vec![pipe_ref(PRESSURE)]).await;
+    register(
+        admin.clone(),
+        "mixed",
+        vec![pipe_ref(TEMPERATURE), pipe_ref(PRESSURE)],
+    )
+    .await;
+    assert_eq!(
+        status(&opal, vec!["show", "pipelines", "data-line"]).await,
+        ok
+    );
+    assert_eq!(
+        status(&opal, vec!["show", "pipelines", "ops-line"]).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(status(&opal, vec!["show", "pipelines", "mixed"]).await, no);
+    assert_eq!(status(&opal, vec!["show", "pipelines"]).await, no);
+    for action in ["delete", "clear", "drop"] {
+        // An Operator lacks `pipes:delete` / `pipes:drop`.
+        assert_eq!(
+            status(&opal, vec![action, "pipelines", "data-line"]).await,
+            no
+        );
+        assert_eq!(
+            status(&oscar, vec![action, "pipelines", "ops-line"]).await,
+            ok
+        );
+        assert_eq!(
+            status(&oscar, vec![action, "pipelines", "data-line"]).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(status(&oscar, vec![action, "pipelines", "mixed"]).await, no);
+    }
+    assert_eq!(
+        status(&opal, vec!["sync", "pipelines", "data-line"]).await,
+        ok
+    );
+
+    // Tokens: only the caller's own.
+    for (user, label) in [("opal", "opal-key"), ("otto", "otto-key")] {
+        let mut t = meerschaum_core::users::Token::new(
+            Some(label),
+            meerschaum_core::users::Expiration::Never,
+            Some(vec!["pipes:read".into()]),
+            366,
+            chrono::Utc::now(),
+        );
+        t.user_id = f
+            .instance
+            .get_user_id(&User::new(user, None))
+            .await
+            .unwrap();
+        assert!(f.instance.register_token(&mut t).await.success);
+    }
+    assert_eq!(status(&opal, vec!["show", "tokens", "opal-key"]).await, ok);
+    assert_eq!(status(&opal, vec!["show", "tokens", "otto-key"]).await, no);
+    assert_eq!(status(&opal, vec!["show", "tokens"]).await, no);
+
+    // Everything else is refused to a non-administrator and runs for an administrator.
+    for sysargs in [
+        vec!["show"],
+        vec!["show", "config"],
+        vec!["show", "users"],
+        vec!["show", "connectors"],
+        vec!["show", "graph"],
+        vec!["show", "runs"],
+        vec!["show", "teams"],
+        vec!["show", "plugins"],
+        vec!["copy", "pipes", "-c", TEMPERATURE.0],
+        vec!["register", "pipelines", "new-line"],
+        vec!["edit", "pipelines", "data-line"],
+        vec!["index", "pipes"],
+        vec!["start", "jobs", "x"],
+        vec!["python"],
+        vec!["sh", "id"],
+        vec!["touch", "/tmp/tpr-x"],
+    ] {
+        let r = validate(opal.clone(), sysargs.clone()).await;
+        assert_eq!(r.status, no, "{sysargs:?}: {}", message(&r));
+        assert_eq!(
+            status(&admin, sysargs.clone()).await,
+            ok,
+            "admin {sysargs:?}"
+        );
+    }
+    // `POST /execute` decides the same (it starts the job only when allowed).
+    for (auth, sysargs, expected) in [
+        (&opal, json!(["show", "graph"]), no),
+        (
+            &opal,
+            json!(["show", "pipes", "-c", PRESSURE.0, "-m", PRESSURE.1]),
+            no,
+        ),
+        (
+            &opal,
+            json!(["show", "pipes", "-c", TEMPERATURE.0, "-m", TEMPERATURE.1]),
+            ok,
+        ),
+        (&admin, json!(["show", "graph"]), ok),
+    ] {
+        let r = call(
+            &f,
+            "POST",
+            auth,
+            "/execute",
+            Some(json!({"sysargs": sysargs, "name": format!("execute-tpr-{}", uuid_like())})),
+        )
+        .await;
+        assert_eq!(r.status, expected, "{sysargs}: {}", r.text());
+    }
+    let refused = validate(opal.clone(), vec!["show", "graph"]).await;
+    assert!(
+        message(&refused).contains("not among the commands non-administrators may run"),
+        "{}",
+        message(&refused)
+    );
+}
+
+/// The table of commands in `permissions.md` is the allowlist's (skipped outside a checkout).
+#[test]
+fn the_permissions_page_lists_the_allowed_commands() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/zensical/reference/api-instance/permissions.md");
+    let Ok(page) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let table = meerschaum_server::execute_policy::non_admin_commands_markdown();
+    let start = "<!-- non-admin-commands:start -->\n";
+    let end = "<!-- non-admin-commands:end -->";
+    let inner = page
+        .split(start)
+        .nth(1)
+        .and_then(|rest| rest.split(end).next())
+        .expect("the generated table's markers in permissions.md");
+    assert_eq!(
+        inner, table,
+        "regenerate the table from execute_policy::non_admin_commands_markdown()"
+    );
+}
+
+/// A short unique suffix for job names.
+fn uuid_like() -> String {
+    static N: AtomicUsize = AtomicUsize::new(0);
+    format!("{}", N.fetch_add(1, Ordering::SeqCst))
 }

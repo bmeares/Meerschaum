@@ -22,6 +22,9 @@ pub fn docstring(function: &str) -> Option<&'static str> {
         "_bootstrap_pipelines" => {
             "Create a registered Pipeline with guided member selection (asks for the NAME when it is not given). Members use instance|connector|metric|location references. Tags require a separate analyze pipelines approval."
         }
+        "_bootstrap_teams" => {
+            "Create a team step by step: whether it is isolated from Everyone, a database or schema of its own on an existing PostgreSQL-family connector (with a connector reserved for the team), the connectors and plugins it may use, and whether its members may install plugins. Answers may be given in --params (isolated, database, base, name, label, instance, connectors, plugins, plugins_write) with --members and --managers."
+        }
         "_edit_pipelines" => {
             "Edit a Pipeline definition in the editor, or use --params JSON including its expected revision. Membership edits never tag or delete Pipes."
         }
@@ -1300,6 +1303,19 @@ Options:
           (`-s 'every 5 minutes jitter 30 seconds'` is the same).
 "##
         }
+        "_start_executor" => {
+            r##"
+Start one team's API executor behind signed main-API control.
+
+Usage:
+    `start executor --host 0.0.0.0 --port 8989`
+
+Set MRSM_EXECUTOR_BOOTSTRAP to the public verifier file provisioned by the
+administrator. The executor waits for signed team configuration before opening an
+instance or loading plugins. It serves no public login or team administration.
+`mrsm stack up` provisions container executors selected in team settings.
+"##
+        }
         "_start_mcp" => {
             r##"
 Start an MCP (Model Context Protocol) server on stdin and stdout.
@@ -1476,9 +1492,26 @@ Remove installed plugins. Does not affect repository registrations.
 Upgrade the current Meerschaum instance.
 Optionally specify dependency groups.
 
+Every question comes first: "Upgrade this installation?", then, when Docker
+is available and this root has a stack, "Pull the stack's new Docker images?"
+(default yes) and "Bring up the stack after upgrading?" (default no).
+Then it installs, pulls and brings the stack up without asking again.
+
+A Python installation is upgraded where it lives (a virtual environment,
+the user site with `pip --user`, or a system location this user can write);
+otherwise nothing is changed and the command to run is printed.
+
+Options:
+    - `--yes`: answer yes to every question.
+    - `--noask`: take every default (upgrade, pull, do not bring up).
+    - `--force`: bring up the stack without asking; also reinstalls the
+      current release or downgrades.
+    - `--no-pull`: do not pull the stack's images (and do not ask).
+
 Examples:
     - `upgrade meerschaum`
     - `upgrade meerschaum full`
+    - `upgrade meerschaum --yes --no-pull`
 
 "##
         }
@@ -1595,14 +1628,14 @@ Attach to a running job and answer its prompts, or follow its logs.
         }
         "bootstrap" => {
             r##"
-Create pipes, connectors, jobs, Pipelines or plugins step by step.
+Create pipes, connectors, jobs, Pipelines, plugins or teams step by step.
 
 Example:
     `bootstrap pipes`
 
 
     Options:
-        `bootstrap [connectors, jobs, pipes, plugins]`"##
+        `bootstrap [connectors, jobs, pipes, plugins, teams]`"##
         }
         "clear" => {
             r##"

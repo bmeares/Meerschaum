@@ -493,6 +493,8 @@ pub fn entry<'py>(
                 rt.eprint(NESTED_IMPORT_NOTICE);
             } else if !dispatch::starts_with_doctor(&sysargs, &rt.dates, patch.as_ref())
                 .unwrap_or(true)
+                && !dispatch::starts_with_executor(&sysargs, &rt.dates, patch.as_ref())
+                    .unwrap_or(true)
                 && let Err(e) = meerschaum_cli::python::manifest(rt)
             {
                 rt.eprint(&format!("Unable to load plugin manifest: {}\n", e.message));

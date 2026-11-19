@@ -803,6 +803,15 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         ));
     };
     let (src_inst, mut pipes) = selected_pipes(rt, args)?;
+    let api_profile =
+        (rt.env)(meerschaum_core::team_scope::api_execution::PROFILE_VAR).as_deref() == Some("1");
+    if api_profile
+        && meerschaum_server::execute_policy::bound_command_scopes(&words(args, "sysargs"))
+            .is_some()
+        && pipes.len() != 1
+    {
+        return Ok(SuccessTuple::fail("Copy requires one visible source pipe."));
+    }
     let session = session(rt);
     let dest = session.instance(&dest_keys, rt.config())?;
     let auto_resolve = force || yes || noask;
@@ -1036,7 +1045,8 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                     // read and drops the rest silently: each read asks for that many explicitly
                     // (a server allowing fewer refuses it), and a read that comes back full is
                     // split, never taken for the whole chunk.
-                    let cap = if src_inst.conn().connector_keys().starts_with("api:") {
+                    let cap = if api_profile || src_inst.conn().connector_keys().starts_with("api:")
+                    {
                         rt.config()
                             .get(&["api", "data", "max_response_row_limit"])
                             .and_then(|v| v.as_i64())

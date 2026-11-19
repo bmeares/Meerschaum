@@ -1,0 +1,8 @@
+{
+  "version": "4.1.1",
+  "python_distribution": "plotly==7.1.0",
+  "sha256": "3b6e15d45dbb7fca5bd2094291e961ddc5472cd887009e6009a56dab668d721f",
+  "raw_bytes": 4815814,
+  "upstream": "https://cdn.plot.ly/plotly-4.1.1.min.js",
+  "license": "https://raw.githubusercontent.com/plotly/plotly.js/v4.1.1/LICENSE"
+}

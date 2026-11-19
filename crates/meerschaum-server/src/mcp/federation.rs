@@ -124,6 +124,8 @@ pub fn internal_token(secret: &[u8], caller: Option<&Caller>) -> String {
     // `sub` must be a string when present (PyJWT and the server's decoder both reject others),
     // so it is omitted for the server itself and for unauthenticated callers.
     let (sub, kind) = match caller.and_then(|c| c.principal.as_ref()) {
+        // No ordinary user subject: hosts cannot adopt a restricted execution as its owner.
+        Some(Principal::Execution(_)) => (None, "execution"),
         Some(Principal::User(u)) => (Some(u.username.clone()), "user"),
         Some(Principal::Token(t)) => (t.id.map(|id| id.to_string()), "token"),
         None => (None, "user"),

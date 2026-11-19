@@ -119,6 +119,13 @@ def test_compose_plugin_deprecation_warning_is_once(monkeypatch):
     assert 'mrsm uninstall plugin compose' in messages[0]
 
 
+def test_compose_empty_jobs_mapping_starts_no_jobs():
+    """`jobs: {}` opts a project out of the default syncing jobs."""
+    from meerschaum.compose.utils.jobs import get_jobs_commands
+
+    assert get_jobs_commands({'project_name': 'test-project', 'jobs': {}}) == {}
+
+
 def test_compose_explicit_jobs_keep_established_flags():
     """Explicit job commands retain their public names and established flags."""
     from meerschaum.compose.utils.jobs import get_jobs_commands

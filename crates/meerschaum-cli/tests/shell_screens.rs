@@ -533,7 +533,7 @@ fn compare(name: &str, label: &str, v4: &Snapshot, v5: &Snapshot, searching: boo
     diffs
 }
 
-/// Apply reviewed v5 menu/help differences without changing or ignoring the v4 recording.
+/// Apply the reviewed menu, help, and narrow-prompt differences to the reference recording.
 fn with_v5_actions(name: &str, label: &str, mut expected: Snapshot) -> Snapshot {
     let overlays: Json =
         serde_json::from_str(include_str!("fixtures/shell_screens_v5_actions.json")).unwrap();
@@ -542,7 +542,7 @@ fn with_v5_actions(name: &str, label: &str, mut expected: Snapshot) -> Snapshot 
     };
     assert!(matches!(
         name,
-        "ctrl_c" | "menu_scroll" | "long_output" | "menu_subactions" | "menu_space"
+        "ctrl_c" | "menu_scroll" | "long_output" | "menu_subactions" | "menu_space" | "tiny"
     ));
     for (row, replacement) in overlay["rows"].as_object().unwrap() {
         let row: usize = row.parse().unwrap();

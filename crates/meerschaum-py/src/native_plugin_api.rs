@@ -188,7 +188,12 @@ impl PyNativeConnector {
             .detach(|| cached_natives(&config, false))
             .map_err(PyRuntimeError::new_err)?;
         let host = facade_host(py, &config, natives);
-        Ok(self.inner.as_ref().clone().with_host_services(host))
+        Ok(self
+            .inner
+            .as_ref()
+            .clone()
+            .with_root_dir(config.paths().root_dir.to_string_lossy())
+            .with_host_services(host))
     }
 }
 
@@ -381,6 +386,9 @@ impl PyNativeConnector {
         let connector = self.hosted(py)?;
         let method_name = method.to_string();
         let reply = py.detach(move || connector.call(&method_name, context, None));
+        if meerschaum_cli::native_plugins::has_written_plugin_configs() {
+            let _ = crate::facade::publish_live_config(py);
+        }
         match reply {
             Ok(reply) => match reply.data {
                 Some(frame) if reply.value.is_null() => {

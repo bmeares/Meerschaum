@@ -503,13 +503,31 @@ pub fn print_script_if_requested(sysargs: &[String]) -> Option<i32> {
 /// top, as `Session::manifest` merges them), without validating or rebuilding either: a plugin
 /// that changed since appears after the next command that loads plugins (`reload` forces it).
 pub(crate) fn cached_manifest(root: &std::path::Path) -> meerschaum_worker::manifest::Manifest {
-    use meerschaum_worker::manifest::{Manifest, manifest_path};
-    let mut manifest = Manifest::read(&manifest_path(root))
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let native = std::fs::read(crate::native_plugins::cache_path(root))
-        .ok()
+    cached_manifest_for(root, &[])
+}
+
+/// Like [`cached_manifest`], preferring the `plugins_dirs`-keyed cache slots when present.
+pub(crate) fn cached_manifest_for(
+    root: &std::path::Path,
+    plugins_dirs: &[std::path::PathBuf],
+) -> meerschaum_worker::manifest::Manifest {
+    use meerschaum_worker::manifest::{Manifest, manifest_path, read_cached_manifest_for};
+    let primary = manifest_path(root);
+    let mut manifest = if plugins_dirs.is_empty() {
+        Manifest::read(&primary).ok().flatten()
+    } else {
+        read_cached_manifest_for(&primary, plugins_dirs)
+            .ok()
+            .flatten()
+    }
+    .unwrap_or_default();
+    let native_primary = crate::native_plugins::cache_path(root);
+    let native = (!plugins_dirs.is_empty())
+        .then(|| {
+            meerschaum_plugin::discovery::keyed_manifest_cache_path(&native_primary, plugins_dirs)
+        })
+        .and_then(|slot| std::fs::read(slot).ok())
+        .or_else(|| std::fs::read(&native_primary).ok())
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
     if let Some(mut raw) = native {
         // The native manifest may omit argparse fields the worker manifest always lists.

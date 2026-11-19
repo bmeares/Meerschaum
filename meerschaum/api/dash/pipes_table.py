@@ -700,7 +700,25 @@ def get_jobs_index(instance_keys: str, rows: List[Dict[str, Any]]) -> Dict[str, 
                 for summary in summaries:
                     if all(job['name'] != summary['name'] for job in jobs):
                         jobs.append(summary)
-    return index
+    return _visible_jobs_index(index)
+
+
+def _visible_jobs_index(index: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Keep the jobs the current viewer may see (the selections are cached for every viewer)."""
+    try:
+        from meerschaum.api.dash import access
+        viewer = access.current_viewer()
+        if viewer.no_auth or viewer.is_admin:
+            return index
+        from meerschaum.jobs import get_jobs
+        visible = set(access.filter_jobs(viewer, get_jobs() or {}))
+    except Exception:
+        return {}
+    filtered = {
+        ref: [job for job in jobs if job['name'] in visible]
+        for ref, jobs in index.items()
+    }
+    return {ref: jobs for ref, jobs in filtered.items() if jobs}
 
 
 #: The commands whose jobs sync the pipes they select (the Jobs column).
@@ -735,9 +753,11 @@ def _job_instance(job: Any, default_instance: str) -> str:
         env = dict(job.env or {})
     except Exception:
         env = {}
+    from meerschaum import _core
     for key in ('MRSM_PATCH', 'MRSM_CONFIG'):
         try:
-            patch = json.loads(env.get(key) or '{}')
+            ### 5.1: the variable, or the file its `*_FILE` form names.
+            patch = json.loads(_core.environment_patch_text(key, env=env) or '{}')
         except (TypeError, ValueError):
             continue
         instance = ((patch.get('meerschaum', None) or {}) if isinstance(patch, dict) else {}).get('instance', None)

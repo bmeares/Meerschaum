@@ -674,7 +674,7 @@ print('JSON:' + json.dumps({
     'secret': 'w7-proxy-token-s3cret' in str(dialogs) + str(new),
 }))
 '''))
-    assert out['raw'] == ['api:host', 'api:host_config', 'api:host_proxy_token']
+    assert out['raw'] == []
     for key in ('connectors', 'datalist', 'instances', 'copy'):
         assert not any(label.startswith('api:host') for label in out[key]), (key, out[key])
         assert 'sql:apihosttest' in out[key], (key, out[key])

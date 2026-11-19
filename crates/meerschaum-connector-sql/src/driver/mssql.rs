@@ -183,6 +183,7 @@ fn bind(q: &mut Query<'_>, p: &SqlParam) {
         SqlParam::Timestamp(t) => q.bind(*t),
         SqlParam::TimestampTz(t) => q.bind(*t),
         SqlParam::Date(d) => q.bind(*d),
+        other => q.bind(other.array_as_json().unwrap_or_else(|| "[]".into())),
     }
 }
 

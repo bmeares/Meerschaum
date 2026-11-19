@@ -169,6 +169,7 @@ def test_new_job_creates_starts_restarts_and_deletes_a_job(server, tab):
         )
         confirm.click()
         tab.page.wait_for_selector('.modal.show', state='detached', timeout=30000)
+        _wait_text(tab.page, '#jobs-alert-div', f"Deleted job '{name}'.")
         ### Gone from the server, then from the page (its refresh hides jobs that went away).
         deadline = time.time() + 30
         while time.time() < deadline and _job_exists(server, name):
@@ -435,11 +436,8 @@ def test_plugins_installed_tab_uninstall_and_install(pages_server, context):
     page.wait_for_selector('#w7_pyfig_card button.plugin-card-install', timeout=30000)
     assert page.inner_text('#w7_pyfig_card button.plugin-card-install') == 'Reinstall'
     page.click('#w7_pyfig_card button.plugin-card-install')
-    page.wait_for_function(
-        "document.querySelector('#plugins-run-alert') && "
-        "document.querySelector('#plugins-run-alert').innerText.startsWith('Reinstalled plugin')",
-        timeout=180000,
-    )
+    result = _plugin_run_result(page, 'Reinstalled plugin', 'Failed to reinstall plugin')
+    assert result.startswith("Reinstalled plugin 'w7_pyfig'."), result
     ### Its output is one click away.
     page.click('#plugins-run-alert button:text-is("View output")')
     page.wait_for_function(

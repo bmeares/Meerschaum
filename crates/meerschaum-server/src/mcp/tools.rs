@@ -111,6 +111,24 @@ pub async fn caller_access(cx: &ToolCx<'_>) -> Result<Access, ToolError> {
     }
 }
 
+/// Run `future` for the isolated team that owns `pipe` when the caller acts for one (5.1): a
+/// caller in several isolated teams syncs a pipe of one of them with that team's workers.
+async fn for_pipe_team<F: std::future::Future>(
+    cx: &ToolCx<'_>,
+    pipe: &Pipe,
+    future: F,
+) -> F::Output {
+    if !cx.caller.api {
+        return future.await;
+    }
+    let Ok(caller) = caller_access(cx).await else {
+        return future.await;
+    };
+    let team = access::PipeAccess::of_pipe(pipe).team_name();
+    let acting = access::acting_for(cx.state, &caller, Some(&team));
+    meerschaum_connector::acting_team::scope(acting, future).await
+}
+
 /// A pipe the caller cannot see, as the tools report it (a pipe that does not exist).
 fn hidden(pipe: &Pipe) -> ToolError {
     ToolError::value(format!("{pipe} was not found."))
@@ -163,9 +181,14 @@ pub fn connector(
     instance_keys: Option<&str>,
 ) -> Result<Arc<dyn InstanceConnector>, ToolError> {
     if cx.caller.api {
+        // The caller's teams decide which instances they may name, and their default (5.1).
+        let keys = cx
+            .caller
+            .scope_instance(cx.state, instance_keys)
+            .map_err(ToolError::permission)?;
         return cx
             .state
-            .get_api_connector(instance_keys)
+            .get_api_connector(keys.as_deref())
             .map_err(|e| ToolError::permission(api_error_str(&e)));
     }
     let default = cx.state.config.instance_keys.as_str();
@@ -484,7 +507,20 @@ fn page_of(records: Vec<Value>, offset: usize, limit: usize) -> Value {
 }
 
 /// Dispatch a built-in tool.
-pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
+pub fn call<'a>(
+    name: &'a str,
+    args: &'a Map,
+    cx: &'a ToolCx<'_>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ToolError>> + Send + 'a>> {
+    // Registration enters another tracked worker with its original HTTP source on this
+    // task. Select its future before polling the other built-in tools' large dispatch frame.
+    match name {
+        "register_pipe" => Box::pin(register_pipe(args, cx)),
+        _ => Box::pin(call_builtin(name, args, cx)),
+    }
+}
+
+async fn call_builtin(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     match name {
         "list_pipes" => list_pipes(args, cx).await,
         "get_pipe_attributes" => {
@@ -496,7 +532,6 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
         }
         "get_pipe_stats" => get_pipe_stats(args, cx).await,
         "get_pipe_data" => get_pipe_data(args, cx).await,
-        "register_pipe" => register_pipe(args, cx).await,
         "edit_pipe" => edit_pipe(args, cx).await,
         "sync_pipe" => {
             let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Sync)).await?;
@@ -523,38 +558,52 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
                     }
                 }
             }
-            let res = if parents.is_none() && children.is_none() {
-                cx.server
-                    .backend
-                    .sync_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
-                    .await
-            } else {
-                cx.server
-                    .backend
-                    .sync_pipe_graph(
-                        &pipe,
-                        str_arg(args, "begin"),
-                        str_arg(args, "end"),
-                        parents,
-                        children,
-                    )
-                    .await
-            };
+            let res = for_pipe_team(cx, &pipe, async {
+                if parents.is_none() && children.is_none() {
+                    cx.server
+                        .backend
+                        .sync_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
+                        .await
+                } else {
+                    cx.server
+                        .backend
+                        .sync_pipe_graph(
+                            &pipe,
+                            str_arg(args, "begin"),
+                            str_arg(args, "end"),
+                            parents,
+                            children,
+                        )
+                        .await
+                }
+            })
+            .await;
             Ok(tuple_value(&res))
         }
         "sync_documents" => {
             let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Sync)).await?;
+            let admission = if cx.caller.api {
+                let headers = crate::executor::context::request_headers().ok_or_else(|| {
+                    ToolError::permission("Document sync lost its original HTTP credential.")
+                })?;
+                Some(crate::routes::pipes::document_admission(
+                    cx.state, headers, &pipe,
+                ))
+            } else {
+                None
+            };
             let docs = match args.get("documents") {
                 Some(v) if v.truthy() => crate::json::from_core(v),
                 _ => serde_json::Value::Array(Vec::new()),
             };
             let started = std::time::Instant::now();
             let registration = meerschaum_connector::sync_metrics::observed_registration(&pipe);
-            let res = pipe_methods::sync(
+            let res = pipe_methods::sync_with_admission(
                 &conn,
                 &pipe,
                 &SyncPayload::Json(docs),
                 &SyncKwargs {
+                    special_dtypes: Map::new(),
                     check_existing: true,
                     force: false,
                     workers: None,
@@ -564,8 +613,10 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
                     params: None,
                 },
                 &cx.state.config.pipe_defaults,
+                admission,
             )
-            .await;
+            .await
+            .map_err(|error| ToolError::permission(api_error_str(&error)))?;
             // The pipe's sync status (rc15 C2), like a data post.
             crate::routes::sync_status::record_server_sync(
                 &conn,
@@ -578,11 +629,14 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
         }
         "verify_pipe" => {
             let (_, pipe) = resolve_editable(cx, args, Some(LockOp::Sync)).await?;
-            let res = cx
-                .server
-                .backend
-                .verify_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end"))
-                .await;
+            let res = for_pipe_team(
+                cx,
+                &pipe,
+                cx.server
+                    .backend
+                    .verify_pipe(&pipe, str_arg(args, "begin"), str_arg(args, "end")),
+            )
+            .await;
             Ok(tuple_value(&res))
         }
         "deduplicate_pipe" | "clear_pipe" => {
@@ -599,19 +653,49 @@ pub async fn call(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, Tool
                 ..Default::default()
             };
             let res = if name == "clear_pipe" {
-                conn.clear_pipe(&pipe, &query).await
+                mutate_http(
+                    cx,
+                    &conn,
+                    &pipe,
+                    crate::routes::pipes::mutation::Operation::Clear,
+                    conn.clear_pipe(&pipe, &query),
+                )
+                .await?
             } else {
-                conn.deduplicate_pipe(&pipe, &query).await
+                mutate_http(
+                    cx,
+                    &conn,
+                    &pipe,
+                    crate::routes::pipes::mutation::Operation::Deduplicate,
+                    conn.deduplicate_pipe(&pipe, &query),
+                )
+                .await?
             };
             Ok(tuple_value(&res))
         }
         "drop_pipe" => {
             let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Drop)).await?;
-            Ok(tuple_value(&conn.drop_pipe(&pipe).await))
+            Ok(tuple_value(
+                &mutate_http(
+                    cx,
+                    &conn,
+                    &pipe,
+                    crate::routes::pipes::mutation::Operation::Drop,
+                    conn.drop_pipe(&pipe),
+                )
+                .await?,
+            ))
         }
         "delete_pipe" => {
             let (conn, pipe) = resolve_editable(cx, args, Some(LockOp::Delete)).await?;
-            let res = conn.delete_pipe(&pipe).await;
+            let res = mutate_http(
+                cx,
+                &conn,
+                &pipe,
+                crate::routes::pipes::mutation::Operation::Delete,
+                conn.delete_pipe(&pipe),
+            )
+            .await?;
             cx.state.access_cache().forget_pipes();
             Ok(tuple_value(&res))
         }
@@ -913,6 +997,49 @@ async fn get_pipe_data(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
     Ok(page_of(frame_records(df), offset, limit))
 }
 
+struct RegistrationProof {
+    state: AppState,
+    grant: crate::executor::callbacks::Grant,
+}
+
+impl Drop for RegistrationProof {
+    fn drop(&mut self) {
+        let state = self.state.clone();
+        let id = self.grant.id;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = crate::executor::callbacks::revoke(&state, id).await;
+            });
+        }
+    }
+}
+
+impl RegistrationProof {
+    async fn current(
+        &self,
+        connector_keys: &str,
+        instance_keys: &str,
+    ) -> Result<Access, ToolError> {
+        let headers = crate::executor::context::request_headers().ok_or_else(|| {
+            ToolError::permission("Registration lost its original HTTP credential.")
+        })?;
+        access::require_fresh(&self.state, &headers, &["pipes:register"])
+            .await
+            .map_err(|error| ToolError::permission(error.detail_text()))?;
+        crate::executor::callbacks::load_identity(&self.state, self.grant.id, self.grant.launch_id)
+            .await
+            .and_then(|identity| {
+                crate::executor::admission::registration_access(
+                    &self.state,
+                    &identity,
+                    connector_keys,
+                    instance_keys,
+                )
+            })
+            .map_err(|error| ToolError::permission(error.detail_text()))
+    }
+}
+
 async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let lk = location_of(args);
     let ik = str_arg(args, "instance_keys");
@@ -938,17 +1065,85 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
     if let Some(dtypes) = truthy_arg(args, "dtypes") {
         parameters.insert("dtypes".into(), dtypes.clone());
     }
-    let caller = caller_access(cx).await?;
+    let mut caller = caller_access(cx).await?;
+    // Retain the actual HTTP credential binding across the hook and native DB lock. A
+    // reconstructed MCP scope list cannot stand in for its original registered source.
+    let proof = if cx.caller.api && !caller.no_auth && !caller.full_admin() {
+        let source = crate::executor::context::current()
+            .filter(|source| !source.no_auth && source.auth.is_some())
+            .ok_or_else(|| {
+                ToolError::permission("Pipe registration lost its original authenticated source.")
+            })?;
+        let team = if meerschaum_core::access::is_everyone(Some(&source.primary_team)) {
+            None
+        } else {
+            cx.state
+                .instance()
+                .get_team(&source.primary_team)
+                .await
+                .map_err(|_| {
+                    ToolError::permission("The registration source's Team is unavailable.")
+                })?
+                .and_then(|team| team.id.and_then(|id| uuid::Uuid::parse_str(&id).ok()))
+                .filter(|id| !id.is_nil())
+                .map(Some)
+                .ok_or_else(|| {
+                    ToolError::permission("The registration source's Team no longer exists.")
+                })?
+        };
+        let purpose = match &source.auth {
+            Some(crate::auth::Principal::Execution(parent)) => parent.grant.purpose,
+            _ => crate::executor::callbacks::Purpose::Command,
+        };
+        let sources = match &source.auth {
+            Some(crate::auth::Principal::Execution(parent)) => {
+                parent.grant.source_ceiling.clone().unwrap_or_default()
+            }
+            _ => Default::default(),
+        };
+        let grant = Box::pin(crate::executor::callbacks::register_with_sources(
+            cx.state,
+            &source,
+            uuid::Uuid::new_v4(),
+            team,
+            &["pipes:register"],
+            purpose,
+            sources,
+        ))
+        .await
+        .map_err(|error| ToolError::permission(error.detail_text()))?;
+        let proof = RegistrationProof {
+            state: cx.state.clone(),
+            grant,
+        };
+        caller = proof.current(&ck, &conn.connector_keys()).await?;
+        Some(proof)
+    } else {
+        None
+    };
+    let original = caller.clone();
     if cx.caller.api {
         caller
             .require(&["pipes:register"], &[])
             .map_err(|e| ToolError::permission(e.detail_text()))?;
-        access::guard::check_connector_teams(cx.state, &caller, &ck)
+        access::guard::check_source_connector(cx.state, &caller, &ck)
             .map_err(|e| ToolError::permission(e.detail_text()))?;
     }
     let mut pipe = build_pipe(cx, &conn, &ck, &mk, lk.as_deref(), Some(parameters))?;
     // Checked after construction because `target` may be set in `parameters`.
     check_protected_target(&pipe)?;
+    if cx.caller.api
+        && caller.full_admin()
+        && conn
+            .get_pipe_id(&pipe)
+            .await
+            .map_err(|error| ToolError::other(error.to_string()))?
+            .is_some()
+    {
+        return Ok(tuple_value(&SuccessTuple::fail(format!(
+            "{pipe} is already registered."
+        ))));
+    }
     // `Pipe.register()`: a plugin or custom connector's `register(pipe)` supplies the base
     // parameters under the ones given (`apply_patch_to_config(params, self.parameters)`).
     match cx.server.backend.connector_register(&pipe).await {
@@ -962,6 +1157,7 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
             "Invalid parameters returned from `register()` in connector {ck}:\n{repr}"
         ),
         super::ConnectorRegister::Undefined => {}
+        super::ConnectorRegister::Unavailable(message) => return Err(ToolError::other(message)),
     }
     // `Pipe.register()`: an empty parameters dict registers the default index columns.
     if pipe.raw_parameters().is_empty() {
@@ -974,6 +1170,16 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
         pipe.set_parameters(map_of([("columns", Value::Map(cols))]));
     }
     if cx.caller.api {
+        if let Some(proof) = &proof {
+            caller = proof.current(&ck, &conn.connector_keys()).await?;
+        } else {
+            let headers = crate::executor::context::request_headers().ok_or_else(|| {
+                ToolError::permission("Registration lost its original HTTP credential.")
+            })?;
+            caller = access::require_fresh(cx.state, &headers, &["pipes:register"])
+                .await
+                .map_err(|error| ToolError::permission(api_error_str(&error)))?;
+        }
         // The new pipe is the caller's (rc15), and its SQL passes the SQL guard.
         let stamped = access::guard::stamp_new_pipe(&caller, pipe.raw_parameters())
             .map_err(|e| ToolError::permission(e.detail_text()))?;
@@ -982,12 +1188,61 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
             .map_err(|e| ToolError::permission(e.detail_text()))?;
         pipe.set_parameters(stamped);
     }
-    let res = conn.register_pipe(&pipe).await;
+    let res = if let Some(proof) = &proof {
+        Box::pin(crate::routes::pipes::mutation::run_registration(
+            cx.state,
+            &conn,
+            &pipe,
+            &original,
+            proof.grant.id,
+            proof.grant.launch_id,
+            conn.register_pipe(&pipe),
+        ))
+        .await
+        .map_err(|error| ToolError::permission(error.detail_text()))?
+    } else if cx.caller.api {
+        let headers = crate::executor::context::request_headers().ok_or_else(|| {
+            ToolError::permission("Registration lost its original HTTP credential.")
+        })?;
+        Box::pin(crate::routes::pipes::mutation::run_headers(
+            cx.state,
+            headers,
+            &conn,
+            &pipe,
+            &original,
+            crate::routes::pipes::mutation::Operation::Register,
+            conn.register_pipe(&pipe),
+        ))
+        .await
+        .map_err(|error| ToolError::permission(api_error_str(&error)))?
+    } else {
+        conn.register_pipe(&pipe).await
+    };
     if cx.caller.api {
         let _ = cx.state.pipes(ik.as_deref(), true).await;
         cx.state.access_cache().forget_pipes();
     }
     Ok(tuple_value(&res))
+}
+
+async fn mutate_http<F: std::future::Future<Output = SuccessTuple>>(
+    cx: &ToolCx<'_>,
+    conn: &Arc<dyn InstanceConnector>,
+    pipe: &Pipe,
+    operation: crate::routes::pipes::mutation::Operation,
+    future: F,
+) -> Result<SuccessTuple, ToolError> {
+    if !cx.caller.api {
+        return Ok(future.await);
+    }
+    let headers = crate::executor::context::request_headers()
+        .ok_or_else(|| ToolError::permission("Pipe mutation lost its original HTTP credential."))?;
+    let caller = caller_access(cx).await?;
+    crate::routes::pipes::mutation::run_headers(
+        cx.state, headers, conn, pipe, &caller, operation, future,
+    )
+    .await
+    .map_err(|error| ToolError::permission(api_error_str(&error)))
 }
 
 async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
@@ -1022,7 +1277,14 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
         return Err(ToolError::permission(e.detail_text()));
     }
     pipe.set_parameters(new);
-    let res = conn.edit_pipe(&pipe, false).await;
+    let res = mutate_http(
+        cx,
+        &conn,
+        &pipe,
+        crate::routes::pipes::mutation::Operation::Edit(old),
+        conn.edit_pipe(&pipe, false),
+    )
+    .await?;
     if cx.caller.api {
         let ik = str_arg(args, "instance_keys");
         let _ = cx.state.pipes(ik.as_deref(), true).await;
@@ -1119,7 +1381,8 @@ async fn execute_action(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
         .is_some_and(|caller| !caller.no_auth && !caller.full_admin())
     {
         let allowed =
-            crate::auth::is_user_allowed_to_execute(cx.state, cx.caller.principal.as_ref()).await;
+            crate::auth::is_user_allowed_to_execute_action(cx.state, cx.caller.principal.as_ref())
+                .await;
         if !allowed.success {
             return Ok(tuple_value(&allowed));
         }
@@ -1148,7 +1411,14 @@ async fn execute_action(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
         && !caller.full_admin()
     {
         let words = crate::execute_access::sysargs_of_keywords(&action_name, &kwargs);
-        if let Err(m) = crate::execute_policy::check_non_admin(&words) {
+        if let Err(m) = crate::execute_policy::check_command(
+            cx.state,
+            caller,
+            &words,
+            crate::execute_policy::Place::Server,
+        )
+        .await
+        {
             return fail(m);
         }
         if let Err(e) = crate::execute_access::check(cx.state, caller, &words).await {

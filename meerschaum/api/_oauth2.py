@@ -82,6 +82,10 @@ async def optional_user(request: Request) -> Optional[User]:
     """
     FastAPI dependency that returns a User if logged in, otherwise None.
     """
+    from meerschaum.api._extension_user import extension_principal
+    handled, projected, _ = extension_principal(request)
+    if handled:
+        return projected
     if no_auth:
         return None
     try:
@@ -98,6 +102,12 @@ async def load_user_or_token(
     """
     Load the current user or token.
     """
+    from meerschaum.api._extension_user import extension_principal
+    handled, projected, _ = extension_principal(request)
+    if handled:
+        if (isinstance(projected, User) and not users) or (isinstance(projected, Token) and not tokens):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
+        return projected
     authorization = request.headers.get('authorization', request.headers.get('Authorization', None))
     if not authorization:
         raise HTTPException(
@@ -150,6 +160,10 @@ def get_granted_scopes(
     -------
     A list of scope strings. `'*'` holds everything.
     """
+    from meerschaum.api._extension_user import extension_granted_scopes
+    handled, projected = extension_granted_scopes(request, user_or_token)
+    if handled:
+        return projected
     if no_auth:
         return ['*']
 
@@ -331,6 +345,7 @@ def ScopedAuth(scopes: List[str], aliases: Optional[Dict[str, str]] = None):
                 )
 
         return user_or_token
+    _authenticate._mrsm_extension_scopes = tuple(scopes)
     return _authenticate
 
 

@@ -2,11 +2,12 @@
 //! that are not about one Pipe ([`pipe`], [`read_sql`], [`exec_sql`], [`plugin_config`],
 //! [`write_plugin_config`], [`config`], and in API requests [`mint_token`], [`revoke_token`] and
 //! [`draining`]; see [`crate::callbacks`]).
-pub use crate::callbacks::MintedToken;
 pub use crate::callbacks::calls::{
-    available, config, draining, exec_sql, mint_token, pipe, plugin_config, read_sql, revoke_token,
-    write_plugin_config,
+    available, config, draining, exec_sql, exec_sql_with, mint_token, pipe, plugin_config,
+    read_sql, read_sql_with, revoke_token, root_dir, sql_bytes, sql_date, sql_json, sql_timestamp,
+    sql_timestamptz, transaction, write_plugin_config,
 };
+pub use crate::callbacks::{MintedToken, Transaction};
 use crate::{
     Frame, Result,
     abi::*,
@@ -307,6 +308,7 @@ impl LoadedPlugin {
             label: self.name.clone(),
             config,
             fetch_kwargs: Value::Null,
+            root_dir: None,
             host: None,
         }
     }
@@ -328,6 +330,7 @@ impl LoadedPlugin {
             label: label.into(),
             config,
             fetch_kwargs: Value::Null,
+            root_dir: None,
             host: None,
         })
     }
@@ -523,11 +526,20 @@ pub struct NativeConnector {
     label: String,
     config: Value,
     fetch_kwargs: Value,
+    root_dir: Option<String>,
     host: Option<Arc<dyn crate::HostServices>>,
 }
 impl NativeConnector {
     pub fn with_host_services(mut self, host: Arc<dyn crate::HostServices>) -> Self {
         self.host = Some(host);
+        self
+    }
+
+    /// Set the resolved `MRSM_ROOT_DIR` delivered in `context.root_dir` for `fetch` / `subscribe`
+    /// calls.
+    pub fn with_root_dir(mut self, root_dir: impl Into<String>) -> Self {
+        let root_dir = root_dir.into();
+        self.root_dir = (!root_dir.is_empty()).then_some(root_dir);
         self
     }
 
@@ -571,6 +583,9 @@ impl NativeConnector {
     ) -> ConnectorResult<crate::subscribe::NativeSubscription> {
         let mut context = pipe_context(pipe);
         context["kwargs"] = kwargs;
+        if let Some(root_dir) = &self.root_dir {
+            context["root_dir"] = json!(root_dir);
+        }
         let reply = self.call("subscribe", context, None)?;
         let handle = reply.value["handle"]
             .as_u64()
@@ -657,6 +672,9 @@ impl NativeConnector {
         let mut context = query_context(pipe, q);
         if self.fetch_kwargs.as_object().is_some_and(|o| !o.is_empty()) {
             context["kwargs"] = self.fetch_kwargs.clone();
+        }
+        if let Some(root_dir) = &self.root_dir {
+            context["root_dir"] = json!(root_dir);
         }
         context
     }

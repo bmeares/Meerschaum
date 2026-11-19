@@ -26,6 +26,9 @@ pub mod connectors;
 pub mod docs;
 pub mod engine;
 pub mod execute;
+pub mod extensions;
+pub mod graph_batch;
+pub mod graph_plan;
 pub mod jobs;
 pub mod login;
 pub mod metrics;
@@ -34,6 +37,7 @@ pub mod pipe_access;
 pub mod pipelines;
 pub mod pipes;
 pub mod plugins;
+pub mod source_fetch;
 pub mod sync_status;
 pub mod teams;
 pub mod tokens;
@@ -99,6 +103,7 @@ pub fn route_group_of(path: &str) -> &'static str {
 }
 
 /// The parts of a request every handler needs: the state, the headers and the query.
+#[derive(Clone)]
 pub struct Ctx {
     /// The server state.
     pub state: AppState,
@@ -106,12 +111,63 @@ pub struct Ctx {
     pub headers: HeaderMap,
     /// The query parameters.
     pub query: Query,
+    /// The default instance of the caller's team ([`Ctx::scope_instance`]), used when the
+    /// request names none.
+    team_instance: std::sync::OnceLock<String>,
+    engine_selection: std::sync::OnceLock<engine::selection::SelectedEngine>,
 }
 
 impl Ctx {
-    /// `instance_keys` (`Optional[str] = None`).
+    pub(crate) fn selected_engine(
+        &self,
+        caller: &crate::access::Access,
+    ) -> Result<engine::selection::SelectedEngine, ApiError> {
+        if let Some(selected) = self.engine_selection.get() {
+            return Ok(selected.clone());
+        }
+        let selected =
+            self.state
+                .selected_engines
+                .select(self, caller, &self.state.self_api_bindings)?;
+        let _ = self.engine_selection.set(selected.clone());
+        Ok(self.engine_selection.get().cloned().unwrap_or(selected))
+    }
+    /// `instance_keys` (`Optional[str] = None`): the request's, else the default instance of the
+    /// caller's team ([`Ctx::scope_instance`], applied when the request is read), else `None`
+    /// (the server's own).
     pub fn instance_keys(&self) -> Option<String> {
-        self.query.opt_str("instance_keys")
+        self.query
+            .opt_str("instance_keys")
+            .or_else(|| self.team_instance.get().cloned())
+    }
+
+    /// Apply the caller's teams to the request's instance: an instance the request names must be
+    /// the server's own or one the caller's teams may use (`403`), and a request that names none
+    /// uses the default instance of the caller's team, when it has one and the server serves it.
+    pub fn scope_instance(&self, caller: &crate::access::Access) -> Result<(), ApiError> {
+        if caller.no_auth || caller.is_admin() {
+            return Ok(());
+        }
+        match self.query.opt_str("instance_keys") {
+            Some(keys) => {
+                let own = keys == self.state.config.instance_keys
+                    || keys == self.state.instance().connector_keys();
+                if !own && !crate::access::guard::may_use_connector(&self.state, caller, &keys) {
+                    return Err(ApiError::new(
+                        403,
+                        format!("The instance '{keys}' is not available to your teams."),
+                    ));
+                }
+            }
+            None => {
+                if let Some(keys) = &caller.principal.grants.instance
+                    && self.state.get_api_connector(Some(keys)).is_ok()
+                {
+                    let _ = self.team_instance.set(keys.clone());
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -119,11 +175,20 @@ impl FromRequestParts<AppState> for Ctx {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
-        Ok(Ctx {
+        let ctx = Ctx {
             state: state.clone(),
             headers: parts.headers.clone(),
             query: Query::parse(parts.uri.query()),
-        })
+            team_instance: std::sync::OnceLock::new(),
+            engine_selection: Default::default(),
+        };
+        // The request's instance follows the caller's teams (5.1), whatever order the handler
+        // reads it and authorizes in. A request without valid credentials is the handler's to
+        // refuse.
+        if let Some(caller) = crate::access::instance_scope(state, &ctx.headers).await {
+            ctx.scope_instance(&caller)?;
+        }
+        Ok(ctx)
     }
 }
 
@@ -132,6 +197,10 @@ impl FromRequestParts<AppState> for Ctx {
 pub struct Unmatched;
 
 async fn fallback(State(state): State<AppState>, req: Request) -> Response {
+    let req = match extensions::api_fallback(state.clone(), req).await {
+        std::ops::ControlFlow::Break(response) => return response,
+        std::ops::ControlFlow::Continue(req) => req,
+    };
     // The Dash console is the Python host's (D21): proxied when mounted, else the pointer page.
     if crate::web::is_console_path(&decoded_path(req.uri().path())) {
         return crate::web::console_entry(state, req).await;
@@ -140,6 +209,10 @@ async fn fallback(State(state): State<AppState>, req: Request) -> Response {
         && host.is_active()
         && is_proxyable(&state.config, req.uri().path())
     {
+        // 5.1: a host that would serve an isolated team's request without its check does not.
+        if let Some(refused) = crate::access::outdated_host_refusal(&state, req.headers()).await {
+            return refused;
+        }
         return host.forward(req).await;
     }
     let mut resp = ApiError::not_found().into_response();
@@ -266,7 +339,7 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         app = login::routes(app);
     }
     execute::start_cleanup(&state);
-    let groups: [(&str, AddRoutes); 16] = [
+    let groups: [(&str, AddRoutes); 19] = [
         ("actions", actions::routes),
         ("actions", execute::routes),
         ("connectors", connectors::routes),
@@ -274,6 +347,9 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
         ("jobs", jobs::routes),
         ("misc", misc::routes),
         ("pipes", pipes::routes),
+        ("pipes", source_fetch::routes),
+        ("pipes", graph_plan::routes),
+        ("pipes", graph_batch::routes),
         ("pipelines", pipelines::routes),
         ("plugins", plugins::routes),
         ("tokens", tokens::routes),
@@ -313,6 +389,10 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
     }
     app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
+        crate::access::acting_team_layer,
+    ))
+    .layer(axum::middleware::from_fn_with_state(
+        state.clone(),
         crate::web::protect_sessions,
     ))
     .fallback(fallback)
@@ -320,6 +400,10 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
     .layer(axum::middleware::from_fn_with_state(
         state.clone(),
         rate_limit,
+    ))
+    .layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::executor::callbacks::guard,
     ))
     // Outermost: the v5-only routes answer every error (the rate limiter's too) in one shape.
     .layer(axum::middleware::from_fn_with_state(
@@ -357,6 +441,8 @@ impl BodyClass {
             BodyClass::Auth
         } else if route == PIPE_DATA_ROUTE && *method == Method::POST {
             BodyClass::Data
+        } else if route == source_fetch::ROUTE {
+            BodyClass::Fixed(meerschaum_connector_api::source_fetch::MAX_REQUEST_BYTES)
         } else if route.starts_with("/engine/") {
             BodyClass::Fixed(engine::ENGINE_BODY_LIMIT)
         } else if route == "/plugins/{name}" && *method == Method::POST {

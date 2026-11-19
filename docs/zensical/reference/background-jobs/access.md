@@ -27,7 +27,9 @@ An operation requires both visibility and its permissions:
 
 ??? info "Teams and nested jobs"
 
-    A job started by another job inherits that job's owner and team. Renaming a team updates its jobs; deleting a team moves its jobs to Everyone. These changes affect the root where the team is managed. A job which still names a missing team remains visible only to its owner and administrators.
+    A job started by another job inherits that job's owner and team. Renaming a team updates its display name. Jobs with registered owner and team provenance retain those identities: deleting the team leaves an owner/admin archive rather than moving the records to Everyone, and a replacement team or account with the same name does not inherit them. Legacy jobs without that provenance follow the root's existing retagging rules; an unresolved private identity requires administrator recovery. See [identity and history](../team-executors.md#identity-history-and-current-authority).
+
+    Reading history does not authorize a restart. A fresh launch uses the original source's current permissions and team membership; a manager's permission to control the record does not replace that source with the manager's credentials.
 
     Local CLI and Python access trust the host's files. They do not apply the API's caller filtering.
 

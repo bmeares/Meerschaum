@@ -36,6 +36,8 @@ from meerschaum.config._patch import (
     apply_patch_to_config,
 )
 from meerschaum import _core
+from meerschaum._internal import team_scope as _team_scope
+_IN_TEAM_PROCESS = _team_scope.in_team_process()
 
 __all__ = (
     'get_plugin_config',
@@ -163,10 +165,16 @@ def get_config(
     >>> get_config('does', 'not', 'exist')
     UserWarning: Invalid keys in config: ('does', 'not', 'exist')
     """
-    return _core.get_config(
+    value = _core.get_config(
         *keys, patch=patch, substitute=substitute, sync_files=sync_files,
         write_missing=write_missing, as_tuple=as_tuple, warn=warn, debug=debug,
     )
+    ### Work the API server runs for an isolated team sees only that team's connectors (5.1).
+    if _team_scope.current() is None:
+        if _IN_TEAM_PROCESS:
+            return _team_scope.filter_process_config(keys, value, as_tuple=as_tuple)
+        return value
+    return _team_scope.filter_config(keys, value, as_tuple=as_tuple)
 
 
 def get_plugin_config(

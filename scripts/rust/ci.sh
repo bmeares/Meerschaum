@@ -221,9 +221,19 @@ step_duckdb_platform() {
 step_duckdb_lib() { log "DuckDB shared library"; scripts/rust/duckdb_lib.sh; }
 step_test()   {
   # Test processes need an isolated root; ordinary cargo commands use normal runtime paths.
-  local test_scratch
-  test_scratch="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mrsm-rust-tests.XXXXXX")"
+  local test_scratch test_parent runtime_dir
+  test_parent="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+  if [ -n "${RUNNER_TEMP:-}" ]; then
+    # The workspace path can exceed Unix socket and terminal fixture limits.
+    runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -d "$runtime_dir" ] && [ -O "$runtime_dir" ] && [ -w "$runtime_dir" ]; then
+      test_parent="$runtime_dir"
+    fi
+  fi
+  test_scratch="$(mktemp -d "$test_parent/mrsm.XXXXXX")"
   trap "rm -rf '$test_scratch'" EXIT
+  # Keep temporary SQLite databases and sockets in the job's owned scratch directory.
+  export TMPDIR="$test_scratch"
   if [ -z "${MRSM_ROOT_DIR+x}" ]; then
     mkdir -p "$test_scratch/root"
     export MRSM_ROOT_DIR="$test_scratch/root"
@@ -252,6 +262,10 @@ step_test()   {
     "$REPO/scripts/parity/setup_reference.sh"
   fi
   if ci_have_nextest; then
+    # These executables are also native launchers for their confined child processes.
+    # Run them directly so their coverage does not depend on libtest discovery.
+    cargo test --locked -p meerschaum-cli --test team_sessions \
+      --test host_api_terminals --test host_plugin_discovery --no-fail-fast
     # nextest runs every test in its own process (and does not run doc tests: those follow).
     log "cargo nextest run --workspace --no-fail-fast (DuckDB library: $MRSM_DUCKDB_LIB)"
     cargo nextest run --workspace --no-fail-fast

@@ -492,7 +492,14 @@ pub fn event_line(event: &Event) -> String {
 
 /// A persisted event row as an [`Event`] (`None` for a payload this version cannot read).
 pub fn event_of_row(row: &EventRow) -> Option<Event> {
-    let kind: EventKind = serde_json::from_str(&row.payload).ok()?;
+    let mut payload: serde_json::Value = serde_json::from_str(&row.payload).ok()?;
+    let fields = payload.as_object_mut()?;
+    // The scoped API returns the event type in its own column and may redact the summary.
+    fields.insert("event".into(), row.event.clone().into());
+    if row.event == "run_finished" {
+        fields.entry("message").or_insert_with(|| "".into());
+    }
+    let kind: EventKind = serde_json::from_value(payload).ok()?;
     Some(Event {
         run_id: row.run_id.clone(),
         seq: row.seq,

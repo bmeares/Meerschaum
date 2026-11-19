@@ -162,6 +162,9 @@ pub(crate) fn to_sql_param(p: &SqlParam) -> Box<dyn ToSql + Send> {
         SqlParam::Timestamp(t) => Box::new(*t),
         SqlParam::TimestampTz(t) => Box::new(*t),
         SqlParam::Date(d) => Box::new(*d),
+        other => Box::new(Varchar2Text(
+            other.array_as_json().unwrap_or_else(|| "[]".into()),
+        )),
     }
 }
 

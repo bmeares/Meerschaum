@@ -13,6 +13,44 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 
 
+def _forwarded_terminal_session():
+    """Give SDK prompts terminal controls and live dimensions through the shell's pipe."""
+    import sys
+    from contextlib import nullcontext
+    from meerschaum.utils.formatting import _forwarded_terminal
+
+    if os.name != 'posix' or not _forwarded_terminal(sys.stdout) or not sys.stdin.isatty():
+        return nullcontext()
+
+    from prompt_toolkit.application import create_app_session, get_app_session
+    from prompt_toolkit.data_structures import Size
+    from prompt_toolkit.output.plain_text import PlainTextOutput
+    from prompt_toolkit.output.vt100 import Vt100_Output
+    from prompt_toolkit.output.color_depth import ColorDepth
+    from prompt_toolkit.utils import get_bell_environment_variable
+
+    original = get_app_session().output
+    # Respect an application's explicit output (e.g. a capture or a custom terminal).
+    if not isinstance(original, PlainTextOutput) or original.stdout is not sys.stdout:
+        return nullcontext()
+
+    def get_size():
+        try:
+            columns, rows = os.get_terminal_size(sys.stdin.fileno())
+            return Size(rows=rows or 24, columns=columns or 80)
+        except (OSError, ValueError):
+            return original.get_size()
+
+    output = Vt100_Output(
+        sys.stdout,
+        get_size,
+        term=os.environ.get('TERM'),
+        default_color_depth=ColorDepth.from_env(),
+        enable_bell=get_bell_environment_variable(),
+    )
+    return create_app_session(output=output)
+
+
 def _read_suggested(question: str, items: List[str], prefill: str = '') -> str:
     """Read a native action's already-formatted prompt with a filtering dropdown."""
     from meerschaum.utils.packages import attempt_import
@@ -22,14 +60,15 @@ def _read_suggested(question: str, items: List[str], prefill: str = '') -> str:
     def show_suggestions():
         toolkit.application.current.get_app().current_buffer.start_completion(select_first=False)
 
-    return toolkit.prompt(
-        toolkit.formatted_text.ANSI(question),
-        default=prefill,
-        completer=completion.WordCompleter(items, ignore_case=True, match_middle=True),
-        complete_while_typing=True,
-        reserve_space_for_menu=min(len(items), 8),
-        pre_run=show_suggestions,
-    )
+    with _forwarded_terminal_session():
+        return toolkit.prompt(
+            toolkit.formatted_text.ANSI(question),
+            default=prefill,
+            completer=completion.WordCompleter(items, ignore_case=True, match_middle=True),
+            complete_while_typing=True,
+            reserve_space_for_menu=min(len(items), 8),
+            pre_run=show_suggestions,
+        )
 
 
 def prompt(
@@ -155,7 +194,10 @@ def prompt(
     printed_question = False
 
     if not running_in_daemon():
-        answer = prompt_toolkit.prompt(**prompt_kwargs) if not noask else ''
+        answer = ''
+        if not noask:
+            with _forwarded_terminal_session():
+                answer = prompt_toolkit.prompt(**prompt_kwargs)
         printed_question = True
     else:
         import json
@@ -174,10 +216,18 @@ def prompt(
             print(STATIC_CONFIG['jobs']['flush_token'], end='', flush=True)
             printed_question = True
 
+        ### On Linux the job's supervisor sees the wait; elsewhere announce it for `attach`.
+        announced = _announce_wait(daemon) if not noask else None
         try:
             answer = input() if not noask else ''
         except EOFError:
             answer = ''
+        finally:
+            if announced is not None:
+                try:
+                    announced.unlink()
+                except OSError:
+                    pass
 
     if noask and not silent and not printed_question:
         print(question)
@@ -186,6 +236,22 @@ def prompt(
         return default_answer
 
     return answer
+
+
+def _announce_wait(daemon) -> Optional[pathlib.Path]:
+    """
+    Create the job's `input.stdin.block` marker before reading its input on systems where the
+    job's supervisor cannot observe the wait (anything but Linux). Return the marker to remove.
+    """
+    import sys
+    if sys.platform.startswith('linux') or daemon is None:
+        return None
+    try:
+        marker = daemon.blocking_stdin_file_path
+        marker.touch()
+        return marker
+    except Exception:
+        return None
 
 
 def yes_no(

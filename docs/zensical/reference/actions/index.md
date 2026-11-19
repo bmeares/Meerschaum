@@ -49,7 +49,7 @@ usage: mrsm [actions] {options}
 Create and Build Pipes with Meerschaum.
 
 Create:
-  bootstrap    Create pipes, connectors, jobs, Pipelines or plugins step by step.
+  bootstrap    Create pipes, connectors, jobs, Pipelines, plugins or teams step by step.
   register     Register pipes, connectors, Pipelines, plugins, tokens or users.
   copy         Copy connectors, pipes or Pipelines.
 

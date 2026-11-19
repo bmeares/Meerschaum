@@ -83,12 +83,12 @@ jobs:
           PY
       - uses: actions/checkout@v7
         with: {persist-credentials: false, ref: '${{ github.sha }}'}
-      - uses: actions/download-artifact@v8
-        with: {pattern: 'wheels-*', path: release-artifacts}
-      - uses: actions/download-artifact@v8
-        with: {pattern: 'mrsm-*', path: release-artifacts}
-      - uses: actions/download-artifact@v8
-        with: {name: sdist, path: release-artifacts/sdist}
+      # Download the entire set together so every artifact keeps its named directory.
+      # A prerelease can contain only one standalone binary.
+      - name: Download the tested release payloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --pattern 'wheels-*' --pattern 'mrsm-*' --pattern 'sdist' --dir release-artifacts
       - name: Record exact tested artifact bytes and configurations
         env:
           NEEDS: ${{ toJSON(needs) }}

@@ -4,12 +4,17 @@
 //! The first time the `stack` key is loaded (and whenever the stack actions ask), the Docker
 //! Compose file and the two Grafana files are rewritten from the config, keeping the comment
 //! header of the file already on disk, and the PostgreSQL extensions script is created once.
+//! The compose file of a stack `mrsm stack` hardens (one with Grafana, or whose `api` service
+//! gets `MRSM_CONFIG` / `MRSM_PATCH`, 5.1) is left to `mrsm stack`
+//! ([`ConfigState::stack_compose_hardened`]).
 //! The built-in Grafana dashboards are installed next to the provider file, and the ones an
 //! earlier release shipped are removed when Meerschaum still manages them.
 
 use std::path::Path;
 
+use super::lossless::ConfigValue;
 use super::{ConfigState, GetOptions};
+use crate::value::Value;
 use crate::yaml::dumper::{DumpOptions, dump_node};
 use crate::yaml::loader::{LoadOptions, load_text};
 
@@ -159,6 +164,20 @@ impl ConfigState {
                 warn: true,
             },
         );
+        // 5.1: "Meerschaum Main" never connects as the instance's owner
+        // (`grafana_readonly`), whoever writes the file.
+        let value = if keys == ["stack", "grafana", "datasource"] {
+            let mut plain = value.to_value();
+            let (_, error) = self.main_readonly_datasource(&mut plain);
+            if let Some(error) = error {
+                self.warn(format!(
+                    "{error}\nGrafana's 'Meerschaum Main' data source is written without a password."
+                ));
+            }
+            ConfigValue::from_value(&plain)
+        } else {
+            value
+        };
         let header = self.read_yaml_header(sub_path);
         let mut text = dump_node(
             &value.to_node(),
@@ -174,7 +193,12 @@ impl ConfigState {
         if let Some(parent) = sub_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        std::fs::write(sub_path, format!("{header}{text}")).map_err(|e| e.to_string())
+        let owner_only = keys.first() == Some(&"stack")
+            && keys.len() == 2
+            && keys[1].ends_with(".yaml")
+            && compose_holds_credentials(&value.to_value());
+        write_stack_file(sub_path, &format!("{header}{text}"), owner_only)
+            .map_err(|e| e.to_string())
     }
 
     /// `_write_initdb()`: the PostgreSQL extensions script, created only when absent.
@@ -313,8 +337,75 @@ impl ConfigState {
         }
     }
 
+    /// Whether `mrsm stack` hardens the stack's compose file (5.1): its `api` service has an
+    /// `MRSM_CONFIG` or `MRSM_PATCH` in its environment (which `mrsm stack` moves to files, so
+    /// the compose file never holds the connectors' credentials), the stack has a `valkey`
+    /// service (`mrsm stack` starts it with its password in a file), or it has a `grafana`
+    /// service, and its "Meerschaum Main" data source is switched to the read-only role (`mrsm
+    /// stack` adds the one-shot `grafana_readonly` service Grafana waits for) or
+    /// `api:grafana:enabled` is set (the auth proxy, its network and the administrator password).
+    /// That transformation lives in `meerschaum-cli` (`os_sql_stack`, `stack_secrets`), which
+    /// writes the file before every `docker compose` command.
+    pub fn stack_compose_hardened(&mut self, compose_name: &str) -> bool {
+        let opts = GetOptions {
+            patch: true,
+            substitute: true,
+            write_missing: false,
+            warn: false,
+        };
+        let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+        let (_, compose) = self.get_config_lossless(&keys(&["stack", compose_name]), opts);
+        let compose = compose.to_value();
+        let api_environment = compose
+            .get("services")
+            .and_then(|services| services.get("api"))
+            .and_then(|api| api.get("environment"));
+        let names = &crate::static_config::static_config().environment;
+        if [&names.config, &names.patch].iter().any(|name| {
+            match api_environment {
+            Some(Value::Map(map)) => map.contains_key(name.as_str()),
+            Some(Value::List(items)) => items.iter().any(|item| {
+                matches!(item, Value::Str(s) if s == *name || s.starts_with(&format!("{name}=")))
+            }),
+            _ => false,
+        }
+        }) {
+            return true;
+        }
+        // 5.1: `mrsm stack` starts the stack's Valkey with a password file.
+        if compose
+            .get("services")
+            .and_then(|services| services.get("valkey"))
+            .is_some_and(|valkey| valkey.as_map().is_some())
+        {
+            return true;
+        }
+        let has_grafana = compose
+            .get("services")
+            .and_then(|services| services.get("grafana"))
+            .is_some_and(|grafana| grafana.as_map().is_some());
+        if !has_grafana {
+            return false;
+        }
+        let (_, enabled) = self.get_config_lossless(&keys(&["api", "grafana", "enabled"]), opts);
+        if enabled.truthy() {
+            return true;
+        }
+        let (_, datasource) =
+            self.get_config_lossless(&keys(&["stack", "grafana", "datasource"]), opts);
+        let mut datasource = datasource.to_value();
+        matches!(
+            self.main_readonly_datasource(&mut datasource).0,
+            super::grafana_readonly::MainSource::Switched { .. }
+        )
+    }
+
     /// `sync_files(keys)`: only the `stack` key has derivative files. Does nothing when writes
     /// are disabled (`_allow_write_missing`), as v4's callers check before calling.
+    ///
+    /// 5.1: the compose file is left to `mrsm stack` when it hardens it
+    /// ([`stack_compose_hardened`](Self::stack_compose_hardened)): this sync never rewrites it in
+    /// a form Grafana could be started from without the hardening.
     pub fn sync_files(&mut self, keys: &[&str]) -> Result<(), String> {
         if !self.allow_writes() || !keys.contains(&"stack") {
             return Ok(());
@@ -322,11 +413,13 @@ impl ConfigState {
         let paths = self.paths().clone();
         let compose_name = paths.path("STACK_COMPOSE_FILENAME");
         let compose_name = compose_name.to_string_lossy().into_owned();
-        self.sync_yaml_config(
-            &["stack", compose_name.as_str()],
-            &paths.path("STACK_COMPOSE_PATH"),
-            COMPOSE_REPLACEMENTS,
-        )?;
+        if !self.stack_compose_hardened(&compose_name) {
+            self.sync_yaml_config(
+                &["stack", compose_name.as_str()],
+                &paths.path("STACK_COMPOSE_PATH"),
+                COMPOSE_REPLACEMENTS,
+            )?;
+        }
         self.sync_yaml_config(
             &["stack", "grafana", "datasource"],
             &paths.path("GRAFANA_DATASOURCE_PATH"),
@@ -339,5 +432,141 @@ impl ConfigState {
         )?;
         self.write_initdb()?;
         self.write_grafana_dashboards()
+    }
+}
+
+/// Whether a stack compose file's config holds a credential (5.1): an `MRSM_CONFIG` /
+/// `MRSM_PATCH` in a service's environment, a variable named like a secret (`*_PASSWORD`,
+/// `*_TOKEN`, `*_SECRET`, ...) with an inline value, or a URI with a password in one. A Docker
+/// Compose placeholder (`$NAME`, `<DOLLAR>NAME`) and a `*_FILE` path are not credentials. Such a
+/// file is written owner-only ([`write_stack_file`]).
+pub fn compose_holds_credentials(compose: &Value) -> bool {
+    let names = &crate::static_config::static_config().environment;
+    let secret = |name: &str, value: &str| -> bool {
+        let value = value.trim();
+        if value.is_empty() || value.starts_with('$') || value.starts_with("<DOLLAR>") {
+            return false;
+        }
+        if name == names.config || name == names.patch {
+            return true;
+        }
+        let upper = name.to_ascii_uppercase();
+        (crate::debug::is_secret_key(name) && !upper.ends_with("_FILE"))
+            || crate::debug::redact_uris(value) != value
+    };
+    let Some(services) = compose.get("services").and_then(Value::as_map) else {
+        return false;
+    };
+    services
+        .values()
+        .any(|service| match service.get("environment") {
+            Some(Value::Map(map)) => map
+                .iter()
+                .any(|(k, v)| !v.is_null() && secret(k, &v.py_str())),
+            Some(Value::List(items)) => items.iter().any(|item| match item {
+                Value::Str(s) => s.split_once('=').is_some_and(|(k, v)| secret(k, v)),
+                _ => false,
+            }),
+            _ => false,
+        })
+}
+
+/// Write a stack file: owner-only (`0600`, created so before a byte is written, then renamed into
+/// place, which also tightens an existing file) when `owner_only`, else as it is.
+pub fn write_stack_file(path: &Path, text: &str, owner_only: bool) -> std::io::Result<()> {
+    if !owner_only {
+        return std::fs::write(path, text);
+    }
+    use std::io::Write;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temporary = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+
+    #[test]
+    fn a_compose_file_with_credentials_is_recognized() {
+        for (text, holds) in [
+            (
+                r#"{"services": {"api": {"environment": {"MRSM_CONFIG": "{}"}}}}"#,
+                true,
+            ),
+            (
+                r#"{"services": {"g": {"environment": {"GF_SECURITY_ADMIN_PASSWORD": "x"}}}}"#,
+                true,
+            ),
+            (
+                r#"{"services": {"g": {"environment": ["DB_URL=postgresql://u:p@h/d"]}}}"#,
+                true,
+            ),
+            (
+                r#"{"services": {"db": {"environment": {"POSTGRES_PASSWORD": "<DOLLAR>P"}}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"db": {"environment": ["POSTGRES_PASSWORD=$P"]}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"g": {"environment": {"GF_SECURITY_ADMIN_PASSWORD__FILE": "/f"}}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"api": {"environment": {"MRSM_CONFIG_FILE": "/f", "A": "1"}}}}"#,
+                false,
+            ),
+            (
+                r#"{"services": {"v": {"environment": {"VALKEY_RDB_POLICY_DISABLED": "no"}}}}"#,
+                false,
+            ),
+        ] {
+            let value = Value::from_json_str(text).unwrap();
+            assert_eq!(compose_holds_credentials(&value), holds, "{text}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_owner_only_write_tightens_an_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("docker-compose.yaml");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_stack_file(&path, "new", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        write_stack_file(&path, "plain", false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "plain");
     }
 }

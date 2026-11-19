@@ -451,10 +451,12 @@ fn a_plugin_reads_a_parent_runs_sql_rewrites_a_window_and_uses_its_config() {
 
     // The action writes the plugin's config through the host; the next syncs read it.
     let configured = home.ok(&["hosted", "configure"]);
-    assert!(
-        configured.contains(r#"config {"rows":4,"multiplier":100}"#),
-        "{configured}"
-    );
+    let config_message = configured
+        .lines()
+        .find_map(|line| line.split_once("config ").map(|(_, json)| json))
+        .expect("the plugin reports its new configuration");
+    let reported: serde_json::Value = serde_json::from_str(config_message).unwrap();
+    assert_eq!(reported, serde_json::json!({"rows": 4, "multiplier": 100}));
     // The `plugins` file of the config directory, as Python's `write_plugin_config()` writes it.
     assert_eq!(
         config(&plugins_json),
@@ -532,10 +534,12 @@ fn serve(home: &Home) -> Server {
     serve_config(home, serde_json::json!({}))
 }
 
-fn serve_config(home: &Home, config: serde_json::Value) -> Server {
+fn serve_config(home: &Home, mut config: serde_json::Value) -> Server {
     let socket = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = socket.local_addr().unwrap().port();
     drop(socket);
+    config["api"]["execution"] =
+        serde_json::json!({"callback_url": format!("http://127.0.0.1:{port}")});
     let stderr = home.root.path().join("server.err");
     let mut command = home.command();
     command.env("MRSM_CONFIG", config.to_string());
@@ -684,7 +688,7 @@ fn route_host_calls_run_with_the_callers_scopes() {
     register_user(&home, "ada");
     let server = serve(&home);
     let port = server.port;
-    let reader = login(port, "ada", "pipes:read");
+    let reader = login(port, "ada", "plugins:read+pipes:read");
     let (status, body) = http(
         port,
         "GET",
@@ -719,7 +723,7 @@ fn route_host_calls_run_with_the_callers_scopes() {
     );
     assert!(body.contains(r#""rowcount":3"#), "{body}");
 
-    let writer = login(port, "ada", "pipes:read+pipes:delete");
+    let writer = login(port, "ada", "plugins:read+pipes:read+pipes:delete");
     let (status, body) = http(
         port,
         "POST",
@@ -743,7 +747,7 @@ fn route_host_calls_run_with_the_callers_scopes() {
     let (status, body) = get("/hosted/sql", &reader);
     assert_eq!(status, 403, "{body}");
     assert!(body.contains("`sql:read`"), "{body}");
-    let analyst = login(port, "ada", "sql:read");
+    let analyst = login(port, "ada", "plugins:read+sql:read");
     let (status, body) = get("/hosted/sql", &analyst);
     assert_eq!(status, 200, "{body}");
     assert_eq!(body, r#"[{"one":1}]"#);
@@ -768,14 +772,14 @@ fn route_host_calls_run_with_the_callers_scopes() {
     }
     // `exec_sql` needs a caller who may run actions: not a user with `actions:execute` alone...
     let post = |path: &str, auth: &str| http(port, "POST", path, &[("Authorization", auth)], b"");
-    let executor = login(port, "ada", "actions:execute");
+    let executor = login(port, "ada", "plugins:read+actions:execute");
     let (status, body) = post("/hosted/exec", &executor);
     assert_eq!(status, 403, "{body}");
     assert!(body.contains("may not execute SQL statements"), "{body}");
     // ...but an administrator, and never on the internal tables.
     register_user(&home, "root");
     home.ok(&["hosted", "promote"]);
-    let admin = login(port, "root", "actions:execute");
+    let admin = login(port, "root", "plugins:read+actions:execute");
     let (status, body) = post("/hosted/exec", &admin);
     assert_eq!(status, 200, "{body}");
     assert!(body.starts_with("[true"), "{body}");
@@ -801,7 +805,7 @@ fn route_host_calls_run_with_the_callers_scopes() {
     let admin_pipe = login(
         port,
         "root",
-        "pipes:read+pipes:write+pipes:delete+pipes:register",
+        "plugins:read+pipes:read+pipes:write+pipes:delete+pipes:register",
     );
     for operation in ["count", "data", "sync", "clear", "register"] {
         let (status, body) = post(&format!("/hosted/probe/internals/{operation}"), &admin_pipe);

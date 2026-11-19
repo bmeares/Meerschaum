@@ -29,6 +29,11 @@ use crate::sync::{DeltaObserver, SyncArgs, SyncEnv};
 /// method").
 #[async_trait]
 pub trait PluginSync: Send + Sync {
+    /// Whether the connector's ordinary fetch path can replace this optimization.
+    fn is_fetch_optimization(&self) -> bool {
+        false
+    }
+
     /// Run the plugin's `sync()` for `pipe`.
     async fn sync(&self, pipe: &Pipe, args: &SyncArgs) -> SyncResult;
 

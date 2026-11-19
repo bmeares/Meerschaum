@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -10,6 +11,8 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
+import zipfile
 
 spec = importlib.util.spec_from_file_location('docker_candidates', Path(__file__).with_name('candidates.py'))
 candidates = importlib.util.module_from_spec(spec)
@@ -18,6 +21,16 @@ gate = candidates.gate
 GROUPS = ('minimal', 'full', 'slim', 'rust', 'rust-full')
 IMAGE = 'bmeares/meerschaum'
 TARGETS = {'linux/amd64': 'x86_64-unknown-linux-gnu', 'linux/arm64': 'aarch64-unknown-linux-gnu'}
+EXECUTOR_CASES = (
+    'generated_container_starts_api_job_and_discovers_a_python_source',
+    'generated_container_starts_credentialed_team_job',
+    'generated_container_api_job_delivers_plugin_rows',
+    'generated_container_team_job_delivers_plugin_rows',
+    'generated_container_discovers_a_granted_native_resource',
+    'public_host_api_terminal_shows_version_after_reconnect',
+    'public_remote_api_terminal_shows_version_after_reconnect',
+    'generated_executors_resume_jobs_after_outage_and_preserve_team_state_on_recreation',
+)
 
 
 class MissingImages(ValueError):
@@ -72,6 +85,47 @@ def inspect_image(reference: str) -> dict:
     return command('docker', 'image', 'inspect', reference)[0]
 
 
+def check_executor_image(image_id: str, sdk: Path, info: dict) -> None:
+    """Exercise the sealed Linux image with generated Teams on the native Docker runner."""
+    wheels = list((sdk / 'wheels').glob('*.whl'))
+    if len(wheels) != 1 or gate.artifacts.sha256(wheels[0]) != info['wheel_sha256']:
+        raise ValueError('The executor check requires the sealed Linux wheel.')
+    if gate.artifacts.sha256(sdk / 'mrsm') != info['binary_sha256']:
+        raise ValueError('The executor check requires the sealed Linux CLI.')
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        extensions = [entry for entry in wheel.namelist()
+                      if re.fullmatch(r'meerschaum/_core/_native[^/]*\.so', entry)]
+        if len(extensions) != 1:
+            raise ValueError('Expected one native SDK extension in the sealed Linux wheel.')
+        with wheel.open(extensions[0]) as extension:
+            sdk_sha256 = hashlib.file_digest(extension, 'sha256').hexdigest()
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('MRSM_', 'TPR_'))
+           and key not in ('TMUX', 'TMUX_PANE', 'GH_TOKEN', 'GITHUB_TOKEN', 'CARGO_TARGET_DIR')}
+    with tempfile.TemporaryDirectory(prefix='mrsm-release-executors-', dir=env.get('RUNNER_TEMP')) as root:
+        plugins = Path(root) / 'plugins'
+        plugins.mkdir()
+        env.update(MRSM_ROOT_DIR=root, MRSM_PLUGINS_DIR=str(plugins), MRSM_NO_AUTO_INSTALL='1',
+                   MRSM_TEST_EXECUTOR_IMAGE=image_id, MRSM_TEST_EXECUTOR_PROVISION_FACTORY='1',
+                   MRSM_TEST_EXECUTOR_NATIVE_SHA256=info['binary_sha256'],
+                   MRSM_TEST_EXECUTOR_SDK_SHA256=sdk_sha256)
+        args = ['cargo', 'test', '--locked', '-p', 'meerschaum-cli', '--test', 'executor_container',
+                '--', '--ignored', '--exact', '--test-threads=1', *EXECUTOR_CASES]
+        # libtest accepts a missing exact filter and can exit successfully with zero tests.
+        result = subprocess.run(args, env=env, text=True, stdout=subprocess.PIPE)
+        print(result.stdout, flush=True)
+        result.check_returncode()
+        if f'test result: ok. {len(EXECUTOR_CASES)} passed;' not in result.stdout:
+            raise ValueError('The installed executor suite did not exercise every selected case.')
+
+
+def required_checks(platform: str) -> dict:
+    checks = {'runtime_smokes': 'success', 'size_gate': 'success', 'facade_smoke': 'success'}
+    if platform == 'linux/amd64':
+        checks['installed_team_executors'] = 'success'
+    return checks
+
+
 def record_images(output: Path, platform: str, sdk: Path) -> dict:
     info = json.loads((sdk / 'sdk-info.json').read_text())
     source = gate.artifacts.checkout()
@@ -90,9 +144,11 @@ def record_images(output: Path, platform: str, sdk: Path) -> dict:
         local = f'{tag_prefix}-{group}'
         subprocess.run(['docker', 'tag', image['Id'], local], check=True)
         images[group] = {'id': image['Id'], 'local_tag': local}
+    if platform == 'linux/amd64':
+        check_executor_image(images['full']['id'], sdk, info)
     record = {'schema': 1, 'source': source, 'version': version(), 'platform': platform,
               'sdk': info, 'run_id': os.environ['GITHUB_RUN_ID'],
-              'checks': {'runtime_smokes': 'success', 'size_gate': 'success', 'facade_smoke': 'success'},
+              'checks': required_checks(platform),
               'images': images}
     output.write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
     return record
@@ -108,7 +164,7 @@ def validate_record(path: Path, platform: str, sdk_run: str, *, local: bool = Tr
             or record['sdk'].get('candidate_run_id') != sdk_run
             or record['sdk'].get('platform') != platform
             or set(record.get('images', {})) != set(GROUPS)
-            or record.get('checks') != {'runtime_smokes': 'success', 'size_gate': 'success', 'facade_smoke': 'success'}):
+            or record.get('checks') != required_checks(platform)):
         raise ValueError('Docker candidate source, SDK, platform, image catalog or checks differ.')
     if sdk is not None and record['sdk'] != json.loads((sdk / 'sdk-info.json').read_text()):
         raise ValueError('Docker candidate SDK checksums differ from the sealed SDK.')

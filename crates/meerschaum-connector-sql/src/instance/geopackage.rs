@@ -29,6 +29,20 @@ use crate::pipe::SqlPipe;
 
 use super::SqlConnector;
 
+/// GeoPackage catalog and spatial-index storage names are maintained by the connector,
+/// never through a user-selected pipe target. Callers must apply this only to GeoPackage.
+pub fn is_system_target(target: &str) -> bool {
+    let name = target
+        .trim()
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_matches(['"', '`', '[', ']'])
+        .to_ascii_lowercase();
+    name.starts_with("gpkg_") || name.starts_with("rtree_")
+}
+
 /// `PRAGMA application_id` of a GeoPackage (`GPKG`).
 pub const GPKG_APPLICATION_ID: i64 = 0x4750_4B47;
 /// `PRAGMA user_version` GDAL writes (GeoPackage 1.4).

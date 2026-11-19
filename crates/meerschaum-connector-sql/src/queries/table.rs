@@ -839,6 +839,16 @@ pub fn cols_indices_from_rows(
     out
 }
 
+/// Whether the relations [`get_postgis_geo_columns_types_query`] reads (`geometry_columns` and
+/// `geography_columns`, resolved through the `search_path` as that query resolves them) exist
+/// and can be read: `1` or `0` in the column `exists`. It cannot fail where PostGIS is missing
+/// (`to_regclass` returns NULL for a missing relation), so it may run inside a transaction that
+/// the lookup itself would abort.
+pub const POSTGIS_CATALOG_QUERY: &str = "SELECT CASE WHEN COALESCE(\
+     has_table_privilege(to_regclass('geometry_columns'), 'SELECT') \
+     AND has_table_privilege(to_regclass('geography_columns'), 'SELECT'), FALSE) \
+     THEN 1 ELSE 0 END AS \"exists\"";
+
 /// The PostGIS `geometry_columns` / `geography_columns` lookup (`utils/sql.py:3106`).
 pub fn get_postgis_geo_columns_types_query(table: &str, schema: Option<&str>) -> Result<String> {
     clean(table)?;

@@ -25,6 +25,10 @@ TESTS = {
     'instance_unique_keys': 'meerschaum-connector-sql',
     'instance_has_rows': 'meerschaum-connector-sql',
     'instance_pipe_data': 'meerschaum-connector-sql',
+    'registered_pg_source': 'meerschaum-cli',
+    'immutable_sync': 'meerschaum-engine',
+    'engine_store': 'meerschaum-server',
+    'graph_window_sql_http': 'meerschaum-server',
     'valkey_first_user': 'meerschaum-connector-valkey',
     'valkey_misc': 'meerschaum-connector-valkey',
     'pipeline_metadata_move': 'meerschaum-connector-valkey',
@@ -33,7 +37,25 @@ TESTS = {
     'w18_fail_fast': 'meerschaum-connector-valkey',
     'valkey_replay': 'meerschaum-connector-valkey',
 }
-FILTERS = {'instance_pipe_data': 'test_selected_columns_do_not_reintroduce_omitted_columns'}
+FILTERS = {
+    'instance_pipe_data': 'test_selected_columns_do_not_reintroduce_omitted_columns',
+    'registered_pg_source': 'registered_same_store_table_fetch_and_paging',
+    'immutable_sync': 'postgres_watermarks_and_sparse_cpi',
+    'engine_store': 'direct_admin_engine_writes_on_postgres',
+    'graph_window_sql_http': 'self_api_restricted_graph_commits_innodb_append',
+}
+SOURCE_PG_URI = 'MEERSCHAUM_TEST_REGISTERED_SOURCE_PG_URI'
+SOURCE_PG_DATABASE = 'mrsm_registered_source_ci'
+SOURCE_PG_OWNER = 'mrsm_registered_source_owner'
+SOURCE_PG_PASSWORD = 'synthetic-registered-source-ci'
+APPEND_USER = 'mrsm_innodb_append_owner'
+APPEND_PASSWORD = 'synthetic-innodb-append-ci'
+APPEND_DATABASES = {
+    'mysql': 'mrsm_innodb_append_mysql',
+    'mariadb': 'mrsm_innodb_append_mariadb',
+}
+APPEND_URIS = {service: f'MEERSCHAUM_TEST_{service.upper()}_APPEND_URI'
+               for service in APPEND_DATABASES}
 
 
 def save_report(path, report):
@@ -92,6 +114,9 @@ def select_tests(lines, repo=REPO):
 def native_environment(root, ports, source=None):
     env = clean_environment(os.environ if source is None else source)
     env.pop('CARGO_TARGET_DIR', None)
+    env.pop(SOURCE_PG_URI, None)
+    for key in APPEND_URIS.values():
+        env.pop(key, None)
     for key in list(env):
         if key.startswith(('PG', 'REDIS', 'VALKEY')):
             env.pop(key)
@@ -241,6 +266,21 @@ def run(root, profile='test', focused_build=False):
                 "CREATE USER IF NOT EXISTS 'test'@'%' IDENTIFIED BY 'test1234'; "
                 "GRANT ALL PRIVILEGES ON *.* TO 'test'@'%';"),
                 env, root / (service + '-test-grants.log'))
+        # The canonical source test exercises one application caller through a
+        # separate non-superuser database owner on this project's local PostgreSQL.
+        run_child(compose('exec', '-T', 'postgresql', 'psql', '-U', 'test', '-d', 'testdb',
+            '-v', 'ON_ERROR_STOP=1',
+            '-c', f"CREATE ROLE {SOURCE_PG_OWNER} LOGIN PASSWORD '{SOURCE_PG_PASSWORD}'",
+            '-c', f'CREATE DATABASE {SOURCE_PG_DATABASE} OWNER {SOURCE_PG_OWNER}'),
+            env, root / 'registered-postgres-database.log')
+        for service, database in APPEND_DATABASES.items():
+            escaped = database.replace('_', r'\_')
+            run_child(compose('exec', '-T', service, service, '-u', 'root',
+                '-pmy-secret-pw', '-e',
+                f'CREATE DATABASE `{database}`; '
+                f"CREATE USER '{APPEND_USER}'@'%' IDENTIFIED BY '{APPEND_PASSWORD}'; "
+                f"GRANT ALL PRIVILEGES ON `{escaped}`.* TO '{APPEND_USER}'@'%';"),
+                env, root / (service + '-registered-append.log'))
         env = native_environment(root, ports, env)
         for name in TESTS:
             binary = binaries[name]
@@ -248,7 +288,23 @@ def run(root, profile='test', focused_build=False):
             command = [str(binary), '--test-threads=1', '--nocapture']
             if name in FILTERS:
                 command.append(FILTERS[name])
-            run_child(command, env, root / (name + '.log'))
+            test_env = env
+            if name == 'registered_pg_source':
+                command.extend(('--ignored', '--exact'))
+                # Only this test sees the distinct owned database selector.
+                port = mapped_port(f"127.0.0.1:{ports['postgresql']}")
+                test_env = {**env, SOURCE_PG_URI: (
+                    f'postgresql://{SOURCE_PG_OWNER}:{SOURCE_PG_PASSWORD}@127.0.0.1:{port}'
+                    f'/{SOURCE_PG_DATABASE}')}
+            if name == 'graph_window_sql_http':
+                command.extend(('--ignored', '--exact'))
+                test_env = {**env, **{
+                    APPEND_URIS[service]: (
+                        f'{service}://{APPEND_USER}:{APPEND_PASSWORD}@127.0.0.1:'
+                        f"{mapped_port('127.0.0.1:' + str(ports[service]))}/{database}")
+                    for service, database in APPEND_DATABASES.items()
+                }}
+            run_child(command, test_env, root / (name + '.log'))
             check_test_output(name, (root / (name + '.log')).read_text())
             report['tests'].append({'name': name, 'filter': FILTERS.get(name),
                                     'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),

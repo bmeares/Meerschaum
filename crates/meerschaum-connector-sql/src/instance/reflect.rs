@@ -464,6 +464,7 @@ impl SqlConnector {
         };
         if self.flavor.driver_family() == DriverFamily::Postgres
             && needs_postgis_lookup(check)
+            && self.postgis_catalog(None).await
             && let Ok(q) = get_postgis_geo_columns_types_query(table, schema_resolved.as_deref())
             && let Ok(gdf) = self.read(&q).await
         {

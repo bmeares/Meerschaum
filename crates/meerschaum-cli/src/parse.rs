@@ -429,6 +429,10 @@ pub const ENGINE_OPTIONS: &[EngineOption] = &[
         flag: "--no-stagger",
     },
     EngineOption {
+        dest: "no_pull",
+        flag: "--no-pull",
+    },
+    EngineOption {
         dest: "startup_jitter",
         flag: "--startup-jitter",
     },
@@ -497,7 +501,7 @@ pub enum AccessCommand {
     PipesAccess,
     /// `lock pipes` / `unlock pipes`: `--locks`.
     Locks,
-    /// `register teams` / `edit teams`: `--members`, `--managers`.
+    /// `register teams` / `edit teams` / `bootstrap teams`: `--members`, `--managers`.
     Teams,
 }
 
@@ -517,7 +521,9 @@ pub fn access_command(sysargs: &[String]) -> Option<AccessCommand> {
                 return Some(AccessCommand::PipesAccess);
             }
             ("lock" | "unlock", "pipe" | "pipes") => return Some(AccessCommand::Locks),
-            ("register" | "edit", "team" | "teams") => return Some(AccessCommand::Teams),
+            ("register" | "edit" | "bootstrap", "team" | "teams") => {
+                return Some(AccessCommand::Teams);
+            }
             _ => {}
         }
     }
@@ -593,7 +599,10 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
                 }
             }
             // Wave 18 (D23): start jobs without the startup jitter, load wait and slots.
-            "chunk_pipelining" | "no_stagger" if attached.is_none() => Some(PyValue::Bool(true)),
+            // 5.1: `upgrade meerschaum` skips pulling the stack's images without asking.
+            "chunk_pipelining" | "no_stagger" | "no_pull" if attached.is_none() => {
+                Some(PyValue::Bool(true))
+            }
             // Wave 18 (D23): `--startup-jitter 30s` bounds a job's startup delay, `--jitter 30s`
             // its schedule's fixed offset (scoped to a schedule so plugin flags named `--jitter`
             // still parse).

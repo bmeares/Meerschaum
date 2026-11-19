@@ -180,7 +180,10 @@ fn settings_from_py(py: Python<'_>, flavor: Flavor) -> InstanceSettings {
 }
 
 /// The connector attributes from the Python connector's `__dict__`-like mapping.
-fn attributes_from_py(label: &str, attrs: &Bound<'_, PyDict>) -> PyResult<ConnectorAttributes> {
+pub(crate) fn attributes_from_py(
+    label: &str,
+    attrs: &Bound<'_, PyDict>,
+) -> PyResult<ConnectorAttributes> {
     let mut out = ConnectorAttributes {
         label: Some(label.to_string()),
         ..Default::default()

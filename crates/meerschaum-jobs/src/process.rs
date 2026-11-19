@@ -104,7 +104,7 @@ mod imp {
         if !exists(pid) {
             return ProcState::Gone;
         }
-        let out = std::process::Command::new("ps")
+        let out = meerschaum_core::child_env::scrubbed(std::process::Command::new("ps"))
             .args(["-o", "stat=", "-p", &pid.to_string()])
             .output();
         let stat = out
@@ -145,7 +145,7 @@ mod imp {
     /// The command lines of every process: `(pid, argv)` (approximated from `ps`).
     #[cfg(not(target_os = "linux"))]
     pub fn process_cmdlines() -> Vec<(i32, Vec<String>)> {
-        let Ok(out) = std::process::Command::new("ps")
+        let Ok(out) = meerschaum_core::child_env::scrubbed(std::process::Command::new("ps"))
             .args(["-axww", "-o", "pid=,args="])
             .output()
         else {

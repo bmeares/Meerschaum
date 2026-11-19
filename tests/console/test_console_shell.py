@@ -130,7 +130,7 @@ def test_old_dashboard_links_open_the_terminal_page(server, tab):
     assert 'action=show' in tab.page.url
     tab.wait_for_dashboard()
     ### `/dash/webterm` (the terminal's old URL) is the Terminal page too.
-    tab.goto('/dash/webterm', '#go-button')
+    tab.goto('/dash/webterm', '#main-div')
     assert tab.page.locator('#instance-select').count() == 1
     assert _errors(tab) == [], _errors(tab)
 

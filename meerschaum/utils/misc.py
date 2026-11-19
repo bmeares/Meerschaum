@@ -338,7 +338,8 @@ def edit_file(
         EDITOR = os.environ.get('EDITOR', default_editor)
         if debug:
             dprint(f"Opening file '{path}' with editor '{EDITOR}'...")
-        rc = call([EDITOR, path])
+        from meerschaum.config.environment import get_child_env
+        rc = call([EDITOR, path], env=get_child_env())
     except Exception as e: ### can't open with default editors
         if debug:
             dprint(str(e))
@@ -1223,9 +1224,11 @@ def interval_str(delta: Union[timedelta, int], round_unit: bool = False) -> str:
 def is_docker_available() -> bool:
     """Check if we can connect to the Docker engine."""
     import subprocess
+    from meerschaum.config.environment import get_child_env
     try:
         has_docker = subprocess.call(
-            ['docker', 'ps'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+            ['docker', 'ps'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+            env=get_child_env()
         ) == 0
     except Exception:
         has_docker = False
@@ -1241,10 +1244,12 @@ def is_android() -> bool:
 def is_bcp_available() -> bool:
     """Check if the MSSQL `bcp` utility is installed."""
     import subprocess
+    from meerschaum.config.environment import get_child_env
 
     try:
         has_bcp = subprocess.call(
-            ['bcp', '-v'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+            ['bcp', '-v'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+            env=get_child_env()
         ) == 0
     except Exception:
         has_bcp = False
@@ -1261,11 +1266,13 @@ def is_tmux_available() -> bool:
     Check if `tmux` is installed.
     """
     import subprocess
+    from meerschaum.config.environment import get_child_env
     try:
         has_tmux = subprocess.call(
             ['tmux', '-V'],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT
+            stderr=subprocess.STDOUT,
+            env=get_child_env()
         ) == 0
     except FileNotFoundError:
         has_tmux = False

@@ -51,7 +51,9 @@ pub fn os(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .config()
         .get(&["shell", "timeout"])
         .and_then(|v| pyfmt::py_int(&v).map(|n| (n, v.py_str())));
+    // The user's own command: it keeps the whole environment, like `sh` (5.1).
     let spec = CommandSpec {
+        scrub_secrets: false,
         program: command[0].clone(),
         args: command[1..].to_vec(),
         ..CommandSpec::default()
@@ -284,6 +286,7 @@ fn open_cli_with_options(
         _ => vec![target.clone()],
     };
     let mut command = CommandSpec {
+        scrub_secrets: true,
         program: client.program,
         args: client.prefix.into_iter().chain(args).collect(),
         env: client.env,
@@ -537,7 +540,8 @@ fn broken_client(client: &Client, script: &std::path::Path) -> Option<String> {
     if !client.prefix.is_empty() {
         interpreter = vec![client.program.clone()];
     }
-    let mut command = std::process::Command::new(&interpreter[0]);
+    let mut command =
+        meerschaum_core::child_env::scrubbed(std::process::Command::new(&interpreter[0]));
     command
         .args(&interpreter[1..])
         .args(["-c", &format!("import {module}")])
@@ -835,6 +839,618 @@ pub(crate) fn stack_env_dict() -> Map {
     env
 }
 
+/// The network between the stack's API server and its Grafana (`api:grafana`, 5.1): Grafana
+/// trusts the auth-proxy header from the API server's fixed address on it only.
+pub const GRAFANA_PROXY_NETWORK: &str = "grafana_auth";
+
+/// The addresses on `api:grafana:proxy_subnet` (an IPv4 network of at least eight addresses,
+/// [`meerschaum_web::grafana::DEFAULT_PROXY_SUBNET`] by default): `(subnet, API server, Grafana)`,
+/// the first two hosts after Docker's gateway.
+pub fn grafana_proxy_addresses(
+    grafana: &Map,
+) -> Result<(String, std::net::Ipv4Addr, std::net::Ipv4Addr), String> {
+    let subnet = meerschaum_web::grafana::setting_text(grafana, "proxy_subnet")
+        .unwrap_or_else(|| meerschaum_web::grafana::DEFAULT_PROXY_SUBNET.to_string());
+    let invalid = || {
+        format!(
+            "`api:grafana:proxy_subnet` ('{subnet}') must be an IPv4 network such as \
+             '{}' (a prefix of /29 or shorter).",
+            meerschaum_web::grafana::DEFAULT_PROXY_SUBNET
+        )
+    };
+    let (address, prefix) = subnet.split_once('/').ok_or_else(invalid)?;
+    let address: std::net::Ipv4Addr = address.trim().parse().map_err(|_| invalid())?;
+    let prefix: u32 = prefix.trim().parse().map_err(|_| invalid())?;
+    if !(8..=29).contains(&prefix) {
+        return Err(invalid());
+    }
+    let mask = u32::MAX << (32 - prefix);
+    let network = u32::from(address) & mask;
+    Ok((
+        format!("{}/{prefix}", std::net::Ipv4Addr::from(network)),
+        std::net::Ipv4Addr::from(network + 2),
+        std::net::Ipv4Addr::from(network + 3),
+    ))
+}
+
+/// What the stack's Grafana is given for the API server to sign its users in (`api:grafana`,
+/// 5.1). `forced`: set over whatever the stack config has (the auth proxy and the server
+/// administrator); `defaults`: set only when missing (served under `/grafana`). Anonymous access
+/// is left as the stack config has it.
+///
+/// The auth-proxy header is trusted from `proxy_whitelist` (a string or a list), else from
+/// `api_address` (the stack's API server on [`GRAFANA_PROXY_NETWORK`]); with neither, the auth
+/// proxy is turned off (`warning` says what to set). Never a network range by default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrafanaSignIn {
+    pub forced: Vec<(&'static str, String)>,
+    pub defaults: Vec<(&'static str, String)>,
+    pub warning: Option<String>,
+}
+
+pub fn grafana_sign_in_environment(
+    grafana: &Map,
+    admin_password: &str,
+    api_address: Option<std::net::Ipv4Addr>,
+) -> GrafanaSignIn {
+    use meerschaum_web::grafana::setting_text;
+    let whitelist = setting_text(grafana, "proxy_whitelist")
+        .or_else(|| api_address.map(|address| address.to_string()));
+    let mut forced = vec![
+        (
+            "GF_SECURITY_ADMIN_USER",
+            setting_text(grafana, "admin_user").unwrap_or_else(|| "admin".into()),
+        ),
+        ("GF_SECURITY_ADMIN_PASSWORD", admin_password.to_string()),
+        ("GF_AUTH_PROXY_HEADER_NAME", "X-WEBAUTH-USER".into()),
+        ("GF_AUTH_PROXY_HEADER_PROPERTY", "username".into()),
+        ("GF_AUTH_PROXY_AUTO_SIGN_UP", "true".into()),
+    ];
+    let mut warning = None;
+    match whitelist {
+        Some(whitelist) => {
+            forced.push(("GF_AUTH_PROXY_ENABLED", "true".into()));
+            forced.push(("GF_AUTH_PROXY_WHITELIST", whitelist));
+        }
+        None => {
+            forced.push(("GF_AUTH_PROXY_ENABLED", "false".into()));
+            forced.push(("GF_AUTH_PROXY_WHITELIST", String::new()));
+            warning = Some(
+                "Grafana's sign-in through Meerschaum is off: the stack has no `api` service, so \
+                 the API server's address is not known. Set `api:grafana:proxy_whitelist` to the \
+                 address Grafana sees the API server connect from (and `api:grafana:url` to how \
+                 the API server reaches Grafana)."
+                    .to_string(),
+            );
+        }
+    }
+    GrafanaSignIn {
+        forced,
+        defaults: vec![
+            (
+                "GF_SERVER_ROOT_URL",
+                setting_text(grafana, "root_url")
+                    .unwrap_or_else(|| "%(protocol)s://%(domain)s:%(http_port)s/grafana/".into()),
+            ),
+            ("GF_SERVER_SERVE_FROM_SUB_PATH", "true".into()),
+        ],
+        warning,
+    }
+}
+
+/// Set `name` in a compose `environment` (a map or a `KEY=value` list); `force` replaces an
+/// existing value.
+pub(super) fn set_environment(environment: &mut Value, name: &str, value: &str, force: bool) {
+    match environment {
+        Value::Map(map) => {
+            if force || !map.contains_key(name) {
+                map.insert(name.to_string(), Value::Str(value.to_string()));
+            }
+        }
+        Value::List(items) => {
+            let prefix = format!("{name}=");
+            let exists = items
+                .iter()
+                .any(|item| matches!(item, Value::Str(s) if s.starts_with(&prefix) || s == name));
+            if exists && !force {
+                return;
+            }
+            items.retain(
+                |item| !matches!(item, Value::Str(s) if s.starts_with(&prefix) || s == name),
+            );
+            items.push(Value::Str(format!("{name}={value}")));
+        }
+        other => {
+            let mut map = Map::new();
+            map.insert(name.to_string(), Value::Str(value.to_string()));
+            *other = Value::Map(map);
+        }
+    }
+}
+
+/// A service's `networks` as a map (compose takes a list or a map), with `network` attached at
+/// `address`.
+fn attach_network(service: &mut Map, network: &str, address: std::net::Ipv4Addr) {
+    let mut networks = match service.get("networks") {
+        Some(Value::Map(map)) => map.clone(),
+        Some(Value::List(items)) => items
+            .iter()
+            .map(|item| (item.py_str(), Value::Null))
+            .collect(),
+        _ => Map::new(),
+    };
+    let mut attachment = Map::new();
+    attachment.insert("ipv4_address".into(), Value::Str(address.to_string()));
+    networks.insert(network.to_string(), Value::Map(attachment));
+    service.insert("networks".into(), Value::Map(networks));
+}
+
+/// The api service's `MRSM_PATCH` with `api:grafana:admin_password` (the stack's API server has
+/// a root of its own, so it is given the password Grafana is started with). `None` when the
+/// variable is not JSON.
+fn patched_api_patch(existing: Option<&str>, admin_password: &str) -> Option<String> {
+    let mut patch: serde_json::Value = match existing.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(text) => serde_json::from_str(text).ok()?,
+        None => serde_json::json!({}),
+    };
+    let object = patch.as_object_mut()?;
+    let api = object
+        .entry("api")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()?;
+    let grafana = api
+        .entry("grafana")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()?;
+    grafana.insert("admin_password".into(), admin_password.into());
+    serde_json::to_string_pretty(&patch).ok()
+}
+
+/// The compose file's config with what `api:grafana:enabled` needs (5.1): the `grafana` service
+/// gets [`grafana_sign_in_environment`] (security settings forced, the others only when
+/// missing); when the stack has an `api` service, both join [`GRAFANA_PROXY_NETWORK`] at fixed
+/// addresses, the API server reaches `grafana` there (`extra_hosts`), and it is given the
+/// administrator password. Other files and a stack without a `grafana` service are returned as
+/// they are.
+fn with_grafana_sign_in(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value) -> Value {
+    if keys != ["stack", "docker-compose.yaml"] {
+        return value;
+    }
+    let grafana = rt
+        .config()
+        .get_with(
+            &["api", "grafana"],
+            meerschaum_core::config::GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        )
+        .1
+        .to_map();
+    if !grafana.get("enabled").is_some_and(Value::truthy) {
+        return value;
+    }
+    let has_grafana = value
+        .get("services")
+        .and_then(|services| services.get("grafana"))
+        .is_some_and(|service| service.as_map().is_some());
+    if !has_grafana {
+        return value;
+    }
+    let admin_password = match meerschaum_web::grafana::setting_text(&grafana, "admin_password") {
+        Some(password) => password,
+        None => {
+            let path = meerschaum_web::grafana::admin_password_path(
+                &rt.config().paths().path("API_CONFIG_RESOURCES_PATH"),
+            );
+            match meerschaum_web::grafana::read_or_generate_admin_password(&path) {
+                Ok(password) => password,
+                Err(e) => {
+                    warn(rt, &format!("{e}\nGrafana's sign-in was not configured."));
+                    return value;
+                }
+            }
+        }
+    };
+    if admin_password == meerschaum_web::grafana::DEFAULT_ADMIN_PASSWORD {
+        warn(
+            rt,
+            "`api:grafana:admin_password` is Grafana's default ('admin'): set another one. \
+             Grafana's sign-in was not configured.",
+        );
+        return value;
+    }
+    let has_api = value
+        .get("services")
+        .and_then(|services| services.get("api"))
+        .is_some_and(|service| service.as_map().is_some());
+    let addresses = if has_api {
+        match grafana_proxy_addresses(&grafana) {
+            Ok(addresses) => Some(addresses),
+            Err(e) => {
+                warn(rt, &e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let sign_in = grafana_sign_in_environment(
+        &grafana,
+        &admin_password,
+        addresses.as_ref().map(|(_, api, _)| *api),
+    );
+    if let Some(warning) = &sign_in.warning {
+        warn(rt, warning);
+    }
+    let Some(compose) = value.as_map_mut() else {
+        return value;
+    };
+    if let Some((subnet, api_address, grafana_address)) = &addresses {
+        let networks = compose
+            .entry("networks".to_string())
+            .or_insert_with(|| Value::Map(Map::new()));
+        if !matches!(networks, Value::Map(_)) {
+            *networks = Value::Map(Map::new());
+        }
+        if let Value::Map(networks) = networks {
+            let mut pool = Map::new();
+            pool.insert("subnet".into(), Value::Str(subnet.clone()));
+            let mut ipam = Map::new();
+            ipam.insert("config".into(), Value::List(vec![Value::Map(pool)]));
+            let mut network = Map::new();
+            network.insert("ipam".into(), Value::Map(ipam));
+            networks.insert(GRAFANA_PROXY_NETWORK.into(), Value::Map(network));
+        }
+        if let Some(Value::Map(services)) = compose.get_mut("services") {
+            if let Some(Value::Map(api)) = services.get_mut("api") {
+                attach_network(api, GRAFANA_PROXY_NETWORK, *api_address);
+                // `grafana` from the API server is Grafana's address on this network.
+                let host = format!("grafana:{grafana_address}");
+                let mut hosts = match api.get("extra_hosts") {
+                    Some(Value::List(items)) => items.clone(),
+                    Some(Value::Map(map)) => map
+                        .iter()
+                        .map(|(k, v)| Value::Str(format!("{k}:{}", v.py_str())))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                hosts.retain(|item| {
+                    !matches!(item, Value::Str(s) if s.starts_with("grafana:") || s.starts_with("grafana="))
+                });
+                hosts.push(Value::Str(host));
+                api.insert("extra_hosts".into(), Value::List(hosts));
+            }
+            if let Some(Value::Map(service)) = services.get_mut("grafana") {
+                attach_network(service, GRAFANA_PROXY_NETWORK, *grafana_address);
+            }
+        }
+    }
+    if let Some(Value::Map(services)) = compose.get_mut("services") {
+        if has_api && let Some(Value::Map(api)) = services.get_mut("api") {
+            let environment = api
+                .entry("environment".to_string())
+                .or_insert_with(|| Value::Map(Map::new()));
+            let existing = match environment {
+                Value::Map(map) => map.get("MRSM_PATCH").map(Value::py_str),
+                Value::List(items) => items.iter().find_map(|item| match item {
+                    Value::Str(s) => s.strip_prefix("MRSM_PATCH=").map(str::to_string),
+                    _ => None,
+                }),
+                _ => None,
+            };
+            match patched_api_patch(existing.as_deref(), &admin_password) {
+                Some(patch) => set_environment(environment, "MRSM_PATCH", &patch, true),
+                None => warn(
+                    rt,
+                    "The stack's `api` service has an `MRSM_PATCH` that is not JSON: set \
+                     `api:grafana:admin_password` for it yourself.",
+                ),
+            }
+        }
+        if let Some(Value::Map(service)) = services.get_mut("grafana") {
+            let environment = service
+                .entry("environment".to_string())
+                .or_insert_with(|| Value::Map(Map::new()));
+            for (name, setting) in &sign_in.forced {
+                set_environment(environment, name, setting, true);
+            }
+            for (name, setting) in &sign_in.defaults {
+                set_environment(environment, name, setting, false);
+            }
+        }
+    }
+    value
+}
+
+/// The stack's provisioned "Meerschaum Main" data source reads through the main read-only role
+/// (5.1, [`super::stack_readonly`]): the data source file gets the role's credentials, the
+/// compose file the one-shot service that sets the role up before Grafana starts. `warn`: tell
+/// the user what could not be done (once per command).
+fn with_main_readonly(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value, warn_: bool) -> Value {
+    use super::stack_readonly as ro;
+    let is_datasource = keys == ["stack", "grafana", "datasource"];
+    let is_compose = keys == ["stack", "docker-compose.yaml"];
+    if !is_datasource && !is_compose {
+        return value;
+    }
+    let opts = meerschaum_core::config::GetOptions {
+        patch: true,
+        substitute: true,
+        write_missing: false,
+        warn: false,
+    };
+    let main = rt
+        .config()
+        .get_with(&["meerschaum", "connectors", "sql", "main"], opts)
+        .1
+        .to_map();
+    let setting = |key: &str| {
+        main.get(key)
+            .filter(|v| !v.is_null())
+            .map(Value::py_str)
+            .filter(|s| !s.is_empty())
+    };
+    let owner_user = setting("username");
+    let owner_password = setting("password").unwrap_or_default();
+    let mut datasource = if is_datasource {
+        value.clone()
+    } else {
+        rt.config()
+            .get_with(&["stack", "grafana", "datasource"], opts)
+            .1
+    };
+    // The same switch every writer of the data source file applies (fails closed: no password
+    // rather than the owner's).
+    let (source, error) = rt
+        .config()
+        .with_state(|s| s.main_readonly_datasource(&mut datasource));
+    if let Some(e) = error
+        && warn_
+        && is_datasource
+    {
+        warn(
+            rt,
+            &format!(
+                "{e}\nGrafana's '{}' data source is written without a password.",
+                ro::MAIN_DATASOURCE
+            ),
+        );
+    }
+    let password = datasource
+        .get("datasources")
+        .and_then(Value::as_list)
+        .and_then(|sources| {
+            sources
+                .iter()
+                .find(|s| s.get("name").map(Value::py_str).as_deref() == Some(ro::MAIN_DATASOURCE))
+        })
+        .and_then(|s| s.get("secureJsonData"))
+        .and_then(|s| s.get("password"))
+        .map(Value::py_str)
+        .unwrap_or_default();
+    let stack_grafana = rt.config().get_with(&["stack", "grafana"], opts).1.to_map();
+    let sql_connectors = rt
+        .config()
+        .get_with(&["meerschaum", "connectors", "sql"], opts)
+        .1
+        .to_map();
+    let (schemas, refused) = ro::readonly_schemas(&stack_grafana, &sql_connectors);
+    if is_datasource {
+        if warn_ {
+            if !refused.is_empty() {
+                warn(
+                    rt,
+                    &format!(
+                        "`stack:grafana:readonly_schemas` names the schema of a team ({}): it is \
+                         never granted to Grafana's read-only main data source.",
+                        refused.join(", ")
+                    ),
+                );
+            }
+            let compose = rt
+                .config()
+                .get_with(&["stack", "docker-compose.yaml"], opts)
+                .1;
+            if ro::anonymous_enabled(&compose)
+                && let Some(warning) = ro::anonymous_warning(&datasource, &source)
+            {
+                warn(rt, &warning);
+            }
+        }
+        return datasource;
+    }
+    let setup = ro::RoleSetup {
+        owner_user: owner_user.as_deref().unwrap_or(""),
+        owner_password: &owner_password,
+        password: &password,
+        schemas: &schemas,
+        revision: &ro::revision(&datasource, &schemas),
+    };
+    if let Err(e) = ro::add_role_setup(&mut value, &source, &setup)
+        && warn_
+    {
+        warn(
+            rt,
+            &format!(
+                "Grafana's '{}' data source connects as the read-only role '{}', which `mrsm \
+                 stack` cannot create: {e}. It cannot connect until the role exists on its \
+                 database.",
+                ro::MAIN_DATASOURCE,
+                meerschaum_connector_sql::team_database::MAIN_READONLY_ROLE
+            ),
+        );
+    }
+    value
+}
+
+/// The compose file's config with the services' credentials in files (5.1,
+/// [`super::stack_secrets`]): the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (when its image
+/// reads `MRSM_CONFIG_FILE`, see [`super::stack_secrets::api_form`]), Grafana's administrator
+/// password and the `grafana_readonly` service's passwords. The files are written here; when
+/// they cannot be, the config is returned as it was (a container never starts without its
+/// configuration). `warn_`: tell the user what stays in the environment (once per command).
+fn with_secret_files(rt: &mut Runtime<'_>, keys: &[&str], value: Value, warn_: bool) -> Value {
+    use super::stack_secrets as secrets;
+    if keys != ["stack", "docker-compose.yaml"] {
+        return value;
+    }
+    let image = value
+        .get("services")
+        .and_then(|services| services.get("api"))
+        .and_then(|api| api.get("image"))
+        .map(Value::py_str);
+    let setting = rt
+        .config()
+        .get_with(
+            &["stack", secrets::API_SETTING],
+            meerschaum_core::config::GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        )
+        .1;
+    let setting = (!setting.is_null()).then_some(setting);
+    let form = secrets::api_form(image.as_deref(), setting.as_ref());
+    let dir = secrets::secrets_dir(&rt.config().paths().path("STACK_RESOURCES_PATH"));
+    let mut externalized = value.clone();
+    let written = secrets::prepare_dir(&dir).and_then(|salt| {
+        let (valkey_password, extra_warnings) = stack_valkey_password(rt, &mut externalized, &dir);
+        let mut done = secrets::externalize(&mut externalized, &dir, &form, &salt);
+        let (valkey, warnings) =
+            secrets::externalize_valkey(&mut externalized, &dir, valkey_password.as_deref(), &salt);
+        done.services.push(valkey);
+        done.warnings.extend(extra_warnings);
+        done.warnings.extend(warnings);
+        secrets::write_files(&dir, &done.services).map(|()| done)
+    });
+    match written {
+        Ok(done) => {
+            if warn_ {
+                for warning in &done.warnings {
+                    warn(rt, warning);
+                }
+            }
+            externalized
+        }
+        Err(e) => {
+            if warn_ {
+                warn(
+                    rt,
+                    &format!(
+                        "{e}\nThe stack's services get their credentials in their environment \
+                         (in `stack/docker-compose.yaml` and `docker inspect`)."
+                    ),
+                );
+            }
+            value
+        }
+    }
+}
+
+/// The password the stack's Valkey requires (5.1, [`super::stack_secrets::externalize_valkey`])
+/// and what to tell the user: `valkey:main`'s password. When it has none, one is generated once
+/// (owner-only, in the secrets directory, as Grafana's administrator password is when unset) and
+/// given to the `api` service through its `MRSM_PATCH`, with a warning saying how to point
+/// `valkey:main` on this host at it. `None` when the stack has no service of Valkey's images.
+fn stack_valkey_password(
+    rt: &mut Runtime<'_>,
+    compose: &mut Value,
+    dir: &std::path::Path,
+) -> (Option<String>, Vec<String>) {
+    use super::stack_secrets as secrets;
+    let image = compose
+        .get("services")
+        .and_then(|services| services.get("valkey"))
+        .and_then(|valkey| valkey.get("image"))
+        .map(Value::py_str);
+    if !secrets::is_valkey_image(image.as_deref()) {
+        return (None, Vec::new());
+    }
+    let configured = rt
+        .config()
+        .get_with(
+            &["meerschaum", "connectors", "valkey", "main", "password"],
+            meerschaum_core::config::GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        )
+        .1;
+    if !configured.is_null() && !configured.py_str().is_empty() {
+        return (Some(configured.py_str()), Vec::new());
+    }
+    let path = dir.join(secrets::VALKEY_GENERATED_FILENAME);
+    let password = match meerschaum_core::config::grafana_readonly::read_or_generate_secret(
+        &path,
+        "the stack's Valkey password",
+    ) {
+        Ok(password) => password,
+        Err(e) => {
+            return (
+                None,
+                vec![format!("{e}\nThe stack's Valkey runs without a password.")],
+            );
+        }
+    };
+    if let Some(Value::Map(api)) = compose
+        .as_map_mut()
+        .and_then(|c| c.get_mut("services"))
+        .and_then(Value::as_map_mut)
+        .and_then(|services| services.get_mut("api"))
+    {
+        let environment = api
+            .entry("environment".to_string())
+            .or_insert_with(|| Value::Map(Map::new()));
+        let existing = secrets::env_get(Some(environment), "MRSM_PATCH");
+        match patched_valkey_patch(existing.as_deref(), &password) {
+            Some(patch) => set_environment(environment, "MRSM_PATCH", &patch, true),
+            None => {
+                return (
+                    None,
+                    vec![
+                        "`valkey:main` has no password and the stack's `api` service's \
+                         `MRSM_PATCH` is not JSON: the stack's Valkey runs without a password. \
+                         Set `meerschaum:connectors:valkey:main:password`."
+                            .into(),
+                    ],
+                );
+            }
+        }
+    }
+    let warning = format!(
+        "`valkey:main` has no password, so the stack's Valkey requires a generated one, stored \
+         in {path}. Set `meerschaum:connectors:valkey:main:password` to `MRSM{{file:{path}}}` so \
+         `valkey:main` on this host can connect.",
+        path = path.display()
+    );
+    (Some(password), vec![warning])
+}
+
+/// The api service's `MRSM_PATCH` with `valkey:main`'s generated password (see
+/// [`stack_valkey_password`]). `None` when the variable is not JSON.
+fn patched_valkey_patch(existing: Option<&str>, password: &str) -> Option<String> {
+    let mut patch: serde_json::Value = match existing.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(text) => serde_json::from_str(text).ok()?,
+        None => serde_json::json!({}),
+    };
+    let mut node = patch.as_object_mut()?;
+    for key in ["meerschaum", "connectors", "valkey", "main"] {
+        node = node
+            .entry(key)
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()?;
+    }
+    node.insert("password".into(), password.into());
+    serde_json::to_string_pretty(&patch).ok()
+}
+
 /// `sync_yaml_configs(keys, sub_path, substitute=True, replace_tuples=...)`.
 fn sync_yaml_config(
     rt: &mut Runtime<'_>,
@@ -852,6 +1468,16 @@ fn sync_yaml_config(
             warn: false,
         },
     );
+    let value = with_grafana_sign_in(rt, keys, value);
+    let value = with_main_readonly(rt, keys, value, true);
+    let value = with_secret_files(rt, keys, value, true);
+    let value = if keys == ["stack", "docker-compose.yaml"] {
+        let root = rt.config().paths().root_dir.clone();
+        let image = rt.config().get(&["stack", "executor", "image"]);
+        crate::executor_stack::apply_with_image(&root, value, image)?
+    } else {
+        value
+    };
     let mut text = meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?;
     for (old, new) in replace {
         text = text.replace(old, new);
@@ -872,7 +1498,16 @@ fn sync_yaml_config(
     if let Some(parent) = sub_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(sub_path, format!("{header}{text}")).map_err(|e| e.to_string())
+    // 5.1: a compose file that still holds a credential (an image that keeps the environment
+    // form, a service of the user's own) is readable by its owner only.
+    let owner_only = keys == ["stack", "docker-compose.yaml"]
+        && meerschaum_core::config::sync::compose_holds_credentials(&value);
+    meerschaum_core::config::sync::write_stack_file(
+        sub_path,
+        &format!("{header}{text}"),
+        owner_only,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// `sync_files(['stack'])` (`config/_sync.py`): rewrite the compose, Grafana and init files from
@@ -941,12 +1576,26 @@ pub fn write_stack(rt: &mut Runtime<'_>) -> Result<(), String> {
     ];
     for (path, keys, header) in files {
         let (_, value) = rt.config().get_with(&keys, opts);
+        let value = with_grafana_sign_in(rt, &keys, value);
+        // `sync_stack_files` below writes them again, with the warnings.
+        let value = with_main_readonly(rt, &keys, value, false);
+        let value = with_secret_files(rt, &keys, value, false);
+        let value = if keys == ["stack", "docker-compose.yaml"] {
+            let root = rt.config().paths().root_dir.clone();
+            let image = rt.config().get(&["stack", "executor", "image"]);
+            crate::executor_stack::apply_with_image(&root, value, image)?
+        } else {
+            value
+        };
         let mut text = header.unwrap_or_default().to_string();
         text.push_str(&meerschaum_core::yaml::dump(&value).map_err(|e| e.0)?);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+        let owner_only = keys == ["stack", "docker-compose.yaml"]
+            && meerschaum_core::config::sync::compose_holds_credentials(&value);
+        meerschaum_core::config::sync::write_stack_file(&path, &text, owner_only)
+            .map_err(|e| e.to_string())?;
     }
     sync_stack_files(rt)
 }
@@ -998,6 +1647,7 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .unwrap_or_else(|| "mrsm".into());
     let docker = |args: &[&str]| CommandSpec {
         program: "docker".into(),
+        scrub_secrets: true,
         args: args.iter().map(|a| a.to_string()).collect(),
         quiet: true,
         ..CommandSpec::default()
@@ -1016,6 +1666,28 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     if !matches!(rt.host.run(&docker(&["compose"])), Ok(0)) {
         return Ok(SuccessTuple::fail("Docker Compose is not available."));
+    }
+    // Only the explicit administrator `up` path may inspect an image or provision
+    // a reverse Factory key. Ordinary rendering/down/dry-run stays read-only.
+    let factory_root = rt.config().paths().root_dir;
+    let factory_image = rt.config().get(&["stack", "executor", "image"]);
+    let factory_installed = match crate::executor_stack::provision_up(
+        &factory_root,
+        &project_name,
+        &sysargs,
+        &stack_env,
+        factory_image,
+        rt.host.as_mut(),
+    ) {
+        Ok(installed) => installed,
+        Err(error) => return Ok(SuccessTuple::fail(error)),
+    };
+    if factory_installed {
+        // The first render above cannot create authority. Re-render after independent
+        // inspection to use the exact image ID and read-only administrator mounts.
+        if let Err(error) = sync_stack_files(rt) {
+            return Ok(SuccessTuple::fail(error));
+        }
     }
     if sysargs.iter().any(|a| a == "down")
         && sysargs.iter().any(|a| a == "-v")
@@ -1036,6 +1708,12 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .skip(1)
         .find_map(|a| super::upgrade_postgres::StackCheck::of(a));
     let starting = guard.is_some();
+    if starting {
+        let root = rt.config().paths().root_dir;
+        if let Err(error) = crate::executor_stack::preflight(&root, &stack_env, rt.host.as_mut()) {
+            return Ok(SuccessTuple::fail(error));
+        }
+    }
     if let Some(check) = guard
         && !flag(args, "force")
         && !sysargs.iter().any(|a| a == "--force")
@@ -1048,6 +1726,18 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         )
     {
         return Ok(SuccessTuple::fail(e));
+    }
+    {
+        let root = rt.config().paths().root_dir;
+        if let Err(error) = crate::executor_stack::reconcile_up(
+            &root,
+            &project_name,
+            &sysargs,
+            &stack_env,
+            rt.host.as_mut(),
+        ) {
+            return Ok(SuccessTuple::fail(error));
+        }
     }
     let mut cmd_list: Vec<String> = vec!["--project-name".into(), project_name];
     cmd_list.extend(sysargs.iter().skip(1).cloned());
@@ -1085,4 +1775,445 @@ pub fn stack(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         )
     };
     Ok(SuccessTuple { success, message })
+}
+
+#[cfg(test)]
+mod grafana_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn map(json: &str) -> Map {
+        Value::from_json_str(json).unwrap().to_map()
+    }
+
+    fn env(list: &[(&'static str, String)]) -> HashMap<&'static str, String> {
+        list.iter().cloned().collect()
+    }
+
+    #[test]
+    fn the_sign_in_environment_trusts_the_api_servers_address_only() {
+        let api: std::net::Ipv4Addr = "10.213.71.2".parse().unwrap();
+        let sign_in = grafana_sign_in_environment(&Map::new(), "generated", Some(api));
+        let forced = env(&sign_in.forced);
+        assert_eq!(forced["GF_AUTH_PROXY_ENABLED"], "true");
+        assert_eq!(forced["GF_AUTH_PROXY_HEADER_NAME"], "X-WEBAUTH-USER");
+        // Exactly the API server's address, never a network range.
+        assert_eq!(forced["GF_AUTH_PROXY_WHITELIST"], "10.213.71.2");
+        assert_eq!(forced["GF_SECURITY_ADMIN_USER"], "admin");
+        assert_eq!(forced["GF_SECURITY_ADMIN_PASSWORD"], "generated");
+        // Anonymous access is not Meerschaum's to change.
+        assert!(!forced.keys().any(|k| k.starts_with("GF_AUTH_ANONYMOUS")));
+        assert!(sign_in.warning.is_none());
+        let defaults = env(&sign_in.defaults);
+        assert_eq!(defaults["GF_SERVER_SERVE_FROM_SUB_PATH"], "true");
+        assert!(defaults["GF_SERVER_ROOT_URL"].ends_with("/grafana/"));
+
+        // Lists are joined with commas (Grafana's syntax), not a Python repr.
+        let section = map(r#"{"root_url": "https://data.example.com/grafana/",
+                "proxy_whitelist": ["10.1.2.3", "10.1.2.4"], "admin_user": "root"}"#);
+        let sign_in = grafana_sign_in_environment(&section, "s3cret", Some(api));
+        let forced = env(&sign_in.forced);
+        assert_eq!(forced["GF_AUTH_PROXY_WHITELIST"], "10.1.2.3,10.1.2.4");
+        assert_eq!(forced["GF_SECURITY_ADMIN_USER"], "root");
+        assert_eq!(
+            env(&sign_in.defaults)["GF_SERVER_ROOT_URL"],
+            "https://data.example.com/grafana/"
+        );
+    }
+
+    #[test]
+    fn without_an_address_the_auth_proxy_is_off() {
+        let sign_in = grafana_sign_in_environment(&Map::new(), "generated", None);
+        let forced = env(&sign_in.forced);
+        assert_eq!(forced["GF_AUTH_PROXY_ENABLED"], "false");
+        assert_eq!(forced["GF_AUTH_PROXY_WHITELIST"], "");
+        assert!(sign_in.warning.unwrap().contains("proxy_whitelist"));
+        // A configured whitelist is enough.
+        let sign_in =
+            grafana_sign_in_environment(&map(r#"{"proxy_whitelist": "192.0.2.7"}"#), "g", None);
+        assert_eq!(env(&sign_in.forced)["GF_AUTH_PROXY_ENABLED"], "true");
+    }
+
+    #[test]
+    fn the_proxy_subnet_gives_fixed_addresses() {
+        let (subnet, api, grafana) = grafana_proxy_addresses(&Map::new()).unwrap();
+        assert_eq!(subnet, "10.213.71.0/29");
+        assert_eq!(api.to_string(), "10.213.71.2");
+        assert_eq!(grafana.to_string(), "10.213.71.3");
+        let (subnet, api, _) =
+            grafana_proxy_addresses(&map(r#"{"proxy_subnet": "10.9.8.77/28"}"#)).unwrap();
+        assert_eq!(subnet, "10.9.8.64/28");
+        assert_eq!(api.to_string(), "10.9.8.66");
+        for bad in ["10.0.0.0/30", "10.0.0.0", "nonsense/24", "10.0.0.0/7"] {
+            assert!(
+                grafana_proxy_addresses(&map(&format!(r#"{{"proxy_subnet": "{bad}"}}"#))).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn security_settings_override_the_stack_and_the_rest_is_kept() {
+        let mut environment = Value::Map(map(
+            r#"{"GF_AUTH_PROXY_WHITELIST": "172.16.0.0/12", "GF_SERVER_ROOT_URL": "mine",
+                "GF_AUTH_ANONYMOUS_ENABLED": "true"}"#,
+        ));
+        set_environment(
+            &mut environment,
+            "GF_AUTH_PROXY_WHITELIST",
+            "10.213.71.2",
+            true,
+        );
+        set_environment(&mut environment, "GF_SERVER_ROOT_URL", "theirs", false);
+        let m = environment.to_map();
+        assert_eq!(m["GF_AUTH_PROXY_WHITELIST"].py_str(), "10.213.71.2");
+        assert_eq!(m["GF_SERVER_ROOT_URL"].py_str(), "mine");
+        assert_eq!(m["GF_AUTH_ANONYMOUS_ENABLED"].py_str(), "true");
+        let mut list = Value::List(vec![Value::Str("GF_SECURITY_ADMIN_PASSWORD=admin".into())]);
+        set_environment(&mut list, "GF_SECURITY_ADMIN_PASSWORD", "generated", true);
+        assert_eq!(
+            list,
+            Value::List(vec![Value::Str(
+                "GF_SECURITY_ADMIN_PASSWORD=generated".into()
+            )])
+        );
+    }
+
+    #[test]
+    fn the_api_server_is_given_the_password() {
+        let patch = patched_api_patch(Some(r#"{"meerschaum": {"x": 1}}"#), "pw").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&patch).unwrap();
+        assert_eq!(parsed["api"]["grafana"]["admin_password"], "pw");
+        assert_eq!(parsed["meerschaum"]["x"], 1);
+        assert!(patched_api_patch(Some("not json"), "pw").is_none());
+        assert!(patched_api_patch(None, "pw").is_some());
+    }
+}
+
+#[cfg(test)]
+mod compose_writer_tests {
+    use super::*;
+    use meerschaum_core::config::{Config, ConfigOptions};
+
+    fn compose_after(
+        root: &std::path::Path,
+        env: &[(&str, &str)],
+        stack_first: bool,
+    ) -> (String, String) {
+        let mut vars: Vec<(String, String)> =
+            vec![("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned())];
+        vars.extend(env.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        let mut opts = ConfigOptions::with_env(vars);
+        opts.allow_writes = true;
+        opts.home = root.to_path_buf();
+        let mut out = Vec::new();
+        let mut rt = Runtime::new(
+            crate::types::DateContext::system(),
+            80,
+            &mut out,
+            |_: &str| None,
+        );
+        rt.err = Box::new(std::io::sink());
+        rt.config = Some(Config::new(opts).unwrap());
+        let path = rt.config().paths().path("STACK_COMPOSE_PATH");
+        let read = |path: &std::path::Path| std::fs::read_to_string(path).unwrap_or_default();
+        let core = |rt: &mut Runtime<'_>| {
+            rt.config()
+                .with_state(|s| s.sync_files(&["stack"]))
+                .unwrap();
+        };
+        if stack_first {
+            write_stack(&mut rt).unwrap();
+            let by_stack = read(&path);
+            core(&mut rt);
+            (by_stack, read(&path))
+        } else {
+            core(&mut rt);
+            let by_core = read(&path);
+            write_stack(&mut rt).unwrap();
+            (read(&path), by_core)
+        }
+    }
+
+    /// `mrsm stack` writes the hardened compose file, and the core `sync_files` (Python's first
+    /// read of the `stack` config) never downgrades it: one result on disk.
+    #[test]
+    fn the_core_sync_never_downgrades_the_stacks_compose_file() {
+        for env in [
+            vec![],
+            vec![("MRSM_CONFIG", r#"{"api": {"grafana": {"enabled": true}}}"#)],
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (by_stack, after_core) = compose_after(dir.path(), &env, true);
+            assert!(by_stack.contains("grafana_readonly"), "{by_stack}");
+            if !env.is_empty() {
+                assert!(by_stack.contains(GRAFANA_PROXY_NETWORK), "{by_stack}");
+                assert!(by_stack.contains("GF_AUTH_PROXY_ENABLED"), "{by_stack}");
+            }
+            assert_eq!(
+                after_core, by_stack,
+                "the core sync rewrote the compose file"
+            );
+
+            // The core sync first: it leaves the compose file to `mrsm stack`.
+            let dir = tempfile::tempdir().unwrap();
+            let (by_stack, by_core) = compose_after(dir.path(), &env, false);
+            assert!(
+                by_core.is_empty() || by_core == by_stack,
+                "the core sync wrote an unhardened compose file:\n{by_core}"
+            );
+        }
+    }
+
+    /// A stack without a `grafana` service and without the `api` service's configuration is
+    /// still written by the core sync (nothing to harden). 5.1: with the `api` service's
+    /// `MRSM_CONFIG`, the core sync leaves it to `mrsm stack`, which moves it to a file.
+    #[test]
+    fn the_core_sync_writes_a_compose_file_without_grafana() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("config")).unwrap();
+        // 5.1: nor a `valkey` service (`mrsm stack` gives it its password in a file).
+        let patch = r#"{"stack": {"docker-compose.yaml": {"services":
+            {"grafana": null, "api": null, "valkey": null}}}}"#;
+        let (by_stack, by_core) = compose_after(dir.path(), &[("MRSM_CONFIG", patch)], false);
+        assert!(!by_core.is_empty());
+        assert!(!by_core.contains("grafana_readonly"), "{by_core}");
+        assert!(by_stack.contains("services:"), "{by_stack}");
+
+        let dir = tempfile::tempdir().unwrap();
+        let patch = r#"{"stack": {"docker-compose.yaml": {"services": {"grafana": null}}}}"#;
+        let (by_stack, by_core) = compose_after(dir.path(), &[("MRSM_CONFIG", patch)], false);
+        assert!(by_core.is_empty() || by_core == by_stack, "{by_core}");
+        assert!(by_stack.contains("MRSM_CONFIG_FILE"), "{by_stack}");
+    }
+
+    /// A root whose files `write_stack` (and then the core sync) wrote, with `env` and an
+    /// optional `stack.yaml`: `(compose text, secrets directory)`.
+    fn stack_files(
+        root: &std::path::Path,
+        env: &[(&str, &str)],
+        stack_yaml: Option<&str>,
+    ) -> (String, std::path::PathBuf) {
+        if let Some(text) = stack_yaml {
+            std::fs::create_dir_all(root.join("config")).unwrap();
+            std::fs::write(root.join("config").join("stack.yaml"), text).unwrap();
+        }
+        let (by_stack, after_core) = compose_after(root, env, true);
+        assert_eq!(
+            by_stack, after_core,
+            "the core sync rewrote the compose file"
+        );
+        (by_stack, root.join("stack").join("secrets"))
+    }
+
+    const SECRET_CONFIG: &str = r#"{"meerschaum": {"connectors": {
+        "sql": {"main": {"username": "mrsm", "password": "pg-s3cret-xyz"}},
+        "api": {"main": {"password": "api-s3cret-xyz"}}}},
+        "api": {"grafana": {"enabled": true, "admin_password": "gf-s3cret-xyz"}}}"#;
+
+    fn assert_no_secret(text: &str) {
+        for secret in ["pg-s3cret-xyz", "api-s3cret-xyz", "gf-s3cret-xyz"] {
+            assert!(!text.contains(secret), "{secret} in:\n{text}");
+        }
+    }
+
+    /// 5.1: the default stack's compose file holds paths, not credentials; the `api` service
+    /// reads them from files only its owner's directory reaches.
+    #[test]
+    fn the_stack_passes_the_api_its_configuration_by_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (compose, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], None);
+        assert_no_secret(&compose);
+        assert!(
+            compose.contains("MRSM_CONFIG_FILE: /run/secrets/meerschaum/mrsm_config.json"),
+            "{compose}"
+        );
+        assert!(compose.contains("MRSM_PATCH_FILE:"), "{compose}");
+        assert!(
+            compose.contains("GF_SECURITY_ADMIN_PASSWORD__FILE:"),
+            "{compose}"
+        );
+        assert!(
+            compose.contains(super::super::stack_secrets::REVISION_LABEL),
+            "{compose}"
+        );
+        let config = std::fs::read_to_string(secrets.join("api").join("mrsm_config.json")).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            config["meerschaum"]["connectors"]["sql"]["main"]["password"],
+            "pg-s3cret-xyz"
+        );
+        assert!(config["system"].is_object());
+        let patch = std::fs::read_to_string(secrets.join("api").join("mrsm_patch.json")).unwrap();
+        let patch: serde_json::Value = serde_json::from_str(&patch).unwrap();
+        assert_eq!(
+            patch["meerschaum"]["connectors"]["sql"]["main"]["host"],
+            "db"
+        );
+        assert_eq!(patch["api"]["grafana"]["admin_password"], "gf-s3cret-xyz");
+        let owner =
+            std::fs::read_to_string(secrets.join("grafana_readonly").join("owner_password"))
+                .unwrap();
+        assert_eq!(owner, "pg-s3cret-xyz");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode =
+                |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&secrets), 0o700);
+            assert_eq!(mode(&secrets.join("api")), 0o755);
+            assert_eq!(mode(&secrets.join("api").join("mrsm_config.json")), 0o644);
+        }
+    }
+
+    /// Upgrades: a `stack.yaml` holding the old default entries (as `MRSM{...}` references or
+    /// materialized) is moved to files; a customized entry's own keys reach the container.
+    #[test]
+    fn an_upgraded_stack_yaml_moves_to_files_and_keeps_customized_keys() {
+        let references = r#"
+docker-compose.yaml:
+  services:
+    api:
+      environment:
+        MRSM_CONFIG: '{"meerschaum": MRSM{!meerschaum}, "system": MRSM{!system}, "api": MRSM{!api}}'
+        MRSM_PATCH: '{"meerschaum": {"connectors": {"sql": {"main": {"host": "db", "port": 5432}}}}}'
+"#;
+        let materialized = r#"
+docker-compose.yaml:
+  services:
+    api:
+      environment:
+        MRSM_CONFIG: '{"meerschaum": {"connectors": {"sql": {"main": {"password": "pg-s3cret-xyz"}}}}, "custom": {"kept": "yes"}}'
+"#;
+        for (stack_yaml, custom) in [(references, false), (materialized, true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let (compose, secrets) = stack_files(
+                dir.path(),
+                &[("MRSM_CONFIG", SECRET_CONFIG)],
+                Some(stack_yaml),
+            );
+            assert_no_secret(&compose);
+            let config =
+                std::fs::read_to_string(secrets.join("api").join("mrsm_config.json")).unwrap();
+            assert!(config.contains("pg-s3cret-xyz"), "{config}");
+            assert_eq!(config.contains("\"kept\": \"yes\""), custom, "{config}");
+            // The user's config file is never rewritten.
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("config").join("stack.yaml")).unwrap(),
+                stack_yaml
+            );
+        }
+    }
+
+    /// 5.1: the stack's Valkey requires `valkey:main`'s password (its images ignore
+    /// `VALKEY_PASSWORD`): a configuration file in its own secrets subdirectory, mounted
+    /// read-only, and no password in the compose file.
+    #[test]
+    fn the_stacks_valkey_requires_the_configured_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = r#"{"meerschaum": {"connectors": {"valkey": {"main":
+            {"password": "vk-s3cret-\"xyz"}}}}}"#;
+        let (compose, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", config)], None);
+        assert!(!compose.contains("vk-s3cret"), "{compose}");
+        assert!(!compose.contains("VALKEY_PASSWORD"), "{compose}");
+        assert!(
+            compose.contains("- /run/secrets/meerschaum/valkey.conf"),
+            "{compose}"
+        );
+        let conf = std::fs::read_to_string(secrets.join("valkey").join("valkey.conf")).unwrap();
+        assert!(conf.contains(r#"requirepass "vk-s3cret-\"xyz""#), "{conf}");
+        // The default password (an upgraded root that never set one).
+        let dir = tempfile::tempdir().unwrap();
+        let (_, secrets) = stack_files(dir.path(), &[], None);
+        let conf = std::fs::read_to_string(secrets.join("valkey").join("valkey.conf")).unwrap();
+        assert!(conf.contains(r#"requirepass "mrsm""#), "{conf}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode =
+                |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&secrets.join("valkey")), 0o755);
+            assert_eq!(mode(&secrets.join("valkey").join("valkey.conf")), 0o644);
+        }
+    }
+
+    /// 5.1: `valkey:main` without a password: one is generated once (owner-only), the stack's
+    /// Valkey requires it and the `api` service is given it; the next write keeps it.
+    #[test]
+    fn a_stack_without_a_valkey_password_gets_a_generated_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = r#"{"meerschaum": {"connectors": {"valkey": {"main": {"password": null}}}}}"#;
+        let (compose, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", config)], None);
+        let generated = std::fs::read_to_string(secrets.join(".valkey_password")).unwrap();
+        assert_eq!(generated.len(), 64);
+        assert!(!compose.contains(&generated), "{compose}");
+        let conf = std::fs::read_to_string(secrets.join("valkey").join("valkey.conf")).unwrap();
+        assert!(
+            conf.contains(&format!("requirepass \"{generated}\"")),
+            "{conf}"
+        );
+        let patch = std::fs::read_to_string(secrets.join("api").join("mrsm_patch.json")).unwrap();
+        let patch: serde_json::Value = serde_json::from_str(&patch).unwrap();
+        assert_eq!(
+            patch["meerschaum"]["connectors"]["valkey"]["main"]["password"],
+            generated.as_str()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(secrets.join(".valkey_password"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let (_, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", config)], None);
+        assert_eq!(
+            std::fs::read_to_string(secrets.join(".valkey_password")).unwrap(),
+            generated
+        );
+    }
+
+    /// An image older than 5.1.0 keeps the environment form (its API server would start without
+    /// its configuration otherwise), and the files of a previous write are removed.
+    #[test]
+    fn an_old_image_keeps_the_environment_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, secrets) = stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], None);
+        assert!(secrets.join("api").join("mrsm_config.json").exists());
+        let old = r#"
+docker-compose.yaml:
+  services:
+    api:
+      image: bmeares/meerschaum:5.0.2-full
+"#;
+        let compose_path = dir.path().join("stack").join("docker-compose.yaml");
+        #[cfg(unix)]
+        let mode = |p: &std::path::Path| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+        };
+        // The hardened file holds paths: no reason to hide it.
+        #[cfg(unix)]
+        assert_ne!(mode(&compose_path), 0o600);
+        let (compose, secrets) =
+            stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], Some(old));
+        assert!(compose.contains("MRSM_CONFIG: "), "{compose}");
+        // 5.1: the environment form holds the credentials: the file is owner-only.
+        #[cfg(unix)]
+        assert_eq!(mode(&compose_path), 0o600);
+        assert!(!compose.contains("MRSM_CONFIG_FILE"), "{compose}");
+        assert!(!secrets.join("api").join("mrsm_config.json").exists());
+        // `stack:api_config_files: true` is the way for an image the rule cannot vouch for.
+        let custom = r#"
+api_config_files: true
+docker-compose.yaml:
+  services:
+    api:
+      image: example/meerschaum-custom:1
+"#;
+        let (compose, _) = stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], Some(custom));
+        assert!(compose.contains("MRSM_CONFIG_FILE"), "{compose}");
+        assert_no_secret(&compose);
+    }
 }

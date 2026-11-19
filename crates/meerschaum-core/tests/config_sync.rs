@@ -15,10 +15,54 @@ fn written(source: &str) -> String {
 }
 
 fn registry(root: &std::path::Path, allow_writes: bool) -> Config {
-    let env = vec![("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned())];
+    registry_with(root, allow_writes, &[])
+}
+
+fn registry_with(root: &std::path::Path, allow_writes: bool, extra: &[(&str, &str)]) -> Config {
+    let mut env = vec![("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned())];
+    env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
     let mut opts = ConfigOptions::with_env(env);
     opts.allow_writes = allow_writes;
     Config::new(opts).unwrap()
+}
+
+/// A stack without a `grafana` service and without the `api` service's configuration: nothing
+/// for `mrsm stack` to harden, so the core sync writes the compose file (5.1; a stack with
+/// Grafana, or whose `api` service gets `MRSM_CONFIG`, leaves it to `mrsm stack`).
+/// (5.1: nor a `valkey` service, which `mrsm stack` starts with its password in a file.)
+const WITHOUT_GRAFANA: (&str, &str) = (
+    "MRSM_CONFIG",
+    r#"{"stack": {"docker-compose.yaml": {"services":
+        {"grafana": null, "api": null, "valkey": null}}}}"#,
+);
+
+/// 5.1: the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (every connector's credentials) never
+/// reach a compose file the core sync writes: with them, the file is left to `mrsm stack`,
+/// which moves them to files, also in a stack without Grafana.
+#[test]
+fn the_core_sync_never_writes_the_api_services_configuration() {
+    for services in [
+        r#"{"grafana": null, "valkey": null}"#,
+        r#"{"grafana": null, "valkey": null, "api": {"environment": ["MRSM_PATCH={}"]}}"#,
+        // 5.1: a `valkey` service gets its password file from `mrsm stack`.
+        r#"{"grafana": null, "api": null}"#,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let patch =
+            format!(r#"{{"stack": {{"docker-compose.yaml": {{"services": {services}}}}}}}"#);
+        let config = registry_with(root.path(), true, &[("MRSM_CONFIG", patch.as_str())]);
+        assert!(config.with_state(|s| s.stack_compose_hardened("docker-compose.yaml")));
+        config
+            .with_state(|s| s.sync_files(&["stack"]))
+            .expect("sync");
+        assert!(
+            !config.paths().path("STACK_COMPOSE_PATH").exists(),
+            "{services}"
+        );
+    }
+    let root = tempfile::tempdir().unwrap();
+    let config = registry_with(root.path(), true, &[WITHOUT_GRAFANA]);
+    assert!(!config.with_state(|s| s.stack_compose_hardened("docker-compose.yaml")));
 }
 
 #[test]
@@ -297,6 +341,15 @@ fn stack_files_are_derived_from_the_config_and_keep_their_header() {
     config
         .with_state(|s| s.sync_files(&["stack"]))
         .expect("sync");
+    // 5.1: the default stack has Grafana, whose compose service `mrsm stack` hardens: the core
+    // sync leaves the compose file to it and never writes it unhardened.
+    assert_eq!(
+        std::fs::read_to_string(&compose).unwrap(),
+        "# keep this header\n\nstale: true\n"
+    );
+    registry_with(root.path(), true, &[WITHOUT_GRAFANA])
+        .with_state(|s| s.sync_files(&["stack"]))
+        .expect("sync");
 
     let text = std::fs::read_to_string(&compose).unwrap();
     assert!(text.starts_with("# keep this header\n\n"), "{text}");
@@ -330,6 +383,56 @@ fn stack_files_are_derived_from_the_config_and_keep_their_header() {
         datasource.contains("postgresVersion: 1800\n"),
         "{datasource}"
     );
+    // 5.1: never the owner's credentials (`sql:main`'s), whoever writes the file.
+    assert!(datasource.contains("user: mrsm__main_ro\n"), "{datasource}");
+    let generated = std::fs::read_to_string(
+        paths
+            .path("API_CONFIG_RESOURCES_PATH")
+            .join(".grafana_readonly_password"),
+    )
+    .unwrap();
+    assert!(
+        datasource.contains(&format!("password: {generated}\n")),
+        "{datasource}"
+    );
+}
+
+/// A `stack.yaml` holding a copy of the 5.0 default (the owner's credentials, here literally)
+/// is written with the read-only role; a customized data source is left as written.
+#[test]
+fn the_main_data_source_switches_unless_customized() {
+    for (user, switched) in [("literal_owner", true), ("someone_else", false)] {
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = root.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("meerschaum.yaml"),
+            "connectors:\n  sql:\n    main:\n      flavor: timescaledb\n      \
+             username: literal_owner\n      password: owner_pw\n      database: meerschaum\n",
+        )
+        .unwrap();
+        std::fs::write(
+            config_dir.join("stack.yaml"),
+            format!(
+                "grafana:\n  datasource:\n    apiVersion: 1\n    datasources:\n    - name: \
+                 Meerschaum Main\n      type: postgres\n      user: {user}\n      \
+                 secureJsonData:\n        password: owner_pw\n      url: db:5432\n"
+            ),
+        )
+        .unwrap();
+        let config = registry(root.path(), true);
+        config
+            .with_state(|state| state.sync_files(&["stack"]))
+            .unwrap();
+        let paths = config.paths();
+        let datasource = std::fs::read_to_string(paths.path("GRAFANA_DATASOURCE_PATH")).unwrap();
+        assert_eq!(
+            datasource.contains("user: mrsm__main_ro"),
+            switched,
+            "{datasource}"
+        );
+        assert_eq!(datasource.contains("owner_pw"), !switched, "{datasource}");
+    }
 }
 
 /// The setup script is safe on any PostgreSQL image (PARITY.md W17K1-001): every extension is
@@ -422,6 +525,9 @@ fn a_v4_stack_yaml_keeps_its_compose_section() {
     std::fs::create_dir_all(&paths.config_dir).unwrap();
     std::fs::write(paths.config_dir.join("stack.yaml"), &stack_yaml).unwrap();
 
+    // Without Grafana's service: a stack with it leaves the compose file to `mrsm stack`.
+    drop(config);
+    let config = registry_with(root.path(), true, &[WITHOUT_GRAFANA]);
     config
         .with_state(|s| s.sync_files(&["stack"]))
         .expect("sync");

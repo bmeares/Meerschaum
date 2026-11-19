@@ -225,10 +225,12 @@ impl MemoryInstance {
             .store(fail, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn data_read_error(&self) -> ConnectorResult<()> {
-        if self
-            .fail_data_reads
-            .load(std::sync::atomic::Ordering::SeqCst)
+    fn data_read_error(&self, pipe: &Pipe) -> ConnectorResult<()> {
+        // A simulated user data outage leaves the Teams permission store readable.
+        if !pipe.temporary
+            && self
+                .fail_data_reads
+                .load(std::sync::atomic::Ordering::SeqCst)
         {
             return Err(ConnectorError::Backend(
                 "could not connect to the database (simulated)".into(),
@@ -591,7 +593,7 @@ impl InstanceConnector for MemoryInstance {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
-        self.data_read_error()?;
+        self.data_read_error(pipe)?;
         let Some(rows) = self.rows(pipe) else {
             return Ok(None);
         };
@@ -636,7 +638,7 @@ impl InstanceConnector for MemoryInstance {
         params: Option<&Map>,
         newest: bool,
     ) -> ConnectorResult<Option<DateBound>> {
-        self.data_read_error()?;
+        self.data_read_error(pipe)?;
         let Some(dt) = pipe.column("datetime") else {
             return Ok(None);
         };
@@ -675,7 +677,7 @@ impl InstanceConnector for MemoryInstance {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>> {
-        self.data_read_error()?;
+        self.data_read_error(pipe)?;
         let dt = pipe.column("datetime");
         Ok(Some(
             self.rows(pipe)

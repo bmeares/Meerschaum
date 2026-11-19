@@ -53,6 +53,16 @@ MRSM_SQL_FOO=sqlite:////tmp/foo.db
     MRSM_SQL_FOO=postgresql://user:MRSM{meerschaum:connectors:sql:main:password}@localhost:5432/db
     ```
 
+!!! tip "Secrets from files"
+
+    Read a password from a file or another variable with `MRSM{file:<path>}` or `MRSM{env:<NAME>}`, in its own attribute (references are substituted into a URI literally):
+
+    ```bash
+    export MRSM_SQL_FOO='{"flavor": "postgresql", "host": "db", "username": "u", "database": "db", "password": "MRSM{file:/run/secrets/foo_password}"}'
+    ```
+
+    See [Secrets in configuration](../environment.md#secrets-in-configuration).
+
 
 ## 🛡️ Protected Connectors
 

@@ -106,7 +106,8 @@ impl InstanceEngine {
         let mut extra = Map::new();
         extra.insert("_check_temporary_tables".into(), Value::Bool(false));
         extra.insert("enforce".into(), Value::Bool(false));
-        self.conn
+        let result = self
+            .conn
             .sync_pipe(
                 &pipe,
                 df,
@@ -116,7 +117,15 @@ impl InstanceEngine {
                     ..Default::default()
                 },
             )
-            .await
+            .await;
+        if !result.success {
+            let reason = meerschaum_core::debug::redact_text(&result.message)
+                .chars()
+                .take(1024)
+                .collect::<String>();
+            tracing::warn!(metric, reason, "Native engine state write failed");
+        }
+        result
     }
 
     async fn clear(
@@ -750,6 +759,9 @@ impl EngineBackend for InstanceEngine {
         match self.conn.acquire_pipe_lease(&pipe, holder, ttl).await {
             Ok(b) => b,
             Err(ConnectorError::NotImplemented(_)) => {
+                if meerschaum_connector::mutation::current().is_some() {
+                    return false;
+                }
                 self.local_leases.acquire_lease(pipe_ref, holder, ttl).await
             }
             Err(e) => {
@@ -766,6 +778,9 @@ impl EngineBackend for InstanceEngine {
         match self.conn.release_pipe_lease(&pipe, holder).await {
             Ok(b) => b,
             Err(ConnectorError::NotImplemented(_)) => {
+                if meerschaum_connector::mutation::current().is_some() {
+                    return false;
+                }
                 self.local_leases.release_lease(pipe_ref, holder).await
             }
             Err(e) => {

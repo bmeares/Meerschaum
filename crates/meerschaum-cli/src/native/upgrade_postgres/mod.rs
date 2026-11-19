@@ -933,6 +933,42 @@ pub(crate) fn prologue(rt: &mut Runtime<'_>, editing: bool) -> Result<(Stack, Lo
 mod tests {
     use super::*;
 
+    /// 5.1: the stack writer keeps the file as written and never writes what `MRSM_PATCH` holds.
+    #[test]
+    fn write_stack_config_never_writes_environment_secrets() {
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = root.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(root.path().join("db-password"), "stack-file-s3cret\n").unwrap();
+        std::fs::write(
+            config_dir.join("stack.yaml"),
+            "project_name: tpr\ngrafana:\n  datasource:\n    password: MRSM{file:db-password}\n",
+        )
+        .unwrap();
+        let config = meerschaum_core::config::Config::new(
+            meerschaum_core::config::ConfigOptions::with_env(vec![
+                ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+                (
+                    "MRSM_PATCH".into(),
+                    r#"{"stack": {"grafana": {"admin": "patch-only-stack-s3cret"}}}"#.into(),
+                ),
+            ]),
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        let mut rt = Runtime::new(crate::types::DateContext::system(), 80, &mut out, |_| None);
+        rt.config = Some(config);
+        let (mut raw, _) = read_raw_stack(&mut rt).unwrap();
+        if let Some(map) = raw.as_map_mut() {
+            map.insert("project_name".into(), ConfigValue::Str("tpr2".into()));
+        }
+        let written = write_stack_config(&mut rt, &raw).unwrap();
+        let text = std::fs::read_to_string(written).unwrap();
+        assert!(!text.contains("s3cret"), "{text}");
+        assert!(text.contains("MRSM{file:db-password}"), "{text}");
+        assert!(text.contains("project_name: tpr2"), "{text}");
+    }
+
     #[test]
     fn a_failed_run_frees_its_dumps_when_its_end_cannot_be_recorded() {
         use std::cell::Cell;

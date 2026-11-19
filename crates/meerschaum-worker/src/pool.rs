@@ -17,11 +17,12 @@ use std::time::{Duration, Instant};
 
 use meerschaum_core::Config;
 use meerschaum_core::pipe::PipeDefaults;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::callback::{CallbackHandler, CallbackRequest};
+use crate::callback::{CallbackGuard, CallbackHandler, CallbackRequest, GuardedHandler};
 use crate::error::{WorkerError, WorkerResult};
 use crate::protocol::{Msg, map_to_wire};
+use crate::team::LiveLimit;
 use crate::worker::{CallOptions, Reply, Worker, WorkerOptions};
 use meerschaum_core::Map;
 use rmpv::Value as Wire;
@@ -74,6 +75,18 @@ pub const IDLE_SECONDS_KEY: [&str; 3] = ["system", "engine", "python_worker_idle
 /// The default of [`IDLE_SECONDS_KEY`].
 pub const DEFAULT_IDLE_SECONDS: u64 = 600;
 
+/// `system.engine.python_worker_team_idle_seconds` (5.1): stop an isolated team's idle worker
+/// after this long (`0`: never). Team pools are used in bursts and there may be many: their
+/// workers give their memory back sooner than the shared pool's.
+pub const TEAM_IDLE_SECONDS_KEY: [&str; 3] =
+    ["system", "engine", "python_worker_team_idle_seconds"];
+/// The default of [`TEAM_IDLE_SECONDS_KEY`].
+pub const DEFAULT_TEAM_IDLE_SECONDS: u64 = 60;
+/// `system.engine.python_team_workers` (5.1): the most live workers of all isolated teams'
+/// pools together (the shared pool's are not counted). A team that needs a worker beyond it
+/// stops another team's idle worker, else waits for one to finish.
+pub const TEAM_WORKERS_KEY: [&str; 3] = ["system", "engine", "python_team_workers"];
+
 /// The pool size when `system.engine.python_workers` is not set: the CPU count clamped to
 /// `1..=4` (Python workers mostly wait on I/O or hold the GIL; more rarely helps).
 pub fn default_python_workers() -> usize {
@@ -103,6 +116,47 @@ pub struct PoolConfig {
     pub max_rss_bytes: Option<u64>,
     /// Stop a worker that has been idle this long (`None`: keep idle workers).
     pub idle_timeout: Option<Duration>,
+    /// The isolated team the pool's workers run for (5.1; `None`: the shared pool).
+    pub scope: Option<PoolScope>,
+    /// The limit on live workers shared with other pools (5.1: the team pools').
+    pub live: Option<LiveLimit>,
+}
+
+/// What a team pool's workers run for (5.1): every call carries the team's scope (the worker
+/// refuses other connectors to plugin code) and every callback from plugin code is checked
+/// against it ([`crate::callback::team_refusal`]) before the host runs it.
+#[derive(Clone)]
+pub struct PoolScope {
+    /// The team.
+    pub scope: Arc<meerschaum_core::team_scope::TeamScope>,
+    /// The connector keys the server defines (a label that names none is anyone's).
+    pub configured: Arc<std::collections::BTreeSet<String>>,
+    /// The host's further checks of callbacks (a pipe's access).
+    pub guard: Option<Arc<dyn CallbackGuard>>,
+}
+
+impl std::fmt::Debug for PoolScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PoolScope")
+            .field("team", &self.scope.team)
+            .field("connectors", &self.scope.connectors)
+            .finish()
+    }
+}
+
+impl PoolScope {
+    /// The `team_scope` argument of every call: what the worker lets plugin code look up.
+    pub fn wire(&self) -> Wire {
+        let names = |set: &std::collections::BTreeSet<String>| {
+            Wire::Array(set.iter().map(|k| Wire::from(k.as_str())).collect())
+        };
+        Wire::Map(vec![
+            (Wire::from("team"), Wire::from(self.scope.team.as_str())),
+            (Wire::from("connectors"), names(&self.scope.connectors)),
+            (Wire::from("plugins"), names(&self.scope.plugins)),
+            (Wire::from("configured"), names(&self.configured)),
+        ])
+    }
 }
 
 impl Default for PoolConfig {
@@ -116,6 +170,8 @@ impl Default for PoolConfig {
             max_calls: None,
             max_rss_bytes: None,
             idle_timeout: None,
+            scope: None,
+            live: None,
         }
     }
 }
@@ -174,6 +230,32 @@ impl PoolConfig {
             ..PoolConfig::default()
         }
     }
+
+    /// The settings of an isolated team's pool (5.1): [`PoolConfig::from_config`] with the team
+    /// idle timeout ([`TEAM_IDLE_SECONDS_KEY`]), at most `live`'s limit workers, the team's
+    /// `scope` and the shared `live` limit.
+    pub fn for_team(config: &Config, scope: PoolScope, live: LiveLimit) -> PoolConfig {
+        let mut settings = PoolConfig::from_config(config);
+        settings.idle_timeout = match config.get(&TEAM_IDLE_SECONDS_KEY).and_then(|v| v.as_i64()) {
+            Some(n) if n <= 0 => None,
+            Some(n) => Some(Duration::from_secs(n as u64)),
+            None => Some(Duration::from_secs(DEFAULT_TEAM_IDLE_SECONDS)),
+        };
+        settings.size = settings.size.min(live.limit()).max(1);
+        settings.scope = Some(scope);
+        settings.live = Some(live);
+        settings
+    }
+}
+
+/// [`TEAM_WORKERS_KEY`] from the config ([`default_python_workers`] when unset or invalid).
+pub fn team_workers_limit(config: &Config) -> usize {
+    config
+        .get(&TEAM_WORKERS_KEY)
+        .and_then(|v| v.as_i64())
+        .filter(|n| *n > 0)
+        .map(|n| n as usize)
+        .unwrap_or_else(default_python_workers)
 }
 
 #[derive(Debug, Default)]
@@ -201,6 +283,8 @@ struct IdleWorker {
     worker: Worker,
     calls: u64,
     since: Instant,
+    /// The worker's place under the shared live limit ([`PoolConfig::live`]).
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 /// A checked-out worker: its pool generation and how many calls it had served.
@@ -208,6 +292,7 @@ struct Checkout {
     generation: u64,
     worker: Worker,
     calls: u64,
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 /// A worker's private resident memory in bytes (`RssAnon` of `/proc/<pid>/status`); `None` off
@@ -240,6 +325,9 @@ struct Inner {
     discarded: AtomicU64,
     calls: AtomicU64,
     retired: AtomicU64,
+    /// When the pool last served a call (the least recently used team pool gives up an idle
+    /// worker first).
+    last_used: Mutex<Instant>,
 }
 
 /// A pool of Python workers. Cloning shares the pool.
@@ -276,8 +364,83 @@ impl WorkerPool {
                 discarded: AtomicU64::new(0),
                 calls: AtomicU64::new(0),
                 retired: AtomicU64::new(0),
+                last_used: Mutex::new(Instant::now()),
             }),
         }
+    }
+
+    /// Whether `other` is this pool (a clone of it).
+    pub fn same(&self, other: &WorkerPool) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    /// When the pool last served a call.
+    pub fn last_used(&self) -> Instant {
+        *self
+            .inner
+            .last_used
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The team the pool's workers run for (`None`: the shared pool).
+    pub fn scope(&self) -> Option<&PoolScope> {
+        self.inner.config.scope.as_ref()
+    }
+
+    /// Add the pool's `team_scope` to a call's arguments (team pools only).
+    pub fn scope_args(&self, args: &mut Msg) {
+        if let Some(scope) = &self.inner.config.scope {
+            args.insert("team_scope", scope.wire());
+        }
+    }
+
+    /// `handler`, checked against the pool's team when it is a team pool
+    /// ([`crate::callback::GuardedHandler`]).
+    pub fn guard_handler(&self, handler: Arc<dyn CallbackHandler>) -> Arc<dyn CallbackHandler> {
+        match &self.inner.config.scope {
+            None => handler,
+            Some(scope) => Arc::new(GuardedHandler {
+                inner: handler,
+                scope: scope.scope.clone(),
+                configured: scope.configured.clone(),
+                guard: scope.guard.clone(),
+            }),
+        }
+    }
+
+    /// Stop the pool's longest idle worker (to give its place under the live limit to another
+    /// pool). `true` when one was stopped.
+    pub async fn evict_idle_one(&self) -> bool {
+        let oldest = {
+            let mut idle = self.inner.idle.lock().unwrap_or_else(|e| e.into_inner());
+            let position = idle
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, w)| w.since)
+                .map(|(i, _)| i);
+            position.map(|i| idle.remove(i))
+        };
+        match oldest {
+            Some(idle) => {
+                self.inner.retired.fetch_add(1, Ordering::SeqCst);
+                idle.worker.shutdown(Duration::from_secs(5)).await;
+                drop(idle.permit);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The pids of the pool's idle workers.
+    pub fn idle_pids(&self) -> Vec<u32> {
+        self.inner
+            .idle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|w| w.worker.pid())
+            .collect()
     }
 
     /// The pool settings.
@@ -362,6 +525,16 @@ impl WorkerPool {
     /// Start a worker outside the pool's accounting (e.g. a dedicated stream worker), waiting
     /// out any backoff first.
     pub async fn spawn_worker(&self) -> WorkerResult<Worker> {
+        self.spawn_worker_with_quiet(false).await
+    }
+
+    /// Start a worker outside the pool's accounting with stdout/stderr silenced and stdin
+    /// detached (used for background manifest refreshes so they never disturb an active prompt).
+    pub async fn spawn_quiet_worker(&self) -> WorkerResult<Worker> {
+        self.spawn_worker_with_quiet(true).await
+    }
+
+    async fn spawn_worker_with_quiet(&self, quiet: bool) -> WorkerResult<Worker> {
         if self.inner.closed.load(Ordering::SeqCst) {
             return Err(WorkerError::ShuttingDown);
         }
@@ -379,7 +552,12 @@ impl WorkerPool {
         if let Some(t) = not_before {
             tokio::time::sleep_until(t.into()).await;
         }
-        match Worker::spawn(&self.inner.config.worker).await {
+        let mut opts = self.inner.config.worker.clone();
+        if quiet {
+            opts.quiet = true;
+            opts.inherit_stdin = false;
+        }
+        match Worker::spawn(&opts).await {
             Ok(w) => {
                 self.inner.spawned.fetch_add(1, Ordering::SeqCst);
                 Ok(w)
@@ -393,9 +571,9 @@ impl WorkerPool {
         }
     }
 
-    async fn checkout(&self) -> WorkerResult<Checkout> {
-        for worker in self.take_expired() {
-            self.retire(worker);
+    async fn checkout(&self, wait: bool) -> WorkerResult<Checkout> {
+        for (worker, permit) in self.take_expired() {
+            self.retire(worker, permit);
         }
         loop {
             let candidate = self
@@ -410,6 +588,7 @@ impl WorkerPool {
                         generation: idle.generation,
                         worker: idle.worker,
                         calls: idle.calls,
+                        permit: idle.permit,
                     });
                 }
                 Some(_) => {
@@ -418,10 +597,16 @@ impl WorkerPool {
                 }
                 None => {
                     let generation = self.inner.generation.load(Ordering::SeqCst);
+                    // A team pool's new worker needs a place under the shared live limit.
+                    let permit = match &self.inner.config.live {
+                        Some(live) => Some(live.acquire(self, wait).await?),
+                        None => None,
+                    };
                     return Ok(Checkout {
                         generation,
                         worker: self.spawn_worker().await?,
                         calls: 0,
+                        permit,
                     });
                 }
             }
@@ -433,6 +618,7 @@ impl WorkerPool {
             generation,
             worker,
             calls,
+            permit,
         } = checkout;
         if self.inner.closed.load(Ordering::SeqCst) || !worker.is_alive() {
             return;
@@ -443,7 +629,7 @@ impl WorkerPool {
             return;
         }
         if self.worn_out(&worker, calls) {
-            self.retire(worker);
+            self.retire(worker, permit);
             return;
         }
         let excess = {
@@ -454,14 +640,18 @@ impl WorkerPool {
                     worker,
                     calls,
                     since: Instant::now(),
+                    permit,
                 });
                 None
             } else {
-                Some(worker)
+                Some((worker, permit))
             }
         };
         match excess {
-            Some(worker) => worker.shutdown(Duration::from_secs(5)).await,
+            Some((worker, permit)) => {
+                worker.shutdown(Duration::from_secs(5)).await;
+                drop(permit);
+            }
             None => self.schedule_reaper(),
         }
     }
@@ -477,13 +667,17 @@ impl WorkerPool {
             .is_some_and(|max| worker_rss_anon(worker.pid()).is_some_and(|rss| rss > max))
     }
 
-    /// Stop a worker in the background (the call that used it returns now).
-    fn retire(&self, worker: Worker) {
+    /// Stop a worker in the background, keeping its place under the live limit (`permit`) until
+    /// it exited.
+    fn retire(&self, worker: Worker, permit: Option<OwnedSemaphorePermit>) {
         self.inner.retired.fetch_add(1, Ordering::SeqCst);
         tracing::debug!("replacing Python worker {}", worker.pid());
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
-                handle.spawn(worker.shutdown(Duration::from_secs(5)));
+                handle.spawn(async move {
+                    worker.shutdown(Duration::from_secs(5)).await;
+                    drop(permit);
+                });
             }
             // No runtime to wait on: dropping the handle kills the process.
             Err(_) => drop(worker),
@@ -491,7 +685,7 @@ impl WorkerPool {
     }
 
     /// Remove the idle workers past the idle timeout.
-    fn take_expired(&self) -> Vec<Worker> {
+    fn take_expired(&self) -> Vec<(Worker, Option<OwnedSemaphorePermit>)> {
         let Some(timeout) = self.inner.config.idle_timeout else {
             return Vec::new();
         };
@@ -500,7 +694,7 @@ impl WorkerPool {
             .into_iter()
             .partition(|w| w.since.elapsed() >= timeout);
         *idle = kept;
-        expired.into_iter().map(|w| w.worker).collect()
+        expired.into_iter().map(|w| (w.worker, w.permit)).collect()
     }
 
     /// When the earliest idle worker reaches the idle timeout (`None`: no idle worker).
@@ -546,8 +740,8 @@ impl WorkerPool {
                 let wait = {
                     let Some(inner) = weak.upgrade() else { return };
                     let pool = WorkerPool { inner };
-                    for worker in pool.take_expired() {
-                        pool.retire(worker);
+                    for (worker, permit) in pool.take_expired() {
+                        pool.retire(worker, permit);
                     }
                     match pool.next_expiry() {
                         Some(wait) => wait,
@@ -586,6 +780,12 @@ impl WorkerPool {
         if let Some(defined) = self.connector_attributes_wire() {
             args.insert("connector_attributes", defined);
         }
+        self.scope_args(&mut args);
+        *self
+            .inner
+            .last_used
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Instant::now();
         if self.inner.closed.load(Ordering::SeqCst) {
             return Err(WorkerError::ShuttingDown);
         }
@@ -612,14 +812,15 @@ impl WorkerPool {
                 .await
                 .map_err(|_| WorkerError::ShuttingDown)?
         };
-        let mut checkout = self.checkout().await?;
+        // A nested callback never queues for a place under the live limit (see the permits).
+        let mut checkout = self.checkout(depth == 0).await?;
         let worker = &checkout.worker;
         if opts.timeout.is_none() {
             opts.timeout = self.inner.config.call_timeout;
         }
         worker.set_callback_handler(handler.map(|handler| {
             Arc::new(ReentrantHandler {
-                handler,
+                handler: self.guard_handler(handler),
                 depth: depth + 1,
             }) as Arc<dyn CallbackHandler>
         }));

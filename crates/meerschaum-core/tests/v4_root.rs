@@ -103,8 +103,28 @@ fn an_upgraded_v4_root_keeps_its_files_and_its_db_service() {
             let got = std::fs::read_to_string(paths.config_dir.join(file)).unwrap();
             assert_eq!(got, want, "case {name}: {file}");
         }
-        // The `db` service v4 generates from the same `stack.yaml`.
-        let compose = std::fs::read_to_string(&compose_path).unwrap();
+        // 5.1: the core sync leaves the compose file of a stack with Grafana to `mrsm stack`
+        // (`ConfigState::stack_compose_hardened`), so the file is untouched here.
+        assert_eq!(
+            std::fs::read_to_string(&compose_path).unwrap(),
+            before_compose,
+            "case {name}"
+        );
+        // The `db` service v4 generates from the same `stack.yaml`: the compose config as a
+        // writer of the file sees it (substituted, `$` escaped).
+        let (_, generated) = config.get_with(
+            &["stack", "docker-compose.yaml"],
+            GetOptions {
+                patch: true,
+                substitute: true,
+                write_missing: false,
+                warn: false,
+            },
+        );
+        let compose = meerschaum_core::yaml::dump(&generated)
+            .unwrap()
+            .replace('$', "$$")
+            .replace("<DOLLAR>", "$");
         let want_compose = case["after"]["compose"]
             .as_str()
             .unwrap()

@@ -8,7 +8,7 @@
 //! | `POST /pipelines/{name}/plan` | `pipes:read` | The plan of a run (`plan`, `text`, `warnings`); nothing moves, nothing is registered |
 //! | `POST /pipelines/{name}/sync` | `pipes:write`, `jobs:execute` | Start a run as a background job: `run_id`, `job`, `stream` |
 //! | `GET /pipelines/keys` | `pipes:read` | The registration keys (`keys`) |
-//! | `POST /pipelines/{name}/register` | `pipes:write` | Register a definition (`409` if it exists) |
+//! | `POST /pipelines/{name}/register` | `pipes:register` | Register a definition (`409` if it exists) |
 //! | `PATCH /pipelines/{name}/edit` | `pipes:write` | Replace (or `patch`) a definition (`404` if missing) |
 //! | `DELETE /pipelines/{name}/delete` | `pipes:delete` | Delete a definition (`409` while scheduled jobs use it) |
 //! | `GET /pipelines/{name}/id`, `/attributes` | `pipes:read` | The registration's ID and raw attributes |
@@ -789,6 +789,7 @@ async fn plan(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
 pub fn plan_error(e: PlanError) -> ApiError {
     match e {
         PlanError::Unavailable => ApiError::new(501, e.to_string()),
+        PlanError::MetadataUnavailable(message) => ApiError::unavailable(message),
         PlanError::Invalid(m) => ApiError::new(400, m),
         PlanError::Failed(m) => ApiError::new(500, "Failed to plan the Pipeline.").with_internal(m),
     }
@@ -966,6 +967,28 @@ pub async fn start_sync(
     options: &PlanOptions,
     run_id: Option<String>,
 ) -> Result<StartedSync, ApiError> {
+    // REST and the HTTP MCP transport install the original request headers. Stdio
+    // and in-process callers keep their local execution context.
+    let original = match crate::executor::context::request_headers() {
+        Some(headers) if !state.config.no_auth => {
+            let initial = crate::executor::context::current().ok_or_else(|| {
+                ApiError::new(403, "The original Pipeline HTTP caller is unavailable.")
+            })?;
+            if initial.full_admin() {
+                None
+            } else {
+                let source = crate::executor::plugin_caller::RequestSource::resolve(
+                    state,
+                    &headers,
+                    &["pipes:write", "jobs:execute"],
+                )
+                .await?;
+                crate::executor::context::check_same_action_access(&initial, &source.access())?;
+                Some(Arc::new(source))
+            }
+        }
+        _ => None,
+    };
     let registry = conn.connector_keys();
     let mut instances = vec![registry.clone()];
     for reference in targets_of(definition) {
@@ -976,7 +999,10 @@ pub async fn start_sync(
         }
     }
     may_run(state, principal, &instances).await?;
-    let caller = super::jobs::access_of_principal(state, principal).await?;
+    let caller = match &original {
+        Some(source) => source.access(),
+        None => Arc::new(super::jobs::access_of_principal(state, principal).await?),
+    };
     check_members_editable(state, &caller, conn, name, definition, options).await?;
     let run_id = match run_id {
         Some(id) if crate::engine_stream::valid_run_id(&id) => id,
@@ -1028,14 +1054,36 @@ pub async fn start_sync(
     });
     // Once accepted, finish the bounded launch even if its HTTP request is cancelled.
     // No provisional running history is written: SSE waits for the runner's trusted header.
-    let started = tokio::spawn(launch_reserved_run(
-        state.clone(),
-        principal.cloned(),
-        conn.clone(),
-        run_id.clone(),
-        job.clone(),
-        sysargs,
-        metadata,
+    let request = original.map(|source| {
+        Arc::new(crate::executor::pipe_operation::PipelineRunRequest {
+            source,
+            job: job.clone(),
+            words: sysargs.clone(),
+            registry: registry.clone(),
+            name: name.into(),
+            definition: definition.clone(),
+            run_id: run_id.clone(),
+            begin: options.begin.clone(),
+            end: options.end.clone(),
+        })
+    });
+    let started = tokio::spawn(crate::executor::context::scope(
+        crate::executor::context::current(),
+        crate::executor::gateway::scope(
+            crate::executor::gateway::current(),
+            crate::executor::context::pipeline_request_scope(
+                request,
+                launch_reserved_run(
+                    state.clone(),
+                    principal.cloned(),
+                    conn.clone(),
+                    run_id.clone(),
+                    job.clone(),
+                    sysargs,
+                    metadata,
+                ),
+            ),
+        ),
     ))
     .await
     .map_err(|_| ApiError::new(503, "The Pipeline launch was interrupted."))??;
@@ -1093,14 +1141,20 @@ async fn sync(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
     };
     let conn = connector(&ctx)?;
     let (definition, _) = visible_registration(&ctx.state, &caller, &conn, &name).await?;
-    let started = start_sync(
-        &ctx.state,
-        principal.as_ref(),
-        &conn,
-        &name,
-        &definition,
-        &options,
-        run_id,
+    let started = crate::executor::context::request_headers_scope(
+        ctx.headers,
+        crate::executor::context::scope(
+            Some(Arc::new(caller)),
+            start_sync(
+                &ctx.state,
+                principal.as_ref(),
+                &conn,
+                &name,
+                &definition,
+                &options,
+                run_id,
+            ),
+        ),
     )
     .await?;
     Ok(envelope::ok(
@@ -1346,7 +1400,7 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
             "Pipeline revision changed; reload before renaming.",
         ));
     }
-    let (jobs, hidden) = referencing_jobs(&ctx, &conn, &name, &caller).await;
+    let (jobs, hidden) = referencing_jobs(&ctx, &conn, &name, &caller).await?;
     if !jobs.is_empty() || hidden > 0 {
         return Err(ApiError::new(
             409,
@@ -1418,11 +1472,17 @@ async fn referencing_jobs(
     conn: &Arc<dyn InstanceConnector>,
     name: &str,
     caller: &Access,
-) -> (Vec<String>, usize) {
+) -> Result<(Vec<String>, usize), ApiError> {
     let mut found = Vec::new();
     let mut hidden = 0;
     // Only the commands and owners: a job's status would cost a `systemctl` query per job.
-    for (job_name, meta) in ctx.state.jobs.list_definitions().await {
+    for (job_name, meta) in ctx
+        .state
+        .jobs
+        .try_list_definitions()
+        .await
+        .map_err(ApiError::unavailable)?
+    {
         let Some(args) = meta.get("sysargs").and_then(Json::as_array) else {
             continue;
         };
@@ -1457,7 +1517,7 @@ async fn referencing_jobs(
     }
     found.sort();
     found.dedup();
-    (found, hidden)
+    Ok((found, hidden))
 }
 
 /// `a, b and 2 hidden jobs` (the jobs the caller may not see are only counted).
@@ -1492,7 +1552,7 @@ async fn delete(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
             ),
         ));
     }
-    let (jobs, hidden_jobs) = referencing_jobs(&ctx, &conn, &name, &caller).await;
+    let (jobs, hidden_jobs) = referencing_jobs(&ctx, &conn, &name, &caller).await?;
     if !jobs.is_empty() || hidden_jobs > 0 {
         return Err(ApiError::new(
             409,
@@ -1542,7 +1602,7 @@ async fn attributes(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     // The jobs the caller may see by name; the others only counted, as one last entry (so a
     // client that refuses to rename a Pipeline some job runs still refuses) and in
     // `pipeline_hidden_referencing_jobs`.
-    let (mut jobs, hidden_jobs) = referencing_jobs(&ctx, &conn, &name, &caller).await;
+    let (mut jobs, hidden_jobs) = referencing_jobs(&ctx, &conn, &name, &caller).await?;
     if hidden_jobs > 0 {
         jobs.push(jobs_label(&[], hidden_jobs));
     }

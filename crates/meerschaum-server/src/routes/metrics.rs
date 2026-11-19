@@ -227,7 +227,7 @@ async fn record(ctx: Ctx, body: Body) -> ApiResult {
                 "Internal Pipes do not emit user sync metrics.",
             ));
         }
-        guard::check_connector_teams(&ctx.state, &caller, pipe.connector_keys())?;
+        guard::check_source_connector(&ctx.state, &caller, pipe.connector_keys())?;
         let registered = registry
             .get(pipe.connector_keys())
             .and_then(|metrics| metrics.get(pipe.metric_key()))

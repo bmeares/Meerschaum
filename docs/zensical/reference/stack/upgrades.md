@@ -1,6 +1,6 @@
 # ⬆️ Upgrading the Stack
 
-Pulling newer images (`mrsm stack pull`, or `mrsm upgrade mrsm`) updates the stack's software, but
+Pulling newer images (`mrsm stack pull`, or `mrsm upgrade mrsm` when you answer yes to pulling) updates the stack's software, but
 not everything inside its database volume. This page covers what an upgrade leaves behind and the
 commands that finish the job. See [the stack page](index.md) for how the stack's database is set
 up in the first place.

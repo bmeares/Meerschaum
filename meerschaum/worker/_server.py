@@ -195,7 +195,18 @@ def _define_connectors(defined: Optional[Dict[str, Dict[str, Any]]]) -> None:
         _DEFINED_CONNECTORS[keys] = attributes
 
 
+#: 5.1: this module opens an inherited channel (`fd:<n>`); the host program checks for it.
+SUPPORTS_INHERITED_CHANNEL: bool = True
+
+
 def _connect(address: str):
+    if address.startswith('fd:'):
+        ### 5.1: the end of a socket pair the Rust host created and this process inherited
+        ### (nothing listens, so no other process can take the worker's place). Nothing this
+        ### worker starts inherits it.
+        sock = socket.socket(fileno=int(address[len('fd:'):]))
+        sock.set_inheritable(False)
+        return sock.makefile('rwb', buffering=1024 * 1024)
     if address.startswith('\\\\.\\pipe\\'):
         ### Windows named pipe: the host created it; open it like a file.
         return open(address, 'r+b', buffering=0)
@@ -223,17 +234,25 @@ def serve(address: str) -> int:
     import meerschaum as mrsm
     from meerschaum.worker import _ops
     from meerschaum.worker._ops import HANDLERS, error_message
+    from meerschaum._internal import team_scope
+    team_scope.install_thread_propagation()
     from meerschaum.worker._msgpack import USING_FALLBACK
     from meerschaum.utils.venv import ensure_default_venvs
 
-    conn.send({
+    hello = {
         't': 'hello',
         'protocol': PROTOCOL_VERSION,
         'pid': os.getpid(),
         'python': platform.python_version(),
         'meerschaum': mrsm.__version__,
         'msgpack': ('stdlib' if USING_FALLBACK else 'msgpack'),
-    })
+        'capabilities': [team_scope.CAPABILITY],
+    }
+    ### 5.1: a worker started for an isolated team proves it loaded the team's configuration.
+    report = team_scope.hello_report()
+    if report is not None:
+        hello['team_scope'] = report
+    conn.send(hello)
 
     reader = threading.Thread(target=conn.reader, name='mrsm-worker-reader', daemon=True)
     reader.start()
@@ -269,8 +288,12 @@ def serve(address: str) -> int:
             conn.send({'t': 'result', 'id': call_id, 'value': True})
             break
         allow_protected = bool(message.get('allow_protected', False))
+        ### A call the host makes for an isolated team (5.1): plugin code may look up only the
+        ### team's connectors. Only the host sends `team_scope`.
+        scope_token = None
         try:
             try:
+                scope_token = team_scope._enter(args.pop('team_scope', None))
                 interruptible = True
                 _ops.CALL_DEBUG = bool(message.get('debug', False))
                 if allow_protected:
@@ -284,6 +307,7 @@ def serve(address: str) -> int:
             finally:
                 interruptible = False
                 _ops.CALL_DEBUG = False
+                team_scope._exit(scope_token)
                 if allow_protected:
                     _allow_protected(False)
             conn.send({'t': 'result', 'id': call_id, 'value': value}, out_frames)

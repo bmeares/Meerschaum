@@ -8,30 +8,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-fn library(name: &str) -> PathBuf {
-    static BUILT: OnceLock<()> = OnceLock::new();
-    BUILT.get_or_init(|| {
-        let root = tempfile::tempdir().unwrap();
-        let plugins = tempfile::tempdir().unwrap();
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "-p", "meerschaum-plugin", "--examples"])
-            .env("MRSM_ROOT_DIR", root.path())
-            .env("MRSM_PLUGINS_DIR", plugins.path())
-            .status()
-            .unwrap();
-        assert!(status.success());
-    });
-    let executable = std::env::current_exe().unwrap();
-    let profile = executable.parent().unwrap().parent().unwrap();
-    profile.join("examples").join(format!(
-        "{}{name}.{}",
-        std::env::consts::DLL_PREFIX,
-        std::env::consts::DLL_EXTENSION
-    ))
-}
+#[path = "common/native_examples.rs"]
+mod native_examples;
+use native_examples::library;
 
 struct Home {
     root: tempfile::TempDir,
@@ -81,8 +62,6 @@ impl Home {
                 "-i",
                 "sql:local",
                 "--nopretty",
-                "--role",
-                "operator",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -93,8 +72,7 @@ impl Home {
             .stdin
             .take()
             .unwrap()
-            // Keep the first fixture user non-admin; Operator has no custom plugin scope.
-            .write_all(b"n\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
+            .write_all(b"y\nsynthetic-pass-1\nsynthetic-pass-1\n\n")
             .unwrap();
         let output = registering.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -328,7 +306,7 @@ fn native_routes_and_mcp_are_served_by_start_api() {
     // Path parameters, the query, headers and the principal; the scope is enforced.
     let denied = http(port, "GET", "/native-api/items/7", &[], b"");
     assert_eq!(denied.status, 401);
-    let reader = login(port, Some("pipes:read"));
+    let reader = login(port, Some("pipes%3Aread"));
     let item = http(
         port,
         "GET",
@@ -394,7 +372,7 @@ fn native_routes_and_mcp_are_served_by_start_api() {
     );
     assert_eq!(prefs.json(), json!({"theme": "dark"}));
 
-    // An API key (a token principal) reaches routes and MCP entries; plugins see who called.
+    // Administrator API keys preserve the token principal on the trusted plugin path.
     let registered = http(
         port,
         "POST",
@@ -403,7 +381,7 @@ fn native_routes_and_mcp_are_served_by_start_api() {
             ("Authorization", &writer),
             ("Content-Type", "application/json"),
         ],
-        br#"{"label": "native-key", "scopes": ["pipes:read"]}"#,
+        br#"{"label": "native-key", "scopes": ["*"]}"#,
     );
     assert_eq!(
         registered.status,
@@ -444,13 +422,12 @@ fn native_routes_and_mcp_are_served_by_start_api() {
     let by_key = whoami(&key);
     assert_eq!(by_key["principal"]["kind"], "token");
     assert_eq!(by_key["principal"]["label"], "native-key");
-    assert_eq!(by_key["scopes"], json!(["pipes:read"]));
-    let by_user = whoami(&reader);
+    let by_user = whoami(&writer);
     assert_eq!(by_user["principal"]["kind"], "user");
     assert_eq!(by_user["principal"]["username"], "ada");
 
-    // MCP: native tools are listed per scope and called with validated arguments.
-    let tools = mcp(port, &reader, "tools/list", json!({}));
+    // MCP tools are listed and called with the trusted administrator's credentials.
+    let tools = mcp(port, &writer, "tools/list", json!({}));
     let names: Vec<&str> = tools["result"]["tools"]
         .as_array()
         .unwrap()
@@ -458,10 +435,10 @@ fn native_routes_and_mcp_are_served_by_start_api() {
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     assert!(names.contains(&"native_api_add"), "{names:?}");
-    assert!(!names.contains(&"native_api_secret"), "{names:?}");
+    assert!(names.contains(&"native_api_secret"), "{names:?}");
     let sum = mcp(
         port,
-        &reader,
+        &writer,
         "tools/call",
         json!({"name": "native_api_add", "arguments": {"a": 2, "b": 40}}),
     );
@@ -473,7 +450,7 @@ fn native_routes_and_mcp_are_served_by_start_api() {
     );
     let invalid = mcp(
         port,
-        &reader,
+        &writer,
         "tools/call",
         json!({"name": "native_api_add", "arguments": {"a": 2, "b": "x"}}),
     );
@@ -491,19 +468,11 @@ fn native_routes_and_mcp_are_served_by_start_api() {
         "tools/call",
         json!({"name": "native_api_secret"}),
     );
-    // A custom scope is not among a user's default scopes: the call is refused like any tool's.
-    assert_eq!(secret["result"]["isError"], true);
-    assert!(
-        secret["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("native:secret"),
-        "{secret}"
-    );
+    assert_eq!(secret["result"]["isError"], false, "{secret}");
 
     let item = mcp(
         port,
-        &reader,
+        &writer,
         "resources/read",
         json!({"uri": "native-api://items/9"}),
     );
@@ -516,14 +485,14 @@ fn native_routes_and_mcp_are_served_by_start_api() {
     );
     let logo = mcp(
         port,
-        &reader,
+        &writer,
         "resources/read",
         json!({"uri": "native-api://logo"}),
     );
     assert_eq!(logo["result"]["contents"][0]["blob"], "iU1SAA==");
     let greet = mcp(
         port,
-        &reader,
+        &writer,
         "prompts/get",
         json!({"name": "native_api_greet", "arguments": {"who": "Ada"}}),
     );

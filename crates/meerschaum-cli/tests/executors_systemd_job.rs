@@ -58,6 +58,12 @@ impl Unit {
             .env("MRSM_PLUGINS_DIR", self.path("plugins"))
             .env("MRSM_PYTHON", self.path("no-python"))
             .env("MRSM_NO_UPDATE_CHECK", "1")
+            // The fixture starts one explicit unit. Bulk startup jitter can otherwise
+            // consume its entire deadline before the job reaches the prompt or signal check.
+            .env(
+                meerschaum_jobs::startup::KIND_ENV,
+                meerschaum_jobs::startup::StartKind::Single.as_str(),
+            )
             .env("MRSM_DAEMON_ID", "sysjob")
             .env(
                 "MRSM_SYSTEMD_LOG_PATH",
@@ -354,4 +360,43 @@ fn a_unit_whose_job_is_killed_records_the_signal() {
         unit.result().expect("a result file"),
         serde_json::json!([false, "Daemon 'sysjob' was killed by signal 9 (SIGKILL)."])
     );
+}
+
+/// A unit whose job waits for input: the wrapper keeps `<socket>.stdin.block` (what the
+/// executor's `is_blocking_on_stdin` reads) while the job's `read` waits, and removes it once
+/// the answer written into the FIFO was read.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_units_prompt_is_seen_and_answered_through_its_fifo() {
+    let unit = Unit::new();
+    let script = unit.path("asks.sh");
+    std::fs::write(&script, "#!/bin/sh\nread a\necho \"got [$a]\"\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let fifo = unit.path("systemd/services/sysjob/mrsm-sysjob.service.stdin");
+    let marker = unit.path("systemd/services/sysjob/mrsm-sysjob.service.stdin.block");
+    let mut child = unit
+        .command(&["sh", &script.to_string_lossy()])
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !marker.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the unit never waited: {}",
+            unit.log_text()
+        );
+        assert!(child.try_wait().unwrap().is_none(), "{}", unit.log_text());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let mut writer = std::fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+    std::io::Write::write_all(&mut writer, b"hello\n").unwrap();
+    drop(writer);
+    assert!(wait_exit(&mut child, 30).success());
+    assert!(
+        unit.log_text().contains("got [hello]"),
+        "{}",
+        unit.log_text()
+    );
+    assert!(!marker.exists());
 }

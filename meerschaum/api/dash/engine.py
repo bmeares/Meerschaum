@@ -589,12 +589,52 @@ def resolve_instance(instance_keys: Optional[str] = None) -> Tuple[Any, Optional
     """
     from meerschaum.api import get_api_connector
     requested = instance_keys or global_instance_keys()
+    viewer = _request_viewer()
+    team_instance = viewer.default_instance if viewer is not None else None
     if requested:
+        if not _viewer_may_use(viewer, str(requested)):
+            return _team_or_api_instance(team_instance), str(requested)
         try:
             return get_api_connector(str(requested)), None
         except Exception:
-            return get_api_connector(), str(requested)
-    return get_api_connector(), None
+            return _team_or_api_instance(team_instance), str(requested)
+    return _team_or_api_instance(team_instance), None
+
+
+def _request_viewer() -> Any:
+    """The viewer of the current request (`None` outside a request)."""
+    try:
+        from meerschaum.api.dash import access
+        if not access._in_request():
+            return None
+        return access.current_viewer()
+    except Exception:
+        return None
+
+
+def _viewer_may_use(viewer: Any, keys: str) -> bool:
+    """Whether the viewer may use the connector `keys` as an instance (its teams and grants)."""
+    if viewer is None:
+        return True
+    try:
+        from meerschaum.api.dash.connector_listing import connector_team_allows
+        return bool(connector_team_allows(keys, viewer))
+    except Exception:
+        return False
+
+
+def _team_or_api_instance(team_instance: Optional[str]) -> Any:
+    """
+    The default instance of the viewer's team when the API allows it (`allow_multiple_instances`,
+    `allowed_instance_keys`), else the API's own instance.
+    """
+    from meerschaum.api import get_api_connector
+    if team_instance:
+        try:
+            return get_api_connector(str(team_instance))
+        except Exception:
+            pass
+    return get_api_connector()
 
 
 def get_instance(instance_keys: Optional[str] = None, strict: bool = False):

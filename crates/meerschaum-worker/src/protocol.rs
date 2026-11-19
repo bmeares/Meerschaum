@@ -297,7 +297,7 @@ pub fn kernel_to_wire(v: &KValue) -> Wire {
     }
 }
 
-fn json_to_wire(j: &serde_json::Value) -> Wire {
+pub(crate) fn json_to_wire(j: &serde_json::Value) -> Wire {
     match j {
         serde_json::Value::Null => Wire::Nil,
         serde_json::Value::Bool(b) => Wire::Boolean(*b),

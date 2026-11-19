@@ -958,6 +958,9 @@ pub fn get_env_dict_in(
 
     if let Some(cfg) = config.get("config").filter(|v| v.truthy()) {
         env.insert("MRSM_CONFIG".into(), Value::Str(json_compact(cfg)));
+        // The block replaces the parent's MRSM_CONFIG, also one read from a file (5.1): the
+        // project's processes, which get this environment whole, never see both.
+        env.shift_remove(&env_name("config_file", "MRSM_CONFIG_FILE"));
     }
 
     match config.get("environment") {
@@ -1194,6 +1197,34 @@ pub fn load_project_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 5.1: a project's `config:` block replaces the parent's `MRSM_CONFIG_FILE` too, so its
+    /// processes never start with both forms set (an error); without a block it is inherited.
+    #[test]
+    fn a_config_block_replaces_an_inherited_config_file() {
+        let process_env: ProcessEnv = [
+            (
+                "MRSM_CONFIG_FILE".to_string(),
+                "/run/mrsm-config.json".to_string(),
+            ),
+            (
+                "MRSM_PATCH_FILE".to_string(),
+                "/run/mrsm-patch.json".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let with_block =
+            Value::from_json_str(r#"{"config": {"meerschaum": {"instance": "sql:x"}}}"#)
+                .unwrap()
+                .to_map();
+        let env = get_env_dict(&with_block, &process_env).unwrap();
+        assert!(env.contains_key("MRSM_CONFIG"));
+        assert!(!env.contains_key("MRSM_CONFIG_FILE"));
+        assert!(env.contains_key("MRSM_PATCH_FILE"));
+        let env = get_env_dict(&Map::new(), &process_env).unwrap();
+        assert!(env.contains_key("MRSM_CONFIG_FILE"));
+    }
 
     #[test]
     fn the_root_label_is_the_static_environment_name() {

@@ -23,7 +23,7 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
 }
 
 fn labels(state: &AppState, caller: &Access, typ: &str) -> Vec<String> {
-    match state.config.connectors.get(typ) {
+    match state.connectors().get(typ) {
         Some(Value::Map(m)) => m
             .keys()
             .filter(|k| *k != "default")
@@ -36,13 +36,13 @@ fn labels(state: &AppState, caller: &Access, typ: &str) -> Vec<String> {
 
 fn connectors_for(state: &AppState, caller: &Access, typ: Option<&str>) -> Result<Json, ApiError> {
     if let Some(t) = typ {
-        if !state.config.connectors.contains_key(t) {
+        if !state.connectors().contains_key(t) {
             return Err(ApiError::new(404, format!("No connectors of type '{t}'.")));
         }
         return Ok(json!(labels(state, caller, t)));
     }
     let mut out = serde_json::Map::new();
-    for typ in state.config.connectors.keys() {
+    for typ in state.connectors().keys() {
         out.insert(typ.clone(), json!(labels(state, caller, typ)));
     }
     Ok(Json::Object(out))

@@ -47,7 +47,11 @@ def _registry(query):
 
 
 def _instance_options():
-    return [{'label': key, 'value': key} for key in get_connector_labels(*instance_types)]
+    from meerschaum.api.dash.components import usable_instance_keys
+    return [
+        {'label': key, 'value': key}
+        for key in usable_instance_keys(list(get_connector_labels(*instance_types)))
+    ]
 
 
 def _navbar(registry):

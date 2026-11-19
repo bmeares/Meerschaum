@@ -26,6 +26,26 @@ path = "src/lib.rs"
 name = "mrsm-cli"
 path = "src/main.rs"
 
+[[test]]
+# The fixture is a native Main entry point, including the launcher's guardian children.
+name = "host_api_terminals"
+harness = false
+
+[[test]]
+# The credential-free Host Metadata fixture is also its native supervisor/worker entry point.
+name = "host_plugin_discovery"
+harness = false
+
+[[test]]
+# Explicit owned offline toolchain; the fixture is its confined native child entry point.
+name = "native_source_compiler"
+harness = false
+
+[[test]]
+# The Team session fixture also handles its native Python launcher children.
+name = "team_sessions"
+harness = false
+
 [package.metadata.docs.rs]
 # docs.rs has no Oracle client: document the lean build.
 no-default-features = true
@@ -40,6 +60,7 @@ default = ["oracle"]
 oracle = ["meerschaum-connector-sql/oracle"]
 
 [dependencies]
+sqlparser = { version = "0.62.0", features = ["visitor"] }
 reqwest = { workspace = true }
 tempfile = "3"
 toml = { workspace = true }
@@ -58,6 +79,7 @@ meerschaum-plugin = { workspace = true }
 meerschaum-web = { workspace = true }
 axum = "0.8"
 async-trait = "0.1"
+base64 = "0.23"
 rmpv = "1"
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -98,6 +120,7 @@ rustix = { version = "1", default-features = false, features = ["std", "event", 
 signal-hook = { version = "0.4", features = ["extended-siginfo"] }
 
 [dev-dependencies]
+bytes = "1"
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
 # The pty harness of tests/shell_screens.rs: drive `mrsm` in a pseudo-terminal and render it.
@@ -105,3 +128,7 @@ portable-pty = "0.9"
 vt100 = "0.16"
 # Self-signed certificates for `start api --keyfile/--certfile` (`server.rs`, tests/https_api.rs).
 rcgen = "0.14"
+# The web terminal's websocket in tests/webterm_restricted.rs (the version meerschaum-server's
+# tests use).
+tokio-tungstenite = "0.30"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }

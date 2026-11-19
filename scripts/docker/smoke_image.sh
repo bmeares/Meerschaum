@@ -187,6 +187,65 @@ grep -q "offline Rust plugin works" "$root/plugin.log"
 TOOLCHAIN_SMOKE
 )
 
+scoped_route_script=$(cat <<'SCOPED_ROUTE_SMOKE'
+set -euo pipefail
+root="$(mktemp -d)"
+api=''
+cleanup() {
+  if [ -n "$api" ]; then
+    kill "$api" 2>/dev/null || true
+    wait "$api" 2>/dev/null || true
+  fi
+  rm -rf -- "$root"
+}
+trap cleanup EXIT
+touch "$root/canary"
+mrsm __mrsm_team_sandbox_probe__ require_sockets "$root/canary" > "$root/sandbox.json"
+if python -c 'import json, sys; sys.exit(0 if json.load(sys.stdin)["kernel_abi"] < 6 else 1)' < "$root/sandbox.json"; then
+  echo 'Scoped execution requires a newer Landlock ABI. The ordinary image checks still run.'
+  exit 0
+fi
+export CARGO_NET_OFFLINE=true MRSM_ROOT_DIR="$root/root" MRSM_PLUGINS_DIR="$root/plugins"
+export MRSM_NO_AUTO_INSTALL=1 MRSM_NO_UPDATE_CHECK=1
+mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+printf '%s\n' n smoke-plugin-password smoke-plugin-password '' |
+  mrsm register user smoke_operator --scopes plugins:read pipes:read -i sql:local --nopretty \
+  > "$root/register.log" 2>&1 || { cat "$root/register.log"; exit 1; }
+cat > "$MRSM_PLUGINS_DIR/scoped_smoke.rs" <<'PLUGIN'
+#[api_route(GET, "/scoped-smoke", scopes = ["pipes:read"])]
+fn probe() -> Value { json!({"number": 42}) }
+PLUGIN
+port=$((20000 + RANDOM % 20000))
+base="http://127.0.0.1:$port"
+export MRSM_PATCH="$(printf '{"api":{"execution":{"callback_url":"%s"}}}' "$base")"
+mrsm start api --host 127.0.0.1 --port "$port" -i sql:local --no-dash > "$root/api.log" 2>&1 &
+api=$!
+for _ in $(seq 1 "${MRSM_SMOKE_WAIT:-90}"); do
+  if curl --fail --silent --max-time 3 "$base/healthcheck/ready" >/dev/null; then break; fi
+  kill -0 "$api" 2>/dev/null || { cat "$root/api.log"; exit 1; }
+  sleep 1
+done
+login_with_scope() {
+  curl --fail --silent --max-time 10 --data-urlencode "scope=$1" \
+    --data 'username=smoke_operator&password=smoke-plugin-password' "$base/login" |
+    python -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+}
+token=$(login_with_scope 'plugins:read pipes:read') || { cat "$root/api.log"; exit 1; }
+curl --fail-with-body --silent --max-time "${MRSM_SMOKE_WAIT:-90}" \
+  -H "Authorization: Bearer $token" "$base/scoped-smoke" > "$root/result.json" || {
+  cat "$root/result.json" "$root/api.log"; exit 1;
+}
+python -c 'import json, sys; assert json.load(sys.stdin) == {"number": 42}' < "$root/result.json"
+for scope in plugins:read pipes:read; do
+  token=$(login_with_scope "$scope")
+  status=$(curl --silent --max-time 10 --output "$root/refused.json" --write-out '%{http_code}' \
+    -H "Authorization: Bearer $token" "$base/scoped-smoke")
+  test "$status" = 403 || { cat "$root/refused.json"; exit 1; }
+done
+echo 'The scoped Rust route compiled and ran offline.'
+SCOPED_ROUTE_SMOKE
+)
+
 for image in "${rust_images[@]}" "${rust_full_images[@]}"; do
   echo "== $image (native, no Python)"
   check "native SQL, jobs and API without Python" "$image" bash -c "$native_script"
@@ -217,6 +276,7 @@ for image in "${full_images[@]}"; do
   check "ssh" "$image" ssh -V
   check "mrsm" "$image" mrsm --version
   check "Python full dependencies" "$image" python -c "import meerschaum, dash, dash_bootstrap_components, dash_ace, dash_extensions, fastapi, uvicorn, a2wsgi, pandas, pyarrow, pyodbc, oracledb, duckdb, duckdb_engine, sqlalchemy_cockroachdb, webview; print(meerschaum.__version__)"
+  check "Scoped Rust route using the attested compiler" "$image" bash -c "$scoped_route_script"
   check "Native DuckDB offline" "$image" bash -c '
     set -euo pipefail
     root="$(mktemp -d)"

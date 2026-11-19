@@ -289,6 +289,10 @@ fn unavailable_reason(plugins_dirs: &[std::path::PathBuf], keys: &str) -> Option
 struct Inplace(Arc<meerschaum_connector_sql::SqlConnector>);
 #[meerschaum_connector::async_trait]
 impl meerschaum_engine::PluginSync for Inplace {
+    fn is_fetch_optimization(&self) -> bool {
+        true
+    }
+
     async fn sync_native(
         &self,
         pipe: &meerschaum_core::Pipe,
@@ -449,7 +453,11 @@ pub fn build(
         native.set_stream_kwargs(kwargs.clone());
         python.set_stream_kwargs(kwargs);
     }
-    Ok(Engine::new(registry, config).with_cadence(Arc::new(JobsCadence)))
+    session
+        .block_on(crate::native::graph_plan::attach(
+            Engine::new(registry, config).with_cadence(Arc::new(JobsCadence)),
+        ))
+        .map_err(|message| ActionError::new("PermissionError", message))
 }
 
 /// `parameters['schedule']` in continuous mode, parsed with the `-s` grammar of
@@ -520,6 +528,29 @@ mod tests {
         assert!(JobsCadence.timer("every blue moons", now).is_err());
     }
 
+    #[test]
+    fn pipe_schedule_takes_a_time_zone() {
+        use meerschaum_engine::Cadence;
+        // `parameters['schedule']` with the `tz` clause keeps 21:00 New York time across the
+        // 2027-03-14 change (02:00Z, then 01:00Z), and a jitter on top of it.
+        let now = "2027-03-01T00:00:00Z".parse().unwrap();
+        let mut timer = JobsCadence
+            .timer("daily starting 2027-03-13 21:00 tz America/New_York", now)
+            .unwrap();
+        let first = timer.first(now).unwrap();
+        assert_eq!(first.to_rfc3339(), "2027-03-14T02:00:00+00:00");
+        let second = timer.after(first).unwrap();
+        assert_eq!(second.to_rfc3339(), "2027-03-15T01:00:00+00:00");
+        let mut jittered = JobsCadence
+            .timer(
+                "daily starting 2027-03-13 21:00 tz America/New_York jitter 0",
+                now,
+            )
+            .unwrap();
+        assert_eq!(jittered.first(now), Some(first));
+        assert!(JobsCadence.timer("daily tz Nowhere/Land", now).is_err());
+    }
+
     #[tokio::test]
     async fn inplace_with_ledger_commits_only_recorded_snapshot() {
         let root = tempfile::tempdir().unwrap();
@@ -550,6 +581,7 @@ mod tests {
             .with_source("sql:wiring", sql.clone());
         let defaults = Default::default();
         let env = SyncEnv {
+            delivery: None,
             registry: &native,
             defaults: &defaults,
             default_backtrack_minutes: 1440,

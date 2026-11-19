@@ -152,6 +152,9 @@ There are two ways to use a token to authenticate with the API:
       -H "Authorization: $API_KEY"
     ```
 
+!!! tip "Connecting an AI agent"
+    The API Key is also the bearer credential of the [MCP server](../mcp/index.md) at `/mcp`. The web console's Tokens page has a **Connect an agent** button with ready-to-paste configuration for Claude Code, Claude Desktop, Codex, OpenCode and other MCP clients.
+
 ---
 
 ## 🎯 Scopes

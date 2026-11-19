@@ -45,6 +45,7 @@ pub mod envelope;
 pub mod error;
 pub mod execute_access;
 pub mod execute_policy;
+pub mod executor;
 pub mod host;
 pub mod json;
 pub mod lifecycle;
@@ -61,6 +62,7 @@ pub mod routes;
 pub mod serialize;
 pub mod sql_guard;
 pub mod state;
+pub mod team_execution;
 pub mod tls;
 pub mod web;
 pub mod webterm;
@@ -163,7 +165,10 @@ pub async fn serve_with_tls(
 /// They must not install a fallback (`/dash/*` is the server's: proxied to the host or the
 /// pointer page).
 pub fn app_with_console(state: AppState, console: axum::Router) -> axum::Router {
-    app(state).merge(console)
+    app(state.clone()).merge(console.layer(axum::middleware::from_fn_with_state(
+        state,
+        executor::callbacks::guard,
+    )))
 }
 
 /// [`app_with_mcp`] plus an optional router of `meerschaum-web`'s exact routes (it must not
@@ -173,9 +178,12 @@ pub fn app_with_mcp_and_console(
     mcp: std::sync::Arc<mcp::McpServer>,
     console: Option<axum::Router>,
 ) -> axum::Router {
-    let app = app_with_mcp(state, mcp);
+    let app = app_with_mcp(state.clone(), mcp);
     match console {
-        Some(console) => app.merge(console),
+        Some(console) => app.merge(console.layer(axum::middleware::from_fn_with_state(
+            state,
+            executor::callbacks::guard,
+        ))),
         None => app,
     }
 }

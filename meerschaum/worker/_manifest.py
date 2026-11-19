@@ -86,6 +86,41 @@ def _plugin_source_files(path: Optional[str]) -> List[pathlib.Path]:
     return [file_path] if file_path.suffix == '.py' else []
 
 
+#: Well-known PyPI distribution names that differ from their top-level import name
+#: (used when checking whether `attempt_import('<import>')` is covered by `required`).
+_COMMON_IMPORT_TO_DIST: Dict[str, str] = {
+    'PIL': 'pillow',
+    'bs4': 'beautifulsoup4',
+    'Crypto': 'pycryptodome',
+    'cv2': 'opencv-python',
+    'dateutil': 'python-dateutil',
+    'docx': 'python-docx',
+    'dotenv': 'python-dotenv',
+    'fitz': 'pymupdf',
+    'jwt': 'pyjwt',
+    'magic': 'python-magic',
+    'serial': 'pyserial',
+    'skimage': 'scikit-image',
+    'sklearn': 'scikit-learn',
+    'usb': 'pyusb',
+    'yaml': 'pyyaml',
+}
+
+
+_PKG_DISTS_CACHE: Optional[Dict[str, List[str]]] = None
+
+
+def _packages_distributions() -> Dict[str, List[str]]:
+    global _PKG_DISTS_CACHE
+    if _PKG_DISTS_CACHE is None:
+        try:
+            import importlib.metadata
+            _PKG_DISTS_CACHE = importlib.metadata.packages_distributions()
+        except Exception:
+            _PKG_DISTS_CACHE = {}
+    return _PKG_DISTS_CACHE
+
+
 def find_undeclared_default_venv_imports(
     path: Optional[str],
     required: List[str],
@@ -102,8 +137,14 @@ def find_undeclared_default_venv_imports(
     found: Dict[str, str] = {}
     for source_file in _plugin_source_files(path):
         try:
-            tree = ast.parse(source_file.read_text(encoding='utf-8'), filename=str(source_file))
-        except (OSError, SyntaxError, ValueError):
+            text = source_file.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):
+            continue
+        if 'attempt_import' not in text:
+            continue
+        try:
+            tree = ast.parse(text, filename=str(source_file))
+        except (SyntaxError, ValueError):
             continue
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -133,6 +174,11 @@ def find_undeclared_default_venv_imports(
                     _normalize(import_name),
                     _normalize(_import_to_install_name(import_name)),
                 }
+                if import_name in _COMMON_IMPORT_TO_DIST:
+                    candidates.add(_normalize(_COMMON_IMPORT_TO_DIST[import_name]))
+                if declared and not (candidates & declared) and import_name not in all_packages:
+                    for dist_name in _packages_distributions().get(import_name, ()):
+                        candidates.add(_normalize(dist_name))
                 if candidates & declared or import_name in all_packages:
                     continue
                 found[import_name] = f"{source_file.name}:{node.lineno}"
@@ -140,8 +186,8 @@ def find_undeclared_default_venv_imports(
         (
             f"Plugin calls attempt_import('{name}') in the shared 'mrsm' venv at {where}, "
             f"but '{name}' is not in its `required` list and is not provided by a Meerschaum "
-            f"extra. Add '{_import_to_install_name(name)}' to `required`, "
-            f"or pass `venv='<plugin name>'` to attempt_import()."
+            f"extra. Add '{_COMMON_IMPORT_TO_DIST.get(name, _import_to_install_name(name))}' "
+            f"to `required`, or pass `venv='<plugin name>'` to attempt_import()."
         )
         for name, where in found.items()
     ]
@@ -200,7 +246,10 @@ def _empty_plugin(name: str) -> Dict[str, Any]:
     }
 
 
-def build_manifest(debug: bool = False) -> Dict[str, Any]:
+def build_manifest(
+    debug: bool = False,
+    cached_venv_warnings: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
     Import every installed plugin and return the manifest dictionary.
     Fingerprints are left empty for the host to fill in.
@@ -275,9 +324,21 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
         required = getattr(module, 'required', [])
         info['required'] = [str(r) for r in required] if isinstance(required, (list, tuple)) else []
         try:
-            info['venv_warnings'] = find_undeclared_default_venv_imports(
-                info['path'], info['required'],
+            cached_entry = (
+                cached_venv_warnings.get(name)
+                if isinstance(cached_venv_warnings, dict)
+                else None
             )
+            if (
+                isinstance(cached_entry, dict)
+                and cached_entry.get('required') == info['required']
+                and isinstance(cached_entry.get('warnings'), list)
+            ):
+                info['venv_warnings'] = [str(m) for m in cached_entry['warnings']]
+            else:
+                info['venv_warnings'] = find_undeclared_default_venv_imports(
+                    info['path'], info['required'],
+                )
             for message in info['venv_warnings']:
                 from meerschaum.utils.warnings import warn
                 warn(f"[{name}] {message}", stack=False, color=False)
@@ -425,6 +486,9 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
             manifest_plugins[plugin_name]['mcp_prompts'].append({
                 'name': prompt_name,
                 'description': getattr(prompt, 'description', None),
+                'arguments': _jsonable(prompt.arguments),
+                'scopes': list(prompt.scopes),
+                'title': prompt.title,
             })
 
     ### Custom connectors

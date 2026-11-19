@@ -21,7 +21,7 @@ mod single_file;
 pub mod source;
 pub mod subscribe;
 pub use arrow;
-pub use callbacks::{Bound, HostCall, HostReply, HostServices, Pipe, Query};
+pub use callbacks::{Bound, HostCall, HostReply, HostServices, Pipe, Query, Transaction};
 pub use chrono;
 pub use host::{LoadedPlugin, NativeConnector};
 pub use indexmap;
@@ -37,7 +37,7 @@ pub use serde_json;
 pub mod prelude {
     pub use crate::{
         Bound, ConnectorType, Error, Frame, FrameExt, Manifest, Pipe, Plugin, Query, Reply,
-        Request, Result, SuccessTuple, export_plugin, host,
+        Request, Result, SuccessTuple, Transaction, export_plugin, host,
     };
     pub use serde_json::{Value, json};
 }

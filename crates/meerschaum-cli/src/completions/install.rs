@@ -186,7 +186,7 @@ fn without_block(text: &str) -> Option<String> {
 fn probe_profiles() -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     for exe in ["pwsh", "powershell"] {
-        let spawned = std::process::Command::new(exe)
+        let spawned = meerschaum_core::child_env::scrubbed(std::process::Command::new(exe))
             .args([
                 "-NoProfile",
                 "-NoLogo",

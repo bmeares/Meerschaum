@@ -53,12 +53,14 @@ pub mod pipe_methods;
 pub mod pipe_methods_api;
 pub mod plugin_bootstrap_api;
 pub mod polars_bridge;
+pub mod retry_api;
 pub mod runtime;
 pub mod sql_api;
 pub mod sql_raw_api;
 pub mod static_config;
 pub mod status_api;
 pub mod sync_api;
+pub mod team_api;
 pub mod trace;
 pub mod valkey_api;
 pub mod verify_api;
@@ -153,6 +155,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<native_plugin_api::PyNativeConnector>()?;
     // `bootstrap plugins` for the console's New plugin (rc28)
     plugin_bootstrap_api::register(m)?;
+    team_api::register(m)?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
     // The native action dispatcher from Python (wave 16, P2)
@@ -202,6 +205,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // meerschaum-connector-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;
     m.add_function(wrap_pyfunction!(sql_api::pipe_metadata_epoch, m)?)?;
+    // `retry_connect()` for the connectors above (sql, valkey, api)
+    m.add_function(wrap_pyfunction!(retry_api::retry_connect_native, m)?)?;
     sql_raw_api::register(m)?;
 
     Ok(())
