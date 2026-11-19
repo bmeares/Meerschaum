@@ -159,6 +159,11 @@ def test_manifest_flags_undeclared_default_venv_imports(tmp_path):
     ### `pypdf` is required, `icalendar` has its own venv, `pandas` is a Meerschaum extra.
     assert named == ['PIL', 'markdown']
     assert all('required' in w and 'venv=' in w for w in warnings_found)
+    ### Declaring the PyPI distribution name (`Pillow`) satisfies `attempt_import('PIL.Image')`.
+    warnings_with_pillow = find_undeclared_default_venv_imports(
+        str(source), ['pypdf>=3', 'Pillow'],
+    )
+    assert sorted(w.split("'")[1] for w in warnings_with_pillow) == ['markdown']
     assert find_undeclared_default_venv_imports(None, []) == []
 
 

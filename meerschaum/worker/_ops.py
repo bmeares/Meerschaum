@@ -610,7 +610,11 @@ def op_post_sync_hook(conn, call_id, args, frames) -> Result:
 
 def op_build_manifest(conn, call_id, args, frames) -> Result:
     from meerschaum.worker._manifest import build_manifest
-    return build_manifest(debug=bool(args.get('debug', False)) or CALL_DEBUG), []
+    cached = args.get('cached_venv_warnings', None)
+    return build_manifest(
+        debug=bool(args.get('debug', False)) or CALL_DEBUG,
+        cached_venv_warnings=(cached if isinstance(cached, dict) else None),
+    ), []
 
 
 def op_inspect_selected_sources(conn, call_id, args, frames) -> Result:

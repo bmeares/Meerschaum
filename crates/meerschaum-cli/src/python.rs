@@ -19,6 +19,13 @@ pub fn manifest(rt: &mut Runtime<'_>) -> Result<Arc<Manifest>, ActionError> {
     session.manifest(rt.config())
 }
 
+/// Currently available plugin metadata without blocking on an in-flight background shell
+/// refresh (returns the cached manifest until the refresh finishes).
+pub fn manifest_nonblocking(rt: &mut Runtime<'_>) -> Option<Arc<Manifest>> {
+    let session = session(rt);
+    session.manifest_nonblocking(rt.config())
+}
+
 /// Validate the plugin trees now (after `install`/`uninstall`/`setup`/`upgrade plugins`).
 pub fn refresh_manifest(rt: &mut Runtime<'_>) -> Result<Arc<Manifest>, ActionError> {
     let session = session(rt);

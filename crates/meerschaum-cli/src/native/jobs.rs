@@ -155,6 +155,18 @@ pub fn sleep_unless_stopped(seconds: f64) -> bool {
     stop.load(Ordering::SeqCst)
 }
 
+/// A lightweight local-only [`JobsContext`] for shell completions (never loads native plugins
+/// or remote resolvers, so interactive shell startup does not block on a background manifest
+/// refresh).
+pub fn local_jobs_context(rt: &mut Runtime<'_>) -> JobsContext {
+    let config = rt.config();
+    JobsContext::new(
+        JobPaths::from_config(config),
+        JobsConfig::from_config(config),
+        Launcher::from_env(),
+    )
+}
+
 /// The jobs context for the runtime's config registry.
 ///
 /// Besides the paths and configuration it installs the resolver for `api:<label>` executors

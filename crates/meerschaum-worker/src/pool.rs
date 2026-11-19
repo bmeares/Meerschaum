@@ -525,6 +525,16 @@ impl WorkerPool {
     /// Start a worker outside the pool's accounting (e.g. a dedicated stream worker), waiting
     /// out any backoff first.
     pub async fn spawn_worker(&self) -> WorkerResult<Worker> {
+        self.spawn_worker_with_quiet(false).await
+    }
+
+    /// Start a worker outside the pool's accounting with stdout/stderr silenced and stdin
+    /// detached (used for background manifest refreshes so they never disturb an active prompt).
+    pub async fn spawn_quiet_worker(&self) -> WorkerResult<Worker> {
+        self.spawn_worker_with_quiet(true).await
+    }
+
+    async fn spawn_worker_with_quiet(&self, quiet: bool) -> WorkerResult<Worker> {
         if self.inner.closed.load(Ordering::SeqCst) {
             return Err(WorkerError::ShuttingDown);
         }
@@ -542,7 +552,12 @@ impl WorkerPool {
         if let Some(t) = not_before {
             tokio::time::sleep_until(t.into()).await;
         }
-        match Worker::spawn(&self.inner.config.worker).await {
+        let mut opts = self.inner.config.worker.clone();
+        if quiet {
+            opts.quiet = true;
+            opts.inherit_stdin = false;
+        }
+        match Worker::spawn(&opts).await {
             Ok(w) => {
                 self.inner.spawned.fetch_add(1, Ordering::SeqCst);
                 Ok(w)

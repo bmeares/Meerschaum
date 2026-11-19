@@ -1385,7 +1385,7 @@ def load_plugins(
         modules.pop(0)
 
     for module in plugins_modules:
-        for name, func in getmembers(module):
+        for name, func in list(vars(module).items()):
             if not isfunction(func):
                 continue
             if name == module.__name__.split('.')[-1]:
@@ -1703,7 +1703,9 @@ def get_data_plugins() -> List[Plugin]:
     data_names = {'sync', 'fetch'}
     data_plugins = []
     for plugin in plugins:
-        for name, ob in inspect.getmembers(plugin.module):
+        if plugin.module is None:
+            continue
+        for name, ob in list(vars(plugin.module).items()):
             if not inspect.isfunction(ob):
                 continue
             if name not in data_names:

@@ -430,8 +430,9 @@ fn run_checks(args: &ArgsMap, rt: &mut Runtime<'_>) -> Report {
     let python_plugins = meerschaum_worker::manifest::discover_plugins(&paths.plugins_dirs).len();
     // The doctor never validates or rebuilds the manifest (that imports plugin code in a worker
     // and writes the cache): it reads the cached one and says when it is stale or missing.
-    let cached = meerschaum_worker::manifest::Manifest::read(
+    let cached = meerschaum_worker::manifest::read_cached_manifest_for(
         &meerschaum_worker::manifest::manifest_path(&paths.root_dir),
+        &paths.plugins_dirs,
     )
     .ok()
     .flatten();

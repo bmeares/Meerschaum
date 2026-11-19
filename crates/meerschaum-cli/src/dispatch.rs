@@ -622,7 +622,14 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         parse_version(sysargs, rt);
         return 0;
     }
+    let in_job = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some();
     let manifest_error = if starts_with_executor(sysargs, &rt.dates, None).unwrap_or(true) {
+        None
+    } else if starts_interactive_shell(sysargs, &rt.dates, rt.env, in_job) {
+        // An interactive shell or webterm opens immediately on cached plugin metadata and
+        // refreshes stale plugin manifests quietly in the background.
+        let session = native::session(rt);
+        session.warm_manifest_for_shell(rt.config());
         None
     } else {
         let progress = crate::format::progress::Progress::start_flags(
@@ -636,7 +643,6 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         manifest.err().map(|e| e.message)
     };
     let nopretty = contains(sysargs, "--nopretty");
-    let in_job = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV).is_some();
     if (sysargs.is_empty() || contains(sysargs, "--shell")) && !in_job {
         if let Some(message) = &manifest_error {
             warn_manifest_error(rt, message);
@@ -768,6 +774,46 @@ pub fn starts_with_executor(
 
 fn is_executor_action(action: &[String]) -> bool {
     matches!(action, [first, second, ..] if first == "start" && second == "executor")
+}
+
+/// Whether `sysargs` opens an interactive shell prompt with no immediate action to run (such as
+/// `mrsm`, `mrsm --shell`, or webterm's `mrsm -i <instance>`). Piped stdin and jobs keep
+/// synchronous manifest validation so commands fed on stdin see fresh plugin metadata at once.
+fn starts_interactive_shell(
+    sysargs: &[String],
+    dates: &DateContext,
+    env: fn(&str) -> Option<String>,
+    in_job: bool,
+) -> bool {
+    !in_job
+        && !crate::env::noninteractive(env)
+        && std::io::IsTerminal::is_terminal(&std::io::stdin())
+        && is_empty_action_shell_invocation(sysargs, dates)
+}
+
+fn is_empty_action_shell_invocation(sysargs: &[String], dates: &DateContext) -> bool {
+    if contains(sysargs, "-d")
+        || contains(sysargs, "--daemon")
+        || contains(sysargs, keys::AND)
+        || contains(sysargs, keys::PIPELINE)
+    {
+        return false;
+    }
+    if sysargs.is_empty() {
+        return true;
+    }
+    let filtered: Vec<String> = sysargs
+        .iter()
+        .filter(|a| *a != "--shell")
+        .cloned()
+        .collect();
+    if filtered.is_empty() {
+        return true;
+    }
+    parse_arguments(&filtered, dates).is_ok_and(|args| {
+        let action = action_words(&args);
+        action.is_empty() || (action.len() == 1 && action[0] == "mrsm")
+    })
 }
 
 struct ExecutorBootstrapManifest {
@@ -2256,6 +2302,35 @@ mod target_tests {
                 ActionTarget::Core(resolved) => assert_eq!(resolved.action.name, name),
                 other => panic!("{words:?}: {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn empty_action_shell_invocations_match_webterm_and_plain_shell() {
+        let dates = DateContext::system();
+        for yes in [
+            &[][..],
+            &["--shell"],
+            &["-i", "sql:sra"],
+            &["-i", "sql:sra", "--shell"],
+            &["--mrsm-instance", "sql:sra", "--debug"],
+        ] {
+            assert!(
+                is_empty_action_shell_invocation(&w(yes), &dates),
+                "expected shell invocation for {yes:?}"
+            );
+        }
+        for no in [
+            &["show", "pipes"][..],
+            &["--shell", "show", "pipes"],
+            &["-d", "-i", "sql:sra"],
+            &["-i", "sql:sra", "+", "show", "version"],
+            &["-i", "sql:sra", ":", "-w", "1"],
+        ] {
+            assert!(
+                !is_empty_action_shell_invocation(&w(no), &dates),
+                "expected non-shell invocation for {no:?}"
+            );
         }
     }
 }

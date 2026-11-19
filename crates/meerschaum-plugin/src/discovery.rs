@@ -526,7 +526,7 @@ pub unsafe fn cached_manifest(directories: &[PathBuf], cache: &Path) -> Result<V
     discovery.build_pending();
     warn_candidates(&discovery.candidates);
     // SAFETY: forwarded trust requirement from this function's caller.
-    let (manifest, skipped) = unsafe { manifest_for(discovery, cache) }?;
+    let (manifest, skipped) = unsafe { manifest_for_in(discovery, directories, cache) }?;
     warn_skipped(&skipped);
     Ok(manifest)
 }
@@ -544,19 +544,90 @@ pub fn manifest_cache_key(candidates: &[Candidate]) -> String {
     hex::encode(hash.finalize())
 }
 
-/// Whether the native manifest cache at `cache` describes the plugins `directories` hold now
-/// (the key the loader checks before it uses the cache). Only scans: nothing is built, loaded
-/// or run, so `mrsm -h` can tell whether the cached plugin actions are current. No plugins and
-/// no cache count as current.
-pub fn manifest_cache_is_current(directories: &[PathBuf], cache: &Path) -> bool {
-    let discovery = discover_report_in(directories, &build_dir_for_cache(cache));
-    match std::fs::read(cache)
+/// The secondary native manifest cache slot keyed by the resolved `directories` list, next to
+/// `primary` (`<root>/cache/manifests/native-<hash>.json`). Processes sharing a root directory
+/// with different `MRSM_PLUGINS_DIR` values keep independent cached manifests without thrashing
+/// each other's primary cache.
+pub fn keyed_manifest_cache_path(primary: &Path, directories: &[PathBuf]) -> PathBuf {
+    let mut hash = Sha256::new();
+    for dir in directories {
+        let resolved = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+        hash.update(resolved.to_string_lossy().as_bytes());
+        hash.update([0]);
+    }
+    let digest = hex::encode(hash.finalize());
+    primary
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("manifests")
+        .join(format!("native-{}.json", &digest[..16]))
+}
+
+fn cache_matches_key(path: &Path, key: &str) -> bool {
+    std::fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-    {
-        Some(cached) => cached["fingerprint"] == manifest_cache_key(&discovery.candidates),
-        None => discovery.candidates.is_empty(),
+        .is_some_and(|cached| cached["fingerprint"] == key)
+}
+
+fn read_valid_cached_manifest(path: &Path, key: &str) -> Option<Value> {
+    let bytes = std::fs::read(path).ok()?;
+    let v = serde_json::from_slice::<Value>(&bytes).ok()?;
+    (v["fingerprint"] == key
+        // Caches written before executor types were aggregated are rebuilt.
+        && v["executor_types"].is_object()
+        && validate_manifest(&v).is_ok())
+    .then_some(v)
+}
+
+/// Whether the native manifest cache at `cache` (or its `directories`-keyed sibling) describes
+/// the plugins `directories` hold now (the key the loader checks before it uses the cache). Only
+/// scans: nothing is built, loaded or run, so `mrsm -h` can tell whether the cached plugin
+/// actions are current. No plugins and no cache count as current.
+pub fn manifest_cache_is_current(directories: &[PathBuf], cache: &Path) -> bool {
+    manifest_cache_is_current_with_policy(directories, cache, &CompilerPolicy::Ambient)
+}
+
+/// Like [`manifest_cache_is_current`] under an explicit [`CompilerPolicy`].
+pub fn manifest_cache_is_current_with_policy(
+    directories: &[PathBuf],
+    cache: &Path,
+    policy: &CompilerPolicy,
+) -> bool {
+    let discovery =
+        discover_report_in_with_policy(directories, &build_dir_for_cache(cache), policy);
+    if discovery.candidates.is_empty() {
+        return true;
     }
+    let key = manifest_cache_key(&discovery.candidates);
+    if cache_matches_key(cache, &key) {
+        return true;
+    }
+    let keyed = keyed_manifest_cache_path(cache, directories);
+    keyed != cache && cache_matches_key(&keyed, &key)
+}
+
+/// Whether [`NativePlugins::open_with_policy`] can answer from cache without building a source
+/// plugin or loading any shared library.
+pub fn manifest_cache_ready_with_policy(
+    directories: &[PathBuf],
+    cache: &Path,
+    policy: &CompilerPolicy,
+) -> bool {
+    let discovery =
+        discover_report_in_with_policy(directories, &build_dir_for_cache(cache), policy);
+    if discovery.candidates.is_empty() {
+        return true;
+    }
+    if discovery.candidates.iter().any(|c| c.build.is_some()) {
+        return false;
+    }
+    let key = manifest_cache_key(&discovery.candidates);
+    if cache_matches_key(cache, &key) {
+        return true;
+    }
+    let keyed = keyed_manifest_cache_path(cache, directories);
+    keyed != cache && cache_matches_key(&keyed, &key)
 }
 
 /// The directory source plugins are built in for a manifest cache file
@@ -581,15 +652,37 @@ pub unsafe fn cached_manifest_report(
     let mut discovery = discover_report_in(directories, &build_dir_for_cache(cache));
     discovery.build_pending();
     // SAFETY: forwarded trust requirement from this function's caller.
-    unsafe { manifest_for(discovery, cache) }
+    unsafe { manifest_for_in(discovery, directories, cache) }
 }
 
-/// The manifest of an already scanned (and built) [`Discovery`]; the returned skipped list is
-/// the discovery's plus the plugins that failed to load.
+fn write_atomic_json(path: &Path, payload: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(error)?;
+    }
+    // A unique temporary sibling also allows concurrent independent manifest builders.
+    let temp = path.with_extension(format!(
+        "{}.{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(error)?
+            .as_nanos()
+    ));
+    std::fs::write(&temp, payload).map_err(error)?;
+    let renamed = std::fs::rename(&temp, path).map_err(error);
+    if renamed.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    renamed
+}
+
+/// Like [`manifest_for`], also consulting and writing the `directories`-keyed sibling slot so
+/// processes sharing a root with different `MRSM_PLUGINS_DIR` lists keep warm caches.
 /// # Safety
 /// Every candidate's library must satisfy `LoadedPlugin::load`'s trust requirements.
-pub(crate) unsafe fn manifest_for(
+pub(crate) unsafe fn manifest_for_in(
     discovery: Discovery,
+    directories: &[PathBuf],
     cache: &Path,
 ) -> Result<(Value, Vec<Skipped>)> {
     let Discovery {
@@ -597,12 +690,13 @@ pub(crate) unsafe fn manifest_for(
         mut skipped,
     } = discovery;
     let key = manifest_cache_key(&candidates);
-    if let Ok(bytes) = std::fs::read(cache)
-        && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
-        && v["fingerprint"] == key
-        // Caches written before executor types were aggregated are rebuilt.
-        && v["executor_types"].is_object()
-        && validate_manifest(&v).is_ok()
+    if let Some(v) = read_valid_cached_manifest(cache, &key) {
+        return Ok((v, skipped));
+    }
+    let keyed = (!directories.is_empty()).then(|| keyed_manifest_cache_path(cache, directories));
+    if let Some(slot) = keyed.as_deref()
+        && slot != cache
+        && let Some(v) = read_valid_cached_manifest(slot, &key)
     {
         return Ok((v, skipped));
     }
@@ -653,24 +747,13 @@ pub(crate) unsafe fn manifest_for(
         }
     }
     validate_manifest(&result)?;
-    if let Some(parent) = cache.parent() {
-        std::fs::create_dir_all(parent).map_err(error)?;
+    let payload = serde_json::to_vec_pretty(&result).map_err(error)?;
+    write_atomic_json(cache, &payload)?;
+    if let Some(slot) = keyed.as_deref()
+        && slot != cache
+    {
+        let _ = write_atomic_json(slot, &payload);
     }
-    // A unique temporary sibling also allows concurrent independent manifest builders.
-    let temp = cache.with_extension(format!(
-        "{}.{}.tmp",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(error)?
-            .as_nanos()
-    ));
-    std::fs::write(&temp, serde_json::to_vec_pretty(&result).map_err(error)?).map_err(error)?;
-    let renamed = std::fs::rename(&temp, cache).map_err(error);
-    if renamed.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    renamed?;
     Ok((result, skipped))
 }
 
@@ -729,5 +812,53 @@ mod cache_key_tests {
             !manifest_cache_is_current(&dirs, &cache),
             "the plugin changed"
         );
+    }
+
+    #[test]
+    fn different_plugins_dirs_keep_independent_keyed_native_caches() {
+        let root = tempfile::tempdir().unwrap();
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir_a.path().join("alpha.rs"),
+            "//! Alpha.\nfn sync() -> SuccessTuple { SuccessTuple::ok(\"\") }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir_b.path().join("beta.rs"),
+            "//! Beta.\nfn sync() -> SuccessTuple { SuccessTuple::ok(\"\") }\n",
+        )
+        .unwrap();
+
+        let cache = root
+            .path()
+            .join("cache")
+            .join("native_plugins_manifest.json");
+        let dirs_a = vec![dir_a.path().to_path_buf()];
+        let dirs_b = vec![dir_a.path().to_path_buf(), dir_b.path().to_path_buf()];
+
+        let key_a = manifest_cache_key(
+            &discover_report_in(&dirs_a, &build_dir_for_cache(&cache)).candidates,
+        );
+        let key_b = manifest_cache_key(
+            &discover_report_in(&dirs_b, &build_dir_for_cache(&cache)).candidates,
+        );
+        assert_ne!(key_a, key_b);
+
+        write_atomic_json(
+            &keyed_manifest_cache_path(&cache, &dirs_a),
+            json!({"fingerprint": key_a}).to_string().as_bytes(),
+        )
+        .unwrap();
+        // Primary holds dirs_b; dirs_a stays current through its keyed sibling slot.
+        write_atomic_json(&cache, json!({"fingerprint": key_b}).to_string().as_bytes()).unwrap();
+        write_atomic_json(
+            &keyed_manifest_cache_path(&cache, &dirs_b),
+            json!({"fingerprint": key_b}).to_string().as_bytes(),
+        )
+        .unwrap();
+
+        assert!(manifest_cache_is_current(&dirs_a, &cache));
+        assert!(manifest_cache_is_current(&dirs_b, &cache));
     }
 }

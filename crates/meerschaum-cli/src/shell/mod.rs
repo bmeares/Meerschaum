@@ -617,28 +617,29 @@ fn words_of(args: &ArgsMap) -> Vec<String> {
 /// (or the next line) re-checks them after this command, so a plugin edited meanwhile is picked
 /// up, and every manifest lookup within one command is served from memory.
 pub fn precmd(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control {
-    let control = run_line(line, state, rt);
-    if let Some(session) = &rt.native {
+    let (control, executed) = run_line_with(line, state, rt, true);
+    if executed && let Some(session) = &rt.native {
         session.invalidate_manifest();
     }
     control
-}
-
-fn run_line(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control {
-    run_line_with(line, state, rt, true)
 }
 
 /// A key binding's command (`shell:keybindings`): run like a typed line, but without clearing
 /// the screen or entering the history, then back to the line being edited.
 pub fn run_key_command(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control {
-    let control = run_line_with(line, state, rt, false);
-    if let Some(session) = &rt.native {
+    let (control, executed) = run_line_with(line, state, rt, false);
+    if executed && let Some(session) = &rt.native {
         session.invalidate_manifest();
     }
     control
 }
 
-fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear: bool) -> Control {
+fn run_line_with(
+    line: &str,
+    state: &mut ShellState,
+    rt: &mut Runtime<'_>,
+    clear: bool,
+) -> (Control, bool) {
     // Each command may show the default-instance hint once.
     crate::native::connectors::reset_default_instance_hint();
     let line = line.replace("\\\n", " ");
@@ -646,26 +647,26 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
         clear_screen(rt, state.debug);
     }
     if line.trim().is_empty() {
-        return Control::Continue;
+        return (Control::Continue, false);
     }
     if matches!(line.as_str(), "exit" | "quit" | "EOF") {
-        return Control::Exit;
+        return (Control::Exit, false);
     }
     let sysargs = match crate::shlex::split(&line) {
         Ok(s) => s,
         Err(e) => {
             let w = rt.with_formatter(|f| f.warn(&e));
             rt.eprint(&w);
-            return Control::Continue;
+            return (Control::Continue, false);
         }
     };
     if let Err(message) = restricted::check_raw(&sysargs) {
         print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
-        return Control::Continue;
+        return (Control::Continue, false);
     }
     if let Some(rest) = line.strip_prefix('?') {
         do_help(&format!("help {rest}"), rt);
-        return Control::Continue;
+        return (Control::Continue, true);
     }
     let (sysargs, pipeline_args) = split_pipeline_sysargs(&sysargs);
     let chained = match split_chained_sysargs(&sysargs) {
@@ -673,7 +674,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
         Err(e) => {
             let w = rt.with_formatter(|f| f.warn(&e.message));
             rt.eprint(&w);
-            return Control::Continue;
+            return (Control::Continue, false);
         }
     };
     let mut chained_kwargs: Vec<ArgsMap> = Vec::new();
@@ -683,7 +684,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
             Err(e) => {
                 let w = rt.with_formatter(|f| f.warn(&e.message));
                 rt.eprint(&w);
-                return Control::Continue;
+                return (Control::Continue, false);
             }
         }
     }
@@ -693,7 +694,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
         .any(|a| a == "--help" || a == "-h")
     {
         dispatch::parse_help(&sysargs, rt);
-        return Control::Continue;
+        return (Control::Continue, true);
     }
     for kwargs in &mut chained_kwargs {
         if !kwargs.get("debug").is_some_and(PyValue::is_truthy) {
@@ -701,14 +702,14 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
         }
     }
     if chained_kwargs.is_empty() || words_of(&chained_kwargs[0]).is_empty() {
-        return Control::Continue;
+        return (Control::Continue, false);
     }
     for kwargs in &mut chained_kwargs {
         let mut action = words_of(kwargs);
         if action.first().map(String::as_str) == Some("mrsm") {
             action.remove(0);
             if action.is_empty() {
-                return Control::Continue;
+                return (Control::Continue, false);
             }
             kwargs.insert("action".into(), PyValue::str_list(&action));
         }
@@ -720,13 +721,13 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
     let main = first[0].as_str();
     if main == "help" {
         do_help(&line, rt);
-        return Control::Continue;
+        return (Control::Continue, true);
     }
     if main == "exit" || main == "quit" {
-        return Control::Exit;
+        return (Control::Exit, false);
     }
     if main == "pass" {
-        return Control::Continue;
+        return (Control::Continue, false);
     }
     if SHELL_COMMANDS.contains(&main) && chained_kwargs.len() == 1 {
         // A restricted shell asks the server about the commands that change where actions run
@@ -735,14 +736,14 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
             && let Err(message) = restricted::authorize(&first)
         {
             print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
-            return Control::Continue;
+            return (Control::Continue, true);
         }
         let result = shell_command(main, &first[1..], state, rt);
         print_result(&result, state, rt);
-        return Control::Continue;
+        return (Control::Continue, true);
     }
     if main.trim_matches(|c| c == '"' || c == '\'').is_empty() {
-        return Control::Continue;
+        return (Control::Continue, false);
     }
 
     let instance_default = rt
@@ -776,7 +777,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
                         clean.chars().take(4096).collect::<String>()
                     );
                     print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
-                    return Control::Continue;
+                    return (Control::Continue, true);
                 }
                 _ => {
                     action.insert(0, "sh".into());
@@ -814,7 +815,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
                 Err(e) => {
                     let w = rt.with_formatter(|f| f.warn(&e.message));
                     rt.eprint(&w);
-                    return Control::Continue;
+                    return (Control::Continue, true);
                 }
             }
         } else {
@@ -833,7 +834,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
     // (the decision of `POST /execute`), on exactly what the dispatcher gets.
     if let Err(message) = restricted::authorize(&sysargs_to_execute) {
         print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);
-        return Control::Continue;
+        return (Control::Continue, true);
     }
     let old_cwd = std::env::current_dir().ok();
     let mut patch = ArgsMap::new();
@@ -853,7 +854,7 @@ fn run_line_with(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>, clear
     {
         let _ = std::env::set_current_dir(old);
     }
-    Control::Continue
+    (Control::Continue, true)
 }
 
 fn print_result(result: &meerschaum_core::SuccessTuple, state: &ShellState, rt: &mut Runtime<'_>) {
@@ -919,7 +920,7 @@ pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::C
         completer::connectors_from_config(config.get(&["meerschaum", "connectors"]).as_ref());
     let plugins_dirs = config.paths().plugins_dirs.clone();
     let plugin_names = builtin::plugin_names(&plugins_dirs);
-    let ctx = crate::native::jobs::jobs_context(rt);
+    let ctx = crate::native::jobs::local_jobs_context(rt);
     let jobs = move |executor_keys: &str| -> Vec<completer::JobEntry> {
         if executor_keys != "local" {
             return Vec::new();
@@ -1004,7 +1005,7 @@ pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::C
         jobs: Some(std::sync::Arc::new(jobs)),
         ..completer::CompletionData::default()
     };
-    if let Ok(manifest) = crate::python::manifest(rt) {
+    if let Some(manifest) = crate::python::manifest_nonblocking(rt) {
         data.plugin_actions = manifest
             .plugins
             .values()
@@ -1183,14 +1184,23 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
     shared.lock().unwrap_or_else(|e| e.into_inner()).keybindings = keybindings;
     // The last line was left for a key binding's command: resume it instead of a new one.
     let mut resumed = false;
+    // Reuse the initial completion data already built above on the first prompt iteration.
+    let mut reuse_initial_data = true;
     let mut editor = new_editor(&shared, max_history);
     loop {
         let prompt_text = current_prompt(&state, rt);
-        let data = completion_data(&state, rt);
+        let data = if reuse_initial_data {
+            reuse_initial_data = false;
+            None
+        } else {
+            Some(completion_data(&state, rt))
+        };
         let toolbar = toolbar_model(&state, rt);
         {
             let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
-            s.data = data;
+            if let Some(data) = data {
+                s.data = data;
+            }
             s.toolbar = toolbar;
             s.prompt = prompt_text;
             s.history = history.clone();

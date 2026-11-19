@@ -968,8 +968,13 @@ pub fn plugins_cache_is_current(
     root: &std::path::Path,
     plugins_dirs: &[std::path::PathBuf],
 ) -> bool {
-    use meerschaum_worker::manifest::{discover_plugins, manifest_path, stale_plugins};
-    let python = match Manifest::read(&manifest_path(root)).ok().flatten() {
+    use meerschaum_worker::manifest::{
+        discover_plugins, manifest_path, read_cached_manifest_for, stale_plugins,
+    };
+    let python = match read_cached_manifest_for(&manifest_path(root), plugins_dirs)
+        .ok()
+        .flatten()
+    {
         Some(cached) => !stale_plugins(&cached, plugins_dirs).0,
         None => discover_plugins(plugins_dirs).is_empty(),
     };

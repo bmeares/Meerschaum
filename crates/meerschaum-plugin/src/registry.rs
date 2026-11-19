@@ -40,6 +40,25 @@ impl NativePlugins {
         cache: &Path,
         policy: &crate::source::compiler::CompilerPolicy,
     ) -> Result<Self> {
+        Self::open_inner(directories, cache, policy, false)
+    }
+
+    /// Like [`NativePlugins::open_with_policy`], suppressing stderr warnings (used for background
+    /// shell manifest refreshes so warnings never write over an active prompt).
+    pub fn open_with_policy_quiet(
+        directories: &[PathBuf],
+        cache: &Path,
+        policy: &crate::source::compiler::CompilerPolicy,
+    ) -> Result<Self> {
+        Self::open_inner(directories, cache, policy, true)
+    }
+
+    fn open_inner(
+        directories: &[PathBuf],
+        cache: &Path,
+        policy: &crate::source::compiler::CompilerPolicy,
+        quiet: bool,
+    ) -> Result<Self> {
         // Source plugins (Cargo crates) are built here when their library is missing or stale;
         // a current build, and a manifest cache hit, load no code and run no cargo.
         let mut discovery = discovery::discover_report_in_with_policy(
@@ -48,15 +67,17 @@ impl NativePlugins {
             policy,
         );
         discovery.build_pending();
-        for warning in discovery
-            .candidates
-            .iter()
-            .filter_map(|c| c.warning.as_deref())
-        {
-            eprintln!("Warning: {warning}");
-        }
-        for item in &discovery.skipped {
-            eprintln!("Warning: {}", item.message());
+        if !quiet {
+            for warning in discovery
+                .candidates
+                .iter()
+                .filter_map(|c| c.warning.as_deref())
+            {
+                eprintln!("Warning: {warning}");
+            }
+            for item in &discovery.skipped {
+                eprintln!("Warning: {}", item.message());
+            }
         }
         let known = discovery.skipped.len();
         let mut candidates = discovery.candidates.clone();
@@ -65,9 +86,12 @@ impl NativePlugins {
         }
         // SAFETY: the configured plugin directories are trusted (see the module documentation).
         // Load-time failures were not visible to the scan; warn about those here.
-        let (manifest, load_skipped) = unsafe { discovery::manifest_for(discovery, cache) }?;
-        for item in load_skipped.iter().skip(known) {
-            eprintln!("Warning: {}", item.message());
+        let (manifest, load_skipped) =
+            unsafe { discovery::manifest_for_in(discovery, directories, cache) }?;
+        if !quiet {
+            for item in load_skipped.iter().skip(known) {
+                eprintln!("Warning: {}", item.message());
+            }
         }
         candidates.retain(|c| manifest["plugins"].get(&c.name).is_some());
         if candidates.is_empty() {
