@@ -2032,6 +2032,16 @@ fn team_sandbox_checks(config: &Config) -> Vec<Check> {
             "Run the API server as a user without Docker access while isolated teams run code.",
         ));
     }
+    let limits = sandbox::ResourceLimits::from_config(config);
+    if limits.is_configured() {
+        out.push(Check::pass("teams", "resource limits", limits.describe()));
+    } else if isolated {
+        out.push(Check::pass(
+            "teams",
+            "resource limits",
+            "unrestricted (default; set system.engine.python_team_max_* or python_team_egress to cap host-team processes)",
+        ));
+    }
     // 5.1: per team that runs code, whether its members' commands may run here.
     for team in crate::team_execution::code_running_teams(config) {
         let label = format!("team execution ({team})");

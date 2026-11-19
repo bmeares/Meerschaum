@@ -3,10 +3,11 @@
 use std::path::{Path, PathBuf};
 
 use landlock::{
-    ABI, Access as _, AccessFs, BitFlags, LandlockStatus, PathBeneath, PathFd, RestrictSelfAttr,
-    Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, Scope,
+    ABI, Access as _, AccessFs, AccessNet, BitFlags, LandlockStatus, NetPort, PathBeneath, PathFd,
+    RestrictSelfAttr, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus, Scope,
 };
 
+use super::limits::{EgressProbe, HostEgress, LimitsReport, ResourceLimits};
 use super::{Access, Mode, NEWEST_ABI, Report, Rule, Support, features_of};
 
 /// The ABI whose rights Meerschaum asks for (best effort: the kernel's subset is used).
@@ -92,7 +93,12 @@ fn abi_of(abi: u32) -> ABI {
     }
 }
 
-pub(super) fn restrict(mode: Mode, rules: &[Rule], max_abi: Option<u32>) -> Report {
+pub(super) fn restrict(
+    mode: Mode,
+    rules: &[Rule],
+    max_abi: Option<u32>,
+    limits: &ResourceLimits,
+) -> Report {
     let support = kernel_support();
     let kernel_abi = match &support {
         Support::Available { kernel_abi } => *kernel_abi,
@@ -101,9 +107,24 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule], max_abi: Option<u32>) -> Repo
     let threads_before = threads();
     let mut added = 0usize;
     let used = abi_of(max_abi.unwrap_or(NEWEST_ABI).min(NEWEST_ABI));
+    let effective_abi_cap = max_abi
+        .unwrap_or(NEWEST_ABI)
+        .min(NEWEST_ABI)
+        .min(kernel_abi);
+    let restrict_tcp_ports = limits.egress == HostEgress::AllowPorts;
+    let mut limits_report = LimitsReport::from_limits(limits);
+    if restrict_tcp_ports && effective_abi_cap < 4 {
+        limits_report.errors.push(format!(
+            "Landlock ABI 4+ (Linux 6.7) is required for `allow_ports` TCP egress filtering, \
+             but only ABI {effective_abi_cap} is available"
+        ));
+    }
     let result = (|| -> Result<landlock::RestrictionStatus, landlock::RulesetError> {
         let handled = AccessFs::from_all(used);
         let mut ruleset = Ruleset::default().handle_access(handled)?;
+        if restrict_tcp_ports && effective_abi_cap >= 4 {
+            ruleset = ruleset.handle_access(AccessNet::ConnectTcp)?;
+        }
         // Scopes exist from ABI 6 (an older ABI asked for in tests has none).
         let scopes = Scope::from_all(used);
         if !scopes.is_empty() {
@@ -127,6 +148,11 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule], max_abi: Option<u32>) -> Repo
             }
             ruleset = ruleset.add_rule(PathBeneath::new(fd, access))?;
             added += 1;
+        }
+        if restrict_tcp_ports && effective_abi_cap >= 4 {
+            for &port in &limits.egress_ports {
+                ruleset = ruleset.add_rule(NetPort::new(port, AccessNet::ConnectTcp))?;
+            }
         }
         ruleset.all_threads(true)?.restrict_self()
     })();
@@ -164,6 +190,11 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule], max_abi: Option<u32>) -> Repo
             ));
         }
     }
+    if restrict_tcp_ports && abi >= 4 {
+        limits_report
+            .applied
+            .push(format!("landlock_tcp_ports({})", limits.egress_ports.len()));
+    }
     Report {
         mode,
         enforced: true,
@@ -176,6 +207,7 @@ pub(super) fn restrict(mode: Mode, rules: &[Rule], max_abi: Option<u32>) -> Repo
         rules: added,
         dropped: Vec::new(),
         level: String::new(),
+        limits: limits_report,
         ..Report::default()
     }
 }
@@ -443,4 +475,229 @@ pub(super) fn deny_inbound_network() -> Result<(), String> {
     .map_err(|e: seccompiler::BackendError| e.to_string())?;
     seccompiler::apply_filter_all_threads(&program)
         .map_err(|e| format!("Could not install API-only listener denial: {e}"))
+}
+
+fn clamp_and_set_rlimit(
+    resource: rustix::process::Resource,
+    requested: u64,
+    label: &str,
+    report: &mut LimitsReport,
+) {
+    let current = rustix::process::getrlimit(resource);
+    let bounded = match current.maximum {
+        Some(max) => requested.min(max),
+        None => requested,
+    };
+    let next = rustix::process::Rlimit {
+        current: Some(bounded),
+        maximum: Some(bounded),
+    };
+    match rustix::process::setrlimit(resource, next) {
+        Ok(()) => report.applied.push(format!("{label}={bounded}")),
+        Err(e) => report.errors.push(format!("{label} failed: {e}")),
+    }
+}
+
+/// Apply configured POSIX `setrlimit` caps irreversibly (both soft and hard lowered so team code
+/// cannot raise them again).
+pub(super) fn apply_rlimits(limits: &ResourceLimits, report: &mut LimitsReport) {
+    use rustix::process::Resource;
+    if let Some(secs) = limits.cpu_seconds {
+        clamp_and_set_rlimit(Resource::Cpu, secs, "rlimit_cpu", report);
+    }
+    if let Some(mb) = limits.memory_mb {
+        let bytes = mb.saturating_mul(1024 * 1024);
+        clamp_and_set_rlimit(Resource::As, bytes, "rlimit_as", report);
+    }
+    if let Some(mb) = limits.file_mb {
+        let bytes = mb.saturating_mul(1024 * 1024);
+        clamp_and_set_rlimit(Resource::Fsize, bytes, "rlimit_fsize", report);
+    }
+    if let Some(procs) = limits.processes {
+        clamp_and_set_rlimit(Resource::Nproc, procs, "rlimit_nproc", report);
+    }
+}
+
+#[allow(unsafe_code)]
+fn ensure_no_new_privs() {
+    // SAFETY: `prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)` takes no pointers and irreversibly drops
+    // privilege elevation on exec so unprivileged seccomp installation succeeds.
+    unsafe {
+        libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+    }
+}
+
+/// Enforce the configured outbound IPv4/IPv6 egress policy via seccomp-BPF (paired with Landlock
+/// `AccessNet::ConnectTcp` for `AllowPorts`).
+pub(super) fn enforce_egress(limits: &ResourceLimits, report: &mut LimitsReport) {
+    use seccompiler::{
+        SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule,
+    };
+    use std::collections::BTreeMap;
+
+    match limits.egress {
+        HostEgress::Open => (),
+        HostEgress::Deny => {
+            let Some(arch) = filter_arch() else {
+                report
+                    .errors
+                    .push("egress denial is unavailable on this architecture".to_string());
+                return;
+            };
+            let build = || -> Result<seccompiler::BpfProgram, String> {
+                let err = |e: seccompiler::BackendError| e.to_string();
+                let inet = SeccompCondition::new(
+                    0,
+                    SeccompCmpArgLen::Dword,
+                    SeccompCmpOp::Eq,
+                    libc::AF_INET as u64,
+                )
+                .map_err(err)?;
+                let inet6 = SeccompCondition::new(
+                    0,
+                    SeccompCmpArgLen::Dword,
+                    SeccompCmpOp::Eq,
+                    libc::AF_INET6 as u64,
+                )
+                .map_err(err)?;
+                let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
+                for nr in numbers(libc::SYS_socket) {
+                    rules.insert(
+                        nr,
+                        vec![
+                            SeccompRule::new(vec![inet.clone()]).map_err(err)?,
+                            SeccompRule::new(vec![inet6.clone()]).map_err(err)?,
+                        ],
+                    );
+                }
+                for nr in numbers(libc::SYS_io_uring_setup) {
+                    rules.insert(nr, Vec::new());
+                }
+                SeccompFilter::new(
+                    rules,
+                    SeccompAction::Allow,
+                    SeccompAction::Errno(libc::EACCES as u32),
+                    arch,
+                )
+                .map_err(err)?
+                .try_into()
+                .map_err(err)
+            };
+            let program = match build() {
+                Ok(p) => p,
+                Err(e) => {
+                    report
+                        .errors
+                        .push(format!("egress filter build failed: {e}"));
+                    return;
+                }
+            };
+            // Ensure NO_NEW_PRIVS is set even if Landlock was off.
+            ensure_no_new_privs();
+            if let Err(e) = seccompiler::apply_filter_all_threads(&program) {
+                report
+                    .errors
+                    .push(format!("egress seccomp filter could not be installed: {e}"));
+                return;
+            }
+            report.egress_mechanism = "seccomp".to_string();
+            report.applied.push("egress_deny".to_string());
+            report.egress_probe = match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(_) => EgressProbe::Allowed,
+                Err(e)
+                    if matches!(
+                        e.raw_os_error(),
+                        Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EAFNOSUPPORT)
+                    ) =>
+                {
+                    EgressProbe::Denied
+                }
+                Err(e) => EgressProbe::Error(e.to_string()),
+            };
+        }
+        HostEgress::AllowPorts => {
+            let Some(arch) = filter_arch() else {
+                report
+                    .errors
+                    .push("egress port filtering is unavailable on this architecture".to_string());
+                return;
+            };
+            // Pair Landlock TCP connect allowlist with seccomp blocking non-TCP IPv4/IPv6
+            // sockets (UDP, raw, SCTP) so non-TCP egress cannot bypass `AccessNet::ConnectTcp`.
+            let build = || -> Result<seccompiler::BpfProgram, String> {
+                let err = |e: seccompiler::BackendError| e.to_string();
+                // Deny explicit non-TCP socket types on AF_INET/AF_INET6 so UDP/raw/SCTP
+                // cannot bypass Landlock's `AccessNet::ConnectTcp` port allowlist.
+                let mut socket_rules = Vec::new();
+                for domain in [libc::AF_INET as u64, libc::AF_INET6 as u64] {
+                    let dom =
+                        SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, domain)
+                            .map_err(err)?;
+                    for sock_type in [
+                        libc::SOCK_DGRAM,
+                        libc::SOCK_RAW,
+                        libc::SOCK_RDM,
+                        libc::SOCK_SEQPACKET,
+                        libc::SOCK_DCCP,
+                    ] {
+                        let ty = SeccompCondition::new(
+                            1,
+                            SeccompCmpArgLen::Dword,
+                            SeccompCmpOp::MaskedEq(0xf),
+                            sock_type as u64,
+                        )
+                        .map_err(err)?;
+                        socket_rules.push(SeccompRule::new(vec![dom.clone(), ty]).map_err(err)?);
+                    }
+                }
+                let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
+                for nr in numbers(libc::SYS_socket) {
+                    rules.insert(nr, socket_rules.clone());
+                }
+                for nr in numbers(libc::SYS_io_uring_setup) {
+                    rules.insert(nr, Vec::new());
+                }
+                SeccompFilter::new(
+                    rules,
+                    SeccompAction::Allow,
+                    SeccompAction::Errno(libc::EACCES as u32),
+                    arch,
+                )
+                .map_err(err)?
+                .try_into()
+                .map_err(err)
+            };
+            let program = match build() {
+                Ok(p) => p,
+                Err(e) => {
+                    report
+                        .errors
+                        .push(format!("non-TCP egress filter build failed: {e}"));
+                    return;
+                }
+            };
+            ensure_no_new_privs();
+            if let Err(e) = seccompiler::apply_filter_all_threads(&program) {
+                report
+                    .errors
+                    .push(format!("non-TCP egress seccomp filter failed: {e}"));
+                return;
+            }
+            report.egress_mechanism = "landlock+seccomp".to_string();
+            report.applied.push("egress_allow_ports".to_string());
+            // Verify non-TCP IPv4 egress is denied by the seccomp half of the filter.
+            report.egress_probe = match std::net::UdpSocket::bind("127.0.0.1:0") {
+                Ok(_) => EgressProbe::Allowed,
+                Err(e)
+                    if matches!(
+                        e.raw_os_error(),
+                        Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EAFNOSUPPORT)
+                    ) =>
+                {
+                    EgressProbe::Denied
+                }
+                Err(e) => EgressProbe::Error(e.to_string()),
+            };
+        }
+    }
 }

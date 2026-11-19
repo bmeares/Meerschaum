@@ -50,7 +50,7 @@ pub enum Egress {
     Open,
 }
 
-/// Container limits. Memory has no additional swap allowance; disk is not capped here.
+/// Container and host-team execution limits. Memory has no additional swap allowance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
@@ -60,6 +60,12 @@ pub struct Limits {
     pub cpus: f64,
     /// Maximum processes/threads in the container.
     pub pids: u32,
+    /// Optional aggregate writable disk quota in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_mb: Option<u64>,
+    /// Optional per-process CPU time cap in seconds (`RLIMIT_CPU` on host execution).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_seconds: Option<u64>,
 }
 
 impl Default for Limits {
@@ -68,6 +74,8 @@ impl Default for Limits {
             memory_mb: 4096,
             cpus: 2.0,
             pids: 1024,
+            disk_mb: None,
+            cpu_seconds: None,
         }
     }
 }
@@ -88,6 +96,14 @@ impl Limits {
         }
         if self.pids == 0 {
             return Err(invalid("limits.pids must be positive"));
+        }
+        if let Some(disk_mb) = self.disk_mb
+            && (disk_mb == 0 || disk_mb.checked_mul(1024 * 1024).is_none())
+        {
+            return Err(invalid("limits.disk_mb must be positive and fit in bytes"));
+        }
+        if self.cpu_seconds == Some(0) {
+            return Err(invalid("limits.cpu_seconds must be positive"));
         }
         Ok(())
     }

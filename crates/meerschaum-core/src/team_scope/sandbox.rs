@@ -80,8 +80,12 @@ use serde::{Deserialize, Serialize};
 use super::{ScopeFiles, TeamScope};
 use crate::config::Config;
 
+#[path = "sandbox/limits.rs"]
+pub mod limits;
 #[path = "runtime.rs"]
 pub mod runtime;
+
+pub use limits::{EgressProbe, HostEgress, LimitsReport, ResourceLimits};
 
 /// `system.engine.python_team_sandbox` (5.1): `auto`, `require`, `require_sockets` or `off`.
 pub const MODE_KEY: [&str; 3] = ["system", "engine", "python_team_sandbox"];
@@ -490,6 +494,9 @@ pub struct Spec {
     /// Host-selected native bootstrap and runtime environment; never a persisted job override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<runtime::Runtime>,
+    /// Optional OS-level resource limits (CPU, memory, file size, disk quota, processes, egress).
+    #[serde(default, skip_serializing_if = "ResourceLimits::is_default")]
+    pub limits: ResourceLimits,
 }
 
 /// What [`build_spec`] needs.
@@ -633,6 +640,7 @@ pub fn build_spec(inputs: &SpecInputs<'_>) -> Spec {
         canary: canary_path(root),
         max_abi: None,
         runtime: None,
+        limits: ResourceLimits::default(),
     };
     spec.rules = spec.allowed(spec.rules.clone()).0;
     spec
@@ -1029,6 +1037,9 @@ pub struct Report {
     /// refused it).
     #[serde(default)]
     pub sockets_reason: Option<String>,
+    /// Applied host-team resource limits and egress policy (omitted when unrestricted).
+    #[serde(default, skip_serializing_if = "LimitsReport::is_empty")]
+    pub limits: LimitsReport,
 }
 
 impl Report {
@@ -1054,8 +1065,8 @@ impl Report {
     /// sandbox claims to be enforced but the canary was not denied.
     pub fn verdict(&self) -> Result<(), String> {
         match self.mode {
-            Mode::Off => Ok(()),
-            Mode::Auto if !self.enforced => Ok(()),
+            Mode::Off => self.limits.verdict(),
+            Mode::Auto if !self.enforced => self.limits.verdict(),
             mode if mode.requires() && !self.enforced => Err(format!(
                 "the filesystem sandbox is required (`system.engine.python_team_sandbox: {}`) \
                  but is not enforced: {}",
@@ -1091,7 +1102,7 @@ impl Report {
                 ))
             }
             _ => match &self.canary {
-                Canary::Denied => Ok(()),
+                Canary::Denied => self.limits.verdict(),
                 Canary::Readable => Err(
                     "the filesystem sandbox reports itself enforced, but the process could still \
                      read the canary file it must not reach"
@@ -1193,6 +1204,12 @@ impl Report {
             _ => "; canary not proven",
         });
         text.push_str(&format!("; {}", self.sockets_words()));
+        if !self.limits.is_empty() {
+            let summary = self.limits.describe();
+            if !summary.is_empty() {
+                text.push_str(&format!("; limits: {summary}"));
+            }
+        }
         if let Some(reason) = &self.reason {
             text.push_str(&format!("; {reason}"));
         }
@@ -1289,12 +1306,18 @@ pub fn enforce(spec: &Spec, extra: &[Rule]) -> Report {
         .is_some_and(|runtime| runtime.api_only)
         || std::env::var(super::api_execution::PROFILE_VAR).as_deref() == Ok("1");
     let report = if spec.mode == Mode::Off {
-        Report::not_enforced(Mode::Off, "off")
+        let mut report = Report::not_enforced(Mode::Off, "off");
+        if spec.limits.has_process_limits() {
+            report.limits = LimitsReport::from_limits(&spec.limits);
+            imp::apply_rlimits(&spec.limits, &mut report.limits);
+            imp::enforce_egress(&spec.limits, &mut report.limits);
+        }
+        report
     } else {
         let mut rules = spec.rules.clone();
         rules.extend(extra.iter().cloned());
         let (rules, dropped) = spec.allowed(rules);
-        let mut report = imp::restrict(spec.mode, &rules, spec.max_abi);
+        let mut report = imp::restrict(spec.mode, &rules, spec.max_abi, &spec.limits);
         report.dropped = dropped
             .iter()
             .map(|r| r.path.display().to_string())
@@ -1309,6 +1332,13 @@ pub fn enforce(spec: &Spec, extra: &[Rule]) -> Report {
                 report.unix_sockets = SOCKETS_BY_LANDLOCK.to_string();
             } else {
                 imp::deny_unix_sockets(&mut report);
+            }
+            if spec.limits.has_process_limits() {
+                if report.limits.is_empty() {
+                    report.limits = LimitsReport::from_limits(&spec.limits);
+                }
+                imp::apply_rlimits(&spec.limits, &mut report.limits);
+                imp::enforce_egress(&spec.limits, &mut report.limits);
             }
         }
         report
@@ -1647,6 +1677,14 @@ pub fn prepare_with(
         }
         None => None,
     };
+    let limits = ResourceLimits::from_config(config);
+    if let Some(max_disk_mb) = limits.disk_mb {
+        let mut dirs: Vec<&Path> = vec![&tmp_dir, &cache_dir, &team_venvs_dir];
+        if let Some(work) = work_dir.as_deref() {
+            dirs.push(work);
+        }
+        limits::check_disk_quota(&scope.team, &dirs, max_disk_mb)?;
+    }
     let mut job_dirs = team_job_dirs(&root.join("jobs"), &key, &scope.team);
     if let Some(dir) = job_dir
         && !job_dirs.iter().any(|d| d == dir)
@@ -1673,6 +1711,7 @@ pub fn prepare_with(
         job_dirs: &job_dirs,
         work_dir: work_dir.as_deref(),
     });
+    spec.limits = limits;
     spec.runtime = Some(runtime::Runtime::prepare(
         &mut spec,
         &crate::process_env::vars(),
@@ -1885,7 +1924,7 @@ mod imp;
 
 #[cfg(not(target_os = "linux"))]
 mod imp {
-    use super::{Mode, Report, Rule, Support};
+    use super::{LimitsReport, Mode, Report, ResourceLimits, Rule, Support};
     use std::path::PathBuf;
 
     pub(super) fn kernel_support() -> Support {
@@ -1894,12 +1933,37 @@ mod imp {
         }
     }
 
-    pub(super) fn restrict(mode: Mode, _rules: &[Rule], _max_abi: Option<u32>) -> Report {
+    pub(super) fn restrict(
+        mode: Mode,
+        _rules: &[Rule],
+        _max_abi: Option<u32>,
+        _limits: &ResourceLimits,
+    ) -> Report {
         Report::not_enforced(mode, "Landlock exists on Linux only")
     }
 
     pub(super) fn deny_unix_sockets(report: &mut Report) {
         report.sockets_reason = Some("seccomp exists on Linux only".to_string());
+    }
+
+    pub(super) fn apply_rlimits(limits: &ResourceLimits, report: &mut LimitsReport) {
+        if limits.cpu_seconds.is_some()
+            || limits.memory_mb.is_some()
+            || limits.file_mb.is_some()
+            || limits.processes.is_some()
+        {
+            report
+                .errors
+                .push("host-team rlimit enforcement is available on Linux only".to_string());
+        }
+    }
+
+    pub(super) fn enforce_egress(limits: &ResourceLimits, report: &mut LimitsReport) {
+        if limits.egress != super::HostEgress::Open {
+            report
+                .errors
+                .push("host-team egress filtering is available on Linux only".to_string());
+        }
     }
 
     pub(super) fn private_tmp_dir(name: &str) -> std::io::Result<PathBuf> {
