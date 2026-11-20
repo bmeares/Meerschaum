@@ -20,20 +20,20 @@ def _check_timescale_metrics_partition_growth(conn, event_id):
     """A day's timestamps must share a chunk, regardless of integer-axis defaults."""
     table = '"_mrsm_internal"."mrsm_engine_metrics"'
     where = "hypertable_schema='_mrsm_internal' AND hypertable_name='mrsm_engine_metrics'"
-    month_us = 30 * 24 * 60 * 60 * 1_000_000
+    week_us = 7 * 24 * 60 * 60 * 1_000_000
     interval = conn.value(
         'SELECT integer_interval FROM timescaledb_information.dimensions WHERE '
         + where + " AND column_name='ts_us'"
     )
-    assert interval == month_us, f'Expected 30-day metrics chunks, got {interval} microseconds.'
+    assert interval == week_us, f'Expected 7-day metrics chunks, got {interval} microseconds.'
     compression_after = conn.value(
         "SELECT (config->>'compress_after')::BIGINT FROM timescaledb_information.jobs WHERE "
         + where + " AND proc_name='policy_compression'"
     )
-    assert compression_after == month_us, f'Expected a 30-day columnstore policy, got {compression_after}.'
+    assert compression_after == week_us, f'Expected a 7-day columnstore policy, got {compression_after}.'
     before = conn.value('SELECT num_chunks FROM timescaledb_information.hypertables WHERE ' + where)
     prefix = 'partition_probe_' + uuid.uuid4().hex + '_'
-    base_us = int(datetime.now(timezone.utc).timestamp() * 1_000_000) // month_us * month_us
+    base_us = int(datetime.now(timezone.utc).timestamp() * 1_000_000) // week_us * week_us
     epoch = f'({base_us}::BIGINT + hour * 3600000000::BIGINT)'
     template_id = event_id.replace("'", "''")
     try:
