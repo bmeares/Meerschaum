@@ -215,6 +215,9 @@ cat > "$MRSM_PLUGINS_DIR/scoped_smoke.rs" <<'PLUGIN'
 #[api_route(GET, "/scoped-smoke", scopes = ["pipes:read"])]
 fn probe() -> Value { json!({"number": 42}) }
 PLUGIN
+mrsm bootstrap team smoke_team --members smoke_operator \
+  --params '{"isolated":true,"database":"none","instance":"sql:local","connectors":["sql:local"],"plugins":["scoped_smoke"]}' \
+  -i sql:local -y --nopretty > "$root/team.log" 2>&1 || { cat "$root/team.log"; exit 1; }
 port=$((20000 + RANDOM % 20000))
 base="http://127.0.0.1:$port"
 export MRSM_PATCH="$(printf '{"api":{"execution":{"callback_url":"%s"}}}' "$base")"
