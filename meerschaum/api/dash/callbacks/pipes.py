@@ -210,6 +210,18 @@ def load_pipes_rows(search, refresh_clicks, pathname, page_meta, session_data, r
         raise PreventUpdate
     from meerschaum.api.dash import engine
     viewer = pipes_access.viewer(session_data)
+    if not refreshed and (page_meta or {}).get('instance_blocked'):
+        store = {
+            'instance': instance_keys,
+            'rows': [],
+            'search': search or '',
+            'rows_key': None,
+            'loaded': time.time(),
+            'generation': int(refresh_clicks or 0),
+            'me': pipes_table.viewer_summary(viewer),
+            'teams': bool(viewer.own_teams),
+        }
+        return store, []
     instance = None
     try:
         instance = engine.get_instance(instance_keys, strict=True)

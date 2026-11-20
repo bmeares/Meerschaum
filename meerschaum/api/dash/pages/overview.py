@@ -110,12 +110,11 @@ def build_empty_state(state: dict) -> Any:
 
 def route(pathname: Optional[str] = None, href: Optional[str] = None) -> List[Any]:
     """The Overview of the requested (`?instance=`) or global instance."""
-    from meerschaum.api.dash.engine import get_instance, instance_problem
+    from meerschaum.api.dash.engine import page_instance
     from meerschaum.api.dash.performance import build_overview_card
     query = parse_qs(urlparse(href or '').query)
     requested = (query.get('instance', None) or [None])[0] or None
-    instance_keys = str(get_instance(requested))
-    problem = instance_problem(requested)
+    instance_keys, problem, _ = page_instance(requested)
     state = get_nav_state()
     performance = build_overview_card()
     return [

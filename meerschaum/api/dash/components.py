@@ -429,8 +429,8 @@ def _instance_options(selected: Optional[str] = None) -> List[Dict[str, str]]:
 def _global_instance_value() -> Optional[str]:
     """The console's global instance (the `mrsm-instance` cookie, if allowed), else the API's."""
     try:
-        from meerschaum.api.dash.engine import get_instance
-        return str(get_instance())
+        from meerschaum.api.dash.engine import display_instance_keys
+        return display_instance_keys()
     except Exception:
         try:
             return str(get_api_connector())

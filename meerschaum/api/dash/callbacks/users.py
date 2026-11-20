@@ -881,7 +881,8 @@ def submit_new_team(
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     access.forget()
-    return False, [], alert_from_success_tuple((True, message)), (refresh or 0) + 1
+    head, _, note = str(message).partition('\n')
+    return False, [], _done_alert(head, note or None), (refresh or 0) + 1
 
 
 @dash_app.callback(
@@ -990,7 +991,9 @@ def submit_team_settings(
     ### A team set up before Grafana was enabled gets its organization here.
     grafana_note = team_setup.ensure_grafana_team(team['name'])
     access.forget()
-    return False, [], _done_alert(message, grafana_note), (refresh or 0) + 1
+    head, _, settings_note = str(message).partition('\n')
+    notes = '\n'.join(part for part in (settings_note, grafana_note) if part)
+    return False, [], _done_alert(head, notes or None), (refresh or 0) + 1
 
 
 @dash_app.callback(

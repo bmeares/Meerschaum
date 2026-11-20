@@ -15,6 +15,7 @@ writes. Every function takes the instance (the API instance by default) and retu
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import meerschaum as mrsm
@@ -579,26 +580,187 @@ def global_instance_keys() -> Optional[str]:
     return keys
 
 
-def resolve_instance(instance_keys: Optional[str] = None) -> Tuple[Any, Optional[str]]:
-    """
-    The instance connector to use and, when one was asked for but refused, its keys.
+@dataclass(frozen=True)
+class _InstanceResolution:
+    instance: Any
+    refused: Optional[str] = None
+    reason: Optional[str] = None
+    detail: Optional[str] = None
+    fallback_allowed: bool = True
+    team_instance: Optional[str] = None
+    team_reason: Optional[str] = None
+    team_detail: Optional[str] = None
 
-    `instance_keys` (a `?instance=` deep link), else the console's global instance, must pass the
-    API's instance permissions (`allow_multiple_instances`, `allowed_instance_keys`) and be valid;
-    otherwise the API's own instance is used and the refused keys are returned with it.
+
+def instance_policy_problem(
+    instance_keys: Optional[str],
+    default_keys: Optional[str] = None,
+) -> Optional[str]:
     """
+    Why the API's `api:permissions:instances` policy refuses `instance_keys`, or `None` when
+    the policy allows it. Does not construct or connect to `instance_keys`.
+    """
+    if not instance_keys:
+        return None
+    from fnmatch import fnmatch
+    import meerschaum.api as api
+    keys = str(instance_keys)
+    if default_keys is None:
+        default_keys = api.default_instance_keys
+        if default_keys is None:
+            try:
+                default_keys = api.get_uvicorn_config().get('mrsm_instance', None)
+            except Exception:
+                default_keys = None
+        if default_keys is None:
+            try:
+                default_keys = str(api.get_api_connector())
+            except Exception:
+                default_keys = None
+    instances_cfg = (api.permissions_config or {}).get('instances', {}) or {}
+    allow_multiple = bool(instances_cfg.get('allow_multiple_instances', False))
+    problems: List[str] = []
+    if not allow_multiple and (default_keys is None or keys != str(default_keys)):
+        problems.append("`api:permissions:instances:allow_multiple_instances` is disabled")
+    allowed_patterns = instances_cfg.get('allowed_instance_keys', ['*'])
+    if not any(fnmatch(keys, str(pattern)) for pattern in (allowed_patterns or [])):
+        problems.append(
+            f"'{keys}' does not match `api:permissions:instances:allowed_instance_keys`"
+        )
+    if not problems:
+        return None
+    return " and ".join(problems) + "."
+
+
+def _try_api_connector(keys: str) -> Tuple[Any, Optional[str], Optional[str]]:
+    """
+    Attempt `get_api_connector(keys)`.
+    Returns `(connector, reason, detail)` where `reason` is `None` on success, `'api'` when
+    blocked by `api:permissions:instances`, or `'invalid'` otherwise.
+    """
+    from meerschaum.api import get_api_connector
+    policy = instance_policy_problem(keys)
+    if policy is not None:
+        return None, 'api', policy
+    try:
+        return get_api_connector(str(keys)), None, None
+    except Exception as e:
+        policy = instance_policy_problem(keys)
+        if policy is not None:
+            return None, 'api', policy
+        return None, 'invalid', str(e) or None
+
+
+def _fallback_for_viewer(
+    viewer: Any,
+    team_instance: Optional[str],
+) -> Tuple[Any, bool, Optional[str], Optional[str]]:
+    """
+    Return `(connector, allowed, team_reason, team_detail)` for the viewer's fallback instance:
+    the viewer's team default instance when allowed and valid, else the API's own instance
+    (`allowed` is `False` when the viewer may not use the API's own instance either).
+    """
+    from meerschaum.api import get_api_connector
+    team_reason = None
+    team_detail = None
+    if team_instance:
+        conn, team_reason, team_detail = _try_api_connector(str(team_instance))
+        if conn is not None:
+            return conn, True, None, None
+    api_conn = get_api_connector()
+    api_allowed = _viewer_may_use(viewer, str(api_conn))
+    return api_conn, api_allowed, team_reason, team_detail
+
+
+def _resolve_instance_state(instance_keys: Optional[str] = None) -> _InstanceResolution:
+    """Resolve the instance connector together with any refusal reason and fallback usability."""
     from meerschaum.api import get_api_connector
     requested = instance_keys or global_instance_keys()
     viewer = _request_viewer()
     team_instance = viewer.default_instance if viewer is not None else None
     if requested:
-        if not _viewer_may_use(viewer, str(requested)):
-            return _team_or_api_instance(team_instance), str(requested)
-        try:
-            return get_api_connector(str(requested)), None
-        except Exception:
-            return _team_or_api_instance(team_instance), str(requested)
-    return _team_or_api_instance(team_instance), None
+        requested = str(requested)
+        if not _viewer_may_use(viewer, requested):
+            fallback, fallback_allowed, team_reason, team_detail = _fallback_for_viewer(
+                viewer, team_instance,
+            )
+            return _InstanceResolution(
+                instance=fallback,
+                refused=requested,
+                reason='team',
+                fallback_allowed=fallback_allowed,
+                team_instance=team_instance,
+                team_reason=team_reason,
+                team_detail=team_detail,
+            )
+        conn, reason, detail = _try_api_connector(requested)
+        if conn is not None:
+            return _InstanceResolution(
+                instance=conn,
+                fallback_allowed=True,
+                team_instance=team_instance,
+            )
+        if team_instance and str(team_instance) == requested:
+            api_conn = get_api_connector()
+            fallback = api_conn
+            fallback_allowed = _viewer_may_use(viewer, str(api_conn))
+            team_reason, team_detail = reason, detail
+        else:
+            fallback, fallback_allowed, team_reason, team_detail = _fallback_for_viewer(
+                viewer, team_instance,
+            )
+        return _InstanceResolution(
+            instance=fallback,
+            refused=requested,
+            reason=reason,
+            detail=detail,
+            fallback_allowed=fallback_allowed,
+            team_instance=team_instance,
+            team_reason=team_reason,
+            team_detail=team_detail,
+        )
+
+    fallback, fallback_allowed, team_reason, team_detail = _fallback_for_viewer(
+        viewer, team_instance,
+    )
+    if fallback_allowed:
+        return _InstanceResolution(
+            instance=fallback,
+            fallback_allowed=True,
+            team_instance=team_instance,
+        )
+    if team_instance:
+        return _InstanceResolution(
+            instance=fallback,
+            refused=str(team_instance),
+            reason=team_reason,
+            detail=team_detail,
+            fallback_allowed=False,
+            team_instance=team_instance,
+            team_reason=team_reason,
+            team_detail=team_detail,
+        )
+    return _InstanceResolution(
+        instance=fallback,
+        refused=str(fallback),
+        reason='team',
+        fallback_allowed=False,
+        team_instance=None,
+    )
+
+
+def resolve_instance(instance_keys: Optional[str] = None) -> Tuple[Any, Optional[str]]:
+    """
+    The instance connector to use and, when one was asked for (or an isolated team's default
+    instance was unavailable) but refused, its keys.
+
+    `instance_keys` (a `?instance=` deep link), else the console's global instance, must pass the
+    API's instance permissions (`allow_multiple_instances`, `allowed_instance_keys`), the viewer's
+    team grants, and be valid; otherwise a fallback instance is used and the refused keys are
+    returned with it.
+    """
+    state = _resolve_instance_state(instance_keys)
+    return state.instance, state.refused
 
 
 def _request_viewer() -> Any:
@@ -637,25 +799,80 @@ def _team_or_api_instance(team_instance: Optional[str]) -> Any:
     return get_api_connector()
 
 
+def _strict_refusal_message(state: _InstanceResolution) -> str:
+    if state.reason == 'team':
+        return f"Instance '{state.refused}' is not available to your teams."
+    if state.reason == 'api' and state.detail:
+        return f"Instance '{state.refused}' is not available to this API: {state.detail}"
+    return f"Instance '{state.refused}' is not available to this API."
+
+
+def _problem_message(state: _InstanceResolution) -> Optional[str]:
+    if not state.refused:
+        return None
+    if state.fallback_allowed:
+        if state.reason == 'team':
+            return f"Instance '{state.refused}' is not available to your teams; showing {state.instance} instead."
+        return f"Instance '{state.refused}' is not available; showing {state.instance} instead."
+    if state.reason == 'api' and state.detail:
+        return f"Instance '{state.refused}' is not available: {state.detail}"
+    if state.reason == 'team':
+        if state.team_instance and state.team_detail:
+            return (
+                f"Instance '{state.refused}' is not available to your teams, "
+                f"and team instance '{state.team_instance}' is not available: {state.team_detail}"
+            )
+        if state.team_instance:
+            return (
+                f"Instance '{state.refused}' is not available to your teams, "
+                f"and team instance '{state.team_instance}' is not available."
+            )
+        return f"Instance '{state.refused}' is not available to your teams."
+    return f"Instance '{state.refused}' is not available."
+
+
 def get_instance(instance_keys: Optional[str] = None, strict: bool = False):
     """
     The instance connector: `instance_keys` (a `?instance=` deep link), else the console's global
-    instance, else the API's. A refused instance is never used: the API's instance is returned
-    instead (`instance_problem` says so), or with `strict` (the instance of a member or a run,
-    where another instance would be the wrong data) a `PermissionError` is raised.
+    instance, else the viewer's team instance or the API's. A refused instance is never used: a
+    fallback is returned instead (`instance_problem` says so), or with `strict` (the instance of a
+    member or a run, where another instance would be the wrong data) a `PermissionError` is raised.
     """
-    instance, refused = resolve_instance(instance_keys)
-    if refused and strict:
-        raise PermissionError(f"Instance '{refused}' is not available to this API.")
-    return instance
+    state = _resolve_instance_state(instance_keys)
+    if state.refused and strict:
+        raise PermissionError(_strict_refusal_message(state))
+    return state.instance
 
 
 def instance_problem(instance_keys: Optional[str] = None) -> Optional[str]:
-    """Why the requested (or global) instance is not the one shown, or `None`."""
-    instance, refused = resolve_instance(instance_keys)
-    if not refused:
-        return None
-    return f"Instance '{refused}' is not available; showing {instance} instead."
+    """Why the requested (or global / team) instance is not the one shown, or `None`."""
+    return _problem_message(_resolve_instance_state(instance_keys))
+
+
+def display_instance_keys(instance_keys: Optional[str] = None) -> str:
+    """
+    The instance keys a page should display and query: the resolved instance when the viewer may
+    use it, else the viewer's team instance (when they have one) or the refused keys, so an
+    isolated viewer's page never switches to an instance they may not access.
+    """
+    state = _resolve_instance_state(instance_keys)
+    if state.fallback_allowed:
+        return str(state.instance)
+    return str(state.team_instance or state.refused or state.instance)
+
+
+def page_instance(instance_keys: Optional[str] = None) -> Tuple[str, Optional[str], bool]:
+    """
+    Resolve a page's display instance, any problem banner, and whether no accessible instance
+    is available (`blocked = True`).
+    """
+    state = _resolve_instance_state(instance_keys)
+    keys = (
+        str(state.instance)
+        if state.fallback_allowed
+        else str(state.team_instance or state.refused or state.instance)
+    )
+    return keys, _problem_message(state), (not state.fallback_allowed)
 
 
 def _call(name: str, request: Dict[str, Any]) -> Any:

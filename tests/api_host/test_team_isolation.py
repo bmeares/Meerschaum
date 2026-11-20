@@ -476,3 +476,173 @@ print('JSON:' + json.dumps(out, default=str))
     assert '- ti-cfg2' in text, text
     assert 'main:' not in text, text
     assert stat.S_IMODE(os.stat(path).st_mode) & 0o077 == 0, oct(os.stat(path).st_mode)
+
+
+def test_isolated_team_instance_policy_refusal_never_falls_back_to_api_default(sandbox):
+    """
+    When an isolated team's default instance is blocked by `api:permissions:instances`, Dash
+    never falls back to showing or querying the API's own instance (which the isolated viewer
+    cannot access), distinguishes policy denial from team isolation, and surfaces one clear alert.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, SEED + '''
+import flask
+import meerschaum.api as api
+from meerschaum.connectors import get_connector
+from meerschaum.api.dash import engine
+from meerschaum.api.dash.pages import pipes as pipes_page
+from meerschaum.api.dash.callbacks import pipes as pipes_cb
+
+team('whitedl', isolated=True, instance='sql:whitedl', connectors=['sql:whitedl'])
+get_connector('sql', 'whitedl', flavor='sqlite', database=':memory:', teams=['whitedl'])
+session = sign_in('whitedl-mgr', role='operator', teams={'whitedl': 'manager'})
+viewer = access.get_viewer(session)
+default = str(api.get_api_connector())
+
+app = flask.Flask('t')
+out = {'default': default}
+
+orig_in_request = access._in_request
+orig_current_viewer = access.current_viewer
+access._in_request = lambda: True
+access.current_viewer = lambda: viewer
+try:
+    ### 1. API forbids additional instances (`allow_multiple_instances=False`, narrow allowlist).
+    api.permissions_config.setdefault('instances', {})['allow_multiple_instances'] = False
+    api.permissions_config['instances']['allowed_instance_keys'] = [default, 'sql:sra']
+
+    with app.test_request_context('/dash/pipes'):
+        out['fresh_problem'] = engine.instance_problem()
+        out['fresh_display'] = engine.display_instance_keys()
+        out['fresh_page'] = list(engine.page_instance())
+        out['req_problem'] = engine.instance_problem('sql:whitedl')
+        out['req_page'] = list(engine.page_instance('sql:whitedl'))
+        try:
+            engine.get_instance('sql:whitedl', strict=True)
+            out['strict_whitedl'] = None
+        except PermissionError as e:
+            out['strict_whitedl'] = str(e)
+        try:
+            engine.get_instance(default, strict=True)
+            out['strict_default'] = None
+        except PermissionError as e:
+            out['strict_default'] = str(e)
+        out['default_problem'] = engine.instance_problem(default)
+
+        layout = pipes_page.layout('/dash/pipes', 'http://localhost/dash/pipes')
+        meta = next(
+            node.data for node in pipes_page._walk(layout)
+            if getattr(node, 'id', None) == 'pipes-page-meta'
+        )
+        alert = next(
+            node.children for node in pipes_page._walk(layout)
+            if getattr(node, 'id', None) == 'pipes-instance-alert'
+        )
+        out['pipes_meta'] = meta
+        out['pipes_instance_alert'] = str(alert)
+        cb_token = context_value.set(AttributeDict(**{
+            'triggered_inputs': [{'prop_id': 'pipes-location.search', 'value': ''}],
+        }))
+        try:
+            store, cb_alert = pipes_cb.load_pipes_rows('', 0, '/dash/pipes', meta, session, None)
+        finally:
+            context_value.reset(cb_token)
+        out['cb_store_instance'] = store['instance']
+        out['cb_rows'] = store['rows']
+        out['cb_alert'] = cb_alert
+
+    ### 2. API allows multiple instances, but the browser still holds a stale `sql:main` cookie.
+    api.permissions_config['instances']['allow_multiple_instances'] = True
+    api.permissions_config['instances']['allowed_instance_keys'] = ['*']
+    with app.test_request_context(
+        '/dash/pipes', headers={'Cookie': f'mrsm-instance={default.replace(":", "%3A")}'}
+    ):
+        out['stale_cookie_page'] = list(engine.page_instance())
+    with app.test_request_context('/dash/pipes'):
+        out['allowed_page'] = list(engine.page_instance())
+finally:
+    access._in_request = orig_in_request
+    access.current_viewer = orig_current_viewer
+
+print('JSON:' + json.dumps(out, default=str))
+'''))
+    default = out['default']
+    for key in ('fresh_problem', 'req_problem', 'pipes_instance_alert'):
+        msg = out[key]
+        assert msg and "'sql:whitedl'" in msg, (key, msg)
+        assert 'allow_multiple_instances' in msg and 'allowed_instance_keys' in msg, (key, msg)
+        assert f'showing {default} instead' not in msg, (key, msg)
+    assert out['fresh_display'] == 'sql:whitedl'
+    assert out['fresh_page'][0] == 'sql:whitedl' and out['fresh_page'][2] is True
+    assert out['req_page'][0] == 'sql:whitedl' and out['req_page'][2] is True
+    assert 'allow_multiple_instances' in (out['strict_whitedl'] or '')
+    assert 'not available to your teams' in (out['strict_default'] or '')
+    assert 'not available to this API' not in (out['strict_default'] or '')
+    assert 'not available to your teams' in (out['default_problem'] or '')
+    assert "'sql:whitedl'" in (out['default_problem'] or '')
+    assert f'showing {default} instead' not in (out['default_problem'] or '')
+
+    assert out['pipes_meta']['instance'] == 'sql:whitedl'
+    assert out['pipes_meta']['instance_blocked'] is True
+    assert out['cb_store_instance'] == 'sql:whitedl'
+    assert out['cb_rows'] == []
+    assert out['cb_alert'] == []
+
+    stale_keys, stale_problem, stale_blocked = out['stale_cookie_page']
+    assert stale_keys == 'sql:whitedl' and stale_blocked is False
+    assert 'not available to your teams' in stale_problem and 'showing sql:whitedl instead' in stale_problem
+    assert out['allowed_page'] == ['sql:whitedl', None, False]
+
+
+def test_team_setup_warns_when_api_instance_policy_blocks_team_instance(sandbox):
+    """
+    Creating or editing a team with a default instance blocked by `api:permissions:instances`
+    succeeds but appends a warning note and renders a warning alert in the Users & Teams dialogs.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, SEED + '''
+import meerschaum.api as api
+from meerschaum.api.dash.callbacks import users as callbacks
+
+admin = sign_in('pol-admin', user_type='admin')
+default = str(api.get_api_connector())
+api.permissions_config.setdefault('instances', {})['allow_multiple_instances'] = False
+api.permissions_config['instances']['allowed_instance_keys'] = [default]
+
+out = {}
+trigger('teams-new-submit.n_clicks')
+created = callbacks.submit_new_team(
+    1, 'pol-team', 'instance', None, None, 'sql:whitedl', True, [], [], False, 0, admin,
+)
+out['create_closed'] = created[0]
+out['create_alert'] = created[2].to_plotly_json()['props']
+
+trigger('teams-settings-submit.n_clicks')
+edited = callbacks.submit_team_settings(
+    1, {'team': 'pol-team'}, 'sql:whitedl', True, ['sql:whitedl'], [], False, 0, admin,
+)
+out['edit_closed'] = edited[0]
+out['edit_alert'] = edited[2].to_plotly_json()['props']
+
+### Once the API policy allows it, saving again returns a normal success alert without a warning.
+api.permissions_config['instances']['allow_multiple_instances'] = True
+api.permissions_config['instances']['allowed_instance_keys'] = ['*']
+trigger('teams-settings-submit.n_clicks')
+edited_ok = callbacks.submit_team_settings(
+    1, {'team': 'pol-team'}, 'sql:whitedl', True, ['sql:whitedl'], [], False, 0, admin,
+)
+out['edit_ok_alert'] = edited_ok[2].to_plotly_json()['props']
+print('JSON:' + json.dumps(out, default=str))
+'''))
+    assert out['create_closed'] is False
+    assert out['create_alert']['color'] == 'warning', out['create_alert']
+    create_text = json.dumps(out['create_alert']['children'])
+    assert 'allow_multiple_instances' in create_text and 'allowed_instance_keys' in create_text
+    assert 'sql:whitedl' in create_text
+
+    assert out['edit_closed'] is False
+    assert out['edit_alert']['color'] == 'warning', out['edit_alert']
+    edit_text = json.dumps(out['edit_alert']['children'])
+    assert 'allow_multiple_instances' in edit_text and 'sql:whitedl' in edit_text
+
+    assert out['edit_ok_alert']['color'] == 'success', out['edit_ok_alert']
