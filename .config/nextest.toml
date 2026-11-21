@@ -14,12 +14,13 @@ test-threads = 16
 leak-timeout = { period = "100ms", result = "fail" }
 
 # The live Valkey tests of `meerschaum-connector-valkey` share one database of the test server
-# (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`), and `valkey_replay`'s
-# `replay_live` flushes it and compares every key after each step: run them one at a time.
-# (`cargo test` runs one test binary at a time, so only nextest needs this.)
+# (`MRSM_VALKEY_TEST_URL`, default `redis://localhost:6399/12`), and `valkey_replay::replay_live`
+# flushes it and compares every key after each step: run them one at a time. Under `cargo test`
+# they share one process and take turns through `tests/support/live.rs`; nextest runs each test
+# in its own process, so this group serializes them.
 [test-groups]
 valkey-live = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'package(meerschaum-connector-valkey) & test(/_live$/)'
+filter = 'package(meerschaum-connector-valkey) & (test(/_live$/) | test(/::live_/))'
 test-group = 'valkey-live'

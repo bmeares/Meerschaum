@@ -68,9 +68,10 @@ async fn an_unroutable_host_is_bounded_by_connect_timeout() {
 
 #[tokio::test]
 async fn the_reachable_test_server_still_connects() {
-    let Some(url) = live::url() else {
+    let Some(database) = live::database().await else {
         return;
     };
+    let url = database.url.clone();
     let Ok(connector) = ValkeyConnector::from_uri("w18cn", &url).await else {
         eprintln!("SKIPPED: no Valkey server reachable at {url}");
         return;

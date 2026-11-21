@@ -8,6 +8,7 @@ static HEADER: Header = Header {
     version: 99,
     size: 8,
 };
+#[allow(unsafe_code)] // exports the hand-written table under the ABI's symbol name
 #[unsafe(no_mangle)]
 pub extern "C" fn mrsm_plugin_v1() -> *const std::ffi::c_void {
     (&HEADER as *const Header).cast()

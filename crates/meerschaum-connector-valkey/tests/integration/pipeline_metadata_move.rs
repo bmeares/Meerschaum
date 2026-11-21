@@ -2,6 +2,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::live;
+
 use meerschaum_connector::PipesKeysQuery;
 use meerschaum_connector_valkey::{FredBackend, MemoryBackend, ValkeyConnector};
 use meerschaum_core::{Map, Pipe, Value};
@@ -175,13 +177,11 @@ async fn concurrent_moves_have_one_winner_and_changed_or_occupied_metadata_is_un
 /// No default address: this test only touches an explicitly supplied disposable instance.
 #[tokio::test]
 async fn live_lua_move_preserves_storage_and_refuses_stale_recreated_and_occupied_sources() {
-    let Ok(url) = std::env::var("MRSM_VALKEY_TEST_URL") else {
-        eprintln!("SKIPPED: set MRSM_VALKEY_TEST_URL to an owned disposable Valkey instance");
+    let Some(database) = live::database().await else {
         return;
     };
-    assert_eq!(std::env::var("MRSM_TEST_ISOLATED").as_deref(), Ok("1"));
     let backend = Arc::new(
-        FredBackend::connect(&url, Some(Duration::from_secs(3)))
+        FredBackend::connect(&database.url, Some(Duration::from_secs(3)))
             .await
             .expect("the explicitly supplied disposable Valkey must be reachable"),
     );

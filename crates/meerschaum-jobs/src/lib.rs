@@ -41,6 +41,8 @@
 //! Behavior follows the Python implementation (v4.1.4); preserved quirks are marked `// PARITY:`.
 
 #![warn(missing_docs)]
+// Daemons need `unsafe` (fork, setsid, signals, raw descriptors); each block says why it holds.
+#![allow(unsafe_code)]
 
 pub mod config;
 pub mod config_files;

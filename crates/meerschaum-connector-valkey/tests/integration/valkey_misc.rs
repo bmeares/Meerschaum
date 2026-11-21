@@ -250,9 +250,10 @@ async fn leases_in_memory() {
 
 #[tokio::test]
 async fn leases_live() {
-    let Some(url) = live::url() else {
+    let Some(database) = live::database().await else {
         return;
     };
+    let url = database.url.clone();
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),
@@ -396,9 +397,10 @@ async fn a_pipe_registered_concurrently_is_registered_once() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_pipe_registered_concurrently_is_registered_once_live() {
-    let Some(url) = live::url() else {
+    let Some(database) = live::database().await else {
         return;
     };
+    let url = database.url.clone();
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),

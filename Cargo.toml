@@ -30,6 +30,13 @@ authors = ["Bennett Meares <bennett.meares@gmail.com>"]
 # reedline 0.52 and sysinfo 0.39 need 1.95, sqlx 0.9 needs 1.94. Recompute after dependency upgrades.
 rust-version = "1.95"
 
+# Every target of every member inherits these (`[lints] workspace = true`). `unsafe` is denied; the
+# crates that need it (`meerschaum-plugin`, `meerschaum-py`, `meerschaum-jobs`) allow it in their
+# `lib.rs`, everything else on the one item that needs it, with a `// SAFETY:` comment
+# (`scripts/check_architecture.py` rule `cargo-invariants`).
+[workspace.lints.rust]
+unsafe_code = "deny"
+
 [workspace.lints.clippy]
 dbg_macro = "deny"
 todo = "deny"

@@ -25,15 +25,17 @@ fn unique(prefix: &str) -> String {
     )
 }
 
-async fn live_backend() -> Option<Arc<dyn ValkeyBackend>> {
-    let url = live::url()?;
+/// The shared live database (held until the test ends) and a backend connected to it.
+async fn live_backend() -> Option<(live::Database, Arc<dyn ValkeyBackend>)> {
+    let database = live::database().await?;
+    let url = database.url.clone();
     match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),
     )
     .await
     {
-        Ok(Ok(b)) => Some(Arc::new(b)),
+        Ok(Ok(b)) => Some((database, Arc::new(b))),
         _ => {
             eprintln!("SKIPPED: no Valkey server reachable at {url}");
             None
@@ -265,7 +267,7 @@ async fn claims_and_unclaimed_rows_in_memory() {
 
 #[tokio::test]
 async fn claims_and_unclaimed_rows_live() {
-    let Some(backend) = live_backend().await else {
+    let Some((_database, backend)) = live_backend().await else {
         return;
     };
     check_claim_and_write(backend.as_ref()).await;
@@ -348,7 +350,7 @@ async fn register_plugin_as_owner_keeps_another_users_plugin_in_memory() {
 
 #[tokio::test]
 async fn register_plugin_as_owner_keeps_another_users_plugin_live() {
-    let Some(backend) = live_backend().await else {
+    let Some((_database, backend)) = live_backend().await else {
         return;
     };
     let conn = ValkeyConnector::with_backend("reg", Map::new(), backend);

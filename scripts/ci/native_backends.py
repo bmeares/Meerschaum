@@ -12,38 +12,55 @@ import signal
 import subprocess
 import sys
 import time
+from typing import NamedTuple, Optional
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.ci.services import TARGET_PORTS, clean_environment, compose_command, mapped_port
 
 SERVICES = ('postgresql', 'mysql', 'mariadb', 'valkey')
+
+
+class NativeTest(NamedTuple):
+    """One regression: a test target of a crate and the libtest filter that selects it.
+
+    A suite target (`tests/<target>/main.rs`) bundles many modules, so its filter names one module
+    (`<module>::`) or one test (`<module>::<test>`): every test function runs exactly once.
+    """
+    crate: str
+    target: str
+    filter: Optional[str] = None
+
+
 TESTS = {
-    'instance_first_user': 'meerschaum-connector-sql',
-    'instance_user_tokens': 'meerschaum-connector-sql',
-    'instance_users': 'meerschaum-connector-sql',
-    'instance_unique_keys': 'meerschaum-connector-sql',
-    'instance_has_rows': 'meerschaum-connector-sql',
-    'instance_pipe_data': 'meerschaum-connector-sql',
-    'registered_pg_source': 'meerschaum-cli',
-    'immutable_sync': 'meerschaum-engine',
-    'engine_store': 'meerschaum-server',
-    'graph_window_sql_http': 'meerschaum-server',
-    'valkey_first_user': 'meerschaum-connector-valkey',
-    'valkey_misc': 'meerschaum-connector-valkey',
-    'pipeline_metadata_move': 'meerschaum-connector-valkey',
-    'rc15_fail_closed': 'meerschaum-connector-valkey',
-    'valkey_registration': 'meerschaum-connector-valkey',
-    'w18_fail_fast': 'meerschaum-connector-valkey',
-    'valkey_replay': 'meerschaum-connector-valkey',
+    'instance_first_user': NativeTest('meerschaum-connector-sql', 'instance_first_user'),
+    'instance_user_tokens': NativeTest('meerschaum-connector-sql', 'instance_user_tokens'),
+    'instance_users': NativeTest('meerschaum-connector-sql', 'instance_users'),
+    'instance_unique_keys': NativeTest('meerschaum-connector-sql', 'instance_unique_keys'),
+    'instance_has_rows': NativeTest('meerschaum-connector-sql', 'instance_has_rows'),
+    'instance_pipe_data': NativeTest('meerschaum-connector-sql', 'instance_pipe_data',
+                                     'test_selected_columns_do_not_reintroduce_omitted_columns'),
+    'registered_pg_source': NativeTest('meerschaum-cli', 'registered_pg_source',
+                                       'registered_same_store_table_fetch_and_paging'),
+    'immutable_sync': NativeTest('meerschaum-engine', 'execution_state_suite',
+                                 'immutable_sync::postgres_watermarks_and_sparse_cpi'),
+    'engine_store': NativeTest('meerschaum-server', 'engine_events_suite',
+                               'engine_store::direct_admin_engine_writes_on_postgres'),
+    'graph_window_sql_http': NativeTest(
+        'meerschaum-server', 'engine_events_suite',
+        'graph_window_sql_http::self_api_restricted_graph_commits_innodb_append'),
+    'valkey_first_user': NativeTest('meerschaum-connector-valkey', 'integration', 'valkey_first_user::'),
+    'valkey_misc': NativeTest('meerschaum-connector-valkey', 'integration', 'valkey_misc::'),
+    'pipeline_metadata_move': NativeTest('meerschaum-connector-valkey', 'integration',
+                                         'pipeline_metadata_move::'),
+    'rc15_fail_closed': NativeTest('meerschaum-connector-valkey', 'integration', 'rc15_fail_closed::'),
+    'valkey_registration': NativeTest('meerschaum-connector-valkey', 'integration',
+                                      'valkey_registration::'),
+    'w18_fail_fast': NativeTest('meerschaum-connector-valkey', 'integration', 'w18_fail_fast::'),
+    'valkey_replay': NativeTest('meerschaum-connector-valkey', 'integration', 'valkey_replay::'),
 }
-FILTERS = {
-    'instance_pipe_data': 'test_selected_columns_do_not_reintroduce_omitted_columns',
-    'registered_pg_source': 'registered_same_store_table_fetch_and_paging',
-    'immutable_sync': 'postgres_watermarks_and_sparse_cpi',
-    'engine_store': 'direct_admin_engine_writes_on_postgres',
-    'graph_window_sql_http': 'self_api_restricted_graph_commits_innodb_append',
-}
+# These tests are `#[ignore]`d in ordinary runs: their filter is the test's full path.
+EXACT_IGNORED = ('registered_pg_source', 'graph_window_sql_http')
 SOURCE_PG_URI = 'MEERSCHAUM_TEST_REGISTERED_SOURCE_PG_URI'
 SOURCE_PG_DATABASE = 'mrsm_registered_source_ci'
 SOURCE_PG_OWNER = 'mrsm_registered_source_owner'
@@ -83,8 +100,16 @@ def cleanup(root):
         save_report(receipt, report)
 
 
+def target_sources(test, repo=REPO):
+    """The two places Cargo finds an integration test target's root file."""
+    tests = repo / 'crates' / test.crate / 'tests'
+    return (tests / (test.target + '.rs'), tests / test.target / 'main.rs')
+
+
 def select_tests(lines, repo=REPO):
-    selected = {}
+    """Map each regression of `TESTS` to the compiled executable of its test target."""
+    wanted = {(test.crate, test.target): test for test in TESTS.values()}
+    binaries = {}
     for line in lines:
         try:
             row = json.loads(line)
@@ -93,22 +118,24 @@ def select_tests(lines, repo=REPO):
         if row.get('reason') != 'compiler-artifact' or not row.get('executable'):
             continue
         target = row['target']
-        name = target['name']
-        if name not in TESTS or target['kind'] != ['test']:
+        if target['kind'] != ['test']:
             continue
-        source = repo / 'crates' / TESTS[name] / 'tests' / (name + '.rs')
+        source = Path(target['src_path']).resolve()
         # Other crates have test targets of the same name: only the intended source is selected.
-        if Path(target['src_path']).resolve() != source.resolve():
+        key = next((key for key, test in wanted.items() if target['name'] == test.target
+                    and source in {path.resolve() for path in target_sources(test, repo)}), None)
+        if key is None:
             continue
         binary = Path(row['executable']).resolve()
         if not binary.is_relative_to((repo / 'target').resolve()):
-            raise ValueError(f'Unexpected native test artifact: {name}')
-        if name in selected and selected[name] != binary:
-            raise ValueError(f'Ambiguous native test artifact: {name}')
-        selected[name] = binary
-    if set(selected) != set(TESTS):
-        raise ValueError(f'Missing native tests: {sorted(set(TESTS) - set(selected))}')
-    return selected
+            raise ValueError(f'Unexpected native test artifact: {key[0]} {key[1]}')
+        if key in binaries and binaries[key] != binary:
+            raise ValueError(f'Ambiguous native test artifact: {key[0]} {key[1]}')
+        binaries[key] = binary
+    missing = sorted(name for name, test in TESTS.items() if (test.crate, test.target) not in binaries)
+    if missing:
+        raise ValueError(f'Missing native tests: {missing}')
+    return {name: binaries[(test.crate, test.target)] for name, test in TESTS.items()}
 
 
 def native_environment(root, ports, source=None):
@@ -158,7 +185,8 @@ def check_test_output(name, output):
     result = re.search(r'test result: ok\. (\d+) passed;', output)
     if result is None or int(result[1]) == 0:
         raise ValueError(f'No passing native tests were recorded: {name}')
-    if TESTS.get(name) == 'meerschaum-connector-valkey' and 'SKIPPED' in output:
+    test = TESTS.get(name)
+    if test is not None and test.crate == 'meerschaum-connector-valkey' and 'SKIPPED' in output:
         raise ValueError(f'A required live Valkey check returned without running: {name}')
     if name.startswith('instance_') and re.search(r'Skipping (postgresql|mysql|mariadb):', output):
         raise ValueError(f'A required live SQL check returned without running: {name}')
@@ -210,11 +238,10 @@ def run(root, profile='test', focused_build=False):
         if focused_build:
             # Local iteration need not relink the whole workspace for these selected targets.
             logs = []
-            for crate in sorted(set(TESTS.values())):
+            for crate in sorted({test.crate for test in TESTS.values()}):
                 command = ['cargo', 'test', '-p', crate, '--locked', '--no-run', '--message-format=json']
-                for name, package in TESTS.items():
-                    if package == crate:
-                        command.extend(['--test', name])
+                for target in sorted({test.target for test in TESTS.values() if test.crate == crate}):
+                    command.extend(['--test', target])
                 if profile != 'test':
                     command.extend(['--profile', profile])
                 log = root / (crate + '-artifacts.log')
@@ -286,18 +313,18 @@ def run(root, profile='test', focused_build=False):
             binary = binaries[name]
             print(f'Native backend regression: {name}', flush=True)
             command = [str(binary), '--test-threads=1', '--nocapture']
-            if name in FILTERS:
-                command.append(FILTERS[name])
+            if TESTS[name].filter:
+                command.append(TESTS[name].filter)
+            if name in EXACT_IGNORED:
+                command.extend(('--ignored', '--exact'))
             test_env = env
             if name == 'registered_pg_source':
-                command.extend(('--ignored', '--exact'))
                 # Only this test sees the distinct owned database selector.
                 port = mapped_port(f"127.0.0.1:{ports['postgresql']}")
                 test_env = {**env, SOURCE_PG_URI: (
                     f'postgresql://{SOURCE_PG_OWNER}:{SOURCE_PG_PASSWORD}@127.0.0.1:{port}'
                     f'/{SOURCE_PG_DATABASE}')}
             if name == 'graph_window_sql_http':
-                command.extend(('--ignored', '--exact'))
                 test_env = {**env, **{
                     APPEND_URIS[service]: (
                         f'{service}://{APPEND_USER}:{APPEND_PASSWORD}@127.0.0.1:'
@@ -306,7 +333,8 @@ def run(root, profile='test', focused_build=False):
                 }}
             run_child(command, test_env, root / (name + '.log'))
             check_test_output(name, (root / (name + '.log')).read_text())
-            report['tests'].append({'name': name, 'filter': FILTERS.get(name),
+            report['tests'].append({'name': name, 'target': TESTS[name].target,
+                                    'filter': TESTS[name].filter,
                                     'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
                                     'passed': True})
             save_report(receipt, report)

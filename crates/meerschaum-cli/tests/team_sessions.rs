@@ -281,6 +281,7 @@ fn main() -> std::process::ExitCode {
     ExitCode::SUCCESS
 }
 
+#[allow(unsafe_code)] // sets the process environment once, below
 fn a_team_session_runs_python_with_the_teams_configuration_only() {
     let Some(python) = python_support::current("MRSM_PYTHON") else {
         eprintln!("Skipping: no Python with meerschaum.");

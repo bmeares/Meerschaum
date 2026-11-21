@@ -9,7 +9,6 @@ mod dtypes_parity;
 mod parameter_resolution;
 mod paths_parity;
 mod pipes_parity;
-mod secret_config;
 mod stack_image;
 mod static_config;
 mod team_reservations;

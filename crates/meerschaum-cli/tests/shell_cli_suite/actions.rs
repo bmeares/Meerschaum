@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use meerschaum_cli::dispatch::{self, CommandSpec, Host, RecordingHost, Runtime};
 use meerschaum_cli::format::FormatSettings;
+use meerschaum_cli::native::Session;
 use meerschaum_cli::types::DateContext;
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::config::{Config, ConfigOptions};
@@ -25,24 +26,37 @@ impl Host for SharedHost {
     }
 }
 
-/// Point the Python workers these tests spawn at this repository. A worker inherits the test
-/// process's environment, and without `PYTHONPATH` the interpreter imports a stale installed
-/// Meerschaum (`~/.local`) that has no `meerschaum.worker` (and prints a traceback to stderr).
-fn use_repo_python() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let repo = repo.canonicalize().unwrap_or(repo);
-        let mut paths = vec![repo];
-        if let Some(existing) = std::env::var_os("PYTHONPATH") {
-            paths.extend(std::env::split_paths(&existing));
-        }
-        if let Ok(joined) = std::env::join_paths(paths) {
-            // SAFETY: the process environment is only written here, once, before any test of
-            // this binary spawns a worker (every test reaches it through `run`).
-            unsafe { std::env::set_var("PYTHONPATH", joined) };
-        }
-    });
+/// A session whose Python workers import this repository's `meerschaum`: without `PYTHONPATH`
+/// the interpreter imports a stale installed Meerschaum (`~/.local`) that has no
+/// `meerschaum.worker` (and prints a traceback to stderr). The variable reaches the workers
+/// only; this process's environment, shared with every other test of the binary, is unchanged.
+fn repo_python_session() -> Session {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let repo = repo.canonicalize().unwrap_or(repo);
+    let mut paths = vec![repo];
+    if let Some(existing) = std::env::var_os("PYTHONPATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    let python_path = std::env::join_paths(paths).expect("a joinable PYTHONPATH");
+    // The configuration of each test supplies the root and plugins directories.
+    let mut env: Vec<(String, String)> = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "MRSM_ROOT_DIR" | "MRSM_PLUGINS_DIR" | "PYTHONPATH"
+            )
+        })
+        .collect();
+    env.push((
+        "PYTHONPATH".into(),
+        python_path.to_string_lossy().into_owned(),
+    ));
+    let session = Session::new();
+    session
+        .set_worker_environment(env)
+        .expect("a new session has no worker pool yet");
+    session
 }
 
 fn config(root: &Path, writes: bool) -> Config {
@@ -64,10 +78,10 @@ fn run(
     env: fn(&str) -> Option<String>,
     host: &SharedHost,
 ) -> (SuccessTuple, String) {
-    use_repo_python();
     let mut out = Vec::new();
     let result = {
         let mut rt = Runtime::new(DateContext::system(), 80, &mut out, env);
+        rt.native = Some(repo_python_session());
         rt.config = Some(config(root, true));
         rt.format = Some(FormatSettings {
             ansi: false,
@@ -438,7 +452,6 @@ fn edit_config_creates_the_key_file_when_mrsm_config_patched_the_key() {
     fn env(k: &str) -> Option<String> {
         (k == "EDITOR").then(|| "my-editor".into())
     }
-    use_repo_python();
     let tmp = tempfile::tempdir().unwrap();
     let host = SharedHost::default();
     let mut opts = ConfigOptions::with_env(vec![
@@ -460,6 +473,7 @@ fn edit_config_creates_the_key_file_when_mrsm_config_patched_the_key() {
     let mut out = Vec::new();
     let result = {
         let mut rt = Runtime::new(DateContext::system(), 80, &mut out, env);
+        rt.native = Some(repo_python_session());
         rt.config = Some(Config::new(opts).unwrap());
         rt.host = Box::new(host.clone());
         rt.cwd = Some(tmp.path().to_path_buf());

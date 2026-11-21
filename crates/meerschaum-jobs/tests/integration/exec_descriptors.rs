@@ -1,5 +1,8 @@
 //! Real inherited-descriptor control: only the selected standard streams cross native exec.
 
+// Raw descriptor calls (`fcntl`, `pread`, `recv`) on this fixture's own descriptors.
+#![allow(unsafe_code)]
+
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;

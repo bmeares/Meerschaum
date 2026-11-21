@@ -38,9 +38,10 @@ async fn replay_in_memory() {
 
 #[tokio::test]
 async fn replay_live() {
-    let Some(url) = live::url() else {
+    let Some(database) = live::database().await else {
         return;
     };
+    let url = database.url.clone();
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),

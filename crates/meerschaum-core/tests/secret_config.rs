@@ -3,6 +3,9 @@
 //! persists what the environment or a reference holds, and the permission warning.
 //!
 //! Every value is synthetic; each test works in its own temporary root.
+//!
+//! A test binary of its own: `MRSM{env:...}` reads the process environment, which these tests
+//! set, and a variable set in a shared suite would reach every other test of that suite.
 
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -17,10 +20,12 @@ const ENV_SECRET: &str = "env-s3cret-for-tests";
 const ENV_VAR: &str = "MRSM_TEST_SECRET_CONFIG_VALUE";
 static SET_ENV: Once = Once::new();
 
+#[allow(unsafe_code)] // sets the process environment once, below
 fn set_env() {
     SET_ENV.call_once(|| {
-        // SAFETY: set once, before any test of this binary reads it, and never changed again;
-        // the variable is private to these tests.
+        // SAFETY: these tests are the only ones in this binary (kept out of the `integration`
+        // suite for this reason): the variable is set once, before any of them reads it, never
+        // changed again, and private to them.
         unsafe { std::env::set_var(ENV_VAR, ENV_SECRET) };
     });
 }

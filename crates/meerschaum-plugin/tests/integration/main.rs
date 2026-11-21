@@ -1,3 +1,6 @@
+// These tests drive the native plugin C ABI, which is `unsafe` by nature.
+#![allow(unsafe_code)]
+
 #[path = "../support/compile_single_file.rs"]
 pub mod compile_single_file;
 

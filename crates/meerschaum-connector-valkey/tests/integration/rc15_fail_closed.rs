@@ -122,9 +122,10 @@ async fn user_reads_that_fail_are_errors_in_memory() {
 
 #[tokio::test]
 async fn user_reads_that_fail_are_errors_live() {
-    let Some(url) = live::url() else {
+    let Some(database) = live::database().await else {
         return;
     };
+    let url = database.url.clone();
     let backend = match tokio::time::timeout(
         Duration::from_secs(3),
         FredBackend::connect(&url, Some(Duration::from_secs(3))),

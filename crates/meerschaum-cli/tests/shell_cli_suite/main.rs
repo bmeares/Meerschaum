@@ -33,7 +33,6 @@ mod progress_interrupt;
 mod prompts_pty;
 #[cfg(unix)]
 mod residual_actions_a;
-mod secret_config_writers;
 mod shell;
 mod shell_completion_scripts;
 mod shell_completions;
