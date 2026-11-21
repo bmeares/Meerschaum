@@ -14,17 +14,15 @@
 }
 
 /*
- * Tiles. Desktop: Pipes (two columns) beside Jobs, then Pipelines beside Recent runs (two
- * columns), then Performance. Tablets: two columns, Pipes and Recent runs full width. Phones: one.
+ * Tiles. Desktop: 6-column grid so normal overview is Pipes (4) beside Jobs (2), then Pipelines
+ * (2) beside Recent runs (4), then Performance (6). When an instance has no saved Pipelines (or no
+ * pipes), quiet empty tiles rebalance cleanly instead of leaving tall empty voids. Tablets: two
+ * columns. Phones: one.
  */
 .overview-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.overview-tile-pipes,
-.overview-tile-runs {
-  grid-column: span 2;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 .overview-tile {
   display: flex;
@@ -34,6 +32,59 @@
   background: #2a3037;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
+}
+@media (min-width: 992px) {
+  .overview-tile-pipes,
+  .overview-tile-runs {
+    grid-column: span 4;
+  }
+  .overview-tile-jobs,
+  .overview-tile-pipelines {
+    grid-column: span 2;
+  }
+  /* No pipes yet: balance the Pipes empty state evenly beside Jobs. */
+  .overview-grid:has(.overview-tile-pipes > #overview-empty:not([hidden])) .overview-tile-pipes,
+  .overview-grid:has(.overview-tile-pipes > #overview-empty:not([hidden])) .overview-tile-jobs {
+    grid-column: span 3;
+  }
+  /* No saved Pipelines, with recent runs: compact full-width Pipelines strip above full-width Recent runs. */
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):not(:has(.overview-tile-runs .overview-none)) .overview-tile-pipelines,
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):not(:has(.overview-tile-runs .overview-none)) .overview-tile-runs {
+    grid-column: 1 / -1;
+  }
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):not(:has(.overview-tile-runs .overview-none)) .overview-tile-pipelines {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 20px;
+  }
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):not(:has(.overview-tile-runs .overview-none)) .overview-tile-pipelines > .overview-tile-heading {
+    margin: 0;
+  }
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):not(:has(.overview-tile-runs .overview-none)) .overview-tile-pipelines > .overview-tile-body {
+    flex-direction: row;
+    align-items: center;
+    min-height: 0;
+  }
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):not(:has(.overview-tile-runs .overview-none)) .overview-pipelines-empty {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):not(:has(.overview-tile-runs .overview-none)) .overview-pipelines-empty .overview-tile-action {
+    align-self: center;
+  }
+  /* No saved Pipelines and no recent runs: share a balanced 50/50 row (or 3-up with quiet Performance). */
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):has(.overview-tile-runs .overview-none) .overview-tile-pipelines,
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):has(.overview-tile-runs .overview-none) .overview-tile-runs {
+    grid-column: span 3;
+  }
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):has(.overview-tile-runs .overview-none):has(.overview-tile-performance .overview-performance-empty) .overview-tile-pipelines,
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):has(.overview-tile-runs .overview-none):has(.overview-tile-performance .overview-performance-empty) .overview-tile-runs,
+  .overview-grid:has(.overview-tile-pipelines .overview-pipelines-empty):has(.overview-tile-runs .overview-none):has(.overview-tile-performance .overview-performance-empty) .overview-tile-performance {
+    grid-column: span 2;
+  }
 }
 .overview-tile-heading {
   margin: 0 0 4px;
@@ -88,10 +139,19 @@ a.overview-tile-title:focus-visible {
   white-space: nowrap;
 }
 .overview-tile-action {
-  margin-left: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  margin-left: 0;
   min-height: 36px;
 }
-.overview-headline .overview-tile-action { margin-left: 0; }
+.overview-pipelines-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
 
 /* A bar split by state, each part as wide as its share. */
 .overview-bar {
@@ -245,12 +305,19 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
 }
 
-/* Pipes: the states beside the latest syncs and the connectors. */
+/* Pipes: the states beside the latest syncs (or beside Connectors when no syncs are recorded yet). */
 .overview-pipes-layout {
   display: grid;
   flex: 1 1 auto;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
   column-gap: 28px;
+}
+.overview-pipes-layout-balanced {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.overview-pipes-layout-single,
+.overview-pipes-layout:not(:has(.overview-pipes-detail)) {
+  grid-template-columns: minmax(0, 1fr);
 }
 .overview-pipes-detail {
   padding-left: 28px;
@@ -270,6 +337,11 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
 }
 .overview-pipes-section + .overview-pipes-section { margin-top: 14px; }
 .overview-pipes-connectors { margin-top: 10px; }
+.overview-pipes-detail > .overview-pipes-connectors { margin-top: 0; }
+.overview-pipes-detail .overview-chips {
+  margin-top: 6px;
+  align-content: flex-start;
+}
 .overview-subheading {
   display: flex;
   align-items: center;
@@ -514,10 +586,24 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
   min-width: 9rem;
 }
 
-@media (max-width: 991.98px) {
+@media (min-width: 576px) and (max-width: 991.98px) {
   .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-tile-pipes,
   .overview-tile-runs { grid-column: 1 / -1; }
+  /* Pair quiet empty tiles side-by-side without creating single-column orphan rows. */
+  .overview-grid:has(.overview-tile-pipes > #overview-empty:not([hidden])) .overview-tile-pipes {
+    grid-column: auto;
+  }
+  .overview-grid:has(.overview-tile-pipes > #overview-empty:not([hidden])):has(.overview-tile-runs .overview-none) .overview-tile-runs {
+    grid-column: auto;
+  }
+  .overview-grid:has(.overview-tile-pipes > #overview-empty:not([hidden])):not(:has(.overview-tile-runs .overview-none)) .overview-tile-pipelines {
+    grid-column: 1 / -1;
+  }
+  .overview-grid:not(:has(.overview-tile-pipes > #overview-empty:not([hidden]))):has(.overview-tile-runs .overview-none):has(.overview-tile-performance .overview-performance-empty) .overview-tile-runs,
+  .overview-grid:not(:has(.overview-tile-pipes > #overview-empty:not([hidden]))):has(.overview-tile-runs .overview-none):has(.overview-tile-performance .overview-performance-empty) .overview-tile-performance {
+    grid-column: auto;
+  }
 }
 /* Recent runs on a narrow screen: the status and when, then what ran, then how long and what changed. */
 @media (max-width: 767.98px) {
@@ -543,8 +629,10 @@ a.overview-job-link:hover .overview-job-state { text-decoration: underline; }
   }
   .overview-grid { grid-template-columns: minmax(0, 1fr); }
   .overview-tile-pipes,
-  .overview-tile-runs { grid-column: auto; }
-  .overview-pipes-layout { grid-template-columns: minmax(0, 1fr); }
+  .overview-tile-runs,
+  .overview-tile-performance { grid-column: auto; }
+  .overview-pipes-layout,
+  .overview-pipes-layout-balanced { grid-template-columns: minmax(0, 1fr); }
   .overview-pipes-detail {
     margin-top: 14px;
     padding: 0;

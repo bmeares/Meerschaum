@@ -795,7 +795,8 @@ def build_pipes_body(summary: Dict[str, Any], instance_query: Optional[str] = No
             ]),
         ]
     detail_column = []
-    if summary.get('latest'):
+    has_latest = bool(summary.get('latest'))
+    if has_latest:
         rows = []
         for item in summary['latest']:
             failing = item['state'] == 'failing'
@@ -828,14 +829,23 @@ def build_pipes_body(summary: Dict[str, Any], instance_query: Optional[str] = No
                 f"{more} more", href=with_query('/dash/pipes', instance=instance_query),
                 className='overview-chip overview-chip-more',
             ))
-        overview_column.append(html.Section([
+        connectors_section = html.Section([
             html.H3('Connectors', className='overview-subheading'),
             html.Div(chips, className='overview-chips', id='overview-pipes-connectors'),
-        ], className='overview-pipes-section overview-pipes-connectors'))
+        ], className='overview-pipes-section overview-pipes-connectors')
+        if has_latest:
+            overview_column.append(connectors_section)
+        else:
+            detail_column.append(connectors_section)
+    layout_class = 'overview-pipes-layout'
+    if not detail_column:
+        layout_class += ' overview-pipes-layout-single'
+    elif not has_latest:
+        layout_class += ' overview-pipes-layout-balanced'
     return [html.Div(
         [html.Div(overview_column, className='overview-pipes-overview')]
         + ([html.Div(detail_column, className='overview-pipes-detail')] if detail_column else []),
-        className='overview-pipes-layout',
+        className=layout_class,
     )]
 
 
@@ -922,19 +932,26 @@ def build_pipelines_body(summary: Dict[str, Any], instance_query: Optional[str] 
     """
     href = with_query('/dash/pipelines', instance=instance_query)
     runs = summary.get('runs_24h', 0) or 0
+    if not summary['count']:
+        return [html.Div(
+            [
+                _headline(
+                    _stat(summary['count'], href, 'All Pipelines', 'overview-pipelines-total'),
+                    _aside('No saved pipelines', 'overview-pipelines-empty-note'),
+                ),
+                dbc.Button(
+                    'New pipeline', href='/dash/pipelines/new', size='sm', color='secondary',
+                    id='overview-new-pipeline', class_name='overview-tile-action',
+                ),
+            ],
+            className='overview-pipelines-empty',
+        )]
     children = [
         _headline(
             _stat(summary['count'], href, 'All Pipelines', 'overview-pipelines-total'),
-            _aside(f"{runs:,} run{'' if runs == 1 else 's'} in {HISTORY_HOURS} h", 'overview-pipelines-runs')
-            if summary['count'] else None,
+            _aside(f"{runs:,} run{'' if runs == 1 else 's'} in {HISTORY_HOURS} h", 'overview-pipelines-runs'),
         ),
     ]
-    if not summary['count']:
-        children.append(dbc.Button(
-            'New pipeline', href='/dash/pipelines/new', size='sm', color='secondary',
-            id='overview-new-pipeline', class_name='overview-tile-action',
-        ))
-        return children
     states = summary.get('states', None) or {}
     shown = [
         (state, label) for state, label in PIPELINE_STATES

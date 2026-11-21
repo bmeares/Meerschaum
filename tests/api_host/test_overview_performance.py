@@ -178,3 +178,118 @@ real = call('engine_run_activity', dict(build_request('sql:apihosttest'),
                                          since=(now - timedelta(days=1)).isoformat()))
 assert set(real) == {'buckets', 'names', 'runs', 'oldest', 'truncated'}, real
 '''))
+
+
+def test_overview_no_pipelines_and_pipes_connectors_layout(sandbox):
+    """Overview balances Pipes/Connectors without syncs and compact no-pipelines states."""
+    root, plugins = sandbox
+    check(run_python(root, plugins, '''
+import json
+import pathlib
+import plotly.utils
+from meerschaum.api.dash import overview, performance
+
+dump = lambda value: json.loads(json.dumps(value, cls=plotly.utils.PlotlyJSONEncoder))
+
+def _by_class(node, class_name):
+    found = []
+    def visit(item):
+        if isinstance(item, list):
+            for child in item:
+                visit(child)
+        elif isinstance(item, dict):
+            props = item.get('props', {}) or {}
+            classes = str(props.get('className') or props.get('class_name') or '').split()
+            if class_name in classes:
+                found.append(item)
+            visit(props.get('children', None))
+    visit(node)
+    return found
+
+### 1. Pipes with connectors but no recorded syncs: Connectors fills the right column symmetrically
+###    instead of leaving an empty 1.35fr track beside a left-squished overview column.
+no_syncs = dump(overview.build_pipes_body({
+    'total': 5, 'statuses': True, 'ok': 0, 'failing': 0, 'unrecorded': 5,
+    'last_sync': None, 'synced_24h': 0, 'latest': [],
+    'connectors': [('sql:main', 3), ('plugin:noaa', 2)],
+}, 'sql:apihosttest'))
+layout = _by_class(no_syncs, 'overview-pipes-layout')
+assert len(layout) == 1
+assert 'overview-pipes-layout-balanced' in layout[0]['props']['className'].split()
+assert 'overview-pipes-layout-single' not in layout[0]['props']['className'].split()
+overview_col = _by_class(no_syncs, 'overview-pipes-overview')
+detail_col = _by_class(no_syncs, 'overview-pipes-detail')
+assert len(overview_col) == 1 and len(detail_col) == 1
+assert 'overview-pipes-connectors' not in json.dumps(overview_col)
+assert 'overview-pipes-connectors' in json.dumps(detail_col)
+assert '/dash/pipes?connector_keys=sql%3Amain&instance=sql%3Aapihosttest' in json.dumps(detail_col)
+
+### 2. Pipes with neither latest syncs nor connectors collapse to a single full-width column.
+no_detail = dump(overview.build_pipes_body({
+    'total': 2, 'statuses': True, 'ok': 0, 'failing': 0, 'unrecorded': 2,
+    'last_sync': None, 'synced_24h': 0, 'latest': [], 'connectors': [],
+}))
+single_layout = _by_class(no_detail, 'overview-pipes-layout')
+assert len(single_layout) == 1
+assert 'overview-pipes-layout-single' in single_layout[0]['props']['className'].split()
+assert _by_class(no_detail, 'overview-pipes-detail') == []
+
+### 3. Pipes with recorded latest syncs keep the standard layout (Latest syncs right, Connectors left).
+with_syncs = dump(overview.build_pipes_body({
+    'total': 2, 'statuses': True, 'ok': 2, 'failing': 0, 'unrecorded': 0,
+    'last_sync': '2026-11-04T12:00:00+00:00', 'synced_24h': 2,
+    'latest': [{'ref': 'sql:apihosttest|sql:main|temp|None', 'state': 'ok',
+                'when': '2026-11-04T12:00:00+00:00', 'failures': 0}],
+    'connectors': [('sql:main', 2)],
+}))
+normal_layout = _by_class(with_syncs, 'overview-pipes-layout')
+assert normal_layout[0]['props']['className'] == 'overview-pipes-layout'
+assert 'overview-pipes-connectors' in json.dumps(_by_class(with_syncs, 'overview-pipes-overview'))
+assert 'overview-pipes-latest' in json.dumps(_by_class(with_syncs, 'overview-pipes-detail'))
+
+### 4. Pipelines tile with 0 saved pipelines renders a compact empty wrapper preserving all IDs.
+empty_pipelines = dump(overview.build_pipelines_body({
+    'count': 0, 'states': {}, 'hours': [], 'runs_24h': 0, 'failed_24h': 0,
+    'last_success': None, 'last_failure': None,
+}, 'sql:apihosttest'))
+empty_wrap = _by_class(empty_pipelines, 'overview-pipelines-empty')
+assert len(empty_wrap) == 1
+empty_json = json.dumps(empty_wrap)
+for token in ('overview-pipelines-total', 'overview-pipelines-empty-note',
+              'overview-new-pipeline', 'New pipeline', 'No saved pipelines'):
+    assert token in empty_json, token
+assert '/dash/pipelines?instance=sql%3Aapihosttest' in empty_json
+
+### 5. Pipelines tile with saved pipelines keeps the full multi-widget layout without the empty wrapper.
+filled_pipelines = dump(overview.build_pipelines_body({
+    'count': 1,
+    'states': {'running': 0, 'succeeded': 1, 'failed': 0, 'stopped': 0, 'none': 0},
+    'hours': [{'start': '2026-11-04T12:00:00+00:00', 'succeeded': 1, 'failed': 0,
+               'running': 0, 'stopped': 0, 'unread': False}],
+    'runs_24h': 1, 'failed_24h': 0,
+    'last_success': {'name': 'daily', 'started': '2026-11-04T12:00:00+00:00', 'run_id': 'daily-1'},
+    'last_failure': None,
+}))
+assert _by_class(filled_pipelines, 'overview-pipelines-empty') == []
+filled_json = json.dumps(filled_pipelines)
+for token in ('overview-pipelines-total', 'overview-pipelines-bar', 'overview-pipelines-history'):
+    assert token in filled_json, token
+
+### 6. Performance overview card marks empty 24h sync state for balanced grid pairing.
+empty_perf = dump(performance.build_overview_body({'summary': {'syncs': 0}}, 'sql:apihosttest'))
+assert len(_by_class(empty_perf, 'overview-performance-empty')) == 1
+assert 'No syncs in the last 24 hours.' in json.dumps(empty_perf)
+assert 'View performance' in json.dumps(empty_perf)
+
+### 7. Stylesheet defines balanced/single Pipes rules and responsive 6-column no-pipelines rebalancing.
+css_path = pathlib.Path(overview.__file__).parent / 'assets' / 'overview.css'
+css = css_path.read_text(encoding='utf-8')
+for rule in (
+    'grid-template-columns: repeat(6, minmax(0, 1fr))',
+    '.overview-pipes-layout-balanced',
+    '.overview-pipes-layout-single',
+    '.overview-pipelines-empty',
+    '.overview-performance-empty',
+):
+    assert rule in css, rule
+'''))
