@@ -424,6 +424,38 @@ def instance_policy_warning(instance: Optional[str], conn: Any = None) -> Option
     )
 
 
+def config_write_problem() -> Optional[str]:
+    """
+    Why this process cannot save a connector to its configuration file (checked before a team's
+    database is made, so a refusal never leaves a database without its connector), or `None`.
+    """
+    if os.name != 'posix':
+        return None
+    try:
+        from meerschaum.config.paths import CONFIG_DIR_PATH
+        directory = str(CONFIG_DIR_PATH)
+    except Exception:
+        return None
+    path = _connectors_file()
+    problems = []
+    if os.path.isdir(directory) and not os.access(directory, os.W_OK | os.X_OK):
+        problems.append(f"the directory '{directory}' is not writable")
+    if path and not os.access(path, os.R_OK | os.W_OK):
+        problems.append(f"'{path}' is not readable and writable")
+    if not problems:
+        return None
+    try:
+        user = f"UID {os.geteuid()}"
+    except Exception:
+        user = 'this user'
+    return (
+        "The team's connector could not be saved: " + ' and '.join(problems)
+        + f" by {user}. Fix the ownership (for a Docker stack: "
+        "`docker compose exec -u 0 api chown -R meerschaum:meerschaum /meerschaum/config`) "
+        "and try again."
+    )
+
+
 def create_team(
     name: str,
     isolated: bool = True,
@@ -465,7 +497,14 @@ def create_team(
             return False, message
         keys = f'sql:{label}'
         if connector_attributes(keys):
-            return False, f"The connector '{keys}' already exists."
+            return False, (
+                f"The connector '{keys}' already exists (in this instance's configuration, or in "
+                "the stack host's configuration given through `MRSM_CONFIG`). Choose another "
+                "name, or remove the old connector first."
+            )
+        write_problem = config_write_problem()
+        if write_problem:
+            return False, write_problem
         base = str(base or default_base() or '')
         if base not in database_bases():
             return False, "Choose a PostgreSQL-family connector to branch from."

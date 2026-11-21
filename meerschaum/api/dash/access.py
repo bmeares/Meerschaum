@@ -175,6 +175,7 @@ class Viewer:
     real_is_admin: Optional[bool] = None
     base_teams: Optional[Dict[str, str]] = None
     base_is_isolated: Optional[bool] = None
+    base_primary_team: Optional[str] = None
 
     @property
     def is_real_admin(self) -> bool:
@@ -185,6 +186,11 @@ class Viewer:
     def real_teams(self) -> Dict[str, str]:
         """The account's real team memberships before any navbar team narrowing."""
         return dict(self.teams if self.base_teams is None else self.base_teams)
+
+    @property
+    def real_primary_team(self) -> Optional[str]:
+        """The account's real primary team before any navbar team narrowing."""
+        return self.primary_team if self.acting_team is None else self.base_primary_team
 
     @property
     def real_is_isolated(self) -> bool:
@@ -342,7 +348,10 @@ def available_acting_teams(viewer: Optional[Viewer], conn: Any = None) -> List[D
     if viewer is None or not viewer.signed_in or viewer.no_auth:
         return []
     if viewer.is_real_admin:
-        records = _cached_teams(conn)
+        try:
+            records = _cached_teams(conn)
+        except Exception:
+            return []
         names = sorted(
             {
                 str(getattr(record, 'name', None) or (record.get('name') if isinstance(record, dict) else ''))
@@ -376,6 +385,21 @@ def available_acting_teams(viewer: Optional[Viewer], conn: Any = None) -> List[D
     return options
 
 
+#: What acting as a team withholds: actions and the terminal run on the server under the
+#: account's real identity, which the team view cannot narrow (switch to All teams to use them).
+ACTING_WITHHELD: frozenset = frozenset({'actions:execute', 'webterm:use'})
+
+
+def _acting_permissions(viewer: Viewer, grants: Dict[str, Any], isolated: bool) -> frozenset:
+    """The permissions of `viewer` acting as a team with `grants` (never more than its own)."""
+    permissions = frozenset(viewer.permissions) - ACTING_WITHHELD
+    if isolated:
+        permissions = permissions - frozenset(core().withheld_permissions(grants))
+    if _secure() and not viewer.no_auth:
+        permissions = permissions - SECURE_WITHHELD
+    return permissions
+
+
 def apply_acting_team(
     viewer: Viewer,
     requested_team: Optional[str],
@@ -407,7 +431,7 @@ def apply_acting_team(
             username=viewer.username,
             signed_in=True,
             is_admin=False,
-            permissions=viewer.permissions,
+            permissions=_acting_permissions(viewer, {}, False),
             teams={EVERYONE: 'member'},
             primary_team=EVERYONE,
             no_auth=False,
@@ -416,11 +440,15 @@ def apply_acting_team(
             real_is_admin=real_is_admin,
             base_teams=real_teams,
             base_is_isolated=real_is_isolated,
+            base_primary_team=viewer.real_primary_team,
         )
         projected.principal = _principal(projected)
         return projected
 
-    records = _cached_teams(conn)
+    try:
+        records = _cached_teams(conn)
+    except Exception:
+        return viewer
     canonical = None
     for record in records:
         name = str(
@@ -442,22 +470,30 @@ def apply_acting_team(
             if existing_name != EVERYONE and existing_name.lower() == target.lower():
                 matched = (existing_name, existing_role)
                 break
-        if matched is None:
+        ### Fail closed: a team whose record cannot be read now (renamed, deleted, or the
+        ### teams unreadable) is never acted as (its grants would be empty and unisolated).
+        if matched is None or canonical is None:
             return viewer
-        team_name = canonical or matched[0]
+        team_name = canonical
         role = matched[1]
 
     try:
         grants = dict(core().team_grants([(team_name, role)], records, team_name) or {})
     except Exception:
-        grants = {'isolated': True}
+        return viewer
+    ### Acting as one of an isolated account's teams never leaves its wall.
+    if not real_is_admin and real_is_isolated:
+        grants['isolated'] = True
+        base_grants = viewer.grants or {}
+        for key in ('connectors', 'plugins'):
+            if key in grants:
+                allowed = set(base_grants.get(key, None) or [])
+                grants[key] = [item for item in (grants[key] or []) if item in allowed]
+        if not base_grants.get('plugins_write', False):
+            grants.pop('plugins_write', None)
     isolated = bool(grants.get('isolated', False))
     teams = {team_name: role} if isolated else {EVERYONE: 'member', team_name: role}
-    permissions = viewer.permissions
-    if isolated:
-        permissions = permissions - frozenset(core().withheld_permissions(grants))
-    if _secure() and not viewer.no_auth:
-        permissions = permissions - SECURE_WITHHELD
+    permissions = _acting_permissions(viewer, grants, isolated)
 
     projected = Viewer(
         username=viewer.username,
@@ -472,6 +508,7 @@ def apply_acting_team(
         real_is_admin=real_is_admin,
         base_teams=real_teams,
         base_is_isolated=real_is_isolated,
+        base_primary_team=viewer.real_primary_team,
     )
     projected.principal = _principal(projected)
     return projected

@@ -266,7 +266,13 @@ pub fn add_role_setup(
         }
         _ => {}
     }
-    if let Some(profiles) = resolved_profiles(&db, &grafana_ref) {
+    let readonly_profiles = resolved_profiles(&db, &grafana_ref);
+    // `grafana` may be active while `grafana_readonly` is not (its profiles follow `db`'s):
+    // then `grafana`'s dependency on it must be optional, or Compose rejects the project.
+    let optional_dependency = readonly_profiles
+        .as_ref()
+        .is_some_and(|profiles| service_profiles(&grafana_ref).as_ref() != Some(profiles));
+    if let Some(profiles) = readonly_profiles {
         service.insert(
             "profiles".into(),
             Value::List(profiles.into_iter().map(|p| s(&p)).collect()),
@@ -291,6 +297,9 @@ pub fn add_role_setup(
     };
     let mut completed = Map::new();
     completed.insert("condition".into(), s("service_completed_successfully"));
+    if optional_dependency {
+        completed.insert("required".into(), Value::Bool(false));
+    }
     depends.insert(SERVICE.into(), Value::Map(completed));
     grafana.insert("depends_on".into(), Value::Map(depends));
     let environment = grafana
@@ -599,6 +608,18 @@ mod tests {
             profiles_of(&db_only),
             Some(vec!["legacy".into(), "unused".into()])
         );
+        let required_of = |compose: &Value| -> Option<Value> {
+            compose
+                .get("services")
+                .and_then(|s| s.get("grafana"))
+                .and_then(|g| g.get("depends_on"))
+                .and_then(|d| d.get(SERVICE))
+                .and_then(|d| d.get("required"))
+                .cloned()
+        };
+        // `grafana` stays active without `db`'s profile: its dependency must be optional.
+        assert_eq!(required_of(&db_only), Some(Value::Bool(false)));
+        assert_eq!(required_of(&both), None);
 
         // Only `grafana` has profiles: `grafana_readonly` only activates with `grafana`.
         let mut grafana_only = value(

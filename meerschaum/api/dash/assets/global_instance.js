@@ -41,14 +41,6 @@
         window.scrollTo(0, 0);
     };
 
-    // Keep the Pages dropdown open when toggling nested collapsible groups (`<summary>`).
-    document.addEventListener('click', function (e) {
-        var summary = e.target && e.target.closest ? e.target.closest('.console-nav-pages-group-toggle') : null;
-        if (summary) {
-            e.stopPropagation();
-        }
-    });
-
     document.addEventListener('change', function (e) {
         var target = e.target;
         if (!target || !target.id) return;

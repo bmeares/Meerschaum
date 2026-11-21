@@ -61,6 +61,9 @@ pub const OFFICIAL_REPOSITORY: &str = "bmeares/meerschaum";
 /// The salt of the revision labels (in the secrets directory).
 const SALT_FILENAME: &str = ".revision_salt";
 
+/// The custom API services whose directories this module manages (one name per line).
+const MANAGED_MANIFEST: &str = ".managed_services";
+
 /// The `api` service's files.
 pub const API_CONFIG_FILENAME: &str = "mrsm_config.json";
 /// The `api` service's patch file.
@@ -733,39 +736,52 @@ pub fn write_files(dir: &Path, services: &[ServiceFiles]) -> Result<(), String> 
         write_one(service, known, wanted)?;
     }
 
+    // Custom API services (`api-sra`, ...): only directories this module wrote before (listed in
+    // its manifest) are ever cleaned, so a user's own files under `stack/secrets/` are kept.
+    let manifest = dir.join(MANAGED_MANIFEST);
+    let previous: Vec<String> = std::fs::read_to_string(&manifest)
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|l| is_safe_service_dir(l))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
     let api_known = &[API_CONFIG_FILENAME, API_PATCH_FILENAME];
-    let mut handled: Vec<&str> = SERVICES.iter().map(|(s, _)| *s).collect();
+    let builtin: Vec<&str> = SERVICES.iter().map(|(s, _)| *s).collect();
+    let mut managed: Vec<String> = Vec::new();
     for entry in services {
-        if handled.contains(&entry.service.as_str()) || !is_safe_service_dir(&entry.service) {
+        let name = entry.service.as_str();
+        if builtin.contains(&name)
+            || !is_safe_service_dir(name)
+            || managed.iter().any(|m| m == name)
+        {
             continue;
         }
-        write_one(&entry.service, api_known, &entry.files)?;
-        handled.push(entry.service.as_str());
-    }
-
-    // Clean up stale managed API files for any custom API service no longer present.
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if handled.contains(&name) || !is_safe_service_dir(name) {
-                continue;
-            }
-            let mut removed = false;
-            for filename in api_known {
-                if std::fs::remove_file(path.join(filename)).is_ok() {
-                    removed = true;
-                }
-            }
-            if removed {
-                let _ = std::fs::remove_dir(&path);
-            }
+        if !entry.files.is_empty() {
+            write_one(name, api_known, &entry.files)?;
+            managed.push(name.to_string());
+        } else if previous.iter().any(|p| p == name) {
+            write_one(name, api_known, &[])?;
         }
+    }
+    for name in &previous {
+        if managed.contains(name) || builtin.contains(&name.as_str()) {
+            continue;
+        }
+        let path = dir.join(name);
+        // Never follow a symlink out of the secrets directory.
+        if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+            continue;
+        }
+        write_one(name, api_known, &[])?;
+    }
+    if managed.is_empty() {
+        let _ = std::fs::remove_file(&manifest);
+    } else {
+        meerschaum_core::team_scope::write_private(&manifest, &(managed.join("\n") + "\n"))
+            .map_err(|e| format!("Cannot write {}: {e}", manifest.display()))?;
     }
     Ok(())
 }
@@ -1168,6 +1184,11 @@ mod tests {
         assert!(dir.join("api-sra").join(API_PATCH_FILENAME).is_file());
         assert!(!dir.join("api-legacy").exists());
 
+        // A user's own directory (never written by this module) is never touched.
+        let mine = dir.join("my-service");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::write(mine.join(API_CONFIG_FILENAME), "{}").unwrap();
+
         // Removing `api-sra` cleans up its managed secret files and empty directory.
         let remaining: Vec<_> = done
             .services
@@ -1177,5 +1198,7 @@ mod tests {
         write_files(&dir, &remaining).unwrap();
         assert!(dir.join("api").join(API_CONFIG_FILENAME).is_file());
         assert!(!dir.join("api-sra").exists());
+        assert!(mine.join(API_CONFIG_FILENAME).is_file());
+        assert!(!dir.join(MANAGED_MANIFEST).exists());
     }
 }

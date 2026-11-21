@@ -99,8 +99,8 @@ impl Registry {
                     .join("initialized")
                     .try_exists()
                     .map_err(|_| "Could not inspect executor initialization state.")?;
-                let populated = |name: &str| -> Result<bool, String> {
-                    match std::fs::read_dir(self.root.join(name)) {
+                let populated_path = |path: &Path| -> Result<bool, String> {
+                    match std::fs::read_dir(path) {
                         Ok(mut entries) => entries
                             .next()
                             .transpose()
@@ -110,7 +110,14 @@ impl Registry {
                         Err(_) => Err("Could not inspect existing executor identities.".into()),
                     }
                 };
-                if initialized || populated("keys")? || populated(DESIRED)? {
+                let populated = |name: &str| populated_path(&self.root.join(name));
+                // The public directory survives losing the private root (in a container it is the
+                // host's bind mount, `desired_dir()`), so it signals an initialized deployment.
+                if initialized
+                    || populated("keys")?
+                    || populated(DESIRED)?
+                    || populated_path(&self.desired_dir())?
+                {
                     return Err("The private executor registry is missing from an initialized deployment. Restore its private backup before reconciling executors.".into());
                 }
                 Ok(Desired::default())

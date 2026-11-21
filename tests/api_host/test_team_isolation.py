@@ -847,6 +847,7 @@ def snapshot(session, team_cookie=None):
             'display_instance': engine.display_instance_keys(),
             'manages_beta': viewer.manages('sw-beta'),
             'webterm': viewer.can('webterm:use'),
+            'actions': viewer.can('actions:execute'),
             'pipes': pipes,
             'connectors': [
                 connector_listing.connector_team_allows(k, viewer)
@@ -894,7 +895,8 @@ print('JSON:' + json.dumps(out, default=str))
     assert a_w['is_admin'] is False and a_w['is_real_admin'] is True
     assert a_w['acting_team'] == 'sw-alpha' and a_w['isolated'] is True
     assert a_w['default_instance'] == 'sql:swalpha' and a_w['display_instance'] == 'sql:swalpha'
-    assert a_w['webterm'] is False
+    assert a_w['webterm'] is False and a_w['actions'] is False
+    assert a_all['actions'] is True
     assert a_w['pipes'] == ['sw_alpha']
     assert a_w['connectors'] == [True, False, False, False]
     assert a_w['plugins'] == [True, False]
@@ -907,6 +909,7 @@ print('JSON:' + json.dumps(out, default=str))
     # Admin acting as Everyone
     a_ev = out['admin_everyone']
     assert a_ev['is_admin'] is False and a_ev['acting_team'] == 'Everyone'
+    assert a_ev['actions'] is False and a_ev['webterm'] is False
     assert a_ev['pipes'] == ['sw_everyone']
     assert a_ev['connectors'] == [False, False, True, True]
     assert a_ev['jobs'] == ['j_local']
@@ -936,3 +939,68 @@ print('JSON:' + json.dumps(out, default=str))
     # Single-team isolated user & Everyone-only user do not see the team switcher
     assert out['solo']['team_select_options'] is None
     assert out['plain_user']['team_select_options'] is None
+
+
+def test_acting_team_fails_closed_when_team_lookup_unavailable(sandbox):
+    """
+    If team records cannot be loaded while evaluating `mrsm-team`, `apply_acting_team` must fail
+    closed (returning the unchanged base viewer) instead of dropping isolation or escalating grants.
+    """
+    root, plugins = sandbox
+    out = _json(run_python(root, plugins, SEED + '''
+import os
+from meerschaum.api.dash import team_setup
+
+team('fc-alpha', isolated=True, instance='sql:fcalpha', connectors=['sql:fcalpha'], plugins=['noaa'])
+team('fc-beta', isolated=True, instance='sql:fcbeta', connectors=['sql:fcbeta'], plugins=['usgs'])
+multi = sign_in('fc-multi', role='operator', teams={'fc-alpha': 'member', 'fc-beta': 'member'})
+base = access.get_viewer(multi)
+
+orig_cached = access._cached_teams
+try:
+    access._cached_teams = lambda conn: []
+    when_empty = access.apply_acting_team(base, 'fc-beta')
+    def _boom(conn):
+        raise RuntimeError('db down')
+    access._cached_teams = _boom
+    when_error = access.apply_acting_team(base, 'fc-beta')
+finally:
+    access._cached_teams = orig_cached
+
+# Also verify `team_setup.create_team` aborts before `team_database_create` when config is unwritable.
+called = {'db_create': False}
+orig_access = os.access
+orig_core = team_setup._core
+real_core = orig_core()
+class _FakeCore:
+    def __getattr__(self, name):
+        return getattr(real_core, name)
+    def team_database_create(self, *args, **kwargs):
+        called['db_create'] = True
+        return True, 'created', {}
+
+try:
+    team_setup._core = lambda: _FakeCore()
+    os.access = lambda p, mode: False if 'config' in str(p) else orig_access(p, mode)
+    ok_unwritable, msg_unwritable = team_setup.create_team(
+        'fc-new', isolated=True, storage='database', base='sql:main', conn=conn,
+    )
+finally:
+    os.access = orig_access
+    team_setup._core = orig_core
+
+print('JSON:' + json.dumps({
+    'empty_acting': when_empty.acting_team,
+    'empty_isolated': when_empty.is_isolated,
+    'error_acting': when_error.acting_team,
+    'error_isolated': when_error.is_isolated,
+    'ok_unwritable': ok_unwritable,
+    'msg_unwritable': msg_unwritable,
+    'db_create_called': called['db_create'],
+}))
+'''))
+    assert out['empty_acting'] is None and out['empty_isolated'] is True
+    assert out['error_acting'] is None and out['error_isolated'] is True
+    assert out['ok_unwritable'] is False
+    assert 'chown -R meerschaum:meerschaum /meerschaum/config' in out['msg_unwritable']
+    assert out['db_create_called'] is False

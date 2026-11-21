@@ -830,3 +830,59 @@ fn writing_loaded_stack_preserves_mrsm_config_and_list_references() {
         "secret expanded into stack.yaml:\n{text}"
     );
 }
+
+/// 5.1.1: in a Docker stack's API container `MRSM_CONFIG` holds the stack host's configuration;
+/// a connector the console reserved for a team in the container's own `meerschaum.yaml` is never
+/// replaced by a stale copy from it, while `MRSM_PATCH` (explicit) still applies.
+#[test]
+fn mrsm_config_never_shadows_a_team_reserved_connector() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    write(
+        &root,
+        "meerschaum.yaml",
+        "connectors:\n  sql:\n    bwg:\n      flavor: timescaledb-ha\n      host: db\n      \
+         port: 5432\n      username: mrsm_bwg\n      password: team-pw\n      database: bwg\n      \
+         teams:\n      - bwg\n    plain:\n      flavor: sqlite\n      database: /tmp/a.db\n",
+    );
+    let host = r#"{"meerschaum": {"connectors": {"sql": {
+        "bwg": {"flavor": "timescaledb", "host": "old", "database": "meerschaum", "password": "old-pw"},
+        "plain": {"database": "/tmp/b.db"},
+        "anchored": {"flavor": "postgresql", "host": "db", "database": "anchored"}
+    }}}}"#;
+    let config = config_with(&root, &[("MRSM_CONFIG", host.to_string())]);
+    let bwg = |key: &str| {
+        config
+            .get(&["meerschaum", "connectors", "sql", "bwg", key])
+            .unwrap()
+    };
+    assert_eq!(bwg("database"), s("bwg"));
+    assert_eq!(bwg("host"), s("db"));
+    assert_eq!(bwg("password"), s("team-pw"));
+    // An unreserved connector still takes the stack's value; a new one is still added.
+    let plain = config
+        .get(&["meerschaum", "connectors", "sql", "plain", "database"])
+        .unwrap();
+    assert_eq!(plain, s("/tmp/b.db"));
+    assert!(
+        config
+            .get(&["meerschaum", "connectors", "sql", "anchored"])
+            .is_some()
+    );
+
+    // An explicit MRSM_PATCH still changes a reserved connector.
+    let patched = config_with(
+        &root,
+        &[
+            ("MRSM_CONFIG", host.to_string()),
+            (
+                "MRSM_PATCH",
+                r#"{"meerschaum": {"connectors": {"sql": {"bwg": {"host": "db2"}}}}}"#.to_string(),
+            ),
+        ],
+    );
+    let host_value = patched
+        .get(&["meerschaum", "connectors", "sql", "bwg", "host"])
+        .unwrap();
+    assert_eq!(host_value, s("db2"));
+}
