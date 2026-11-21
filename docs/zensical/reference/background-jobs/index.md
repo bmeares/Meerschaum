@@ -10,6 +10,9 @@ mrsm show logs syncing-engine
 
 Jobs keep running after your terminal closes. Their [executor](executors.md) determines where they run and whether they return after a reboot.
 
+??? example "Watch starting and managing a job"
+    <asciinema-player src="/assets/casts/v5-jobs.cast" preload="true" rows="20" idle-time-limit="2" poster="npt:0:05"></asciinema-player>
+
 ## Manage a job
 
 | Command | Effect |

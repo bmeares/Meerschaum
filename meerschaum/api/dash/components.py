@@ -643,6 +643,8 @@ def _build_pages_menu(pathname: Optional[str], viewer: Any = None) -> Any:
             label, path = group_pages[0]
             is_current = current == path
             active = active or is_current
+            if group and not label.lower().startswith(group.lower()):
+                items.append(dbc.DropdownMenuItem(group, header=True))
             items.append(dbc.DropdownMenuItem(label, href=path, active=is_current))
             continue
         stripped = [(_strip_group_prefix(group, label), path) for label, path in group_pages]

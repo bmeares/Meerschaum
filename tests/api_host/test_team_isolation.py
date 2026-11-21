@@ -687,10 +687,13 @@ try:
     _plugin_endpoints_to_pages['Solo'] = {
         'solo/home': {'function': _dummy, 'page_key': 'solo/home'},
     }
+    _plugin_endpoints_to_pages['Weather'] = {
+        'forecast': {'function': _dummy, 'page_key': 'forecast'},
+    }
     for ep in (
         '/dash/anchored', '/dash/anchored/login', '/dash/anchored/crew',
         '/dash/anchored/calendar', '/dash/anchored/admin/users', '/dash/anchored/admin/audit',
-        '/dash/reports/daily', '/dash/reports/weekly', '/dash/solo/home',
+        '/dash/reports/daily', '/dash/reports/weekly', '/dash/solo/home', '/dash/forecast',
     ):
         dash_cb._paths[ep] = True
 
@@ -753,7 +756,7 @@ print('JSON:' + json.dumps(out, default=str))
     assert len(pipes_groups['Anchored']['subgroups']) == 1
     assert pipes_groups['Reports']['open'] is True
     assert pipes_groups['Reports']['labels'] == ['Daily', 'Weekly']
-    assert out['pipes']['top_items'] == ['Solo / Home']
+    assert out['pipes']['top_items'] == ['Solo / Home', 'Weather', 'Forecast']
 
     active_groups = {g['group']: g for g in out['active_anchored']['details']}
     assert active_groups['Anchored']['open'] is True
