@@ -42,7 +42,7 @@ from urllib.parse import urlsplit
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.pages import pipes as pages
-from meerschaum.api.dash import engine, pipes_access
+from meerschaum.api.dash import access, engine
 
 def ids(layout):
     return {getattr(node, 'id', None) for node in pages._walk(layout)}
@@ -347,8 +347,7 @@ def test_new_pipe_preview_limits_guess_and_registration(sandbox):
     root, plugins = sandbox
     out = _json(run_python(root, plugins, SEED + '''
 import pandas as pd
-from meerschaum.api.dash import new_pipe as np_
-from meerschaum.api.dash import pipes_access
+from meerschaum.api.dash import access, new_pipe as np_
 src = make('np', 'source', columns={'datetime': 'ts', 'id': 'station'})
 assert src.sync(pd.DataFrame({
     'ts': pd.date_range('2026-01-01', periods=30, freq='h'), 'station': [i % 3 for i in range(30)],
@@ -386,9 +385,7 @@ import meerschaum.config as config
 original = config.get_config
 config.get_config = lambda *keys, **kwargs: (False if keys == ('api', 'permissions', 'registration', 'pipes')
                                              else original(*keys, **kwargs))
-pipes_access.get_config = config.get_config
-import meerschaum.api.dash.pipes_access as access_module
-out['refused'] = access_module.can_register({'session-id': 'x'})
+out['refused'] = access.resolve_viewer({'session-id': 'x'}).can_register_pipes()
 print('JSON:' + json.dumps(out, default=str))
 '''))
     assert out['preview'] == ['', 10, ['ts', 'station', 'value']]
@@ -429,7 +426,7 @@ from dash.exceptions import PreventUpdate
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
-from meerschaum.api.dash import pipe_detail, pipes_access
+from meerschaum.api.dash import access, pipe_detail
 pipe = make('cb', 'metric')
 meta = pipe_detail.meta_of(pipe)
 ref = pipe_detail.pipe_ref(pipe)
@@ -491,7 +488,7 @@ out['deep_link'] = callbacks.update_location_on_pipes_filter_change([], [], [], 
 out['scope_link'] = callbacks.update_location_on_pipes_filter_change([], [], [], [], 'any', None, 'mine', '', {'instance': 'x', 'global': 'x'})
 ### Preview runs the query with the connector's credentials: only for those who may register pipes.
 previewed = []
-with mock.patch.object(pipes_access, 'can_register', return_value=(False, 'Registering is off here.')), \
+with mock.patch.object(access.Viewer, 'can_register_pipes', return_value=(False, 'Registering is off here.')), \
         mock.patch('meerschaum.api.dash.new_pipe.preview_query', lambda *args, **kwargs: previewed.append(args) or (None, '')):
     trigger('new-pipe-preview.n_clicks')
     refused = callbacks.preview_new_pipe(1, 'sql:apihosttest', 'SELECT 1', str(instance), None, {'session-id': 'x'})
@@ -529,19 +526,20 @@ os.environ['MRSM_API_HOST_CONFIG'] = json.dumps({'mrsm_instance': 'sql:apihostte
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector
 from meerschaum.core import User
-from meerschaum.api.dash import sessions, pipes_access
+from meerschaum.api.dash import access, sessions
 conn = get_api_connector()
 assert conn.register_user(User('secadmin', 'correct-horse-9', instance=conn, type='admin'))[0]
 assert conn.register_user(User('secuser', 'correct-horse-9', instance=conn))[0]
 sessions.set_session('00000000-0000-4000-8000-0000000b5a01', {'username': 'secadmin'})
 sessions.set_session('00000000-0000-4000-8000-0000000b5a02', {'username': 'secuser'})
-admin = {'session-id': '00000000-0000-4000-8000-0000000b5a01'}
-user = {'session-id': '00000000-0000-4000-8000-0000000b5a02'}
+admin = access.resolve_viewer({'session-id': '00000000-0000-4000-8000-0000000b5a01'})
+user = access.resolve_viewer({'session-id': '00000000-0000-4000-8000-0000000b5a02'})
+anon = access.resolve_viewer({})
 print('JSON:' + json.dumps({
-    'act': [pipes_access.can_act(admin), pipes_access.can_act(user)],
-    'register': [pipes_access.can_register(admin)[0], pipes_access.can_register(user)[0]],
-    'write': [pipes_access.can_write_pipes(admin)[0], pipes_access.can_write_pipes(user)[0]],
-    'read': [pipes_access.can_read(admin), pipes_access.can_read(user), pipes_access.can_read({})],
+    'act': [admin.can_act, user.can_act],
+    'register': [admin.can_register_pipes()[0], user.can_register_pipes()[0]],
+    'write': [admin.can_write_pipes()[0], user.can_write_pipes()[0]],
+    'read': [admin.can_read_pipes, user.can_read_pipes, anon.can_read_pipes],
 }))
 '''))
     assert out['act'] == [True, False]
@@ -569,7 +567,7 @@ from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
 from meerschaum.api.dash.pages import pipes as pages
-from meerschaum.api.dash import pipe_detail, pipes_access
+from meerschaum.api.dash import access, pipe_detail
 
 def trigger(prop_id, value=1):
     context_value.set(AttributeDict(**{'triggered_inputs': [{'prop_id': prop_id, 'value': value}]}))
@@ -601,9 +599,7 @@ as_viewer('down-editor', admin=False, role='editor')
 trigger('pipe-detail-tabs.active_tab', 'overview')
 results['down_editor'] = callbacks.render_pipe_detail_tab('overview', False, 0, pipe_detail.meta_of(down), session)['registered']
 as_viewer()
-with mock.patch.object(pipes_access, 'can_read', return_value=True), \\
-        mock.patch.object(pipes_access, 'can_act', return_value=True), \\
-        mock.patch.object(pipes_access, 'can_register', return_value=(True, '')):
+with mock.patch.object(access.Viewer, 'can_register_pipes', return_value=(True, '')):
     for name, pipe in (('registered', registered), ('missing', missing), ('down', down)):
         trigger('pipe-detail-tabs.active_tab', 'overview')
         result = callbacks.render_pipe_detail_tab('overview', False, 0, pipe_detail.meta_of(pipe), session)
@@ -690,7 +686,7 @@ from dash.exceptions import PreventUpdate
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
-from meerschaum.api.dash import pipes_table as pt, pipes_access
+from meerschaum.api.dash import pipes_table as pt
 from meerschaum.api.dash.pages import pipes as pages
 make('srch', 'store_1', tags=['retail'])
 make('srch', 'store_2', tags=['retail'])
@@ -777,7 +773,7 @@ from dash.exceptions import PreventUpdate
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
-from meerschaum.api.dash import pipes_table as pt, pipes_access
+from meerschaum.api.dash import pipes_table as pt
 make('html', "o'brien <b>&{x}", 'loc/with slash', tags=['t"1', '{t2}', 'two\\nlines'])
 make('html', 'plain')
 rows = pt.list_rows(instance, connector_keys=['html'])

@@ -119,10 +119,24 @@ def team_scope_of_user(username: Optional[str]) -> Optional[Dict[str, Any]]:
     return scope
 
 
-def forget() -> None:
-    """Drop the cached teams."""
+def forget(username: Optional[str] = None) -> None:
+    """Drop cached team scopes (for one user, or all)."""
     with _lock:
-        _cache.clear()
+        if username is None:
+            _cache.clear()
+        else:
+            _cache.pop(str(username), None)
+
+
+def _register_access_invalidation() -> None:
+    try:
+        from meerschaum.api.dash.access import register_invalidation_hook
+        register_invalidation_hook(forget)
+    except Exception:
+        pass
+
+
+_register_access_invalidation()
 
 
 class TeamScopeMiddleware:

@@ -22,7 +22,6 @@ api/dash/
 ├── pipes_table.py     # the Pipes table: rows, filters in the URL, search/sort/pages, slow columns
 ├── pipe_detail.py     # a pipe's page: header actions, tabs, Manage dialogs (Copy, Clear, ...)
 ├── new_pipe.py        # New pipe: connectors, flavor-limited Preview, datetime guess, Register
-├── pipes_access.py    # who may read, act, edit and register on the Pipes pages
 ├── keys.py, pipes.py, jobs.py, plugins.py, tokens.py, users.py, connectors.py
 ├── execute.py         # what the Exec button, a pipe's Manage menu and "Follow logs" run
 ├── engine.py          # the Syncing Engine's graph, runs, Gantt bars and events (pipelines page)

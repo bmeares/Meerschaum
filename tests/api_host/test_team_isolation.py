@@ -61,7 +61,7 @@ def test_members_of_an_isolated_team_are_walled_off_from_everyone(sandbox):
     root, plugins = sandbox
     out = _json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import overview, pipes_table, connector_listing, components
-from meerschaum.api.dash.users import visible_teams, viewer as page_viewer
+from meerschaum.api.dash.users import visible_teams
 from meerschaum.connectors import get_connector
 team('wetlands', isolated=True, instance='sql:wetdb', connectors=['sql:wetdb'], plugins=['noaa'])
 team('open')
@@ -98,7 +98,7 @@ for who, session in SESSIONS.items():
             connector_listing.connector_team_allows(keys, viewer)
             for keys in ('sql:wetdb', 'sql:shared', INSTANCE)
         ],
-        'teams': sorted(t['name'] for t in visible_teams(access.list_teams(), page_viewer(session))),
+        'teams': sorted(t['name'] for t in visible_teams(access.list_teams(), access.resolve_viewer(session, fresh=True))),
         'team_names': access._principal(viewer).team_names if viewer.principal is None else viewer.principal.team_names,
     }
 

@@ -453,6 +453,54 @@ def delete_session(session_id: str):
     conn.client.delete(session_key)
 
 
+_viewer_resolver: Any = None
+
+
+def register_viewer_resolver(fn: Any) -> None:
+    """
+    Register the higher-level viewer resolver (`meerschaum.api.dash.access.resolve_viewer`)
+    so session-level compatibility helpers never import `access.py`.
+    """
+    global _viewer_resolver
+    _viewer_resolver = fn
+
+
+def _standalone_user_access(session_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Direct user lookup used only when `meerschaum.api.dash.access` has not been imported.
+    Never imports `access.py`.
+    """
+    username = get_username_from_session(session_id)
+    if not username:
+        return None
+    conn = get_api_connector()
+    user = User(str(username), instance=conn)
+    user_id = conn.get_user_id(user)
+    if user_id is None:
+        return None
+    user.user_id = user_id
+    user_type = conn.get_user_type(user)
+    is_admin = str(user_type or '').lower() == 'admin'
+    if is_admin:
+        return {'is_admin': True, 'can_act': True}
+    from meerschaum.api import get_uvicorn_config
+    import meerschaum.core.access as core_access
+    host_cfg = get_uvicorn_config()
+    host_cfg = host_cfg if isinstance(host_cfg, dict) else {}
+    if (
+        host_cfg.get('actions_non_admin', True) is False
+        or get_config('api', 'permissions', 'actions', 'non_admin', warn=False) is False
+    ):
+        return {'is_admin': False, 'can_act': False}
+    attributes = conn.get_user_attributes(user) or {}
+    default_role = host_cfg.get('default_role', None)
+    if default_role not in ('viewer', 'editor', 'operator'):
+        default_role = str(core_access.default_role())
+    perms = {str(p) for p in core_access.user_permissions(user_type, attributes, default_role)}
+    can_act = 'actions:execute' in perms or '*' in perms
+    return {'is_admin': False, 'can_act': can_act}
+
+
 def is_session_authenticated(session_id: Optional[str]) -> bool:
     """
     Return whether a session's user may run actions: the `actions:execute` permission of their
@@ -481,12 +529,14 @@ def is_session_authenticated(session_id: Optional[str]) -> bool:
     if session_id is None:
         return False
 
-    from meerschaum.api.dash.access import get_viewer
     try:
-        viewer = get_viewer(session_id=session_id)
+        if _viewer_resolver is not None:
+            viewer = _viewer_resolver(session_id=session_id)
+            return bool(viewer.signed_in and viewer.can('actions:execute'))
+        info = _standalone_user_access(session_id)
+        return bool(info and info['can_act'])
     except Exception:
         return False
-    return bool(viewer.signed_in and viewer.can('actions:execute'))
 
 
 def public_callback(func):
@@ -510,7 +560,7 @@ def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool
     authorization: a callback that runs actions takes `State('session-store', 'data')` and checks
     it through this function (the `actions:execute` permission) before doing any work. A callback
     that reads or writes pipes, users or jobs checks the viewer's permissions and the pipe's
-    access instead (`meerschaum.api.dash.access.get_viewer(session_store_data)`).
+    access instead (`meerschaum.api.dash.access.resolve_viewer(session_store_data)`).
 
     Parameters
     ----------
@@ -534,7 +584,7 @@ def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool
 def session_is_admin(session_id: str) -> bool:
     """
     Check whether a session ID corresponds to an admin user (read again every few seconds, so a
-    demotion applies at once: `meerschaum.api.dash.access.get_viewer`).
+    demotion applies at once).
     """
     if debug:
         dprint(f"Check admin for {session_id=}")
@@ -543,9 +593,11 @@ def session_is_admin(session_id: str) -> bool:
     session_id = valid_session_id(session_id)
     if session_id is None:
         return False
-    from meerschaum.api.dash.access import get_viewer
     try:
-        viewer = get_viewer(session_id=session_id)
+        if _viewer_resolver is not None:
+            viewer = _viewer_resolver(session_id=session_id)
+            return bool(viewer.signed_in and viewer.is_admin)
+        info = _standalone_user_access(session_id)
+        return bool(info and info['is_admin'])
     except Exception:
         return False
-    return bool(viewer.signed_in and viewer.is_admin)

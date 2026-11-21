@@ -250,6 +250,71 @@ class Viewer:
         """The viewer's teams other than Everyone, sorted."""
         return sorted(team for team in self.teams if team != EVERYONE)
 
+    @property
+    def active(self) -> bool:
+        """Whether the viewer is signed in or running under `--no-auth`."""
+        return bool(self.no_auth or self.signed_in)
+
+    @property
+    def can_read_pipes(self) -> bool:
+        """Whether the viewer may view pipes (`pipes:read`, or `--no-auth`)."""
+        return bool(self.no_auth or (self.signed_in and self.can('pipes:read')))
+
+    @property
+    def can_act(self) -> bool:
+        """Whether the viewer may run actions (`actions:execute`, or `--no-auth`)."""
+        return bool(self.no_auth or (self.signed_in and self.can('actions:execute')))
+
+    def can_write_pipes(self) -> Tuple[bool, str]:
+        """`(allowed, reason)`: whether the viewer may edit pipes' registrations (`pipes:write`)."""
+        if not self.active:
+            return False, "Sign in to edit pipes."
+        if not self.can('pipes:write'):
+            return False, "Your account may not edit pipes."
+        return True, ''
+
+    def can_register_pipes(self) -> Tuple[bool, str]:
+        """`(allowed, reason)`: whether the viewer may register new pipes."""
+        from meerschaum.config import get_config
+        if not get_config('api', 'permissions', 'registration', 'pipes', warn=False):
+            return False, (
+                "This server does not allow registering pipes "
+                "(`api:permissions:registration:pipes`)."
+            )
+        if not self.active:
+            return False, "Sign in to register pipes."
+        if not self.can('pipes:register'):
+            return False, "Your account may not register pipes."
+        return True, ''
+
+    def can_define_sql(self) -> Tuple[bool, str]:
+        """`(allowed, reason)`: whether the viewer may set or change SQL definitions."""
+        if not self.can('pipes:define_sql'):
+            return False, "Your account may not set SQL definitions."
+        return True, ''
+
+    @property
+    def can_view_connectors(self) -> bool:
+        """
+        Whether the viewer may see the Connectors page: a signed-in user with `connectors:read`
+        (only an administrator under `--secure`), or anyone with `--no-auth`.
+        """
+        if self.no_auth:
+            return True
+        if not self.signed_in or not self.can('connectors:read'):
+            return False
+        return self.is_admin or not _secure()
+
+    @property
+    def can_see_connector_details(self) -> bool:
+        """Whether the viewer may see masked connector settings (administrators, or `--no-auth`)."""
+        return bool(self.no_auth or (self.signed_in and self.is_admin))
+
+    @property
+    def can_test_connectors(self) -> bool:
+        """Whether the viewer may test connections (administrators, or `--no-auth`)."""
+        return self.can_see_connector_details
+
     def to_json(self) -> Dict[str, Any]:
         return {
             'username': self.username,
@@ -271,6 +336,14 @@ SYSTEM = Viewer(username=None, signed_in=True, is_admin=True)
 _viewer_cache: Dict[str, Tuple[float, Viewer]] = {}
 _teams_cache: Optional[Tuple[float, List[Any]]] = None
 _viewer_lock = threading.Lock()
+_invalidation_hooks: List[Any] = []
+
+
+def register_invalidation_hook(fn: Any) -> None:
+    """Register a callback `fn(username: Optional[str])` invoked whenever `forget()` runs."""
+    with _viewer_lock:
+        if fn not in _invalidation_hooks:
+            _invalidation_hooks.append(fn)
 
 
 def forget(username: Optional[str] = None) -> None:
@@ -281,17 +354,28 @@ def forget(username: Optional[str] = None) -> None:
         if username is None:
             _viewer_cache.clear()
             _refs_cache.clear()
-            return
-        for key in [key for key, (_, viewer) in _viewer_cache.items() if viewer.username == username]:
-            _viewer_cache.pop(key, None)
-        _refs_cache.clear()
+        else:
+            for key in [key for key, (_, viewer) in _viewer_cache.items() if viewer.username == username]:
+                _viewer_cache.pop(key, None)
+            _refs_cache.clear()
+        hooks = list(_invalidation_hooks)
+    for hook in hooks:
+        try:
+            hook(username)
+        except TypeError:
+            try:
+                hook()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
 
-def _cached_teams(conn: Any = None) -> List[Any]:
+def _cached_teams(conn: Any = None, *, fresh: bool = False) -> List[Any]:
     """Cached team records on the API instance (TTL `VIEWER_TTL_SECONDS`)."""
     global _teams_cache
     now = time.monotonic()
-    if conn is None:
+    if conn is None and not fresh:
         with _viewer_lock:
             if _teams_cache is not None and now - _teams_cache[0] < VIEWER_TTL_SECONDS:
                 return list(_teams_cache[1])
@@ -404,6 +488,8 @@ def apply_acting_team(
     viewer: Viewer,
     requested_team: Optional[str],
     conn: Any = None,
+    *,
+    fresh: bool = False,
 ) -> Viewer:
     """
     Narrow `viewer` to act as `requested_team` (never widens permissions or grants).
@@ -446,7 +532,7 @@ def apply_acting_team(
         return projected
 
     try:
-        records = _cached_teams(conn)
+        records = _cached_teams(conn, fresh=fresh)
     except Exception:
         return viewer
     canonical = None
@@ -786,39 +872,88 @@ def viewer_for(username: Optional[str]) -> Viewer:
     return viewer
 
 
-def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Viewer:
-    """
-    The viewer of a console session (`session_data` is the `session-store`'s data; by default the
-    current request's session). The base record is cached for `VIEWER_TTL_SECONDS`; an
-    API-only execution projection is refreshed from Main on every call.
-    """
+def _resolve_viewer_uncached_or_cached(
+    session: Optional[Dict[str, Any]] = None,
+    *,
+    session_id: Optional[str] = None,
+    fresh: bool = False,
+    apply_acting: bool = True,
+) -> Viewer:
     from meerschaum.api import no_auth
     if no_auth:
         return viewer_for(None)
-    if session_id is None and session_data is None and not _in_request():
+    if session_id is None and session is None and not _in_request():
         ### Not a web request (a script, a test, the host's own work): the instance's
         ### credentials are the trust boundary, as for the CLI and Python (AC6).
         return SYSTEM
-    session_id = session_id or _session_id_of(session_data) or _request_session_id()
-    if not session_id:
+    sid = session_id or _session_id_of(session) or _request_session_id()
+    if not sid:
         return ANONYMOUS
     now = time.monotonic()
-    with _viewer_lock:
-        entry = _viewer_cache.get(session_id, None)
+    entry = None
+    if not fresh:
+        with _viewer_lock:
+            entry = _viewer_cache.get(sid, None)
     if entry is not None and now - entry[0] < VIEWER_TTL_SECONDS:
         base_viewer = entry[1]
     else:
         from meerschaum.api.dash.sessions import get_username_from_session
-        username = get_username_from_session(session_id)
+        username = get_username_from_session(sid)
         base_viewer = viewer_for(username) if username else ANONYMOUS
         with _viewer_lock:
             if len(_viewer_cache) > 4096:
                 _viewer_cache.clear()
-            _viewer_cache[session_id] = (now, base_viewer)
-    acting_team = _request_acting_team()
-    viewer = apply_acting_team(base_viewer, acting_team) if acting_team else base_viewer
+            _viewer_cache[sid] = (now, base_viewer)
+    if apply_acting:
+        acting_team = _request_acting_team()
+        viewer = (
+            apply_acting_team(base_viewer, acting_team, fresh=fresh)
+            if acting_team else base_viewer
+        )
+    else:
+        viewer = base_viewer
     from meerschaum.api.dash._native_execution import project
-    return project(viewer, session_id)
+    return project(viewer, sid)
+
+
+def resolve_viewer(
+    session: Optional[Dict[str, Any]] = None,
+    *,
+    session_id: Optional[str] = None,
+    fresh: bool = False,
+    apply_acting: bool = True,
+) -> Viewer:
+    """
+    Canonical console viewer resolver.
+
+    - `fresh=False` (default): reuses the base `Viewer` for `VIEWER_TTL_SECONDS`; `fresh=True`
+      bypasses `_viewer_cache` and `_teams_cache` for fresh DB state.
+    - `apply_acting=True` (default): applies the `mrsm-team` cookie / nav-context narrowing.
+      Pass `apply_acting=False` only when real-admin identity is explicitly required (e.g.
+      Users & Teams admin mutations).
+    - An API-only execution projection is always refreshed from Main on every call.
+    """
+    if get_viewer is not _default_get_viewer:
+        if session_id is not None:
+            return get_viewer(session, session_id=session_id)
+        return get_viewer(session)
+    return _resolve_viewer_uncached_or_cached(
+        session,
+        session_id=session_id,
+        fresh=fresh,
+        apply_acting=apply_acting,
+    )
+
+
+def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Viewer:
+    """
+    The viewer of a console session (`session_data` is the `session-store`'s data; by default the
+    current request's session). Thin alias over `resolve_viewer()`.
+    """
+    return resolve_viewer(session_data, session_id=session_id)
+
+
+_default_get_viewer = get_viewer
 
 
 def current_viewer() -> Viewer:
@@ -826,7 +961,63 @@ def current_viewer() -> Viewer:
     The viewer of the current request (a callback's or a page's); outside a web request, the
     local trust boundary (`SYSTEM`: sees every pipe).
     """
-    return get_viewer()
+    return resolve_viewer()
+
+
+def is_session_authenticated(session_id: Optional[str]) -> bool:
+    """
+    Whether `session_id` belongs to a viewer who may run actions (`actions:execute`),
+    or everyone under `--no-auth`.
+    """
+    from meerschaum.api import no_auth
+    from meerschaum.api.dash.sessions import valid_session_id
+    if no_auth:
+        return True
+    sid = valid_session_id(session_id)
+    if sid is None:
+        return False
+    try:
+        viewer = resolve_viewer(session_id=sid)
+    except Exception:
+        return False
+    return bool(viewer.signed_in and viewer.can('actions:execute'))
+
+
+def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool:
+    """Whether a callback's `session-store` state may run actions (`actions:execute`)."""
+    if not isinstance(session_store_data, dict):
+        return False
+    session_id = session_store_data.get('session-id', None)
+    if not session_id:
+        return is_session_authenticated(None)
+    return is_session_authenticated(str(session_id))
+
+
+def session_is_admin(session_id: Optional[str]) -> bool:
+    """Whether `session_id` currently belongs to an administrator (respecting acting team)."""
+    from meerschaum.api import no_auth
+    from meerschaum.api.dash.sessions import valid_session_id
+    if no_auth:
+        return True
+    sid = valid_session_id(session_id)
+    if sid is None:
+        return False
+    try:
+        viewer = resolve_viewer(session_id=sid)
+    except Exception:
+        return False
+    return bool(viewer.signed_in and viewer.is_admin)
+
+
+def _register_session_resolver() -> None:
+    try:
+        from meerschaum.api.dash.sessions import register_viewer_resolver
+        register_viewer_resolver(lambda session_id=None: resolve_viewer(session_id=session_id))
+    except Exception:
+        pass
+
+
+_register_session_resolver()
 
 
 # ------------------------------------------------------------------------------------------------

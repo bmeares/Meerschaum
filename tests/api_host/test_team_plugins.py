@@ -485,7 +485,7 @@ def detail(who, name):
                       default=lambda o: o.to_plotly_json())
     return '404' in text
 
-ps.source_viewer = pub.source_viewer = lambda session: {
+access.resolve_viewer = lambda session=None, **kwargs: {
     'walled': walled, 'writer': writer, 'admin': admin,
 }.get((session or {}).get('who'), access.ANONYMOUS)
 
@@ -677,7 +677,7 @@ def test_team_managers_create_upload_edit_and_claim_their_plugins(plugins_dir):
     (plugins / 'foreign.py').write_text('VALUE = 1\n')
     out = _json(_run(root, plugins, ARCHIVES + '''
 from types import SimpleNamespace
-from meerschaum.api.dash import plugins as mp, plugin_sources as ps, plugin_upload as up
+from meerschaum.api.dash import access, plugins as mp, plugin_sources as ps, plugin_upload as up
 dest = pathlib.Path(os.environ['MRSM_PLUGINS_DIR'])
 admin = sign_in('tp-admin', user_type='admin')
 writer = sign_in('tp-writer', role='editor', teams={'tp-builders': 'member', 'tp-aaa': 'member'})
@@ -685,7 +685,7 @@ other = sign_in('tp-other', role='editor', teams={'tp-rivals': 'member'})
 member = sign_in('tp-member', role='editor', teams={'tp-readers': 'member'})
 team_settings('tp-builders', plugins_write=True)
 team_settings('tp-rivals', plugins_write=True)
-out = {'writing_team': mp.writing_team(ps.source_viewer(writer))}
+out = {'writing_team': mp.writing_team(access.resolve_viewer(writer, fresh=True))}
 
 def upload(session, files, name=None, replace=False, directory=None):
     contents = [data_url(data) for _, data in files]
@@ -739,23 +739,23 @@ out['records'] = {
     'uninstall': mp.plugin_run_record(
         job('tp-writer', 'made', 'uninstall', ['uninstall', 'plugins', 'made', '--yes']), 'tp-writer'),
 }
-who = ps.source_viewer(writer)
+who = access.resolve_viewer(writer, fresh=True)
 out['claim'] = mp.claim_plugin(who, 'fromrepo')
-out['claim_twice'] = mp.claim_plugin(ps.source_viewer(writer), 'fromrepo')
-out['claim_member'] = mp.claim_plugin(ps.source_viewer(member), 'fromrepo')
-out['claim_unsafe'] = mp.claim_plugin(ps.source_viewer(writer), '../x')
-out['claim_admin'] = mp.claim_plugin(ps.source_viewer(admin), 'byadmin')
+out['claim_twice'] = mp.claim_plugin(access.resolve_viewer(writer, fresh=True), 'fromrepo')
+out['claim_member'] = mp.claim_plugin(access.resolve_viewer(member, fresh=True), 'fromrepo')
+out['claim_unsafe'] = mp.claim_plugin(access.resolve_viewer(writer, fresh=True), '../x')
+out['claim_admin'] = mp.claim_plugin(access.resolve_viewer(admin, fresh=True), 'byadmin')
 out['claimed'] = team_plugins('tp-builders')
-out['manage_after'] = mp.may_manage_plugin(ps.source_viewer(writer), 'fromrepo')
-out['release'] = mp.release_plugin(ps.source_viewer(writer), 'fromrepo')
-out['release_member'] = mp.release_plugin(ps.source_viewer(member), 'made')
+out['manage_after'] = mp.may_manage_plugin(access.resolve_viewer(writer, fresh=True), 'fromrepo')
+out['release'] = mp.release_plugin(access.resolve_viewer(writer, fresh=True), 'fromrepo')
+out['release_member'] = mp.release_plugin(access.resolve_viewer(member, fresh=True), 'made')
 out['released'] = team_plugins('tp-builders')
 team_settings('tp-builders', plugins_write=False)
 out['after_switch_off'] = {
-    'manage': mp.may_manage_plugin(ps.source_viewer(writer), 'made'),
+    'manage': mp.may_manage_plugin(access.resolve_viewer(writer, fresh=True), 'made'),
     'authoring': ps.authoring_refusal(writer),
     'upload': upload(writer, [('late.py', b'VALUE = 1\\n')]),
-    'claim': mp.claim_plugin(ps.source_viewer(writer), 'late'),
+    'claim': mp.claim_plugin(access.resolve_viewer(writer, fresh=True), 'late'),
 }
 print('JSON:' + json.dumps(out))
 '''))

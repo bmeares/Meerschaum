@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 
 from meerschaum.utils.typing import List, Dict, Any, Optional, Tuple, WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.jobs import (
     get_jobs,

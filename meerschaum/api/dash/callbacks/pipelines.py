@@ -22,19 +22,20 @@ from meerschaum.utils.warnings import warn
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import dash_app
 from meerschaum.api.dash.components import alert_from_success_tuple, build_icon
-from meerschaum.api.dash.sessions import is_session_authenticated
 
 
 def _may_read(session) -> bool:
     """The Pipelines pages are for viewers who may read pipes (`pipes:read`)."""
-    from meerschaum.api.dash import pipes_access
-    return pipes_access.can_read(session)
+    from meerschaum.api.dash import access
+    return access.resolve_viewer(session if session is not None else {}).can_read_pipes
 
 
 def _visible_ref(ref, session) -> bool:
     """Whether the viewer may see the pipe of a `pipe_ref` the browser sent."""
-    from meerschaum.api.dash import access, pipes_access
-    return bool(ref) and access.ref_is_visible(pipes_access.viewer(session), str(ref))
+    from meerschaum.api.dash import access
+    return bool(ref) and access.ref_is_visible(
+        access.resolve_viewer(session if session is not None else {}), str(ref),
+    )
 from meerschaum.api.dash import engine as _engine
 from meerschaum.utils.packages import import_html, import_dcc
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
@@ -361,8 +362,8 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False, dr
         raise PreventUpdate
     if not _visible_ref(ref, session_data):
         raise PreventUpdate
-    from meerschaum.api.dash import access, pipes_access
-    viewer = pipes_access.viewer(session_data)
+    from meerschaum.api.dash import access
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
     instance_keys, connector_keys, metric_key, location_key = _engine.split_ref(ref)
     visible = access.visible_pipe(connector_keys, metric_key, location_key, instance_keys, viewer=viewer)
     may_sync = visible is not None and access.can_edit_pipe(viewer, visible)
@@ -524,10 +525,10 @@ def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, 
         raise PreventUpdate
     from meerschaum.api.dash.execute import run_action
     from meerschaum.api.dash.sessions import get_username_from_session
-    from meerschaum.api.dash import access, pipes_access
+    from meerschaum.api.dash import access
     try:
         instance, connector, metric, location = _engine.split_ref(ref)
-        viewer = pipes_access.viewer(session)
+        viewer = access.resolve_viewer(session if session is not None else {})
         pipe = access.visible_pipe(connector, metric, location, instance, viewer=viewer)
         if pipe is None:
             raise PermissionError('This Pipe is not available.')
@@ -756,9 +757,10 @@ def render_pipeline_graph(pathname, definition, draft, refresh, prefs, search, s
             graph = _engine.dependency_graph(instance, pipes, parents=True, children=True)
             for node in graph['nodes']:
                 node['context'] = node['pipe_ref'] not in members
-        from meerschaum.api.dash import access, pipes_access
+        from meerschaum.api.dash import access
         shared = {}
-        for name, other in access.visible_pipelines(instance, viewer=pipes_access.viewer(session_data)).items():
+        viewer = access.resolve_viewer(session_data if session_data is not None else {})
+        for name, other in access.visible_pipelines(instance, viewer=viewer).items():
             if name == definition.get('name'):
                 continue
             for ref in other.get('targets', []):
@@ -1230,8 +1232,8 @@ def cancel_node_execution(clicks, pipeline_clicks, live_run, runs, selected, ses
                 or metadata.get('run_id') != run.get('run_id')):
             raise ValueError('This execution is unavailable or belongs to another session.')
         ### One's own run, or anyone's with `jobs:stop`.
-        from meerschaum.api.dash import pipes_access
-        viewer = pipes_access.viewer(session)
+        from meerschaum.api.dash import access
+        viewer = access.resolve_viewer(session if session is not None else {})
         if not (viewer.can('jobs:stop') or (viewer.username and getattr(job, 'owner', None) == viewer.username)):
             raise PermissionError('Your account may not stop this execution.')
         result = job.stop()

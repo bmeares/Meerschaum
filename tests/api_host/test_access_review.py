@@ -110,24 +110,25 @@ print('JSON:' + json.dumps({'payload': payload, 'label': label, 'empty': empty,
 def test_registration_uses_the_server_lock_and_never_falls_back_on_failure(sandbox):
     root, plugins = sandbox
     out = _json(run_python(root, plugins, '''
-import io, json
-import urllib.error
+import json
 from urllib.parse import parse_qs
 from unittest import mock
 from meerschaum.api import get_api_connector
-from meerschaum.api.dash import registration, execute
+from meerschaum.api.dash import registration
+from meerschaum.api.host._server_client import (
+    InMemoryTransport, ServerUnavailableError, use_transport,
+)
 requests = []
-def refused(request, **kwargs):
-    requests.append({'url': request.full_url, 'form': parse_qs(request.data.decode())})
-    return io.BytesIO(json.dumps([False, 'Registration is closed.']).encode())
-with mock.patch.object(execute, 'server_url', return_value='http://127.0.0.1:19997'), \
-     mock.patch.object(registration, '_users', return_value=[]):
-    with mock.patch('urllib.request.urlopen', side_effect=refused):
+def refused(req):
+    requests.append({'url': req.path, 'form': parse_qs((req.body or b'').decode())})
+    return (200, [False, 'Registration is closed.'])
+with mock.patch.object(registration, '_users', return_value=[]):
+    with use_transport(InMemoryTransport(handler=refused)):
         first = registration.create_first_admin('review-first', 'correct-horse-9', 'correct-horse-9')
         with mock.patch.object(registration, 'first_run', return_value=False), \
              mock.patch.object(registration, 'self_registration_open', return_value=True):
             visitor = registration.register_account('review-visitor', 'correct-horse-9', email='visitor@example.com')
-    with mock.patch('urllib.request.urlopen', side_effect=urllib.error.URLError('offline')):
+    with use_transport(InMemoryTransport(handler=lambda req: ServerUnavailableError('offline'))):
         unavailable = registration.create_first_admin('review-offline', 'correct-horse-9', 'correct-horse-9')
 print('JSON:' + json.dumps({'requests': requests, 'first': first, 'visitor': visitor,
                           'unavailable': unavailable, 'users': get_api_connector().get_users()}))

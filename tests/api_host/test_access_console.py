@@ -381,7 +381,7 @@ for name, email in (('ac-member', 'member@example.com'), ('ac-other', 'other@exa
 
 import plotly.utils
 def listing(who):
-    info = users.viewer(SESSIONS[who])
+    info = access.resolve_viewer(SESSIONS[who], fresh=True)
     table, _, total = users.build_users_listing('', 1, viewer_info=info)
     return json.dumps(table, cls=plotly.utils.PlotlyJSONEncoder)
 

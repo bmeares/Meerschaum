@@ -63,7 +63,6 @@ from meerschaum.api.dash.jobs import (
     job_rights,
 )
 from meerschaum.api.dash._support import get_job as _get_job
-from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate

@@ -22,11 +22,8 @@ import meerschaum as mrsm
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import dash_app
-from meerschaum.api.dash.sessions import (
-    is_state_authenticated,
-    is_session_authenticated,
-    get_username_from_session,
-)
+from meerschaum.api.dash.sessions import get_username_from_session
+from meerschaum.api.dash.access import is_state_authenticated
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.callbacks.dashboard import keys_state
 from meerschaum.api.dash.keys import build_flags_options

@@ -195,76 +195,59 @@ def check_last_admin(
 # Who is asking.
 ########################################################################################
 
-def viewer(session_store_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Who is looking at the Users & Teams page: `{'username', 'active', 'admin', 'sees_all',
-    'viewer'}` (`viewer` is the `access.Viewer`). Under `--no-auth` everyone is an
-    administrator. Administrators are read again (not a session's cached flag), since these are
-    user-management decisions.
-    """
-    from meerschaum.api import no_auth
-    if no_auth:
-        who = access.viewer_for(None)
-        return {'username': None, 'active': True, 'admin': True, 'sees_all': True, 'viewer': who}
-    session_id = (
-        (session_store_data or {}).get('session-id', None)
-        if isinstance(session_store_data, dict) else None
-    )
-    from meerschaum.api.dash.sessions import get_username_from_session
-    username = get_username_from_session(str(session_id)) if session_id else None
-    if not username:
-        return {'username': None, 'active': False, 'admin': False, 'sees_all': False,
-                'viewer': access.ANONYMOUS}
-    who = access.viewer_for(username)
-    if not who.signed_in:
-        return {'username': None, 'active': False, 'admin': False, 'sees_all': False,
-                'viewer': access.ANONYMOUS}
-    return {
-        'username': username,
-        'active': True,
-        'admin': who.is_admin,
-        'sees_all': who.is_admin,
-        'viewer': who,
-    }
+def _viewer_fields(who: Any) -> Tuple[access.Viewer, Optional[str], bool, bool]:
+    """Return `(viewer, username, is_admin, sees_all)` for a `Viewer` (or legacy dict)."""
+    if isinstance(who, access.Viewer):
+        is_admin = bool(who.no_auth or (who.signed_in and who.is_admin))
+        return who, who.username, is_admin, is_admin
+    if isinstance(who, dict):
+        viewer_obj = who.get('viewer')
+        if not isinstance(viewer_obj, access.Viewer):
+            viewer_obj = access.ANONYMOUS
+        is_admin = bool(who.get('admin') or viewer_obj.is_admin or viewer_obj.no_auth)
+        sees_all = bool(is_admin or who.get('sees_all'))
+        username = who.get('username') if 'username' in who else viewer_obj.username
+        return viewer_obj, username, is_admin, sees_all
+    return access.ANONYMOUS, None, False, False
 
 
 def visible_user_rows(
     rows: List[Dict[str, Any]],
-    who: Dict[str, Any],
+    who: Any,
     teams: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     The users a viewer may see: every user for administrators and managers of Everyone, else
     themselves and the members of their teams (other than Everyone).
     """
-    if who.get('admin') or who.get('sees_all'):
+    viewer_obj, username, is_admin, sees_all = _viewer_fields(who)
+    if is_admin or sees_all:
         return list(rows)
-    username = who.get('username')
     if not username:
         return []
     if username in access.everyone_managers(teams or []):
         return list(rows)
-    viewer_teams = set((who.get('viewer') or access.ANONYMOUS).own_teams)
+    viewer_teams = set(viewer_obj.own_teams)
     return [
         row for row in rows
         if row['username'] == username or (set(row['teams']) & viewer_teams)
     ]
 
 
-def email_visible(who: Dict[str, Any], row: Dict[str, Any]) -> bool:
+def email_visible(who: Any, row: Dict[str, Any]) -> bool:
     """Whether the viewer may see this user's email address (AC13)."""
-    viewer_object = who.get('viewer') or access.ANONYMOUS
-    return access.can_see_email(viewer_object, row['username'], list(row.get('teams', {})))
+    viewer_obj, _, _, _ = _viewer_fields(who)
+    return access.can_see_email(viewer_obj, row['username'], list(row.get('teams', {})))
 
 
-def sees_any_email(who: Dict[str, Any], teams: Optional[List[Dict[str, Any]]] = None) -> bool:
+def sees_any_email(who: Any, teams: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Whether the Email column has anything for this viewer: administrators and managers."""
-    viewer_object = who.get('viewer') or access.ANONYMOUS
-    if who.get('admin') or viewer_object.is_admin or viewer_object.no_auth:
+    viewer_obj, username, is_admin, _ = _viewer_fields(who)
+    if is_admin:
         return True
-    if viewer_object.managed_teams:
+    if viewer_obj.managed_teams:
         return True
-    return bool(who.get('username')) and who.get('username') in access.everyone_managers(teams or [])
+    return bool(username) and username in access.everyone_managers(teams or [])
 
 
 ########################################################################################
@@ -507,24 +490,25 @@ def team_job_count(team: str) -> int:
         return 0
 
 
-def visible_teams(teams: List[Dict[str, Any]], who: Dict[str, Any]) -> List[Dict[str, Any]]:
+def visible_teams(teams: List[Dict[str, Any]], who: Any) -> List[Dict[str, Any]]:
     """The teams a viewer sees: every team for administrators, else Everyone and their own."""
-    if who.get('admin'):
+    viewer_obj, username, is_admin, _ = _viewer_fields(who)
+    if is_admin:
         return list(teams)
-    username = who.get('username')
     ### A walled-off viewer is not in Everyone: they see their own teams only.
-    isolated = bool(getattr(who.get('viewer'), 'is_isolated', False))
+    isolated = bool(viewer_obj.is_isolated)
     return [
         team for team in teams
         if (team['builtin'] and not isolated) or username in team['members']
     ]
 
 
-def may_manage_team(who: Dict[str, Any], team: Dict[str, Any]) -> bool:
+def may_manage_team(who: Any, team: Dict[str, Any]) -> bool:
     """Whether the viewer may change the team's members: administrators and its managers."""
-    if who.get('admin'):
+    _, username, is_admin, _ = _viewer_fields(who)
+    if is_admin:
         return True
-    return team['members'].get(who.get('username') or '') == 'manager'
+    return team['members'].get(username or '') == 'manager'
 
 
 def validate_team_name(name: Optional[str], existing: List[str]) -> SuccessTuple:
@@ -689,7 +673,8 @@ def get_users_cards(
     (the web terminal page's Users button): the users the session's viewer may see.
     """
     alerts: List[SuccessTuple] = []
-    who = viewer((state or {}).get('session-store.data', None) if isinstance(state, dict) else None)
+    session = (state or {}).get('session-store.data', None) if isinstance(state, dict) else None
+    who = access.resolve_viewer(session if session is not None else {}, fresh=True)
     rows = visible_user_rows(get_user_rows(), who)
     all_names = sorted(row['username'] for row in rows)
     if search_term:
@@ -709,13 +694,13 @@ def get_users_cards(
 def build_users_listing(
     search_term: Optional[str],
     page: int = 1,
-    viewer_info: Optional[Dict[str, Any]] = None,
+    viewer_info: Any = None,
 ) -> Tuple[Any, int, int]:
     """
     Build the users table for a viewer (everyone, or the users they may see) and return it
     along with the total page count and total user count.
     """
-    viewer_info = viewer_info or {'admin': False, 'sees_all': False, 'username': None}
+    viewer_obj, username, is_admin, _ = _viewer_fields(viewer_info)
     try:
         teams = access.list_teams()
     except Exception:
@@ -740,9 +725,9 @@ def build_users_listing(
     return (
         build_users_table(
             page_rows,
-            admin=bool(viewer_info.get('admin')),
-            me=viewer_info.get('username'),
-            who=viewer_info,
+            admin=is_admin,
+            me=username,
+            who=viewer_obj if isinstance(viewer_info, access.Viewer) else viewer_info,
             show_email=show_email,
         ),
         total_pages,
@@ -824,11 +809,11 @@ def _build_user_card(
     )
 
 
-def build_user_detail(username: str, viewer_info: Optional[Dict[str, Any]] = None) -> Any:
+def build_user_detail(username: str, viewer_info: Any = None) -> Any:
     """
     Build the detail view for a single user (shareable URL): only a user the viewer may see.
     """
-    viewer_info = viewer_info or {'sees_all': False}
+    _, viewer_username, is_admin, _ = _viewer_fields(viewer_info)
     back_button = dbc.Button(
         '← Users',
         href='/dash/users',
@@ -850,7 +835,7 @@ def build_user_detail(username: str, viewer_info: Optional[Dict[str, Any]] = Non
         ], className='plugin-detail-wrapper')
 
     row = rows[username]
-    is_self = username == viewer_info.get('username')
+    is_self = username == viewer_username
     return html.Div([
         back_button,
         html.Br(),
@@ -859,8 +844,8 @@ def build_user_detail(username: str, viewer_info: Optional[Dict[str, Any]] = Non
             username,
             detail=True,
             row=row,
-            show_email=bool(viewer_info.get('admin') or is_self or email_visible(viewer_info, row)),
-            show_type=bool(viewer_info.get('admin') or is_self),
+            show_email=bool(is_admin or is_self or email_visible(viewer_info, row)),
+            show_type=bool(is_admin or is_self),
         ),
         html.Br(),
     ], className='plugin-detail-wrapper')
@@ -868,7 +853,7 @@ def build_user_detail(username: str, viewer_info: Optional[Dict[str, Any]] = Non
 
 def build_teams_table(
     teams: List[Dict[str, Any]],
-    who: Dict[str, Any],
+    who: Any,
     pipe_counts: Optional[Dict[Optional[str], int]] = None,
     users_count: Optional[int] = None,
 ) -> Any:
@@ -876,6 +861,7 @@ def build_teams_table(
     The teams: Team, Members, Managers and Pipes, with each team's `⋮` menu (Members for its
     managers and administrators; Rename and Delete for administrators, never for Everyone).
     """
+    _, _, is_admin, _ = _viewer_fields(who)
     pipe_counts = pipe_counts or {}
     header = [html.Th('Team'), html.Th('Members'), html.Th('Managers'), html.Th('Pipes'),
               html.Th(html.Span('Actions', className='visually-hidden'))]
@@ -894,7 +880,7 @@ def build_teams_table(
             items.append(dbc.DropdownMenuItem(
                 'Members', id={'type': 'team-action', 'action': 'members', 'index': name},
             ))
-        if who.get('admin') and not team['builtin']:
+        if is_admin and not team['builtin']:
             items += [
                 dbc.DropdownMenuItem(
                     'Settings', id={'type': 'team-action', 'action': 'settings', 'index': name},

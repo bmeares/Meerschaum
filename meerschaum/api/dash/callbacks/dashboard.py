@@ -27,7 +27,7 @@ from meerschaum.api.dash.sessions import (
     set_session,
     clear_session_cookie,
 )
-from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
+from meerschaum.api.dash.access import is_session_authenticated, is_state_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import (
@@ -907,8 +907,8 @@ def download_pipe_csv(n_clicks, session_store_data):
     clicks = ctx[0]['value'] if ctx else None
     if isinstance(clicks, bool) or not isinstance(clicks, int) or clicks < 1:
         raise PreventUpdate
-    from meerschaum.api.dash import pipes_access
-    if not pipes_access.can_read(session_store_data):
+    from meerschaum.api.dash import access
+    if not access.resolve_viewer(session_store_data if session_store_data is not None else {}).can_read_pipes:
         raise PreventUpdate
     pipe = pipe_from_ctx(ctx, 'n_clicks')
     if pipe is None:
@@ -963,8 +963,9 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store
     """Save the parameters editor (edit rights, access, locks and SQL checks: `pipe_writes`)."""
     if not n_clicks:
         raise PreventUpdate
-    from meerschaum.api.dash import pipes_access, pipe_writes
-    allowed, reason = pipes_access.can_write_pipes(session_store_data)
+    from meerschaum.api.dash import access, pipe_writes
+    viewer = access.resolve_viewer(session_store_data if session_store_data is not None else {})
+    allowed, reason = viewer.can_write_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason))
     triggered = dash.callback_context.triggered
@@ -990,7 +991,7 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store
         if params is not None:
             try:
                 success, msg = pipe_writes.save_parameters(
-                    pipe, params, viewer=pipes_access.viewer(session_store_data),
+                    pipe, params, viewer=viewer,
                 )
             except Exception as e:
                 success, msg = False, str(e)
@@ -1009,8 +1010,9 @@ def update_pipe_sql_click(n_clicks, sql_editor_text, session_store_data):
     """Save a pipe's SQL definition (`pipes:define_sql` and the SQL guard: `pipe_writes`)."""
     if not n_clicks:
         raise PreventUpdate
-    from meerschaum.api.dash import pipes_access, pipe_writes
-    allowed, reason = pipes_access.can_write_pipes(session_store_data)
+    from meerschaum.api.dash import access, pipe_writes
+    viewer = access.resolve_viewer(session_store_data if session_store_data is not None else {})
+    allowed, reason = viewer.can_write_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason))
     triggered = dash.callback_context.triggered
@@ -1027,7 +1029,7 @@ def update_pipe_sql_click(n_clicks, sql_editor_text, session_store_data):
             success, msg = set_pipe_query(
                 pipe, sql_editor_text,
                 save=lambda patch: pipe_writes.update_parameters(
-                    pipe, patch, viewer=pipes_access.viewer(session_store_data),
+                    pipe, patch, viewer=viewer,
                 ),
             )
         except Exception as e:
@@ -1048,8 +1050,8 @@ def toggle_sql_symlinks(value, session_store_data):
         raise PreventUpdate
 
     ### The pipe's SQL definition is not public.
-    from meerschaum.api.dash import pipes_access
-    if not pipes_access.can_read(session_store_data):
+    from meerschaum.api.dash import access
+    if not access.resolve_viewer(session_store_data if session_store_data is not None else {}).can_read_pipes:
         raise PreventUpdate
 
     pipe = pipe_from_ctx(triggered, 'value')
@@ -1071,8 +1073,8 @@ def sync_documents_click(n_clicks, sync_editor_text, session_store_data):
     """Sync rows into the pipe: `pipes:write`, edit rights and no `sync` lock."""
     if not n_clicks:
         raise PreventUpdate
-    from meerschaum.api.dash import pipes_access, access
-    viewer = pipes_access.viewer(session_store_data)
+    from meerschaum.api.dash import access
+    viewer = access.resolve_viewer(session_store_data if session_store_data is not None else {})
     if not viewer.signed_in and not viewer.no_auth:
         return alert_from_success_tuple((False, "You are not authenticated."))
     triggered = dash.callback_context.triggered
@@ -1133,8 +1135,8 @@ def query_data_click(
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
-    from meerschaum.api.dash import pipes_access
-    if not pipes_access.can_read(session_store_data):
+    from meerschaum.api.dash import access
+    if not access.resolve_viewer(session_store_data if session_store_data is not None else {}).can_read_pipes:
         return alert_from_success_tuple((False, "You are not authenticated."))
     pipe = pipe_from_ctx(triggered, 'n_clicks')
     if pipe is None:
@@ -1356,8 +1358,8 @@ def calculate_rowcount_button_click(n_clicks: int, session_store_data):
     if not n_clicks:
         raise PreventUpdate
 
-    from meerschaum.api.dash import pipes_access
-    if not pipes_access.can_read(session_store_data):
+    from meerschaum.api.dash import access
+    if not access.resolve_viewer(session_store_data if session_store_data is not None else {}).can_read_pipes:
         raise PreventUpdate
 
     triggered = dash.callback_context.triggered

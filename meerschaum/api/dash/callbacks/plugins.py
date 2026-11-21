@@ -7,17 +7,18 @@ Callbacks for the plugins page: the Installed and Repository tabs, a published p
 the Update, Uninstall and Install actions of administrators and of a team's plugin managers
 (run as jobs and watched until they finish), New plugin (from a template or uploaded files), and
 editing an installed plugin's files. Every callback reads the session's viewer again and asks
-the policy (`plugins.plugin_action_refusal`, `plugins.may_manage_plugin`,
-`plugin_sources.authoring_refusal`): nothing the browser sends decides who may do what.
+the Dash-free policy & lifecycle core (`meerschaum.api.dash._plugins`).
 """
 
 from __future__ import annotations
+
 import json
+import uuid
 from urllib.parse import parse_qs
+
 from meerschaum.utils.typing import Optional, Dict, Any
-from meerschaum.api.dash import dash_app, debug
-from meerschaum.api import get_api_connector, CHECK_UPDATE
-from meerschaum.core import Plugin
+from meerschaum.api import CHECK_UPDATE, debug
+from meerschaum.api.dash import dash_app
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate
@@ -25,30 +26,48 @@ from dash.dependencies import Input, Output, State, ALL, MATCH, ClientsideFuncti
 from dash import no_update
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
+
+import meerschaum.api.dash.access as access
 from meerschaum.api.dash.components import alert_from_success_tuple
-from meerschaum.api.dash.users import viewer
+from meerschaum.api.dash._plugins import (
+    ACTION_WORDS,
+    authoring_refusal,
+    create_new_plugin,
+    forget_remote_versions,
+    may_author,
+    may_manage_plugin,
+    new_plugin_choices,
+    plugin_action_refusal,
+    reconcile_plugin_run,
+    suggested_name,
+    update_plugin_description,
+    upload_plugin as install_upload,
+)
 from meerschaum.api.dash.plugins import (
     build_plugins_listing,
     build_plugin_detail,
     build_installed_plugin_detail,
     build_installed_plugins_tab,
     get_installed_plugins,
-    is_plugin_owner,
     plugin_action_sysargs,
+    plugin_update_versions,
     start_plugin_run,
-    may_manage_plugin,
-    plugin_action_refusal,
 )
-from meerschaum.api.dash.plugin_sources import may_author
+from meerschaum.api.dash.plugin_sources import (
+    language_logo,
+    read_source_with_digest,
+    save_source,
+    source_preview,
+)
+import meerschaum.api.dash.plugin_publish as publishing
+from meerschaum.api.dash.pages.plugins import UPLOAD_PROMPT
 
 PLUGINS_TABS = ('installed', 'repository')
 HIDDEN = {'display': 'none'}
 
 
 def _parse_plugin_name_from_pathname(pathname: Optional[str]) -> Optional[str]:
-    """
-    Return the plugin name from ``/dash/plugins/<name>`` or ``None`` for the listing.
-    """
+    """Return the plugin name from ``/dash/plugins/<name>`` or ``None`` for the listing."""
     if not pathname or not str(pathname).startswith('/dash/plugins'):
         return None
     suffix = str(pathname)[len('/dash/plugins'):].strip('/')
@@ -101,24 +120,24 @@ def render_plugins_page(
     session_data: Optional[Dict[str, Any]] = None,
     search: Optional[str] = None,
 ):
-    """
-    Render the active tab (Installed or Repository) or a single plugin's page, with the
-    plugins the viewer may see. New plugin (the header's circled plus) is shown to those who may
-    author plugins (`plugin_sources.may_author`).
-    """
-    who = viewer(session_data)
-    if not who['active'] or not who['viewer'].can('plugins:read'):
-        message = ('Plugins are not available to your account.' if who['active']
-                   else 'Sign in to see the plugins')
+    """Render the active tab (Installed or Repository) or a single plugin's page."""
+    who = access.resolve_viewer(session_data if session_data is not None else {}, fresh=True)
+    if not who.active or not who.can('plugins:read'):
+        message = (
+            'Plugins are not available to your account.'
+            if who.active
+            else 'Sign in to see the plugins'
+        )
         return (
             html.Div(
-                [html.H5(message)] + ([] if who['active'] else [
-                    dbc.Button('Sign in', href='/dash/login', color='primary')]),
+                [html.H5(message)] + ([] if who.active else [
+                    dbc.Button('Sign in', href='/dash/login', color='primary'),
+                ]),
                 className='console-empty',
             ),
             HIDDEN, 1, 1, HIDDEN, [], True, False, True, HIDDEN, [],
         )
-    admin, person = who['admin'], who['viewer']
+    admin, person = bool(who.no_auth or who.is_admin), who
     plugin_name = _parse_plugin_name_from_pathname(pathname)
     if plugin_name:
         if str(pathname).startswith('/dash/plugins/installed/'):
@@ -177,10 +196,15 @@ def render_plugins_page(
 def _new_plugin_button():
     """The header's New plugin: a circled plus."""
     return html.Button(
-        [html.I(className='fa-solid fa-circle-plus', **{'aria-hidden': 'true'}),
-         html.Span('New plugin', className='visually-hidden')],
-        id='plugins-new-button', type='button', n_clicks=0,
-        className='btn plugin-new-button', title='New plugin',
+        [
+            html.I(className='fa-solid fa-circle-plus', **{'aria-hidden': 'true'}),
+            html.Span('New plugin', className='visually-hidden'),
+        ],
+        id='plugins-new-button',
+        type='button',
+        n_clicks=0,
+        className='btn plugin-new-button',
+        title='New plugin',
         **{'aria-label': 'New plugin'},
     )
 
@@ -192,14 +216,9 @@ def _new_plugin_button():
     State('session-store', 'data'),
 )
 def show_plugin_source(selected, context, session):
-    """
-    Every file selection repeats authentication, membership, and bounded path checks. An
-    installed plugin's file has Edit for authors; the context's `edit` naming the file opens it
-    in the editor (its text as read now, and the digest a save is checked against).
-    """
+    """Every file selection repeats authentication, membership, and bounded path checks."""
     if not selected or not isinstance(context, dict):
         raise PreventUpdate
-    from meerschaum.api.dash.plugin_sources import read_source_with_digest, source_preview
     kind = context.get('kind')
     try:
         source, digest = read_source_with_digest(kind, context.get('name'), selected, session)
@@ -225,26 +244,19 @@ def show_plugin_source(selected, context, session):
     prevent_initial_call=True,
 )
 def plugin_source_action(clicks, selected, context, data, text, session):
-    """
-    Edit opens the file in the editor (the context's `edit`, which `show_plugin_source` reads),
-    Cancel closes it, Save writes it (`plugin_sources.save_source`: inside the plugin's own
-    directory, atomically, refused if the file changed on disk since it was opened) and closes
-    it. Permission is checked again for each.
-    """
+    """Edit opens the file in the editor, Cancel closes it, Save writes atomically with CAS."""
     ctx = dash.callback_context
     trigger = ctx.triggered_id
     if not isinstance(trigger, dict) or not ctx.triggered or not ctx.triggered[0].get('value'):
         raise PreventUpdate
     if not isinstance(context, dict) or context.get('kind') != 'installed' or not selected:
         raise PreventUpdate
-    from meerschaum.api.dash.plugin_sources import authoring_refusal, save_source
     action = trigger.get('action')
     closed = {**context, 'edit': None}
     refusal = authoring_refusal(session, context.get('name'))
     if refusal:
         return (closed if context.get('edit') else no_update), _source_alert(False, refusal)
     if action == 'edit':
-        import uuid
         return {**context, 'edit': {'path': selected, 'nonce': uuid.uuid4().hex}}, []
     if action == 'cancel':
         return closed, []
@@ -260,8 +272,11 @@ def plugin_source_action(clicks, selected, context, data, text, session):
 
 def _source_alert(success: bool, message: str):
     return dbc.Alert(
-        message, color=('success' if success else 'danger'), dismissable=True,
-        id='plugin-source-save-alert', class_name='plugin-source-save-alert',
+        message,
+        color=('success' if success else 'danger'),
+        dismissable=True,
+        id='plugin-source-save-alert',
+        class_name='plugin-source-save-alert',
     )
 
 
@@ -288,10 +303,10 @@ dash_app.clientside_callback(
             (item.path === target.path ? ' active' : ''))];
     }
     """,
-    Output('plugin-source-file','value'),
-    Output({'type':'plugin-source-select','path':ALL},'className'),
-    Input({'type':'plugin-source-select','path':ALL},'n_clicks'),
-    State({'type':'plugin-source-select','path':ALL},'id'),
+    Output('plugin-source-file', 'value'),
+    Output({'type': 'plugin-source-select', 'path': ALL}, 'className'),
+    Input({'type': 'plugin-source-select', 'path': ALL}, 'n_clicks'),
+    State({'type': 'plugin-source-select', 'path': ALL}, 'id'),
     prevent_initial_call=True,
 )
 
@@ -306,22 +321,20 @@ dash_app.clientside_callback(
     State('session-store', 'data'),
 )
 def show_plugin_updates(names, slots, buttons, session_data):
-    """
-    After the installed plugins show, reveal Update only for the plugins whose repository has a
-    newer version, among the plugins the viewer may manage (`plugins.plugin_update_versions`).
-    """
+    """Reveal Update only for plugins whose origin repository has a newer version."""
     if not slots:
         raise PreventUpdate
-    from meerschaum.api.dash.plugins import plugin_update_versions
-    who = viewer(session_data)
-    updates = plugin_update_versions(names or [], viewer=who['viewer']) if who['active'] else {}
+    who = access.resolve_viewer(session_data if session_data is not None else {}, fresh=True)
+    updates = plugin_update_versions(names or [], viewer=who) if who.active else {}
     hidden = [slot.get('index') not in updates for slot in slots]
     titles = [
-        (f"Update {button.get('index')} to {updates[button.get('index')]}"
-         if button.get('index') in updates else f"Update {button.get('index')}")
+        (
+            f"Update {button.get('index')} to {updates[button.get('index')]}"
+            if button.get('index') in updates
+            else f"Update {button.get('index')}"
+        )
         for button in buttons
     ]
-    ### `plugin-update-checked`: the check has answered (what browser tests wait for).
     checked = ['plugin-update-slot plugin-update-checked' for _ in slots]
     return hidden, checked, titles
 
@@ -348,31 +361,18 @@ def _run_alert(message: str, job_name: Optional[str], success: bool = True, runn
     )
 
 
-ACTION_WORDS = {
-    'install': ('Installing', 'Installed', 'install'),
-    'reinstall': ('Reinstalling', 'Reinstalled', 'reinstall'),
-    'update': ('Updating', 'Updated', 'update'),
-    'uninstall': ('Uninstalling', 'Uninstalled', 'uninstall'),
-}
-
-
 def run_plugin_action(action: str, name: str, session_data: Optional[Dict[str, Any]]):
-    """
-    Start a plugin action for who may run it (`plugins.plugin_action_refusal`: administrators,
-    and a team's plugin managers for their team's plugins). Returns `(alert, run,
-    interval_disabled)`.
-    """
-    who = viewer(session_data)
+    """Start a plugin action for who may run it (`plugin_action_refusal`)."""
+    who = access.resolve_viewer(session_data if session_data is not None else {}, fresh=True)
     if action not in ACTION_WORDS:
         return alert_from_success_tuple((False, f"Unknown plugin action '{action}'.")), no_update, no_update
     refusal = (
-        plugin_action_refusal(who['viewer'], action, name) if who['active']
+        plugin_action_refusal(who, action, name)
+        if who.active
         else "Sign in to manage plugins."
     )
     if refusal:
         return alert_from_success_tuple((False, refusal)), no_update, no_update
-    ### Its versions change: the next update check asks the repository again.
-    from meerschaum.api.dash.plugins import forget_remote_versions
     forget_remote_versions(name)
     origin = None
     if action == 'update':
@@ -380,12 +380,11 @@ def run_plugin_action(action: str, name: str, session_data: Optional[Dict[str, A
         if name not in installed:
             return alert_from_success_tuple((False, f"Plugin '{name}' is not installed.")), no_update, no_update
         origin = installed[name].get('origin')
-    sysargs, env, message = plugin_action_sysargs(action, name, origin=origin, username=who['username'])
+    sysargs, env, message = plugin_action_sysargs(action, name, origin=origin, username=who.username)
     if sysargs is None:
         return alert_from_success_tuple((False, message)), no_update, no_update
-    ### The job itself records what it is for: `watch_plugin_run` reads it back from the job.
     (success, message), job_name = start_plugin_run(
-        sysargs, who['username'], env=env, execution={'plugin': name, 'action': action},
+        sysargs, who.username, env=env, execution={'plugin': name, 'action': action},
     )
     if not success:
         return _run_alert(message, job_name, success=False), no_update, no_update
@@ -435,8 +434,8 @@ def plugin_action_click(action_clicks, cancel_clicks, confirm_clicks, target, ru
         raise PreventUpdate
     action, name = trigger.get('action'), trigger.get('index')
     if action == 'uninstall':
-        who = viewer(session_data)
-        if not who['active'] or not may_manage_plugin(who['viewer'], name):
+        who = access.resolve_viewer(session_data if session_data is not None else {}, fresh=True)
+        if not who.active or not may_manage_plugin(who, name):
             raise PreventUpdate
         return True, ['Uninstall plugin ', html.B(name), '?'], name, no_update, no_update, no_update
     if action not in ('install', 'reinstall', 'update'):
@@ -458,53 +457,30 @@ def plugin_action_click(action_clicks, cancel_clicks, confirm_clicks, target, ru
 )
 def watch_plugin_run(n_intervals, run, refresh, session_data):
     """
-    When the plugin action's job finishes, say how it went and refresh the lists. A
-    non-administrator's install is then recorded as their team's plugin, and their uninstall
-    taken off its list (`plugins.claim_plugin`, `plugins.release_plugin`). The browser only
-    names the job: whose it is, and the plugin and action it ran, are read from the job
-    (`plugins.plugin_run_record`), and the viewer's rights are read again.
+    Poll a running plugin action job and delegate completion + team ownership reconciliation
+    (`claim_plugin` / `release_plugin`) to the Dash-free lifecycle module (`reconcile_plugin_run`).
     """
     if not run or not isinstance(run, dict) or not run.get('job'):
         return no_update, no_update, True, no_update
-    from meerschaum.api.dash.plugins import (
-        may_manage_plugins, plugin_run_record, claim_plugin, release_plugin,
-    )
-    who = viewer(session_data)
-    if not who['active'] or not may_manage_plugins(who['viewer']):
-        return no_update, None, True, no_update
-    from meerschaum.api.dash._support import get_job
+    who = access.resolve_viewer(session_data if session_data is not None else {}, fresh=True)
     from meerschaum.api.dash.jobs import job_visible_to_session
-    record = None
-    try:
-        job = get_job(str(run['job']))
-        exists = job.exists() and job_visible_to_session(job, (session_data or {}).get('session-id'))
-        ### Only a plugin run this console started for this user is watched.
-        record = plugin_run_record(job, who['username']) if exists else None
-        exists = exists and record is not None
-        status = job.status if exists else 'stopped'
-        result = job.result if exists else (False, 'The job went away.')
-    except Exception as e:
-        status, result = 'stopped', (False, str(e))
-    if status in ('running', 'paused'):
-        raise PreventUpdate
-    record = record or {}
-    action = record.get('action') or 'install'
-    plugin = record.get('plugin') or run.get('plugin')
-    done, verb = ACTION_WORDS.get(action, ACTION_WORDS['install'])[1:]
-    success = bool(result and result[0])
-    message = (
-        f"{done} plugin '{plugin}'."
-        if success
-        else f"Failed to {verb} plugin '{plugin}'."
+    session_id = (session_data or {}).get('session-id')
+    outcome = reconcile_plugin_run(
+        str(run['job']),
+        who,
+        fallback_plugin=run.get('plugin'),
+        is_visible=lambda job: job_visible_to_session(job, session_id),
     )
-    if success and record and not who['admin']:
-        recorded, note = (
-            release_plugin(who['viewer'], plugin) if action == 'uninstall'
-            else claim_plugin(who['viewer'], plugin)
-        )
-        if not recorded:
-            message = f"{message} {note}"
-    return _run_alert(message, run['job'], success=success), None, True, (refresh or 0) + 1
+    if outcome['status'] == 'denied':
+        return no_update, None, True, no_update
+    if outcome['status'] == 'running':
+        raise PreventUpdate
+    return (
+        _run_alert(outcome['message'], run['job'], success=outcome['success']),
+        None,
+        True,
+        (refresh or 0) + 1,
+    )
 
 
 @dash_app.callback(
@@ -518,28 +494,16 @@ def edit_plugin_description(
     description: Optional[str] = None,
     session_data: Optional[Dict[str, Any]] = None,
 ):
-    """
-    Edit a plugin's description and set the alert.
-    """
+    """Edit a plugin's description via the Dash-free lifecycle module and set the alert."""
     if n_clicks is None:
         raise PreventUpdate
     ctx = dash.callback_context
     prop_id = ctx.triggered[0]['prop_id']
     j = '.'.join(prop_id.split('.')[:-1])
     plugin_name = json.loads(j)['index']
-    if not is_plugin_owner(plugin_name, session_data):
-        success, msg = (
-            False,
-            f"Failed to update description for plugin '{plugin_name}'"
-            + " due to insufficient permissions."
-        )
-    else:
-        plugin = Plugin(plugin_name)
-        plugin.user_id = get_api_connector().get_plugin_user_id(plugin, debug=debug)
-        plugin.attributes = get_api_connector().get_plugin_attributes(plugin, debug=debug)
-        plugin.attributes.update({'description': description})
-        success, _msg = get_api_connector().register_plugin(plugin, debug=debug, force=True)
-        msg = _msg if not success else "Successfully updated description."
+    success, msg = update_plugin_description(
+        plugin_name, description, session_data, debug=debug,
+    )
     return [alert_from_success_tuple((success, msg))]
 
 
@@ -555,11 +519,14 @@ def _feature_options(choices):
 
 
 def _language_options(choices):
-    from meerschaum.api.dash.plugin_sources import language_logo
     return [
-        {'label': html.Span([language_logo(language), html.Span(language, **{'aria-hidden': 'true'})],
-                            className='plugin-new-language'),
-         'value': language}
+        {
+            'label': html.Span(
+                [language_logo(language), html.Span(language, **{'aria-hidden': 'true'})],
+                className='plugin-new-language',
+            ),
+            'value': language,
+        }
         for language in choices.get('languages', [])
     ]
 
@@ -591,11 +558,9 @@ def open_new_plugin(new_clicks, cancel_clicks, session_data):
     keep = [no_update] * 12
     if ctx.triggered_id == 'plugins-new-cancel':
         return [False] + keep
-    from meerschaum.api.dash.plugin_sources import authoring_refusal
     refusal = authoring_refusal(session_data)
     if refusal:
         return [False] + keep[:-1] + [no_update]
-    from meerschaum.api.dash.plugins import new_plugin_choices
     try:
         choices = new_plugin_choices()
     except Exception as e:
@@ -625,11 +590,7 @@ def open_new_plugin(new_clicks, cancel_clicks, session_data):
     prevent_initial_call=True,
 )
 def new_plugin_form(name, language, features):
-    """
-    The packaging choices worded for the name and language; Action and Datetime column as
-    needed. Nothing here is privileged (Create checks the session).
-    """
-    from meerschaum.api.dash.plugins import new_plugin_choices
+    """The packaging choices worded for the name and language; Action and Datetime column as needed."""
     try:
         packaging = new_plugin_choices(name)['packaging'].get(language or 'Python')
     except Exception:
@@ -658,10 +619,9 @@ def new_plugin_form(name, language, features):
     prevent_initial_call=True,
 )
 def create_plugin(clicks, name, language, packaging, features, action, dt_col, directory, session_data):
-    """Create the plugin (`plugins.create_new_plugin`) and open its source for editing."""
+    """Create the plugin (`create_new_plugin`) and open its source for editing."""
     if not clicks:
         raise PreventUpdate
-    from meerschaum.api.dash.plugins import create_new_plugin
     success, message, url = create_new_plugin(
         name, language, packaging, features, action, dt_col, directory, session_data,
     )
@@ -712,19 +672,15 @@ def reset_new_plugin_upload(is_open):
     prevent_initial_call=True,
 )
 def show_chosen_upload(filenames):
-    """
-    Name the chosen files in the drop zone, and fill Name with the name one file suggests (its
-    stem). Nothing here is privileged (Upload checks the session).
-    """
-    from meerschaum.api.dash.pages.plugins import UPLOAD_PROMPT
-    from meerschaum.api.dash.plugin_upload import suggested_name
+    """Name the chosen files in the drop zone, and fill Name with the name one file suggests."""
     if isinstance(filenames, str):
         filenames = [filenames]
     names = [str(name) for name in (filenames or []) if name]
     if not names:
         return UPLOAD_PROMPT, no_update
     chosen = names[0] if len(names) == 1 else f"{len(names)} files: " + ', '.join(names[:3]) + (
-        '…' if len(names) > 3 else '')
+        '…' if len(names) > 3 else ''
+    )
     suggestion = suggested_name(names)
     return chosen, (suggestion if suggestion else no_update)
 
@@ -744,13 +700,9 @@ def show_chosen_upload(filenames):
     running=[(Output('plugins-new-upload', 'disabled'), True, False)],
 )
 def upload_plugin(clicks, contents, filenames, name, directory, replace, session_data):
-    """
-    Install the uploaded files as a plugin (`plugin_upload.upload_plugin`, which checks the
-    session's authoring rights and every path) and open the installed plugin's page.
-    """
+    """Install the uploaded files as a plugin and open the installed plugin's page."""
     if not clicks:
         raise PreventUpdate
-    from meerschaum.api.dash.plugin_upload import upload_plugin as install_upload
     success, message, url = install_upload(
         contents, filenames, name, directory, replace is True, session_data,
     )
@@ -816,13 +768,28 @@ dash_app.clientside_callback(
     State('plugin-publish-persist', 'value'),
     State('plugin-publish-credentials', 'data'),
     prevent_initial_call=True,
-    running=[(Output('plugin-publish-auth', 'disabled'), True, False),
-             (Output('plugin-publish-controls', 'disabled'), True, False),
-             (Output('plugin-publish-repository', 'disabled'), True, False)],
+    running=[
+        (Output('plugin-publish-auth', 'disabled'), True, False),
+        (Output('plugin-publish-controls', 'disabled'), True, False),
+        (Output('plugin-publish-repository', 'disabled'), True, False),
+    ],
 )
-def plugin_publish_action(is_open, repository, login_clicks, publish_clicks, context, session,
-                          method, username, password, client_id, client_secret, api_key, persist, browser):
-    from meerschaum.api.dash import plugin_publish as publishing
+def plugin_publish_action(
+    is_open,
+    repository,
+    login_clicks,
+    publish_clicks,
+    context,
+    session,
+    method,
+    username,
+    password,
+    client_id,
+    client_secret,
+    api_key,
+    persist,
+    browser,
+):
     if not is_open:
         return no_update, True, True, '', '', '', no_update
     trigger = dash.callback_context.triggered_id
@@ -833,8 +800,8 @@ def plugin_publish_action(is_open, repository, login_clicks, publish_clicks, con
         return dbc.Alert(message, color='success' if ok else 'danger'), ready, not ready, '', '', '', no_update
     if trigger == 'plugin-publish-login' and login_clicks:
         ready, message, stored = publishing.login_repository(
-            context, repository, session, method, username, password, client_id, client_secret, api_key,
-            persist=persist, browser=browser,
+            context, repository, session, method, username, password,
+            client_id, client_secret, api_key, persist=persist, browser=browser,
         )
         return dbc.Alert(message, color='success' if ready else 'danger'), ready, not ready, '', '', '', stored
     ready, message = publishing.repository_status(context, repository, session, browser=browser)

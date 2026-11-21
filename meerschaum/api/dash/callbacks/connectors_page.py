@@ -20,18 +20,16 @@ html = import_html(check_update=CHECK_UPDATE)
 
 
 def _connector_row(keys, session, details=False):
-    from meerschaum.api.dash.access import _secure
+    from meerschaum.api.dash.access import resolve_viewer
     from meerschaum.api.dash.connector_listing import list_connectors
-    from meerschaum.api.dash.users import viewer
-    who = viewer(session)
-    if (not who['active'] or not who['viewer'].can('connectors:read')
-        or ((details or _secure()) and not who['admin'])):
+    who = resolve_viewer(session if session is not None else {}, fresh=True)
+    if not who.can_view_connectors or (details and not who.can_see_connector_details):
         raise PermissionError('Connector details are unavailable.')
-    rows = list_connectors(viewer=who['viewer'])
-    row = next((row for row in rows if row['keys']==keys),None)
+    rows = list_connectors(viewer=who)
+    row = next((row for row in rows if row['keys'] == keys), None)
     if row is None:
         raise PermissionError('Connector is unavailable.')
-    return row,who
+    return row, who
 
 
 @dash_app.callback(
@@ -52,9 +50,9 @@ def connector_info_click(clicks, session):
     if not isinstance(trigger,dict) or trigger.get('type')!='connector-info-button' or not any(clicks or []):
         raise PreventUpdate
     try:
-        row,who = _connector_row(trigger.get('index'),session)
-        body,footer = connector_info(row,who['admin'],who['admin'])
-        return True,html.Code(row['keys']),body,footer,({} if footer else {'display':'none'})
+        row, who = _connector_row(trigger.get('index'), session)
+        body, footer = connector_info(row, who.can_see_connector_details, who.can_test_connectors)
+        return True, html.Code(row['keys']), body, footer, ({} if footer else {'display': 'none'})
     except Exception:
         return (True,'Connector',dbc.Alert('This connector is not available.',color='secondary'),
                 [],{'display':'none'})
@@ -94,9 +92,9 @@ def test_connection_click(n_clicks: Optional[int], session_data: Optional[Dict[s
     """Test a connector (administrators only) and show the result under its button."""
     if not n_clicks:
         raise PreventUpdate
-    from meerschaum.api.dash.pages.connectors import may_test
-    session_id = (session_data or {}).get('session-id', None) if isinstance(session_data, dict) else None
-    if not may_test(session_id):
+    from meerschaum.api.dash.access import resolve_viewer
+    who = resolve_viewer(session_data if session_data is not None else {}, fresh=True)
+    if not who.can_test_connectors:
         return html.Span(
             'Only administrators can test connections.',
             className='connectors-test-failure',

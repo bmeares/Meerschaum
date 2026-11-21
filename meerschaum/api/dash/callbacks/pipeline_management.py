@@ -5,8 +5,7 @@ from dash import Input, Output, State, ALL, html
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
-from meerschaum.api.dash import dash_app, engine
-from meerschaum.api.dash.sessions import is_state_authenticated
+from meerschaum.api.dash import access, dash_app, engine
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.core.Pipeline._saved import (
     list_pipelines, save_pipeline, delete_pipeline, job_arguments, initialize_pipelines, derivative_job_settings,
@@ -15,14 +14,12 @@ from meerschaum.core.Pipeline._saved import (
 
 def _require_session(data):
     """A Pipeline's page is for viewers who may read pipes (`pipes:read`)."""
-    from meerschaum.api.dash import pipes_access
-    if not pipes_access.can_read(data):
+    if not access.resolve_viewer(data if data is not None else {}).can_read_pipes:
         raise PreventUpdate
 
 
 def _viewer(session):
-    from meerschaum.api.dash import pipes_access
-    return pipes_access.viewer(session)
+    return access.resolve_viewer(session if session is not None else {})
 
 
 def _require_pipeline_rights(session, name, instance, permission='pipes:write'):
@@ -635,9 +632,8 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
                 if context.get('action') == 'remove':
                     new['targets'] = [ref for ref in new['targets'] if ref != context['ref']]
                 elif context.get('action') == 'add':
-                    from meerschaum.api.dash import access, pipes_access
                     ref = context.get('ref')
-                    if not ref or not access.ref_is_visible(pipes_access.viewer(session), ref):
+                    if not ref or not access.ref_is_visible(_viewer(session), ref):
                         raise PreventUpdate
                     new['targets'] = list(dict.fromkeys([*new['targets'], ref]))
                 elif context.get('action') == 'edit_pipe':

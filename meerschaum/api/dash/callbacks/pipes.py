@@ -23,10 +23,9 @@ from meerschaum.api.dash.pipes import (
     add_pipe_relation,
     remove_pipe_relation,
 )
-from meerschaum.api.dash import pipes_table, pipe_detail, new_pipe, pipes_access
+from meerschaum.api.dash import access, pipes_table, pipe_detail, new_pipe
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
-from meerschaum.api.dash.sessions import is_state_authenticated
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
 #: The keys filters' dropdowns, in order.
@@ -59,7 +58,8 @@ def _is_table_path(pathname: Optional[str]) -> bool:
 )
 def init_pipes_filters(pathname, search, page_meta, session_data):
     """Fill the key and tag filters from the URL and the instance's keys."""
-    if not _is_table_path(pathname) or not pipes_access.can_read(session_data):
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    if not _is_table_path(pathname) or not viewer.can_read_pipes:
         raise PreventUpdate
     filters = pipes_table.filters_from_search(search)
     instance_keys = (page_meta or {}).get('instance') or pipes_table.global_instance_keys()
@@ -67,7 +67,7 @@ def init_pipes_filters(pathname, search, page_meta, session_data):
     try:
         options = pipes_table.filter_options(
             engine.get_instance(instance_keys, strict=True),
-            viewer=pipes_access.viewer(session_data),
+            viewer=viewer,
         )
     except Exception:
         options = {key: [] for key, _ in KEY_FILTERS}
@@ -192,7 +192,8 @@ def load_pipes_rows(search, refresh_clicks, pathname, page_meta, session_data, r
     a new `generation`, which drops the statistics computed so far. A URL that changed only its
     search or status keeps the rows (those narrow the table without a new read).
     """
-    if not _is_table_path(pathname) or not pipes_access.can_read(session_data):
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    if not _is_table_path(pathname) or not viewer.can_read_pipes:
         raise PreventUpdate
     refreshed = dash.callback_context.triggered_id == 'pipes-refresh-button'
     if refreshed:
@@ -209,7 +210,6 @@ def load_pipes_rows(search, refresh_clicks, pathname, page_meta, session_data, r
     ):
         raise PreventUpdate
     from meerschaum.api.dash import engine
-    viewer = pipes_access.viewer(session_data)
     if not refreshed and (page_meta or {}).get('instance_blocked'):
         store = {
             'instance': instance_keys,
@@ -303,7 +303,8 @@ def fill_pipes_stats(rendered, rows_store, sort, search, status, stats, session_
     filtering by status; the table renders again with them. Only pipes the viewer may see are
     read (`pipes_table.compute_stats` checks the store's rows again).
     """
-    if not rows_store or not isinstance(rendered, dict) or not pipes_access.can_read(session_data):
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    if not rows_store or not isinstance(rendered, dict) or not viewer.can_read_pipes:
         raise PreventUpdate
     generation = rows_store.get('generation', 0)
     if rendered.get('generation', 0) != generation:
@@ -318,7 +319,7 @@ def fill_pipes_stats(rendered, rows_store, sort, search, status, stats, session_
         raise PreventUpdate
     current = dict(current)
     current.update(pipes_table.compute_stats(
-        rows_store.get('instance'), needed, viewer=pipes_access.viewer(session_data),
+        rows_store.get('instance'), needed, viewer=viewer,
     ))
     return {'generation': generation, 'stats': current}
 
@@ -432,8 +433,8 @@ def _meta_pipe(meta: Optional[Dict[str, Any]], session_data: Optional[Dict[str, 
     """
     if not meta:
         raise PreventUpdate
-    from meerschaum.api.dash import access
-    pipe = access.visible_pipe_from_meta(meta, viewer=pipes_access.viewer(session_data))
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    pipe = access.visible_pipe_from_meta(meta, viewer=viewer)
     if pipe is None:
         raise PreventUpdate
     return pipe
@@ -453,10 +454,9 @@ def render_pipe_detail_tab(active_tab, edit, refresh, meta, session_data):
     built for: a slow tab answered after the next one was chosen is not shown (see below). It
     also carries whether the pipe is registered (`None`: its instance could not be read).
     """
-    if not pipes_access.can_read(session_data) or not meta:
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    if not viewer.can_read_pipes or not meta:
         raise PreventUpdate
-    from meerschaum.api.dash import access
-    viewer = pipes_access.viewer(session_data)
     try:
         pipe, error = access.resolve_visible_pipe(
             meta['connector_keys'], meta['metric_key'], meta.get('location_key', None),
@@ -484,7 +484,7 @@ def render_pipe_detail_tab(active_tab, edit, refresh, meta, session_data):
             if state[0] else {}
         )
     registered = state[0]
-    can_register = registered is False and pipes_access.can_register(session_data)[0]
+    can_register = registered is False and viewer.can_register_pipes()[0]
     try:
         children = pipe_detail.build_tab(
             tab, pipe, edit=bool(edit), state=state, can_register=can_register, rights=rights,
@@ -525,7 +525,7 @@ dash_app.clientside_callback(
 )
 def show_runs_tab(meta, session_data):
     """Runs appears only on instances that keep engine runs."""
-    if not pipes_access.can_read(session_data):
+    if not access.resolve_viewer(session_data if session_data is not None else {}).can_read_pipes:
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     return {} if pipe_detail.runs_available(pipe.instance_connector) else {'display': 'none'}
@@ -567,8 +567,7 @@ def toggle_pipe_edit(n_clicks, edit, active_tab, session_data, meta=None):
     """Edit makes the parameters, definition, lineage and rows editable; Done ends it."""
     if not n_clicks:
         raise PreventUpdate
-    from meerschaum.api.dash import access
-    viewer = pipes_access.viewer(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
     if not access.can_edit_pipe(viewer, _meta_pipe(meta, session_data)):
         raise PreventUpdate
     edit = not bool(edit)
@@ -588,8 +587,9 @@ def _start_action(sysargs: List[str], action: str, session_data, ref: str):
     """Run `sysargs` on the server; return `(store, alert)`."""
     from meerschaum.api.dash.execute import run_action
     import shlex
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
     try:
-        result = run_action(sysargs, pipes_access.username(session_data))
+        result = run_action(sysargs, viewer.username)
     except Exception as e:
         result = {'success': False, 'msg': str(e), 'job': None, 'stream': None}
     if not result.get('success'):
@@ -640,8 +640,7 @@ def run_pipe_action(sync_clicks, verify_clicks, confirm_clicks, confirm, typed, 
     else:
         action = 'sync' if trigger == 'pipe-action-sync' else 'verify'
     ### Its permission, edit rights on this pipe and its locks (the server checks them again).
-    from meerschaum.api.dash import access
-    viewer = pipes_access.viewer(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
     allowed, reason = access.may_run_pipe_action(viewer, pipe, action)
     if not allowed:
         return dash.no_update, alert_from_success_tuple((False, reason)), False
@@ -700,8 +699,8 @@ def open_pipe_confirm(clear_clicks, drop_clicks, delete_clicks, cancel_clicks, m
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     action = trigger[len('pipe-manage-'):]
-    from meerschaum.api.dash import access
-    allowed, reason = access.may_run_pipe_action(pipes_access.viewer(session_data), pipe, action)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    allowed, reason = access.may_run_pipe_action(viewer, pipe, action)
     if not allowed:
         return no, no, no, no, no, no, no, alert_from_success_tuple((False, reason))
     title, button, consequence = pipe_detail.DESTRUCTIVE_ACTIONS[action]
@@ -744,7 +743,7 @@ def open_pipe_copy(copy_clicks, cancel_clicks, session_data):
         if not cancel_clicks:
             raise PreventUpdate
         return False, []
-    if not copy_clicks or not pipes_access.can_register(session_data)[0]:
+    if not copy_clicks or not access.resolve_viewer(session_data if session_data is not None else {}).can_register_pipes()[0]:
         raise PreventUpdate
     return True, []
 
@@ -792,7 +791,8 @@ def copy_pipe_click(n_clicks, connector_keys, metric_key, location_key, instance
     """
     if not n_clicks:
         raise PreventUpdate
-    allowed, reason = pipes_access.can_register(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    allowed, reason = viewer.can_register_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason)), dash.no_update, dash.no_update, dash.no_update
     pipe = _meta_pipe(meta, session_data)
@@ -813,7 +813,7 @@ def copy_pipe_click(n_clicks, connector_keys, metric_key, location_key, instance
             return alert, dash.no_update, dash.no_update, dash.no_update
         return [], False, store, []
     (success, message), new_pipe = pipe_detail.copy_pipe(
-        pipe, destination, viewer=pipes_access.viewer(session_data),
+        pipe, destination, viewer=viewer,
     )
     if not success:
         return alert_from_success_tuple((False, message)), dash.no_update, dash.no_update, dash.no_update
@@ -873,7 +873,7 @@ def after_pipe_action(refresh, action_store, meta, session_data):
     """
     if not refresh or not action_store or action_store.get('action') != 'delete':
         raise PreventUpdate
-    if not pipes_access.can_read(session_data):
+    if not access.resolve_viewer(session_data if session_data is not None else {}).can_read_pipes:
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     registered, _ = pipe_detail.registration(pipe)
@@ -942,7 +942,8 @@ def update_pipe_fetch(n_clicks, text, meta, session_data):
     """Update a non-SQL pipe's `fetch` parameters (Definition, in Edit mode)."""
     if not n_clicks:
         raise PreventUpdate
-    allowed, reason = pipes_access.can_write_pipes(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    allowed, reason = viewer.can_write_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason))
     pipe = _meta_pipe(meta, session_data)
@@ -957,7 +958,7 @@ def update_pipe_fetch(n_clicks, text, meta, session_data):
     else:
         parameters.pop('fetch', None)
     return alert_from_success_tuple(
-        pipe_writes.save_parameters(pipe, parameters, viewer=pipes_access.viewer(session_data))
+        pipe_writes.save_parameters(pipe, parameters, viewer=viewer)
     )
 
 
@@ -1018,7 +1019,7 @@ def open_pipe_access(access_clicks, cancel_clicks, meta, session_data):
     if not access_clicks:
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
-    viewer = pipes_access.viewer(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
     parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
     if not access.can_manage_access(viewer, parameters):
         raise PreventUpdate
@@ -1057,9 +1058,9 @@ def save_pipe_access(n_clicks, owner, team, visibility, edit, meta, session_data
     """Save the pipe's access (checked again here: `pipe_writes.set_access`)."""
     if not n_clicks:
         raise PreventUpdate
-    from meerschaum.api.dash import access, pipe_writes
+    from meerschaum.api.dash import pipe_writes
     pipe = _meta_pipe(meta, session_data)
-    viewer = pipes_access.viewer(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
     owner = None if owner in (None, '', NO_OWNER) else owner
     success, message = pipe_writes.set_access(pipe, owner, team, visibility, edit, viewer=viewer)
     if not success:
@@ -1095,7 +1096,7 @@ def open_pipe_locks(locks_clicks, cancel_clicks, meta, session_data):
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
-    if not access.can_lock(pipes_access.viewer(session_data), parameters):
+    if not access.can_lock(access.resolve_viewer(session_data if session_data is not None else {}), parameters):
         raise PreventUpdate
     return True, access.pipe_locks(parameters), []
 
@@ -1117,7 +1118,8 @@ def save_pipe_locks(n_clicks, locks, meta, session_data):
         raise PreventUpdate
     from meerschaum.api.dash import pipe_writes
     pipe = _meta_pipe(meta, session_data)
-    success, message = pipe_writes.set_locks(pipe, list(locks or []), viewer=pipes_access.viewer(session_data))
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    success, message = pipe_writes.set_locks(pipe, list(locks or []), viewer=viewer)
     if not success:
         return dash.no_update, alert_from_success_tuple((False, message)), dash.no_update, dash.no_update
     pipes_table.clear_cache()
@@ -1157,7 +1159,8 @@ def preview_new_pipe(n_clicks, connector_keys, query, instance_keys, datetime_co
     """Run the query (first rows only); its columns fill the Datetime and ID pickers."""
     if not n_clicks:
         raise PreventUpdate
-    allowed, reason = pipes_access.can_register(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    allowed, reason = viewer.can_register_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason)), dash.no_update, dash.no_update
     from meerschaum.api.dash import engine
@@ -1167,7 +1170,7 @@ def preview_new_pipe(n_clicks, connector_keys, query, instance_keys, datetime_co
         return alert_from_success_tuple((False, str(e))), dash.no_update, dash.no_update
     ### The query runs with the connector's credentials: the same checks as a SQL definition.
     refusal = new_pipe.preview_refusal(
-        pipes_access.viewer(session_data), connector_keys, query, instance_keys,
+        viewer, connector_keys, query, instance_keys,
     )
     if refusal:
         return (
@@ -1226,7 +1229,8 @@ def register_new_pipe(
     if not clicks.get(trigger):
         raise PreventUpdate
     no = dash.no_update
-    allowed, reason = pipes_access.can_register(session_data)
+    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    allowed, reason = viewer.can_register_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason)), no, no, no, no, no
     keys, errors = new_pipe.validate_keys(connector_keys, metric_key, location_key)
@@ -1248,7 +1252,7 @@ def register_new_pipe(
         return alert_from_success_tuple((False, message)), False, False, False, no, no
     (success, message), pipe = new_pipe.register_pipe(
         connector_keys, metric_key, location_key, instance_keys, parameters,
-        viewer=pipes_access.viewer(session_data), team=team, visibility=visibility,
+        viewer=viewer, team=team, visibility=visibility,
     )
     if not success:
         return (
@@ -1258,8 +1262,7 @@ def register_new_pipe(
     pipes_table.clear_cache()
     ref = pipes_table.make_ref(instance_keys, connector_keys, metric_key, location_key)
     follow = None
-    from meerschaum.api.dash import access
-    if trigger == 'new-pipe-register-sync' and pipes_access.viewer(session_data).can('pipes:write'):
+    if trigger == 'new-pipe-register-sync' and viewer.can('pipes:write'):
         sysargs, _ = pipe_detail.action_sysargs(pipe_detail.meta_of(pipe), 'sync')
         store, alert = _start_action(sysargs, 'sync', session_data, ref)
         if store is dash.no_update:
@@ -1303,8 +1306,7 @@ def edit_pipe_relations(
     if not triggered or not triggered_id or not any(trigger.get('value') for trigger in triggered):
         raise PreventUpdate
 
-    from meerschaum.api.dash import access
-    viewer = pipes_access.viewer(session_store_data)
+    viewer = access.resolve_viewer(session_store_data if session_store_data is not None else {})
     try:
         pipe = access.visible_pipe_from_meta(json.loads(triggered_id['index']), viewer=viewer)
     except (TypeError, ValueError):

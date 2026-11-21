@@ -21,7 +21,6 @@ from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import dash_app
 from meerschaum.api.dash import engine as _engine
 from meerschaum.api.dash.components import alert_from_success_tuple
-from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api.dash.pipeline_management import (
     pipeline_title, count_label, pipes_label, runs_placeholder,
 )
@@ -34,13 +33,13 @@ STEPS = ('name', 'members', 'traversal', 'review')
 
 def _authenticated(session) -> bool:
     """The Pipelines pages are for viewers who may read pipes (`pipes:read`)."""
-    from meerschaum.api.dash import pipes_access
-    return pipes_access.can_read(session)
+    from meerschaum.api.dash import access
+    return access.resolve_viewer(session if session is not None else {}).can_read_pipes
 
 
 def _viewer(session):
-    from meerschaum.api.dash import pipes_access
-    return pipes_access.viewer(session)
+    from meerschaum.api.dash import access
+    return access.resolve_viewer(session if session is not None else {})
 
 
 def _instance(search):

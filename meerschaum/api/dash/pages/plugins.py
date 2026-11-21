@@ -19,7 +19,7 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 import dash_bootstrap_components as dbc
 from meerschaum.api.dash.components import build_pages_navbar
 from meerschaum.api.dash.jobs import build_job_logs_modal
-from meerschaum.api.dash.plugin_upload import upload_limit_bytes, size_label
+from meerschaum.api.dash._plugins import upload_limit_bytes, size_label
 
 #: The two ways New plugin adds a plugin.
 NEW_PLUGIN_MODES = (('template', 'Start from a template'), ('upload', 'Upload files'))

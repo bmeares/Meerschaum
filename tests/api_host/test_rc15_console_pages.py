@@ -508,7 +508,11 @@ out['guard'] = [
 ]
 
 ### The callbacks: only administrators change users; the only admin is never demoted or deleted.
-cu.viewer = lambda data: {'username': 'c-admin', 'active': True, 'admin': True, 'sees_all': True}
+from meerschaum.api.dash import access
+set_who = lambda name, admin=True: setattr(
+    access, 'resolve_viewer', lambda *args, _v=access.make_viewer(name, admin=admin), **kwargs: _v,
+)
+set_who('c-admin', admin=True)
 target = lambda name, action: {'username': name, 'action': action}
 ### The Edit dialog's Save: the type, a role (here the default), no explicit permissions, no teams.
 edit = lambda name, user_type, role='default': cu.submit_edit_user(
@@ -527,7 +531,7 @@ out['promoted_session'] = sessions.get_session_data('00000000-0000-4000-8000-000
 out['demote_now_allowed'] = edit('c-admin', 'user')[0]
 sessions.set_session('00000000-0000-4000-8000-0000000c5ea1', {'username': 'c-admin', 'admin': True})
 edit('c-admin', 'admin')
-cu.viewer = lambda data: {'username': 'c-user', 'active': True, 'admin': True, 'sees_all': True}
+set_who('c-user', admin=True)
 sessions.set_session('00000000-0000-4000-8000-0000000c5e02', {'username': 'c-user', 'admin': True})
 reset = cu.submit_reset_password(1, target('c-user', 'password'), 'brand-new-pass-1', 'brand-new-pass-1', 0,
                                  {'session-id': '00000000-0000-4000-8000-0000000c5e02'})
@@ -535,13 +539,13 @@ out['reset'] = reset[0]
 out['password'] = verify_password('brand-new-pass-1', conn.get_user_password_hash(User('c-user', instance=conn)))
 out['reset_keeps_own_session'] = sessions.get_session_data('00000000-0000-4000-8000-0000000c5e02', use_cache=False) is not None
 out['reset_ended_other'] = sessions.get_session_data('00000000-0000-4000-8000-0000000c5e01', use_cache=False) is None
-cu.viewer = lambda data: {'username': 'c-admin', 'active': True, 'admin': True, 'sees_all': True}
+set_who('c-admin', admin=True)
 sessions.set_session('00000000-0000-4000-8000-0000000c5e03', {'username': 'c-user'})
 deleted = cu.submit_delete_user(1, target('c-user', 'delete'), 'c-user', 0, {})
 out['deleted'] = [deleted[0], 'c-user' in (conn.get_users() or [])]
 out['deleted_session'] = sessions.get_session_data('00000000-0000-4000-8000-0000000c5e03', use_cache=False)
 
-cu.viewer = lambda data: {'username': 'bob', 'active': True, 'admin': False, 'sees_all': True}
+set_who('bob', admin=False)
 out['non_admin'] = str(edit('c-admin', 'user')[1])
 print('JSON:' + json.dumps(out, default=str))
 '''))

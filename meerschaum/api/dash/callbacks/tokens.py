@@ -19,7 +19,7 @@ import dash.dcc as dcc
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector, debug
 from meerschaum.api.dash import dash_app
-from meerschaum.api.dash.sessions import get_user_from_session, is_state_authenticated
+from meerschaum.api.dash.sessions import get_user_from_session
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from meerschaum.api.dash.tokens import (
     get_tokens_cards,

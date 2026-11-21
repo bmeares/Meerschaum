@@ -92,28 +92,25 @@ def validate_account(
 
 def _register_on_server(username: str, password: str, email: Optional[str]) -> Optional[SuccessTuple]:
     """Use the server's single registration lock; `None` only for an in-process host."""
-    import json
-    import urllib.error
-    import urllib.parse
-    import urllib.request
-    from meerschaum.api.dash.execute import server_url, _error_message
-    base_url = server_url()
-    if not base_url:
+    from meerschaum.api.host._server_client import (
+        AnonymousAuth, ServerHTTPError, get_client,
+    )
+    client = get_client()
+    if not client.available:
         return None
     form = {'username': username, 'password': password}
     if email:
         form['email'] = str(email).strip()
-    request = urllib.request.Request(
-        base_url + '/users/register',
-        data=urllib.parse.urlencode(form).encode('utf-8'),
-        headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'},
-        method='POST',
-    )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        return False, _error_message(e)
+        payload = client.request_json(
+            'POST',
+            '/users/register',
+            auth=AnonymousAuth(),
+            form_body=form,
+            timeout=30,
+        )
+    except ServerHTTPError as e:
+        return False, e.message
     except Exception as e:
         return False, f"Could not register the account with the server: {e}"
     if isinstance(payload, list) and len(payload) == 2 and isinstance(payload[0], bool):

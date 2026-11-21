@@ -11,7 +11,7 @@ from typing import Optional, Tuple, Any
 
 import meerschaum as mrsm
 from meerschaum.api import CHECK_UPDATE
-from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
+from meerschaum.api.dash.sessions import get_username_from_session
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_icon
 from meerschaum.utils.typing import WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc

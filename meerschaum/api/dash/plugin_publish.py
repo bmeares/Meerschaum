@@ -6,10 +6,12 @@ import threading
 import uuid
 from types import SimpleNamespace
 
-from dash import dcc, html
-import dash_bootstrap_components as dbc
-
-from meerschaum.api.dash.plugin_sources import source_viewer
+import meerschaum.api.dash.access as access
+from meerschaum.api.dash._plugins import (
+    PUBLISH_REFUSAL,
+    discover_plugin_files,
+    may_publish,
+)
 
 _AUTH_FIELDS = ('username', 'password', 'client_id', 'client_secret', 'api_key')
 _LOCK = threading.Lock()
@@ -17,30 +19,6 @@ _LOCK = threading.Lock()
 
 class PublishError(ValueError):
     """A local validation error whose message is safe to show in the dialog."""
-
-
-#: Why a session may not publish an installed plugin.
-PUBLISH_REFUSAL = 'Only administrators and team plugin managers can publish installed plugins.'
-
-
-def may_publish(session, name=None):
-    """
-    Whether this session, read fresh, may publish the installed plugin `name` (those who may
-    manage it: `plugins.may_manage_plugin`); without a name, whether it may publish at all.
-    """
-    from meerschaum.api.dash import plugins as pages
-    try:
-        who = source_viewer(session)
-    except Exception:
-        return False
-    if who.no_auth:
-        return True
-    if not who.signed_in or not who.can('plugins:read'):
-        return False
-    if name is None:
-        return pages.may_manage_plugins(who)
-    return (pages.is_safe_plugin_name(name) and pages.can_see_plugin(who, name)
-            and pages.may_manage_plugin(who, name))
 
 
 def repositories(session, name=None):
@@ -51,16 +29,16 @@ def repositories(session, name=None):
     if not may_publish(session, name):
         return []
     from meerschaum.api.dash.connector_listing import list_connectors
-    return [row['keys'] for row in list_connectors(source_viewer(session)) if row['type'] == 'api']
+    who = access.resolve_viewer(session if session is not None else {}, fresh=True)
+    return [row['keys'] for row in list_connectors(who) if row['type'] == 'api']
 
 
 def _key(context, repository, session):
     if not isinstance(context, dict) or not may_publish(session):
         raise PermissionError(PUBLISH_REFUSAL)
-    from meerschaum.api.dash.plugins import _discover_plugin_files
     name = context.get('name')
     ### A plugin the session may not manage is not told apart from one that is not installed.
-    if name not in _discover_plugin_files() or not may_publish(session, name):
+    if name not in discover_plugin_files() or not may_publish(session, name):
         raise PublishError('This plugin is not installed.')
     if repository not in repositories(session, name):
         raise PublishError('Select a configured API repository.')
@@ -68,7 +46,8 @@ def _key(context, repository, session):
     session_id = valid_session_id((session or {}).get('session-id'))
     # A no-auth console still keeps different dialogs' remote credentials separate.
     nonce = valid_session_id(context.get('nonce'))
-    if not session_id and not (source_viewer(session).no_auth and nonce):
+    who = access.resolve_viewer(session if session is not None else {}, fresh=True)
+    if not session_id and not (who.no_auth and nonce):
         raise PermissionError('Sign in before publishing a plugin.')
     return session_id or nonce, repository
 
@@ -86,8 +65,10 @@ def browser_credentials(browser, key, url):
         {'username', 'password'}, {'client_id', 'client_secret'}, {'api_key'},
     ):
         return None
-    if not all(isinstance(value, str) and value.strip() and len(value) <= 4096
-               for value in fields.values()):
+    if not all(
+        isinstance(value, str) and value.strip() and len(value) <= 4096
+        for value in fields.values()
+    ):
         return None
     return fields
 
@@ -140,8 +121,9 @@ def _save_credentials(repository, conn, fields):
     overrides = [patch.get('api', {}).get(label, {}) for _, patch in _env_patches()]
     variable = os.environ.get('MRSM_API_' + label.upper())
     if variable:
-        overrides.append(json.loads(variable) if variable.lstrip().startswith('{')
-                         else {'uri': variable})
+        overrides.append(
+            json.loads(variable) if variable.lstrip().startswith('{') else {'uri': variable}
+        )
     for override in overrides:
         if not isinstance(override, dict):
             continue
@@ -149,11 +131,15 @@ def _save_credentials(repository, conn, fields):
         if isinstance(values.get('uri'), str):
             values.update(conn.from_uri(values['uri'], as_dict=True))
         if any(values.get(field) and values[field] != fields.get(field) for field in _AUTH_FIELDS):
-            raise PublishError('This connector has credentials in environment settings. '
-                               'Update those settings or choose temporary browser storage.')
+            raise PublishError(
+                'This connector has credentials in environment settings. '
+                'Update those settings or choose temporary browser storage.'
+            )
     with _LOCK:
-        disk = read_config(keys=['meerschaum'], write_missing=False, substitute=False,
-                           raise_parsing_errors=True)
+        disk = read_config(
+            keys=['meerschaum'], write_missing=False, substitute=False,
+            raise_parsing_errors=True,
+        )
         section = disk.setdefault('meerschaum', {})
         apis = section.setdefault('connectors', {}).setdefault('api', {})
         attributes = copy.deepcopy(apis.get(label) or {})
@@ -203,15 +189,28 @@ def repository_status(context, repository, session, browser=None):
         return False, 'Could not connect to this repository. Check its connection settings and try again.'
 
 
-def login_repository(context, repository, session, method, username, password,
-                     client_id, client_secret, api_key, persist=False, browser=None):
+def login_repository(
+    context,
+    repository,
+    session,
+    method,
+    username,
+    password,
+    client_id,
+    client_secret,
+    api_key,
+    persist=False,
+    browser=None,
+):
     fields = {
         'password': {'username': username, 'password': password},
         'client_credentials': {'client_id': client_id, 'client_secret': client_secret},
         'api_key': {'api_key': api_key},
     }.get(method)
-    if not fields or not all(isinstance(value, str) and value.strip() and len(value) <= 4096
-                             for value in fields.values()):
+    if not fields or not all(
+        isinstance(value, str) and value.strip() and len(value) <= 4096
+        for value in fields.values()
+    ):
         return False, 'Fill in the credentials for the selected sign-in method.', browser
     try:
         key, conn, url = _connection(context, repository, session, fields)
@@ -223,10 +222,14 @@ def login_repository(context, repository, session, method, username, password,
             except PublishError:
                 raise
             except Exception:
-                raise PublishError('Could not save credentials to this API connector. '
-                                   'Check its configuration permissions or choose temporary browser storage.') from None
+                raise PublishError(
+                    'Could not save credentials to this API connector. '
+                    'Check its configuration permissions or choose temporary browser storage.'
+                ) from None
         stored = _browser_update(browser, key, url, None if persist is True else fields)
-        destination = 'Saved to the API connector.' if persist is True else 'Stored for this browser session.'
+        destination = (
+            'Saved to the API connector.' if persist is True else 'Stored for this browser session.'
+        )
         return True, f'Ready to publish to {repository}. {destination}', stored
     except (PublishError, PermissionError) as exc:
         return False, str(exc), browser
@@ -265,14 +268,24 @@ def publish(context, repository, session, browser=None):
 
 
 def build_publish_dialog(name, origin, session):
+    from dash import dcc, html
+    import dash_bootstrap_components as dbc
+
     choices = repositories(session, name)
     selected = origin if origin in choices else (choices[0] if choices else None)
+
     def field(label, identifier, secret=False):
         return html.Div([
             dbc.Label(label, html_for=identifier),
-            dbc.Input(id=identifier, type='password' if secret else 'text',
-                      autoComplete='off', value='', maxLength=4096),
+            dbc.Input(
+                id=identifier,
+                type='password' if secret else 'text',
+                autoComplete='off',
+                value='',
+                maxLength=4096,
+            ),
         ], className='mb-3')
+
     return dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle(f"Publish {name}")),
         dbc.ModalBody([
@@ -280,28 +293,62 @@ def build_publish_dialog(name, origin, session):
             dcc.Store(id='plugin-publish-context', data={'name': name, 'nonce': str(uuid.uuid4())}),
             dcc.Store(id='plugin-publish-credentials', storage_type='session'),
             dbc.Label('API repository', html_for='plugin-publish-repository'),
-            dbc.Select(id='plugin-publish-repository',
-                       options=[{'label': keys, 'value': keys} for keys in choices], value=selected),
-            html.P('Configure an API connector on this server to add a repository.',
-                   hidden=bool(choices), className='text-muted mt-2'),
+            dbc.Select(
+                id='plugin-publish-repository',
+                options=[{'label': keys, 'value': keys} for keys in choices],
+                value=selected,
+            ),
+            html.P(
+                'Configure an API connector on this server to add a repository.',
+                hidden=bool(choices),
+                className='text-muted mt-2',
+            ),
             html.Div(id='plugin-publish-alert', className='mt-3', role='status'),
             html.Fieldset([
                 dbc.Label('Sign in with'),
-                dbc.RadioItems(id='plugin-publish-method', value='password', inline=True,
-                    options=[{'label': 'Username and password', 'value': 'password'},
-                             {'label': 'Client ID and secret', 'value': 'client_credentials'},
-                             {'label': 'API key', 'value': 'api_key'}]),
-                html.Div([field('Username', 'plugin-publish-username'),
-                          field('Password', 'plugin-publish-password', True)],
-                         id='plugin-publish-password-fields', className='mt-3'),
-                html.Div([field('Client ID', 'plugin-publish-client-id'),
-                          field('Client secret', 'plugin-publish-client-secret', True)],
-                         id='plugin-publish-client-fields', hidden=True, className='mt-3'),
-                html.Div(field('API key', 'plugin-publish-api-key', True),
-                         id='plugin-publish-key-fields', hidden=True, className='mt-3'),
-                dbc.Switch(id='plugin-publish-persist', label='Save credentials to this API connector', value=False),
-                html.P('Off: temporary browser storage, cleared when this browser session ends. '
-                       'On: save on the server for future use of this connector.', className='text-muted mt-2'),
+                dbc.RadioItems(
+                    id='plugin-publish-method',
+                    value='password',
+                    inline=True,
+                    options=[
+                        {'label': 'Username and password', 'value': 'password'},
+                        {'label': 'Client ID and secret', 'value': 'client_credentials'},
+                        {'label': 'API key', 'value': 'api_key'},
+                    ],
+                ),
+                html.Div(
+                    [
+                        field('Username', 'plugin-publish-username'),
+                        field('Password', 'plugin-publish-password', True),
+                    ],
+                    id='plugin-publish-password-fields',
+                    className='mt-3',
+                ),
+                html.Div(
+                    [
+                        field('Client ID', 'plugin-publish-client-id'),
+                        field('Client secret', 'plugin-publish-client-secret', True),
+                    ],
+                    id='plugin-publish-client-fields',
+                    hidden=True,
+                    className='mt-3',
+                ),
+                html.Div(
+                    field('API key', 'plugin-publish-api-key', True),
+                    id='plugin-publish-key-fields',
+                    hidden=True,
+                    className='mt-3',
+                ),
+                dbc.Switch(
+                    id='plugin-publish-persist',
+                    label='Save credentials to this API connector',
+                    value=False,
+                ),
+                html.P(
+                    'Off: temporary browser storage, cleared when this browser session ends. '
+                    'On: save on the server for future use of this connector.',
+                    className='text-muted mt-2',
+                ),
                 dbc.Button('Sign in', id='plugin-publish-login', n_clicks=0, color='primary'),
             ], id='plugin-publish-auth', hidden=True),
         ]),

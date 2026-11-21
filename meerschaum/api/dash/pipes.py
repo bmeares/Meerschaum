@@ -32,7 +32,7 @@ from meerschaum.api.dash.components import (
     build_sign_out_button,
     build_logo_row,
 )
-from meerschaum.api.dash.sessions import is_session_authenticated
+from meerschaum.api.dash.access import is_session_authenticated
 from meerschaum.config import get_config
 import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)

@@ -74,7 +74,7 @@ STARLETTE_HTTPX_WARNING_FILTER = 'ignore:Using `httpx` with `starlette.testclien
 FAKE_VIEWERS = '''
 def fake_viewers(viewers=None, default=None):
     from meerschaum.api.dash import access as _access
-    def _get_viewer(session_data=None, session_id=None):
+    def _get_viewer(session_data=None, session_id=None, **kwargs):
         if session_id is None and isinstance(session_data, dict):
             session_id = session_data.get('session-id')
         spec = (viewers or {}).get(session_id, default)
@@ -86,6 +86,47 @@ def fake_viewers(viewers=None, default=None):
     _access.get_viewer = _get_viewer
     return _get_viewer
 '''
+
+
+def extract_json(result, prefix: str = 'JSON:') -> dict:
+    """Assert subprocess `result` exited 0 and parse the last `JSON:` line from stdout."""
+    assert result.returncode == 0, result.stderr[-6000:]
+    lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
+    assert lines, f"No {prefix!r} line in stdout:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}"
+    return json.loads(lines[-1][len(prefix):])
+
+
+_json = extract_json
+
+
+def check(result) -> str:
+    """Assert subprocess `result` exited 0 and return its stdout."""
+    assert result.returncode == 0, result.stderr[-6000:]
+    return result.stdout
+
+
+def walk(node):
+    """Yield every component node in a Dash component tree."""
+    if isinstance(node, (list, tuple)):
+        for child in node:
+            yield from walk(child)
+        return
+    if node is None or isinstance(node, (str, int, float, bool)):
+        return
+    yield node
+    for attr in ('children', 'label'):
+        child = getattr(node, attr, None)
+        if child is not None:
+            yield from walk(child)
+
+
+def ids(component) -> set:
+    """Return all string `id`s in a Dash component tree."""
+    return {
+        node_id
+        for node in walk(component)
+        if isinstance((node_id := getattr(node, 'id', None)), str)
+    }
 
 
 def run_python(root, plugins, code: str, host_mode: bool = True, extra_env: dict = None):
@@ -166,22 +207,49 @@ def write_plugin(plugins: pathlib.Path, name: str, source: str) -> None:
     (path / '__init__.py').write_text(textwrap.dedent(source), encoding='utf-8')
 
 
+_DEPS_CHECKED: bool = False
+_DEPS_SKIP_REASON: Optional[str] = None
+
+
+def ensure_api_host_deps() -> bool:
+    """Verify the API host + Dash console dependencies once per pytest worker process."""
+    global _DEPS_CHECKED, _DEPS_SKIP_REASON
+    if not _DEPS_CHECKED:
+        import shutil
+        scratch = pathlib.Path.home() / '.cache' / 'mrsm-api-host-tests'
+        scratch.mkdir(parents=True, exist_ok=True)
+        root = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-probe-', dir=scratch))
+        plugins = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-probe-plugins-', dir=scratch))
+        try:
+            probe = run_python(
+                root,
+                plugins,
+                "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
+                "import fastapi, uvicorn, dash, dash_bootstrap_components, dash_ace, a2wsgi, jwt",
+            )
+            if probe.returncode != 0:
+                _DEPS_SKIP_REASON = (
+                    f"The API host's dependencies are missing:\n{probe.stderr[-1500:]}"
+                )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+            shutil.rmtree(plugins, ignore_errors=True)
+        _DEPS_CHECKED = True
+    if _DEPS_SKIP_REASON is not None:
+        pytest.skip(_DEPS_SKIP_REASON)
+    return True
+
+
 @pytest.fixture(scope='module')
 def sandbox():
-    """A temporary root and plugins directory, skipped when the host dependencies are missing."""
+    """A temporary root and plugins directory (uses the process-cached dependency probe)."""
+    ensure_api_host_deps()
     scratch = pathlib.Path.home() / '.cache' / 'mrsm-api-host-tests'
     scratch.mkdir(parents=True, exist_ok=True)
     root = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-', dir=scratch))
     plugins = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-plugins-', dir=scratch))
     import shutil
     try:
-        check = run_python(
-            root, plugins,
-            "import meerschaum.utils.venv as v; v.activate_venv('mrsm'); "
-            "import fastapi, uvicorn, dash, dash_bootstrap_components, dash_ace, a2wsgi, jwt",
-        )
-        if check.returncode != 0:
-            pytest.skip(f"The API host's dependencies are missing:\n{check.stderr[-1500:]}")
         yield root, plugins
     finally:
         ### Also when the check skips or fails: the directories are never left behind.
