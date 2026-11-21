@@ -86,7 +86,8 @@ impl SqlConnector {
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<Option<i64>> {
         use crate::queries::estimate::{get_rowcount_estimate_query, use_estimate};
-        let (pipe, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
+        let pipe: &Pipe = &sp;
         let filtered = query.remote
             || query.begin.is_some()
             || query.end.is_some()
@@ -114,7 +115,7 @@ impl SqlConnector {
                 Err(e) => tracing::debug!("No row estimate for {pipe}: {e}"),
             }
         }
-        self.get_pipe_rowcount_cached(&pipe, query, cached).await
+        self.get_pipe_rowcount_cached(pipe, query, cached).await
     }
 
     /// `get_pipe_size(pipe)`: the target table's on-disk size in bytes (`None` if unknown).
@@ -124,7 +125,7 @@ impl SqlConnector {
 
     /// [`get_pipe_size`](Self::get_pipe_size) propagating lazy schema discovery / binding errors.
     pub(crate) async fn get_pipe_size_checked(&self, pipe: &Pipe) -> ConnectorResult<Option<i64>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         Ok(self.pipe_size(&sp).await)
     }
 

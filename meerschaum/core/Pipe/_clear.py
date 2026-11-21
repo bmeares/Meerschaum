@@ -75,6 +75,6 @@ def clear(
             **kwargs
         )
     if begin is None and end is None and not params and isinstance(result, tuple) and result[0]:
-        from meerschaum.core.Pipeline._engine import forget_engine_state
-        forget_engine_state(self, 'clear_pipe')
+        from meerschaum.core.Pipe._drop import _forget_engine_state
+        _forget_engine_state(self, 'clear_pipe')
     return result

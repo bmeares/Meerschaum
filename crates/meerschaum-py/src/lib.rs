@@ -21,6 +21,9 @@
 //!
 //! The Python-facing loader is `meerschaum/_core/__init__.py`; see this crate's README.
 
+// PyO3 and the Arrow C stream boundary need `unsafe`; each block says why it holds.
+#![allow(unsafe_code)]
+
 use pyo3::prelude::*;
 
 pub mod access_api;

@@ -259,7 +259,8 @@ impl SqlConnector {
     /// `verify schema`: how the pipe's table differs from its declared dtypes (nothing is
     /// written). A missing table has an empty plan (`exists: false`).
     pub async fn get_pipe_schema_plan(&self, pipe: &Pipe) -> ConnectorResult<SchemaPlan> {
-        let (pipe, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
+        let pipe: &Pipe = &sp;
         let schema = self.get_pipe_schema(&sp);
         let table = self.pipe_table_name(&sp);
         if !self

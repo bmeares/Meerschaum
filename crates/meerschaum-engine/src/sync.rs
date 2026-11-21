@@ -1207,25 +1207,18 @@ async fn sync_inner(
     result
 }
 
-/// Whether `pipe` should sync in place directly inside `instance` (source == instance, the
-/// instance implements the in-place capability, the registry allows it, no delegated node
-/// delivery is active, and `system:experimental:inplace_sync` is not turned off).
+/// Whether `pipe` syncs in place directly inside `instance`: its source is that same instance,
+/// the instance can, and the host opted in for that source
+/// ([`ConnectorRegistry::allows_inplace_sync`], where hosts apply
+/// `system:experimental:inplace_sync`). Never under delegated node delivery: an in-place write
+/// would bypass the delivery's fenced destination write.
 fn can_sync_inplace(env: &SyncEnv<'_>, instance: &dyn InstanceConnector, pipe: &Pipe) -> bool {
-    if env.delivery.is_some()
-        || !instance.supports_inplace_sync()
-        || !env.registry.allows_inplace_sync(pipe.instance_keys())
-    {
-        return false;
-    }
     let same_instance = pipe.connector_keys() == pipe.instance_keys()
         || pipe.connector_keys() == instance.connector_keys();
-    if !same_instance {
-        return false;
-    }
-    meerschaum_core::config::Config::current()
-        .ok()
-        .and_then(|c| c.get(&["system", "experimental", "inplace_sync"]))
-        .is_none_or(|v| v.truthy())
+    env.delivery.is_none()
+        && same_instance
+        && instance.supports_inplace_sync()
+        && env.registry.allows_inplace_sync(pipe.connector_keys())
 }
 
 /// Run an in-place sync through [`InstanceConnector::sync_pipe_inplace`], bridging the engine's

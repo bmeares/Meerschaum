@@ -330,3 +330,78 @@ async fn engine_run_records_ledger_natively_through_inplace_seam() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A host opts in for the sources it syncs in place (its home instance): a same-instance pipe of
+/// another source takes the fetch path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inplace_sync_follows_the_hosts_sources() {
+    let dir = temp_dir("inplace_home");
+    let uri = format!("sqlite:///{}", dir.join("home.db").display());
+    let keys = "sql:inpl_home";
+    let sql = Arc::new(SqlConnector::from_uri("inpl_home", &uri).await.unwrap());
+    assert!(
+        sql.exec_queries(
+            &[
+                "CREATE TABLE home_src (ts TIMESTAMP, id INTEGER, v INTEGER)".into(),
+                "INSERT INTO home_src VALUES ('2024-01-01 00:00:00', 1, 10)".into(),
+            ],
+            true,
+            true,
+        )
+        .await
+        .iter()
+        .all(Option::is_some)
+    );
+    let pipe = |metric: &str| {
+        Pipe::builder(keys, metric)
+            .instance(keys)
+            .parameters(
+                Value::from_json_str(
+                    r#"{
+                        "columns": {"datetime": "ts", "id": "id"},
+                        "fetch": {"definition": "SELECT ts, id, v FROM home_src"}
+                    }"#,
+                )
+                .unwrap()
+                .to_map(),
+            )
+            .build()
+            .unwrap()
+    };
+    let defaults = Default::default();
+    // Whether a sync ran in place: it stages the definition's rows inside the database.
+    let synced_in_place = |sources: meerschaum_engine::registry::InplaceSources, metric: &str| {
+        let sql = sql.clone();
+        let pipe = pipe(metric);
+        let defaults = &defaults;
+        async move {
+            let registry = meerschaum_engine::registry::with_inplace_sync(
+                Arc::new(
+                    StaticRegistry::new()
+                        .with_instance(keys, sql.clone())
+                        .with_source(keys, sql.clone()),
+                ),
+                sources,
+            );
+            let env = SyncEnv {
+                delivery: None,
+                registry: registry.as_ref(),
+                defaults,
+                default_backtrack_minutes: 1440,
+                filter_params_index_limit: 250,
+                known: None,
+            };
+            sql.enable_query_log();
+            let result = sync_pipe(&env, &pipe, None, &SyncArgs::default(), None).await;
+            assert!(result.success, "{}", result.message);
+            sql.take_query_log().iter().any(|statement| {
+                (statement.starts_with("CREATE TABLE") || statement.starts_with("INSERT INTO"))
+                    && statement.contains("home_src")
+            })
+        }
+    };
+    assert!(synced_in_place(Arc::new(move |k: &str| k == keys), "home").await);
+    assert!(!synced_in_place(Arc::new(|k: &str| k == "sql:other"), "other").await);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

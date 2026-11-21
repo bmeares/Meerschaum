@@ -136,7 +136,7 @@ impl SqlConnector {
         if remote || cached.as_ref().is_none_or(IndexMap::is_empty) {
             return self.get_sync_time(pipe, params, newest, remote).await;
         }
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_cached_checked(&sp, cached).await?;
         self.sync_time_checked(&sp, &state, params, newest).await
     }
@@ -152,7 +152,7 @@ impl SqlConnector {
         if query.remote || cached.as_ref().is_none_or(IndexMap::is_empty) {
             return self.get_pipe_rowcount(pipe, query).await;
         }
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_cached_checked(&sp, cached).await?;
         self.rowcount_with_state(&sp, &state, query).await
     }
@@ -250,7 +250,7 @@ impl SqlConnector {
         opts: &DataQueryOptions,
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<(Option<Frame>, PipeState)> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_cached_checked(&sp, cached).await?;
         if !state.exists {
             return Ok((None, state));
@@ -270,7 +270,7 @@ impl SqlConnector {
         no_order: bool,
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<Option<Frame>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_cached(&sp, cached).await;
         if !state.exists {
             return Ok(None);

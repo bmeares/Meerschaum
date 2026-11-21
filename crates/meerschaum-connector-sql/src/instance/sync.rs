@@ -564,21 +564,23 @@ impl SqlConnector {
         let internal_table = pipe.temporary && pipe.connector_keys() == "mrsm";
         let cache_internal = internal_table && sp0.is_static();
         let precise_history = mysql_engine_history(&sp0, flavor);
+        let ready = (internal_table || precise_history)
+            .then(|| {
+                self.catalog()
+                    .internal_ready(&sp0.target, schema.as_deref())
+            })
+            .flatten();
         // Non-static node writers still refresh their schema, but successful readiness also
         // marks their timestamp precision so warm progress updates need no extra catalog read.
-        let precision_ready = precise_history
-            && self
-                .catalog()
-                .is_internal_ready(&sp0.target, schema.as_deref());
-        let mut cached = internal.cached_state.clone().or_else(|| {
-            if internal_table {
-                self.catalog()
-                    .internal_ready_cols(&sp0.target, schema.as_deref())
-                    .map(|cols| super::data::pipe_state_from_cols(&sp0, cols))
-            } else {
-                None
-            }
-        });
+        let precision_ready = precise_history && ready.is_some();
+        // A sync that does not finish leaves no columns types behind.
+        let synced_key = super::catalog::synced_key(pipe);
+        self.catalog().forget_synced(&synced_key);
+        let mut cached =
+            internal
+                .cached_state
+                .clone()
+                .or(if internal_table { ready } else { None });
         // A non-static internal table (engine nodes and cursors: newer releases add progress
         // and dependency columns) is ready as this process left it only while the rows fit its
         // layout: rows that need a column added or altered take the cold path below (the lock
@@ -1023,6 +1025,14 @@ impl SqlConnector {
                     tracing::warn!("{m}");
                 }
             }
+            if !is_new && internal.columns_types.is_none() {
+                self.catalog().put_synced(
+                    &synced_key,
+                    &sp.target,
+                    schema.as_deref(),
+                    &state.cols_types,
+                );
+            }
             return Ok(replace_result(
                 replaced_rows,
                 unseen_count,
@@ -1056,6 +1066,16 @@ impl SqlConnector {
             result.inserted = unseen_count;
             result.updated = update_count;
         }
+        if !is_new && !cache_internal && internal.columns_types.is_none() {
+            // The layout the sync worked against (reflected again after any `ADD COLUMN` /
+            // `ALTER COLUMN` it ran; inserts and updates do not change it).
+            self.catalog().put_synced(
+                &synced_key,
+                &sp.target,
+                schema.as_deref(),
+                &state.cols_types,
+            );
+        }
         // Internal tables (static or not) are ready for this process once a write succeeded:
         // later writes skip the initialization lock and the catalog.
         if internal_table || precise_history {
@@ -1063,7 +1083,7 @@ impl SqlConnector {
                 state = self.pipe_state(&sp).await;
             }
             self.catalog()
-                .put_internal_ready(&sp.target, schema.as_deref(), &state.cols_types);
+                .put_internal_ready(&sp.target, schema.as_deref(), &state);
         }
         let _ = dt_col;
         Ok(result)

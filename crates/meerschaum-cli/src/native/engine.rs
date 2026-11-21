@@ -149,9 +149,6 @@ pub fn registry_with(
         && config_ref
             .get(&["system", "experimental", "inplace_sync"])
             .is_none_or(|v| v.truthy());
-    if inplace_enabled {
-        native = native.with_inplace_sync(true);
-    }
     let engine_defaults = EngineConfig::from_config(config_ref, Some(&config_ref.paths().root_dir));
     let graph_options = meerschaum_engine::GraphOptions {
         defaults: engine_defaults.defaults.clone(),
@@ -254,8 +251,14 @@ pub fn registry_with(
     );
     // Native plugins' host calls reuse the session's connectors.
     registry.set_session(session.clone());
+    // v4 syncs a pipe in place when its source is its instance; here, the pipes whose
+    // source and instance are the home instance.
     let exposed: Arc<dyn meerschaum_engine::ConnectorRegistry> = if inplace_enabled {
-        meerschaum_engine::registry::with_inplace_sync(registry.clone(), true)
+        let home = inst.keys();
+        meerschaum_engine::registry::with_inplace_sync(
+            registry.clone(),
+            Arc::new(move |keys: &str| keys == home),
+        )
     } else {
         registry.clone()
     };

@@ -428,3 +428,88 @@ async fn oracle_metrics_writer_child() {
         .await
         .unwrap();
 }
+
+/// Whether a statement reads Oracle's catalog (what an internal write's cold path does).
+fn reads_catalog(statement: &str) -> bool {
+    let upper = statement.to_uppercase();
+    [
+        "ALL_TAB_COLS",
+        "ALL_INDEXES",
+        "ALL_CONSTRAINTS",
+        "ALL_TABLES",
+    ]
+    .iter()
+    .any(|view| upper.contains(view))
+}
+
+/// Another internal table's guarded index DDL (a `DECLARE ... EXECUTE IMMEDIATE` block) leaves
+/// the metrics table ready: the next metrics write takes the warm path, with no catalog read.
+#[tokio::test]
+async fn oracle_guarded_ddl_of_one_internal_table_keeps_the_others_ready() {
+    let Some(setup) = connector().await else {
+        return;
+    };
+    setup.initialize_engine_metrics().await.unwrap();
+    // A connector of its own: nothing is ready in it yet.
+    let conn = connector().await.unwrap();
+    let metric_key = format!(
+        "readiness_{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let source = Pipe::builder("sql:synthetic", &metric_key)
+        .instance(INSTANCE)
+        .build()
+        .unwrap();
+    let registered = conn.register_pipe(&source).await;
+    assert!(registered.success, "{}", registered.message);
+    let metric = || {
+        SyncMetric::from_outcome(
+            &source,
+            &SyncOutcome::new(true, "synthetic", SyncSource::Python, None)
+                .with_counts(1, 0, 0)
+                .with_duration(Some(Duration::from_millis(1))),
+        )
+    };
+    // The first write of this connector initializes the table (the cold path reads the catalog).
+    conn.enable_query_log();
+    conn.record_sync_metrics(&[metric()]).await.unwrap();
+    let cold = conn.take_query_log();
+    assert!(cold.iter().any(|s| reads_catalog(s)), "{cold:#?}");
+
+    // Guarded index DDL of another, new internal table, as its initialization runs it.
+    let other = empty_metrics(&setup).await;
+    let plan = conn.get_create_index_queries(&other).await.unwrap();
+    let guarded: Vec<String> = plan
+        .values()
+        .flatten()
+        .filter(|s| s.starts_with("DECLARE"))
+        .cloned()
+        .collect();
+    assert!(!guarded.is_empty(), "{plan:#?}");
+    assert!(conn.exec_queries_all(&guarded, true, true).await);
+
+    conn.enable_query_log();
+    conn.record_sync_metrics(&[metric()]).await.unwrap();
+    let warm = conn.take_query_log();
+    assert!(!warm.iter().any(|s| reads_catalog(s)), "{warm:#?}");
+
+    // Leave the shared metrics table as it was for the other tests of this instance.
+    let metrics = conn.engine_state_pipe(INSTANCE, "engine_metrics").unwrap();
+    let mut params = meerschaum_core::Map::new();
+    params.insert("metric_key".into(), Value::Str(metric_key));
+    let query = DataQuery {
+        params: Some(params),
+        ..Default::default()
+    };
+    assert_eq!(
+        conn.get_pipe_rowcount(&metrics, &query).await.unwrap(),
+        Some(2)
+    );
+    assert!(conn.clear_pipe(&metrics, &query).await.success);
+    assert!(conn.delete_pipe(&source).await.success);
+    let table = conn.pipe_table_name(&conn.sql_pipe(&other).unwrap());
+    conn.driver()
+        .exec(&format!("DROP TABLE {table} PURGE"))
+        .await
+        .unwrap();
+}

@@ -71,9 +71,9 @@ flavor_tests!(attributes_come_from_one_query, |c: Ctx| async move {
     c.delete(&without_location).await;
 });
 
-// A sync that wrote into an existing table leaves the table's columns types in CatalogCache for
-// the façade to peek; one that created the table leaves none; a sync that added a column updates
-// the cache; `forget_table` and table drops evict it.
+// A sync that wrote into an existing table leaves the table's columns types for the façade to
+// adopt (once); one that created the table, and one that was superseded, leave none; a sync that
+// added a column leaves the layout with it.
 flavor_tests!(
     a_sync_hands_out_the_table_layout_once,
     |c: Ctx| async move {
@@ -82,23 +82,25 @@ flavor_tests!(
 
         ok(c.sync(&pipe, vec![row(1, 1, 10), row(2, 2, 20)]).await);
         assert!(
-            c.conn.cached_columns_types(&pipe).is_none(),
+            c.conn.take_synced_columns_types(&pipe).is_none(),
             "the sync that created the table reflects it on the next read"
         );
 
         ok(c.sync(&pipe, vec![row(3, 3, 30)]).await);
         let handed = c
             .conn
-            .cached_columns_types(&pipe)
-            .expect("a sync into an existing table populates CatalogCache");
+            .take_synced_columns_types(&pipe)
+            .expect("a sync into an existing table hands its layout out");
         let reflected = c.conn.get_pipe_columns_types(&pipe).await.unwrap();
         assert_eq!(handed, reflected);
         assert!(handed.contains_key("val"));
-        // Read-only peek stays available until invalidated by DDL, drop, or `forget_table`.
-        assert_eq!(c.conn.cached_columns_types(&pipe).as_ref(), Some(&handed));
-        assert!(c.conn.cached_columns_types(&other).is_none(), "per table");
+        assert!(c.conn.take_synced_columns_types(&pipe).is_none(), "once");
+        assert!(
+            c.conn.take_synced_columns_types(&other).is_none(),
+            "per table"
+        );
 
-        // A new column: the cached layout reflects the post-`ADD COLUMN` schema.
+        // A new column: the layout handed out is the one after the `ADD COLUMN`.
         let extra = doc(vec![
             ("dt", ndt(2024, 1, 4, 0, 0)),
             ("id", i(4)),
@@ -106,20 +108,15 @@ flavor_tests!(
             ("extra", s("x")),
         ]);
         ok(c.sync(&pipe, vec![extra]).await);
-        let handed = c.conn.cached_columns_types(&pipe).expect("layout");
+        let handed = c.conn.take_synced_columns_types(&pipe).expect("layout");
         assert!(handed.contains_key("extra"), "{handed:?}");
         assert_eq!(handed, c.conn.get_pipe_columns_types(&pipe).await.unwrap());
 
-        // `forget_table` evicts the cached entry; dropping and re-creating leaves none.
-        let target = c.conn.sql_pipe(&pipe).unwrap().target;
-        c.conn.forget_table(&target);
-        assert!(c.conn.cached_columns_types(&pipe).is_none());
-
+        // An untaken layout does not outlive the table: re-creating it clears the entry.
         ok(c.sync(&pipe, vec![row(5, 5, 50)]).await);
-        assert!(c.conn.cached_columns_types(&pipe).is_some());
         assert!(c.conn.drop_pipe(&pipe).await.success);
         ok(c.sync(&pipe, vec![row(1, 1, 10)]).await);
-        assert!(c.conn.cached_columns_types(&pipe).is_none());
+        assert!(c.conn.take_synced_columns_types(&pipe).is_none());
         c.delete(&pipe).await;
     }
 );

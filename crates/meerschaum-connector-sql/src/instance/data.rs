@@ -312,7 +312,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, String>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         Ok(self.columns_types(&sp).await)
     }
 
@@ -392,7 +392,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<IndexDoc>>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         Ok(self
             .get_table_cols_indices(&sp.target, self.get_pipe_schema(&sp).as_deref())
             .await)
@@ -400,7 +400,7 @@ impl SqlConnector {
 
     /// `pipe_exists(pipe)`: whether the target table exists.
     pub async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         Ok(self
             .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
             .await)
@@ -411,7 +411,7 @@ impl SqlConnector {
     ///
     /// [`InstanceConnector::pipe_exists_checked`]: meerschaum_connector::InstanceConnector::pipe_exists_checked
     pub async fn pipe_exists_checked(&self, pipe: &Pipe) -> ConnectorResult<bool> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         self.table_exists_checked(&sp.target, self.get_pipe_schema(&sp).as_deref())
             .await
     }
@@ -470,7 +470,7 @@ impl SqlConnector {
         query: &DataQuery,
         opts: &DataQueryOptions,
     ) -> ConnectorResult<String> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state(&sp).await;
         self.build_data_query(&sp, &state, query, opts).await
     }
@@ -748,7 +748,7 @@ impl SqlConnector {
                 .map(Some)
                 .map_err(be);
         }
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(None);
@@ -773,7 +773,7 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Frame> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(Frame::empty());
@@ -876,7 +876,7 @@ impl SqlConnector {
         query: &DataQuery,
         chunk_interval: Option<crate::pipe::ChunkIntervalArg>,
     ) -> ConnectorResult<Vec<Frame>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(Vec::new());
@@ -985,7 +985,7 @@ impl SqlConnector {
         backtrack_minutes: Option<i64>,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(None);
@@ -1029,7 +1029,7 @@ impl SqlConnector {
         newest: bool,
         remote: bool,
     ) -> ConnectorResult<Option<DateBound>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if remote {
             return self.remote_sync_time(&sp, &state, params, newest).await;
@@ -1222,7 +1222,8 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>> {
-        let (pipe, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
+        let pipe: &Pipe = &sp;
         if query.remote {
             let has_def = sp
                 .param("fetch")
@@ -1271,7 +1272,7 @@ impl SqlConnector {
         pipe: &Pipe,
         params: Option<&Map>,
     ) -> ConnectorResult<bool> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(false);

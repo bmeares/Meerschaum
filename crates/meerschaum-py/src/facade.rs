@@ -219,7 +219,6 @@ struct FacadeNative {
     instances: Mutex<HashMap<String, Arc<dyn InstanceConnector>>>,
     sql: Mutex<HashMap<String, Arc<SqlConnector>>>,
     attributes: HashMap<String, Map>,
-    inplace: bool,
 }
 
 impl FacadeNative {
@@ -373,10 +372,6 @@ impl ConnectorRegistry for FacadeNative {
             .unwrap_or(100_000)
     }
 
-    fn allows_inplace_sync(&self, _instance_keys: &str) -> bool {
-        self.inplace
-    }
-
     fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
         if let Some(sql) = self
             .sql
@@ -443,7 +438,6 @@ pub fn build_registry(
             .iter()
             .map(|(k, v)| (full_keys(k), v.clone()))
             .collect(),
-        inplace: input.inplace,
     });
     // The live config of the process, as of this call (`set_config()`, `MRSM_CONFIG` patches and
     // `write_config()` are seen by the next sync): the engine's defaults, backtrack and filter
@@ -451,9 +445,22 @@ pub fn build_registry(
     let _ = native.config.set(config.clone());
     let mut engine_config = EngineConfig::from_config(&config, Some(&config.paths().root_dir));
     engine_config.home_instance = full_keys(&input.instance_keys);
+    // v4's `Pipe.sync()` syncs a `sql:` pipe in place only when the pipe's source is
+    // its instance: the call's pipe and, in a graph run, the pipes that share its source and
+    // instance.
+    let inplace_home = (input.inplace
+        && full_keys(&input.connector_keys) == full_keys(&input.instance_keys))
+    .then(|| full_keys(&input.instance_keys));
+    let with_inplace = |registry: Arc<dyn ConnectorRegistry>| match inplace_home.clone() {
+        Some(home) => meerschaum_engine::registry::with_inplace_sync(
+            registry,
+            Arc::new(move |keys: &str| full_keys(keys) == home),
+        ),
+        None => registry,
+    };
     if !need_python {
         return Ok(Built {
-            registry: native,
+            registry: with_inplace(native),
             config: Some(engine_config),
         });
     }
@@ -476,13 +483,8 @@ pub fn build_registry(
     // as Python's `write_plugin_config()` would (the live snapshot itself is read-only).
     registry.set_session(session.clone());
     registry.set_config_writes(crate::native_plugin_api::config_writes_allowed(py));
-    let registry: Arc<dyn ConnectorRegistry> = if input.inplace {
-        meerschaum_engine::registry::with_inplace_sync(registry, true)
-    } else {
-        registry
-    };
     Ok(Built {
-        registry,
+        registry: with_inplace(registry),
         config: Some(engine_config),
     })
 }

@@ -416,12 +416,15 @@ impl SqlConnector {
     }
 
     /// Canonical private pipe-entry guard: settle the default schema, resolve cross-pipe
-    /// templates (`prepare_pipe`), and bind the pipe to this connector (`sql_pipe`).
-    pub(crate) async fn bind_pipe(&self, pipe: &Pipe) -> ConnectorResult<(Pipe, SqlPipe)> {
+    /// templates (`prepare_pipe`), and bind the pipe to this connector (`sql_pipe`). The bound
+    /// pipe dereferences to the prepared `Pipe` (one copy of the pipe per call).
+    pub(crate) async fn bind_pipe(&self, pipe: &Pipe) -> ConnectorResult<SqlPipe> {
         self.ensure_schema().await?;
+        if !meerschaum_connector::template::needs_instance_resolution(pipe) {
+            return Ok(self.sql_pipe(pipe)?);
+        }
         let prepared = self.prepare_pipe(pipe).await;
-        let sp = self.sql_pipe(&prepared)?;
-        Ok((prepared, sp))
+        Ok(self.sql_pipe_owned(prepared)?)
     }
 
     /// Ask the database for its default schema when none is configured (one query, cached
@@ -539,7 +542,12 @@ impl SqlConnector {
 
     /// Bind a pipe to this instance (its flavor-truncated `target` and the configured defaults).
     pub fn sql_pipe(&self, pipe: &Pipe) -> Result<SqlPipe> {
-        Ok(SqlPipe::new(pipe.clone(), self.flavor)?.with_defaults(
+        self.sql_pipe_owned(pipe.clone())
+    }
+
+    /// [`sql_pipe`](Self::sql_pipe) of a pipe the caller no longer needs.
+    fn sql_pipe_owned(&self, pipe: Pipe) -> Result<SqlPipe> {
+        Ok(SqlPipe::new(pipe, self.flavor)?.with_defaults(
             self.settings.pipe_defaults.clone(),
             self.settings.backtrack_minutes,
         ))
@@ -1512,12 +1520,12 @@ mod entry_seam_tests {
     }
 
     #[tokio::test]
-    async fn catalog_cache_peek_and_invalidation_across_sync_and_forget_table() {
-        let conn = SqlConnector::from_uri("cat_peek", "sqlite:///:memory:")
+    async fn a_sync_hands_its_layout_out_once() {
+        let conn = SqlConnector::from_uri("cat_take", "sqlite:///:memory:")
             .await
             .expect("sqlite");
-        let pipe = Pipe::builder("cat", "peek")
-            .instance("sql:cat_peek")
+        let pipe = Pipe::builder("cat", "take")
+            .instance("sql:cat_take")
             .parameters(
                 Value::from_json_str(r#"{"columns":{"datetime":"id"}}"#)
                     .unwrap()
@@ -1526,71 +1534,46 @@ mod entry_seam_tests {
             .build()
             .unwrap();
         let other = Pipe::builder("cat", "other")
-            .instance("sql:cat_peek")
+            .instance("sql:cat_take")
             .build()
             .unwrap();
+        let sync = |id: i64, extra: Option<&'static str>| {
+            let conn = &conn;
+            let pipe = &pipe;
+            async move {
+                let res = conn
+                    .sync(
+                        pipe,
+                        PipeInput::Frame(sample_frame(id, extra)),
+                        &SyncOptions::default(),
+                    )
+                    .await;
+                assert!(res.success, "{}", res.message);
+            }
+        };
 
-        // Initial table creation leaves no stale layout in CatalogCache.
-        let res = conn
-            .sync(
-                &pipe,
-                PipeInput::Frame(sample_frame(1, None)),
-                &SyncOptions::default(),
-            )
-            .await;
-        assert!(res.success, "{}", res.message);
-        assert!(
-            conn.cached_columns_types(&pipe).is_none(),
-            "initial table creation must not populate stale cached columns types"
-        );
+        // The sync that created the table hands nothing out (whatever the catalog cache holds).
+        sync(1, None).await;
+        assert!(conn.take_synced_columns_types(&pipe).is_none());
 
-        // Syncing into an existing table populates CatalogCache, and `cached_columns_types` is
-        // a non-destructive read-only peek.
-        let res = conn
-            .sync(
-                &pipe,
-                PipeInput::Frame(sample_frame(2, None)),
-                &SyncOptions::default(),
-            )
-            .await;
-        assert!(res.success, "{}", res.message);
-        let peek1 = conn
-            .cached_columns_types(&pipe)
-            .expect("existing-table sync populates CatalogCache");
-        let peek2 = conn
-            .cached_columns_types(&pipe)
-            .expect("read-only peek must remain available");
-        assert_eq!(peek1, peek2);
-        assert_eq!(peek1, conn.get_pipe_columns_types(&pipe).await.unwrap());
-        assert!(conn.cached_columns_types(&other).is_none());
+        // A sync into the existing table hands its layout out, once, for its own pipe only.
+        sync(2, None).await;
+        let handed = conn
+            .take_synced_columns_types(&pipe)
+            .expect("a sync into an existing table hands its layout out");
+        assert_eq!(handed, conn.get_pipe_columns_types(&pipe).await.unwrap());
+        assert!(conn.take_synced_columns_types(&pipe).is_none(), "once");
+        assert!(conn.take_synced_columns_types(&other).is_none());
 
-        // Adding a column updates CatalogCache immediately after DDL + re-reflection.
-        let res = conn
-            .sync(
-                &pipe,
-                PipeInput::Frame(sample_frame(3, Some("x"))),
-                &SyncOptions::default(),
-            )
-            .await;
-        assert!(res.success, "{}", res.message);
-        let updated = conn
-            .cached_columns_types(&pipe)
-            .expect("added column cached");
-        assert!(updated.contains_key("extra"), "{updated:?}");
-        assert_eq!(updated, conn.get_pipe_columns_types(&pipe).await.unwrap());
+        // A sync that added a column hands out the layout after the `ADD COLUMN`.
+        sync(3, Some("x")).await;
+        let handed = conn.take_synced_columns_types(&pipe).expect("layout");
+        assert!(handed.contains_key("extra"), "{handed:?}");
+        assert_eq!(handed, conn.get_pipe_columns_types(&pipe).await.unwrap());
 
-        // Explicit invalidation (`forget_table`, used by `clear_caches()`) evicts the entry.
-        let target = conn.sql_pipe(&pipe).unwrap().target;
-        conn.forget_table(&target);
-        assert!(
-            conn.cached_columns_types(&pipe).is_none(),
-            "forget_table must evict cached columns types"
-        );
-
-        // Re-populating and dropping clears the cache as well.
-        let _ = conn.get_pipe_columns_types(&pipe).await.unwrap();
-        assert!(conn.cached_columns_types(&pipe).is_some());
+        // An untaken layout does not outlive its table.
+        sync(4, None).await;
         assert!(conn.drop_pipe(&pipe).await.success);
-        assert!(conn.cached_columns_types(&pipe).is_none());
+        assert!(conn.take_synced_columns_types(&pipe).is_none());
     }
 }

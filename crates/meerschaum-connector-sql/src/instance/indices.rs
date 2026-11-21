@@ -222,7 +222,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<String>>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         self.create_index_queries(&sp, None).await
     }
 
@@ -339,7 +339,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<String>>> {
-        let (_, sp) = self.bind_pipe(pipe).await?;
+        let sp = self.bind_pipe(pipe).await?;
         let schema = self.get_pipe_schema(&sp);
         let exists = self.table_exists(&sp.target, schema.as_deref()).await;
         if !exists {
@@ -392,7 +392,7 @@ impl SqlConnector {
         columns: Option<&[String]>,
         indices: Option<&[String]>,
     ) -> bool {
-        let Ok((_, sp)) = self.bind_pipe(pipe).await else {
+        let Ok(sp) = self.bind_pipe(pipe).await else {
             return false;
         };
         self.create_indices_sp(&sp, columns, indices, None).await
@@ -446,9 +446,10 @@ impl SqlConnector {
         columns: Option<&[String]>,
         indices: Option<&[String]>,
     ) -> bool {
-        let Ok((pipe, sp)) = self.bind_pipe(pipe).await else {
+        let Ok(sp) = self.bind_pipe(pipe).await else {
             return false;
         };
+        let pipe: &Pipe = &sp;
         if sp.indices().is_empty() {
             tracing::warn!("No indices to drop for {pipe}.");
             return false;
@@ -459,7 +460,7 @@ impl SqlConnector {
             .chain(indices.unwrap_or_default())
             .cloned()
             .collect();
-        let ix_queries = match self.get_drop_index_queries(&pipe).await {
+        let ix_queries = match self.get_drop_index_queries(pipe).await {
             Ok(q) => q,
             Err(_) => return false,
         };

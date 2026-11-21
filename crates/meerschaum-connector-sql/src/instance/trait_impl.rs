@@ -499,8 +499,8 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn get_pipe_index_names(&self, pipe: &Pipe) -> ConnectorResult<Map> {
-        let (pipe, _) = self.bind_pipe(pipe).await?;
-        Ok(SqlConnector::get_pipe_index_names(self, &pipe)?
+        let sp = self.bind_pipe(pipe).await?;
+        Ok(SqlConnector::get_pipe_index_names(self, &sp)?
             .into_iter()
             .map(|(k, v)| (k, Value::Str(v)))
             .collect())

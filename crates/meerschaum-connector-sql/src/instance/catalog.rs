@@ -16,6 +16,15 @@
 //! - a read that started before an invalidation is never stored (generation counter), so a
 //!   concurrent DDL cannot leave its old layout behind.
 //!
+//! Two more kinds of entry live here, with their own lifetimes:
+//!
+//! - the readiness of internal `mrsm:*` tables: set once a write into one succeeded, kept until
+//!   a statement names that table, a write into it fails or it is dropped (never by a clear of
+//!   the whole cache: an unrelated procedural DDL block must not send every internal write back
+//!   through initialization);
+//! - the layout a sync into an existing table ended with, handed out once to the caller of that
+//!   sync ([`SqlConnector::take_synced_columns_types`](super::SqlConnector::take_synced_columns_types)).
+//!
 //! The lock is never held across an `await`, and the connector is rebuilt after a fork (the
 //! Python façade), so no lock is inherited.
 
@@ -25,6 +34,7 @@ use std::time::{Duration, Instant};
 use indexmap::IndexMap;
 
 use crate::flavor::Flavor;
+use crate::instance::data::PipeState;
 use crate::queries::table::IndexDoc;
 
 /// The most entries of each kind held at once (temporary tables are looked up too: the maps are
@@ -51,8 +61,12 @@ pub(crate) struct CatalogCache {
     /// its parameters), see [`CatalogCache::staged`].
     staged: HashMap<(TableKey, u64), (Instant, IndexMap<String, String>)>,
     /// Internal `mrsm:*` tables that completed initialization (table, indices/constraints, and
-    /// MySQL history precision upgrade) in this process and have not been invalidated since.
-    internal_ready: HashMap<TableKey, IndexMap<String, String>>,
+    /// MySQL history precision upgrade) in this process, with the table state their last write
+    /// left (see [`CatalogCache::internal_ready`]).
+    internal_ready: HashMap<TableKey, PipeState>,
+    /// The layout the last successful sync of a pipe into its existing table ended with, by the
+    /// pipe's keys (see [`CatalogCache::take_synced`]).
+    synced: HashMap<String, (TableKey, IndexMap<String, String>)>,
 }
 
 fn key(table: &str, schema: Option<&str>) -> TableKey {
@@ -241,32 +255,56 @@ impl CatalogCache {
         );
     }
 
-    /// Whether an internal `mrsm:*` table completed initialization in this process without being
-    /// invalidated since.
-    pub(crate) fn is_internal_ready(&self, table: &str, schema: Option<&str>) -> bool {
-        self.internal_ready.contains_key(&key(table, schema))
-    }
-
-    /// The columns types of an initialized internal `mrsm:*` table, if still valid.
-    pub(crate) fn internal_ready_cols(
-        &self,
-        table: &str,
-        schema: Option<&str>,
-    ) -> Option<IndexMap<String, String>> {
+    /// The table state of an internal `mrsm:*` table that completed initialization in this
+    /// process, as its last successful write left it (`None`: the next write initializes it).
+    pub(crate) fn internal_ready(&self, table: &str, schema: Option<&str>) -> Option<PipeState> {
         self.internal_ready.get(&key(table, schema)).cloned()
     }
 
-    /// Record that an internal `mrsm:*` table completed initialization with `cols_types`.
+    /// Record that an internal `mrsm:*` table completed initialization with `state`.
     pub(crate) fn put_internal_ready(
         &mut self,
         table: &str,
         schema: Option<&str>,
-        cols_types: &IndexMap<String, String>,
+        state: &PipeState,
     ) {
-        bounded(&mut self.internal_ready).insert(key(table, schema), cols_types.clone());
+        bounded(&mut self.internal_ready).insert(key(table, schema), state.clone());
     }
 
-    /// Forget everything.
+    /// Keep the layout a sync of the pipe `pipe_key` into its existing table ended with, until
+    /// [`take_synced`](Self::take_synced) hands it out (or the table is invalidated).
+    pub(crate) fn put_synced(
+        &mut self,
+        pipe_key: &str,
+        table: &str,
+        schema: Option<&str>,
+        cols_types: &IndexMap<String, String>,
+    ) {
+        if cols_types.is_empty() {
+            return;
+        }
+        bounded(&mut self.synced).insert(
+            pipe_key.to_string(),
+            (key(table, schema), cols_types.clone()),
+        );
+    }
+
+    /// The layout the last successful sync of the pipe `pipe_key` left, handed out once.
+    pub(crate) fn take_synced(&mut self, pipe_key: &str) -> Option<IndexMap<String, String>> {
+        self.synced
+            .remove(pipe_key)
+            .map(|(_, cols_types)| cols_types)
+    }
+
+    /// Drop what a sync of the pipe `pipe_key` left (a new sync of it started).
+    pub(crate) fn forget_synced(&mut self, pipe_key: &str) {
+        self.synced.remove(pipe_key);
+    }
+
+    /// Forget every catalog answer (a statement that may have changed any table). The readiness
+    /// of internal tables is kept: it is forgotten per table only (a statement naming the table,
+    /// a failed write into it, a drop), so a DDL block elsewhere does not send every internal
+    /// write back through initialization.
     pub(crate) fn clear(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.exists.clear();
@@ -275,7 +313,7 @@ impl CatalogCache {
         self.indices.clear();
         self.conflict.clear();
         self.staged.clear();
-        self.internal_ready.clear();
+        self.synced.clear();
     }
 
     /// Forget what `sql` may change, if it changes the schema of a table (see [`ddl_scope`]).
@@ -307,6 +345,7 @@ impl CatalogCache {
         self.conflict.retain(|(k, _), _| !named(k));
         self.staged.retain(|(k, _), _| !named(k));
         self.internal_ready.retain(|k, _| !named(k));
+        self.synced.retain(|_, (k, _)| !named(k));
     }
 
     /// Forget one table.
@@ -321,6 +360,7 @@ impl CatalogCache {
         self.conflict.retain(|(k, _), _| !named(k));
         self.staged.retain(|(k, _), _| !named(k));
         self.internal_ready.retain(|k, _| !named(k));
+        self.synced.retain(|_, (k, _)| !named(k));
     }
 }
 
@@ -410,6 +450,54 @@ fn create_header(sql: &str) -> &str {
     &sql[..cut]
 }
 
+/// The statements a procedural block runs with `EXECUTE IMMEDIATE '<statement>';` (Oracle's
+/// guarded DDL), when they are all the DDL it can run: each one a constant literal, and no
+/// `CREATE` / `ALTER` / `DROP` / `RENAME` / `TRUNCATE` word outside them. `None` when the block
+/// runs no such statement, builds one at run time (`'DROP TABLE ' || name`, `USING`) or runs
+/// DDL of its own.
+fn execute_immediate_statements(sql: &str) -> Option<Vec<String>> {
+    const KEYWORD: &str = "EXECUTE IMMEDIATE";
+    let upper = sql.to_ascii_uppercase();
+    let bytes = sql.as_bytes();
+    let mut outside = String::new();
+    let mut statements = Vec::new();
+    let mut from = 0;
+    while let Some(pos) = upper[from..].find(KEYWORD) {
+        let start = from + pos;
+        outside.push_str(&upper[from..start]);
+        let mut i = start + KEYWORD.len();
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        if bytes.get(i) != Some(&b'\'') {
+            return None;
+        }
+        let literal_start = i + 1;
+        i = literal_start;
+        let literal_end = loop {
+            match bytes.get(i)? {
+                b'\'' if bytes.get(i + 1) == Some(&b'\'') => i += 2,
+                b'\'' => break i,
+                _ => i += 1,
+            }
+        };
+        i = literal_end + 1;
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        if bytes.get(i) != Some(&b';') {
+            return None;
+        }
+        statements.push(sql[literal_start..literal_end].replace("''", "'"));
+        from = i;
+    }
+    outside.push_str(&upper[from..]);
+    let ddl_outside = ["CREATE", "ALTER", "DROP", "RENAME", "TRUNCATE"]
+        .iter()
+        .any(|word| names_table(&outside, word));
+    (!statements.is_empty() && !ddl_outside).then_some(statements)
+}
+
 /// What `sql` may change in the catalog.
 pub(crate) fn ddl_scope(sql: &str) -> DdlScope<'_> {
     let sql = strip_leading_comments(sql);
@@ -430,8 +518,23 @@ pub(crate) fn ddl_scope(sql: &str) -> DdlScope<'_> {
         "ALTER" | "DROP" | "RENAME" => DdlScope::Tables(sql),
         // Procedural blocks (MSSQL `IF ... CREATE`, Oracle `BEGIN EXECUTE IMMEDIATE`, `DO $$`).
         "EXEC" | "EXECUTE" | "CALL" | "DO" | "IF" | "BEGIN" | "DECLARE" => {
-            if mentions(&["CREATE", "ALTER", "DROP", "RENAME"]) {
-                DdlScope::All
+            if !mentions(&["CREATE", "ALTER", "DROP", "RENAME"]) {
+                return DdlScope::None;
+            }
+            // Oracle's guarded DDL runs constant statements: they name what they change.
+            let Some(statements) = execute_immediate_statements(sql) else {
+                return DdlScope::All;
+            };
+            let mut changes = false;
+            for statement in &statements {
+                match ddl_scope(statement) {
+                    DdlScope::All => return DdlScope::All,
+                    DdlScope::Tables(_) => changes = true,
+                    DdlScope::None => {}
+                }
+            }
+            if changes {
+                DdlScope::Tables(sql)
             } else {
                 DdlScope::None
             }
@@ -488,25 +591,34 @@ impl super::SqlConnector {
         self.catalog().forget_table(table);
     }
 
-    /// Forget all cached metadata for `table` (used by callers such as `Pipe.clear_caches()`).
-    pub fn forget_table(&self, table: &str) {
-        self.forget_catalog_table(table);
-    }
-
-    /// Read-only peek of `pipe`'s cached `{column: DB TYPE}` layout from `CatalogCache` without
-    /// querying the database (`None` when the cache has no fresh entry, e.g. right after table
-    /// creation, DDL invalidation, drop, failure, or `forget_table`).
-    pub fn cached_columns_types(
+    /// The columns types `{column: DB TYPE}` of the pipe's table as the last successful
+    /// `sync_pipe` of this connector left them, handed out once (`None` when that sync created
+    /// the table, did not finish, was given the layout by its caller, or was already taken, and
+    /// when a statement or a failure invalidated the table since).
+    ///
+    /// A sync reflects the table's columns before it writes, and again after any DDL of its own,
+    /// so what it holds at the end is the table's layout. The Python façade adopts it as the
+    /// pipe's cached `get_columns_types()` instead of reflecting the table a second time on the
+    /// next read.
+    pub fn take_synced_columns_types(
         &self,
         pipe: &meerschaum_core::Pipe,
     ) -> Option<IndexMap<String, String>> {
-        let ttl = self.catalog_ttl()?;
-        let sp = self.sql_pipe(pipe).ok()?;
-        let schema = self.get_pipe_schema(&sp);
-        let reflected = super::reflect::uses_reflection(self.flavor);
-        self.catalog()
-            .cols_types(&sp.target, schema.as_deref(), reflected, ttl)
+        self.catalog().take_synced(&synced_key(pipe))
     }
+}
+
+/// The key of a pipe's post-sync layout: its keys, which a caller has without resolving the
+/// pipe's parameters.
+pub(crate) fn synced_key(pipe: &meerschaum_core::Pipe) -> String {
+    format!(
+        "{:?}",
+        (
+            pipe.connector_keys(),
+            pipe.metric_key(),
+            pipe.location_key()
+        )
+    )
 }
 
 #[cfg(test)]
@@ -538,6 +650,33 @@ mod tests {
         );
         assert_eq!(
             ddl_scope("BEGIN EXECUTE IMMEDIATE 'CREATE TABLE x (a INT)'; END;"),
+            DdlScope::Tables("BEGIN EXECUTE IMMEDIATE 'CREATE TABLE x (a INT)'; END;")
+        );
+        // A statement built at run time, DDL outside the literal, or an index dropped by name
+        // may change anything.
+        assert_eq!(
+            ddl_scope("BEGIN EXECUTE IMMEDIATE 'DROP TABLE ' || v_name; END;"),
+            DdlScope::All
+        );
+        assert_eq!(
+            ddl_scope("BEGIN EXECUTE IMMEDIATE 'SELECT 1 FROM dual'; DROP TABLE x; END;"),
+            DdlScope::All
+        );
+        assert_eq!(
+            ddl_scope("BEGIN EXECUTE IMMEDIATE 'DROP INDEX \"IX_t\"'; END;"),
+            DdlScope::All
+        );
+        assert_eq!(
+            ddl_scope("BEGIN EXECUTE IMMEDIATE 'ALTER SESSION SET x = ''y'''; END;"),
+            DdlScope::Tables("BEGIN EXECUTE IMMEDIATE 'ALTER SESSION SET x = ''y'''; END;")
+        );
+        assert_eq!(
+            ddl_scope("BEGIN EXECUTE IMMEDIATE 'CREATE TABLE x (a INT)' USING y; END;"),
+            DdlScope::All
+        );
+        // Procedural blocks with no `EXECUTE IMMEDIATE` (MSSQL's guarded DDL) stay `All`.
+        assert_eq!(
+            ddl_scope("IF NOT EXISTS (SELECT 1) CREATE INDEX \"IX_t\" ON \"t\" (\"a\")"),
             DdlScope::All
         );
         assert_eq!(ddl_scope("BEGIN"), DdlScope::None);
@@ -629,5 +768,108 @@ mod tests {
         cache.clear();
         assert!(!cache.exists("t", None, ttl));
         assert!(cache.cols_types("t", None, false, Duration::ZERO).is_none());
+    }
+
+    fn ready_state() -> PipeState {
+        PipeState {
+            exists: true,
+            cols_types: [("a".to_string(), "INT".to_string())].into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn internal_readiness_survives_unrelated_clears() {
+        let mut cache = CatalogCache::default();
+        let state = ready_state();
+        cache.put_internal_ready("mrsm_engine_metrics", Some("mrsm"), &state);
+        cache.put_internal_ready("mrsm_engine_runs", Some("mrsm"), &state);
+        // A procedural block that may change anything forgets the catalog, not readiness.
+        cache.note_statement(
+            "DECLARE x INT; BEGIN EXECUTE IMMEDIATE 'DROP TABLE ' || v_name; END;",
+            Flavor::Oracle,
+        );
+        cache.clear();
+        assert_eq!(
+            cache.internal_ready("mrsm_engine_metrics", Some("mrsm")),
+            Some(state.clone())
+        );
+        // A statement naming the table, and a failed write (`forget_table`), forget it.
+        cache.note_statement(
+            "ALTER TABLE \"mrsm\".\"mrsm_engine_metrics\" ADD \"b\" INT",
+            Flavor::Oracle,
+        );
+        assert!(
+            cache
+                .internal_ready("mrsm_engine_metrics", Some("mrsm"))
+                .is_none()
+        );
+        assert!(
+            cache
+                .internal_ready("mrsm_engine_runs", Some("mrsm"))
+                .is_some()
+        );
+        cache.forget_table("mrsm_engine_runs");
+        assert!(
+            cache
+                .internal_ready("mrsm_engine_runs", Some("mrsm"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn oracle_guarded_index_forgets_only_its_table() {
+        let ttl = Duration::from_secs(60);
+        let mut cache = CatalogCache::default();
+        let state = ready_state();
+        let cols = state.cols_types.clone();
+        let g = cache.generation();
+        cache.put_cols_types("mrsm_engine_runs", Some("MRSM"), false, &cols, g);
+        cache.put_cols_types("other", Some("MRSM"), false, &cols, g);
+        cache.put_internal_ready("mrsm_engine_metrics", Some("MRSM"), &state);
+        // The shape `guard_oracle_internal_indices` emits for an internal table's index.
+        let guarded = "DECLARE matching_objects PLS_INTEGER;\nBEGIN\n    EXECUTE IMMEDIATE \
+            'CREATE INDEX \"IX_mrsm_engine_runs_run_id\" ON \"MRSM\".\"mrsm_engine_runs\" (\"run_id\")';\n\
+            EXCEPTION WHEN OTHERS THEN\n    IF SQLCODE NOT IN (-955, -1408) THEN RAISE; END IF;\n\
+            SELECT COUNT(*) INTO matching_objects FROM all_indexes existing\n\
+            WHERE existing.owner = 'MRSM' AND existing.table_name = 'mrsm_engine_runs'\n\
+            AND existing.index_name = 'IX_mrsm_engine_runs_run_id';\n\
+            IF matching_objects != 1 THEN RAISE; END IF;\nEND;";
+        assert_eq!(ddl_scope(guarded), DdlScope::Tables(guarded));
+        cache.note_statement(guarded, Flavor::Oracle);
+        assert!(
+            cache
+                .cols_types("mrsm_engine_runs", Some("MRSM"), false, ttl)
+                .is_none()
+        );
+        assert!(
+            cache
+                .cols_types("other", Some("MRSM"), false, ttl)
+                .is_some()
+        );
+        assert!(
+            cache
+                .internal_ready("mrsm_engine_metrics", Some("MRSM"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn synced_layout_is_handed_out_once() {
+        let mut cache = CatalogCache::default();
+        let cols: IndexMap<String, String> = [("a".to_string(), "INT".to_string())].into();
+        cache.put_synced("p", "t", None, &cols);
+        assert_eq!(cache.take_synced("p"), Some(cols.clone()));
+        assert_eq!(cache.take_synced("p"), None);
+        // Invalidating its table, or a whole clear, drops an untaken layout.
+        cache.put_synced("p", "t", None, &cols);
+        cache.note_statement("ALTER TABLE \"t\" ADD \"b\" INT", Flavor::Sqlite);
+        assert_eq!(cache.take_synced("p"), None);
+        cache.put_synced("p", "t", None, &cols);
+        cache.clear();
+        assert_eq!(cache.take_synced("p"), None);
+        cache.put_synced("p", "t", None, &cols);
+        cache.forget_synced("p");
+        assert_eq!(cache.take_synced("p"), None);
     }
 }

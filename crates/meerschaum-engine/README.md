@@ -150,7 +150,7 @@ Every durable row lives on an instance as a `temporary`, `static` internal pipe 
 `GET /engine/runs/{run_id}/events/stream`). Writes go through
 `sync_pipe(check_existing=False, enforce=False, _check_temporary_tables=False)`. Per user sync
 the engine adds one ledger insert (before the data commit, parents only) and one cursor upsert
-for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measures this.
+for all of a node's edges (after the sync succeeds); `tests/execution_state_suite/state_cost.rs` measures this.
 
 Dropping, deleting or fully clearing a pipe forgets its state (its ledger entries, the cursors
 it is part of, its definition hash) on its own instance: the SQL and Valkey instance connectors
@@ -184,29 +184,29 @@ carry each node's window in words
 
 | Test | What it covers |
 |---|---|
-| `tests/golden.rs` | The planner golden fixtures (`tests/fixtures/*.json`). |
-| `tests/v4_sync.rs` | A six-level chain and a diamond on SQLite over three phases of source changes, `--parents` and flat `-w 1`, against tables recorded from v4.1 (`tests/fixtures/v4_sync/`). |
-| `tests/crash.rs` | Crashes between ledger write and data commit, and between data commit and cursor advance; `--resume`. |
-| `tests/crash_restart.rs` | The same two points as real process deaths (a child process `exit`s inside the fault hook) followed by a restart, on SQLite and PostgreSQL-family (`MRSM_TEST_PG_URI`, schema `w9_engine`): the ledger holds the interrupted run's entry, no cursor moved, no run record, and the next run converges with every row exactly once. |
-| `tests/forget_state.rs` | Drop, delete and full clear forget a pipe's ledger, cursors and hash (partial clears keep them); a reset chain plans like a first run. |
-| `tests/w18_remote_state.rs` | Dropping a parent also forgets its ledger entries and parent cursors on its cross-instance children's instances (found through remote-state markers in `mrsm:engine_state`, GAP-002); an unreachable instance keeps its marker and is reported. |
-| `tests/pg_state.rs` | On PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w9s_state`), a second graph run sees the first run's history, hashes, cursors and watermarks. |
-| `tests/legacy_flush.rs` | A v4-pattern (`LegacyStream`) connector's callback syncs are `callback` flushes: events with rows and bounds, ledger entries, children triggered; syncs of pipes outside the graph stay bare. |
-| `tests/leases.rs` | Lease contention across two processes on one SQLite instance (engine run level). |
-| `tests/leases_backends.rs` | Lease contention across processes through `InstanceLeases` on SQLite, PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w7_engine`) and Valkey (`MRSM_TEST_VALKEY_URI`), including a killed holder that blocks only until its TTL. |
-| `tests/stream_children.rs` | A stream flush triggers the stream's children, rate-limited by the child's `min_seconds`, coalescing flushes. |
-| `tests/mqtt_stream.rs` | QoS 1 persistent-session redelivery and a crash mid-flush against a disposable Mosquitto (`MRSM_TEST_MQTT_URI`), through the `subscribe` path and the v4-pattern adapter path. |
-| `tests/chunk_events.rs` | Per-chunk progress events in fetch order (rows, bounds, timing). |
-| `tests/source_kwargs.rs` | `source_for_sync` receives the sync kwargs (begin, end, params, chunk settings, extras). |
-| `tests/templates.rs` | `{{ Pipe(...) }}` resolution in graph, flat and bare syncs; stored parameters stay raw. |
-| `tests/continuous.rs` | Lap-compatible `--loop --min-seconds`, `-l _negation`, `-w 1` order, v4's error cooldown, a supervised in-memory stream under `--listen`. |
-| `tests/state_cost.rs` | The engine-state write path. |
-| `tests/bare_sync.rs` | A bare `pipe.sync()` (R1). |
-| `tests/sync_status.rs` | The per-pipe sync status on SQLite: bare syncs, flat (`cli`) and graph (`engine`) runs (one record per node, after its retries; skipped nodes record nothing), failures counting until a success, the 5-second debounce and its trailing write, reads that see a held success, the status owner of nested syncs, temporary pipes, forgetting a deleted, dropped or cleared pipe for good (a held success never brings it back). |
-| `tests/python_glue.rs` | Manifest routing, native callbacks, scoped ledger observers, real plugin sync and custom fetch kwargs. |
-| `tests/pipe_schedule.rs` | `parameters['schedule']` in `--loop`: a scheduled root only syncs when due (via a host-supplied `Cadence`), unscheduled pipes keep the lap cadence, an all-scheduled selection idles until due. |
-| `tests/chunk_pipelining.rs` | `--chunk-pipelining`: a child pre-syncs a running parent's committed windows (extra `node_started`), tables identical to a sequential run, cursors advance exactly. |
-| `tests/date_bounds.rs` | v4's `parse_date_bounds` on the fetch path: UTC-aware, naive and epoch-integer bounds. |
+| `tests/planner_graph_suite/golden.rs` | The planner golden fixtures (`tests/fixtures/*.json`). |
+| `tests/planner_graph_suite/v4_sync.rs` | A six-level chain and a diamond on SQLite over three phases of source changes, `--parents` and flat `-w 1`, against tables recorded from v4.1 (`tests/fixtures/v4_sync/`). |
+| `tests/execution_state_suite/crash.rs` | Crashes between ledger write and data commit, and between data commit and cursor advance; `--resume`. |
+| `tests/execution_state_suite/crash_restart.rs` | The same two points as real process deaths (a child process `exit`s inside the fault hook) followed by a restart, on SQLite and PostgreSQL-family (`MRSM_TEST_PG_URI`, schema `w9_engine`): the ledger holds the interrupted run's entry, no cursor moved, no run record, and the next run converges with every row exactly once. |
+| `tests/execution_state_suite/forget_state.rs` | Drop, delete and full clear forget a pipe's ledger, cursors and hash (partial clears keep them); a reset chain plans like a first run. |
+| `tests/execution_state_suite/w18_remote_state.rs` | Dropping a parent also forgets its ledger entries and parent cursors on its cross-instance children's instances (found through remote-state markers in `mrsm:engine_state`, GAP-002); an unreachable instance keeps its marker and is reported. |
+| `tests/execution_state_suite/pg_state.rs` | On PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w9s_state`), a second graph run sees the first run's history, hashes, cursors and watermarks. |
+| `tests/execution_state_suite/legacy_flush.rs` | A v4-pattern (`LegacyStream`) connector's callback syncs are `callback` flushes: events with rows and bounds, ledger entries, children triggered; syncs of pipes outside the graph stay bare. |
+| `tests/execution_state_suite/leases.rs` | Lease contention across two processes on one SQLite instance (engine run level). |
+| `tests/execution_state_suite/leases_backends.rs` | Lease contention across processes through `InstanceLeases` on SQLite, PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w7_engine`) and Valkey (`MRSM_TEST_VALKEY_URI`), including a killed holder that blocks only until its TTL. |
+| `tests/planner_graph_suite/stream_children.rs` | A stream flush triggers the stream's children, rate-limited by the child's `min_seconds`, coalescing flushes. |
+| `tests/planner_graph_suite/mqtt_stream.rs` | QoS 1 persistent-session redelivery and a crash mid-flush against a disposable Mosquitto (`MRSM_TEST_MQTT_URI`), through the `subscribe` path and the v4-pattern adapter path. |
+| `tests/planner_graph_suite/chunk_events.rs` | Per-chunk progress events in fetch order (rows, bounds, timing). |
+| `tests/planner_graph_suite/source_kwargs.rs` | `source_for_sync` receives the sync kwargs (begin, end, params, chunk settings, extras). |
+| `tests/planner_graph_suite/templates.rs` | `{{ Pipe(...) }}` resolution in graph, flat and bare syncs; stored parameters stay raw. |
+| `tests/execution_state_suite/continuous.rs` | Lap-compatible `--loop --min-seconds`, `-l _negation`, `-w 1` order, v4's error cooldown, a supervised in-memory stream under `--listen`. |
+| `tests/execution_state_suite/state_cost.rs` | The engine-state write path. |
+| `tests/planner_graph_suite/bare_sync.rs` | A bare `pipe.sync()` (R1). |
+| `tests/execution_state_suite/sync_status.rs` | The per-pipe sync status on SQLite: bare syncs, flat (`cli`) and graph (`engine`) runs (one record per node, after its retries; skipped nodes record nothing), failures counting until a success, the 5-second debounce and its trailing write, reads that see a held success, the status owner of nested syncs, temporary pipes, forgetting a deleted, dropped or cleared pipe for good (a held success never brings it back). |
+| `tests/planner_graph_suite/python_glue.rs` | Manifest routing, native callbacks, scoped ledger observers, real plugin sync and custom fetch kwargs. |
+| `tests/planner_graph_suite/pipe_schedule.rs` | `parameters['schedule']` in `--loop`: a scheduled root only syncs when due (via a host-supplied `Cadence`), unscheduled pipes keep the lap cadence, an all-scheduled selection idles until due. |
+| `tests/planner_graph_suite/chunk_pipelining.rs` | `--chunk-pipelining`: a child pre-syncs a running parent's committed windows (extra `node_started`), tables identical to a sequential run, cursors advance exactly. |
+| `tests/planner_graph_suite/date_bounds.rs` | v4's `parse_date_bounds` on the fetch path: UTC-aware, naive and epoch-integer bounds. |
 
 Regenerate the v4 fixture with
 `scripts/parity/run.sh crates/meerschaum-engine/tests/fixtures/v4_sync/gen_v4_sync.py`.
