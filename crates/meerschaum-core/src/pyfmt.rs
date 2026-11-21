@@ -108,7 +108,8 @@ fn write_json_str(s: &str, ensure_ascii: bool, out: &mut String) {
     out.push('"');
 }
 
-fn json_float(f: f64) -> String {
+/// A float as `json.dumps` writes it (`NaN`, `Infinity` and `-Infinity` included).
+pub fn json_float(f: f64) -> String {
     if f.is_nan() {
         "NaN".to_string()
     } else if f.is_infinite() {
@@ -1252,9 +1253,275 @@ pub fn py_repr_json(v: &serde_json::Value) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Number and duration text (`f"{n:,}"`, `humanfriendly.format_timespan`), URL quoting
+// ---------------------------------------------------------------------------------------------
+
+/// `f"{n:,}"`: an integer with comma thousands separators.
+pub fn thousands(n: impl Into<i128>) -> String {
+    let n: i128 = n.into();
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3 + 1);
+    if n < 0 {
+        out.push('-');
+    }
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `humanfriendly.format_timespan(seconds)` (`detailed=False`, `max_units=3`), as
+/// `interval_str(timedelta)` and the sync summaries use it.
+pub fn format_timespan(seconds: f64) -> String {
+    fn round_number(x: f64) -> String {
+        let s = format!("{x:.2}");
+        let s = s.trim_end_matches('0');
+        s.trim_end_matches('.').to_string()
+    }
+    fn pluralize(count: &str, singular: &str) -> String {
+        let n: f64 = count.parse().unwrap_or(0.0);
+        if n.floor() == 1.0 {
+            format!("{count} {singular}")
+        } else {
+            format!("{count} {singular}s")
+        }
+    }
+    if seconds < 60.0 {
+        return pluralize(&round_number(seconds), "second");
+    }
+    let units: [(&str, f64); 6] = [
+        ("year", 31_536_000.0),
+        ("week", 604_800.0),
+        ("day", 86_400.0),
+        ("hour", 3_600.0),
+        ("minute", 60.0),
+        ("second", 1.0),
+    ];
+    let mut remaining = seconds;
+    let mut parts = Vec::new();
+    for (i, (name, divider)) in units.iter().enumerate() {
+        let count = remaining / divider;
+        remaining %= divider;
+        let text = if i + 1 < units.len() {
+            (count.trunc() as i64).to_string()
+        } else {
+            round_number(count)
+        };
+        if text != "0" {
+            parts.push(pluralize(&text, name));
+        }
+    }
+    if parts.len() == 1 {
+        return parts.remove(0);
+    }
+    parts.truncate(3);
+    let last = parts.pop().unwrap_or_default();
+    if parts.is_empty() {
+        last
+    } else {
+        format!("{} and {last}", parts.join(", "))
+    }
+}
+
+/// `urllib.parse.quote_plus(s)` with the default `safe=''`: unreserved characters
+/// (`A-Za-z0-9_.-~`) stay, spaces become `+`, everything else is percent-encoded from UTF-8
+/// with upper-case hex.
+pub fn quote_plus(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------------------------
+// `rich` table column widths (`rich._ratio.ratio_reduce`, `Table._collapse_widths`)
+// ---------------------------------------------------------------------------------------------
+
+/// Python's `round()` (half to even) on a float.
+fn py_round(x: f64) -> i64 {
+    let r = x.round();
+    if (x - x.trunc()).abs() == 0.5 {
+        let t = x.trunc();
+        if (t as i64) % 2 == 0 {
+            t as i64
+        } else {
+            r as i64
+        }
+    } else {
+        r as i64
+    }
+}
+
+/// `rich._ratio.ratio_reduce(total, ratios, maximums, values)`.
+pub fn ratio_reduce(
+    total: usize,
+    ratios: &[usize],
+    maximums: &[usize],
+    values: &[usize],
+) -> Vec<usize> {
+    let ratios: Vec<usize> = ratios
+        .iter()
+        .zip(maximums)
+        .map(|(r, m)| if *m > 0 { *r } else { 0 })
+        .collect();
+    let mut total_ratio: usize = ratios.iter().sum();
+    if total_ratio == 0 {
+        return values.to_vec();
+    }
+    let mut total_remaining = total as i64;
+    let mut result = Vec::new();
+    for ((ratio, maximum), value) in ratios.iter().zip(maximums).zip(values) {
+        if *ratio > 0 && total_ratio > 0 {
+            let distributed = (*maximum as i64).min(py_round(
+                *ratio as f64 * total_remaining as f64 / total_ratio as f64,
+            ));
+            result.push((*value as i64 - distributed).max(0) as usize);
+            total_remaining -= distributed;
+            total_ratio -= ratio;
+        } else {
+            result.push(*value);
+        }
+    }
+    result
+}
+
+/// `rich._ratio.ratio_distribute(total, ratios, minimums)`.
+pub fn ratio_distribute(total: usize, ratios: &[usize], minimums: Option<&[usize]>) -> Vec<usize> {
+    let ratios: Vec<usize> = match minimums {
+        Some(m) => ratios
+            .iter()
+            .zip(m)
+            .map(|(r, mn)| if *mn > 0 { *r } else { 0 })
+            .collect(),
+        None => ratios.to_vec(),
+    };
+    let mut total_ratio: usize = ratios.iter().sum();
+    if total_ratio == 0 {
+        // PARITY: rich asserts `total_ratio > 0`; an all-zero layout keeps its widths.
+        return vec![0; ratios.len()];
+    }
+    let mut total_remaining = total as i64;
+    let mins: Vec<usize> = minimums
+        .map(<[usize]>::to_vec)
+        .unwrap_or(vec![0; ratios.len()]);
+    let mut out = Vec::new();
+    for (ratio, minimum) in ratios.iter().zip(mins) {
+        let distributed = if total_ratio > 0 {
+            (minimum as i64)
+                .max((*ratio as f64 * total_remaining as f64 / total_ratio as f64).ceil() as i64)
+        } else {
+            total_remaining
+        };
+        out.push(distributed.max(0) as usize);
+        total_ratio -= ratio;
+        total_remaining -= distributed;
+    }
+    out
+}
+
+/// `rich.table.Table._collapse_widths(widths, wrapable, max_width)`: shrink the widest wrapable
+/// columns until the row fits `max_width` (or nothing wrapable is left to shrink).
+pub fn collapse_widths(widths: &[usize], wrapable: &[bool], max_width: usize) -> Vec<usize> {
+    let mut widths = widths.to_vec();
+    let mut total: usize = widths.iter().sum();
+    let mut excess = total as i64 - max_width as i64;
+    if wrapable.iter().any(|w| *w) {
+        while total > 0 && excess > 0 {
+            let max_column = widths
+                .iter()
+                .zip(wrapable)
+                .filter(|(_, w)| **w)
+                .map(|(w, _)| *w)
+                .max()
+                .unwrap_or(0);
+            let second = widths
+                .iter()
+                .zip(wrapable)
+                .map(|(w, a)| if *a && *w != max_column { *w } else { 0 })
+                .max()
+                .unwrap_or(0);
+            let diff = max_column - second;
+            let ratios: Vec<usize> = widths
+                .iter()
+                .zip(wrapable)
+                .map(|(w, a)| usize::from(*w == max_column && *a))
+                .collect();
+            if !ratios.iter().any(|r| *r > 0) || diff == 0 {
+                break;
+            }
+            let max_reduce = vec![(excess as usize).min(diff); widths.len()];
+            widths = ratio_reduce(excess as usize, &ratios, &max_reduce, &widths);
+            total = widths.iter().sum();
+            excess = total as i64 - max_width as i64;
+        }
+    }
+    widths
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thousands_matches_python_format_spec() {
+        assert_eq!(thousands(0i64), "0");
+        assert_eq!(thousands(999u64), "999");
+        assert_eq!(thousands(1_234_567i64), "1,234,567");
+        assert_eq!(thousands(-1000i64), "-1,000");
+        assert_eq!(thousands(u64::MAX), "18,446,744,073,709,551,615");
+        assert_eq!(thousands(i64::MIN), "-9,223,372,036,854,775,808");
+    }
+
+    #[test]
+    fn format_timespan_matches_humanfriendly() {
+        assert_eq!(format_timespan(0.48), "0.48 seconds");
+        assert_eq!(format_timespan(1.0), "1 second");
+        assert_eq!(format_timespan(1.5), "1.5 second");
+        assert_eq!(format_timespan(0.0), "0 seconds");
+        assert_eq!(format_timespan(61.0), "1 minute and 1 second");
+        assert_eq!(format_timespan(3723.5), "1 hour, 2 minutes and 3.5 seconds");
+        assert_eq!(format_timespan(90_061.0), "1 day, 1 hour and 1 minute");
+    }
+
+    #[test]
+    fn quote_plus_matches_urllib() {
+        assert_eq!(quote_plus("a b/c~d"), "a+b%2Fc~d");
+        assert_eq!(quote_plus("p@ss:wörd"), "p%40ss%3Aw%C3%B6rd");
+    }
+
+    #[test]
+    fn json_float_spells_non_finite_values_like_json_dumps() {
+        assert_eq!(json_float(f64::NAN), "NaN");
+        assert_eq!(json_float(f64::INFINITY), "Infinity");
+        assert_eq!(json_float(f64::NEG_INFINITY), "-Infinity");
+        assert_eq!(json_float(1.5), "1.5");
+    }
+
+    #[test]
+    fn rich_ratio_reduce_and_rounding() {
+        assert_eq!(py_round(2.5), 2);
+        assert_eq!(py_round(3.5), 4);
+        assert_eq!(ratio_distribute(10, &[1, 1, 1], None), vec![4, 3, 3]);
+        assert_eq!(ratio_distribute(10, &[0, 0], None), vec![0, 0]);
+        assert_eq!(ratio_reduce(3, &[1, 1], &[5, 5], &[10, 10]), vec![8, 9]);
+        assert_eq!(
+            ratio_reduce(3, &[1, 1, 1], &[3, 3, 3], &[10, 10, 10]),
+            vec![9, 9, 9]
+        );
+        assert_eq!(collapse_widths(&[10, 4], &[true, true], 10), vec![6, 4]);
+        assert_eq!(collapse_widths(&[10, 4], &[false, false], 10), vec![10, 4]);
+    }
 
     #[test]
     fn float_reprs() {

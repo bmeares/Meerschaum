@@ -23,7 +23,9 @@ use std::sync::Arc;
 use chrono::{Duration, TimeDelta};
 use indexmap::IndexMap;
 use meerschaum_connector::pipe_ops::{self, Doc};
-use meerschaum_connector::{ConnectorError, DataQuery, DateBound, FetchedKind, InstanceConnector};
+use meerschaum_connector::{
+    ConnectorError, DataQuery, DateBound, FetchedKind, InstanceConnector, MixedInterval,
+};
 use meerschaum_connector_sql::SqlConnector;
 use meerschaum_connector_sql::instance::data::{ChunkBounds, DataQueryOptions, get_chunk_bounds};
 use meerschaum_core::pipe::{ChunkInterval, ChunkIntervalArg, PipeDefaults};
@@ -31,7 +33,9 @@ use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_engine::ConnectorRegistry;
 use meerschaum_engine::sync::{SyncArgs, SyncBegin, SyncEnv, determine_begin, parse_date_bound};
 use meerschaum_kernel::cast::{RoundTo, round_time};
-use meerschaum_kernel::diff::{BacktrackRequest, FilterExistingParams, filter_existing};
+use meerschaum_kernel::diff::{
+    BacktrackRequest, FilterExistingParams, backtrack_params, filter_existing,
+};
 use meerschaum_kernel::enforce::{
     PipeDtypesContext, PipeInput, pipe_enforce_dtypes, pipe_get_dtypes, pipe_is_tz_aware,
 };
@@ -232,34 +236,6 @@ fn with_dtypes(pipe: &Pipe, dtypes: &IndexMap<String, String>) -> Pipe {
 
 fn dt_col(pipe: &Pipe) -> Option<String> {
     pipe.column("datetime").filter(|c| !c.is_empty())
-}
-
-/// Python's `str()` of a bound (`None` for no bound).
-fn bound_str(b: &Option<DateBound>) -> String {
-    b.as_ref()
-        .map(DateBound::py_str)
-        .unwrap_or_else(|| "None".into())
-}
-
-fn bound_lt(a: &DateBound, b: &DateBound) -> bool {
-    match (a, b) {
-        (DateBound::Datetime(x), DateBound::Datetime(y)) => x.utc < y.utc,
-        (DateBound::Int(x), DateBound::Int(y)) => x < y,
-        _ => false,
-    }
-}
-
-fn add_interval(b: &DateBound, interval: &ChunkInterval) -> Option<DateBound> {
-    match (b, interval) {
-        (DateBound::Datetime(dt), ChunkInterval::Delta(d)) => {
-            Some(DateBound::Datetime(DateTimeValue {
-                utc: dt.utc.checked_add_signed(*d)?,
-                tz: dt.tz.clone(),
-            }))
-        }
-        (DateBound::Int(i), ChunkInterval::Int(w)) => Some(DateBound::Int(i.checked_add(*w)?)),
-        _ => None,
-    }
 }
 
 fn sub_interval(b: &DateBound, interval: &ChunkInterval) -> Option<DateBound> {
@@ -983,8 +959,9 @@ impl Reader {
         let single = match (&min_dt, &max_dt) {
             (None, None) => true,
             // `(min + chunk_interval) > max`
-            (Some(mn), Some(mx)) => add_interval(mn, &interval)
-                .map(|edge| bound_lt(mx, &edge))
+            (Some(mn), Some(mx)) => mn
+                .checked_add_interval(&interval, MixedInterval::Refuse)
+                .map(|edge| mx.precedes(&edge))
                 .unwrap_or(true),
             _ => true,
         };
@@ -1140,7 +1117,7 @@ impl Reader {
             }
             _ => false,
         };
-        Ok((bound_lt(&oldest, &bound_time) || extreme).then_some(bound_time))
+        Ok((oldest.precedes(&bound_time) || extreme).then_some(bound_time))
     }
 
     /// The generic chunked implementation of `Pipe.deduplicate()` (`_deduplicate.py`).
@@ -1366,7 +1343,11 @@ impl Reader {
         if existing_chunk_len == deduped_chunk_len {
             return Ok(SuccessTuple::ok(""));
         }
-        let header = format!("\n{} - {}", bound_str(chunk_begin), bound_str(chunk_end));
+        let header = format!(
+            "\n{} - {}",
+            DateBound::optional_py_str(chunk_begin),
+            DateBound::optional_py_str(chunk_end)
+        );
         let mut body = String::new();
         let full_args = GetDataArgs {
             select_columns: None,
@@ -1599,26 +1580,6 @@ fn input_frame(input: PipeInput) -> Result<Frame, String> {
         PipeInput::Docs(docs) => meerschaum_kernel::docs::frame_from_docs(&docs).map_err(err),
         PipeInput::Columns(cols) => meerschaum_kernel::docs::frame_from_columns(&cols).map_err(err),
     }
-}
-
-/// A backtrack request's `params` as `build_where` params (as the SQL instance builds them).
-fn backtrack_params(req: &BacktrackRequest) -> Map {
-    req.params
-        .iter()
-        .map(|(k, vals)| {
-            let items = vals
-                .iter()
-                .map(|v| match v {
-                    v if v.is_na() => Value::Null,
-                    Cell::Int(i) => Value::Int(*i),
-                    Cell::Float(f) => Value::Float(*f),
-                    Cell::Bool(b) => Value::Bool(*b),
-                    other => Value::Str(other.py_str()),
-                })
-                .collect();
-            (k.clone(), Value::List(items))
-        })
-        .collect()
 }
 
 /// The number of distinct rows (`DataFrame.drop_duplicates()`).
@@ -2056,14 +2017,8 @@ mod tests {
         assert_eq!(out.height(), 2);
         let a = DateBound::Int(5);
         assert_eq!(
-            add_interval(&a, &ChunkInterval::Int(3)),
-            Some(DateBound::Int(8))
-        );
-        assert_eq!(add_interval(&a, &ChunkInterval::minutes(3)), None);
-        assert_eq!(
             sub_interval(&a, &ChunkInterval::Int(3)),
             Some(DateBound::Int(2))
         );
-        assert!(bound_lt(&DateBound::Int(1), &DateBound::Int(2)));
     }
 }

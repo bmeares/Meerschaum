@@ -183,7 +183,7 @@ fn names_with(team: &Team, role: TeamRole) -> Vec<String> {
 
 /// The path segment of a name (a team or a user).
 fn segment(name: &str) -> String {
-    crate::wire::quote_plus(name.trim())
+    meerschaum_core::pyfmt::quote_plus(name.trim())
 }
 
 impl APIConnector {

@@ -10,6 +10,7 @@
 
 use std::sync::LazyLock;
 
+use meerschaum_core::pyfmt::{collapse_widths, ratio_distribute, ratio_reduce};
 use regex::Regex;
 use unicode_width::UnicodeWidthChar;
 
@@ -466,105 +467,6 @@ fn render_padded(
         .collect()
 }
 
-/// `ratio_reduce(total, ratios, maximums, values)`.
-pub fn ratio_reduce(
-    total: usize,
-    ratios: &[usize],
-    maximums: &[usize],
-    values: &[usize],
-) -> Vec<usize> {
-    let ratios: Vec<usize> = ratios
-        .iter()
-        .zip(maximums)
-        .map(|(r, m)| if *m > 0 { *r } else { 0 })
-        .collect();
-    let mut total_ratio: usize = ratios.iter().sum();
-    if total_ratio == 0 {
-        return values.to_vec();
-    }
-    let mut total_remaining = total as f64;
-    let mut out = Vec::new();
-    for ((ratio, maximum), value) in ratios.iter().zip(maximums).zip(values) {
-        if *ratio > 0 && total_ratio > 0 {
-            let distributed = (*maximum as f64).min(py_round(
-                *ratio as f64 * total_remaining / total_ratio as f64,
-            ));
-            out.push((*value as f64 - distributed) as usize);
-            total_remaining -= distributed;
-            total_ratio -= ratio;
-        } else {
-            out.push(*value);
-        }
-    }
-    out
-}
-
-/// Python's `round()` (banker's rounding).
-fn py_round(x: f64) -> f64 {
-    let r = x.round();
-    if (x - x.trunc()).abs() == 0.5 {
-        2.0 * (x / 2.0).round()
-    } else {
-        r
-    }
-}
-
-/// `ratio_distribute(total, ratios, minimums=None)`.
-pub fn ratio_distribute(total: usize, ratios: &[usize]) -> Vec<usize> {
-    let mut total_ratio: usize = ratios.iter().sum();
-    let mut total_remaining = total as f64;
-    let mut out = Vec::new();
-    for ratio in ratios {
-        let distributed = if total_ratio > 0 {
-            (*ratio as f64 * total_remaining / total_ratio as f64)
-                .ceil()
-                .max(0.0)
-        } else {
-            total_remaining
-        };
-        out.push(distributed as usize);
-        total_ratio -= ratio;
-        total_remaining -= distributed;
-    }
-    out
-}
-
-fn collapse_widths(mut widths: Vec<usize>, wrapable: &[bool], max_width: usize) -> Vec<usize> {
-    let mut total: usize = widths.iter().sum();
-    let mut excess = total as isize - max_width as isize;
-    if wrapable.iter().any(|w| *w) {
-        while total > 0 && excess > 0 {
-            let max_column = widths
-                .iter()
-                .zip(wrapable)
-                .filter(|(_, w)| **w)
-                .map(|(x, _)| *x)
-                .max()
-                .unwrap_or(0);
-            let second = widths
-                .iter()
-                .zip(wrapable)
-                .map(|(x, w)| if *w && *x != max_column { *x } else { 0 })
-                .max()
-                .unwrap_or(0);
-            let diff = max_column - second;
-            let ratios: Vec<usize> = widths
-                .iter()
-                .zip(wrapable)
-                .map(|(x, w)| usize::from(*x == max_column && *w))
-                .collect();
-            if !ratios.iter().any(|r| *r > 0) || diff == 0 {
-                break;
-            }
-            let max_reduce = vec![(excess as usize).min(diff); widths.len()];
-            widths = ratio_reduce(excess as usize, &ratios, &max_reduce, &widths);
-            total = widths.iter().sum();
-            excess = total as isize - max_width as isize;
-        }
-    }
-    widths
-}
-
 /// A table row: cells and whether it ends a section.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
@@ -634,7 +536,7 @@ impl Table {
             .collect();
         let mut table_width: usize = widths.iter().sum();
         if table_width > max_width {
-            widths = collapse_widths(widths, &vec![true; n], max_width);
+            widths = collapse_widths(&widths, &vec![true; n], max_width);
             table_width = widths.iter().sum();
             if table_width > max_width {
                 let excess = table_width - max_width;
@@ -647,7 +549,7 @@ impl Table {
             // (table.py `_calculate_column_widths`).
         }
         if table_width < max_width {
-            let pads = ratio_distribute(max_width - table_width, &widths);
+            let pads = ratio_distribute(max_width - table_width, &widths, None);
             widths = widths.iter().zip(pads).map(|(w, p)| w + p).collect();
         }
         widths
@@ -756,11 +658,5 @@ mod tests {
             chop_cells("abcdef", 4),
             vec!["abcd".to_string(), "ef".to_string()]
         );
-    }
-
-    #[test]
-    fn ratio_helpers_match_rich() {
-        assert_eq!(ratio_distribute(10, &[1, 1, 1]), vec![4, 3, 3]);
-        assert_eq!(ratio_reduce(3, &[1, 1], &[5, 5], &[10, 10]), vec![8, 9]);
     }
 }

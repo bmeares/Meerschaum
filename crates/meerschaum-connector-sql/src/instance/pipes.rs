@@ -6,6 +6,7 @@
 
 use indexmap::IndexMap;
 use meerschaum_connector::{ConnectorResult, PipeId, PipeKeysEntry, PipesKeys, PipesKeysQuery};
+use meerschaum_core::static_config::{negation_prefix, separate_negation_values};
 use meerschaum_core::value::apply_patch_maps;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::value::Value as KValue;
@@ -14,7 +15,6 @@ use crate::driver::SqlParam;
 use crate::driver::params::{placeholder, placeholders};
 use crate::flavor::Flavor;
 use crate::queries::table::get_table_exists_query;
-use crate::where_clause::negation_prefix;
 
 use super::{SqlConnector, be, frame_docs, kv_int, kv_str};
 
@@ -35,20 +35,6 @@ pub(crate) fn bump_metadata_epoch(res: SuccessTuple) -> SuccessTuple {
         METADATA_WRITES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
     res
-}
-
-/// `separate_negation_values(vals)`.
-pub fn separate_negation_values(values: &[String]) -> (Vec<String>, Vec<String>) {
-    let prefix = negation_prefix();
-    let mut inc = Vec::new();
-    let mut exc = Vec::new();
-    for v in values {
-        match v.strip_prefix(prefix) {
-            Some(rest) => exc.push(rest.to_string()),
-            None => inc.push(v.clone()),
-        }
-    }
-    (inc, exc)
 }
 
 /// Parse the stored `parameters` (JSONB on PostgreSQL, JSON text elsewhere).

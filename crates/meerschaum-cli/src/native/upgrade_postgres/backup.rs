@@ -266,7 +266,7 @@ pub(crate) fn backup(rt: &mut Runtime<'_>, opts: &Options) -> ActionResult {
             .fingerprint
             .get("row_estimate")
             .and_then(Json::as_i64)
-            .map(|n| format!("  (~{} rows)", super::super::thousands(n)))
+            .map(|n| format!("  (~{} rows)", meerschaum_core::pyfmt::thousands(n)))
             .unwrap_or_default();
         text.push_str(&format!(
             "  {:<28} {:>10}{estimate}\n",

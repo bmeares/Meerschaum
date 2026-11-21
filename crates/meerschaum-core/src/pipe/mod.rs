@@ -699,6 +699,13 @@ impl Pipe {
         self.parameters().get(key)
     }
 
+    /// Whether the pipe sets `fetch: {replace: true}`: each fetched window is authoritative.
+    pub fn fetch_replace(&self) -> bool {
+        self.param("fetch")
+            .and_then(|f| f.get("replace"))
+            .is_some_and(|v| v.truthy())
+    }
+
     /// `pipe.columns`: the `columns` dict without falsy names or roles.
     pub fn columns(&self) -> Map {
         match self.param("columns") {
@@ -1304,6 +1311,20 @@ impl Pipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fetch_replace_reads_fetch_replace() {
+        let pipe = |parameters: &str| {
+            Pipe::builder("plugin:x", "m")
+                .parameters(Value::from_json_str(parameters).unwrap().to_map())
+                .build()
+                .unwrap()
+        };
+        assert!(pipe(r#"{"fetch": {"replace": true}}"#).fetch_replace());
+        assert!(!pipe(r#"{"fetch": {"replace": false}}"#).fetch_replace());
+        assert!(!pipe(r#"{"fetch": {}}"#).fetch_replace());
+        assert!(!pipe("{}").fetch_replace());
+    }
 
     fn json(s: &str) -> Value {
         Value::from_json_str(s).unwrap()

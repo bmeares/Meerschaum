@@ -3,7 +3,7 @@
 //! `start connectors`, plus `parse_connector_keys` over the config registry (a connector is
 //! validated from its attributes; nothing connects until `start connectors`).
 
-use meerschaum_connector_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes, InvalidPort};
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::value::{Map, Value};
 
@@ -141,44 +141,14 @@ fn attr_str(attrs: &Map, key: &str) -> Option<String> {
 }
 
 /// `SQLConnector.__init__` + `create_engine()`'s attribute resolution, without connecting.
-pub(super) fn sql_spec(label: &str, attrs: &Map) -> Result<ConnectionSpec, String> {
-    let mut ca = ConnectorAttributes {
-        label: Some(label.to_string()),
-        ..Default::default()
-    };
-    for (k, v) in attrs {
-        if v.is_null() {
-            continue;
-        }
-        let s = v.py_str();
-        match k.as_str() {
-            "flavor" => {
-                ca.flavor = Some(
-                    s.parse::<meerschaum_connector_sql::flavor::Flavor>()
-                        .map_err(|e| e.to_string())?,
-                )
-            }
-            "uri" => ca.uri = Some(s),
-            "host" => ca.host = Some(s),
-            "port" => ca.port = s.trim().parse::<u16>().ok(),
-            "username" => ca.username = Some(s),
-            "password" => ca.password = Some(s),
-            "database" => ca.database = Some(s),
-            "schema" => ca.schema = Some(s),
-            "options" => {
-                ca.options = Some(match v {
-                    Value::Map(m) => ConnectionOptions::Pairs(
-                        m.iter().map(|(k, v)| (k.clone(), v.py_str())).collect(),
-                    ),
-                    _ => ConnectionOptions::Str(s),
-                })
-            }
-            "pool_size" => ca.pool_size = s.trim().parse().ok(),
-            "max_overflow" => ca.max_overflow = s.trim().parse().ok(),
-            other => ca.extra.push((other.to_string(), s)),
-        }
-    }
-    ConnectionSpec::from_attributes(&ca).map_err(|e| e.to_string())
+pub(super) fn sql_spec(
+    label: &str,
+    attrs: &Map,
+    invalid_port: InvalidPort,
+) -> Result<ConnectionSpec, String> {
+    ConnectorAttributes::from_attribute_map(label, attrs, invalid_port)
+        .and_then(|ca| ConnectionSpec::from_attributes(&ca))
+        .map_err(|e| e.to_string())
 }
 
 /// `parse_connector_keys(keys)`: the connector the keys name, or `None` after the warnings v4
@@ -218,7 +188,7 @@ fn parse_connector_keys_inner(rt: &mut Runtime<'_>, keys: &str) -> Option<Parsed
                 warn(rt, &undefined_connector_message("sql", &label));
                 return None;
             }
-            let failure = sql_spec(&label, &attrs).err();
+            let failure = sql_spec(&label, &attrs, InvalidPort::Ignore).err();
             if let Some(message) = failure {
                 warn(
                     rt,
@@ -226,7 +196,7 @@ fn parse_connector_keys_inner(rt: &mut Runtime<'_>, keys: &str) -> Option<Parsed
                 );
                 return None;
             }
-            let spec = sql_spec(&label, &attrs).ok()?;
+            let spec = sql_spec(&label, &attrs, InvalidPort::Ignore).ok()?;
             Some(Parsed {
                 typ,
                 label,
@@ -771,7 +741,7 @@ fn tcp_endpoint(parsed: &Parsed) -> Option<(String, u16)> {
         return None;
     }
     let (host, port) = if parsed.typ == "sql" {
-        let spec = sql_spec(&parsed.label, &parsed.attrs).ok()?;
+        let spec = sql_spec(&parsed.label, &parsed.attrs, InvalidPort::Ignore).ok()?;
         (spec.host.clone()?, spec.port?)
     } else {
         (
@@ -812,7 +782,7 @@ pub fn validate_attributes(typ: &str, label: &str, attrs: &Map) -> Result<(), St
                     "    Missing flavor. Provide flavor as a key for 'sql:{label}'."
                 ));
             }
-            sql_spec(label, attrs).map(|_| ())
+            sql_spec(label, attrs, InvalidPort::Ignore).map(|_| ())
         }
         "api" | "valkey" => {
             if attrs.is_empty() {
@@ -864,6 +834,24 @@ mod tests {
             "",
             std::time::Duration::from_secs(5),
         ))
+    }
+
+    #[test]
+    fn an_invalid_port_is_refused_when_connecting_and_unset_when_describing() {
+        let root = tempfile::tempdir().unwrap();
+        let patch = r#"{"meerschaum": {"connectors": {"sql": {"badport": {
+            "flavor": "postgresql", "host": "db", "username": "u", "password": "p",
+            "database": "d", "port": "abc"}}}}}"#;
+        let config = config(root.path(), &[("MRSM_CONFIG", patch)]);
+        let err = super::super::session::sql_spec("badport", &config).unwrap_err();
+        assert_eq!(err.message, "Invalid port 'abc'.");
+        let attrs = super::super::session::connector_attributes(&config, "sql", "badport");
+        let described = sql_spec("badport", &attrs, InvalidPort::Ignore).unwrap();
+        assert_eq!(described.port, Some(5432));
+        assert_eq!(
+            sql_spec("badport", &attrs, InvalidPort::Reject).unwrap_err(),
+            "Invalid port 'abc'."
+        );
     }
 
     #[test]

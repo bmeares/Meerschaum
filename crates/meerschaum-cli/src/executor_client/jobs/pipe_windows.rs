@@ -301,7 +301,7 @@ async fn prepare_pipeline_children(
             || node.axis.explicit_unit != root.axis.explicit_unit
             || node.pipe.connector_keys() != instance
             || node.pipe.instance_keys() != instance
-            || meerschaum_engine::sync::fetch_replace(&node.pipe) != parent
+            || node.pipe.fetch_replace() != parent
             || planned.clear
             || planned.requires_confirmation
             || (parent && (planned.provisional || planned.action != Action::Root))
@@ -934,7 +934,7 @@ impl Controller {
                         axis,
                         verification.calls.clone(),
                         verification.coverage,
-                        meerschaum_engine::sync::fetch_replace(&node.pipe),
+                        node.pipe.fetch_replace(),
                     )
                     .and_then(|window| window.with_accepted_rows(accepted_rows.clone()))
                     .map_err(|error| error.detail_text())?
@@ -1159,7 +1159,7 @@ impl Controller {
                         axis,
                         ranges,
                         coverage,
-                        meerschaum_engine::sync::fetch_replace(&node.pipe),
+                        node.pipe.fetch_replace(),
                     )
                     .and_then(|window| window.with_accepted_rows(accepted_rows.clone()))
                     .map_err(|error| error.detail_text())?

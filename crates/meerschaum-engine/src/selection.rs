@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
-use meerschaum_core::static_config;
+use meerschaum_core::static_config::{negation_prefix, separate_negation_values};
 use meerschaum_core::{Value, pyfmt::py_str};
 use serde::{Deserialize, Serialize};
 
@@ -72,24 +72,6 @@ pub struct KeyFilter {
     /// `-i` instance keys (when the graph spans several instances).
     #[serde(default)]
     pub instance_keys: Option<String>,
-}
-
-fn negation_prefix() -> &'static str {
-    &static_config().system.fetch_pipes_keys.negation_prefix
-}
-
-/// Port of `separate_negation_values`: `(included, excluded)` with the prefix stripped.
-pub fn separate_negation_values(values: &[String]) -> (Vec<String>, Vec<String>) {
-    let prefix = negation_prefix();
-    let mut inc = Vec::new();
-    let mut exc = Vec::new();
-    for v in values {
-        match v.strip_prefix(prefix) {
-            Some(rest) => exc.push(rest.to_string()),
-            None => inc.push(v.clone()),
-        }
-    }
-    (inc, exc)
 }
 
 fn matches_keys(values: &[String], actual: &str) -> bool {

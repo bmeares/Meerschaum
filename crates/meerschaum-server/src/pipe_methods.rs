@@ -7,9 +7,11 @@ use std::sync::Arc;
 use chrono::TimeDelta;
 use indexmap::IndexMap;
 use meerschaum_connector::replace::WindowBound;
-use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, SyncOptions, pipe_ops};
+use meerschaum_connector::{
+    DataQuery, DateBound, InstanceConnector, MixedInterval, SyncOptions, pipe_ops,
+};
 use meerschaum_core::pipe::PipeDefaults;
-use meerschaum_core::pipe::chunk::{ChunkInterval, ChunkIntervalArg};
+use meerschaum_core::pipe::chunk::ChunkIntervalArg;
 use meerschaum_core::{Map, Pipe, SuccessTuple};
 use meerschaum_kernel::cast::{RoundTo, coerce_datetime, datetime_to_int, round_time};
 use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
@@ -197,29 +199,6 @@ pub async fn try_get_rowcount(
         .map_err(|e| ApiError::exception(&format!("Failed to get a rowcount for {pipe}"), e))
 }
 
-fn add_interval(b: &DateBound, interval: &ChunkInterval) -> DateBound {
-    match (b, interval) {
-        (DateBound::Int(i), ChunkInterval::Int(n)) => DateBound::Int(i + n),
-        (DateBound::Int(i), ChunkInterval::Delta(d)) => DateBound::Int(i + d.num_minutes()),
-        (DateBound::Datetime(dt), ChunkInterval::Delta(d)) => DateBound::Datetime(DateTimeValue {
-            utc: dt.utc + *d,
-            tz: dt.tz.clone(),
-        }),
-        (DateBound::Datetime(dt), ChunkInterval::Int(n)) => DateBound::Datetime(DateTimeValue {
-            utc: dt.utc + TimeDelta::minutes(*n),
-            tz: dt.tz.clone(),
-        }),
-    }
-}
-
-fn bound_lt(a: &DateBound, b: &DateBound) -> bool {
-    match (a, b) {
-        (DateBound::Int(x), DateBound::Int(y)) => x < y,
-        (DateBound::Datetime(x), DateBound::Datetime(y)) => x.utc < y.utc,
-        _ => false,
-    }
-}
-
 /// A chunk's `(begin, end)`.
 pub type ChunkBounds = (Option<DateBound>, Option<DateBound>);
 
@@ -261,7 +240,7 @@ pub async fn get_chunk_bounds(
     end = coerce_bound(conn, pipe, end, defaults).await?;
 
     if let (Some(b), Some(e)) = (&begin, &end)
-        && !bound_lt(b, e)
+        && !b.precedes(e)
     {
         return Ok(if bounded {
             vec![(Some(b.clone()), Some(b.clone()))]
@@ -283,8 +262,11 @@ pub async fn get_chunk_bounds(
     };
     let mut chunks: Vec<(DateBound, DateBound)> = Vec::new();
     let mut cursor = b.clone();
-    while bound_lt(&cursor, &e) {
-        let next = add_interval(&cursor, &interval);
+    while cursor.precedes(&e) {
+        // PARITY: Python raises `OverflowError: date value out of range` past `datetime.max`.
+        let next = cursor
+            .checked_add_interval(&interval, MixedInterval::Minutes)
+            .ok_or_else(|| ApiError::exception("get_chunk_bounds", "date value out of range"))?;
         chunks.push((cursor, next.clone()));
         cursor = next;
         if chunks.len() >= 1_000_000 {
@@ -300,7 +282,7 @@ pub async fn get_chunk_bounds(
         chunks.push((b.clone(), e.clone()));
     }
     if let Some(last) = chunks.last_mut()
-        && bound_lt(&e, &last.1)
+        && e.precedes(&last.1)
     {
         last.1 = e.clone();
     }

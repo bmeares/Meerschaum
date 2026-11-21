@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use meerschaum_connector::{DateBound, SyncOptions, pipe_ops};
 use meerschaum_core::SuccessTuple;
+use meerschaum_core::pyfmt::format_timespan;
 use meerschaum_core::value::Map;
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
@@ -28,58 +29,6 @@ pub fn interval_str(seconds: f64) -> String {
     let neg = seconds < 0.0;
     let s = format_timespan(seconds.abs());
     if neg { format!("{s} ago") } else { s }
-}
-
-/// `humanfriendly.format_timespan(seconds)` (`detailed=False`, `max_units=3`).
-pub fn format_timespan(seconds: f64) -> String {
-    fn round_number(x: f64) -> String {
-        let s = format!("{x:.2}");
-        let s = s.trim_end_matches('0');
-        s.trim_end_matches('.').to_string()
-    }
-    fn pluralize(count: &str, singular: &str) -> String {
-        let n: f64 = count.parse().unwrap_or(0.0);
-        if n.floor() == 1.0 {
-            format!("{count} {singular}")
-        } else {
-            format!("{count} {singular}s")
-        }
-    }
-    if seconds < 60.0 {
-        return pluralize(&round_number(seconds), "second");
-    }
-    let units: [(&str, f64); 6] = [
-        ("year", 31_536_000.0),
-        ("week", 604_800.0),
-        ("day", 86_400.0),
-        ("hour", 3_600.0),
-        ("minute", 60.0),
-        ("second", 1.0),
-    ];
-    let mut remaining = seconds;
-    let mut parts = Vec::new();
-    for (i, (name, divider)) in units.iter().enumerate() {
-        let count = remaining / divider;
-        remaining %= divider;
-        let text = if i + 1 < units.len() {
-            (count.trunc() as i64).to_string()
-        } else {
-            round_number(count)
-        };
-        if text != "0" {
-            parts.push(pluralize(&text, name));
-        }
-    }
-    if parts.len() == 1 {
-        return parts.remove(0);
-    }
-    parts.truncate(3);
-    let last = parts.pop().unwrap_or_default();
-    if parts.is_empty() {
-        last
-    } else {
-        format!("{} and {last}", parts.join(", "))
-    }
 }
 
 /// The keyword arguments `_wrap_pipe` passes to `Pipe.sync()`.

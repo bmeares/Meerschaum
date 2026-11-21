@@ -143,7 +143,7 @@ pub fn plan(
     observed: &Observations,
     default_begin: Option<DateBound>,
 ) -> Result<NativeVerifyPlan, String> {
-    let coerce = |value| crate::native::verify::coerce_bound(value, observed.aware);
+    let coerce = |value: DateBound| value.coerce_tz(observed.aware);
     let effective = bound_time(pipe, observed)?;
     let bounded = effective.is_some(); // typed endpoint default bounded=None
     let mut begin = requested_begin.map(coerce);

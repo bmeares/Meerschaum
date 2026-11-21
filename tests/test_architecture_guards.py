@@ -124,6 +124,39 @@ def test_single_home_catches_a_second_definition(tmp_path):
     assert 'crates/meerschaum-engine/src/state.rs:1: defines `forget_engine_state_after`' in joined
 
 
+def test_single_home_catches_a_second_copy_of_a_shared_rust_helper(tmp_path):
+    homes = {
+        'crates/meerschaum-core/src/pyfmt.rs': 'pub fn thousands() {}\npub fn quote_plus() {}\n',
+        'crates/meerschaum-core/src/static_config.rs': 'pub fn separate_negation_values() {}\n',
+        'crates/meerschaum-core/src/pipe/mod.rs': 'impl Pipe {\n    pub fn fetch_replace(&self) {}\n}\n',
+        'crates/meerschaum-core/src/config/grafana_readonly.rs': 'pub fn trimmed_text() {}\n',
+        'crates/meerschaum-kernel/src/diff.rs': 'pub fn backtrack_params() {}\n',
+        'crates/meerschaum-kernel/src/serialize.rs': 'pub fn sort_json_keys() {}\n',
+        'crates/meerschaum-connector/src/date_bound.rs': 'impl DateBound {\n    pub fn precedes(&self) {}\n}\n',
+        'crates/meerschaum-connector/src/pipe_ops.rs': 'pub fn forget_engine_state_after() {}\n',
+        'crates/meerschaum-connector-sql/src/uri.rs': 'impl X {\n    pub fn from_attribute_map() {}\n}\n',
+    }
+    for path, text in homes.items():
+        _write(tmp_path, path, text)
+    # A helper named like a retired copy, but of another name, is not a copy.
+    _write(tmp_path, 'crates/meerschaum-cli/src/native/show.rs', 'fn thousands_of_rows() {}\n')
+    assert guards.check_single_home(tmp_path) == []
+
+    _write(tmp_path, 'crates/meerschaum-connector-api/src/client/pipes.rs',
+           'fn thousands(n: usize) -> String {\n    n.to_string()\n}\n')
+    _write(tmp_path, 'crates/meerschaum-engine/src/selection.rs', 'fn negation_prefix() {}\n')
+    _write(tmp_path, 'crates/meerschaum-server/src/pipe_methods.rs', 'fn bound_lt() {}\n')
+    _write(tmp_path, 'crates/meerschaum-cli/src/native/session.rs', 'fn sql_attributes() {}\n')
+    joined = '\n'.join(guards.check_single_home(tmp_path))
+    assert 'crates/meerschaum-connector-api/src/client/pipes.rs:1: defines `thousands`' in joined
+    assert 'crates/meerschaum-engine/src/selection.rs:1: defines `negation_prefix`' in joined
+    assert 'crates/meerschaum-server/src/pipe_methods.rs:1: defines `bound_lt`' in joined
+    assert 'crates/meerschaum-cli/src/native/session.rs:1: defines `sql_attributes`' in joined
+
+    _write(tmp_path, 'crates/meerschaum-kernel/src/diff.rs', 'pub fn filter_existing() {}\n')
+    assert any('no longer defines a backtrack request' in v for v in guards.check_single_home(tmp_path))
+
+
 # ---------------------------------------------------------------------------
 # Rule 3: dash import cycles
 # ---------------------------------------------------------------------------

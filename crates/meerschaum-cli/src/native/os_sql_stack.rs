@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use meerschaum_connector_sql::uri::InvalidPort;
 use meerschaum_core::config::paths::Paths;
 use meerschaum_core::value::{Map, Value};
 use meerschaum_core::{SuccessTuple, pyfmt};
@@ -160,7 +161,7 @@ fn open_cli_with_options(
     if attrs.is_empty() {
         return failed(format!("'{keys}' is not a SQL connector."));
     }
-    let spec = match super::connectors::sql_spec(label, &attrs) {
+    let spec = match super::connectors::sql_spec(label, &attrs, InvalidPort::Reject) {
         Ok(spec) => spec,
         Err(message) => return failed(message),
     };

@@ -4,7 +4,7 @@
 
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, pipe_ops};
 use meerschaum_core::SuccessTuple;
-use meerschaum_core::pyfmt::{JsonStyle, json_dumps};
+use meerschaum_core::pyfmt::{JsonStyle, json_dumps, thousands};
 use meerschaum_core::value::{Map, Value};
 use meerschaum_kernel::value::DateTimeValue;
 use meerschaum_kernel::value::Value as KValue;
@@ -21,7 +21,7 @@ use crate::format::{Cell, Frame as TabFrame, OptionsArgs, TupleArgs, format_data
 use crate::value::{ArgsMap, PyValue};
 
 use super::pipes::{SelectedPipe, hydrate, pipe_keys, pipe_meta, pipe_state, selected_pipes};
-use super::{Instance, flag, info, pprint, print_tuple, session, thousands, warn, words};
+use super::{Instance, flag, info, pprint, print_tuple, session, warn, words};
 
 /// `json.dumps(value)`.
 pub fn dumps(v: &Value) -> String {

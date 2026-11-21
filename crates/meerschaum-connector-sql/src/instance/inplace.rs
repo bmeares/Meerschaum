@@ -24,10 +24,11 @@ use crate::queries::update::{
 };
 use meerschaum_connector::DataQuery;
 
-use super::data::{DataQueryOptions, fmt_thousands};
+use super::data::DataQueryOptions;
 use super::fetch::FetchArgs;
 use super::values::sync_time_from_sql;
 use super::{SqlConnector, frame_docs, kv_int, kv_str};
+use meerschaum_core::pyfmt::thousands;
 
 const TEMP_TABLE_ROOTS: [&str; 6] = ["backtrack", "new", "delta", "joined", "unseen", "update"];
 
@@ -440,7 +441,7 @@ impl SqlConnector {
             Vec::new()
         };
         // `replace`: the fetched window is authoritative.
-        let replace = replace || fetch_replace(pipe);
+        let replace = replace || pipe.fetch_replace();
         if replace && (matches!(begin, Bound::Str(_)) || matches!(end, Bound::Str(_))) {
             return SuccessTuple::fail(format!(
                 "Cannot replace a window of {pipe} bounded by a SQL expression: pass datetimes or integers as `begin` / `end`."
@@ -552,7 +553,7 @@ impl SqlConnector {
                 clean_up(true).await;
                 return SuccessTuple::ok(format!(
                     "Inserted {}, updated 0 rows.",
-                    fmt_thousands(rowcount)
+                    thousands(rowcount)
                 ));
             }
             let db_types = self
@@ -619,10 +620,7 @@ impl SqlConnector {
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
             clean_up(true).await;
-            return SuccessTuple::ok(format!(
-                "Inserted {}, updated 0 rows.",
-                fmt_thousands(inserted)
-            ));
+            return SuccessTuple::ok(format!("Inserted {}, updated 0 rows.", thousands(inserted)));
         }
 
         if !state.exists
@@ -769,7 +767,7 @@ impl SqlConnector {
             clean_up(true).await;
             SuccessTuple::ok(format!(
                 "Inserted {}, updated 0 rows.",
-                fmt_thousands(rowcount)
+                thousands(rowcount)
             ))
             })
             .await;
@@ -865,10 +863,7 @@ impl SqlConnector {
                 .flatten()
                 .unwrap_or(0);
             clean_up(false).await;
-            return SuccessTuple::ok(format!(
-                "Inserted {}, updated 0 rows.",
-                fmt_thousands(rowcount)
-            ));
+            return SuccessTuple::ok(format!("Inserted {}, updated 0 rows.", thousands(rowcount)));
         }
 
         let mut tx: Option<SqlTransaction> = match self.driver().begin_write().await {
@@ -1917,13 +1912,13 @@ impl SqlConnector {
         let msg = if !upsert {
             format!(
                 "Inserted {}, updated {} rows.",
-                fmt_thousands(unseen_count),
-                fmt_thousands(update_count)
+                thousands(unseen_count),
+                thousands(update_count)
             )
         } else {
             format!(
                 "Upserted {} row{}.",
-                fmt_thousands(update_count),
+                thousands(update_count),
                 if update_count != 1 { "s" } else { "" }
             )
         };
@@ -1989,13 +1984,6 @@ fn parameters_digest(pipe: &Pipe) -> u64 {
 /// Whether a SQLite column has no declared type (a computed column of `CREATE TABLE ... AS`).
 fn untyped(declared: &str) -> bool {
     declared.is_empty() || declared.eq_ignore_ascii_case("null")
-}
-
-/// Whether the pipe sets `fetch: {replace: true}` (each fetched window is authoritative).
-fn fetch_replace(pipe: &Pipe) -> bool {
-    pipe.param("fetch")
-        .and_then(|f| f.get("replace"))
-        .is_some_and(|v| v.truthy())
 }
 
 /// SQLite: `UPDATE` statements rewriting the staged table's datetime columns (those of `cols`

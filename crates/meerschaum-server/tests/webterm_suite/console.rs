@@ -934,6 +934,36 @@ async fn execute_prunes_only_old_finished_execute_jobs() {
 }
 
 #[tokio::test]
+async fn execute_removes_only_expired_execution_summaries() {
+    let (app, _jobs, root) = jobs_app();
+    let admin = common::login(&app, "admin", "pass", None).await;
+    let runs = root.path().join("runs");
+    std::fs::create_dir_all(&runs).unwrap();
+    let now = chrono::Utc::now().timestamp();
+    for (name, expires) in [
+        ("execute-expired1", now - 60),
+        ("execute-current2", now + 3600),
+    ] {
+        let record = json!({"name": name, "metadata": {}, "summary_expires": expires});
+        std::fs::write(runs.join(format!("{name}.json")), record.to_string()).unwrap();
+    }
+    std::fs::write(runs.join("notes.txt"), "kept").unwrap();
+    let r = send(
+        &app,
+        post_json(
+            "/execute",
+            Some(&admin),
+            json!({"sysargs": ["show", "version"]}),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert!(!runs.join("execute-expired1.json").exists());
+    assert!(runs.join("execute-current2.json").exists());
+    assert!(runs.join("notes.txt").exists());
+}
+
+#[tokio::test]
 async fn execute_validates_and_authorizes() {
     let (app, jobs, _root) = jobs_app();
     let admin = common::login(&app, "admin", "pass", None).await;

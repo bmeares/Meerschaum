@@ -58,14 +58,8 @@ pub fn file_command(owner_path: &str, password_path: &str) -> String {
 /// The provisioned data source's name.
 pub const MAIN_DATASOURCE: &str = meerschaum_core::config::grafana_readonly::MAIN_DATASOURCE_NAME;
 
+use meerschaum_core::config::grafana_readonly::trimmed_text;
 pub use meerschaum_core::config::grafana_readonly::{MainSource, switch_main_datasource};
-
-fn text(value: Option<&Value>) -> String {
-    match value {
-        None | Some(Value::Null) => String::new(),
-        Some(v) => v.py_str().trim().to_string(),
-    }
-}
 
 /// The schemas `stack:grafana:readonly_schemas` asks the role to read too (a list or a
 /// comma-separated string), and those refused: the schema of a connector reserved for teams
@@ -89,7 +83,7 @@ pub fn readonly_schemas(stack_grafana: &Map, sql_connectors: &Map) -> (Vec<Strin
         .values()
         .filter_map(|attrs| attrs.as_map())
         .filter(|attrs| attrs.get("teams").is_some_and(|t| !t.is_null()))
-        .map(|attrs| text(attrs.get("schema")))
+        .map(|attrs| trimmed_text(attrs.get("schema")))
         .filter(|s| !s.is_empty())
         .collect();
     let mut granted = Vec::new();
@@ -318,11 +312,11 @@ pub fn anonymous_warning(datasource: &Value, source: &MainSource) -> Option<Stri
     }
     if let Some(Value::List(sources)) = datasource.get("datasources") {
         for source in sources {
-            let name = text(source.get("name"));
+            let name = trimmed_text(source.get("name"));
             if name == MAIN_DATASOURCE {
                 continue;
             }
-            let user = text(source.get("user"));
+            let user = trimmed_text(source.get("user"));
             listed.push(if user.is_empty() {
                 format!("'{name}'")
             } else {

@@ -8,6 +8,7 @@ use chrono::Duration;
 use indexmap::IndexMap;
 use meerschaum_connector::{ConnectorResult, DataQuery, DateBound};
 use meerschaum_core::dtypes::{are_dtypes_equal, get_pd_type_from_db_type};
+use meerschaum_core::pyfmt::thousands;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::enforce::{
@@ -24,7 +25,7 @@ use crate::queries::cte::{ColsToSelect, format_cte_subquery, wrap_query_with_cte
 use crate::queries::metadef::get_pipe_query;
 use crate::queries::table::{IndexDoc, get_create_table_query, get_rename_table_queries};
 
-use super::values::{coerce_bound, date_arg, sync_time_from_sql};
+use super::values::{date_arg, sync_time_from_sql};
 use super::{SqlConnector, be, reflect};
 
 /// What `Pipe` reads from the instance while building queries: the table's columns and the
@@ -456,10 +457,7 @@ impl SqlConnector {
         } else {
             dt_typ
         };
-        Ok(Some(coerce_bound(
-            bound,
-            !dt_typ.to_lowercase().contains("utc"),
-        )))
+        Ok(Some(bound.coerce_tz(dt_typ.to_lowercase().contains("utc"))))
     }
 
     /// `get_pipe_data_query(pipe, select_columns, omit_columns, begin, end, params, order,
@@ -523,8 +521,8 @@ impl SqlConnector {
         end = self.parse_date_bound(sp, &state.dtypes, end).map_err(be)?;
         if let Some(t) = &dt_typ {
             let strip = !t.to_lowercase().contains("utc");
-            begin = begin.map(|b| coerce_bound(b, strip));
-            end = end.map(|e| coerce_bound(e, strip));
+            begin = begin.map(|b| b.coerce_tz(!strip));
+            end = end.map(|e| e.coerce_tz(!strip));
         }
 
         let cols_names: Vec<String> = select_columns.iter().map(|c| q(c)).collect();
@@ -1897,10 +1895,8 @@ impl SqlConnector {
         if Some(old_rowcount) != new_rowcount {
             msg.push_str(&format!(
                 "\nfrom {} to {} rows",
-                fmt_thousands(old_rowcount),
-                new_rowcount
-                    .map(fmt_thousands)
-                    .unwrap_or_else(|| "None".into())
+                thousands(old_rowcount),
+                new_rowcount.map(thousands).unwrap_or_else(|| "None".into())
             ));
         }
         msg.push('.');
@@ -1929,29 +1925,9 @@ pub fn subtract_interval(bound: DateBound, interval: ChunkInterval) -> DateBound
     }
 }
 
-/// Python's `f"{n:,}"`.
-pub fn fmt_thousands(n: i64) -> String {
-    let s = n.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    if n < 0 { format!("-{out}") } else { out }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn thousands() {
-        assert_eq!(fmt_thousands(0), "0");
-        assert_eq!(fmt_thousands(1234567), "1,234,567");
-        assert_eq!(fmt_thousands(-1000), "-1,000");
-    }
 
     #[test]
     fn chunk_bounds_ints() {

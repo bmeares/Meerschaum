@@ -19,7 +19,8 @@ use crate::value::{ArgsMap, PyValue};
 
 use super::pipes::{SelectedPipe, hydrate};
 use super::sync::{SyncArgs, interval_str, sync_pipe};
-use super::{Instance, Session, flag, info, int, print_tuple, thousands, warn};
+use super::{Instance, Session, flag, info, int, print_tuple, warn};
+use meerschaum_core::pyfmt::thousands;
 
 /// Whether the pipe's datetime axis is timezone-aware (`'utc' in dtypes[dt_col]`, with
 /// `'datetime'` as the default).
@@ -43,18 +44,6 @@ pub fn dt_is_aware(session: &Session, inst: &Instance, sp: &SelectedPipe) -> boo
     typ == "datetime" || typ.to_lowercase().contains("utc")
 }
 
-/// `coerce_timezone(bound, strip_utc=not aware)` (`Pipe.parse_date_bounds`).
-pub fn coerce_bound(b: DateBound, aware: bool) -> DateBound {
-    match b {
-        DateBound::Datetime(dt) => DateBound::Datetime(if aware {
-            DateTimeValue::utc(dt.utc)
-        } else {
-            DateTimeValue::naive(dt.utc)
-        }),
-        other => other,
-    }
-}
-
 /// `get_sync_time(params, newest, remote)`. A remote sync time is asked of `source`
 /// (v4: `self.connector if remote else self.instance_connector`).
 pub fn sync_time(
@@ -69,7 +58,7 @@ pub fn sync_time(
     // PARITY: v4 returns the sync time in the pipe's timezone (aware for UTC pipes).
     let conn = if remote { source } else { inst };
     let b = sync_time_raw(session, conn, sp, params, newest, remote)?;
-    Some(coerce_bound(b, dt_is_aware(session, inst, sp)))
+    Some(b.coerce_tz(dt_is_aware(session, inst, sp)))
 }
 
 fn sync_time_raw(
@@ -149,28 +138,17 @@ fn remote_instance(
         .unwrap_or_else(|_| inst.clone())
 }
 
-/// `str(bound)` (`None` for an open bound).
-pub fn bound_str(b: &Option<DateBound>) -> String {
-    b.as_ref()
-        .map(DateBound::py_str)
-        .unwrap_or_else(|| "None".into())
-}
-
 fn chunk_label(b: &ChunkBounds) -> String {
-    format!("{} - {}", bound_str(&b.0), bound_str(&b.1))
+    format!(
+        "{} - {}",
+        DateBound::optional_py_str(&b.0),
+        DateBound::optional_py_str(&b.1)
+    )
 }
 
 /// `Pipe.get_bound_interval()`.
 fn get_bound_interval(sp: &SelectedPipe) -> Option<ChunkInterval> {
     super::verify_plan::bound_interval(&sp.pipe)
-}
-
-fn bound_lt(a: &DateBound, b: &DateBound) -> bool {
-    match (a, b) {
-        (DateBound::Int(x), DateBound::Int(y)) => x < y,
-        (DateBound::Datetime(x), DateBound::Datetime(y)) => x.utc < y.utc,
-        _ => false,
-    }
 }
 
 /// `Pipe.get_bound_time()`.
@@ -186,7 +164,7 @@ fn get_bound_time(session: &Session, inst: &Instance, sp: &SelectedPipe) -> Opti
         }
         _ => false,
     };
-    if bound_lt(&oldest, &bound_time) || extreme {
+    if oldest.precedes(&bound_time) || extreme {
         Some(bound_time)
     } else {
         None
@@ -458,8 +436,8 @@ pub fn verify_pipe_with(
     };
     let bounded = va.bounded.unwrap_or(bound_time.is_some());
     let aware = dt_is_aware(session, inst, sp);
-    let mut begin = sync_args.begin.clone().map(|b| coerce_bound(b, aware));
-    let mut end = sync_args.end.clone().map(|b| coerce_bound(b, aware));
+    let mut begin = sync_args.begin.clone().map(|b| b.coerce_tz(aware));
+    let mut end = sync_args.end.clone().map(|b| b.coerce_tz(aware));
     if bounded && begin.is_none() {
         begin = bound_time
             .clone()
@@ -526,8 +504,8 @@ pub fn verify_pipe_with(
         }
         return SuccessTuple::ok(format!(
             "Could not determine chunks between '{}' and '{}'; nothing to do.",
-            bound_str(&begin),
-            bound_str(&end)
+            DateBound::optional_py_str(&begin),
+            DateBound::optional_py_str(&end)
         ));
     }
 
@@ -535,11 +513,11 @@ pub fn verify_pipe_with(
     let last = &chunk_bounds[chunk_bounds.len() - 1];
     let begin_to_print = match &begin {
         Some(b) => b.py_str(),
-        None => bound_str(if bounded { &first.0 } else { &first.1 }),
+        None => DateBound::optional_py_str(if bounded { &first.0 } else { &first.1 }),
     };
     let end_to_print = match &end {
         Some(e) => e.py_str(),
-        None => bound_str(if bounded { &last.1 } else { &last.0 }),
+        None => DateBound::optional_py_str(if bounded { &last.1 } else { &last.0 }),
     };
     let message_header = format!("{begin_to_print} - {end_to_print}");
     let interval_text = match &chunk_interval {
@@ -659,7 +637,11 @@ pub fn verify_pipe_with(
      -> SuccessTuple {
         let b_begin = batch[0].0.clone();
         let b_end = batch[batch.len() - 1].1.clone();
-        let header = format!("{} - {}", bound_str(&b_begin), bound_str(&b_end));
+        let header = format!(
+            "{} - {}",
+            DateBound::optional_py_str(&b_begin),
+            DateBound::optional_py_str(&b_end)
+        );
         if va.check_rowcounts_only {
             info(
                 rt,
@@ -714,8 +696,8 @@ pub fn verify_pipe_with(
             thousands(i as i64 + 1),
             thousands(num_batches as i64)
         );
-        let b_begin = bound_str(&batch[0].0);
-        let b_end = bound_str(&batch[batch.len() - 1].1);
+        let b_begin = DateBound::optional_py_str(&batch[0].0);
+        let b_end = DateBound::optional_py_str(&batch[batch.len() - 1].1);
         let batch_label = format!("batch {counter}:\n{b_begin} - {b_end}");
         let label_str = batch_label.replace(":\n", &format!(" for {pipe_str}...\n    "));
         info(rt, &format!("Verifying {label_str}\n"));

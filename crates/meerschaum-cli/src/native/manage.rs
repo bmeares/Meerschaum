@@ -27,9 +27,10 @@ use super::pipes::{
 };
 use super::show::{bound, bound_str};
 use super::{
-    Instance, flag, info, plural, pprint, print_tuple, session, string, thousands, warn, words,
-    yes_no,
+    Instance, flag, info, plural, pprint, print_tuple, session, string, warn, words, yes_no,
 };
+use meerschaum_core::pyfmt::thousands;
+use meerschaum_core::static_config::separate_negation_values;
 
 /// `Pipe.validate_indices()` (the implementation is `meerschaum_core::Pipe::validate_indices`).
 pub fn validate_indices(pipe: &Pipe) -> SuccessTuple {
@@ -667,23 +668,6 @@ pub fn clear_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     })
 }
 
-/// `separate_negation_values(values)`.
-fn separate_negation(values: &[String]) -> (Vec<String>, Vec<String>) {
-    let prefix = &meerschaum_core::static_config()
-        .system
-        .fetch_pipes_keys
-        .negation_prefix;
-    let mut inc = Vec::new();
-    let mut exc = Vec::new();
-    for v in values {
-        match v.strip_prefix(prefix.as_str()) {
-            Some(rest) => exc.push(rest.to_string()),
-            None => inc.push(v.clone()),
-        }
-    }
-    (inc, exc)
-}
-
 /// `tag pipes [tag ...] [_tag ...]`.
 pub fn tag_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action = words(args, "action");
@@ -701,7 +685,7 @@ pub fn tag_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         pipes.len(),
         plural(pipes.len())
     );
-    let (add, remove) = separate_negation(&action);
+    let (add, remove) = separate_negation_values(&action);
     let mut edited: Vec<Pipe> = Vec::new();
     for sp in pipes.iter_mut() {
         hydrate(rt, &inst, sp);

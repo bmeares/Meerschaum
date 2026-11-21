@@ -552,7 +552,7 @@ impl SqlConnector {
             let _ = self.edit_pipe(&updated, false).await;
             let desc = match interval {
                 Ok(ChunkInterval::Int(i)) => {
-                    format!("{} epoch units", super::data::fmt_thousands(i))
+                    format!("{} epoch units", meerschaum_core::pyfmt::thousands(i))
                 }
                 _ => format!("{new_minutes} minutes"),
             };

@@ -97,24 +97,6 @@ pub fn bound_from_partition(value: &PartitionValue) -> DateBound {
     }
 }
 
-/// `coerce_timezone(dt, strip_utc)`: convert aware datetimes to UTC, optionally dropping the
-/// timezone.
-pub fn coerce_bound(bound: DateBound, strip_utc: bool) -> DateBound {
-    match bound {
-        DateBound::Datetime(dt) => {
-            let out = match dt.tz {
-                None if strip_utc => dt,
-                // `dt.replace(tzinfo=timezone.utc)`.
-                None => DateTimeValue::utc(dt.utc),
-                Some(_) if strip_utc => DateTimeValue::naive(dt.utc),
-                Some(_) => DateTimeValue::utc(dt.utc),
-            };
-            DateBound::Datetime(out)
-        }
-        other => other,
-    }
-}
-
 /// A database scalar as a sync time (`get_sync_time`'s conversions).
 pub fn sync_time_from_sql(value: &SqlValue) -> Option<DateBound> {
     match value {
@@ -143,22 +125,11 @@ pub fn sync_time_from_sql(value: &SqlValue) -> Option<DateBound> {
 /// `json.dumps(x, default=json_serialize_value, sort_keys=sort_keys)` with the default
 /// separators (`', '`, `': '`).
 pub fn json_dumps_default(j: &serde_json::Value, sort_keys: bool) -> String {
-    fn sort(j: &serde_json::Value) -> serde_json::Value {
-        match j {
-            serde_json::Value::Object(o) => {
-                let mut keys: Vec<&String> = o.keys().collect();
-                keys.sort();
-                let mut m = serde_json::Map::new();
-                for k in keys {
-                    m.insert(k.clone(), sort(&o[k]));
-                }
-                serde_json::Value::Object(m)
-            }
-            serde_json::Value::Array(a) => serde_json::Value::Array(a.iter().map(sort).collect()),
-            other => other.clone(),
-        }
-    }
-    let j = if sort_keys { sort(j) } else { j.clone() };
+    let j = if sort_keys {
+        meerschaum_kernel::serialize::sort_json_keys(j)
+    } else {
+        j.clone()
+    };
     let core = meerschaum_connector::pipe_ops::json_to_core(&j);
     json_dumps(&core, JsonStyle::Default, true)
 }

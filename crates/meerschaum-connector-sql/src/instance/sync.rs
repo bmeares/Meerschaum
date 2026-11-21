@@ -19,7 +19,9 @@ use meerschaum_core::dtypes::{are_dtypes_equal, get_pd_type_from_db_type, is_dty
 use meerschaum_core::{Map, Pipe, SuccessTuple, SyncResult, Value};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::detect::{get_numeric_cols, get_special_cols};
-use meerschaum_kernel::diff::{BacktrackRequest, FilterExistingParams, filter_existing};
+use meerschaum_kernel::diff::{
+    BacktrackRequest, FilterExistingParams, backtrack_params, filter_existing,
+};
 use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
 use meerschaum_kernel::value::Value as KValue;
 
@@ -124,26 +126,6 @@ pub(crate) struct InternalSync {
     pub history_datetime_precision: bool,
 }
 
-/// A backtrack request's `params` as `build_where` params (values via `str()`).
-fn backtrack_params(req: &BacktrackRequest) -> Map {
-    req.params
-        .iter()
-        .map(|(k, vals)| {
-            let items = vals
-                .iter()
-                .map(|v| match v {
-                    v if v.is_na() => Value::Null,
-                    KValue::Int(i) => Value::Int(*i),
-                    KValue::Float(f) => Value::Float(*f),
-                    KValue::Bool(b) => Value::Bool(*b),
-                    other => Value::Str(other.py_str()),
-                })
-                .collect();
-            (k.clone(), Value::List(items))
-        })
-        .collect()
-}
-
 /// `get_current_timestamp(precision_unit, as_int)` for autotime (rounded down to the unit).
 fn current_timestamp(unit: meerschaum_core::dtypes::PrecisionUnit, as_int: bool) -> KValue {
     let now = chrono::Utc::now();
@@ -214,7 +196,7 @@ fn history_db_type(sp: &SqlPipe, flavor: Flavor, dtype: &str) -> String {
 /// changes.
 pub(crate) fn oracle_empty_string_params(params: Option<&Map>, literal: &[String]) -> Option<Map> {
     let params = params?;
-    let negation = crate::where_clause::negation_prefix();
+    let negation = meerschaum_core::static_config::negation_prefix();
     let fix = |v: &Value| -> Option<Value> {
         match v {
             Value::Str(s) if s.is_empty() => Some(Value::Null),
@@ -1043,13 +1025,13 @@ impl SqlConnector {
         let message = if !upsert {
             format!(
                 "Inserted {}, updated {} rows.",
-                super::data::fmt_thousands(unseen_count as i64),
-                super::data::fmt_thousands(update_count as i64)
+                meerschaum_core::pyfmt::thousands(unseen_count as i64),
+                meerschaum_core::pyfmt::thousands(update_count as i64)
             )
         } else {
             format!(
                 "Upserted {} row{}.",
-                super::data::fmt_thousands(update_count as i64),
+                meerschaum_core::pyfmt::thousands(update_count as i64),
                 if update_count != 1 { "s" } else { "" }
             )
         };

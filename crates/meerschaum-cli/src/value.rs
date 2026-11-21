@@ -551,16 +551,6 @@ fn json_dump_into(value: &PyValue, out: &mut String) -> Result<(), PyException> 
     Ok(())
 }
 
-fn json_float(f: f64) -> String {
-    if f.is_nan() {
-        "NaN".into()
-    } else if f.is_infinite() {
-        if f > 0.0 { "Infinity" } else { "-Infinity" }.into()
-    } else {
-        float_repr(f)
-    }
-}
-
 fn complex_repr(r: f64, i: f64) -> String {
     fn part(f: f64) -> String {
         let s = float_repr(f);
@@ -573,6 +563,7 @@ fn complex_repr(r: f64, i: f64) -> String {
     format!("({}{sign}{}j)", part(r), part(i.abs()))
 }
 
+use meerschaum_core::pyfmt::json_float;
 pub use meerschaum_core::pyfmt::{float_repr, str_repr as repr_str};
 
 /// `json.encoder.py_encode_basestring_ascii` (`json.dumps(s)` with `ensure_ascii=True`).

@@ -810,6 +810,27 @@ pub struct BacktrackRequest {
     pub params: IndexMap<String, Vec<Value>>,
 }
 
+/// A backtrack request's `params` as `build_where` params: integers, floats and booleans keep
+/// their type, nulls become `None` and everything else its `str()`.
+pub fn backtrack_params(req: &BacktrackRequest) -> meerschaum_core::Map {
+    req.params
+        .iter()
+        .map(|(k, vals)| {
+            let items = vals
+                .iter()
+                .map(|v| match v {
+                    v if v.is_na() => meerschaum_core::Value::Null,
+                    Value::Int(i) => meerschaum_core::Value::Int(*i),
+                    Value::Float(f) => meerschaum_core::Value::Float(*f),
+                    Value::Bool(b) => meerschaum_core::Value::Bool(*b),
+                    other => meerschaum_core::Value::Str(other.py_str()),
+                })
+                .collect();
+            (k.clone(), meerschaum_core::Value::List(items))
+        })
+        .collect()
+}
+
 /// The pipe attributes `filter_existing` reads.
 #[derive(Clone, Debug)]
 pub struct FilterExistingParams {

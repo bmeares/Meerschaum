@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use indexmap::IndexMap;
-use meerschaum_core::pyfmt::{JsonStyle, json_dumps, py_str};
+use meerschaum_core::pyfmt::{JsonStyle, format_timespan, json_dumps, py_str, thousands};
 use meerschaum_core::success::SyncResult;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::Frame;
@@ -59,71 +59,6 @@ pub fn query_value(v: &Value) -> QueryValue {
         Value::List(items) => QueryValue::Many(items.iter().map(py_str).collect()),
         other => QueryValue::One(py_str(other)),
     }
-}
-
-/// `humanfriendly.format_timespan(seconds)` as `interval_str(timedelta)` uses it.
-pub fn format_timespan(seconds: f64) -> String {
-    fn round_number(x: f64) -> String {
-        let s = format!("{x:.2}");
-        let s = s.trim_end_matches('0');
-        s.trim_end_matches('.').to_string()
-    }
-    fn pluralize(count: &str, singular: &str) -> String {
-        let n: f64 = count.parse().unwrap_or(0.0);
-        if n.floor() == 1.0 {
-            format!("{count} {singular}")
-        } else {
-            format!("{count} {singular}s")
-        }
-    }
-    if seconds < 60.0 {
-        return pluralize(&round_number(seconds), "second");
-    }
-    let units: [(&str, f64); 6] = [
-        ("year", 31_536_000.0),
-        ("week", 604_800.0),
-        ("day", 86_400.0),
-        ("hour", 3_600.0),
-        ("minute", 60.0),
-        ("second", 1.0),
-    ];
-    let mut remaining = seconds;
-    let mut parts = Vec::new();
-    for (i, (name, divider)) in units.iter().enumerate() {
-        let count = remaining / divider;
-        remaining %= divider;
-        let text = if i + 1 < units.len() {
-            (count.trunc() as i64).to_string()
-        } else {
-            round_number(count)
-        };
-        if text != "0" {
-            parts.push(pluralize(&text, name));
-        }
-    }
-    if parts.len() == 1 {
-        return parts.remove(0);
-    }
-    parts.truncate(3);
-    let last = parts.pop().unwrap_or_default();
-    if parts.is_empty() {
-        last
-    } else {
-        format!("{} and {last}", parts.join(", "))
-    }
-}
-
-/// `f"{n:,}"`.
-fn thousands(n: usize) -> String {
-    let s = n.to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
 }
 
 /// The error of a read the server failed (`5xx`: its instance errored or could not be reached),
@@ -247,7 +182,7 @@ impl APIConnector {
             format!(
                 "{}/{}",
                 routes::PIPELINES,
-                crate::wire::quote_plus(pipe.location_key().unwrap_or(""))
+                meerschaum_core::pyfmt::quote_plus(pipe.location_key().unwrap_or(""))
             )
         } else {
             Self::pipe_r_url(pipe)
@@ -832,9 +767,9 @@ impl APIConnector {
         counts.message = format!(
             "It took {} to sync {} row{} across {} chunk{} to {pipe}.",
             format_timespan(elapsed),
-            thousands(rowcount),
+            thousands(rowcount as u64),
             if rowcount != 1 { "s" } else { "" },
-            thousands(num_success_chunks),
+            thousands(num_success_chunks as u64),
             if num_success_chunks != 1 { "s" } else { "" },
         );
         counts
@@ -1850,14 +1785,7 @@ mod tests {
     }
 
     #[test]
-    fn timespans() {
-        assert_eq!(format_timespan(0.48), "0.48 seconds");
-        assert_eq!(format_timespan(1.0), "1 second");
-        assert_eq!(format_timespan(1.5), "1.5 second");
-        assert_eq!(format_timespan(0.0), "0 seconds");
-        assert_eq!(format_timespan(61.0), "1 minute and 1 second");
-        assert_eq!(format_timespan(3723.5), "1 hour, 2 minutes and 3.5 seconds");
-        assert_eq!(thousands(1234567), "1,234,567");
+    fn py_json_lists() {
         assert_eq!(
             py_json(&Value::List(vec![Value::Str("a".into()), Value::Int(1)])),
             "[\"a\", 1]"

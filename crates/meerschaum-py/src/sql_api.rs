@@ -17,7 +17,7 @@ use meerschaum_connector::{PipesKeys, PipesKeysQuery, SyncOptions};
 use meerschaum_connector_sql::instance::InstanceSettings;
 use meerschaum_connector_sql::instance::data::DataQueryOptions;
 use meerschaum_connector_sql::pipe::ChunkInterval;
-use meerschaum_connector_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes, InvalidPort};
 use meerschaum_connector_sql::{Flavor, SqlConnector as RsSqlConnector};
 use meerschaum_core::{Map, Value};
 use meerschaum_kernel::Frame;
@@ -179,72 +179,41 @@ fn settings_from_py(py: Python<'_>, flavor: Flavor) -> InstanceSettings {
     s
 }
 
-/// The connector attributes from the Python connector's `__dict__`-like mapping.
+/// The connector attributes from the Python connector's `__dict__`-like mapping
+/// ([`ConnectorAttributes::from_attribute_map`], an invalid `port` refused). An attribute other than the
+/// connection keys counts only when it is a string or an integer: the connector's other
+/// attributes are Python objects, not connection parameters.
 pub(crate) fn attributes_from_py(
     label: &str,
     attrs: &Bound<'_, PyDict>,
 ) -> PyResult<ConnectorAttributes> {
-    let mut out = ConnectorAttributes {
-        label: Some(label.to_string()),
-        ..Default::default()
-    };
+    const CONNECTION_KEYS: [&str; 12] = [
+        "label",
+        "flavor",
+        "uri",
+        "host",
+        "port",
+        "username",
+        "password",
+        "database",
+        "schema",
+        "options",
+        "pool_size",
+        "max_overflow",
+    ];
+    let mut map = Map::new();
     for (k, v) in attrs.iter() {
-        if v.is_none() {
+        let key: String = k.str()?.extract()?;
+        if !CONNECTION_KEYS.contains(&key.as_str())
+            && !(v.is_instance_of::<pyo3::types::PyString>()
+                || v.is_instance_of::<pyo3::types::PyInt>())
+        {
             continue;
         }
-        let key: String = k.str()?.extract()?;
-        let text = || -> PyResult<String> { Ok(v.str()?.to_str()?.to_string()) };
-        match key.as_str() {
-            "flavor" => {
-                out.flavor = Some(
-                    text()?
-                        .parse()
-                        .map_err(|e| PyValueError::new_err(format!("{e:?}")))?,
-                )
-            }
-            "uri" => out.uri = Some(text()?),
-            "host" => out.host = Some(text()?),
-            "port" => {
-                out.port = Some(
-                    text()?
-                        .parse()
-                        .map_err(|_| PyValueError::new_err(format!("Invalid port '{v}'.")))?,
-                )
-            }
-            "username" => out.username = Some(text()?),
-            "password" => out.password = Some(text()?),
-            "database" => out.database = Some(text()?),
-            "schema" => out.schema = Some(text()?),
-            "options" => {
-                out.options = Some(if let Ok(mapping) = v.cast::<PyDict>() {
-                    ConnectionOptions::Pairs(
-                        mapping
-                            .iter()
-                            .map(|(key, value)| {
-                                Ok((
-                                    key.str()?.to_str()?.to_string(),
-                                    value.str()?.to_str()?.to_string(),
-                                ))
-                            })
-                            .collect::<PyResult<_>>()?,
-                    )
-                } else {
-                    ConnectionOptions::Str(text()?)
-                });
-            }
-            "pool_size" => out.pool_size = text()?.trim().parse().ok(),
-            "max_overflow" => out.max_overflow = text()?.trim().parse().ok(),
-            "label" => {}
-            _ => {
-                if v.is_instance_of::<pyo3::types::PyString>()
-                    || v.is_instance_of::<pyo3::types::PyInt>()
-                {
-                    out.extra.push((key, text()?));
-                }
-            }
-        }
+        map.insert(key, py_to_core(&v)?);
     }
-    Ok(out)
+    ConnectorAttributes::from_attribute_map(label, &map, InvalidPort::Reject)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 /// The pandas dtype hints of a read (`read(dtype=...)` in v4: `to_pandas_dtype()` of the

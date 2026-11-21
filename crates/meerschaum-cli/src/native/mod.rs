@@ -432,19 +432,6 @@ pub fn plural(n: usize) -> &'static str {
     if n != 1 { "s" } else { "" }
 }
 
-/// `f"{n:,}"`.
-pub fn thousands(n: i64) -> String {
-    let s = n.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    if n < 0 { format!("-{out}") } else { out }
-}
-
 /// `items_str(items, quotes=..., and_=..., and_str=...)` (`meerschaum/utils/misc.py`).
 pub fn items_str_with(items: &[String], quotes: bool, and_: bool, and_str: &str) -> String {
     if items.is_empty() {

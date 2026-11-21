@@ -4,6 +4,7 @@ use super::console::{Console, Justify, Measurement, Overflow, Padding, RenderOpt
 use super::segment::{self, Line, Segment};
 use super::style::{Style, StyleRef};
 use super::text::Text;
+use meerschaum_core::pyfmt::{collapse_widths, ratio_distribute, ratio_reduce};
 
 /// `rich.box.Box`: eight lines of four characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -510,126 +511,6 @@ impl Default for Table<'_> {
     }
 }
 
-/// Python's `round()` (half to even) on a float.
-fn py_round(x: f64) -> i64 {
-    let r = x.round();
-    if (x - x.trunc()).abs() == 0.5 {
-        let t = x.trunc();
-        if (t as i64) % 2 == 0 {
-            t as i64
-        } else {
-            r as i64
-        }
-    } else {
-        r as i64
-    }
-}
-
-/// `rich._ratio.ratio_reduce(total, ratios, maximums, values)`.
-pub fn ratio_reduce(
-    total: usize,
-    ratios: &[usize],
-    maximums: &[usize],
-    values: &[usize],
-) -> Vec<usize> {
-    let ratios: Vec<usize> = ratios
-        .iter()
-        .zip(maximums)
-        .map(|(r, m)| if *m > 0 { *r } else { 0 })
-        .collect();
-    let mut total_ratio: usize = ratios.iter().sum();
-    if total_ratio == 0 {
-        return values.to_vec();
-    }
-    let mut total_remaining = total as i64;
-    let mut result = Vec::new();
-    for ((ratio, maximum), value) in ratios.iter().zip(maximums).zip(values) {
-        if *ratio > 0 && total_ratio > 0 {
-            let distributed = (*maximum as i64).min(py_round(
-                *ratio as f64 * total_remaining as f64 / total_ratio as f64,
-            ));
-            result.push((*value as i64 - distributed).max(0) as usize);
-            total_remaining -= distributed;
-            total_ratio -= ratio;
-        } else {
-            result.push(*value);
-        }
-    }
-    result
-}
-
-/// `rich._ratio.ratio_distribute(total, ratios, minimums)`.
-pub fn ratio_distribute(total: usize, ratios: &[usize], minimums: Option<&[usize]>) -> Vec<usize> {
-    let ratios: Vec<usize> = match minimums {
-        Some(m) => ratios
-            .iter()
-            .zip(m)
-            .map(|(r, mn)| if *mn > 0 { *r } else { 0 })
-            .collect(),
-        None => ratios.to_vec(),
-    };
-    let mut total_ratio: usize = ratios.iter().sum();
-    if total_ratio == 0 {
-        // PARITY: rich asserts `total_ratio > 0`; an all-zero layout keeps its widths.
-        return vec![0; ratios.len()];
-    }
-    let mut total_remaining = total as i64;
-    let mins: Vec<usize> = minimums
-        .map(<[usize]>::to_vec)
-        .unwrap_or(vec![0; ratios.len()]);
-    let mut out = Vec::new();
-    for (ratio, minimum) in ratios.iter().zip(mins) {
-        let distributed = if total_ratio > 0 {
-            (minimum as i64)
-                .max((*ratio as f64 * total_remaining as f64 / total_ratio as f64).ceil() as i64)
-        } else {
-            total_remaining
-        };
-        out.push(distributed.max(0) as usize);
-        total_ratio -= ratio;
-        total_remaining -= distributed;
-    }
-    out
-}
-
-/// `Table._collapse_widths(widths, wrapable, max_width)`.
-fn collapse_widths(widths: &[usize], wrapable: &[bool], max_width: usize) -> Vec<usize> {
-    let mut widths = widths.to_vec();
-    let mut total: usize = widths.iter().sum();
-    let mut excess = total as i64 - max_width as i64;
-    if wrapable.iter().any(|w| *w) {
-        while total > 0 && excess > 0 {
-            let max_column = widths
-                .iter()
-                .zip(wrapable)
-                .filter(|(_, w)| **w)
-                .map(|(w, _)| *w)
-                .max()
-                .unwrap_or(0);
-            let second = widths
-                .iter()
-                .zip(wrapable)
-                .map(|(w, a)| if *a && *w != max_column { *w } else { 0 })
-                .max()
-                .unwrap_or(0);
-            let diff = max_column - second;
-            let ratios: Vec<usize> = widths
-                .iter()
-                .zip(wrapable)
-                .map(|(w, a)| usize::from(*w == max_column && *a))
-                .collect();
-            if !ratios.iter().any(|r| *r > 0) || diff == 0 {
-                break;
-            }
-            let max_reduce = vec![(excess as usize).min(diff); widths.len()];
-            widths = ratio_reduce(excess as usize, &ratios, &max_reduce, &widths);
-            total = widths.iter().sum();
-            excess = total as i64 - max_width as i64;
-        }
-    }
-    widths
-}
-
 impl Renderable for Table<'_> {
     fn render(&self, console: &Console, options: &RenderOptions) -> Vec<Segment> {
         let mut out = Vec::new();
@@ -811,14 +692,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ratios() {
-        assert_eq!(ratio_distribute(10, &[1, 1, 1], None), vec![4, 3, 3]);
-        assert_eq!(
-            ratio_reduce(3, &[1, 1, 1], &[3, 3, 3], &[10, 10, 10]),
-            vec![9, 9, 9]
-        );
-        assert_eq!(py_round(2.5), 2);
-        assert_eq!(py_round(3.5), 4);
+    fn simple_box_head_row() {
         assert_eq!(
             SIMPLE.get_row(&[2, 3], "head", true),
             " ──────── ".replace("────────", "──────")

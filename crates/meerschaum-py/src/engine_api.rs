@@ -104,7 +104,7 @@ use meerschaum_cli::native::session::ConfiguredSqlProvider;
 use meerschaum_cli::native::{EngineRegistry, Instance, RegistryOptions, Session, registry_with};
 use meerschaum_connector_sql::SqlConnector;
 use meerschaum_connector_sql::instance::InstanceSettings;
-use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes};
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes, InvalidPort};
 use meerschaum_core::config::Config;
 use meerschaum_core::success::Bound;
 use meerschaum_engine::read::{EngineReader, RunFilter, RunStatus};
@@ -218,69 +218,6 @@ fn time_field(request: &Json, key: &str) -> PyResult<Option<DateTime<Utc>>> {
     }
 }
 
-fn sql_attributes(
-    label: &str,
-    attrs: &serde_json::Map<String, Json>,
-) -> PyResult<ConnectorAttributes> {
-    let mut out = ConnectorAttributes {
-        label: Some(label.to_string()),
-        ..Default::default()
-    };
-    for (key, value) in attrs {
-        if value.is_null() {
-            continue;
-        }
-        if key == "options" {
-            use meerschaum_connector_sql::uri::ConnectionOptions;
-            out.options = Some(match value {
-                Json::Object(mapping) => ConnectionOptions::Pairs(
-                    mapping
-                        .iter()
-                        .map(|(key, value)| {
-                            (
-                                key.clone(),
-                                value
-                                    .as_str()
-                                    .map(str::to_string)
-                                    .unwrap_or_else(|| value.to_string()),
-                            )
-                        })
-                        .collect(),
-                ),
-                Json::String(text) => ConnectionOptions::Str(text.clone()),
-                _ => return Err(value_err("SQL options must be a string or mapping.")),
-            });
-            continue;
-        }
-        let text = match value {
-            Json::String(s) => s.clone(),
-            Json::Number(n) => n.to_string(),
-            Json::Bool(b) => b.to_string(),
-            _ => continue,
-        };
-        match key.as_str() {
-            "flavor" => out.flavor = Some(text.parse().map_err(|e| value_err(format!("{e:?}")))?),
-            "uri" => out.uri = Some(text),
-            "host" => out.host = Some(text),
-            "port" => {
-                out.port = Some(
-                    text.parse()
-                        .map_err(|_| value_err(format!("Invalid port '{text}'.")))?,
-                )
-            }
-            "username" => out.username = Some(text),
-            "password" => out.password = Some(text),
-            "database" => out.database = Some(text),
-            "schema" => out.schema = Some(text),
-            "pool_size" => out.pool_size = text.trim().parse().ok(),
-            "max_overflow" => out.max_overflow = text.trim().parse().ok(),
-            "label" => {}
-            _ => out.extra.push((key.clone(), text)),
-        }
-    }
-    Ok(out)
-}
-
 struct Built {
     engine: Engine,
     registry: Arc<dyn ConnectorRegistry>,
@@ -305,9 +242,14 @@ fn build(py: Python<'_>, session: &Session, request: &Json) -> PyResult<Built> {
         for (keys, attrs) in connectors {
             let Json::Object(attrs) = attrs else { continue };
             let label = keys.split_once(':').map_or(keys.as_str(), |(_, l)| l);
-            let ca = sql_attributes(label, attrs)?;
-            let spec =
-                ConnectionSpec::from_attributes(&ca).map_err(|e| value_err(e.to_string()))?;
+            let attrs =
+                match meerschaum_connector::pipe_ops::json_to_core(&Json::Object(attrs.clone())) {
+                    meerschaum_core::Value::Map(attrs) => attrs,
+                    _ => meerschaum_core::Map::new(),
+                };
+            let spec = ConnectorAttributes::from_attribute_map(label, &attrs, InvalidPort::Reject)
+                .and_then(|ca| ConnectionSpec::from_attributes(&ca))
+                .map_err(|e| value_err(e.to_string()))?;
             let settings = InstanceSettings::from_config(spec.flavor, config);
             // Never block on the runtime while holding the interpreter lock: the runtime's
             // `tracing` sink takes the lock on its own threads.
@@ -905,25 +847,5 @@ mod tests {
 
     fn selection_for_test(request: &Json) -> Selection {
         super::selection(request, "sql:home").unwrap().unwrap()
-    }
-
-    #[test]
-    fn sql_attributes_map_known_keys_and_keep_the_rest() {
-        let attrs = json!({
-            "flavor": "sqlite",
-            "database": "/tmp/x.db",
-            "port": 5432,
-            "host": null,
-            "sslmode": "require",
-        });
-        let out = sql_attributes("lbl", attrs.as_object().unwrap()).unwrap();
-        assert_eq!(out.label.as_deref(), Some("lbl"));
-        assert_eq!(out.database.as_deref(), Some("/tmp/x.db"));
-        assert_eq!(out.port, Some(5432));
-        assert!(out.host.is_none());
-        assert_eq!(
-            out.extra,
-            vec![("sslmode".to_string(), "require".to_string())]
-        );
     }
 }

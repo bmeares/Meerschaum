@@ -344,7 +344,7 @@ fn render(plan: &Restore, project: &str) -> String {
                 .fingerprint
                 .get("row_estimate")
                 .and_then(Json::as_i64)
-                .map(|n| format!(", ~{} rows", super::super::thousands(n)))
+                .map(|n| format!(", ~{} rows", meerschaum_core::pyfmt::thousands(n)))
                 .unwrap_or_default();
             format!("{} ({}{rows})", d.name, human_bytes(d.dump.bytes as i64))
         })

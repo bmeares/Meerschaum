@@ -519,8 +519,8 @@ fn success_message(plan: &Plan, steps: &Steps, manifest: &Json) -> String {
         plan.new_volume,
         plan.databases.len(),
         if plan.databases.len() == 1 { "" } else { "s" },
-        super::super::thousands(tables as i64),
-        super::super::thousands(rows),
+        meerschaum_core::pyfmt::thousands(tables as i64),
+        meerschaum_core::pyfmt::thousands(rows),
         format_duration(steps.started.elapsed())
     );
     text.push_str(&steps.timings_text());

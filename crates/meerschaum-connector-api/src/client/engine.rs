@@ -203,7 +203,7 @@ impl APIConnector {
         let path = format!(
             "{}/{}",
             routes::ENGINE_RUNS,
-            crate::wire::quote_plus(run_id).replace('+', "%20")
+            meerschaum_core::pyfmt::quote_plus(run_id).replace('+', "%20")
         );
         let r = self
             .get(&path, self.engine_options(RequestOptions::default()))

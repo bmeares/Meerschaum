@@ -43,9 +43,8 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use meerschaum_connector::InstanceConnector;
 use meerschaum_connector_sql::SqlConnector;
-use meerschaum_connector_sql::flavor::Flavor;
 use meerschaum_connector_sql::instance::InstanceSettings;
-use meerschaum_connector_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes, InvalidPort};
 use meerschaum_core::config::Config;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{pyfmt, static_config};
@@ -1385,8 +1384,9 @@ pub fn sql_spec(label: &str, config: &Config) -> Result<ConnectionSpec, ActionEr
             super::connectors::undefined_connector_message("sql", label),
         ));
     }
-    let ca = sql_attributes(label, &attrs)?;
-    ConnectionSpec::from_attributes(&ca).map_err(|e| ActionError::new("ValueError", e.to_string()))
+    ConnectorAttributes::from_attribute_map(label, &attrs, InvalidPort::Reject)
+        .and_then(|ca| ConnectionSpec::from_attributes(&ca))
+        .map_err(|e| ActionError::new("ValueError", e.to_string()))
 }
 
 /// `type:label` with the default label filled in (the session's map key).
@@ -1440,48 +1440,6 @@ pub fn connector_attributes(config: &Config, typ: &str, label: &str) -> Map {
         .map(|v| v.to_map())
         .unwrap_or_default();
     apply_patch_maps(&base, &specific)
-}
-
-fn sql_attributes(label: &str, attrs: &Map) -> Result<ConnectorAttributes, ActionError> {
-    let mut ca = ConnectorAttributes {
-        label: Some(label.to_string()),
-        ..Default::default()
-    };
-    let s = |v: &Value| pyfmt::py_str(v);
-    for (k, v) in attrs {
-        if v.is_null() {
-            continue;
-        }
-        match k.as_str() {
-            "flavor" => {
-                ca.flavor = Some(
-                    s(v).parse::<Flavor>()
-                        .map_err(|e| ActionError::new("ValueError", e.to_string()))?,
-                )
-            }
-            "uri" => ca.uri = Some(s(v)),
-            "host" => ca.host = Some(s(v)),
-            "port" => ca.port = pyfmt::py_int(v).and_then(|p| u16::try_from(p).ok()),
-            "username" => ca.username = Some(s(v)),
-            "password" => ca.password = Some(s(v)),
-            "database" => ca.database = Some(s(v)),
-            "schema" => ca.schema = Some(s(v)),
-            "options" => {
-                ca.options = Some(match v {
-                    Value::Map(m) => {
-                        ConnectionOptions::Pairs(m.iter().map(|(k, v)| (k.clone(), s(v))).collect())
-                    }
-                    other => ConnectionOptions::Str(s(other)),
-                })
-            }
-            "pool_size" => ca.pool_size = pyfmt::py_int(v).and_then(|p| u32::try_from(p).ok()),
-            "max_overflow" => {
-                ca.max_overflow = pyfmt::py_int(v).and_then(|p| u32::try_from(p).ok())
-            }
-            other => ca.extra.push((other.to_string(), s(v))),
-        }
-    }
-    Ok(ca)
 }
 
 /// What a callback from a team's plugin code may do to a pipe: what a member of the team
@@ -1565,7 +1523,8 @@ impl ConfiguredSqlProvider {
                 attrs.insert("database".into(), Value::Str(self.sqlite_path.clone()));
             }
         }
-        let ca = sql_attributes(label, &attrs).ok()?;
+        let ca =
+            ConnectorAttributes::from_attribute_map(label, &attrs, InvalidPort::Reject).ok()?;
         let spec = ConnectionSpec::from_attributes(&ca).ok()?;
         let settings = InstanceSettings::defaults(spec.flavor);
         SqlConnector::connect_lazy(label, spec, settings).ok()
@@ -1633,6 +1592,7 @@ mod provider_tests {
 #[cfg(test)]
 mod registration_tests {
     use super::*;
+    use meerschaum_connector_sql::flavor::Flavor;
     use meerschaum_core::config::ConfigOptions;
 
     fn isolated_config() -> (tempfile::TempDir, tempfile::TempDir, Config) {

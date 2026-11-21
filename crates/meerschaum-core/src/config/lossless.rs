@@ -27,7 +27,7 @@ use indexmap::IndexMap;
 use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Zero};
 
-use crate::pyfmt::{JsonStyle, bytes_repr, float_repr, json_dumps_str, str_repr};
+use crate::pyfmt::{JsonStyle, bytes_repr, float_repr, json_dumps_str, json_float, str_repr};
 use crate::value::{Map, Value};
 use crate::yaml::dumper::value_from_node;
 use crate::yaml::node::{Date, DateTime, Node, NodeRef, PyKey, py_key};
@@ -531,16 +531,6 @@ pub fn py_str(value: &ConfigValue) -> String {
 // ---------------------------------------------------------------------------------------------
 // json.dumps
 // ---------------------------------------------------------------------------------------------
-
-fn json_float(f: f64) -> String {
-    if f.is_nan() {
-        "NaN".to_string()
-    } else if f.is_infinite() {
-        if f > 0.0 { "Infinity" } else { "-Infinity" }.to_string()
-    } else {
-        float_repr(f)
-    }
-}
 
 /// The text of the placeholder for the `n`th lossless leaf (see [`json_dumps_lossless`]).
 pub fn placeholder_token(n: usize) -> String {

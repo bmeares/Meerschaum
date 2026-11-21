@@ -43,7 +43,9 @@ use meerschaum_core::value::apply_patch_maps;
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::cast::{coerce_datetime, datetime_to_int};
-use meerschaum_kernel::diff::{BacktrackRequest, FilterExistingParams, filter_existing};
+use meerschaum_kernel::diff::{
+    BacktrackRequest, FilterExistingParams, backtrack_params, filter_existing,
+};
 use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
 
@@ -505,26 +507,6 @@ pub fn result_from_message(success: bool, message: String) -> SyncResult {
     meerschaum_connector::pipe_ops::sync_result_from_message(success, message)
 }
 
-/// A backtrack request's `params` as `build_where` params (as the SQL instance builds them).
-fn backtrack_params(req: &BacktrackRequest) -> Map {
-    req.params
-        .iter()
-        .map(|(k, vals)| {
-            let items = vals
-                .iter()
-                .map(|v| match v {
-                    v if v.is_na() => Value::Null,
-                    KValue::Int(i) => Value::Int(*i),
-                    KValue::Float(f) => Value::Float(*f),
-                    KValue::Bool(b) => Value::Bool(*b),
-                    other => Value::Str(other.py_str()),
-                })
-                .collect();
-            (k.clone(), Value::List(items))
-        })
-        .collect()
-}
-
 /// `pipe.filter_existing(df)` over the trait: `(unseen, update, delta)`.
 pub async fn filter_existing_frame(
     env: &SyncEnv<'_>,
@@ -733,7 +715,7 @@ async fn sync_inner(
             meerschaum_connector::sync_metrics::observed_registration(&pipe),
         );
     }
-    let replacing = args.replace || (input.is_none() && fetch_replace(&pipe));
+    let replacing = args.replace || (input.is_none() && pipe.fetch_replace());
     if let Some(refused) = meerschaum_connector::locks::refusal_of(
         &pipe,
         registered_parameters.as_ref(),
@@ -922,7 +904,7 @@ async fn sync_inner(
             );
             // `fetch: {replace: true}` (or `replace=True`): the fetched window is authoritative,
             // so every chunk of it is written in one transaction that first clears the window.
-            let replace = args.replace || fetch_replace(&pipe);
+            let replace = args.replace || pipe.fetch_replace();
             // A first load (no table yet) has nothing to replace: its chunks stream in like any
             // other fetch instead of being held in memory for one transaction.
             let replace = replace && !matches!(instance.pipe_exists(&pipe).await, Ok(false));
@@ -1309,13 +1291,6 @@ async fn sync_inplace(
         result = fail(e);
     }
     result
-}
-
-/// Whether the pipe sets `fetch: {replace: true}`: each fetched window is authoritative.
-pub fn fetch_replace(pipe: &Pipe) -> bool {
-    pipe.param("fetch")
-        .and_then(|f| f.get("replace"))
-        .is_some_and(|v| v.truthy())
 }
 
 /// The window `[begin, end)` a `replace=True` sync of data replaces: the sync's `begin` /

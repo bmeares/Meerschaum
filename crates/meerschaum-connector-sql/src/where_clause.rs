@@ -13,14 +13,7 @@ use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
 use meerschaum_core::Value;
 use meerschaum_core::dtypes::value_is_null;
-
-/// `STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']` (from `static.toml`).
-pub fn negation_prefix() -> &'static str {
-    &meerschaum_core::static_config()
-        .system
-        .fetch_pipes_keys
-        .negation_prefix
-}
+use meerschaum_core::static_config::negation_prefix;
 
 /// The words that make `build_where` give up (`utils/sql.py:1134`).
 const BAD_WORDS: [&str; 3] = ["drop ", "--", ";"];
