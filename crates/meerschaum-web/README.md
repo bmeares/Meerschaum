@@ -12,6 +12,13 @@ page ("The web console comes with the Python package: `pip install meerschaum[da
 that logic is `meerschaum_server::web::console_entry`, so the standalone binary (`cargo install
 meerschaum`, the `minimal` Docker image) serves it too.
 
+## Teams
+
+Team-aware pieces here: job-log visibility by team (`stream.rs`), isolated teams' plugin pages
+rendered from sealed executor catalogs (`extension_pages.rs`) and one Grafana organization per team
+(`grafana.rs`). Team terminals, API-only terminals and the terminal bridge live in
+`meerschaum_server::webterm`. Map: `docs/agents/teams-and-executors.md`.
+
 ## The web terminal
 
 `WebtermSettings` (set by `mrsm start api` unless `--no-webterm`) serves `/webterm/{session_id}`, the
@@ -84,7 +91,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cargo fmt -p meerschaum-web
 cargo clippy -p meerschaum-web --all-targets -- -D warnings
 cargo test -p meerschaum-web
-cargo test -p meerschaum-server --test console
+cargo test -p meerschaum-server --test webterm_suite console::
 ```
 
 Tests drive the composed router in process: the shared session store (an in-memory instance, a

@@ -168,7 +168,7 @@ back as `9.22e18`). Two kernel spots used `f as i64`, which saturates:
   `filter_unseen_df` against an `int64` frame falls back to the numeric rule (`Decimal('1E+20')`
   style values), as v4 does.
 
-Both use `cast::float_fits_i64`. Regression tests: `crates/meerschaum-kernel/tests/big_floats.rs`
+Both use `cast::float_fits_i64`. Regression tests: `crates/meerschaum-kernel/tests/integration/big_floats.rs`
 (kernel, values from `MRSM_CORE=python`) and `test_out_of_range_floats_do_not_saturate` in
 `tests/test_core.py` (both modes, `float` / `numeric` / `int` / untyped, float64 and object
 columns, `filter_unseen_df`, `query_df`).
@@ -468,7 +468,7 @@ now asserts this through `pg_stat_activity`.
   internal upsert ("expression is of type text").
 - Stale prepared statements (SQLSTATE 0A000, "cached plan must not change result type") are
   retried on a connection with a cleared statement cache. Describes of empty reads use their own
-  statement text. Tests: `crates/meerschaum-connector-sql/tests/w9u_pg_params.rs`.
+  statement text. Tests: `crates/meerschaum-connector-sql/tests/queries_drivers_suite/w9u_pg_params.rs`.
 
 **Per-flavor microbenchmark** (one pipe, 36 rows, fresh process, median of 15 calls, best of 3
 rounds, ms; python / rust):

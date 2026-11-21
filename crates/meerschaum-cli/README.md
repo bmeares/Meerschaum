@@ -106,7 +106,7 @@ worker until it writes a full line, and output written while the monitor is open
 and printed when it closes. SIGTSTP erases the region, restores the terminal and stops the
 process. `--loop` / `--listen` show the rows only (`LoopView`), under the laps' v4 lines.
 Terminals without ANSI keep one line per node transition.
-`tests/live_sync_pty.rs` drives it in a pseudo-terminal.
+`tests/shell_cli_suite/live_sync_pty.rs` drives it in a pseudo-terminal.
 - `--chunk-pipelining` and `--last N` (only for `show run[s]`) are parsed by
   `parse::engine_arguments` like `--parents`. `parameters['schedule']` reaches the engine through
   a `Cadence` built on `meerschaum-jobs` (`native/engine.rs`).
@@ -129,7 +129,7 @@ F3 keys draw full-screen views with `ratatui` on the same `crossterm` as `reedli
 
 Adding a view: a `ViewDef` in `VIEWS`, its subaction in `actions.rs` (`CORE_ACTIONS` and
 `V5_ONLY_SUBACTIONS`) and its docstring in `action_docs.rs` (a unit test checks they agree).
-`tests/tui_pty.rs` drives the views and the shell keys in a pseudo-terminal.
+`tests/shell_cli_suite/tui_pty.rs` drives the views and the shell keys in a pseudo-terminal.
 
 ### Waiting feedback (`src/format/progress.rs`)
 
@@ -185,13 +185,27 @@ and a supervised Python API host selected by the manifest. MCP stdout contains p
 only. Every standard action is native (`src/native/`); Python runs only a plugin's own code,
 through the worker. `python` keeps its native interpreter launch.
 
+### Teams and team executors (`executor_*`, `team_*`, `source_fetch_*`, `server_executor.rs`)
+
+Both sides of team executors live here: the main API's client, job catalog and placement
+(`executor_client*`, `executor_jobs.rs`, `executor_registry.rs`, `executor_stack.rs`), the executor
+process of `mrsm start executor` (`server_executor.rs`, `executor_context*.rs`), sandbox enforcement
+at process start (`team_sandbox.rs`, `team_python.rs`, `executor_terminal_guard.rs`, called first
+from `run.rs`), team execution's probe and shells (`team_execution.rs`), and the canonical source
+broker (`source_fetch_*`). Many of these files are attached to a parent module with `#[path]`, so
+search by file name. The map of the subsystem, its trust boundaries and its tests is
+`docs/agents/teams-and-executors.md`.
+
 ### Tests and fixtures
 
-- `tests/shell_completions.rs`: every input in `fixtures/shell_completions.json` (239 inputs:
+Integration tests are suite binaries: `cargo test -p meerschaum-cli --test <suite> -- <module>::`
+(`ls tests` lists them).
+
+- `tests/shell_cli_suite/shell_completions.rs`: every input in `fixtures/shell_completions.json` (239 inputs:
   actions, subactions, flags, flag `choices`, connector keys, config keys, jobs, compose, the
   empty fallback, chained `+` and `:` pipelines) must give v4's completions exactly: text, start
   position, display and highlighted prefix.
-- `tests/shell_screens.rs`: drives `mrsm` in a pseudo-terminal (`portable-pty`), renders it with
+- `tests/shell_cli_suite/shell_screens.rs`: drives `mrsm` in a pseudo-terminal (`portable-pty`), renders it with
   `vt100`, and compares every snapshot of the 23 scenarios in `fixtures/shell_screens.json`
   (recorded from v4 with `pexpect` + `pyte`) cell by cell: text, cursor, and styles (colors in
   pyte's vocabulary, bold, reverse, underline). Scenarios: startup with the toolbar, the menu for
@@ -217,7 +231,7 @@ temporary directory before spawning anything.
 ### Tolerances
 
 The screen comparison is exact except for these, each applied only where named in
-`tests/shell_screens.rs`:
+`tests/shell_cli_suite/shell_screens.rs`:
 
 1. **Version string.** `v4.1.4` and `v5.x` differ in length, so the banner's version line is
    compared with leading spaces trimmed. In the 40-column scenario (`tiny`) the banner wraps
@@ -253,8 +267,8 @@ both shells are measured against the same terminal model.
 
 ### Wiring regression tests
 
-`tests/wiring_parity.rs` compares plugin actions, custom flags, fetch results, callback writes,
+`tests/shell_cli_suite/wiring_parity.rs` compares plugin actions, custom flags, fetch results, callback writes,
 and a parent graph run against `tests/fixtures/wiring_transcript.json`. Regenerate it with
 `scripts/parity/run.sh crates/meerschaum-cli/tests/fixtures/gen_actions.py --wiring-only`.
-The original actions transcript remains a separate unchanged fixture. `tests/server_modes.rs`
+The original actions transcript remains a separate unchanged fixture. `tests/host_api_team_suite/server_modes.rs`
 checks API startup on a disposable port and MCP stdout isolation with temporary SQLite roots.

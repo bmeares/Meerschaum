@@ -55,3 +55,10 @@ shell's toggle. Redact secrets with `debug::redact_uris` (URI passwords, secret 
 quoted secret keys in JSON or `repr` text, secret flags inside a word) and `debug::is_secret_key`
 before printing them. The CLI and the Python
 extension own the subscribers that print these events.
+
+**Teams.** `access` holds teams, roles, grants and locks; `execution` a team's placement
+(`host`, `container`, `api`); `team_scope` what an isolated team's processes receive (its
+configuration, the environment allowlist) and which team a caller acts for; `team_scope::sandbox`
+the Linux Landlock/seccomp sandbox those processes apply to themselves. These are trust-boundary
+modules: read `docs/agents/teams-and-executors.md` and ADRs 0007 to 0009 in `docs/adr/` before
+changing them.
