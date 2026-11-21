@@ -424,7 +424,7 @@ impl WebtermConfig {
             match dedicated_tmux(&state.config) {
                 Ok(tmux) => {
                     // A server left behind by a killed API on this root is this one's to stop.
-                    adopt_orphaned_server(&tmux);
+                    TmuxMux::new(tmux.clone(), TmuxProfile::Full).adopt_orphaned_server();
                     Some(tmux)
                 }
                 Err(error) => {

@@ -11,7 +11,6 @@ use meerschaum_core::{
 use meerschaum_server::{
     AppState,
     backends::{ActionsBackend, ApiExecution},
-    engine_stream::BrowserAuth,
     executor::{
         context, plugin_handlers as handlers,
         plugin_host::{HostIdentity, Placement},
@@ -24,6 +23,7 @@ use meerschaum_server::{
     native::{
         NativeAdmission, NativeRoute, NativeRouteHandler, NativeRouteRequest, NativeRouteResponse,
     },
+    sse::BrowserAuth,
 };
 use serde_json::{Value as Json, json};
 use std::{

@@ -171,7 +171,7 @@ pub fn target(pipe: &Pipe) -> String {
 }
 
 fn is_protected(t: &str) -> bool {
-    builtin().protected_tables.iter().any(|p| p == t)
+    crate::sql_guard::PROTECTED_TABLES.contains(&t)
 }
 
 /// The instance connector for `instance_keys`: the API's instance permissions over HTTP

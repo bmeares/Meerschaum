@@ -20,7 +20,7 @@ use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::{Map, Value};
 use meerschaum_server::AppState;
 use meerschaum_server::engine_store::InstanceEngine;
-use meerschaum_server::engine_stream::BrowserAuth;
+use meerschaum_server::sse::BrowserAuth;
 use serde_json::{Value as Json, json};
 use tower::ServiceExt;
 

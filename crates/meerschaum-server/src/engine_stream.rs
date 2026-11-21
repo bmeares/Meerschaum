@@ -59,8 +59,7 @@ use tokio::time::Instant;
 use crate::backends::{EngineBackend, EngineStoreError, RunsFilter};
 use crate::error::ApiError;
 use crate::routes::Ctx;
-pub use crate::sse::BrowserAuth;
-use crate::sse::{self, StreamAuth, StreamGuard, StreamSlots};
+use crate::sse::{self, BrowserAuth, StreamAuth, StreamGuard, StreamSlots};
 use crate::state::AppState;
 
 /// How often a stream reads the persisted events.
@@ -629,10 +628,10 @@ impl Tail {
         // A console stream's bearer lives a minute: mint the next one from the session, which
         // checks the session, its user, and its credential binding again (an ended session or
         // rotated credential ends the stream, never an older bearer).
-        self.guard.refresh_headers(&self.state).await.ok()?;
+        let headers = self.guard.reauthorize(&self.state).await?.clone();
         let caller = self
             .selected
-            .fresh_headers(&self.state, self.guard.headers(), SCOPES)
+            .fresh_headers(&self.state, &headers, SCOPES)
             .await
             .ok()?;
         if self.selected.unrestricted(&caller) {
@@ -644,7 +643,7 @@ impl Tail {
             .await
             .ok()??;
         self.selected
-            .finish_read_headers(&self.state, self.guard.headers(), &caller, SCOPES)
+            .finish_read_headers(&self.state, &headers, &caller, SCOPES)
             .await
             .ok()?;
         self.filter = Some(filter);

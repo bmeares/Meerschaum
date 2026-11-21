@@ -27,6 +27,11 @@ pub mod native_pages;
 pub mod sessions;
 mod stream;
 pub mod webterm;
+
+/// The server's in-memory test instance, for this crate's unit tests.
+#[cfg(test)]
+#[path = "../../meerschaum-server/tests/common/memory.rs"]
+mod test_memory;
 pub use native_pages::{PageContent, PageHandler, PluginPage};
 pub use webterm::{ShellCommand, WebtermSettings};
 
@@ -220,12 +225,16 @@ pub(crate) async fn bound_username(
         .map(|(username, _)| username))
 }
 
-/// Request headers carrying a short-lived bearer token for the user of a console session, so
-/// that the API's own authorization (user existence, scopes, admin, credential binding) applies
-/// to what the session does.
+/// How long a bearer minted for a console session lives, in seconds.
+pub(crate) const CONSOLE_BEARER_SECONDS: i64 = 60;
+
+/// Request headers carrying a bearer token that lives `lifetime` seconds for the user of a
+/// console session, so that the API's own authorization (user existence, scopes, admin,
+/// credential binding) applies to what the session does.
 pub(crate) async fn api_headers_for(
     server: &AppState,
     data: &Json,
+    lifetime: i64,
 ) -> Result<HeaderMap, StatusCode> {
     let mut headers = HeaderMap::new();
     if server.config.no_auth {
@@ -271,7 +280,7 @@ pub(crate) async fn api_headers_for(
     let mut claims: Map = serde_json::from_value(json!({
         "sub": username,
         "scopes": scopes,
-        "exp": chrono::Utc::now().timestamp() + 60,
+        "exp": chrono::Utc::now().timestamp() + lifetime,
         (auth::PRINCIPAL_CLAIM): "user",
     }))
     .expect("claims");
@@ -288,8 +297,4 @@ pub(crate) async fn api_headers_for(
             .expect("JWT header"),
     );
     Ok(headers)
-}
-
-pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderMap, StatusCode> {
-    api_headers_for(&state.server, data).await
 }

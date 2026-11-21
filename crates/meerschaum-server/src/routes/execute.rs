@@ -155,8 +155,13 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
 /// Retained summaries are owner filtered and redact the same secrets as Job metadata.
 async fn run_summaries(ctx: Ctx) -> ApiResult {
     let access = crate::access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let mut records = Vec::new();
-    if let Ok(files) = std::fs::read_dir(ctx.state.config.root_dir.join("runs")) {
+    let runs = ctx.state.config.root_dir.join("runs");
+    // Every record is a file to read: off the async workers.
+    let mut records = tokio::task::spawn_blocking(move || {
+        let mut records = Vec::new();
+        let Ok(files) = std::fs::read_dir(runs) else {
+            return records;
+        };
         for file in files.flatten() {
             if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
                 continue;
@@ -175,7 +180,10 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
             }
             records.push(record);
         }
-    }
+        records
+    })
+    .await
+    .map_err(|_| ApiError::unavailable("Could not read the retained executions."))?;
     let teams = if records.iter().any(|record| {
         record
             .get("metadata")

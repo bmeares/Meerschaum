@@ -42,15 +42,6 @@ pub(super) fn tuple_json(tuple: &SuccessTuple) -> serde_json::Value {
     serde_json::json!([tuple.success, tuple.message])
 }
 
-/// The refusal of an API caller's SQL (`read_sql`, `exec_sql`) that could reach Meerschaum's
-/// internal tables, shared with MCP's `read_sql` over HTTP
-/// ([`meerschaum_server::sql_guard::check_internal_tables`]).
-#[cfg(test)]
-pub(super) fn refuse_internal_tables(query: &str) -> HostResult<()> {
-    meerschaum_server::sql_guard::check_internal_tables(query, "for an API request")
-        .map_err(|e| host_error(e.into_message()))
-}
-
 /// A host call's bound as a `DateBound` (`None`: unbounded).
 pub(super) fn date_bound(
     call: &meerschaum_plugin::HostCall,

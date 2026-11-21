@@ -120,6 +120,8 @@ pub(super) enum WriterEnd {
 /// The only task that writes to a terminal's socket: the bridge's control frames (`control`,
 /// first) and the session's events (`events`), each write bounded by `write_timeout`. A browser
 /// that stops reading stalls only this task; the bridge keeps reading input and reauthorizing.
+/// Once the bridge stops sending control frames without a close frame (the backend ended), the
+/// session's remaining events are still delivered, `["disconnect", 1]` included.
 async fn write_terminal<S, E>(
     mut tx: futures_util::stream::SplitSink<S, Message>,
     mut events: mpsc::Receiver<remote::Event>,
@@ -129,12 +131,14 @@ async fn write_terminal<S, E>(
 where
     S: futures_util::Sink<Message, Error = E> + Unpin,
 {
+    let mut control_open = true;
     loop {
         tokio::select! {
             biased;
-            message = control.recv() => {
+            message = control.recv(), if control_open => {
                 let Some(message) = message else {
-                    return WriterEnd::Closed;
+                    control_open = false;
+                    continue;
                 };
                 let close = matches!(message, Message::Close(_));
                 if !send_within(&mut tx, message, write_timeout).await {

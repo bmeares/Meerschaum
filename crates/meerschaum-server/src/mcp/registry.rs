@@ -328,16 +328,6 @@ pub struct Builtin {
     pub max_row_limit: i64,
     /// `DEFAULT_PAGE_SIZE`.
     pub default_page_size: usize,
-    /// `PROTECTED_TABLES`.
-    pub protected_tables: Vec<String>,
-    /// `_READ_ONLY_STARTS`.
-    pub read_only_starts: Vec<String>,
-    /// `_MUTATING_KEYWORDS`.
-    pub mutating_keywords: Vec<String>,
-    /// `_MUTATING_FUNCTIONS`.
-    pub mutating_functions: Vec<String>,
-    /// `_MUTATING_WORD_PREFIXES`.
-    pub mutating_word_prefixes: Vec<String>,
     /// The tools, in registration order.
     pub tools: Vec<Tool>,
     /// The resources and templates, in registration order.
@@ -390,11 +380,6 @@ pub fn builtin() -> &'static Builtin {
             default_row_limit: int("default_row_limit"),
             max_row_limit: int("max_row_limit"),
             default_page_size: usize::try_from(int("default_page_size")).unwrap_or(100),
-            protected_tables: strings(v.get("protected_tables")),
-            read_only_starts: strings(v.get("read_only_starts")),
-            mutating_keywords: strings(v.get("mutating_keywords")),
-            mutating_functions: strings(v.get("mutating_functions")),
-            mutating_word_prefixes: strings(v.get("mutating_word_prefixes")),
             tools: list("tools")
                 .iter()
                 .filter_map(|t| Tool::from_value(t, Source::Builtin))
@@ -423,6 +408,23 @@ mod tests {
         assert_eq!(b.resources.len(), 5);
         assert_eq!(b.prompts.len(), 3);
         assert!(b.primer.starts_with("Meerschaum is an ETL framework"));
+    }
+
+    /// The SQL guard keeps v4's statement and table lists as its own data; they must stay what
+    /// v4 exported.
+    #[test]
+    fn the_sql_guard_keeps_v4s_keyword_lists() {
+        let v = Value::from_json_str(REGISTRY_JSON).unwrap();
+        use crate::sql_guard as g;
+        for (key, guard) in [
+            ("protected_tables", g::PROTECTED_TABLES),
+            ("read_only_starts", g::READ_ONLY_STARTS),
+            ("mutating_keywords", g::MUTATING_KEYWORDS),
+            ("mutating_functions", g::MUTATING_FUNCTIONS),
+            ("mutating_word_prefixes", g::MUTATING_WORD_PREFIXES),
+        ] {
+            assert_eq!(strings(v.get(key)), guard, "{key}");
+        }
     }
 
     #[test]

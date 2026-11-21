@@ -13,9 +13,13 @@ use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_server::access::{guard, pipe_targets_on};
 use meerschaum_server::auth::{Principal, Scopes};
 use meerschaum_server::mcp::{Caller, McpServer};
-use meerschaum_server::sql_guard::{HiddenTables, check_definition};
+use meerschaum_server::sql_guard::{HiddenTables, SqlPolicy, check_sql};
 use meerschaum_server::{AppState, ServerConfig};
 use serde_json::json;
+
+fn check_definition(sql: &str, hidden: &HiddenTables) -> Result<(), String> {
+    check_sql(sql, &SqlPolicy::PipeDefinition { hidden }).map_err(|e| e.into_message())
+}
 
 fn parameters(value: serde_json::Value) -> Map {
     serde_json::from_value::<Value>(value).unwrap().to_map()

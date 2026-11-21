@@ -12,16 +12,25 @@ use meerschaum_server::AppState;
 use meerschaum_server::sse::BrowserAuth;
 
 use crate::sessions::SessionStore;
-use crate::{api_headers_for, cookie, session_from};
+use crate::{CONSOLE_BEARER_SECONDS, api_headers_for, cookie, session_from};
 
 /// [`BrowserAuth`] over the console's session store.
 pub(crate) struct ConsoleSessionAuth {
     sessions: Arc<dyn SessionStore>,
+    /// How long each minted bearer lives, in seconds.
+    bearer_lifetime: i64,
 }
 
 impl ConsoleSessionAuth {
     pub(crate) fn new(sessions: Arc<dyn SessionStore>) -> Self {
-        Self { sessions }
+        Self::with_bearer_lifetime(sessions, CONSOLE_BEARER_SECONDS)
+    }
+
+    pub(crate) fn with_bearer_lifetime(sessions: Arc<dyn SessionStore>, seconds: i64) -> Self {
+        Self {
+            sessions,
+            bearer_lifetime: seconds,
+        }
     }
 }
 
@@ -41,7 +50,11 @@ impl BrowserAuth for ConsoleSessionAuth {
             Ok(data) => data,
             Err(status) => return Some(Err(status)),
         };
-        Some(api_headers_for(state, &data).await.map(|h| (h, id)))
+        Some(
+            api_headers_for(state, &data, self.bearer_lifetime)
+                .await
+                .map(|h| (h, id)),
+        )
     }
 
     /// A `--no-auth` server counts a browser's streams by its console cookie.

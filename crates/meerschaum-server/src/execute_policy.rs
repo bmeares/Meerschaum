@@ -1,4 +1,4 @@
-//! What a non-administrator may run through `POST /execute` (wave 18, FX7).
+//! What a non-administrator may run through `POST /execute`.
 //!
 //! The Dash console's Execute box runs an action line as a job on the server with the user's own
 //! credentials. The console offers a subset of the CLI (it never lists `sh`, `os`, `api`, ...,

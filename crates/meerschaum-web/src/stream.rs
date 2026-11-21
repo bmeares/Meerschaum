@@ -27,8 +27,9 @@ use meerschaum_server::sse::{self, StreamAuth};
 
 use super::*;
 
-/// How often an idle stream re-authorizes its session/bearer and job visibility, re-minting
-/// short-lived console bearers so a live console session never expires mid-stream.
+/// How often a stream re-authorizes its caller and the job's visibility, re-minting a console
+/// session's short-lived bearer (it lives `CONSOLE_BEARER_SECONDS`), so a live console session
+/// never expires mid-stream.
 const SESSION_CHECK: Duration = Duration::from_secs(10);
 
 /// Scopes required to read a job's log stream.
@@ -97,21 +98,20 @@ pub(crate) async fn logs(
             }
             let event = loop {
                 tokio::select! {
-                    event = monitor.events.recv() => {
-                        let event = event?;
-                        // A console session that ended (logout, credential rotation) ends its
-                        // streams immediately on the next log event too.
-                        if guard.has_session()
-                            && guard.refresh_headers(&state.server).await.is_err()
-                        {
-                            return None;
-                        }
-                        break event;
-                    }
-                    // ... also while the job is silent, re-minting fresh short-lived bearers
-                    // for live console sessions and re-verifying fresh permissions & visibility.
+                    event = monitor.events.recv() => break event?,
+                    // Re-authorize at an interval, never per log line: a console session is
+                    // checked again (an ended session or a rotated credential ends the stream)
+                    // and its next short-lived bearer minted, then the caller's permissions and
+                    // the job's visibility are checked with it.
                     _ = ticker.tick() => {
-                        let caller = guard.reauthorize(&state.server, SCOPES).await?;
+                        let headers = guard.reauthorize(&state.server).await?;
+                        let caller = meerschaum_server::access::require_fresh(
+                            &state.server,
+                            headers,
+                            SCOPES,
+                        )
+                        .await
+                        .ok()?;
                         if !meerschaum_server::routes::jobs::may_see(&state.server, &caller, &name).await {
                             return None;
                         }
@@ -136,4 +136,220 @@ pub(crate) async fn logs(
     );
     // A draining server ends the stream at once (the browser reconnects to another server).
     sse::response(stream, drain, KeepAlive::default(), sse::CACHE_NO_STORE)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    use futures_util::StreamExt;
+    use indexmap::IndexMap;
+    use meerschaum_core::users::User;
+    use meerschaum_core::{Map, SuccessTuple};
+    use meerschaum_server::backends::{CreateJob, JobsBackend, LogMonitor};
+    use meerschaum_server::sse::StreamSlots;
+    use meerschaum_server::{ServerConfig, auth};
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::engine_auth::ConsoleSessionAuth;
+    use crate::sessions::{COOKIE, SessionStore};
+    use crate::test_memory as memory;
+
+    const SECRET: &[u8] = b"0123456789abcdef0123456789abcdef0123456789abcdef";
+    const JOB: &str = "execute-held";
+    const SESSION: &str = "6f1d3c2a-5b4e-4f7a-9c8d-0e1f2a3b4c5d";
+    /// The test's console bearers live this long (the console's live a minute).
+    const BEARER_SECONDS: i64 = 2;
+
+    /// Console sessions in memory, counting the reads of the session store.
+    #[derive(Default)]
+    struct CountingSessions {
+        rows: Mutex<HashMap<String, Json>>,
+        reads: AtomicUsize,
+    }
+
+    impl CountingSessions {
+        fn reads(&self) -> usize {
+            self.reads.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl SessionStore for CountingSessions {
+        async fn get(&self, id: &str) -> Result<Option<Json>, String> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            Ok(self.rows.lock().unwrap().get(id).cloned())
+        }
+        async fn set(&self, id: &str, payload: Json, _ttl: i64) -> Result<(), String> {
+            self.rows.lock().unwrap().insert(id.into(), payload);
+            Ok(())
+        }
+        async fn delete(&self, id: &str) -> Result<(), String> {
+            self.rows.lock().unwrap().remove(id);
+            Ok(())
+        }
+    }
+
+    /// One running job whose log lines the test writes.
+    #[derive(Default)]
+    struct HeldJob {
+        lines: Mutex<Option<mpsc::Sender<LogEvent>>>,
+    }
+
+    #[async_trait]
+    impl JobsBackend for HeldJob {
+        async fn list(&self) -> IndexMap<String, Json> {
+            IndexMap::new()
+        }
+        async fn get(&self, name: &str) -> Option<Json> {
+            (name == JOB).then(|| json!({"daemon": {"properties": {}}}))
+        }
+        async fn exists(&self, name: &str) -> bool {
+            name == JOB
+        }
+        async fn create(&self, _: &str, _: Vec<String>, _: Option<Map>) -> CreateJob {
+            CreateJob::Started(SuccessTuple::success())
+        }
+        async fn delete(&self, _: &str) -> SuccessTuple {
+            SuccessTuple::success()
+        }
+        async fn start(&self, _: &str) -> SuccessTuple {
+            SuccessTuple::success()
+        }
+        async fn stop(&self, _: &str) -> SuccessTuple {
+            SuccessTuple::success()
+        }
+        async fn pause(&self, _: &str) -> SuccessTuple {
+            SuccessTuple::success()
+        }
+        async fn logs(&self, _: &str) -> Option<String> {
+            None
+        }
+        async fn stop_time(&self, _: &str) -> Option<DateTime<Utc>> {
+            None
+        }
+        async fn is_blocking_on_stdin(&self, _: &str) -> bool {
+            false
+        }
+        async fn prompt_kwargs(&self, _: &str) -> Map {
+            Map::new()
+        }
+        async fn monitor_logs(&self, name: &str) -> Option<LogMonitor> {
+            if name != JOB {
+                return None;
+            }
+            let (tx, events) = mpsc::channel(64);
+            let (input, _) = mpsc::channel(1);
+            *self.lines.lock().unwrap() = Some(tx);
+            Some(LogMonitor { events, input })
+        }
+    }
+
+    /// A console job-log stream re-authorizes its session at its interval, never per log line;
+    /// each re-authorization mints the next short-lived bearer, so the stream outlives the
+    /// bearer it opened with, and ends once the session's credential rotates.
+    #[tokio::test(start_paused = true)]
+    async fn a_console_log_stream_outlives_its_bearer_and_ends_when_its_credential_rotates() {
+        let root = tempfile::tempdir().unwrap();
+        let instance = Arc::new(memory::MemoryInstance::new("fixture"));
+        instance.seed_user("admin", "pass", Some("admin"));
+        let jobs = Arc::new(HeldJob::default());
+        let server =
+            AppState::builder(ServerConfig::for_root("sql:fixture", root.path()), instance)
+                .secret(SECRET.to_vec())
+                .jobs(jobs.clone())
+                .build()
+                .unwrap();
+        let sessions = Arc::new(CountingSessions::default());
+        let credential = auth::user_credential(&server, &User::new("admin", None))
+            .await
+            .unwrap();
+        sessions
+            .set(
+                SESSION,
+                json!({"username": "admin", "credential": credential}),
+                3600,
+            )
+            .await
+            .unwrap();
+        let state = WebState {
+            server,
+            config: WebConfig {
+                sessions: sessions.clone(),
+                webterm: None,
+                pages: vec![],
+            },
+            streams: StreamSlots::new("log streams"),
+            browser_auth: Arc::new(ConsoleSessionAuth::with_bearer_lifetime(
+                sessions.clone(),
+                BEARER_SECONDS,
+            )),
+            grafana: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("{COOKIE}={SESSION}").parse().unwrap(),
+        );
+        let response = logs(State(state), headers, Path(JOB.into())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut body = response.into_body().into_data_stream();
+        let lines = jobs.lines.lock().unwrap().clone().unwrap();
+
+        // Log lines never re-authorize the session.
+        let opened = sessions.reads();
+        for i in 0..50 {
+            lines
+                .send(LogEvent::Line(format!("line {i}")))
+                .await
+                .unwrap();
+            let frame = body.next().await.unwrap().unwrap();
+            assert!(String::from_utf8_lossy(&frame).contains(&format!("line {i}")));
+        }
+        assert_eq!(
+            sessions.reads(),
+            opened,
+            "a log line re-authorized the session"
+        );
+
+        // The bearer minted at open expires (bearers expire by the wall clock) ...
+        std::thread::sleep(Duration::from_millis(
+            u64::try_from(BEARER_SECONDS).unwrap() * 1000 + 1500,
+        ));
+        // ... and the stream outlives it: its next re-authorization mints another.
+        let idle = tokio::time::timeout(SESSION_CHECK + Duration::from_secs(2), body.next()).await;
+        assert!(
+            idle.is_err(),
+            "the stream ended with its first bearer: {idle:?}"
+        );
+        assert_eq!(sessions.reads(), opened + 1);
+        lines
+            .send(LogEvent::Line("still here".into()))
+            .await
+            .unwrap();
+        let frame = body.next().await.unwrap().unwrap();
+        assert!(String::from_utf8_lossy(&frame).contains("still here"));
+
+        // A rotated credential (a password change) ends the stream at its next check.
+        sessions
+            .set(
+                SESSION,
+                json!({"username": "admin", "credential": "rotated-stale-hash"}),
+                3600,
+            )
+            .await
+            .unwrap();
+        let ended = tokio::time::timeout(SESSION_CHECK * 3, async {
+            while let Some(frame) = body.next().await {
+                frame.unwrap();
+            }
+        })
+        .await;
+        assert!(ended.is_ok(), "the stream outlived its rotated credential");
+    }
 }

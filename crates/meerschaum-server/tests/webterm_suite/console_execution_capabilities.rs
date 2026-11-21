@@ -17,8 +17,8 @@ use meerschaum_server::{
     AppState,
     access::{self, Access},
     backends::{ActionsBackend, ApiExecution},
-    engine_stream::BrowserAuth,
     executor::{callbacks, plugins},
+    sse::BrowserAuth,
 };
 use serde_json::{Value as Json, json};
 use std::sync::{

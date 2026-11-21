@@ -194,13 +194,16 @@ impl WindowBudget {
         }
     }
 
-    /// Mark the active window task complete. Returns `true` if another queued window should start.
-    pub(super) fn complete(&mut self) -> bool {
-        if self.queued > 0 {
+    /// Mark the active window task complete. Returns `true` if another queued window should start
+    /// now; when `may_open` is `false` (the terminal limit, or tmux refused), the queued windows
+    /// are dropped instead, and the next request starts at once.
+    pub(super) fn complete(&mut self, may_open: bool) -> bool {
+        if self.queued > 0 && may_open {
             self.queued -= 1;
             self.in_flight = true;
             true
         } else {
+            self.queued = 0;
             self.in_flight = false;
             false
         }
@@ -402,9 +405,9 @@ impl LocalPtyAdapter {
                         if options.strict_pty_errors && !matches!(result, Ok(Ok(_))) {
                             break ("window_task_failed", true);
                         }
-                        if windows.complete()
-                            && active_terminals() < MAX_TERMINALS
-                            && config.tmux_refused().is_none()
+                        let may_open = active_terminals() < MAX_TERMINALS
+                            && config.tmux_refused().is_none();
+                        if windows.complete(may_open)
                             && let (Some(mux), Some(session)) = (&mux, &session)
                         {
                             window_job = Some(spawn_window(mux, &shell, guardian.as_ref(), session));

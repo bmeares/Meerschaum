@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use super::{
     MAX_SOCKET_PATH, TermMode, TmuxMux, TmuxProfile, TmuxSettings, create_private_dir,
-    end_tmux_session, restricted_tmux, tmux_output, tmux_server_running,
+    restricted_tmux, tmux_output,
 };
 use crate::AppState;
 
@@ -23,6 +23,13 @@ struct TeamServer {
     sessions: BTreeMap<String, String>,
     state: Option<AppState>,
     sweeping: bool,
+}
+
+impl TeamServer {
+    /// The multiplexer of this team's server.
+    fn mux(&self) -> TmuxMux {
+        TmuxMux::new(self.settings.clone(), TmuxProfile::Team(self.team.clone()))
+    }
 }
 
 fn servers() -> &'static Mutex<HashMap<PathBuf, TeamServer>> {
@@ -111,21 +118,16 @@ pub fn end_team_sessions_of(name: &str) {
 }
 
 pub(super) fn end_team_sessions_except(name: &str, keep: Option<&Path>) {
-    let targets: Vec<TmuxSettings> = {
+    let targets: Vec<TmuxMux> = {
         let mut servers = servers().lock().unwrap_or_else(|e| e.into_inner());
         servers
             .iter_mut()
             .filter(|(socket, _)| Some(socket.as_path()) != keep)
-            .filter_map(|(_, server)| {
-                server
-                    .sessions
-                    .remove(name)
-                    .map(|_| server.settings.clone())
-            })
+            .filter_map(|(_, server)| server.sessions.remove(name).map(|_| server.mux()))
             .collect()
     };
-    for tmux in targets {
-        end_tmux_session(&tmux, name);
+    for mux in targets {
+        mux.end_session(name);
     }
 }
 
@@ -170,6 +172,7 @@ async fn sweep(socket: PathBuf, every: Duration) {
         let Some((team, tmux, sessions, Some(state))) = snapshot else {
             return;
         };
+        let mux = TmuxMux::new(tmux, TmuxProfile::Team(team.clone()));
         for (session, user) in sessions {
             let keep = matches!(
                 super::authorize_user(&state, &user, true).await,
@@ -181,8 +184,8 @@ async fn sweep(socket: PathBuf, every: Duration) {
                     "Ending the team terminal of '{user}' (team '{team}'): it may no longer be \
                      opened."
                 );
-                let (tmux, ending) = (tmux.clone(), session.clone());
-                let _ = tokio::task::spawn_blocking(move || end_tmux_session(&tmux, &ending)).await;
+                let (mux, ending) = (mux.clone(), session.clone());
+                let _ = tokio::task::spawn_blocking(move || mux.end_session(&ending)).await;
                 let mut servers = servers().lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(server) = servers.get_mut(&socket) {
                     server.sessions.remove(&session);
@@ -190,13 +193,12 @@ async fn sweep(socket: PathBuf, every: Duration) {
             }
         }
         // Sessions whose shells exited are gone from tmux; a server with none left stops.
-        let (tmux2, team2, socket2) = (tmux.clone(), team.clone(), socket.clone());
+        let probe = mux.clone();
         let live: Option<Vec<String>> = tokio::task::spawn_blocking(move || {
-            if !tmux_server_running(&tmux2, &socket2) {
+            if !probe.server_running() {
                 return None;
             }
-            let mux = TmuxMux::new(tmux2, TmuxProfile::Team(team2));
-            mux.command(None).and_then(|mut command| {
+            probe.command(None).and_then(|mut command| {
                 command.args(["list-sessions", "-F", "#{session_name}"]);
                 tmux_output(&mut command).map(|o| {
                     String::from_utf8_lossy(&o.stdout)
@@ -219,7 +221,7 @@ async fn sweep(socket: PathBuf, every: Duration) {
                 // A session this process does not know (another API's, or a stale one) has no
                 // user to check: it ends.
                 for name in live.iter().filter(|n| !server.sessions.contains_key(*n)) {
-                    end_tmux_session(&server.settings, name);
+                    server.mux().end_session(name);
                 }
             }
             _ => {

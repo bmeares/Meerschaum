@@ -1176,12 +1176,122 @@ mod in_memory_bridge {
             assert!(!budget.request(MAX_NEW_WINDOWS));
         }
         let mut started = 1usize;
-        while budget.complete() {
+        while budget.complete(true) {
             started += 1;
         }
         assert_eq!(started, MAX_NEW_WINDOWS);
         // Once the connection cap is reached, even after completion no more windows start.
         assert!(!budget.request(MAX_NEW_WINDOWS));
+    }
+
+    #[test]
+    fn a_refused_queued_window_leaves_new_windows_working() {
+        let mut budget = WindowBudget::default();
+        assert!(budget.request(MAX_NEW_WINDOWS));
+        // Queued behind the first; when it finishes, windows may not open (the terminal limit,
+        // or tmux refused): the queued one is dropped ...
+        assert!(!budget.request(MAX_NEW_WINDOWS));
+        assert!(!budget.request(MAX_NEW_WINDOWS));
+        assert!(!budget.complete(false));
+        // ... and the next request starts at once instead of waiting behind a window that
+        // never started.
+        assert!(budget.request(MAX_NEW_WINDOWS));
+        assert!(!budget.complete(true));
+    }
+
+    /// When the backend ends while the browser is still sending, its last output and
+    /// `["disconnect", 1]` still reach the browser, so it stops instead of reconnecting.
+    #[tokio::test]
+    async fn a_backend_that_ends_first_still_delivers_its_last_events() {
+        // The browser reads one frame at a time, so the writer is still sending when the bridge
+        // finds the backend gone.
+        let (socket, mut client) = memory_socket_pair(16, 1);
+        let (input_tx, input_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = mpsc::channel(16);
+        let session = TerminalSession::new(
+            remote::Terminal {
+                input: input_tx,
+                events: event_rx,
+            },
+            RevokeAction::None,
+        );
+        // The backend's last events, then it stops reading input.
+        for event in [
+            remote::Event::Output("earlier output".into()),
+            remote::Event::Output("\r\n[input queue full]\r\n".into()),
+            remote::Event::Disconnected,
+        ] {
+            event_tx.send(event).await.unwrap();
+        }
+        drop(event_tx);
+        drop(input_rx);
+        client
+            .to_server
+            .send(Message::Text(json!(["stdin", "x"]).to_string().into()))
+            .await
+            .unwrap();
+        let bridge = tokio::spawn(bridge_session(
+            socket,
+            session,
+            std::future::pending::<()>(),
+            fast_timeouts(Duration::from_secs(60)),
+            || async { None },
+            "alice",
+        ));
+        // The bridge reads the browser's input, finds the backend gone and ends, while the
+        // writer still waits for the browser.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        for expected in [
+            json!(["stdout", "earlier output"]),
+            json!(["stdout", "\r\n[input queue full]\r\n"]),
+            json!(["disconnect", 1]),
+        ] {
+            assert_eq!(
+                parse_text(client.from_server.recv().await.unwrap()),
+                expected
+            );
+        }
+        assert!(matches!(
+            client.from_server.recv().await.unwrap(),
+            Message::Close(Some(CloseFrame { code: 1000, .. }))
+        ));
+        bridge.await.unwrap();
+    }
+
+    #[test]
+    fn an_isolated_host_api_window_keeps_its_term() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: Some(dir.path().join("tmux-r.sock")),
+            session_suffix: String::new(),
+            env_dir: dir.path().join("env"),
+            config_file: None,
+        };
+        let mut shell = ShellCommand::new("/bin/mrsm");
+        shell.clear_env = true;
+        shell.env = vec![
+            ("TERM".into(), "xterm-256color".into()),
+            ("PATH".into(), "/bin:/usr/bin".into()),
+            ("SHLVL".into(), "3".into()),
+        ];
+        for profile in [TmuxProfile::Restricted, TmuxProfile::Full] {
+            let argv = TmuxMux::new(tmux.clone(), profile)
+                .shell_argv(&shell)
+                .unwrap();
+            // `env -i` wipes tmux's `TERM`, so the window's own file must carry it.
+            assert_eq!(argv[1], "-i");
+            let body = std::fs::read_to_string(&argv[5]).unwrap();
+            assert!(body.contains("TERM='xterm-256color'"), "{body}");
+            assert!(!body.contains("SHLVL="), "{body}");
+        }
+        // A window that inherits the server's environment keeps tmux's own `TERM`.
+        shell.clear_env = false;
+        let argv = TmuxMux::new(tmux, TmuxProfile::Restricted)
+            .shell_argv(&shell)
+            .unwrap();
+        let body = std::fs::read_to_string(&argv[3]).unwrap();
+        assert!(!body.lines().any(|line| line.starts_with("TERM=")));
     }
 
     #[test]

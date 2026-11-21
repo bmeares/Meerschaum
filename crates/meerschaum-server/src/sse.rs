@@ -7,11 +7,11 @@
 //!   header uses that credential; otherwise a console session cookie is validated through the
 //!   installed [`BrowserAuth`] implementation, which verifies the session and its user's
 //!   credential binding and mints a fresh short-lived bearer token.
-//! - **Periodic reauthorization ([`StreamGuard::refresh_headers`], [`StreamGuard::reauthorize`])**:
-//!   each refresh tick re-validates the console session via [`BrowserAuth::authorize`] and mints a
-//!   fresh short-lived bearer, so a long-lived console stream outlives individual bearer lifetimes
+//! - **Periodic reauthorization ([`StreamGuard::reauthorize`])**: each re-authorization tick
+//!   re-validates the console session via [`BrowserAuth::authorize`] and mints a fresh
+//!   short-lived bearer, so a long-lived console stream outlives individual bearer lifetimes
 //!   while still ending promptly on logout, credential rotation, or permission revocation.
-//! - **Concurrency limits ([`StreamSlots`], [`Slot`])**: open streams are bounded globally and
+//! - **Concurrency limits ([`StreamSlots`])**: open streams are bounded globally and
 //!   per user/token/session (`api:permissions:log_streams`), returning `429 Too Many Requests`
 //!   with `Retry-After: 5` when exhausted and releasing the slot automatically on drop.
 //! - **Graceful shutdown and proxy-safe headers ([`response`])**: streams terminate immediately
@@ -27,7 +27,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 
-use crate::access::Access;
 use crate::auth::Principal;
 use crate::lifecycle::DrainSignal;
 use crate::state::AppState;
@@ -36,8 +35,6 @@ use crate::state::AppState;
 pub const CACHE_NO_STORE: &str = "no-store";
 /// `Cache-Control: no-cache` (for replayable event streams).
 pub const CACHE_NO_CACHE: &str = "no-cache";
-/// Default `Retry-After` header value on `429 Too Many Requests`.
-pub const RETRY_AFTER_SECONDS: &str = "5";
 
 /// Authenticates a browser request that carries no `Authorization` header (a browser's
 /// `EventSource` cannot set one) by its console session. `meerschaum-web` installs one with
@@ -88,7 +85,7 @@ impl StreamSlots {
     }
 
     /// Take a slot for `key`, or return the reason the server-wide or per-user limit was reached.
-    pub fn take(&self, key: &str, max: usize, per_user: usize) -> Result<Slot, String> {
+    pub(crate) fn take(&self, key: &str, max: usize, per_user: usize) -> Result<Slot, String> {
         let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
         if open.0 >= max {
             return Err(format!("Too many {} are open on this server.", self.label));
@@ -110,9 +107,9 @@ impl StreamSlots {
     }
 }
 
-/// RAII handle for one open stream; releases the slot automatically on drop.
+/// One open stream's place in its [`StreamSlots`]; released on drop.
 #[derive(Debug)]
-pub struct Slot {
+pub(crate) struct Slot {
     open: Arc<Mutex<(usize, HashMap<String, usize>)>>,
     key: String,
 }
@@ -131,7 +128,7 @@ impl Drop for Slot {
 }
 
 /// Who a stream counts against for per-user stream limits.
-pub fn slot_key(principal: Option<&Principal>, session_id: Option<&str>) -> String {
+fn slot_key(principal: Option<&Principal>, session_id: Option<&str>) -> String {
     match principal {
         Some(Principal::Execution(identity)) => identity.owner_key(),
         Some(Principal::User(user)) => format!("user:{}", user.username),
@@ -145,13 +142,12 @@ pub fn slot_key(principal: Option<&Principal>, session_id: Option<&str>) -> Stri
     }
 }
 
-/// Build a `429 Too Many Requests` response with `Retry-After: 5`.
-pub fn too_many_response(reason: impl Into<String>) -> Response {
-    let mut response = (StatusCode::TOO_MANY_REQUESTS, reason.into()).into_response();
-    response.headers_mut().insert(
-        header::RETRY_AFTER,
-        HeaderValue::from_static(RETRY_AFTER_SECONDS),
-    );
+/// A `429 Too Many Requests` response with `Retry-After: 5`.
+fn too_many_response(reason: String) -> Response {
+    let mut response = (StatusCode::TOO_MANY_REQUESTS, reason).into_response();
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
     response
 }
 
@@ -173,15 +169,7 @@ impl IntoResponse for StreamRejection {
     }
 }
 
-/// Extract only the `Cookie` headers of a request.
-pub fn cookies_of(headers: &HeaderMap) -> HeaderMap {
-    let mut cookies = HeaderMap::new();
-    for value in headers.get_all(header::COOKIE) {
-        cookies.append(header::COOKIE, value.clone());
-    }
-    cookies
-}
-
+/// The console session behind a browser's stream, and the cookies to re-authorize it with.
 struct ConsoleSession {
     auth: Arc<dyn BrowserAuth>,
     id: String,
@@ -210,13 +198,13 @@ impl StreamAuth {
         {
             match auth.authorize(state, headers).await {
                 Some(Ok((minted, id))) => {
+                    let mut cookies = HeaderMap::new();
+                    for value in headers.get_all(header::COOKIE) {
+                        cookies.append(header::COOKIE, value.clone());
+                    }
                     return Ok(Self {
                         auth_headers: minted,
-                        session: Some(ConsoleSession {
-                            auth,
-                            id,
-                            cookies: cookies_of(headers),
-                        }),
+                        session: Some(ConsoleSession { auth, id, cookies }),
                         anonymous_key: None,
                     });
                 }
@@ -237,35 +225,10 @@ impl StreamAuth {
         })
     }
 
-    /// The current authorization headers (the caller's bearer, or the latest bearer minted from
-    /// the console session).
+    /// The authorization headers: the caller's own, or the bearer minted for its console
+    /// session.
     pub fn headers(&self) -> &HeaderMap {
         &self.auth_headers
-    }
-
-    /// Whether this request is backed by a console session cookie.
-    pub fn has_session(&self) -> bool {
-        self.session.is_some()
-    }
-
-    /// The console session ID, if backed by a console session.
-    pub fn session_id(&self) -> Option<&str> {
-        self.session.as_ref().map(|s| s.id.as_str())
-    }
-
-    /// Refresh the console session and re-mint its short-lived bearer (for bearer-backed
-    /// streams, returns the existing headers unchanged).
-    pub async fn refresh_headers(&mut self, state: &AppState) -> Result<&HeaderMap, StatusCode> {
-        if let Some(session) = &self.session {
-            match session.auth.authorize(state, &session.cookies).await {
-                Some(Ok((headers, id))) if id == session.id => {
-                    self.auth_headers = headers;
-                }
-                Some(Err(status)) => return Err(status),
-                _ => return Err(StatusCode::UNAUTHORIZED),
-            }
-        }
-        Ok(&self.auth_headers)
     }
 
     /// Acquire a bounded stream slot and promote this authentication state into a live
@@ -292,44 +255,34 @@ impl StreamAuth {
             .take(&key, max, limit)
             .map_err(StreamRejection::TooMany)?;
         Ok(StreamGuard {
-            auth: self,
+            auth_headers: self.auth_headers,
+            session: self.session,
             _slot: slot,
         })
     }
 }
 
-/// Live guard held by an open SSE stream: owns the RAII [`Slot`] and refreshes console-session
-/// bearers + server authorization on every refresh tick.
+/// An open SSE stream's credential and its slot (released on drop).
 pub struct StreamGuard {
-    auth: StreamAuth,
+    auth_headers: HeaderMap,
+    session: Option<ConsoleSession>,
     _slot: Slot,
 }
 
 impl StreamGuard {
-    /// The current authorization headers.
-    pub fn headers(&self) -> &HeaderMap {
-        self.auth.headers()
-    }
-
-    /// Whether this stream is backed by a console session cookie.
-    pub fn has_session(&self) -> bool {
-        self.auth.has_session()
-    }
-
-    /// Re-validate a console session and mint a fresh short-lived bearer. For bearer-backed
-    /// streams, returns the original headers unchanged.
-    pub async fn refresh_headers(&mut self, state: &AppState) -> Result<&HeaderMap, StatusCode> {
-        self.auth.refresh_headers(state).await
-    }
-
-    /// Re-mint a console session's short-lived bearer (if session-backed) and re-verify fresh
-    /// access with `scopes`. Returns `None` when the session ended, the user's credential rotated,
-    /// or permissions were revoked.
-    pub async fn reauthorize(&mut self, state: &AppState, scopes: &[&str]) -> Option<Access> {
-        let headers = self.auth.refresh_headers(state).await.ok()?;
-        crate::access::require_fresh(state, headers, scopes)
-            .await
-            .ok()
+    /// The headers to authorize the stream's next step with, after re-authorizing a console
+    /// session: its session, its user and its credential binding are checked again and a fresh
+    /// short-lived bearer is minted (a caller's own bearer is kept as it is). `None` when the
+    /// session ended or its credential rotated. Call it at the stream's re-authorization
+    /// interval, never per event: each call reads the session store and the instance.
+    pub async fn reauthorize(&mut self, state: &AppState) -> Option<&HeaderMap> {
+        if let Some(session) = &self.session {
+            match session.auth.authorize(state, &session.cookies).await {
+                Some(Ok((headers, id))) if id == session.id => self.auth_headers = headers,
+                _ => return None,
+            }
+        }
+        Some(&self.auth_headers)
     }
 }
 
@@ -471,6 +424,18 @@ mod tests {
         (dir, state)
     }
 
+    /// Re-authorize a stream and check its fresh access, as the log stream's tick does.
+    async fn fresh(guard: &mut StreamGuard, state: &AppState) -> bool {
+        match guard.reauthorize(state).await {
+            Some(headers) => {
+                crate::access::require_fresh(state, headers, &["jobs:read", "logs:read"])
+                    .await
+                    .is_ok()
+            }
+            None => false,
+        }
+    }
+
     #[test]
     fn slot_exhaustion_returns_429_with_retry_after_5_and_frees_on_drop() {
         let slots = StreamSlots::new("event streams");
@@ -521,10 +486,7 @@ mod tests {
         // Wait past the initial 1s bearer's expiration: reauthorize re-mints a fresh bearer.
         tokio::time::sleep(Duration::from_millis(1200)).await;
         assert!(
-            guard
-                .reauthorize(&state, &["jobs:read", "logs:read"])
-                .await
-                .is_some(),
+            fresh(&mut guard, &state).await,
             "bearer refresh must keep a live console session open past bearer expiry"
         );
         assert_eq!(auth.minted.load(Ordering::SeqCst), 2);
@@ -532,27 +494,16 @@ mod tests {
         // Credential rotation (e.g. password change): pinned old credential no longer binds.
         *auth.pinned_credential.lock().unwrap() = Some("stale-credential-hash".into());
         assert!(
-            guard
-                .reauthorize(&state, &["jobs:read", "logs:read"])
-                .await
-                .is_none(),
+            !fresh(&mut guard, &state).await,
             "credential rotation must terminate the stream"
         );
 
         // Restore valid credential, then test logout (session deleted/inactive).
         *auth.pinned_credential.lock().unwrap() = None;
-        assert!(
-            guard
-                .reauthorize(&state, &["jobs:read", "logs:read"])
-                .await
-                .is_some()
-        );
+        assert!(fresh(&mut guard, &state).await);
         auth.active.store(false, Ordering::SeqCst);
         assert!(
-            guard
-                .reauthorize(&state, &["jobs:read", "logs:read"])
-                .await
-                .is_none(),
+            !fresh(&mut guard, &state).await,
             "logout must terminate the stream"
         );
 

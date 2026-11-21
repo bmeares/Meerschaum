@@ -94,8 +94,26 @@ mod host_access_tests {
     use meerschaum_plugin::HostServices;
     use serde_json::json;
 
-    #[test]
-    fn api_sql_never_reaches_the_internal_tables() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn api_sql_never_reaches_the_internal_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let state = server_state(root.path(), |_| {}).await;
+        let config =
+            meerschaum_core::config::Config::new(meerschaum_core::config::ConfigOptions::with_env(
+                vec![("MRSM_ROOT_DIR".into(), root.path().display().to_string())],
+            ))
+            .unwrap();
+        let env = HostEnv::new(
+            crate::native::Session::with_runtime(tokio::runtime::Handle::current()),
+            host_config(&config),
+            Arc::new(NativePlugins::empty()),
+            None,
+        );
+        let host = PluginHost::api(env, state, vec!["*".into()], None);
+        let check = |query: &'static str, is_read: bool| {
+            let host = &host;
+            async move { host.check_api_sql("sql:local", query, is_read, None).await }
+        };
         for refused in [
             "SELECT * FROM mrsm_users",
             "select password_hash from \"mrsm_users\"",
@@ -111,21 +129,42 @@ mod host_access_tests {
             "SELECT * FROM sqlite_dbpage",
             "SELECT 'mrsm_' || 'users'",
             "UPDATE mrsm_users SET user_type = 'admin'",
+            // Hidden behind what only some databases read as a comment.
+            "SELECT 1 # 2 FROM mrsm_users",
+            "SELECT * FROM #t JOIN mrsm_users ON 1=1",
+            "SELECT 1--1 FROM mrsm_users",
+            "SELECT /* /* */ * FROM mrsm_users -- */",
         ] {
-            assert!(refuse_internal_tables(refused).is_err(), "{refused}");
+            for is_read in [true, false] {
+                assert!(check(refused, is_read).await.is_err(), "{refused}");
+            }
         }
-        let error = refuse_internal_tables("SELECT * FROM \"MRSM_USERS\"")
+        let error = check("SELECT * FROM \"MRSM_USERS\"", true)
+            .await
             .unwrap_err()
             .to_string();
         assert!(error.contains("'MRSM_USERS'"), "{error}");
+        // A read is one read-only statement however a database reads its comments.
+        for stacked in [
+            "SELECT /* /* */ 1; DELETE FROM t -- */",
+            "SELECT 1 --1 INTO OUTFILE '/tmp/x'",
+        ] {
+            assert!(check(stacked, true).await.is_err(), "{stacked}");
+        }
         for allowed in [
             "SELECT * FROM plugin_hosted_parent",
             "SELECT query FROM searches",
             "SELECT COUNT(*) AS n FROM \"plugin_readings\"",
             "SELECT 'mrsm' AS name",
+            "SELECT 1 # note",
+            "SELECT * FROM #temp",
         ] {
-            assert!(refuse_internal_tables(allowed).is_ok(), "{allowed}");
+            for is_read in [true, false] {
+                assert!(check(allowed, is_read).await.is_ok(), "{allowed}");
+            }
         }
+        // `exec_sql` keeps MySQL's backslash-escaped strings.
+        assert!(check("UPDATE t SET note = 'it\\'s'", false).await.is_ok());
     }
 
     fn call(method: &str, args: serde_json::Value) -> meerschaum_plugin::HostCall {

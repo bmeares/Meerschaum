@@ -37,12 +37,13 @@ impl TmuxProfile {
         matches!(self, Self::Team(_)) || shell.clear_env
     }
 
-    /// Whether `key` must be omitted from the window's sourced environment file.
-    fn skip_env_key(&self, key: &str) -> bool {
-        match self {
-            // Team shells explicitly inject `TERM` and start under `env -i` (which wipes tmux's).
-            Self::Team(_) => ENV_SKIP_ISOLATED.contains(&key),
-            Self::Full | Self::Restricted => ENV_SKIP.contains(&key),
+    /// Whether `key` must be omitted from the window's sourced environment file: a window that
+    /// starts under `env -i` (which wipes tmux's `TERM`) keeps the shell's own `TERM`.
+    fn skip_env_key(&self, shell: &ShellCommand, key: &str) -> bool {
+        if self.isolate_env(shell) {
+            ENV_SKIP_ISOLATED.contains(&key)
+        } else {
+            ENV_SKIP.contains(&key)
         }
     }
 
@@ -133,8 +134,12 @@ impl TmuxMux {
     }
 
     /// End the tmux `session` (exact name) on this mux's socket, with every window and process.
+    /// Nothing happens without a dedicated socket, a running server or such a session.
     pub(super) fn end_session(&self, session: &str) {
-        end_tmux_session(&self.settings, session);
+        if let Some(mut command) = self.command(None) {
+            command.args(["kill-session", "-t", &format!("={session}")]);
+            let _ = tmux_output(&mut command);
+        }
     }
 
     /// How many windows the tmux `session` (exact name) has; `None` when tmux cannot say.
@@ -182,7 +187,10 @@ impl TmuxMux {
         let context = job_context_vars();
         let mut body = String::new();
         for (key, value) in &vars {
-            if self.profile.skip_env_key(key) || !valid_env_name(key) || context.contains(key) {
+            if self.profile.skip_env_key(shell, key)
+                || !valid_env_name(key)
+                || context.contains(key)
+            {
                 continue;
             }
             body.push_str(&format!("{key}={}\n", sh_quote(value)));
@@ -256,7 +264,7 @@ impl TmuxMux {
         };
         let argv = self.shell_argv(&prepared)?;
         if self.profile.needs_server_scrub() {
-            scrub_tmux_server_env(&self.settings, Some(session));
+            self.scrub_server_env(Some(session));
         }
         let Some(mut command) = self.window_command(&prepared) else {
             return Ok(false);
@@ -279,14 +287,12 @@ impl TmuxMux {
 
     /// Write the locked-down config, claim server ownership, and verify lockdown if already running.
     fn prepare_locked_server(&self, label: &str) -> std::io::Result<()> {
-        let socket = self
-            .settings
-            .socket
-            .as_deref()
-            .ok_or_else(|| std::io::Error::other(format!("no {label} tmux socket")))?;
+        if self.settings.socket.is_none() {
+            return Err(std::io::Error::other(format!("no {label} tmux socket")));
+        }
         write_restricted_conf(&self.settings)?;
-        claim_tmux_server(&self.settings);
-        if tmux_server_running(&self.settings, socket) && !apply_restricted_conf(&self.settings) {
+        self.claim_server();
+        if self.server_running() && !self.apply_restricted_conf() {
             return Err(std::io::Error::other(format!(
                 "the {label} tmux configuration could not be applied"
             )));
@@ -400,35 +406,26 @@ pub(super) const RESTRICTED_PYTHON_VARS: &[(&str, &str)] = &[
     ("PYTHONBREAKPOINT", "0"),
 ];
 
-/// A tmux command on `tmux`'s own socket (never the default server), without the caller's tmux
-/// variables or the server's job context.
-pub(super) fn tmux_command(tmux: &TmuxSettings) -> Option<std::process::Command> {
-    TmuxMux::new(tmux.clone(), TmuxProfile::Full).command(None)
-}
-
 /// Retire all panes of the exact Factory lease on its Team, API-only or legacy socket.
 /// Each socket belongs to this executor configuration. A dedicated base is required.
 pub fn end_executor_terminal(base: &TmuxSettings, team_id: uuid::Uuid, name: &str) {
     let session = tmux_session_name(name, &base.session_suffix);
-    for tmux in [
-        team::team_tmux(base, &team_id.to_string()),
-        restricted_tmux(base),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        end_tmux_session(&tmux, &session);
+    for profile in [
+        TmuxProfile::Team(team_id.to_string()),
+        TmuxProfile::Restricted,
+        TmuxProfile::Full,
+    ] {
+        if let Some(mux) = TmuxMux::from_base(base, profile) {
+            mux.end_session(&session);
+        }
     }
-    end_tmux_session(base, &session);
 }
 
-/// End the tmux `session` (exact name) on `tmux`'s socket, with every window and process in it.
+/// End the tmux `session` (exact name) on `tmux`'s socket, with every window and process in it,
+/// for a caller that holds only the socket's settings (an administrators' server's).
 /// Nothing happens without a dedicated socket, a running server or such a session.
 pub fn end_tmux_session(tmux: &TmuxSettings, session: &str) {
-    if let Some(mut command) = tmux_command(tmux) {
-        command.args(["kill-session", "-t", &format!("={session}")]);
-        let _ = tmux_output(&mut command);
-    }
+    TmuxMux::new(tmux.clone(), TmuxProfile::Full).end_session(session);
 }
 
 /// Write [`TMUX_RESTRICTED_CONF`] (`0600`) where `tmux` (restricted settings) reads it.
@@ -450,50 +447,53 @@ pub(super) fn write_restricted_conf(tmux: &TmuxSettings) -> std::io::Result<()> 
     std::fs::rename(&temporary, path)
 }
 
-/// Lock down the restricted tmux server that runs on `tmux`'s socket: apply
-/// [`TMUX_RESTRICTED_CONF`] (`source-file`), empty every key table it does not keep
-/// ([`restricted::KEPT_TABLES`]: tmux has more tables than the ones the file names, and new
-/// releases add some), then check that tmux lists exactly the file's bindings and no prefix
-/// key. `true` only when all of that holds.
-pub(super) fn apply_restricted_conf(tmux: &TmuxSettings) -> bool {
-    let Some(file) = &tmux.config_file else {
-        return false;
-    };
-    let run = |args: &[&str]| -> Option<std::process::Output> {
-        let mut command = tmux_command(tmux)?;
-        command.args(args);
-        tmux_output(&mut command).filter(|output| output.status.success())
-    };
-    if run(&["source-file", file]).is_none() {
-        return false;
-    }
-    let Some(listing) = run(&["list-keys"]) else {
-        return false;
-    };
-    let mut tables: Vec<String> = String::from_utf8_lossy(&listing.stdout)
-        .lines()
-        .filter_map(|line| restricted::binding(line).map(|(table, _, _)| table))
-        .filter(|table| !restricted::KEPT_TABLES.contains(&table.as_str()))
-        .collect();
-    tables.sort();
-    tables.dedup();
-    for table in &tables {
-        if run(&["unbind-key", "-a", "-T", table]).is_none() {
+impl TmuxMux {
+    /// Lock down this mux's locked-down tmux server (`Restricted` or `Team`): apply
+    /// [`TMUX_RESTRICTED_CONF`] (`source-file`), empty every key table it does not keep
+    /// ([`restricted::KEPT_TABLES`]: tmux has more tables than the ones the file names, and new
+    /// releases add some), then check that tmux lists exactly the file's bindings and no prefix
+    /// key. `true` only when all of that holds.
+    pub(super) fn apply_restricted_conf(&self) -> bool {
+        let Some(file) = &self.settings.config_file else {
+            return false;
+        };
+        let run = |args: &[&str]| -> Option<std::process::Output> {
+            let mut command = self.command(None)?;
+            command.args(args);
+            tmux_output(&mut command).filter(|output| output.status.success())
+        };
+        if run(&["source-file", file]).is_none() {
             return false;
         }
+        let Some(listing) = run(&["list-keys"]) else {
+            return false;
+        };
+        let mut tables: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .filter_map(|line| restricted::binding(line).map(|(table, _, _)| table))
+            .filter(|table| !restricted::KEPT_TABLES.contains(&table.as_str()))
+            .collect();
+        tables.sort();
+        tables.dedup();
+        for table in &tables {
+            if run(&["unbind-key", "-a", "-T", table]).is_none() {
+                return false;
+            }
+        }
+        let Some(listing) = run(&["list-keys"]) else {
+            return false;
+        };
+        if let Err(error) =
+            restricted::only_allowed_bindings(&String::from_utf8_lossy(&listing.stdout))
+        {
+            tracing::warn!("A restricted terminal's tmux server is not locked down: {error}");
+            return false;
+        }
+        ["prefix", "prefix2"].iter().all(|option| {
+            run(&["show-options", "-gv", option])
+                .is_some_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "None")
+        })
     }
-    let Some(listing) = run(&["list-keys"]) else {
-        return false;
-    };
-    if let Err(error) = restricted::only_allowed_bindings(&String::from_utf8_lossy(&listing.stdout))
-    {
-        tracing::warn!("A restricted terminal's tmux server is not locked down: {error}");
-        return false;
-    }
-    ["prefix", "prefix2"].iter().all(|option| {
-        run(&["show-options", "-gv", option])
-            .is_some_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "None")
-    })
 }
 
 /// Start a terminal's process (`Full` or `Restricted` mode), validating any API guardian once.
@@ -538,10 +538,10 @@ pub(super) fn launch_with_guardian(
                 config.policy.forget_session(&name);
             }
             let wrapped = mux.shell_argv(&config.shell)?;
-            if claim_tmux_server(tmux) {
+            if mux.claim_server() {
                 refresh_tmux_config(tmux);
             }
-            scrub_tmux_server_env(tmux, Some(&name));
+            mux.scrub_server_env(Some(&name));
             builder = CommandBuilder::new(&tmux.binary);
             if let Some(socket) = &tmux.socket {
                 builder.arg("-S");
@@ -567,9 +567,9 @@ pub(super) fn launch_with_guardian(
             let _launching = RESTRICTED_LAUNCH.lock().unwrap_or_else(|e| e.into_inner());
             // A user who may not run system commands never reattaches a session started when
             // they could (a demotion): end it, with whatever runs in it.
-            end_tmux_session(tmux, &name);
+            TmuxMux::new(tmux.clone(), TmuxProfile::Full).end_session(&name);
             rmux.prepare_locked_server("restricted")?;
-            scrub_tmux_server_env(&rmux.settings, Some(&name));
+            rmux.scrub_server_env(Some(&name));
             // Reattach only a session whose shell this server started for this user (so its
             // grant is known); end any other.
             let token = match config.policy.session_grant(term_name, &name) {
@@ -595,7 +595,7 @@ pub(super) fn launch_with_guardian(
                 }
             };
             // tmux applies all of it, or the terminal does not open.
-            if !apply_restricted_conf(&rmux.settings) {
+            if !rmux.apply_restricted_conf() {
                 rmux.end_session(&name);
                 config.policy.forget_session(&name);
                 return Err(std::io::Error::other(
@@ -711,9 +711,9 @@ pub(super) fn launch_team(
     static TEAM_LAUNCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _launching = TEAM_LAUNCH.lock().unwrap_or_else(|e| e.into_inner());
     // Not a session of another mode, nor of another team's server.
-    end_tmux_session(base, &name);
-    if let Some(restricted) = restricted_tmux(base) {
-        end_tmux_session(&restricted, &name);
+    TmuxMux::new(base.clone(), TmuxProfile::Full).end_session(&name);
+    if let Some(restricted) = TmuxMux::from_base(base, TmuxProfile::Restricted) {
+        restricted.end_session(&name);
         config.policy.forget_session(&name);
     }
     team::end_team_sessions_except(&name, Some(&socket));
@@ -727,7 +727,7 @@ pub(super) fn launch_team(
         guardian.cancel_unspawned()?;
     }
     // tmux applies all of the lockdown, or the terminal does not open.
-    if !apply_restricted_conf(&mux.settings) {
+    if !mux.apply_restricted_conf() {
         mux.end_session(&name);
         return Err(std::io::Error::other(
             "the team terminal's tmux configuration could not be applied",
@@ -765,8 +765,8 @@ pub(super) const ENV_SKIP: &[&str] = &[
     "OLDPWD",
 ];
 
-/// Variables omitted from isolated (`Team`) env files (`TERM` is explicitly provided by the team
-/// launcher because `env -i` clears tmux's `TERM`).
+/// Variables omitted from the env files of windows that start under `env -i` (Team, and shells
+/// with `clear_env`): `TERM` stays, because `env -i` clears tmux's.
 const ENV_SKIP_ISOLATED: &[&str] = &[
     "TMUX",
     "TMUX_PANE",
