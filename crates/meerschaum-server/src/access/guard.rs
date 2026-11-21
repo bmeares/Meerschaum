@@ -378,11 +378,14 @@ pub async fn check_parameters(
     let Some(definition_hidden) = definition_hidden else {
         return Ok(());
     };
+    let policy = sql_guard::SqlPolicy::PipeDefinition {
+        hidden: &definition_hidden,
+    };
     for definition in sql_guard::definitions(new) {
-        sql_guard::check_definition(&definition, &definition_hidden).map_err(forbidden)?;
+        sql_guard::check_sql(&definition, &policy).map_err(|e| forbidden(e.into_message()))?;
     }
     for definition in sql_guard::definitions(resolved.parameters()) {
-        sql_guard::check_definition(&definition, &definition_hidden).map_err(forbidden)?;
+        sql_guard::check_sql(&definition, &policy).map_err(|e| forbidden(e.into_message()))?;
     }
     Ok(())
 }

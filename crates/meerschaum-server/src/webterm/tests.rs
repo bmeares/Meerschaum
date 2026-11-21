@@ -65,7 +65,8 @@ fn the_tmux_window_unsets_the_job_context_and_its_env_file_omits_it() {
         .env
         .push(("MRSM_SYSTEMD_LOG_PATH".into(), "/job/log".into()));
     shell.env.push(("MRSM_RC25_KEEP".into(), "yes".into()));
-    let argv = tmux_shell_argv(&tmux, &shell).unwrap();
+    let mux = TmuxMux::new(tmux, TmuxProfile::Full);
+    let argv = mux.shell_argv(&shell).unwrap();
     assert!(argv[2].contains("unset "), "{}", argv[2]);
     for var in job_context_vars() {
         assert!(
@@ -106,7 +107,11 @@ fn an_isolated_tmux_window_uses_only_its_supplied_environment() {
         ("TPR_CURRENT_CONTEXT".into(), "current".into()),
     ];
     shell.args = vec!["-c".into(), "env".into()];
-    let argv = tmux_shell_argv(&tmux, &shell).unwrap();
+    let mux = TmuxMux::new(tmux, TmuxProfile::Full);
+    let argv = mux.shell_argv(&shell).unwrap();
+    assert_eq!(argv[0], env_program());
+    assert_eq!(argv[1], "-i");
+    assert_eq!(argv[2], "/bin/sh");
     // Exercise the actual window wrapper without starting any tmux server.
     let output = std::process::Command::new(&argv[0])
         .args(&argv[1..])
@@ -188,23 +193,26 @@ fn utf8_stream_joins_split_characters() {
 fn client_messages_follow_terminado() {
     assert!(matches!(
         parse_client_message(r#"["stdin","ls\r"]"#),
-        Some(ClientMessage::Stdin(s)) if s == "ls\r"
+        Some(remote::Input::Stdin(s)) if s == "ls\r"
     ));
-    let Some(ClientMessage::SetSize(size)) = parse_client_message(r#"["set_size",30,100,600,800]"#)
+    let Some(remote::Input::Resize {
+        rows,
+        cols,
+        height,
+        width,
+    }) = parse_client_message(r#"["set_size",30,100,600,800]"#)
     else {
         panic!("set_size");
     };
-    assert_eq!(
-        (size.rows, size.cols, size.pixel_height, size.pixel_width),
-        (30, 100, 600, 800)
-    );
+    assert_eq!((rows, cols, height, width), (30, 100, 600, 800));
     assert!(matches!(
         parse_client_message(r#"["new_window"]"#),
-        Some(ClientMessage::NewWindow)
+        Some(remote::Input::NewWindow)
     ));
     for ignored in [
         r#"["set_size",0,10]"#,
         r#"["stdin"]"#,
+        r#"["shell_state",""]"#,
         r#"{"a":1}"#,
         "nope",
         "[]",
@@ -406,11 +414,12 @@ fn simultaneous_launches_never_share_an_env_temp_file() {
         env_dir: dir.clone(),
         config_file: None,
     };
+    let mux = TmuxMux::new(tmux, TmuxProfile::Full);
     let shell = ShellCommand::new("sh");
     let handles: Vec<_> = (0..16)
         .map(|_| {
-            let (tmux, shell) = (tmux.clone(), shell.clone());
-            std::thread::spawn(move || write_env_file(&tmux, &shell))
+            let (mux, shell) = (mux.clone(), shell.clone());
+            std::thread::spawn(move || mux.write_env_file(&shell))
         })
         .collect();
     let mut paths: Vec<PathBuf> = handles
@@ -435,7 +444,7 @@ fn simultaneous_launches_never_share_an_env_temp_file() {
     );
     // The shared file of earlier releases is removed by the next launch.
     std::fs::write(dir.join("webterm.env"), "OLD=1\n").unwrap();
-    write_env_file(&tmux, &shell).unwrap();
+    mux.write_env_file(&shell).unwrap();
     assert!(!dir.join("webterm.env").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -503,4 +512,717 @@ fn env_values_are_quoted_for_sh() {
     assert!(valid_env_name("MRSM_SQL_MAIN"));
     assert!(!valid_env_name("1X"));
     assert!(!valid_env_name("A-B"));
+}
+
+// --- Fast in-memory bridge & multiplexer unit tests (zero PTY / zero tmux) ---
+
+mod in_memory_bridge {
+    use std::collections::HashMap;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use std::task::{Context, Poll};
+
+    use futures_util::{Sink, Stream};
+
+    use super::*;
+
+    type SendFuture =
+        Pin<Box<dyn Future<Output = Result<(), mpsc::error::SendError<Message>>> + Send>>;
+
+    /// In-memory WebSocket transport backed by bounded `tokio::sync::mpsc` channels so tests
+    /// exercise real async backpressure without sockets, PTYs, or tmux.
+    struct MemorySocket {
+        incoming: mpsc::Receiver<Message>,
+        outgoing: mpsc::Sender<Message>,
+        pending_send: Option<SendFuture>,
+    }
+
+    struct MemoryClient {
+        to_server: mpsc::Sender<Message>,
+        from_server: mpsc::Receiver<Message>,
+    }
+
+    fn memory_socket_pair(
+        to_server_cap: usize,
+        to_client_cap: usize,
+    ) -> (MemorySocket, MemoryClient) {
+        let (to_server, incoming) = mpsc::channel(to_server_cap);
+        let (outgoing, from_server) = mpsc::channel(to_client_cap);
+        (
+            MemorySocket {
+                incoming,
+                outgoing,
+                pending_send: None,
+            },
+            MemoryClient {
+                to_server,
+                from_server,
+            },
+        )
+    }
+
+    impl Stream for MemorySocket {
+        type Item = Result<Message, ()>;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.incoming.poll_recv(cx).map(|opt| opt.map(Ok))
+        }
+    }
+
+    impl Sink<Message> for MemorySocket {
+        type Error = ();
+
+        fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            self.as_mut().poll_flush(cx)
+        }
+
+        fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), ()> {
+            let tx = self.outgoing.clone();
+            self.pending_send = Some(Box::pin(async move { tx.send(item).await }));
+            Ok(())
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            let Some(fut) = self.pending_send.as_mut() else {
+                return Poll::Ready(Ok(()));
+            };
+            match fut.as_mut().poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Ok(())) => {
+                    self.pending_send = None;
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Ready(Err(_)) => {
+                    self.pending_send = None;
+                    Poll::Ready(Err(()))
+                }
+            }
+        }
+
+        fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            self.poll_flush(cx)
+        }
+    }
+
+    fn fast_timeouts(reauthorize_every: Duration) -> BridgeTimeouts {
+        BridgeTimeouts {
+            write: Duration::from_secs(2),
+            close: Duration::from_secs(2),
+            flow: Duration::from_secs(2),
+            ping: Duration::from_secs(60),
+            reauthorize_every,
+            reauthorize_timeout: Duration::from_millis(200),
+        }
+    }
+
+    fn parse_text(message: Message) -> Value {
+        match message {
+            Message::Text(raw) => serde_json::from_str(raw.as_str()).expect("json text frame"),
+            other => panic!("expected text frame, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn framing_forwards_all_terminado_commands_events_and_pongs() {
+        let (socket, mut client) = memory_socket_pair(16, 16);
+        let (input_tx, mut input_rx) = mpsc::channel(16);
+        let (event_tx, event_rx) = mpsc::channel(16);
+        let session = TerminalSession::new(
+            remote::Terminal {
+                input: input_tx,
+                events: event_rx,
+            },
+            RevokeAction::None,
+        );
+        let (_drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
+        let bridge = tokio::spawn(async move {
+            bridge_session(
+                socket,
+                session,
+                async {
+                    let _ = drain_rx.await;
+                },
+                fast_timeouts(Duration::from_secs(60)),
+                || async { None },
+                "alice",
+            )
+            .await;
+        });
+
+        event_tx.send(remote::Event::Setup).await.unwrap();
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["setup", {}])
+        );
+
+        // Send every valid client command plus an invalid frame (ignored) and a Ping.
+        for raw in [
+            json!(["stdin", "ls\r"]).to_string(),
+            json!(["set_size", 40, 120, 800, 1200]).to_string(),
+            json!(["new_window"]).to_string(),
+            json!(["shell_state", "req-1"]).to_string(),
+            "not json".to_string(),
+        ] {
+            client
+                .to_server
+                .send(Message::Text(raw.into()))
+                .await
+                .unwrap();
+        }
+        client
+            .to_server
+            .send(Message::Ping(b"hi".to_vec().into()))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            input_rx.recv().await.unwrap(),
+            remote::Input::Stdin("ls\r".into())
+        );
+        assert_eq!(
+            input_rx.recv().await.unwrap(),
+            remote::Input::Resize {
+                rows: 40,
+                cols: 120,
+                height: 800,
+                width: 1200,
+            }
+        );
+        assert_eq!(input_rx.recv().await.unwrap(), remote::Input::NewWindow);
+        assert_eq!(
+            input_rx.recv().await.unwrap(),
+            remote::Input::ShellState("req-1".into())
+        );
+        assert_eq!(
+            client.from_server.recv().await.unwrap(),
+            Message::Pong(b"hi".to_vec().into())
+        );
+
+        event_tx
+            .send(remote::Event::Output("hello\r\n".into()))
+            .await
+            .unwrap();
+        event_tx
+            .send(remote::Event::ShellState {
+                id: "req-1".into(),
+                state: Some(remote::ShellState {
+                    idle: true,
+                    empty: false,
+                }),
+            })
+            .await
+            .unwrap();
+        event_tx.send(remote::Event::Disconnected).await.unwrap();
+
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["stdout", "hello\r\n"])
+        );
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["shell_state", "req-1", {"idle": true, "empty": false}])
+        );
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["disconnect", 1])
+        );
+        assert!(matches!(
+            client.from_server.recv().await.unwrap(),
+            Message::Close(Some(CloseFrame { code: 1000, .. }))
+        ));
+
+        bridge.await.unwrap();
+        assert!(input_rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn input_backpressure_buffers_client_burst_without_dropping_or_closing() {
+        let (socket, mut client) = memory_socket_pair(32, 32);
+        // Intentionally tiny backend queue (capacity 2) to force bridge backpressure.
+        let (input_tx, mut input_rx) = mpsc::channel(2);
+        let (event_tx, event_rx) = mpsc::channel(16);
+        let session = TerminalSession::new(
+            remote::Terminal {
+                input: input_tx,
+                events: event_rx,
+            },
+            RevokeAction::None,
+        );
+        let (_drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
+        let bridge = tokio::spawn(async move {
+            bridge_session(
+                socket,
+                session,
+                async {
+                    let _ = drain_rx.await;
+                },
+                fast_timeouts(Duration::from_secs(60)),
+                || async { None },
+                "alice",
+            )
+            .await;
+        });
+
+        event_tx.send(remote::Event::Setup).await.unwrap();
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["setup", {}])
+        );
+
+        // Burst 8 commands while the backend has not yet drained its capacity-2 queue.
+        for i in 0..8 {
+            client
+                .to_server
+                .send(Message::Text(
+                    json!(["stdin", format!("cmd-{i}")]).to_string().into(),
+                ))
+                .await
+                .unwrap();
+        }
+        // Let the bridge fill the queue and park a pending command.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let mut received = Vec::new();
+        for _ in 0..8 {
+            let remote::Input::Stdin(cmd) =
+                tokio::time::timeout(Duration::from_secs(2), input_rx.recv())
+                    .await
+                    .expect("no stall")
+                    .expect("bridge stayed open")
+            else {
+                panic!("expected stdin");
+            };
+            received.push(cmd);
+        }
+        assert_eq!(
+            received,
+            (0..8).map(|i| format!("cmd-{i}")).collect::<Vec<_>>()
+        );
+
+        drop(client.to_server);
+        bridge.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn revocation_closes_terminal_even_when_browser_stops_reading() {
+        // Outbound channel of capacity 1 fills immediately when the client stops reading.
+        let (socket, client) = memory_socket_pair(8, 1);
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let (event_tx, event_rx) = mpsc::channel(2);
+        let session = TerminalSession::new(
+            remote::Terminal {
+                input: input_tx,
+                events: event_rx,
+            },
+            RevokeAction::None,
+        );
+        let revoked = Arc::new(AtomicBool::new(false));
+        let revoked_flag = revoked.clone();
+        let (_drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
+        let mut timeouts = fast_timeouts(Duration::from_millis(20));
+        timeouts.close = Duration::from_millis(100);
+        let bridge = tokio::spawn(async move {
+            bridge_session(
+                socket,
+                session,
+                async {
+                    let _ = drain_rx.await;
+                },
+                timeouts,
+                move || {
+                    let flag = revoked_flag.clone();
+                    async move {
+                        flag.load(Ordering::SeqCst)
+                            .then(|| "Your session has ended.".to_string())
+                    }
+                },
+                "alice",
+            )
+            .await;
+        });
+
+        // Flood outbound frames without reading from `client.from_server` so writer blocks.
+        let _ = event_tx.send(remote::Event::Setup).await;
+        let _ = event_tx.send(remote::Event::Output("flood-1".into())).await;
+        let _ = event_tx.send(remote::Event::Output("flood-2".into())).await;
+        let _ = event_tx.send(remote::Event::Output("flood-3".into())).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        // Revoke the session while the writer is completely stalled.
+        revoked.store(true, Ordering::SeqCst);
+
+        // Backend input MUST close promptly without waiting for the stalled browser.
+        let closed = tokio::time::timeout(Duration::from_millis(500), input_rx.recv())
+            .await
+            .expect("revocation dropped backend input promptly");
+        assert!(closed.is_none());
+
+        // Drain what reached the client (or finishes once client reads again).
+        drop(client.from_server);
+        tokio::time::timeout(Duration::from_secs(2), bridge)
+            .await
+            .expect("bridge exited promptly")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn revocation_delivers_reason_disconnect_and_close_1008() {
+        let (socket, mut client) = memory_socket_pair(8, 16);
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let (event_tx, event_rx) = mpsc::channel(8);
+        let session = TerminalSession::new(
+            remote::Terminal {
+                input: input_tx,
+                events: event_rx,
+            },
+            RevokeAction::None,
+        );
+        let revoked = Arc::new(AtomicBool::new(false));
+        let revoked_flag = revoked.clone();
+        let (_drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
+        let bridge = tokio::spawn(async move {
+            bridge_session(
+                socket,
+                session,
+                async {
+                    let _ = drain_rx.await;
+                },
+                fast_timeouts(Duration::from_millis(20)),
+                move || {
+                    let flag = revoked_flag.clone();
+                    async move {
+                        flag.load(Ordering::SeqCst)
+                            .then(|| "Your permission was removed.".to_string())
+                    }
+                },
+                "bob",
+            )
+            .await;
+        });
+
+        event_tx.send(remote::Event::Setup).await.unwrap();
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["setup", {}])
+        );
+
+        revoked.store(true, Ordering::SeqCst);
+
+        let mut stdout = String::new();
+        let mut saw_disconnect = false;
+        let mut close_code = None;
+        while let Some(msg) =
+            tokio::time::timeout(Duration::from_secs(2), client.from_server.recv())
+                .await
+                .expect("revocation frames")
+        {
+            match msg {
+                Message::Text(raw) => {
+                    let v: Value = serde_json::from_str(raw.as_str()).unwrap();
+                    if v[0] == "stdout" {
+                        stdout.push_str(v[1].as_str().unwrap());
+                    } else if v[0] == "disconnect" && v[1] == 1 {
+                        saw_disconnect = true;
+                    }
+                }
+                Message::Close(Some(frame)) => {
+                    close_code = Some(frame.code);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            stdout.contains("Your permission was removed."),
+            "{stdout:?}"
+        );
+        assert!(saw_disconnect);
+        assert_eq!(close_code, Some(CLOSE_REVOKED));
+        bridge.await.unwrap();
+        assert!(input_rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn drain_sends_going_away_1001_without_disconnect_and_stops_backend() {
+        let (socket, mut client) = memory_socket_pair(8, 16);
+        let (input_tx, mut input_rx) = mpsc::channel(8);
+        let (event_tx, event_rx) = mpsc::channel(8);
+        let session = TerminalSession::new(
+            remote::Terminal {
+                input: input_tx,
+                events: event_rx,
+            },
+            RevokeAction::None,
+        );
+        let (drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
+        let bridge = tokio::spawn(async move {
+            bridge_session(
+                socket,
+                session,
+                async {
+                    let _ = drain_rx.await;
+                },
+                fast_timeouts(Duration::from_secs(60)),
+                || async { None },
+                "alice",
+            )
+            .await;
+        });
+
+        event_tx.send(remote::Event::Setup).await.unwrap();
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["setup", {}])
+        );
+
+        drain_tx.send(()).unwrap();
+
+        let mut stdout = String::new();
+        let mut saw_disconnect = false;
+        let mut close_code = None;
+        while let Some(msg) =
+            tokio::time::timeout(Duration::from_secs(2), client.from_server.recv())
+                .await
+                .expect("drain frames")
+        {
+            match msg {
+                Message::Text(raw) => {
+                    let v: Value = serde_json::from_str(raw.as_str()).unwrap();
+                    if v[0] == "stdout" {
+                        stdout.push_str(v[1].as_str().unwrap());
+                    } else if v[0] == "disconnect" {
+                        saw_disconnect = true;
+                    }
+                }
+                Message::Close(Some(frame)) => {
+                    close_code = Some(frame.code);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(stdout.contains(SHUTTING_DOWN), "{stdout:?}");
+        assert!(
+            !saw_disconnect,
+            "drain must not emit disconnect so browser can reconnect"
+        );
+        assert_eq!(close_code, Some(1001));
+        bridge.await.unwrap();
+        assert!(input_rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn shell_state_coalescer_runs_one_query_at_a_time_and_answers_displaced_with_none() {
+        let (socket, mut client) = memory_socket_pair(32, 32);
+        let (input_tx, mut input_rx) = mpsc::channel(32);
+        let (event_tx, event_rx) = mpsc::channel(32);
+        let session = TerminalSession::new(
+            remote::Terminal {
+                input: input_tx,
+                events: event_rx,
+            },
+            RevokeAction::None,
+        );
+
+        let running = Arc::new(AtomicUsize::new(0));
+        let max_running = Arc::new(AtomicUsize::new(0));
+        let total_queries = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(tokio::sync::Notify::new());
+
+        let (running_c, max_c, total_c, gate_c) = (
+            running.clone(),
+            max_running.clone(),
+            total_queries.clone(),
+            gate.clone(),
+        );
+        // In-memory backend exercising the exact `ShellStateCoalescer` used by `LocalPtyAdapter`.
+        let backend = tokio::spawn(async move {
+            let mut coalescer = ShellStateCoalescer::default();
+            let mut job: Option<tokio::task::JoinHandle<Option<remote::ShellState>>> = None;
+            event_tx.send(remote::Event::Setup).await.unwrap();
+            let spawn_query = || {
+                let (running, max, total, gate) = (
+                    running_c.clone(),
+                    max_c.clone(),
+                    total_c.clone(),
+                    gate_c.clone(),
+                );
+                tokio::spawn(async move {
+                    let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                    max.fetch_max(now, Ordering::SeqCst);
+                    total.fetch_add(1, Ordering::SeqCst);
+                    gate.notified().await;
+                    running.fetch_sub(1, Ordering::SeqCst);
+                    Some(remote::ShellState {
+                        idle: true,
+                        empty: true,
+                    })
+                })
+            };
+            loop {
+                tokio::select! {
+                    result = joined(&mut job), if job.is_some() => {
+                        job = None;
+                        let (finished, next) = coalescer.complete();
+                        if let Some(id) = finished {
+                            let _ = event_tx.send(remote::Event::ShellState {
+                                id,
+                                state: result.ok().flatten(),
+                            }).await;
+                        }
+                        if next.is_some() {
+                            job = Some(spawn_query());
+                        }
+                    }
+                    command = input_rx.recv() => {
+                        let Some(command) = command else { break; };
+                        if let remote::Input::ShellState(id) = command {
+                            let (start_now, displaced) = coalescer.submit(id);
+                            if start_now {
+                                job = Some(spawn_query());
+                            } else if let Some(dropped) = displaced {
+                                let _ = event_tx.send(remote::Event::ShellState {
+                                    id: dropped,
+                                    state: None,
+                                }).await;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let (_drain_tx, drain_rx) = tokio::sync::oneshot::channel::<()>();
+        let bridge = tokio::spawn(async move {
+            bridge_session(
+                socket,
+                session,
+                async {
+                    let _ = drain_rx.await;
+                },
+                fast_timeouts(Duration::from_secs(60)),
+                || async { None },
+                "alice",
+            )
+            .await;
+        });
+
+        assert_eq!(
+            parse_text(client.from_server.recv().await.unwrap()),
+            json!(["setup", {}])
+        );
+
+        let burst: Vec<String> = (0..12).map(|i| format!("q{i}")).collect();
+        for id in &burst {
+            client
+                .to_server
+                .send(Message::Text(json!(["shell_state", id]).to_string().into()))
+                .await
+                .unwrap();
+        }
+
+        // Wait for the 10 displaced middle requests (q1..q10) to be answered immediately with null.
+        let mut answers: HashMap<String, Value> = HashMap::new();
+        while answers.len() < 10 {
+            let msg = parse_text(
+                tokio::time::timeout(Duration::from_secs(2), client.from_server.recv())
+                    .await
+                    .expect("displaced reply")
+                    .unwrap(),
+            );
+            assert_eq!(msg[0], "shell_state");
+            answers.insert(msg[1].as_str().unwrap().to_string(), msg[2].clone());
+        }
+        for i in 1..11 {
+            assert_eq!(answers.get(&format!("q{i}")), Some(&Value::Null));
+        }
+
+        // Release q0, then release the coalesced latest request q11.
+        gate.notify_one();
+        let msg = parse_text(client.from_server.recv().await.unwrap());
+        answers.insert(msg[1].as_str().unwrap().to_string(), msg[2].clone());
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        gate.notify_one();
+        let msg = parse_text(client.from_server.recv().await.unwrap());
+        answers.insert(msg[1].as_str().unwrap().to_string(), msg[2].clone());
+
+        assert_eq!(
+            answers.get("q0"),
+            Some(&json!({"idle": true, "empty": true}))
+        );
+        assert_eq!(
+            answers.get("q11"),
+            Some(&json!({"idle": true, "empty": true}))
+        );
+        assert_eq!(max_running.load(Ordering::SeqCst), 1);
+        assert_eq!(total_queries.load(Ordering::SeqCst), 2);
+
+        drop(client.to_server);
+        bridge.await.unwrap();
+        backend.await.unwrap();
+    }
+
+    #[test]
+    fn window_budget_enforces_per_connection_cap_and_serializes_spawns() {
+        let mut budget = WindowBudget::default();
+        // First request starts immediately; requests 2..=MAX_NEW_WINDOWS queue serially;
+        // anything past MAX_NEW_WINDOWS is refused.
+        assert!(budget.request(MAX_NEW_WINDOWS));
+        for _ in 1..MAX_NEW_WINDOWS {
+            assert!(!budget.request(MAX_NEW_WINDOWS));
+        }
+        for _ in 0..10 {
+            assert!(!budget.request(MAX_NEW_WINDOWS));
+        }
+        let mut started = 1usize;
+        while budget.complete() {
+            started += 1;
+        }
+        assert_eq!(started, MAX_NEW_WINDOWS);
+        // Once the connection cap is reached, even after completion no more windows start.
+        assert!(!budget.request(MAX_NEW_WINDOWS));
+    }
+
+    #[test]
+    fn tmux_profile_team_scrubs_job_context_and_uses_probed_env_i() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmux = TmuxSettings {
+            binary: "tmux".into(),
+            socket: Some(dir.path().join("team.sock")),
+            session_suffix: "_t".into(),
+            env_dir: dir.path().join("env"),
+            config_file: None,
+        };
+        let mut shell = ShellCommand::new("/bin/mrsm");
+        shell.env = vec![
+            ("TERM".into(), "xterm-256color".into()),
+            ("TEAM_VAR".into(), "ok".into()),
+            ("MRSM_DAEMON_ID".into(), "leaked-job".into()),
+            ("TMUX".into(), "/tmp/host,1,0".into()),
+        ];
+        let mux = TmuxMux::new(tmux, TmuxProfile::Team("alpha".into()));
+        let argv = mux.shell_argv(&shell).unwrap();
+        assert_eq!(argv[0], env_program());
+        assert_eq!(argv[1], "-i");
+        assert_eq!(argv[2], "/bin/sh");
+        assert_eq!(argv[3], "-c");
+        assert!(argv[4].contains("unset "), "{}", argv[4]);
+        let body = std::fs::read_to_string(&argv[5]).unwrap();
+        assert!(body.contains("TEAM_VAR='ok'"), "{body}");
+        assert!(body.contains("TERM='xterm-256color'"), "{body}");
+        assert!(!body.contains("MRSM_DAEMON_ID="), "{body}");
+        assert!(!body.contains("TMUX="), "{body}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let file_mode = std::fs::metadata(&argv[5]).unwrap().permissions().mode();
+            assert_eq!(file_mode & 0o777, 0o600);
+            let dir_mode = std::fs::metadata(dir.path().join("env"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(dir_mode & 0o777, 0o700);
+        }
+    }
 }

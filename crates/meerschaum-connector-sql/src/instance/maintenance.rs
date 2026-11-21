@@ -86,11 +86,11 @@ impl SqlConnector {
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<Option<i64>> {
         use crate::queries::estimate::{get_rowcount_estimate_query, use_estimate};
+        let (pipe, sp) = self.bind_pipe(pipe).await?;
         let filtered = query.remote
             || query.begin.is_some()
             || query.end.is_some()
             || query.params.as_ref().is_some_and(|p| !p.is_empty());
-        let sp = self.sql_pipe(pipe)?;
         let schema = self.get_pipe_schema(&sp);
         let estimate_query = (!filtered)
             .then(|| get_rowcount_estimate_query(self.flavor, &sp.target, schema.as_deref()))
@@ -114,13 +114,18 @@ impl SqlConnector {
                 Err(e) => tracing::debug!("No row estimate for {pipe}: {e}"),
             }
         }
-        self.get_pipe_rowcount_cached(pipe, query, cached).await
+        self.get_pipe_rowcount_cached(&pipe, query, cached).await
     }
 
     /// `get_pipe_size(pipe)`: the target table's on-disk size in bytes (`None` if unknown).
     pub async fn get_pipe_size(&self, pipe: &Pipe) -> Option<i64> {
-        let sp = self.sql_pipe(pipe).ok()?;
-        self.pipe_size(&sp).await
+        self.get_pipe_size_checked(pipe).await.ok().flatten()
+    }
+
+    /// [`get_pipe_size`](Self::get_pipe_size) propagating lazy schema discovery / binding errors.
+    pub(crate) async fn get_pipe_size_checked(&self, pipe: &Pipe) -> ConnectorResult<Option<i64>> {
+        let (_, sp) = self.bind_pipe(pipe).await?;
+        Ok(self.pipe_size(&sp).await)
     }
 
     pub(crate) async fn pipe_size(&self, sp: &SqlPipe) -> Option<i64> {
@@ -159,6 +164,10 @@ impl SqlConnector {
     /// `apply_compression_policy(pipe)`: idempotently enable the columnstore and install a
     /// columnstore policy (TimescaleDB only; a no-op success elsewhere).
     pub async fn apply_compression_policy(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
+        let pipe = &self.prepare_pipe(pipe).await;
         if !self.flavor.is_timescaledb() {
             return SuccessTuple::ok("Compression policies are only supported for TimescaleDB.");
         }
@@ -230,10 +239,14 @@ impl SqlConnector {
         no_policy: bool,
         compress: bool,
     ) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let verb = if compress { "compress" } else { "decompress" };
         if let Some(refused) = self.protected_refusal(pipe, verb) {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -309,9 +322,13 @@ impl SqlConnector {
 
     /// `vacuum_pipe(pipe, full)`.
     pub async fn vacuum_pipe(&self, pipe: &Pipe, full: bool) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "vacuum") {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -379,6 +396,10 @@ impl SqlConnector {
 
     /// `analyze_pipe(pipe)`.
     pub async fn analyze_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),

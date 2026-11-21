@@ -296,59 +296,6 @@ fn internal_key_length_error(sp: &SqlPipe, flavor: Flavor, df: &Frame) -> Option
     None
 }
 
-/// The most pipes whose post-sync columns types are held at once (consumed by the first
-/// [`take_synced_columns_types`](SqlConnector::take_synced_columns_types); a caller that never
-/// takes them, such as the CLI, must not grow the map without bound).
-const MAX_SYNCED_COLUMNS: usize = 512;
-
-/// The key of a pipe's post-sync columns types: its keys, which a caller has without resolving
-/// the pipe's parameters.
-fn synced_columns_key(pipe: &Pipe) -> String {
-    format!(
-        "{:?}",
-        (
-            pipe.connector_keys(),
-            pipe.metric_key(),
-            pipe.location_key()
-        )
-    )
-}
-
-impl SqlConnector {
-    fn forget_synced_columns(&self, key: &str) {
-        self.state.lock().expect("state").synced_columns.remove(key);
-    }
-
-    fn record_synced_columns(&self, key: &str, cols_types: &IndexMap<String, String>) {
-        if cols_types.is_empty() {
-            return;
-        }
-        let mut state = self.state.lock().expect("state");
-        if state.synced_columns.len() >= MAX_SYNCED_COLUMNS {
-            state.synced_columns.clear();
-        }
-        state
-            .synced_columns
-            .insert(key.to_string(), cols_types.clone());
-    }
-
-    /// The columns types `{column: DB TYPE}` of the pipe's table as the last successful
-    /// `sync_pipe` of this connector left them, handed out once (`None` when that sync created
-    /// the table, did not finish, or was already taken).
-    ///
-    /// A sync reflects the table's columns before it writes, and again after any DDL of its own,
-    /// so what it holds at the end is the table's layout. The Python façade adopts it as the
-    /// pipe's cached `get_columns_types()` instead of reflecting the table a second time on the
-    /// next read.
-    pub fn take_synced_columns_types(&self, pipe: &Pipe) -> Option<IndexMap<String, String>> {
-        self.state
-            .lock()
-            .expect("state")
-            .synced_columns
-            .remove(&synced_columns_key(pipe))
-    }
-}
-
 impl SqlConnector {
     /// `Pipe.sync(df)` essentials over this instance: enforce the pipe's dtypes on the input
     /// (a frame, documents or a dict of lists), add the autotime column, persist newly detected
@@ -380,6 +327,7 @@ impl SqlConnector {
         input: PipeInput,
         opts: &SyncOptions,
     ) -> ConnectorResult<SuccessTuple> {
+        self.ensure_schema().await?;
         if let Some(params) = self.get_pipe_parameters(pipe).await? {
             // `Pipe.parameters` reads the registered parameters unless set in memory.
             if pipe.parameters().is_empty() {
@@ -483,6 +431,9 @@ impl SqlConnector {
 
     /// [`sync_pipe`](Self::sync_pipe) with the structured result (row counts).
     pub async fn sync_pipe_result(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SyncResult {
+        if let Err(e) = self.ensure_schema().await {
+            return SyncResult::new(false, e.to_string());
+        }
         let internal = InternalSync {
             new_special_cols: opts
                 .extra
@@ -504,6 +455,9 @@ impl SqlConnector {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = SyncResult> + Send + 'a>> {
         Box::pin(async move {
             // Every sync into this instance converges here (CLI, jobs, engine, API, façade).
+            if let Err(e) = self.ensure_schema().await {
+                return SyncResult::new(false, e.to_string());
+            }
             if let Some(refused) = self.protected_refusal(pipe, "sync") {
                 return SyncResult::new(false, refused.message);
             }
@@ -522,12 +476,8 @@ impl SqlConnector {
             if !result.success
                 && let Ok(sp) = self.sql_pipe(pipe)
             {
-                self.state
-                    .lock()
-                    .expect("state")
-                    .internal_pipe_states
-                    .remove(&self.pipe_table_name(&sp));
-                // The table may have changed elsewhere: the next sync asks the catalog again.
+                // The table may have changed elsewhere: forget all cached catalog & readiness
+                // metadata so the next sync asks the database again.
                 self.forget_catalog_table(&sp.target);
             }
             result.duration = Some(start.elapsed());
@@ -613,28 +563,18 @@ impl SqlConnector {
         let mut check_existing = opts.check_existing;
         let internal_table = pipe.temporary && pipe.connector_keys() == "mrsm";
         let cache_internal = internal_table && sp0.is_static();
-        let cache_key = self.pipe_table_name(&sp0);
         let precise_history = mysql_engine_history(&sp0, flavor);
         // Non-static node writers still refresh their schema, but successful readiness also
         // marks their timestamp precision so warm progress updates need no extra catalog read.
         let precision_ready = precise_history
             && self
-                .state
-                .lock()
-                .expect("state")
-                .internal_pipe_states
-                .contains_key(&cache_key);
-        // A sync that does not finish leaves no columns types behind.
-        let synced_key = synced_columns_key(pipe);
-        self.forget_synced_columns(&synced_key);
+                .catalog()
+                .is_internal_ready(&sp0.target, schema.as_deref());
         let mut cached = internal.cached_state.clone().or_else(|| {
             if internal_table {
-                self.state
-                    .lock()
-                    .expect("state")
-                    .internal_pipe_states
-                    .get(&cache_key)
-                    .cloned()
+                self.catalog()
+                    .internal_ready_cols(&sp0.target, schema.as_deref())
+                    .map(|cols| super::data::pipe_state_from_cols(&sp0, cols))
             } else {
                 None
             }
@@ -1083,9 +1023,6 @@ impl SqlConnector {
                     tracing::warn!("{m}");
                 }
             }
-            if !is_new && internal.columns_types.is_none() {
-                self.record_synced_columns(&synced_key, &state.cols_types);
-            }
             return Ok(replace_result(
                 replaced_rows,
                 unseen_count,
@@ -1119,22 +1056,14 @@ impl SqlConnector {
             result.inserted = unseen_count;
             result.updated = update_count;
         }
-        if !is_new && !cache_internal && internal.columns_types.is_none() {
-            // The layout the sync worked against (reflected again after any `ADD COLUMN` /
-            // `ALTER COLUMN` it ran; inserts and updates do not change it).
-            self.record_synced_columns(&synced_key, &state.cols_types);
-        }
         // Internal tables (static or not) are ready for this process once a write succeeded:
         // later writes skip the initialization lock and the catalog.
         if internal_table || precise_history {
             if is_new {
                 state = self.pipe_state(&sp).await;
             }
-            self.state
-                .lock()
-                .expect("state")
-                .internal_pipe_states
-                .insert(cache_key, state);
+            self.catalog()
+                .put_internal_ready(&sp.target, schema.as_deref(), &state.cols_types);
         }
         let _ = dt_col;
         Ok(result)

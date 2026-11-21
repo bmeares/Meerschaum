@@ -1,23 +1,27 @@
-//! Console-session authentication for `GET /engine/runs/{run_id}/events/stream`
-//! (`meerschaum_server::engine_stream`): the Dash Pipelines page follows a live run with an
-//! `EventSource`, which sends the console's session cookie but cannot set `Authorization`. The
-//! session's user is authorized with a short-lived bearer, exactly as for the job-log stream.
-use super::*;
-use meerschaum_server::engine_stream::BrowserAuth;
+//! Console-session authentication for console-backed SSE streams
+//! (`GET /engine/runs/{run_id}/events/stream` and `GET /logs/{name}/stream`): the browser's
+//! `EventSource` sends the console's session cookie but cannot set `Authorization`. Each
+//! authorization (initial open and every periodic refresh tick) verifies the session store entry
+//! and its user's credential binding ([`bound_user_principal`]) before minting a fresh
+//! short-lived bearer.
+
+use std::sync::Arc;
+
+use axum::http::{HeaderMap, StatusCode};
+use meerschaum_server::AppState;
+use meerschaum_server::sse::BrowserAuth;
+
+use crate::sessions::SessionStore;
+use crate::{api_headers_for, cookie, session_from};
 
 /// [`BrowserAuth`] over the console's session store.
 pub(crate) struct ConsoleSessionAuth {
-    pub config: WebConfig,
+    sessions: Arc<dyn SessionStore>,
 }
 
 impl ConsoleSessionAuth {
-    fn web_state(&self, state: &AppState) -> WebState {
-        WebState {
-            server: state.clone(),
-            config: self.config.clone(),
-            streams: Arc::default(),
-            grafana: None,
-        }
+    pub(crate) fn new(sessions: Arc<dyn SessionStore>) -> Self {
+        Self { sessions }
     }
 }
 
@@ -33,20 +37,14 @@ impl BrowserAuth for ConsoleSessionAuth {
             return None;
         }
         let id = cookie(headers)?;
-        let web = self.web_state(state);
-        let data = match session(&web, headers).await {
+        let data = match session_from(self.sessions.as_ref(), headers).await {
             Ok(data) => data,
             Err(status) => return Some(Err(status)),
         };
-        Some(api_headers(&web, &data).await.map(|h| (h, id)))
+        Some(api_headers_for(state, &data).await.map(|h| (h, id)))
     }
 
-    async fn session_active(&self, _state: &AppState, session_id: &str) -> bool {
-        matches!(self.config.sessions.get(session_id).await, Ok(Some(_)))
-    }
-
-    /// A `--no-auth` server counts a browser's streams by its console cookie, like the job-log
-    /// stream does.
+    /// A `--no-auth` server counts a browser's streams by its console cookie.
     fn anonymous_key(&self, headers: &HeaderMap) -> Option<String> {
         cookie(headers).map(|id| format!("session:{id}"))
     }

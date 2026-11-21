@@ -1,6 +1,13 @@
-//! WebSocket upgrade, terminado wire protocol, and active terminal accounting.
+//! Single WebSocket bridge, terminado wire protocol, and active terminal accounting for all 5
+//! terminal modes (`Full`, `Restricted`, `Team`, `Remote`, `HostApi`).
 
 use super::*;
+
+/// How long a full backend input queue may stall a buffered client command before closing.
+const FLOW_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Periodic WebSocket keepalive interval.
+const PING_EVERY: Duration = Duration::from_secs(30);
 
 pub(super) async fn socket(
     State(inner): State<Inner>,
@@ -15,7 +22,7 @@ pub(super) async fn socket(
     ws.max_message_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| async move {
             let verified = inner
-                .executor
+                .is_executor()
                 .then(|| verified.map(|axum::Extension(caller)| caller))
                 .flatten();
             crate::executor::gateway::scope(verified, async move {
@@ -36,19 +43,29 @@ pub(super) async fn socket(
 }
 
 pub(super) fn close_message(code: u16, reason: &str) -> Message {
+    // RFC 6455 control frames hold at most 125 bytes (2-byte status code + 123-byte UTF-8 reason).
+    let truncated = if reason.len() <= 123 {
+        reason
+    } else {
+        let mut end = 123;
+        while !reason.is_char_boundary(end) {
+            end -= 1;
+        }
+        &reason[..end]
+    };
     Message::Close(Some(CloseFrame {
         code,
-        reason: reason.into(),
+        reason: truncated.into(),
     }))
 }
 
-/// Send one message, giving up after [`WRITE_TIMEOUT`]; `false` when it was not sent.
-pub(super) async fn send_within<S>(sink: &mut S, message: Message) -> bool
+/// Send one message, giving up after `timeout`; `false` when it was not sent.
+pub(super) async fn send_within<S, E>(sink: &mut S, message: Message, timeout: Duration) -> bool
 where
-    S: futures_util::Sink<Message> + Unpin,
+    S: futures_util::Sink<Message, Error = E> + Unpin,
 {
     matches!(
-        tokio::time::timeout(WRITE_TIMEOUT, sink.send(message)).await,
+        tokio::time::timeout(timeout, sink.send(message)).await,
         Ok(Ok(()))
     )
 }
@@ -61,10 +78,23 @@ pub(super) fn reason_message(reason: &str) -> Message {
 /// Tell the browser why, end the terminal (`["disconnect", 1]`, so it does not reconnect) and
 /// close the socket with `code`, each write bounded.
 pub(super) async fn refuse(mut socket: WebSocket, reason: &str, code: u16) {
-    if send_within(&mut socket, reason_message(reason)).await
-        && send_within(&mut socket, text(json!(["disconnect", 1]))).await
+    if send_within(&mut socket, reason_message(reason), WRITE_TIMEOUT).await
+        && send_within(&mut socket, text(json!(["disconnect", 1])), WRITE_TIMEOUT).await
     {
-        let _ = send_within(&mut socket, close_message(code, "")).await;
+        let _ = send_within(&mut socket, close_message(code, ""), WRITE_TIMEOUT).await;
+    }
+}
+
+async fn refuse_open_error(mut socket: WebSocket, error: OpenError) {
+    let first = if error.bracketed {
+        reason_message(&error.message)
+    } else {
+        text(json!(["stdout", error.message]))
+    };
+    if send_within(&mut socket, first, WRITE_TIMEOUT).await
+        && send_within(&mut socket, text(json!(["disconnect", 1])), WRITE_TIMEOUT).await
+    {
+        let _ = send_within(&mut socket, close_message(error.code, ""), WRITE_TIMEOUT).await;
     }
 }
 
@@ -78,25 +108,27 @@ pub(super) fn queue(control: &mpsc::Sender<Message>, messages: impl IntoIterator
 
 /// How a terminal's socket writer ended.
 pub(super) enum WriterEnd {
-    /// The PTY closed (the shell exited): its last output, `["disconnect", 1]` and a close frame
-    /// were sent.
+    /// The backend sent `Event::Disconnected`: `["disconnect", 1]` and a close frame were sent.
     ShellExited,
-    /// It sent the bridge's close frame, or the bridge let go of it.
+    /// It sent the bridge's close frame, or the backend event stream closed.
     Closed,
-    /// A write failed or did not finish within [`WRITE_TIMEOUT`] (the browser is gone or stopped
+    /// A write failed or did not finish within the write timeout (the browser is gone or stopped
     /// reading).
     PeerGone,
 }
 
-/// The only task that writes to a terminal's socket: the bridge's messages (`control`, first)
-/// and the PTY's output, each write bounded by [`WRITE_TIMEOUT`]. A browser that stops reading
-/// stalls only this task; the bridge keeps reading input and checking the session.
-pub(super) async fn write_terminal(
-    mut tx: futures_util::stream::SplitSink<WebSocket, Message>,
-    mut output: mpsc::Receiver<Vec<u8>>,
+/// The only task that writes to a terminal's socket: the bridge's control frames (`control`,
+/// first) and the session's events (`events`), each write bounded by `write_timeout`. A browser
+/// that stops reading stalls only this task; the bridge keeps reading input and reauthorizing.
+async fn write_terminal<S, E>(
+    mut tx: futures_util::stream::SplitSink<S, Message>,
+    mut events: mpsc::Receiver<remote::Event>,
     mut control: mpsc::Receiver<Message>,
-) -> WriterEnd {
-    let mut decoder = Utf8Stream::default();
+    write_timeout: Duration,
+) -> WriterEnd
+where
+    S: futures_util::Sink<Message, Error = E> + Unpin,
+{
     loop {
         tokio::select! {
             biased;
@@ -105,32 +137,29 @@ pub(super) async fn write_terminal(
                     return WriterEnd::Closed;
                 };
                 let close = matches!(message, Message::Close(_));
-                if !send_within(&mut tx, message).await {
+                if !send_within(&mut tx, message, write_timeout).await {
                     return WriterEnd::PeerGone;
                 }
                 if close {
                     return WriterEnd::Closed;
                 }
             }
-            chunk = output.recv() => match chunk {
-                Some(bytes) => {
-                    let out = decoder.push(&bytes);
-                    if !out.is_empty()
-                        && !send_within(&mut tx, text(json!(["stdout", out]))).await
+            event = events.recv() => match event {
+                Some(remote::Event::Disconnected) => {
+                    if send_within(&mut tx, text(json!(["disconnect", 1])), write_timeout).await {
+                        let _ = send_within(&mut tx, close_message(1000, ""), write_timeout).await;
+                    }
+                    return WriterEnd::ShellExited;
+                }
+                Some(event) => {
+                    if !send_within(&mut tx, Message::Text(event.wire().into()), write_timeout)
+                        .await
                     {
                         return WriterEnd::PeerGone;
                     }
                 }
                 None => {
-                    // Each write waits only while the previous one went through.
-                    let rest = decoder.finish();
-                    if (rest.is_empty()
-                        || send_within(&mut tx, text(json!(["stdout", rest]))).await)
-                        && send_within(&mut tx, text(json!(["disconnect", 1]))).await
-                    {
-                        let _ = send_within(&mut tx, close_message(1000, "")).await;
-                    }
-                    return WriterEnd::ShellExited;
+                    return WriterEnd::Closed;
                 }
             },
         }
@@ -141,17 +170,40 @@ pub(super) fn text(parts: Value) -> Message {
     Message::Text(parts.to_string().into())
 }
 
-/// Bridge one websocket to one PTY until either side ends, or the session's access does.
+/// Timing knobs for [`bridge_session`]; production uses [`BridgeTimeouts::production`], while
+/// in-memory unit tests can shorten them for millisecond determinism.
+#[derive(Clone, Copy)]
+pub(super) struct BridgeTimeouts {
+    pub(super) write: Duration,
+    pub(super) close: Duration,
+    pub(super) flow: Duration,
+    pub(super) ping: Duration,
+    pub(super) reauthorize_every: Duration,
+    pub(super) reauthorize_timeout: Duration,
+}
+
+impl BridgeTimeouts {
+    pub(super) fn production(reauthorize_every: Duration) -> Self {
+        Self {
+            write: WRITE_TIMEOUT,
+            close: CLOSE_TIMEOUT,
+            flow: FLOW_TIMEOUT,
+            ping: PING_EVERY,
+            reauthorize_every,
+            reauthorize_timeout: REAUTHORIZE_TIMEOUT,
+        }
+    }
+}
+
+/// Open the right [`TerminalSession`] adapter for `mode`, then drive it through [`bridge_session`].
 pub(super) async fn run(
     inner: Inner,
     session_id: String,
     term_name: String,
     mode: TermMode,
     team: Option<Box<meerschaum_core::access::Team>>,
-    mut socket: WebSocket,
+    socket: WebSocket,
 ) {
-    let restricted = mode == TermMode::Restricted;
-    let mut config = inner.config.clone();
     let guard = match TerminalGuard::acquire() {
         Some(guard) => guard,
         None => {
@@ -160,148 +212,110 @@ pub(super) async fn run(
         }
     };
     let _guard = guard;
-    if let TermMode::HostApi(team_id) = mode {
-        remote::bridge_host(inner, session_id, term_name, team_id, socket).await;
-        return;
-    }
-    if let TermMode::Remote(team_id) = mode {
-        if let Some(team) = team {
-            remote::bridge(inner, session_id, term_name, team_id, *team, socket).await;
-        } else {
-            refuse(
-                socket,
-                "The terminal's executor placement is unavailable.",
-                1011,
+
+    let session = match &mode {
+        TermMode::Full | TermMode::Restricted | TermMode::Team(_) => {
+            LocalPtyAdapter::open(&inner, &session_id, &term_name, &mode, team).await
+        }
+        TermMode::Remote(team_id) => {
+            remote::RemoteExecutorAdapter::open_remote(
+                &inner,
+                &session_id,
+                &term_name,
+                *team_id,
+                team,
             )
-            .await;
-        }
-        return;
-    }
-    if inner.executor {
-        match config.sessions.shell(&session_id, &config.shell).await {
-            Ok(shell) => config.shell = shell,
-            Err(_) => {
-                refuse(
-                    socket,
-                    "This terminal's execution environment is unavailable.",
-                    1011,
-                )
-                .await;
-                return;
-            }
-        }
-    }
-    // A restricted shell asks this server's policy socket before it runs anything.
-    let policy_address = if restricted && inner.executor {
-        Ok(Some(restricted::API_POLICY_ADDRESS.to_string()))
-    } else if restricted {
-        config
-            .policy
-            .listen(&inner.state, &config.policy_dir)
             .await
-            .map(Some)
-    } else {
-        Ok(None)
-    };
-    // A team terminal's shell is a process of the team (5.1), from the host of the actions.
-    let team_shell = match (&mode, &team) {
-        (TermMode::Team(_), None) if inner.executor => Some(Ok(config.shell.clone())),
-        (TermMode::Team(_), Some(record)) => Some(
-            inner
-                .state
-                .actions
-                .team_shell(record)
-                .map_err(std::io::Error::other),
-        ),
-        (TermMode::Team(_), None) => Some(Err(std::io::Error::other("no team record"))),
-        _ => None,
-    };
-    let launch = match (policy_address, team_shell) {
-        (_, Some(Err(error))) => Ok(Err(error)),
-        (_, Some(Ok(shell))) => {
-            let config = config.clone();
-            let name = term_name.clone();
-            let team_name = match &mode {
-                TermMode::Team(team) => team.clone(),
-                _ => String::new(),
-            };
-            let state = inner.state.clone();
-            let every = config.reauthorize_every;
-            // Factory lease expiry retires its own sessions, including detached windows.
-            let check_membership = !inner.executor;
-            let launched = tokio::task::spawn_blocking(move || {
-                launch_team(&config, &name, &team_name, &shell, check_membership)
-            })
-            .await;
-            if check_membership && matches!(launched, Ok(Ok(_))) {
-                start_team_sweeper(&state, every);
-            }
-            launched
         }
-        (Ok(address), None) => {
-            let config = config.clone();
-            let name = term_name.clone();
-            tokio::task::spawn_blocking(move || launch(&config, &name, address.as_deref())).await
+        TermMode::HostApi(team_id) => {
+            remote::RemoteExecutorAdapter::open_host_api(&inner, &session_id, &term_name, *team_id)
+                .await
         }
-        (Err(error), None) => Ok(Err(error)),
     };
-    let Launched {
-        pty,
-        session: tmux_session,
-        tmux: active_tmux,
-        shell: active_shell,
-        grant: _grant,
-        team_window,
-    } = match launch {
-        Ok(Ok(started)) => started,
-        Ok(Err(error)) => {
-            tracing::warn!("Failed to start a terminal for '{term_name}': {error}");
-            let reason = text(json!([
-                "stdout",
-                format!("Failed to start the shell: {error}\r\n")
-            ]));
-            if send_within(&mut socket, reason).await
-                && send_within(&mut socket, text(json!(["disconnect", 1]))).await
-            {
-                let _ = send_within(&mut socket, close_message(1011, "")).await;
-            }
+    let session = match session {
+        Ok(session) => session,
+        Err(error) => {
+            refuse_open_error(socket, error).await;
             return;
         }
-        Err(_) => return,
     };
-    let Pty {
-        process_id,
-        master,
+
+    let timeouts = BridgeTimeouts::production(inner.config.reauthorize_every);
+    let drain = inner.state.lifecycle.signal().wait();
+    let reauth_inner = inner.clone();
+    let reauth_session = session_id.clone();
+    let reauth_name = term_name.clone();
+    let reauth_mode = mode.clone();
+    bridge_session(
+        socket,
+        session,
+        drain,
+        timeouts,
+        move || {
+            let inner = reauth_inner.clone();
+            let session_id = reauth_session.clone();
+            let term_name = reauth_name.clone();
+            let mode = reauth_mode.clone();
+            async move {
+                let access = authorize(&inner, &session_id, true).await;
+                access.revocation(&term_name, &mode)
+            }
+        },
+        &term_name,
+    )
+    .await;
+}
+
+/// The single WebSocket bridge driving every [`TerminalSession`] across all 5 terminal modes.
+///
+/// Handles terminado framing, bounded input backpressure, ping/pong keepalives, periodic
+/// reauthorization (fail-closed), graceful drain (`1001 Going Away`), and ordered teardown.
+pub(super) async fn bridge_session<S, E, F, Fut>(
+    socket: S,
+    session: TerminalSession,
+    drain: impl std::future::Future<Output = ()>,
+    timeouts: BridgeTimeouts,
+    mut reauthorize: F,
+    term_name: &str,
+) where
+    S: futures_util::Stream<Item = Result<Message, E>>
+        + futures_util::Sink<Message, Error = E>
+        + Send
+        + Unpin
+        + 'static,
+    E: Send + 'static,
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<String>>,
+{
+    let TerminalSession {
         input,
-        output,
-        killer,
-    } = pty;
+        events,
+        on_revoke,
+    } = session;
     let (tx, mut rx) = socket.split();
     // Every write goes through one task with bounded writes, so nothing here ever waits on a
     // browser that stopped reading: input, the session's checks and the teardown stay live.
     let (control, control_rx) = mpsc::channel::<Message>(CONTROL_QUEUE);
-    queue(&control, [text(json!(["setup", {}]))]);
-    let mut writer = tokio::spawn(write_terminal(tx, output, control_rx));
+    let mut writer = tokio::spawn(write_terminal(tx, events, control_rx, timeouts.write));
     let mut writer_done = false;
-    let mut ping = tokio::time::interval(Duration::from_secs(30));
+
+    let mut ping = tokio::time::interval(timeouts.ping);
     ping.tick().await;
-    // The session, its user and the permission are checked again while the terminal is open: a
-    // logout, a deleted user or a removed permission must not leave a shell running.
-    let every = config.reauthorize_every.max(Duration::from_millis(10));
+
+    let every = timeouts.reauthorize_every.max(Duration::from_millis(10));
     let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
     recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut closed_by_client = false;
-    let mut new_windows = 0usize;
-    // At most one `shell_state` query runs per connection (each may run tmux). Requests that
-    // arrive meanwhile are coalesced: the latest waits for the next query, an older one is
-    // answered at once without a snapshot (the browser's probe treats that as "unknown").
-    let mut shell_job: Option<tokio::task::JoinHandle<Option<Value>>> = None;
-    let mut shell_request: Option<String> = None;
-    let mut shell_waiting: Option<String> = None;
-    // A draining server closes the terminal at once (`1001 Going Away`): the process on the PTY
-    // ends (a tmux session survives it), and the browser may reconnect once a server is back.
-    let drain = inner.state.lifecycle.signal().wait();
+
     tokio::pin!(drain);
+
+    let mut closed_by_client = false;
+    let mut revoked_reason: Option<String> = None;
+    // Keep one bounded client input parked while waiting for backend queue capacity so a startup
+    // burst applies backpressure instead of dropping or closing, while drain and reauthorization
+    // stay live.
+    let mut pending_input: Option<remote::Input> = None;
+    let mut input_deadline: Option<tokio::time::Instant> = None;
+
     loop {
         tokio::select! {
             () = &mut drain => {
@@ -311,95 +325,43 @@ pub(super) async fn run(
                 ]);
                 break;
             }
-            snapshot = joined(&mut shell_job), if shell_job.is_some() => {
-                shell_job = None;
-                let snapshot = snapshot.ok().flatten();
-                if let Some(request) = shell_request.take() {
-                    queue(&control, [text(json!(["shell_state", request, snapshot]))]);
-                }
-                if let Some(request) = shell_waiting.take() {
-                    let session = tmux_session.as_deref();
-                    shell_job = Some(spawn_shell_state(
-                        &config,
-                        active_tmux.as_ref(),
-                        session,
-                        process_id,
-                    ));
-                    shell_request = Some(request);
-                }
-            }
             ended = &mut writer, if !writer_done => {
-                // The shell exited (its last output and close frame are sent), or the browser is
-                // gone or stopped reading.
                 writer_done = true;
                 if matches!(ended, Ok(WriterEnd::PeerGone)) {
                     tracing::debug!("A browser stopped reading the terminal of '{term_name}'.");
                 }
                 break;
             }
-            message = rx.next() => match message {
+            () = capacity_deadline(input_deadline), if pending_input.is_some() => {
+                tracing::debug!("Terminal input backpressure stalled for '{term_name}'.");
+                break;
+            }
+            permit = input.reserve(), if pending_input.is_some() => {
+                let Ok(permit) = permit else {
+                    break;
+                };
+                permit.send(pending_input.take().expect("pending input checked in the same task"));
+                input_deadline = None;
+            }
+            message = rx.next(), if pending_input.is_none() => match message {
                 Some(Ok(Message::Text(raw))) => {
-                    match parse_client_message(raw.as_str()) {
-                        Some(ClientMessage::Stdin(data)) => {
-                            // Never block the bridge on a stuck shell (its output could not be
-                            // drained meanwhile): a full queue ends the connection.
-                            if let Err(std::sync::mpsc::TrySendError::Full(_)) =
-                                input.try_send(data.into_bytes())
-                            {
-                                tracing::warn!("A terminal's input queue is full; closing it.");
-                                queue(&control, [
-                                    text(json!(["stdout", "\r\n[input queue full]\r\n"])),
-                                    text(json!(["disconnect", 1])),
-                                    close_message(1000, ""),
-                                ]);
+                    if let Some(command) = parse_client_message(raw.as_str()) {
+                        match input.try_send(command) {
+                            Ok(()) => {}
+                            Err(mpsc::error::TrySendError::Full(command)) => {
+                                pending_input = Some(command);
+                                input_deadline = Some(tokio::time::Instant::now() + timeouts.flow);
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
                                 break;
                             }
                         }
-                        Some(ClientMessage::SetSize(size)) => {
-                            let _ = master.resize(size);
-                        }
-                        Some(ClientMessage::NewWindow) => {
-                            // Each window is a process: bounded per connection and per user
-                            // session (`MAX_SESSION_WINDOWS`, across reconnects), and refused
-                            // while the server is at its terminal limit. tmux runs off the
-                            // bridge (and bounded): it never delays input or a revocation.
-                            // A restricted terminal's window runs its restricted shell on the
-                            // restricted tmux server (`active_tmux`, `active_shell`).
-                            if new_windows < MAX_NEW_WINDOWS
-                                && active_terminals() < MAX_TERMINALS
-                                && let (Some(settings), Some(session)) =
-                                    (&active_tmux, &tmux_session)
-                                && config.tmux_refused().is_none()
-                            {
-                                new_windows += 1;
-                                let (settings, shell, session) =
-                                    (settings.clone(), active_shell.clone(), session.clone());
-                                tokio::task::spawn_blocking(move || {
-                                    if team_window {
-                                        team_new_window(&settings, &shell, &session)
-                                    } else {
-                                        tmux_new_window(&settings, &shell, &session)
-                                    }
-                                });
-                            }
-                        }
-                        Some(ClientMessage::ShellState(request)) => {
-                            if shell_job.is_none() {
-                                let session = tmux_session.as_deref();
-                                shell_job = Some(spawn_shell_state(
-                                    &config,
-                                    active_tmux.as_ref(),
-                                    session,
-                                    process_id,
-                                ));
-                                shell_request = Some(request);
-                            } else if let Some(dropped) = shell_waiting.replace(request) {
-                                queue(&control, [text(json!(["shell_state", dropped, null]))]);
-                            }
-                        }
-                        None => {}
                     }
                 }
+                Some(Ok(Message::Ping(bytes))) => {
+                    queue(&control, [Message::Pong(bytes)]);
+                }
+                Some(Ok(Message::Pong(_))) => {}
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
                     closed_by_client = true;
                     break;
@@ -413,59 +375,51 @@ pub(super) async fn run(
             }
             _ = recheck.tick() => {
                 // Fail closed: an error or a store that does not answer ends the terminal too.
-                let access = tokio::time::timeout(
-                    REAUTHORIZE_TIMEOUT,
-                    authorize(&inner, &session_id, true),
+                let revocation = tokio::time::timeout(
+                    timeouts.reauthorize_timeout,
+                    reauthorize(),
                 )
                 .await
-                .unwrap_or(Access::Unavailable);
-                if let Some(reason) = access.revocation(&term_name, &mode) {
+                .unwrap_or_else(|_| {
+                    Some("Could not verify your session, so the terminal was closed.".into())
+                });
+                if let Some(reason) = revocation {
                     tracing::info!("Closing the terminal of '{term_name}': {reason}");
-                    // A changed role ends the user's tmux session of the old mode too: an
-                    // unrestricted shell cannot be restricted after the fact, so a demoted user
-                    // never reattaches one (and its windows and commands end now). A team
-                    // terminal's session ends with any revocation (5.1).
-                    if (reason == ROLE_CHANGED || team_window)
-                        && let (Some(settings), Some(session)) = (&active_tmux, &tmux_session)
-                    {
-                        let (settings, session, policy) =
-                            (settings.clone(), session.clone(), config.policy.clone());
-                        tokio::task::spawn_blocking(move || {
-                            end_tmux_session(&settings, &session);
-                            policy.forget_session(&session);
-                        });
-                    }
                     queue(&control, [
                         reason_message(&reason),
                         text(json!(["disconnect", 1])),
                         close_message(CLOSE_REVOKED, &reason),
                     ]);
+                    revoked_reason = Some(reason);
                     break;
                 }
             }
         }
     }
-    // End the process on the PTY (the tmux client, never the tmux session) first, whether or not
-    // the browser ever reads the reason, then close the input queue: the writer thread drops its
-    // writer only after the process has exited, so the EOF it sends reaches no one (see
-    // `spawn_pty`).
-    drop(killer);
+
+    // End the backend transport first (killing the local PTY client or closing the upstream
+    // executor socket, never a valid detached tmux session), whether or not the browser ever reads
+    // the closing reason.
     drop(input);
-    // A `shell_state` query still running is this connection's: stop it (its tmux command is
-    // bounded by `TMUX_TIMEOUT` either way).
-    if let Some(job) = shell_job.take() {
-        job.abort();
-    }
-    // Then let the socket's writer deliver what was queued (the reason, the close frame), for a
-    // bounded time.
+    // Let the socket writer deliver any queued closing frames while revocation side-effects run.
     drop(control);
+    if let Some(reason) = revoked_reason {
+        on_revoke.run(&reason).await;
+    }
     if !writer_done
         && (closed_by_client
-            || tokio::time::timeout(CLOSE_TIMEOUT, &mut writer)
+            || tokio::time::timeout(timeouts.close, &mut writer)
                 .await
                 .is_err())
     {
         writer.abort();
+    }
+}
+
+async fn capacity_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending::<()>().await,
     }
 }
 
@@ -482,30 +436,35 @@ pub(super) async fn joined<T>(
 /// Read the shell's readiness off the bridge (it may run tmux, bounded by `TMUX_TIMEOUT`).
 pub(super) fn spawn_shell_state(
     config: &WebtermConfig,
-    tmux: Option<&TmuxSettings>,
+    mux: Option<&TmuxMux>,
     session: Option<&str>,
     process_id: Option<u32>,
+    guardian: Option<&NativeGuardian>,
 ) -> tokio::task::JoinHandle<Option<Value>> {
-    let (config, tmux, session) = (config.clone(), tmux.cloned(), session.map(str::to_string));
+    let (config, mux, session, guardian) = (
+        config.clone(),
+        mux.cloned(),
+        session.map(str::to_string),
+        guardian.cloned(),
+    );
     tokio::task::spawn_blocking(move || {
-        shell_state(&config, tmux.as_ref(), session.as_deref(), process_id)
+        shell_state(
+            &config,
+            mux.as_ref(),
+            session.as_deref(),
+            process_id,
+            guardian.as_ref(),
+        )
     })
 }
 
-/// What a browser may send.
-pub(super) enum ClientMessage {
-    Stdin(String),
-    SetSize(PtySize),
-    NewWindow,
-    ShellState(String),
-}
-
-/// Decode terminado's JSON arrays; anything else is ignored, as terminado does.
-pub(super) fn parse_client_message(raw: &str) -> Option<ClientMessage> {
+/// Decode terminado's JSON arrays into typed [`remote::Input`]; anything else is ignored, as
+/// terminado does.
+pub(super) fn parse_client_message(raw: &str) -> Option<remote::Input> {
     let value: Value = serde_json::from_str(raw).ok()?;
     let items = value.as_array()?;
     match items.first()?.as_str()? {
-        "stdin" => Some(ClientMessage::Stdin(items.get(1)?.as_str()?.to_string())),
+        "stdin" => Some(remote::Input::Stdin(items.get(1)?.as_str()?.to_string())),
         "set_size" => {
             let dim = |i: usize| items.get(i).and_then(Value::as_u64);
             let (rows, cols) = (dim(1)?, dim(2)?);
@@ -513,17 +472,17 @@ pub(super) fn parse_client_message(raw: &str) -> Option<ClientMessage> {
                 return None;
             }
             let clamp = |n: u64| u16::try_from(n).unwrap_or(u16::MAX);
-            Some(ClientMessage::SetSize(PtySize {
+            Some(remote::Input::Resize {
                 rows: clamp(rows),
                 cols: clamp(cols),
-                pixel_height: clamp(dim(3).unwrap_or(0)),
-                pixel_width: clamp(dim(4).unwrap_or(0)),
-            }))
+                height: clamp(dim(3).unwrap_or(0)),
+                width: clamp(dim(4).unwrap_or(0)),
+            })
         }
-        "new_window" => Some(ClientMessage::NewWindow),
+        "new_window" => Some(remote::Input::NewWindow),
         "shell_state" => {
             let request = items.get(1)?.as_str()?;
-            (request.len() <= 128).then(|| ClientMessage::ShellState(request.to_string()))
+            remote::valid_id(request).then(|| remote::Input::ShellState(request.to_string()))
         }
         _ => None,
     }

@@ -664,9 +664,10 @@ impl PySqlConnector {
         Ok(out)
     }
 
-    /// The columns types the last successful `sync_pipe` of this connector left for the pipe's
-    /// table, handed out once (`None` when there are none): what the façade adopts as the
-    /// pipe's cached `get_columns_types()` after a sync instead of reflecting the table again.
+    /// Read-only peek of the pipe's cached `{column: DB TYPE}` layout from `CatalogCache`
+    /// (`None` when not cached, e.g. right after table creation, DDL, drop, or `forget_table`):
+    /// what the façade adopts as the pipe's cached `get_columns_types()` after a sync instead of
+    /// reflecting the table again.
     #[pyo3(signature = (pipe, **_kw))]
     fn take_synced_columns_types<'py>(
         &self,
@@ -674,8 +675,19 @@ impl PySqlConnector {
         pipe: &Bound<'py, PyAny>,
         _kw: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
-        let p = core_pipe(pipe, ParamsView::Keys)?;
-        let Some(types) = self.conn().take_synced_columns_types(&p) else {
+        self.cached_columns_types(py, pipe, _kw)
+    }
+
+    /// Read-only peek of `pipe`'s cached columns types in `CatalogCache` without querying the DB.
+    #[pyo3(signature = (pipe, **_kw))]
+    fn cached_columns_types<'py>(
+        &self,
+        py: Python<'py>,
+        pipe: &Bound<'py, PyAny>,
+        _kw: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let p = core_pipe(pipe, ParamsView::Raw)?;
+        let Some(types) = self.conn().cached_columns_types(&p) else {
             return Ok(None);
         };
         let out = PyDict::new(py);
@@ -683,6 +695,11 @@ impl PySqlConnector {
             out.set_item(k, v)?;
         }
         Ok(Some(out))
+    }
+
+    /// Forget cached catalog metadata for `table` (used by `Pipe.clear_caches()`).
+    fn forget_table(&self, table: &str) {
+        self.conn().forget_table(table);
     }
 
     #[pyo3(signature = (pipe, **_kw))]
@@ -965,17 +982,7 @@ impl PySqlConnector {
         let cached = cached_columns_types(pipe);
         let c = self.conn();
         let df = block_on(py, async move {
-            let sp = c.sql_pipe(&p)?;
-            let state = c.pipe_state_cached(&sp, cached).await;
-            if !state.exists {
-                return Ok::<_, meerschaum_connector::ConnectorError>(None);
-            }
-            let opts = DataQueryOptions {
-                no_order,
-                ..Default::default()
-            };
-            let sql = c.build_data_query(&sp, &state, &q, &opts).await?;
-            Ok(c.driver().read_docs_frame(&sql).await.ok())
+            c.get_pipe_docs_frame_cached(&p, &q, no_order, cached).await
         })
         .map_err(backend_err)?;
         match df {

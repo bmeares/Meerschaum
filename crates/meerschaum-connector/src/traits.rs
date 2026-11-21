@@ -885,6 +885,29 @@ pub trait InstanceConnector: Connector {
         pipe_ops::sync_result_from_message(res.success, res.message)
     }
 
+    /// Whether this instance supports syncing a pipe whose source connector is this same instance
+    /// directly inside the backend without pulling rows into memory (e.g. SQL `INSERT ... SELECT`).
+    fn supports_inplace_sync(&self) -> bool {
+        false
+    }
+
+    /// Sync a pipe whose source connector is this same instance directly inside the backend.
+    ///
+    /// When `observer` is provided, the implementation hands over staged rows before committing so
+    /// the engine can record its dirty-range ledger without a frame round trip.
+    async fn sync_pipe_inplace(
+        &self,
+        pipe: &Pipe,
+        opts: &crate::inplace::InplaceSyncOptions,
+        observer: Option<&dyn crate::inplace::InplaceObserver>,
+    ) -> SuccessTuple {
+        let _ = (pipe, opts, observer);
+        SuccessTuple::fail(format!(
+            "`sync_pipe_inplace()` is not implemented for instance connectors of type '{}'.",
+            self.connector_type()
+        ))
+    }
+
     /// Delete rows within `begin`, `end` and `params`.
     ///
     /// `begin`: remove rows `>= begin`; `end`: remove rows `< end`; `params`: only remove rows

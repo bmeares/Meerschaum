@@ -1,4 +1,4 @@
-//! Terminal session launch, restricted tmux configuration, and environment files.
+//! Unified tmux multiplexer lifecycle (`TmuxMux` + `TmuxProfile`), environment files, and launch.
 
 use super::*;
 
@@ -20,19 +20,336 @@ pub fn tmux_session_name(term_name: &str, suffix: &str) -> String {
     name
 }
 
+/// Which tmux multiplexer server and environment-scrubbing policy a terminal uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum TmuxProfile {
+    /// Administrators' dedicated tmux server (`tmux.sock`).
+    Full,
+    /// Restricted terminals' locked-down tmux server (`tmux-r.sock`).
+    Restricted,
+    /// Per-team locked-down tmux server (`<stem>-t-<hash>.sock`), always isolated with `env -i`.
+    Team(String),
+}
+
+impl TmuxProfile {
+    /// Whether this profile starts tmux commands and windows from a clean environment (`env -i`).
+    pub(super) fn isolate_env(&self, shell: &ShellCommand) -> bool {
+        matches!(self, Self::Team(_)) || shell.clear_env
+    }
+
+    /// Whether `key` must be omitted from the window's sourced environment file.
+    fn skip_env_key(&self, key: &str) -> bool {
+        match self {
+            // Team shells explicitly inject `TERM` and start under `env -i` (which wipes tmux's).
+            Self::Team(_) => ENV_SKIP_ISOLATED.contains(&key),
+            Self::Full | Self::Restricted => ENV_SKIP.contains(&key),
+        }
+    }
+
+    /// Whether the tmux server itself may hold inherited job-context variables that must be scrubbed.
+    fn needs_server_scrub(&self) -> bool {
+        !matches!(self, Self::Team(_))
+    }
+
+    /// Derive the dedicated [`TmuxSettings`] for this profile from the base settings.
+    pub(super) fn settings(&self, base: &TmuxSettings) -> Option<TmuxSettings> {
+        match self {
+            Self::Full => Some(base.clone()),
+            Self::Restricted => restricted_tmux(base),
+            Self::Team(team) => team::team_tmux(base, team),
+        }
+    }
+}
+
+/// Unified tmux multiplexer handle parameterized by [`TmuxProfile`].
+///
+/// Consolidates socket selection, environment scrubbing, atomic `0600` env-file generation,
+/// `env -i` / `sh -c` wrapper construction, session probing, window counting, window creation,
+/// and lockdown verification across `Full`, `Restricted`, and `Team` modes.
+#[derive(Debug, Clone)]
+pub(super) struct TmuxMux {
+    pub(super) settings: TmuxSettings,
+    pub(super) profile: TmuxProfile,
+}
+
+impl TmuxMux {
+    pub(super) fn new(settings: TmuxSettings, profile: TmuxProfile) -> Self {
+        Self { settings, profile }
+    }
+
+    pub(super) fn from_base(base: &TmuxSettings, profile: TmuxProfile) -> Option<Self> {
+        let settings = profile.settings(base)?;
+        Some(Self { settings, profile })
+    }
+
+    /// A tmux command targeting this mux's dedicated socket (never the default server),
+    /// with the profile's environment isolation applied.
+    pub(super) fn command(&self, shell: Option<&ShellCommand>) -> Option<std::process::Command> {
+        let socket = self.settings.socket.as_ref()?;
+        let mut command = std::process::Command::new(&self.settings.binary);
+        command.arg("-S").arg(socket);
+        self.apply_command_env(&mut command, shell);
+        Some(command)
+    }
+
+    /// A tmux command for window/pane queries. `Restricted` and `Team` always require a dedicated
+    /// socket; `Full` permits an optional socket for unit tests without a running server.
+    fn window_command(&self, shell: &ShellCommand) -> Option<std::process::Command> {
+        let mut command = std::process::Command::new(&self.settings.binary);
+        match (&self.profile, &self.settings.socket) {
+            (_, Some(socket)) => {
+                command.arg("-S").arg(socket);
+            }
+            (TmuxProfile::Full, None) => {}
+            (TmuxProfile::Restricted | TmuxProfile::Team(_), None) => return None,
+        }
+        self.apply_command_env(&mut command, Some(shell));
+        Some(command)
+    }
+
+    fn apply_command_env(&self, command: &mut std::process::Command, shell: Option<&ShellCommand>) {
+        let isolated = match shell {
+            Some(shell) => self.profile.isolate_env(shell),
+            None => matches!(self.profile, TmuxProfile::Team(_)),
+        };
+        if isolated {
+            command.env_clear().envs(team::minimal_env());
+        } else if let Some(shell) = shell {
+            command.envs(shell.env.iter().map(|(key, value)| (key, value)));
+        }
+        command.env_remove("TMUX").env_remove("TMUX_PANE");
+        for var in job_context_vars() {
+            command.env_remove(var);
+        }
+    }
+
+    /// Whether the tmux `session` (exact name) exists on this mux's socket.
+    pub(super) fn has_session(&self, session: &str) -> bool {
+        let Some(mut command) = self.command(None) else {
+            return false;
+        };
+        command.args(["has-session", "-t", &format!("={session}")]);
+        tmux_output(&mut command).is_some_and(|output| output.status.success())
+    }
+
+    /// End the tmux `session` (exact name) on this mux's socket, with every window and process.
+    pub(super) fn end_session(&self, session: &str) {
+        end_tmux_session(&self.settings, session);
+    }
+
+    /// How many windows the tmux `session` (exact name) has; `None` when tmux cannot say.
+    pub(super) fn window_count(&self, shell: &ShellCommand, session: &str) -> Option<usize> {
+        let mut command = self.window_command(shell)?;
+        let output = tmux_output(command.args([
+            "list-windows",
+            "-t",
+            &format!("={session}"),
+            "-F",
+            "#{window_id}",
+        ]))?;
+        output.status.success().then(|| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count()
+        })
+    }
+
+    /// Read the active pane's PID for `session` (exact name) on this mux's socket.
+    pub(super) fn pane_pid(&self, shell: &ShellCommand, session: &str) -> Option<u32> {
+        let mut command = self.window_command(shell)?;
+        // `=`: exactly this terminal's session, never another whose name starts with it.
+        let target = format!("={session}:");
+        let output =
+            tmux_output(command.args(["display-message", "-p", "-t", &target, "#{pane_pid}"]))?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+    }
+
+    /// Write the shell's environment file (`0600`, replaced atomically) and return its path.
+    pub(super) fn write_env_file(&self, shell: &ShellCommand) -> std::io::Result<PathBuf> {
+        let mut vars: std::collections::BTreeMap<String, String> =
+            if self.profile.isolate_env(shell) {
+                Default::default()
+            } else {
+                meerschaum_core::process_env::vars().into_iter().collect()
+            };
+        for (key, value) in &shell.env {
+            vars.insert(key.clone(), value.clone());
+        }
+        let context = job_context_vars();
+        let mut body = String::new();
+        for (key, value) in &vars {
+            if self.profile.skip_env_key(key) || !valid_env_name(key) || context.contains(key) {
+                continue;
+            }
+            body.push_str(&format!("{key}={}\n", sh_quote(value)));
+        }
+        create_private_dir(&self.settings.env_dir)?;
+        remove_stale_env_files(&self.settings.env_dir);
+        // One file per launch, which the window's `sh` removes once it has read it
+        // (`shell_argv`): two terminals starting at once never read each other's (a
+        // restricted terminal's carries its own grant), and none stays behind.
+        static LAUNCHES: AtomicUsize = AtomicUsize::new(0);
+        let prefix = match self.profile {
+            TmuxProfile::Team(_) => "webterm.team",
+            TmuxProfile::Full | TmuxProfile::Restricted => "webterm",
+        };
+        let stem = format!(
+            "{prefix}.{}.{}",
+            std::process::id(),
+            LAUNCHES.fetch_add(1, Ordering::Relaxed)
+        );
+        let path = self.settings.env_dir.join(format!("{stem}.env"));
+        let temporary = self.settings.env_dir.join(format!("{stem}.env.tmp"));
+        write_private_file(&temporary, body.as_bytes())?;
+        std::fs::rename(&temporary, &path)?;
+        Ok(path)
+    }
+
+    /// The argv tmux runs in a window: `sh` sources the `0600` environment file and removes it,
+    /// unsets the server's job context, then replaces itself with the shell. Isolated profiles
+    /// start through `env -i /bin/sh` using the probed absolute `env` path.
+    pub(super) fn shell_argv(&self, shell: &ShellCommand) -> std::io::Result<Vec<String>> {
+        let env_file = self.write_env_file(shell)?;
+        // The names are `valid_env_name`s: safe to write into the script as they are.
+        let unset = job_context_vars().join(" ");
+        let mut argv: Vec<String> = if self.profile.isolate_env(shell) {
+            vec![env_program().to_string(), "-i".into(), "/bin/sh".into()]
+        } else {
+            vec!["sh".into()]
+        };
+        argv.extend([
+            "-c".into(),
+            format!(
+                "set -a; . \"$0\"; set +a; command -p rm -f -- \"$0\"; unset {unset}; exec \"$@\""
+            ),
+            env_file.display().to_string(),
+            shell.program.clone(),
+        ]);
+        argv.extend(shell.args.iter().cloned());
+        Ok(argv)
+    }
+
+    /// Open a window running `shell` in `session` (exact name), unless it already has
+    /// [`MAX_SESSION_WINDOWS`] (or its windows cannot be counted): `Ok(false)` then.
+    pub(super) fn new_window(
+        &self,
+        shell: &ShellCommand,
+        guardian: Option<&NativeGuardian>,
+        session: &str,
+    ) -> std::io::Result<bool> {
+        // One at a time, so two tabs of a session cannot both pass the count.
+        static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _opening = OPENING.lock().unwrap_or_else(|e| e.into_inner());
+        if self
+            .window_count(shell, session)
+            .is_none_or(|n| n >= MAX_SESSION_WINDOWS)
+        {
+            return Ok(false);
+        }
+        let prepared = match guardian {
+            Some(guardian) => guardian.prepare_window_shell(shell)?,
+            None => shell.clone(),
+        };
+        let argv = self.shell_argv(&prepared)?;
+        if self.profile.needs_server_scrub() {
+            scrub_tmux_server_env(&self.settings, Some(session));
+        }
+        let Some(mut command) = self.window_command(&prepared) else {
+            return Ok(false);
+        };
+        // `=`: exactly this session, never another whose name starts with it.
+        command
+            .args([
+                "new-window",
+                "-t",
+                &format!("={session}:"),
+                "-n",
+                TMUX_WINDOW_NAME,
+            ])
+            .args(&argv)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        Ok(tmux_output(&mut command).is_some_and(|output| output.status.success()))
+    }
+
+    /// Write the locked-down config, claim server ownership, and verify lockdown if already running.
+    fn prepare_locked_server(&self, label: &str) -> std::io::Result<()> {
+        let socket = self
+            .settings
+            .socket
+            .as_deref()
+            .ok_or_else(|| std::io::Error::other(format!("no {label} tmux socket")))?;
+        write_restricted_conf(&self.settings)?;
+        claim_tmux_server(&self.settings);
+        if tmux_server_running(&self.settings, socket) && !apply_restricted_conf(&self.settings) {
+            return Err(std::io::Error::other(format!(
+                "the {label} tmux configuration could not be applied"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Start a detached tmux session running `shell` on this mux's dedicated socket.
+    fn start_detached_session(
+        &self,
+        session: &str,
+        shell: &ShellCommand,
+        cwd: Option<PathBuf>,
+        label: &str,
+    ) -> std::io::Result<()> {
+        let argv = self.shell_argv(shell)?;
+        let mut command = self
+            .command(Some(shell))
+            .ok_or_else(|| std::io::Error::other(format!("no {label} tmux socket")))?;
+        command.arg("-u");
+        if let Some(file) = &self.settings.config_file {
+            command.args(["-f", file]);
+        }
+        command
+            .args(["new-session", "-d", "-s", session, "-n", TMUX_WINDOW_NAME])
+            .args(&argv)
+            .env("TERM", "xterm-256color");
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        if tmux_output(&mut command).is_some_and(|output| output.status.success()) {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!(
+                "tmux could not start the {label} session"
+            )))
+        }
+    }
+
+    /// Build the `attach-session` command for a locked-down server (`Restricted` or `Team`).
+    fn attach_builder(&self, session: &str) -> CommandBuilder {
+        let mut builder = CommandBuilder::new(&self.settings.binary);
+        builder.arg("-S");
+        builder.arg(self.settings.socket.as_ref().expect("dedicated socket"));
+        builder.arg("-u");
+        builder.args(["attach-session", "-t", &format!("={session}")]);
+        builder
+    }
+}
+
 /// A started terminal.
 pub(super) struct Launched {
     pub(super) pty: Pty,
     /// The tmux session it attached to (the tmux path).
     pub(super) session: Option<String>,
-    /// The tmux server that session lives on (the restricted one for a restricted terminal).
-    pub(super) tmux: Option<TmuxSettings>,
+    /// The tmux multiplexer that session lives on (carries both socket settings and profile).
+    pub(super) mux: Option<TmuxMux>,
     /// The shell a new window runs (a restricted terminal's carries its grant).
     pub(super) shell: ShellCommand,
     /// A restricted terminal's own grant on the plain path (one shell per connection).
     pub(super) grant: Option<restricted::GrantGuard>,
-    /// A team terminal (5.1): its windows run the team's shell from an empty environment.
-    pub(super) team_window: bool,
+    /// Validated native guardian context, constructed once at the seam for API-profile shells.
+    pub(super) guardian: Option<NativeGuardian>,
 }
 
 /// The tmux settings of the restricted terminals next to `tmux` (the administrators'): their own
@@ -86,26 +403,7 @@ pub(super) const RESTRICTED_PYTHON_VARS: &[(&str, &str)] = &[
 /// A tmux command on `tmux`'s own socket (never the default server), without the caller's tmux
 /// variables or the server's job context.
 pub(super) fn tmux_command(tmux: &TmuxSettings) -> Option<std::process::Command> {
-    let socket = tmux.socket.as_ref()?;
-    let mut command = std::process::Command::new(&tmux.binary);
-    command
-        .arg("-S")
-        .arg(socket)
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE");
-    for var in job_context_vars() {
-        command.env_remove(var);
-    }
-    Some(command)
-}
-
-/// Whether the tmux `session` (exact name) exists on `tmux`'s socket.
-pub(super) fn tmux_has_session(tmux: &TmuxSettings, session: &str) -> bool {
-    let Some(mut command) = tmux_command(tmux) else {
-        return false;
-    };
-    command.args(["has-session", "-t", &format!("={session}")]);
-    tmux_output(&mut command).is_some_and(|output| output.status.success())
+    TmuxMux::new(tmux.clone(), TmuxProfile::Full).command(None)
 }
 
 /// Retire all panes of the exact Factory lease on its Team, API-only or legacy socket.
@@ -198,91 +496,48 @@ pub(super) fn apply_restricted_conf(tmux: &TmuxSettings) -> bool {
     })
 }
 
-/// Start a restricted terminal's tmux session `name` for `term_name` on `tmux` (restricted
-/// A complete shell environment is delivered in its private pane file. The tmux client
-/// and server run as the terminal host and resolve their tools with the host environment.
-pub(super) fn configure_tmux_environment(
-    command: &mut std::process::Command,
-    shell: &ShellCommand,
-) {
-    if shell.clear_env {
-        command.env_clear().envs(team::minimal_env());
-    } else {
-        command.envs(shell.env.iter().map(|(key, value)| (key, value)));
-    }
-}
-
-/// settings), detached; the terminal attaches to it afterwards. Its grant.
-pub(super) fn new_restricted_session(
-    config: &WebtermConfig,
-    tmux: &TmuxSettings,
-    term_name: &str,
-    name: &str,
-    address: &str,
-) -> std::io::Result<String> {
-    let grant = config.policy.grant_for_session(term_name, name);
-    let shell = restricted_shell(&config.shell, address, &grant);
-    let argv = tmux_shell_argv(tmux, &shell)?;
-    let mut command =
-        tmux_command(tmux).ok_or_else(|| std::io::Error::other("no restricted tmux socket"))?;
-    configure_tmux_environment(&mut command, &shell);
-    command.arg("-u");
-    if let Some(file) = &tmux.config_file {
-        command.args(["-f", file]);
-    }
-    command
-        .args(["new-session", "-d", "-s", name, "-n", TMUX_WINDOW_NAME])
-        .args(&argv)
-        .env("TERM", "xterm-256color")
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE");
-    if let Some(cwd) = shell.cwd.clone().or_else(|| std::env::current_dir().ok()) {
-        command.current_dir(cwd);
-    }
-    for var in job_context_vars() {
-        command.env_remove(var);
-    }
-    if tmux_output(&mut command).is_some_and(|output| output.status.success()) {
-        Ok(grant)
-    } else {
-        config.policy.forget_session(name);
-        Err(std::io::Error::other(
-            "tmux could not start the restricted session",
-        ))
-    }
-}
-
-/// Start a terminal's process: the shell itself, or tmux around it (`new-session -A`, or for a
-/// restricted terminal a session on the restricted tmux server, then `attach-session`).
-/// `restricted` is the policy socket's address when the terminal is restricted.
+/// Start a terminal's process (`Full` or `Restricted` mode), validating any API guardian once.
 pub(super) fn launch(
     config: &WebtermConfig,
     term_name: &str,
     restricted: Option<&str>,
 ) -> std::io::Result<Launched> {
-    let cwd = match &config.shell.cwd {
-        Some(dir) => Some(dir.clone()),
-        None => std::env::current_dir().ok(),
-    };
+    let guardian = NativeGuardian::parse(&config.shell)?;
+    launch_with_guardian(config, term_name, restricted, guardian)
+}
+
+/// Start a `Full` or `Restricted` terminal with a pre-validated [`NativeGuardian`].
+pub(super) fn launch_with_guardian(
+    config: &WebtermConfig,
+    term_name: &str,
+    restricted: Option<&str>,
+    guardian: Option<NativeGuardian>,
+) -> std::io::Result<Launched> {
+    let cwd = config
+        .shell
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok());
     let mut builder;
     let mut session = None;
-    let mut active_tmux = None;
+    let mut active_mux: Option<TmuxMux> = None;
     let mut grant = None;
     let mut shell = config.shell.clone();
     // 5.1: no tmux at all while isolated teams' sandbox does not refuse Unix sockets
     // (`WebtermConfig::active_tmux`), for restricted terminals too.
     match (config.active_tmux(), restricted) {
         (Some(tmux), None) => {
+            let mux = TmuxMux::new(tmux.clone(), TmuxProfile::Full);
             let name = tmux_session_name(term_name, &tmux.session_suffix);
             // A user who may run system commands now has no use for a restricted session left
             // from before (a promotion): end it.
-            if let Some(restricted_tmux) = restricted_tmux(tmux)
-                && tmux_has_session(&restricted_tmux, &name)
+            if let Some(rmux) = TmuxMux::from_base(tmux, TmuxProfile::Restricted)
+                && rmux.has_session(&name)
             {
-                end_tmux_session(&restricted_tmux, &name);
+                rmux.end_session(&name);
                 config.policy.forget_session(&name);
             }
-            let wrapped = tmux_shell_argv(tmux, &config.shell)?;
+            let wrapped = mux.shell_argv(&config.shell)?;
             if claim_tmux_server(tmux) {
                 refresh_tmux_config(tmux);
             }
@@ -301,10 +556,10 @@ pub(super) fn launch(
             builder.args(["new-session", "-A", "-s", &name, "-n", TMUX_WINDOW_NAME]);
             builder.args(&wrapped);
             session = Some(name);
-            active_tmux = Some(tmux.clone());
+            active_mux = Some(mux);
         }
         (Some(tmux), Some(address)) if restricted_tmux(tmux).is_some() => {
-            let rtmux = restricted_tmux(tmux).expect("checked");
+            let rmux = TmuxMux::from_base(tmux, TmuxProfile::Restricted).expect("checked");
             let name = tmux_session_name(term_name, &tmux.session_suffix);
             // One restricted launch at a time: two tabs opening at once must not both start the
             // session (the second one's grant would replace the first's).
@@ -313,47 +568,44 @@ pub(super) fn launch(
             // A user who may not run system commands never reattaches a session started when
             // they could (a demotion): end it, with whatever runs in it.
             end_tmux_session(tmux, &name);
-            write_restricted_conf(&rtmux)?;
-            claim_tmux_server(&rtmux);
-            // The server already runs: lock it down before anything else happens on it.
-            if tmux_server_running(&rtmux, rtmux.socket.as_deref().expect("socket"))
-                && !apply_restricted_conf(&rtmux)
-            {
-                return Err(std::io::Error::other(
-                    "the restricted tmux configuration could not be applied",
-                ));
-            }
-            scrub_tmux_server_env(&rtmux, Some(&name));
+            rmux.prepare_locked_server("restricted")?;
+            scrub_tmux_server_env(&rmux.settings, Some(&name));
             // Reattach only a session whose shell this server started for this user (so its
             // grant is known); end any other.
             let token = match config.policy.session_grant(term_name, &name) {
-                Some(token) if tmux_has_session(&rtmux, &name) => {
+                Some(token) if rmux.has_session(&name) => {
                     // This fresh prepared shell has not been handed to argv construction or
                     // any launcher. Reattachment keeps the existing pane's claimed proof.
-                    native_pending::cancel_unspawned(&config.shell)?;
+                    if let Some(ref guardian) = guardian {
+                        guardian.cancel_unspawned()?;
+                    }
                     token
                 }
                 _ => {
-                    end_tmux_session(&rtmux, &name);
-                    new_restricted_session(config, &rtmux, term_name, &name, address)?
+                    rmux.end_session(&name);
+                    let grant = config.policy.grant_for_session(term_name, &name);
+                    let rshell = restricted_shell(&config.shell, address, &grant);
+                    if let Err(error) =
+                        rmux.start_detached_session(&name, &rshell, cwd.clone(), "restricted")
+                    {
+                        config.policy.forget_session(&name);
+                        return Err(error);
+                    }
+                    grant
                 }
             };
             // tmux applies all of it, or the terminal does not open.
-            if !apply_restricted_conf(&rtmux) {
-                end_tmux_session(&rtmux, &name);
+            if !apply_restricted_conf(&rmux.settings) {
+                rmux.end_session(&name);
                 config.policy.forget_session(&name);
                 return Err(std::io::Error::other(
                     "the restricted tmux configuration could not be applied",
                 ));
             }
             shell = restricted_shell(&config.shell, address, &token);
-            builder = CommandBuilder::new(&rtmux.binary);
-            builder.arg("-S");
-            builder.arg(rtmux.socket.as_ref().expect("socket"));
-            builder.arg("-u");
-            builder.args(["attach-session", "-t", &format!("={name}")]);
+            builder = rmux.attach_builder(&name);
             session = Some(name);
-            active_tmux = Some(rtmux);
+            active_mux = Some(rmux);
         }
         (_, Some(address)) => {
             // One restricted shell per connection, with a grant that ends with it.
@@ -371,7 +623,7 @@ pub(super) fn launch(
     if shell.clear_env {
         builder.env_clear();
     }
-    if shell.clear_env && active_tmux.is_some() {
+    if shell.clear_env && active_mux.is_some() {
         for (key, value) in team::minimal_env() {
             builder.env(key, value);
         }
@@ -395,7 +647,7 @@ pub(super) fn launch(
     if let Some(cwd) = cwd {
         builder.cwd(cwd);
     }
-    let state_dir = if active_tmux.is_none() {
+    let state_dir = if active_mux.is_none() {
         config.shell_state_directory().map(PathBuf::from)
     } else {
         // The PTY owns a tmux client; the session's shell survives that client's exit.
@@ -408,14 +660,99 @@ pub(super) fn launch(
     Ok(Launched {
         pty: spawn_pty(builder, state_dir)?,
         session,
-        tmux: active_tmux,
+        mux: active_mux,
         shell,
         grant,
-        team_window: false,
+        guardian,
     })
 }
 
-/// The environment variables the tmux path does not carry into the shell.
+/// Start a team terminal for `term_name` of `team` running `shell` (complete: it starts from an
+/// empty environment): on the team's tmux server when the terminal uses tmux, else the shell
+/// itself on the PTY.
+pub(super) fn launch_team(
+    config: &WebtermConfig,
+    term_name: &str,
+    team_name: &str,
+    shell: &ShellCommand,
+    check_membership: bool,
+) -> std::io::Result<Launched> {
+    let guardian = NativeGuardian::parse(shell)?;
+    let mut shell = shell.clone();
+    for (name, value) in [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")] {
+        shell.env.retain(|(k, _)| k != name);
+        shell.env.push((name.into(), value.into()));
+    }
+    // The public rule applies here too (`WebtermConfig::active_tmux`): no tmux while isolated
+    // teams' sandbox does not refuse Unix sockets. A team terminal exists only where it does.
+    let Some(base) = config.active_tmux() else {
+        let mut builder = CommandBuilder::new(&shell.program);
+        builder.args(&shell.args);
+        builder.env_clear();
+        for (key, value) in &shell.env {
+            builder.env(key, value);
+        }
+        if let Some(cwd) = &shell.cwd {
+            builder.cwd(cwd);
+        }
+        return Ok(Launched {
+            pty: spawn_pty(builder, None)?,
+            session: None,
+            mux: None,
+            shell,
+            grant: None,
+            guardian,
+        });
+    };
+    let mux = TmuxMux::from_base(base, TmuxProfile::Team(team_name.to_string()))
+        .ok_or_else(|| std::io::Error::other("no tmux socket for the team's terminals"))?;
+    let socket = mux.settings.socket.clone().expect("a team socket");
+    let name = tmux_session_name(term_name, &base.session_suffix);
+    static TEAM_LAUNCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _launching = TEAM_LAUNCH.lock().unwrap_or_else(|e| e.into_inner());
+    // Not a session of another mode, nor of another team's server.
+    end_tmux_session(base, &name);
+    if let Some(restricted) = restricted_tmux(base) {
+        end_tmux_session(&restricted, &name);
+        config.policy.forget_session(&name);
+    }
+    team::end_team_sessions_except(&name, Some(&socket));
+    mux.prepare_locked_server("team terminal's")?;
+    if !mux.has_session(&name) {
+        let cwd = Some(shell.cwd.clone().unwrap_or_else(|| PathBuf::from("/")));
+        mux.start_detached_session(&name, &shell, cwd, "team terminal's")?;
+    } else if let Some(ref guardian) = guardian {
+        // No argv for this fresh shell has been constructed or handed to tmux. An API
+        // guardian's unused nonce must not survive reattachment to its existing panes.
+        guardian.cancel_unspawned()?;
+    }
+    // tmux applies all of the lockdown, or the terminal does not open.
+    if !apply_restricted_conf(&mux.settings) {
+        mux.end_session(&name);
+        return Err(std::io::Error::other(
+            "the team terminal's tmux configuration could not be applied",
+        ));
+    }
+    if check_membership {
+        team::record_team_session(&socket, team_name, &mux.settings, &name, term_name);
+    }
+    let mut builder = mux.attach_builder(&name);
+    builder.env_clear();
+    for (key, value) in team::minimal_env() {
+        builder.env(key, value);
+    }
+    builder.env("TERM", "xterm-256color");
+    Ok(Launched {
+        pty: spawn_pty(builder, None)?,
+        session: Some(name),
+        mux: Some(mux),
+        shell,
+        grant: None,
+        guardian,
+    })
+}
+
+/// The environment variables the tmux path does not carry into inherited-env shells.
 pub(super) const ENV_SKIP: &[&str] = &[
     "TMUX",
     "TMUX_PANE",
@@ -427,6 +764,27 @@ pub(super) const ENV_SKIP: &[&str] = &[
     "PWD",
     "OLDPWD",
 ];
+
+/// Variables omitted from isolated (`Team`) env files (`TERM` is explicitly provided by the team
+/// launcher because `env -i` clears tmux's `TERM`).
+const ENV_SKIP_ISOLATED: &[&str] = &[
+    "TMUX",
+    "TMUX_PANE",
+    "COLUMNS",
+    "LINES",
+    "SHLVL",
+    "_",
+    "PWD",
+    "OLDPWD",
+];
+
+/// `env`, by its absolute path (isolated windows start from an empty environment, without `PATH`).
+pub(super) fn env_program() -> &'static str {
+    ["/usr/bin/env", "/bin/env"]
+        .into_iter()
+        .find(|p| Path::new(p).is_file())
+        .unwrap_or("/usr/bin/env")
+}
 
 /// Single-quote a value for `sh`.
 pub(super) fn sh_quote(value: &str) -> String {
@@ -441,52 +799,12 @@ pub(super) fn valid_env_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Write the shell's environment for the tmux path (`0600`, replaced atomically) and return its
-/// path: the server's environment plus [`ShellCommand::env`].
-pub(super) fn write_env_file(
-    tmux: &TmuxSettings,
-    shell: &ShellCommand,
-) -> std::io::Result<PathBuf> {
-    let mut vars: std::collections::BTreeMap<String, String> = if shell.clear_env {
-        Default::default()
-    } else {
-        meerschaum_core::process_env::vars().into_iter().collect()
-    };
-    for (key, value) in &shell.env {
-        vars.insert(key.clone(), value.clone());
-    }
-    let context = job_context_vars();
-    let mut body = String::new();
-    for (key, value) in &vars {
-        if ENV_SKIP.contains(&key.as_str()) || !valid_env_name(key) || context.contains(key) {
-            continue;
-        }
-        body.push_str(&format!("{key}={}\n", sh_quote(value)));
-    }
-    create_private_dir(&tmux.env_dir)?;
-    remove_stale_env_files(&tmux.env_dir);
-    // One file per launch, which the window's `sh` removes once it has read it
-    // ([`tmux_shell_argv`]): two terminals starting at once never read each other's (a
-    // restricted terminal's carries its own grant), and none stays behind.
-    static LAUNCHES: AtomicUsize = AtomicUsize::new(0);
-    let stem = format!(
-        "webterm.{}.{}",
-        std::process::id(),
-        LAUNCHES.fetch_add(1, Ordering::Relaxed)
-    );
-    let path = tmux.env_dir.join(format!("{stem}.env"));
-    let temporary = tmux.env_dir.join(format!("{stem}.env.tmp"));
-    write_private_file(&temporary, body.as_bytes())?;
-    std::fs::rename(&temporary, &path)?;
-    Ok(path)
-}
-
 /// How long an environment file may wait for its window before it counts as abandoned (tmux
 /// never started the window).
 pub(super) const STALE_ENV_FILE: Duration = Duration::from_secs(120);
 
-/// Remove the environment files ([`write_env_file`]) no window read: older than
-/// [`STALE_ENV_FILE`], and the shared `webterm.env` of earlier releases.
+/// Remove the environment files no window read: older than [`STALE_ENV_FILE`], and the shared
+/// `webterm.env` of earlier releases.
 pub(super) fn remove_stale_env_files(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -529,104 +847,4 @@ pub(super) fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<(
     }
     let mut file = options.open(path)?;
     file.write_all(bytes)
-}
-
-/// The argv tmux runs in a window: `sh` sources the environment file and removes it, unsets the
-/// server's job context (a tmux server started before, or from a job's environment, may hold it
-/// in its global environment), then replaces itself with the shell. A file that cannot be read
-/// ends `sh` there (`.` is a special built-in): the window closes, nothing else runs.
-pub(super) fn tmux_shell_argv(
-    tmux: &TmuxSettings,
-    shell: &ShellCommand,
-) -> std::io::Result<Vec<String>> {
-    let env_file = write_env_file(tmux, shell)?;
-    // The names are `valid_env_name`s: safe to write into the script as they are.
-    let unset = job_context_vars().join(" ");
-    let mut argv: Vec<String> = if shell.clear_env {
-        vec!["/usr/bin/env".into(), "-i".into()]
-    } else {
-        Vec::new()
-    };
-    argv.extend([
-        "sh".to_string(),
-        "-c".into(),
-        format!("set -a; . \"$0\"; set +a; command -p rm -f -- \"$0\"; unset {unset}; exec \"$@\""),
-        env_file.display().to_string(),
-        shell.program.clone(),
-    ]);
-    argv.extend(shell.args.iter().cloned());
-    Ok(argv)
-}
-
-/// How many windows the tmux `session` (exact name) has; `None` when tmux cannot say.
-pub(super) fn tmux_window_count(
-    tmux: &TmuxSettings,
-    shell: &ShellCommand,
-    session: &str,
-) -> Option<usize> {
-    let mut command = std::process::Command::new(&tmux.binary);
-    configure_tmux_environment(&mut command, shell);
-    if let Some(socket) = &tmux.socket {
-        command.arg("-S").arg(socket);
-    }
-    let output = tmux_output(
-        command
-            .args([
-                "list-windows",
-                "-t",
-                &format!("={session}"),
-                "-F",
-                "#{window_id}",
-            ])
-            .env_remove("TMUX")
-            .env_remove("TMUX_PANE"),
-    )?;
-    output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .count()
-    })
-}
-
-/// Open a window running the shell in the user's tmux `session` (exact name), unless it already
-/// has [`MAX_SESSION_WINDOWS`] (or its windows cannot be counted): `Ok(false)` then.
-pub(super) fn tmux_new_window(
-    tmux: &TmuxSettings,
-    shell: &ShellCommand,
-    session: &str,
-) -> std::io::Result<bool> {
-    // One at a time, so two tabs of a session cannot both pass the count.
-    static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _opening = OPENING.lock().unwrap_or_else(|e| e.into_inner());
-    if tmux_window_count(tmux, shell, session).is_none_or(|n| n >= MAX_SESSION_WINDOWS) {
-        return Ok(false);
-    }
-    let shell = native_pending::window_shell(shell)?;
-    let argv = tmux_shell_argv(tmux, &shell)?;
-    scrub_tmux_server_env(tmux, Some(session));
-    let mut command = std::process::Command::new(&tmux.binary);
-    configure_tmux_environment(&mut command, &shell);
-    if let Some(socket) = &tmux.socket {
-        command.arg("-S").arg(socket);
-    }
-    // `=`: exactly this session, never another whose name starts with it.
-    command
-        .args([
-            "new-window",
-            "-t",
-            &format!("={session}:"),
-            "-n",
-            TMUX_WINDOW_NAME,
-        ])
-        .args(&argv)
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    for var in job_context_vars() {
-        command.env_remove(var);
-    }
-    Ok(tmux_output(&mut command).is_some_and(|output| output.status.success()))
 }

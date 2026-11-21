@@ -29,11 +29,6 @@ use crate::sync::{DeltaObserver, SyncArgs, SyncEnv};
 /// method").
 #[async_trait]
 pub trait PluginSync: Send + Sync {
-    /// Whether the connector's ordinary fetch path can replace this optimization.
-    fn is_fetch_optimization(&self) -> bool {
-        false
-    }
-
     /// Run the plugin's `sync()` for `pipe`.
     async fn sync(&self, pipe: &Pipe, args: &SyncArgs) -> SyncResult;
 
@@ -141,6 +136,14 @@ pub trait ConnectorRegistry: Send + Sync {
         None
     }
 
+    /// Whether same-instance in-place sync (`InstanceConnector::sync_pipe_inplace`) is enabled
+    /// for `instance_keys` by this registry (defaults to `false`; hosts and tests opt in when
+    /// in-place sync is desired).
+    fn allows_inplace_sync(&self, instance_keys: &str) -> bool {
+        let _ = instance_keys;
+        false
+    }
+
     /// The table reference `{{ Pipe(...) }}` renders to. Python renders the quoted,
     /// schema-qualified name (`sql_item_name`) on SQL instances and `pipe.target` elsewhere;
     /// registries that hold SQL instances override this.
@@ -243,6 +246,7 @@ pub struct StaticRegistry {
     table_refs: Option<TableRefFn>,
     registered: Arc<RegisteredCache>,
     unavailable: HashMap<String, String>,
+    inplace_sync: bool,
 }
 
 impl std::fmt::Debug for StaticRegistry {
@@ -309,6 +313,13 @@ impl StaticRegistry {
         self
     }
 
+    /// Enable or disable same-instance in-place sync (`InstanceConnector::sync_pipe_inplace`)
+    /// on this registry (disabled by default; hosts opt in).
+    pub fn with_inplace_sync(mut self, enabled: bool) -> Self {
+        self.inplace_sync = enabled;
+        self
+    }
+
     /// Override how `{{ Pipe(...) }}` renders a table reference.
     pub fn with_table_reference(
         mut self,
@@ -362,12 +373,84 @@ impl ConnectorRegistry for StaticRegistry {
         self.hooks.clone()
     }
 
+    fn allows_inplace_sync(&self, _instance_keys: &str) -> bool {
+        self.inplace_sync
+    }
+
     fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
         let loaded = load_registered(self, pipe, Some(&self.registered));
         match &self.table_refs {
             Some(f) => f(&loaded),
             None => loaded.target(None).map_err(|e| e.to_string()),
         }
+    }
+}
+
+/// Wrap any [`ConnectorRegistry`] so that [`ConnectorRegistry::allows_inplace_sync`] returns
+/// `enabled`, delegating every other lookup to `inner`.
+pub fn with_inplace_sync(
+    inner: Arc<dyn ConnectorRegistry>,
+    enabled: bool,
+) -> Arc<dyn ConnectorRegistry> {
+    Arc::new(InplaceSyncRegistry { inner, enabled })
+}
+
+struct InplaceSyncRegistry {
+    inner: Arc<dyn ConnectorRegistry>,
+    enabled: bool,
+}
+
+impl ConnectorRegistry for InplaceSyncRegistry {
+    fn instance(&self, keys: &str) -> Result<Arc<dyn InstanceConnector>, String> {
+        self.inner.instance(keys)
+    }
+
+    fn source(&self, keys: &str) -> Result<Option<Arc<dyn Connector>>, String> {
+        self.inner.source(keys)
+    }
+
+    fn fetch_chunksize(&self, keys: &str) -> usize {
+        self.inner.fetch_chunksize(keys)
+    }
+
+    fn source_for_sync(
+        &self,
+        keys: &str,
+        args: &SyncArgs,
+    ) -> Result<Option<Arc<dyn Connector>>, String> {
+        self.inner.source_for_sync(keys, args)
+    }
+
+    fn plugin_sync(&self, keys: &str) -> Option<Arc<dyn PluginSync>> {
+        self.inner.plugin_sync(keys)
+    }
+
+    fn stream_source(&self, keys: &str) -> Option<Arc<dyn StreamSource>> {
+        self.inner.stream_source(keys)
+    }
+
+    fn legacy_stream(&self, keys: &str) -> Option<Arc<dyn LegacyStream>> {
+        self.inner.legacy_stream(keys)
+    }
+
+    fn register_hook(&self, keys: &str) -> Option<Arc<dyn ConnectorRegisterHook>> {
+        self.inner.register_hook(keys)
+    }
+
+    fn is_python(&self, keys: &str) -> bool {
+        self.inner.is_python(keys)
+    }
+
+    fn hooks(&self) -> Option<Arc<dyn SyncHooks>> {
+        self.inner.hooks()
+    }
+
+    fn allows_inplace_sync(&self, _instance_keys: &str) -> bool {
+        self.enabled
+    }
+
+    fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
+        self.inner.table_reference(pipe)
     }
 }
 

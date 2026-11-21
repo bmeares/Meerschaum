@@ -1009,7 +1009,12 @@ pub fn access_sql_guard(
     if target {
         meerschaum_server::sql_guard::check_target(text, &hidden).err()
     } else {
-        meerschaum_server::sql_guard::check_definition(text, &hidden).err()
+        meerschaum_server::sql_guard::check_sql(
+            text,
+            &meerschaum_server::sql_guard::SqlPolicy::PipeDefinition { hidden: &hidden },
+        )
+        .err()
+        .map(meerschaum_server::sql_guard::SqlError::into_message)
     }
 }
 

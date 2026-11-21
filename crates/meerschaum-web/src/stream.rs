@@ -9,138 +9,49 @@
 //! Authorization is the rule of `GET /logs/{name}` (`jobs:read` and `logs:read` on a job the
 //! caller can see: its team's, a console run its owner's and its team's managers', every job the
 //! administrators'; `meerschaum_core::job_access`); streams are rate limited like the rest of the
-//! `jobs` route group and bounded in number (`api:permissions:log_streams`).
-use super::*;
+//! `jobs` route group and bounded in number (`api:permissions:log_streams`) through
+//! [`meerschaum_server::sse::StreamGuard`].
+
+use std::convert::Infallible;
+use std::time::Duration;
+
 use axum::{
     extract::{Path, State},
     response::{
         IntoResponse, Response,
-        sse::{Event, KeepAlive, Sse},
+        sse::{Event, KeepAlive},
     },
 };
 use meerschaum_server::backends::LogEvent;
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use meerschaum_server::sse::{self, StreamAuth};
 
-/// How often an idle stream re-checks that its console session still exists, so a logout ends a
-/// stream of a job that is silent.
+use super::*;
+
+/// How often an idle stream re-authorizes its session/bearer and job visibility, re-minting
+/// short-lived console bearers so a live console session never expires mid-stream.
 const SESSION_CHECK: Duration = Duration::from_secs(10);
 
-/// The log streams open on this server, in total and per user or token: each follows its job on
-/// a thread of its own, so they are bounded (`api:permissions:log_streams`).
-#[derive(Debug, Default)]
-pub(crate) struct StreamSlots {
-    open: Mutex<(usize, HashMap<String, usize>)>,
-}
-
-/// One open stream; the slot is free again when it drops (however the stream ends).
-#[derive(Debug)]
-pub(crate) struct Slot {
-    slots: Arc<StreamSlots>,
-    key: String,
-}
-
-impl StreamSlots {
-    /// Take a slot for `key`, or say which limit is reached.
-    pub(crate) fn take(
-        self: &Arc<Self>,
-        key: &str,
-        max: usize,
-        per_user: usize,
-    ) -> Result<Slot, &'static str> {
-        let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
-        if open.0 >= max {
-            return Err("Too many log streams are open on this server.");
-        }
-        if open.1.get(key).copied().unwrap_or(0) >= per_user {
-            return Err("Too many log streams are open for this user.");
-        }
-        open.0 += 1;
-        *open.1.entry(key.to_string()).or_insert(0) += 1;
-        Ok(Slot {
-            slots: self.clone(),
-            key: key.to_string(),
-        })
-    }
-
-    #[cfg(test)]
-    fn total(&self) -> usize {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).0
-    }
-}
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        let mut open = self.slots.open.lock().unwrap_or_else(|e| e.into_inner());
-        open.0 = open.0.saturating_sub(1);
-        if let Some(n) = open.1.get_mut(&self.key) {
-            *n = n.saturating_sub(1);
-            if *n == 0 {
-                open.1.remove(&self.key);
-            }
-        }
-    }
-}
-
-/// Who a stream counts against: the user, the token, or the session of a `--no-auth` server.
-fn slot_key(principal: Option<&auth::Principal>, session_id: Option<&str>) -> String {
-    match principal {
-        Some(meerschaum_server::auth::Principal::Execution(identity)) => identity.owner_key(),
-        Some(auth::Principal::User(user)) => format!("user:{}", user.username),
-        Some(auth::Principal::Token(token)) => match token.id {
-            Some(id) => format!("token:{id}"),
-            None => "token:".to_string(),
-        },
-        None => format!("session:{}", session_id.unwrap_or("")),
-    }
-}
-
-/// Whether a console session that was following has ended (`None`: a bearer, nothing to check).
-async fn session_ended(state: &WebState, id: Option<&str>) -> bool {
-    match id {
-        Some(id) if !state.server.config.no_auth => match state.config.sessions.get(id).await {
-            // Still its user's: the session carries the user's current credential.
-            Ok(Some(data)) => !matches!(bound_username(&state.server, &data).await, Ok(Some(_))),
-            _ => true,
-        },
-        _ => false,
-    }
-}
+/// Scopes required to read a job's log stream.
+const SCOPES: &[&str] = &["jobs:read", "logs:read"];
 
 pub(crate) async fn logs(
     State(state): State<WebState>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Response {
-    // A bearer wins; otherwise the cookie's session stands in for the user.
-    let (auth_headers, session_id) = if headers.contains_key(header::AUTHORIZATION) {
-        (headers.clone(), None)
-    } else if state.server.config.no_auth {
-        (HeaderMap::new(), cookie(&headers))
-    } else {
-        let data = match session(&state, &headers).await {
-            Ok(data) => data,
-            Err(status) => return status.into_response(),
+    let auth =
+        match StreamAuth::open(&state.server, &headers, Some(state.browser_auth.clone())).await {
+            Ok(auth) => auth,
+            Err(rejected) => return rejected.into_response(),
         };
-        match api_headers(&state, &data).await {
-            Ok(h) => (h, cookie(&headers)),
-            Err(status) => return status.into_response(),
-        }
-    };
     // The rule of `GET /logs/{name}` (the same log): the permissions to read jobs and their logs,
     // on a job the caller can see.
-    let access = match meerschaum_server::access::require(
-        &state.server,
-        &auth_headers,
-        &["jobs:read", "logs:read"],
-    )
-    .await
-    {
-        Ok(access) => access,
-        Err(e) => return e.into_response(),
-    };
+    let access =
+        match meerschaum_server::access::require_fresh(&state.server, auth.headers(), SCOPES).await
+        {
+            Ok(access) => access,
+            Err(e) => return e.into_response(),
+        };
     if !state.server.jobs.exists(&name).await {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -157,19 +68,14 @@ pub(crate) async fn logs(
         return StatusCode::NOT_FOUND.into_response();
     }
     // Each stream follows its job on a thread: bounded in total and per user.
-    let slot = match state.streams.take(
-        &slot_key(access.auth.as_ref(), session_id.as_deref()),
+    let guard = match auth.into_guard(
+        &state.streams,
         state.server.config.log_streams_max,
         state.server.config.log_streams_per_user,
+        access.auth.as_ref(),
     ) {
-        Ok(slot) => slot,
-        Err(why) => {
-            let mut response = (StatusCode::TOO_MANY_REQUESTS, why).into_response();
-            response
-                .headers_mut()
-                .insert(header::RETRY_AFTER, "5".parse().unwrap());
-            return response;
-        }
+        Ok(guard) => guard,
+        Err(rejected) => return rejected.into_response(),
     };
     let Some(monitor) = meerschaum_server::executor::context::scope(
         Some(std::sync::Arc::new(access)),
@@ -184,17 +90,8 @@ pub(crate) async fn logs(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let drain = state.server.lifecycle.signal();
     let stream = futures_util::stream::unfold(
-        (
-            monitor,
-            state,
-            session_id,
-            auth_headers,
-            name,
-            false,
-            ticker,
-            slot,
-        ),
-        |(mut monitor, state, id, headers, name, done, mut ticker, slot)| async move {
+        (monitor, state, guard, name, false, ticker),
+        |(mut monitor, state, mut guard, name, done, mut ticker)| async move {
             if done {
                 return None;
             }
@@ -202,20 +99,22 @@ pub(crate) async fn logs(
                 tokio::select! {
                     event = monitor.events.recv() => {
                         let event = event?;
-                        // A session that ended (logout, expiry) ends its streams.
-                        if session_ended(&state, id.as_deref()).await {
+                        // A console session that ended (logout, credential rotation) ends its
+                        // streams immediately on the next log event too.
+                        if guard.has_session()
+                            && guard.refresh_headers(&state.server).await.is_err()
+                        {
                             return None;
                         }
                         break event;
                     }
-                    // ... also while the job is silent.
+                    // ... also while the job is silent, re-minting fresh short-lived bearers
+                    // for live console sessions and re-verifying fresh permissions & visibility.
                     _ = ticker.tick() => {
-                        if session_ended(&state, id.as_deref()).await {
+                        let caller = guard.reauthorize(&state.server, SCOPES).await?;
+                        if !meerschaum_server::routes::jobs::may_see(&state.server, &caller, &name).await {
                             return None;
                         }
-                        let caller = meerschaum_server::access::require_fresh(
-                            &state.server, &headers, &["jobs:read", "logs:read"]).await.ok()?;
-                        if !meerschaum_server::routes::jobs::may_see(&state.server, &caller, &name).await { return None; }
                     }
                 }
             };
@@ -231,40 +130,10 @@ pub(crate) async fn logs(
             };
             Some((
                 Ok::<_, Infallible>(event),
-                (monitor, state, id, headers, name, done, ticker, slot),
+                (monitor, state, guard, name, done, ticker),
             ))
         },
     );
     // A draining server ends the stream at once (the browser reconnects to another server).
-    let stream = meerschaum_server::lifecycle::until_drain(stream, drain);
-    let mut response = Sse::new(stream)
-        .keep_alive(KeepAlive::default())
-        .into_response();
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
-    // A reverse proxy in front of the server must not buffer the stream.
-    response
-        .headers_mut()
-        .insert("x-accel-buffering", "no".parse().unwrap());
-    response
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn slots_are_taken_per_key_and_freed_on_drop() {
-        let slots = Arc::new(StreamSlots::default());
-        let a1 = slots.take("user:a", 3, 2).unwrap();
-        let _a2 = slots.take("user:a", 3, 2).unwrap();
-        assert!(slots.take("user:a", 3, 2).unwrap_err().contains("user"));
-        let _b = slots.take("user:b", 3, 2).unwrap();
-        assert!(slots.take("user:c", 3, 2).unwrap_err().contains("server"));
-        assert_eq!(slots.total(), 3);
-        drop(a1);
-        assert_eq!(slots.total(), 2);
-        assert!(slots.take("user:a", 3, 2).is_ok());
-    }
+    sse::response(stream, drain, KeepAlive::default(), sse::CACHE_NO_STORE)
 }

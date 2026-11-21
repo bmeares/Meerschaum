@@ -15,7 +15,7 @@ use meerschaum_core::SuccessTuple;
 use meerschaum_plugin::{HostCall, HostReply};
 use serde_json::json;
 
-use super::host::{HostResult, PluginHost, host_error, refuse_internal_tables, tuple_json};
+use super::host::{HostResult, PluginHost, host_error, tuple_json};
 
 pub(super) struct OpenTx {
     connector_keys: String,
@@ -62,56 +62,13 @@ impl TxRegistry {
 }
 
 impl PluginHost {
-    async fn authorize_sql_query(
+    /// Authorize the caller's scopes, connector access, and execute permission before touching
+    /// connector metadata (so unauthorized callers cannot probe whether a connector exists).
+    pub(super) async fn authorize_sql_caller(
         &self,
         keys: &str,
-        rewritten: &str,
         is_read: bool,
-    ) -> HostResult<()> {
-        let access = if is_read {
-            let access = self.api_access("sql:read", "run SQL queries").await?;
-            if self.api.is_some() {
-                meerschaum_server::mcp::security::is_read_only_query(rewritten)
-                    .map_err(host_error)?;
-            }
-            access
-        } else {
-            let access = self
-                .api_access("actions:execute", "execute SQL statements")
-                .await?;
-            self.may_execute().await?;
-            access
-        };
-        if self.api.is_some() {
-            refuse_internal_tables(rewritten)?;
-        }
-        if let (Some(api), Some(access)) = (&self.api, &access) {
-            self.instance(keys)?;
-            meerschaum_server::access::guard::check_connector_teams(&api.state, access, keys)
-                .map_err(|e| host_error(e.detail_text()))?;
-            let index = meerschaum_server::access::pipe_index(&api.state, Some(keys))
-                .await
-                .map_err(|e| host_error(e.detail_text()))?;
-            meerschaum_server::sql_guard::check_definition(
-                rewritten,
-                &index.hidden_targets(access),
-            )
-            .map_err(host_error)?;
-        }
-        Ok(())
-    }
-
-    pub(super) async fn serve_sql_with(
-        &self,
-        call: &HostCall,
-        is_read: bool,
-    ) -> HostResult<HostReply> {
-        let keys = call
-            .str_arg("connector_keys")
-            .ok_or_else(|| host_error("`connector_keys` names no connector"))?;
-        let query = call.str_arg("query").unwrap_or_default();
-
-        // Check caller permissions before revealing connector existence.
+    ) -> HostResult<Option<meerschaum_server::access::Access>> {
         let access = if is_read {
             self.api_access("sql:read", "run SQL queries").await?
         } else {
@@ -126,29 +83,69 @@ impl PluginHost {
             meerschaum_server::access::guard::check_connector_teams(&api.state, access, keys)
                 .map_err(|e| host_error(e.detail_text()))?;
         }
+        Ok(access)
+    }
+
+    /// Enforce the unified SQL guard policy once on the final SQL statement for an API caller.
+    pub(super) async fn check_api_sql(
+        &self,
+        keys: &str,
+        query: &str,
+        is_read: bool,
+        access: Option<&meerschaum_server::access::Access>,
+    ) -> HostResult<()> {
+        let Some(api) = &self.api else {
+            return Ok(());
+        };
+        let hidden = match access {
+            Some(access) => {
+                let index = meerschaum_server::access::pipe_index(&api.state, Some(keys))
+                    .await
+                    .map_err(|e| host_error(e.detail_text()))?;
+                index.hidden_targets(access)
+            }
+            None => meerschaum_server::sql_guard::HiddenTables::default(),
+        };
+        let policy = if is_read {
+            meerschaum_server::sql_guard::SqlPolicy::ReadOnlyHostQuery { hidden: &hidden }
+        } else {
+            meerschaum_server::sql_guard::SqlPolicy::RawExec { hidden: &hidden }
+        };
+        meerschaum_server::sql_guard::check_sql(query, &policy)
+            .map_err(|e| host_error(e.into_message()))
+    }
+
+    pub(super) async fn authorize_sql_query(
+        &self,
+        keys: &str,
+        query: &str,
+        is_read: bool,
+    ) -> HostResult<()> {
+        let access = self.authorize_sql_caller(keys, is_read).await?;
+        self.check_api_sql(keys, query, is_read, access.as_ref())
+            .await
+    }
+
+    pub(super) async fn serve_sql_with(
+        &self,
+        call: &HostCall,
+        is_read: bool,
+    ) -> HostResult<HostReply> {
+        let keys = call
+            .str_arg("connector_keys")
+            .ok_or_else(|| host_error("`connector_keys` names no connector"))?;
+        let query = call.str_arg("query").unwrap_or_default();
+
+        // Check caller permissions before revealing connector existence.
+        let access = self.authorize_sql_caller(keys, is_read).await?;
 
         let sql = self.env()?.sql(keys).map_err(host_error)?;
         let (rewritten, bound) = bind_named_sql(sql.flavor(), query, call.arg("params"))
             .map_err(|e| host_error(e.to_string()))?;
 
-        // Run SQL guards on the rewritten SQL so `:param` names cannot false-positive.
-        if self.api.is_some() {
-            if is_read {
-                meerschaum_server::mcp::security::is_read_only_query(&rewritten)
-                    .map_err(host_error)?;
-            }
-            refuse_internal_tables(&rewritten)?;
-            if let (Some(api), Some(access)) = (&self.api, &access) {
-                let index = meerschaum_server::access::pipe_index(&api.state, Some(keys))
-                    .await
-                    .map_err(|e| host_error(e.detail_text()))?;
-                meerschaum_server::sql_guard::check_definition(
-                    &rewritten,
-                    &index.hidden_targets(access),
-                )
-                .map_err(host_error)?;
-            }
-        }
+        // Run the unified SQL guard on the rewritten SQL so `:param` names cannot false-positive.
+        self.check_api_sql(keys, &rewritten, is_read, access.as_ref())
+            .await?;
 
         if is_read {
             let frame = sql

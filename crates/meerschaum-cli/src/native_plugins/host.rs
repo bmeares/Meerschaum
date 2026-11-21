@@ -44,9 +44,11 @@ pub(super) fn tuple_json(tuple: &SuccessTuple) -> serde_json::Value {
 
 /// The refusal of an API caller's SQL (`read_sql`, `exec_sql`) that could reach Meerschaum's
 /// internal tables, shared with MCP's `read_sql` over HTTP
-/// ([`meerschaum_server::mcp::security::refuse_internal_tables`]).
+/// ([`meerschaum_server::sql_guard::check_internal_tables`]).
+#[cfg(test)]
 pub(super) fn refuse_internal_tables(query: &str) -> HostResult<()> {
-    meerschaum_server::mcp::security::refuse_internal_tables(query).map_err(host_error)
+    meerschaum_server::sql_guard::check_internal_tables(query, "for an API request")
+        .map_err(|e| host_error(e.into_message()))
 }
 
 /// A host call's bound as a `DateBound` (`None`: unbounded).
@@ -593,42 +595,11 @@ impl PluginHost {
                     .str_arg("connector_keys")
                     .ok_or_else(|| host_error("`connector_keys` names no connector"))?;
                 let query = call.str_arg("query").unwrap_or_default();
+                let is_read = call.method == m::READ_SQL;
                 // Permissions first: an API caller learns nothing about connectors it may not use.
-                let access = if call.method == m::READ_SQL {
-                    let access = self.api_access("sql:read", "run SQL queries").await?;
-                    if self.api.is_some() {
-                        meerschaum_server::mcp::security::is_read_only_query(query)
-                            .map_err(host_error)?;
-                    }
-                    access
-                } else {
-                    let access = self
-                        .api_access("actions:execute", "execute SQL statements")
-                        .await?;
-                    self.may_execute().await?;
-                    access
-                };
-                if self.api.is_some() {
-                    refuse_internal_tables(query)?;
-                }
-                if let (Some(api), Some(access)) = (&self.api, &access) {
-                    // Named SQL must use a served instance, within its connector's teams.
-                    self.instance(keys)?;
-                    meerschaum_server::access::guard::check_connector_teams(
-                        &api.state, access, keys,
-                    )
-                    .map_err(|e| host_error(e.detail_text()))?;
-                    let index = meerschaum_server::access::pipe_index(&api.state, Some(keys))
-                        .await
-                        .map_err(|e| host_error(e.detail_text()))?;
-                    meerschaum_server::sql_guard::check_definition(
-                        query,
-                        &index.hidden_targets(access),
-                    )
-                    .map_err(host_error)?;
-                }
+                self.authorize_sql_query(keys, query, is_read).await?;
                 let sql = self.env()?.sql(keys).map_err(host_error)?;
-                if call.method == m::READ_SQL {
+                if is_read {
                     // A protected connector runs only a read statement, read-only.
                     let frame = sql
                         .read_raw(query)

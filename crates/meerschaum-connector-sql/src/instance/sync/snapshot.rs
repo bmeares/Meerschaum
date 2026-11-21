@@ -150,7 +150,6 @@ impl SqlConnector {
             )));
         }
         self.forget_catalog_table(&pipe.target);
-        self.forget_synced_columns(&super::synced_columns_key(resolved));
         let state = self.pipe_state(&pipe).await;
         let (signature, stored_indices) = table_signature(self, &pipe).await?;
         let mut context = self.dtypes_ctx(&pipe, &state);
@@ -739,7 +738,6 @@ impl SqlConnector {
         if result.is_err() || cleared.is_err() {
             let rollback = transaction.rollback_target(native_batch.as_ref()).await;
             self.forget_catalog_table(&plan.pipe.target);
-            self.forget_synced_columns(&super::synced_columns_key(plan.pipe.pipe()));
             if cleared.is_err() {
                 self.driver().close().await;
             }
@@ -793,7 +791,6 @@ impl SqlConnector {
             let _ = bump_metadata_epoch(SuccessTuple::success());
         }
         self.forget_catalog_table(&plan.pipe.target);
-        self.forget_synced_columns(&super::synced_columns_key(plan.pipe.pipe()));
         let mut result = result?;
         if plan.parameters != plan.original && authority.tracks_metadata_inference() {
             let change = meerschaum_connector::mutation::MetadataInference {

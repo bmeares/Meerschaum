@@ -222,7 +222,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<String>>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         self.create_index_queries(&sp, None).await
     }
 
@@ -339,7 +339,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<String>>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let schema = self.get_pipe_schema(&sp);
         let exists = self.table_exists(&sp.target, schema.as_deref()).await;
         if !exists {
@@ -392,7 +392,7 @@ impl SqlConnector {
         columns: Option<&[String]>,
         indices: Option<&[String]>,
     ) -> bool {
-        let Ok(sp) = self.sql_pipe(pipe) else {
+        let Ok((_, sp)) = self.bind_pipe(pipe).await else {
             return false;
         };
         self.create_indices_sp(&sp, columns, indices, None).await
@@ -446,7 +446,7 @@ impl SqlConnector {
         columns: Option<&[String]>,
         indices: Option<&[String]>,
     ) -> bool {
-        let Ok(sp) = self.sql_pipe(pipe) else {
+        let Ok((pipe, sp)) = self.bind_pipe(pipe).await else {
             return false;
         };
         if sp.indices().is_empty() {
@@ -459,7 +459,7 @@ impl SqlConnector {
             .chain(indices.unwrap_or_default())
             .cloned()
             .collect();
-        let ix_queries = match self.get_drop_index_queries(pipe).await {
+        let ix_queries = match self.get_drop_index_queries(&pipe).await {
             Ok(q) => q,
             Err(_) => return false,
         };
@@ -482,9 +482,13 @@ impl SqlConnector {
         pipe: &Pipe,
         columns: Option<&[String]>,
     ) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "create indices for") {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         if self.create_indices(pipe, columns, None).await {
             SuccessTuple::ok("Success")
         } else {
@@ -494,6 +498,9 @@ impl SqlConnector {
 
     /// `drop_pipe_indices(pipe, columns)`.
     pub async fn drop_pipe_indices(&self, pipe: &Pipe, columns: Option<&[String]>) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "drop indices for") {
             return refused;
         }
@@ -503,6 +510,7 @@ impl SqlConnector {
         {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         if self.drop_indices(pipe, columns, None).await {
             SuccessTuple::ok("Success")
         } else {

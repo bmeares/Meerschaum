@@ -293,13 +293,26 @@ pub struct DataQueryOptions {
     pub no_order: bool,
 }
 
+/// Build a [`PipeState`] for an existing table from its `{column: DB TYPE}` map.
+pub(crate) fn pipe_state_from_cols(
+    sp: &SqlPipe,
+    cols_types: IndexMap<String, String>,
+) -> PipeState {
+    PipeState {
+        exists: true,
+        dtypes: pipe_dtypes(sp, &cols_types, true),
+        explicit_dtypes: pipe_dtypes(sp, &cols_types, false),
+        cols_types,
+    }
+}
+
 impl SqlConnector {
     /// `pipe.get_columns_types()` / `get_pipe_columns_types(pipe)`: `{column: DB TYPE}`.
     pub async fn get_pipe_columns_types(
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, String>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         Ok(self.columns_types(&sp).await)
     }
 
@@ -379,7 +392,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<IndexDoc>>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         Ok(self
             .get_table_cols_indices(&sp.target, self.get_pipe_schema(&sp).as_deref())
             .await)
@@ -387,7 +400,7 @@ impl SqlConnector {
 
     /// `pipe_exists(pipe)`: whether the target table exists.
     pub async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         Ok(self
             .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
             .await)
@@ -398,7 +411,7 @@ impl SqlConnector {
     ///
     /// [`InstanceConnector::pipe_exists_checked`]: meerschaum_connector::InstanceConnector::pipe_exists_checked
     pub async fn pipe_exists_checked(&self, pipe: &Pipe) -> ConnectorResult<bool> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         self.table_exists_checked(&sp.target, self.get_pipe_schema(&sp).as_deref())
             .await
     }
@@ -457,7 +470,7 @@ impl SqlConnector {
         query: &DataQuery,
         opts: &DataQueryOptions,
     ) -> ConnectorResult<String> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let state = self.pipe_state(&sp).await;
         self.build_data_query(&sp, &state, query, opts).await
     }
@@ -704,6 +717,7 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        self.ensure_schema().await?;
         if crate::driver::mysql_authority::active() {
             let teams = meerschaum_connector::teams::teams_pipe(&self.keys());
             if pipe.pipe_ref() != teams.pipe_ref()
@@ -734,7 +748,7 @@ impl SqlConnector {
                 .map(Some)
                 .map_err(be);
         }
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(None);
@@ -759,10 +773,7 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Frame> {
-        self.require_schema().await?;
-        let prepared = self.prepare_pipe(pipe).await;
-        let pipe = &prepared;
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(Frame::empty());
@@ -865,7 +876,7 @@ impl SqlConnector {
         query: &DataQuery,
         chunk_interval: Option<crate::pipe::ChunkIntervalArg>,
     ) -> ConnectorResult<Vec<Frame>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(Vec::new());
@@ -974,7 +985,7 @@ impl SqlConnector {
         backtrack_minutes: Option<i64>,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(None);
@@ -1018,7 +1029,7 @@ impl SqlConnector {
         newest: bool,
         remote: bool,
     ) -> ConnectorResult<Option<DateBound>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if remote {
             return self.remote_sync_time(&sp, &state, params, newest).await;
@@ -1211,7 +1222,7 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>> {
-        let sp = self.sql_pipe(pipe)?;
+        let (pipe, sp) = self.bind_pipe(pipe).await?;
         if query.remote {
             let has_def = sp
                 .param("fetch")
@@ -1224,10 +1235,30 @@ impl SqlConnector {
             }
         }
         let state = self.pipe_state_checked(&sp).await?;
-        let Some(sql) = self.get_pipe_rowcount_query(&sp, &state, query)? else {
+        self.rowcount_with_state(&sp, &state, query).await
+    }
+
+    pub(crate) async fn rowcount_with_state(
+        &self,
+        sp: &SqlPipe,
+        state: &PipeState,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        let Some(sql) = self.get_pipe_rowcount_query(sp, state, query)? else {
             return Ok(None);
         };
-        Ok(self.value_checked(&sql).await?.and_then(|v| v.as_i64()))
+        // Without bounds or `params` the text only depends on the table: prepared once per
+        // pooled connection on PostgreSQL (see `SqlConnector::sync_time`).
+        let stable = !query.remote
+            && query.begin.is_none()
+            && query.end.is_none()
+            && query.params.as_ref().is_none_or(|p| p.is_empty());
+        let value = if stable {
+            self.value_catalog_checked(&sql).await?
+        } else {
+            self.value_checked(&sql).await?
+        };
+        Ok(value.and_then(|v| v.as_i64()))
     }
 
     /// [`InstanceConnector::pipe_has_rows_checked`]: a target the checked table probe finds
@@ -1240,7 +1271,7 @@ impl SqlConnector {
         pipe: &Pipe,
         params: Option<&Map>,
     ) -> ConnectorResult<bool> {
-        let sp = self.sql_pipe(pipe)?;
+        let (_, sp) = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_checked(&sp).await?;
         if !state.exists {
             return Ok(false);
@@ -1408,8 +1439,26 @@ impl SqlConnector {
         Ok(Some(sql))
     }
 
-    /// `drop_pipe(pipe)`: drop the target table (keep the registration).
+    /// `drop_pipe(pipe)`: drop the target table (keep the registration) and forget its Syncing
+    /// Engine state on success.
     pub async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        let res = self.drop_pipe_table(pipe).await;
+        let provider = self.instance_provider();
+        meerschaum_connector::pipe_ops::forget_engine_state_after(
+            self,
+            Some(provider.as_ref()),
+            pipe,
+            res,
+        )
+        .await
+    }
+
+    /// Drop the target table without forgetting Syncing Engine state (used by `partition_pipe`
+    /// while rebuilding a table in place).
+    pub(crate) async fn drop_pipe_table(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "drop") {
             return refused;
         }
@@ -1419,17 +1468,13 @@ impl SqlConnector {
         {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
         let schema = self.get_pipe_schema(&sp);
         let target_name = self.pipe_table_name(&sp);
-        self.state
-            .lock()
-            .expect("state")
-            .internal_pipe_states
-            .remove(&target_name);
         // Ask the database itself: another process may have dropped the table already.
         self.forget_catalog_table(&sp.target);
         let mut success = true;
@@ -1464,8 +1509,12 @@ impl SqlConnector {
     }
 
     /// `clear_pipe(pipe, begin, end, params)`: delete rows (`>= begin`, `< end`, matching
-    /// `params`) without dropping the table.
+    /// `params`) without dropping the table. On an unbounded full clear, forgets Syncing Engine
+    /// state on success.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "clear") {
             return refused;
         }
@@ -1475,10 +1524,22 @@ impl SqlConnector {
         {
             return refused;
         }
-        match self.clear_pipe_inner(pipe, query).await {
+        let pipe = &self.prepare_pipe(pipe).await;
+        let res = match self.clear_pipe_inner(pipe, query).await {
             Ok(t) => t,
             Err(e) => SuccessTuple::fail(e.to_string()),
+        };
+        if !meerschaum_connector::pipe_ops::is_full_clear(query) {
+            return res;
         }
+        let provider = self.instance_provider();
+        meerschaum_connector::pipe_ops::forget_engine_state_after(
+            self,
+            Some(provider.as_ref()),
+            pipe,
+            res,
+        )
+        .await
     }
 
     async fn clear_pipe_inner(
@@ -1672,6 +1733,9 @@ impl SqlConnector {
     /// deduplicated (`_pipes.py:3995`).
     pub async fn deduplicate_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         let _ = query;
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "deduplicate") {
             return refused;
         }
@@ -1681,6 +1745,7 @@ impl SqlConnector {
         {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         match self.deduplicate_pipe_inner(pipe).await {
             Ok(t) => t,
             Err(e) => SuccessTuple::fail(e.to_string()),

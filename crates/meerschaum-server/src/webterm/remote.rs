@@ -1,14 +1,18 @@
-//! Bounded terminal messages across an untrusted executor boundary.
+//! Bounded terminal messages across an untrusted executor boundary and `RemoteExecutorAdapter`.
 
-use futures_util::StreamExt;
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+use super::session::{OpenError, RevokeAction, TerminalSession};
+use super::{Inner, TermMode};
+
 pub const MAX_BYTES: usize = 1024 * 1024;
 pub const QUEUE: usize = 16;
 
-/// A backend-owned remote connection. Dropping input closes its transport task.
+/// A backend-owned remote connection. Dropping `input` closes its transport task.
 pub struct Terminal {
     pub input: mpsc::Sender<Input>,
     pub events: mpsc::Receiver<Event>,
@@ -20,263 +24,153 @@ enum Placement {
 }
 
 impl Placement {
-    fn mode(&self) -> super::TermMode {
+    fn mode(&self) -> TermMode {
         match self {
-            Self::Remote(id, _) => super::TermMode::Remote(*id),
-            Self::Host(id) => super::TermMode::HostApi(*id),
+            Self::Remote(id, _) => TermMode::Remote(*id),
+            Self::Host(id) => TermMode::HostApi(*id),
         }
     }
 
-    async fn revoke(&self, state: &crate::AppState, owner: &str, credential: &str) {
+    fn revoke_action(
+        &self,
+        state: &crate::AppState,
+        owner: &str,
+        credential: &str,
+    ) -> RevokeAction {
         match self {
-            Self::Remote(id, _) => state.actions.revoke_executor_terminal(*id, owner).await,
-            Self::Host(id) => {
-                state
-                    .actions
-                    .revoke_host_api_terminal(*id, owner, credential)
-                    .await
-            }
-        }
-    }
-}
-
-/// Bridge the console session locally; its UUID/cookies never enter the remote transport.
-pub(super) async fn bridge(
-    inner: super::Inner,
-    session_id: String,
-    owner: String,
-    team_id: uuid::Uuid,
-    team: meerschaum_core::access::Team,
-    socket: axum::extract::ws::WebSocket,
-) {
-    bridge_to(
-        inner,
-        session_id,
-        owner,
-        Placement::Remote(team_id, team),
-        socket,
-    )
-    .await;
-}
-
-pub(super) async fn bridge_host(
-    inner: super::Inner,
-    session_id: String,
-    owner: String,
-    team_id: Option<uuid::Uuid>,
-    socket: axum::extract::ws::WebSocket,
-) {
-    bridge_to(inner, session_id, owner, Placement::Host(team_id), socket).await;
-}
-
-async fn bridge_to(
-    inner: super::Inner,
-    session_id: String,
-    owner: String,
-    placement: Placement,
-    socket: axum::extract::ws::WebSocket,
-) {
-    use axum::extract::ws::Message;
-    use std::{sync::Arc, time::Duration};
-    let binding = inner.config.sessions.binding(&session_id).await;
-    let credential = match binding {
-        Ok(Some((username, credential))) if username == owner => credential,
-        _ => {
-            super::refuse(
-                socket,
-                "Could not verify the terminal session's credential.",
-                1008,
-            )
-            .await;
-            return;
-        }
-    };
-    let caller = crate::access::access_of_fresh(
-        &inner.state,
-        crate::auth::Principal::User(meerschaum_core::users::User::new(&owner, None)),
-        &crate::auth::Scopes::List(vec!["*".into()]),
-    )
-    .await;
-    let mut caller = match caller {
-        Ok(caller) => caller,
-        Err(_) => {
-            super::refuse(socket, "Could not verify terminal permissions.", 1008).await;
-            return;
-        }
-    };
-    caller.credential = Some(credential);
-    let opened = crate::executor::context::scope(Some(Arc::new(caller.clone())), async {
-        match &placement {
-            Placement::Remote(_, team) => {
-                inner.state.actions.executor_terminal(team, &caller).await
-            }
-            Placement::Host(id) => inner.state.actions.host_api_terminal(*id, &caller).await,
-        }
-    })
-    .await;
-    let mut terminal = match opened {
-        Ok(terminal) => terminal,
-        Err(_) => {
-            tracing::debug!(target: "mrsm::terminal_transport", layer = "main_bridge", reason = "runtime_open_refused", "The execution terminal could not open.");
-            super::refuse(socket, "Your execution terminal is unavailable. Ask an administrator to check its deployment and native runtime.", 1011).await;
-            return;
-        }
-    };
-    // Provisioning may outlive the session that requested it. Check the console binding again
-    // before accepting input or displaying output from the newly opened remote connection.
-    let checked = tokio::time::timeout(
-        super::REAUTHORIZE_TIMEOUT,
-        super::authorize(&inner, &session_id, true),
-    )
-    .await
-    .unwrap_or(super::Access::Unavailable);
-    if checked.revocation(&owner, &placement.mode()).is_some() {
-        tracing::debug!(target: "mrsm::terminal_transport", layer = "main_bridge", reason = "session_changed_during_open", "The execution terminal could not open.");
-        drop(terminal);
-        let _ = tokio::time::timeout(
-            Duration::from_secs(10),
-            placement.revoke(
-                &inner.state,
-                &owner,
-                caller.credential.as_deref().unwrap_or_default(),
-            ),
-        )
-        .await;
-        super::refuse(
-            socket,
-            "Your terminal session changed while connecting. Log in again.",
-            1008,
-        )
-        .await;
-        return;
-    }
-    let (mut sink, mut source) = socket.split();
-    let (outgoing, mut pending) = mpsc::channel(QUEUE);
-    let mut writer = tokio::spawn(async move {
-        while let Some(message) = pending.recv().await {
-            let close = matches!(message, Message::Close(_));
-            if !super::send_within(&mut sink, message).await {
-                return "websocket_send_failed";
-            }
-            if close {
-                return "websocket_close_sent";
-            }
-        }
-        "websocket_output_queue_closed"
-    });
-    let every = inner
-        .config
-        .reauthorize_every
-        .max(Duration::from_millis(10));
-    let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
-    recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let drain = inner.state.lifecycle.signal().wait();
-    tokio::pin!(drain);
-    let mut writer_done = false;
-    let mut revoked = false;
-    let mode = placement.mode();
-    // Provisioning can buffer a legitimate browser burst before this loop starts. Keep one
-    // bounded message in each direction while waiting for queue capacity, and keep draining
-    // the other direction and rechecking the original session. Awaiting send inline would
-    // deadlock when the backend's full event queue prevents it from reading more input.
-    let mut pending_input = None;
-    let mut input_deadline = None;
-    let mut pending_output = None;
-    let mut output_deadline = None;
-    let mut native_disconnected = false;
-    let reason = loop {
-        tokio::select! {
-            () = &mut drain => {
-                let _ = outgoing.try_send(super::close_message(1001, super::SHUTTING_DOWN));
-                break "main_shutdown";
-            }
-            result = &mut writer => { writer_done = true; break result.unwrap_or("websocket_writer_task_failed"); }
-            () = capacity_deadline(input_deadline), if pending_input.is_some() => break "native_input_stalled",
-            () = capacity_deadline(output_deadline), if pending_output.is_some() => break "websocket_output_stalled",
-            capacity = terminal.input.reserve(), if pending_input.is_some() => {
-                let Ok(capacity) = capacity else { break "native_input_queue_closed"; };
-                capacity.send(pending_input.take().expect("pending input checked in the same task"));
-                input_deadline = None;
-            }
-            capacity = outgoing.reserve(), if pending_output.is_some() => {
-                let Ok(capacity) = capacity else { break "websocket_output_queue_closed"; };
-                capacity.send(pending_output.take().expect("pending output checked in the same task"));
-                output_deadline = None;
-                if native_disconnected { break "native_disconnected"; }
-            }
-            event = terminal.events.recv(), if pending_output.is_none() => {
-                let Some(event) = event else { break "native_event_stream_eof"; };
-                native_disconnected = event == Event::Disconnected;
-                pending_output = Some(Message::Text(event.wire().into()));
-                output_deadline = Some(tokio::time::Instant::now() + FLOW_TIMEOUT);
-            }
-            message = source.next(), if pending_input.is_none() && pending_output.is_none() => match message {
-                Some(Ok(Message::Text(raw))) => {
-                    pending_input = match super::parse_client_message(&raw) {
-                        Some(super::ClientMessage::Stdin(text)) => Some(Input::Stdin(text)),
-                        Some(super::ClientMessage::SetSize(s)) => Some(Input::Resize { rows: s.rows, cols: s.cols, height: s.pixel_height, width: s.pixel_width }),
-                        Some(super::ClientMessage::NewWindow) => Some(Input::NewWindow),
-                        Some(super::ClientMessage::ShellState(id)) => Some(Input::ShellState(id)),
-                        None => None,
-                    };
-                    if pending_input.is_some() { input_deadline = Some(tokio::time::Instant::now() + FLOW_TIMEOUT); }
-                }
-                Some(Ok(Message::Ping(bytes))) => {
-                    pending_output = Some(Message::Pong(bytes));
-                    output_deadline = Some(tokio::time::Instant::now() + FLOW_TIMEOUT);
-                }
-                Some(Ok(Message::Pong(_))) => {}
-                Some(Ok(Message::Close(_))) => break "browser_close_received",
-                Some(Err(_)) => break "browser_transport_error",
-                None => break "browser_transport_eof",
-                _ => break "browser_input_refused",
+            Self::Remote(id, _) => RevokeAction::RemoteExecutor {
+                state: state.clone(),
+                team_id: *id,
+                owner: owner.to_string(),
             },
-            _ = recheck.tick() => {
-                let access = tokio::time::timeout(super::REAUTHORIZE_TIMEOUT, super::authorize(&inner, &session_id, true)).await
-                    .unwrap_or(super::Access::Unavailable);
-                if let Some(reason) = access.revocation(&owner, &mode) {
-                    revoked = true;
-                    super::queue(&outgoing, [super::reason_message(&reason), super::close_message(1008, "Terminal access ended.")]);
-                    break "session_reauthorization_refused";
-                }
-            }
+            Self::Host(id) => RevokeAction::HostApi {
+                state: state.clone(),
+                team_id: *id,
+                owner: owner.to_string(),
+                credential: credential.to_string(),
+            },
         }
-    };
-    tracing::debug!(target: "mrsm::terminal_transport", layer = "main_bridge", reason, "The execution terminal bridge ended.");
-    drop(terminal); // Stops this websocket client; a valid detached lease keeps tmux alive.
-    if revoked {
-        let _ = tokio::time::timeout(
-            Duration::from_secs(10),
-            placement.revoke(
-                &inner.state,
-                &owner,
-                caller.credential.as_deref().unwrap_or_default(),
-            ),
-        )
-        .await;
-    }
-    drop(outgoing);
-    if !writer_done
-        && tokio::time::timeout(super::CLOSE_TIMEOUT, &mut writer)
-            .await
-            .is_err()
-    {
-        writer.abort();
     }
 }
 
-// Match the private Host transport's bounded sends; this changes neither queue size nor
-// message limits, and a stalled direction does not suspend session revocation or shutdown.
-const FLOW_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-async fn capacity_deadline(deadline: Option<tokio::time::Instant>) {
-    match deadline {
-        Some(deadline) => tokio::time::sleep_until(deadline).await,
-        None => std::future::pending::<()>().await,
+/// Connects Main's console session to either a remote team executor terminal or a host API
+/// terminal and adapts it into the unified [`TerminalSession`] seam driven by [`super::bridge`].
+pub(super) struct RemoteExecutorAdapter;
+
+impl RemoteExecutorAdapter {
+    pub(super) async fn open_remote(
+        inner: &Inner,
+        session_id: &str,
+        owner: &str,
+        team_id: uuid::Uuid,
+        team: Option<Box<meerschaum_core::access::Team>>,
+    ) -> Result<TerminalSession, OpenError> {
+        let Some(team) = team else {
+            return Err(OpenError::refused(
+                "The terminal's executor placement is unavailable.",
+                1011,
+            ));
+        };
+        Self::open_placement(inner, session_id, owner, Placement::Remote(team_id, *team)).await
+    }
+
+    pub(super) async fn open_host_api(
+        inner: &Inner,
+        session_id: &str,
+        owner: &str,
+        team_id: Option<uuid::Uuid>,
+    ) -> Result<TerminalSession, OpenError> {
+        Self::open_placement(inner, session_id, owner, Placement::Host(team_id)).await
+    }
+
+    /// Resolve the session credential binding, provision the remote/host backend under caller
+    /// scope, re-verify authorization after provisioning, and return a [`TerminalSession`].
+    /// Console session UUIDs and cookies never cross into the remote transport.
+    async fn open_placement(
+        inner: &Inner,
+        session_id: &str,
+        owner: &str,
+        placement: Placement,
+    ) -> Result<TerminalSession, OpenError> {
+        let binding = inner.config.sessions.binding(session_id).await;
+        let credential = match binding {
+            Ok(Some((username, credential))) if username == owner => credential,
+            _ => {
+                return Err(OpenError::refused(
+                    "Could not verify the terminal session's credential.",
+                    1008,
+                ));
+            }
+        };
+        let caller = crate::access::access_of_fresh(
+            &inner.state,
+            crate::auth::Principal::User(meerschaum_core::users::User::new(owner, None)),
+            &crate::auth::Scopes::List(vec!["*".into()]),
+        )
+        .await;
+        let mut caller = match caller {
+            Ok(caller) => caller,
+            Err(_) => {
+                return Err(OpenError::refused(
+                    "Could not verify terminal permissions.",
+                    1008,
+                ));
+            }
+        };
+        caller.credential = Some(credential.clone());
+        let opened = crate::executor::context::scope(Some(Arc::new(caller.clone())), async {
+            match &placement {
+                Placement::Remote(_, team) => {
+                    inner.state.actions.executor_terminal(team, &caller).await
+                }
+                Placement::Host(id) => inner.state.actions.host_api_terminal(*id, &caller).await,
+            }
+        })
+        .await;
+        let terminal = match opened {
+            Ok(terminal) => terminal,
+            Err(_) => {
+                tracing::debug!(
+                    target: "mrsm::terminal_transport",
+                    layer = "main_bridge",
+                    reason = "runtime_open_refused",
+                    "The execution terminal could not open."
+                );
+                return Err(OpenError::refused(
+                    "Your execution terminal is unavailable. Ask an administrator to check its deployment and native runtime.",
+                    1011,
+                ));
+            }
+        };
+        let on_revoke = placement.revoke_action(&inner.state, owner, &credential);
+        // Provisioning may outlive the session that requested it. Check the console binding again
+        // before accepting input or displaying output from the newly opened connection.
+        let checked = tokio::time::timeout(
+            super::REAUTHORIZE_TIMEOUT,
+            super::authorize(inner, session_id, true),
+        )
+        .await
+        .unwrap_or(super::Access::Unavailable);
+        if let Some(reason) = checked.revocation(owner, &placement.mode()) {
+            tracing::debug!(
+                target: "mrsm::terminal_transport",
+                layer = "main_bridge",
+                reason = "session_changed_during_open",
+                "The execution terminal could not open."
+            );
+            drop(terminal);
+            on_revoke.run(&reason).await;
+            return Err(OpenError::refused(
+                "Your terminal session changed while connecting. Log in again.",
+                1008,
+            ));
+        }
+        Ok(TerminalSession::new(terminal, on_revoke))
     }
 }
 
 /// Only these commands may cross from a browser to the executor.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Input {
     Stdin(String),
     Resize {
@@ -344,7 +238,7 @@ impl Event {
     }
 }
 
-fn valid_id(id: &str) -> bool {
+pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
 }
 
@@ -403,13 +297,15 @@ enum Escape {
     StringEnd,
 }
 
+/// Stateful ANSI/control-sequence filter that strips OSC/DCS/APC/PM/SOS string sequences even
+/// when split across output frames while keeping cursor movement, styles, and charset selection.
 #[derive(Default)]
-struct Controls {
+pub(super) struct Controls {
     escape: Escape,
 }
 
 impl Controls {
-    fn filter(&mut self, text: &str) -> String {
+    pub(super) fn filter(&mut self, text: &str) -> String {
         let mut out = String::with_capacity(text.len());
         for c in text.chars() {
             self.escape = match std::mem::take(&mut self.escape) {

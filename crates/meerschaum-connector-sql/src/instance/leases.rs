@@ -104,6 +104,7 @@ impl SqlConnector {
         ttl: Duration,
         after_insert_conflict: &(dyn Fn() + Sync),
     ) -> ConnectorResult<bool> {
+        self.ensure_schema().await?;
         if holder.is_empty() || holder.len() > 256 || ttl.is_zero() {
             return Err(be(
                 "A lease requires a nonempty holder (at most 256 bytes) and positive TTL.",
@@ -211,6 +212,7 @@ impl SqlConnector {
 
     /// Release only this holder's lease; another holder's replacement cannot be removed.
     pub async fn release_pipe_lease(&self, pipe: &Pipe, holder: &str) -> ConnectorResult<bool> {
+        self.ensure_schema().await?;
         self.ensure_leases().await?;
         // Hash holders to keep identity case-sensitive even on case-insensitive collations.
         let holder = hex::encode(Sha256::digest(holder.as_bytes()));

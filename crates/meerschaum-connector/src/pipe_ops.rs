@@ -662,6 +662,32 @@ pub async fn forget_engine_state<C: InstanceConnector + ?Sized>(
     }
 }
 
+/// After a successful drop, delete or full clear, forget the pipe's Syncing Engine state
+/// (ledger, cursors, definition hash, sync status; [`forget_engine_state`]) — and, when a
+/// cross-instance `provider` is given, any remote engine state written onto other instances
+/// ([`forget_remote_engine_state`]) — so a pipe recreated under the same keys starts fresh, as in
+/// v4. Best effort: `res` is returned unchanged.
+pub async fn forget_engine_state_after<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    provider: Option<&dyn crate::template::InstanceProvider>,
+    pipe: &Pipe,
+    res: SuccessTuple,
+) -> SuccessTuple {
+    if res.success {
+        let forgotten = forget_engine_state(conn, pipe).await;
+        if !forgotten.success {
+            tracing::warn!("{}", forgotten.message);
+        }
+        if let Some(provider) = provider {
+            let remote = forget_remote_engine_state(conn, provider, pipe).await;
+            if !remote.success {
+                tracing::warn!("{}", remote.message);
+            }
+        }
+    }
+    res
+}
+
 /// The separator of a remote-state marker key (see [`remote_state_key`]).
 pub const REMOTE_STATE_SEPARATOR: &str = "|remote|";
 

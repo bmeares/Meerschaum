@@ -160,6 +160,9 @@ impl SqlConnector {
 
     /// `register_pipe(pipe)`: insert the pipe's keys and parameters into `mrsm_pipes`.
     pub async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "register") {
             return refused;
         }
@@ -194,6 +197,7 @@ impl SqlConnector {
 
     /// `get_pipe_id(pipe)`: the pipe's `pipe_id`, or `None` (always `None` for temporary pipes).
     pub async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<i64>> {
+        self.ensure_schema().await?;
         if pipe.temporary {
             return Ok(None);
         }
@@ -240,6 +244,7 @@ impl SqlConnector {
     /// it, two round trips; the id comes back with the row.) A temporary pipe, and a database
     /// without the instance tables, have no row.
     pub async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        self.ensure_schema().await?;
         if pipe.temporary
             || (!crate::driver::mysql_authority::active()
                 && !self.tables_ready()
@@ -311,6 +316,9 @@ impl SqlConnector {
 
     /// `edit_pipe(pipe, patch)`: persist the pipe's in-memory parameters.
     pub async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "edit") {
             return refused;
         }
@@ -368,6 +376,7 @@ impl SqlConnector {
         expected: &Map,
         parameters: &Map,
     ) -> ConnectorResult<bool> {
+        self.ensure_schema().await?;
         let Some(old_name) = source.location_key() else {
             return Ok(false);
         };
@@ -546,8 +555,11 @@ impl SqlConnector {
     }
 
     /// `delete_pipe(pipe)`: delete the pipe's registration (the table is dropped by
-    /// `Pipe.delete()` beforehand).
+    /// `Pipe.delete()` beforehand) and forget its Syncing Engine state on success.
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "delete") {
             return refused;
         }
@@ -567,10 +579,18 @@ impl SqlConnector {
             "DELETE FROM {table} WHERE {table}.pipe_id = {}",
             placeholder(self.flavor, 1)
         );
-        bump_metadata_epoch(match self.exec_params(&query, &[SqlParam::Int(id)]).await {
+        let res = bump_metadata_epoch(match self.exec_params(&query, &[SqlParam::Int(id)]).await {
             Some(_) => SuccessTuple::ok("Success"),
             None => SuccessTuple::fail(format!("Failed to delete registration for {pipe}.")),
-        })
+        });
+        let provider = self.instance_provider();
+        meerschaum_connector::pipe_ops::forget_engine_state_after(
+            self,
+            Some(provider.as_ref()),
+            pipe,
+            res,
+        )
+        .await
     }
 
     /// `fetch_pipes_keys(connector_keys, metric_keys, location_keys, tags, params)`: a mapping
@@ -580,6 +600,7 @@ impl SqlConnector {
     /// `mrsm` pipes are left out unless `connector_keys` names `mrsm`
     /// ([`meerschaum_connector::hides_internal_pipes`]).
     pub async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
+        self.ensure_schema().await?;
         let f = self.flavor;
         let table = self.instance_table_name("mrsm_pipes");
         let schema = self.instance_schema();

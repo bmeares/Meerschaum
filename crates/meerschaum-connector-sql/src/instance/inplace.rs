@@ -31,39 +31,7 @@ use super::{SqlConnector, frame_docs, kv_int, kv_str};
 
 const TEMP_TABLE_ROOTS: [&str; 6] = ["backtrack", "new", "delta", "joined", "unseen", "update"];
 
-/// Sees the rows an in-place sync is about to write, before it writes them
-/// ([`SqlConnector::sync_pipe_inplace_observed`]): the engine records its dirty-range ledger
-/// here, so the commit that follows keeps v4's in-place semantics (the definition's column
-/// types, no frame round trip).
-#[meerschaum_connector::async_trait]
-pub trait InplaceObserver: Send + Sync {
-    /// `delta` has one row per logical insertion or change (excluding unchanged UPSERTs), with only the
-    /// pipe's datetime column (no columns when the pipe has none). `Err` aborts the sync with
-    /// nothing merged.
-    async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String>;
-
-    /// A replacing in-place sync is about to delete the rows of `[begin, end)` (`None`:
-    /// unbounded on that side) and insert `delta`'s rows in their place: called instead of
-    /// [`before_merge`](Self::before_merge). The window's rows may be deleted without a
-    /// replacement, so a ledger marks the whole window. The default hands over `delta` only.
-    async fn before_replace(
-        &self,
-        delta: &meerschaum_kernel::Frame,
-        begin: Option<&meerschaum_connector::DateBound>,
-        end: Option<&meerschaum_connector::DateBound>,
-    ) -> Result<(), String> {
-        let _ = (begin, end);
-        self.before_merge(delta).await
-    }
-
-    /// The pipe's dtypes as this sync reads its table (handed over before the first
-    /// [`before_merge`](Self::before_merge) / [`before_replace`](Self::before_replace), and
-    /// again after the sync altered the table), so an observer that types the staged rows needs
-    /// no catalog read of its own. The default ignores them.
-    fn pipe_dtypes(&self, dtypes: &meerschaum_kernel::enforce::PipeDtypesContext) {
-        let _ = dtypes;
-    }
-}
+pub use meerschaum_connector::InplaceObserver;
 
 /// `session_execute(session, query, with_results=True)`: run one statement in the transaction,
 /// rolling it back on failure. Returns the rows affected (`-1` for `CREATE TABLE ... AS` on SQLite,
@@ -283,24 +251,32 @@ impl SqlConnector {
         replace: bool,
         observer: Option<&dyn InplaceObserver>,
     ) -> SuccessTuple {
-        if let Some(refused) = self.protected_refusal(pipe, "sync") {
-            return refused;
-        }
-        if let Some(refused) = self
-            .lock_refusal(pipe, meerschaum_connector::locks::sync_op(replace))
+        // Boxed so callers (`sync_pipe_inplace`, `sync_pipe_inplace_replacing`) keep small
+        // futures even though `ensure_schema` and `lock_refusal` poll catalog/attribute queries.
+        Box::pin(async move {
+            if let Err(e) = self.ensure_schema().await {
+                return SuccessTuple::fail(e.to_string());
+            }
+            if let Some(refused) = self.protected_refusal(pipe, "sync") {
+                return refused;
+            }
+            if let Some(refused) = self
+                .lock_refusal(pipe, meerschaum_connector::locks::sync_op(replace))
+                .await
+            {
+                return refused;
+            }
+            self.sync_pipe_inplace_forgetting(
+                pipe,
+                params,
+                begin,
+                end,
+                check_existing,
+                replace,
+                observer,
+            )
             .await
-        {
-            return refused;
-        }
-        self.sync_pipe_inplace_forgetting(
-            pipe,
-            params,
-            begin,
-            end,
-            check_existing,
-            replace,
-            observer,
-        )
+        })
         .await
     }
 

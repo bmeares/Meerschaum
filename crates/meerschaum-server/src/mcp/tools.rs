@@ -1294,45 +1294,44 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
 }
 
 async fn read_sql(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
-    let query = args.get("query").map(Value::py_str).unwrap_or_default();
-    security::is_read_only_query(&query).map_err(ToolError::value)?;
-    // Protected instance tables are off-limits here too, not just to the pipe tools.
-    let stripped = security::strip_sql_noise(&query).unwrap_or_else(|_| query.clone());
-    let scan = if stripped.is_empty() {
-        &query
-    } else {
-        &stripped
+    use crate::sql_guard::{self, SqlError, SqlErrorKind, SqlPolicy};
+
+    let map_sql_err = |err: SqlError| match err.kind {
+        SqlErrorKind::InvalidQuery => ToolError::value(err.message),
+        SqlErrorKind::Forbidden => ToolError::permission(err.message),
     };
-    for word in security::words(scan) {
-        if is_protected(&word.to_lowercase()) {
-            return Err(ToolError::permission(format!(
-                "Refusing to query protected table '{word}'."
-            )));
-        }
-    }
-    // The scan above skips quoted identifiers and string literals (`"mrsm_users"`, a table named
-    // inside `query_to_xml('...')`): an API caller's SQL may not name an internal table at all.
+    let query = args.get("query").map(Value::py_str).unwrap_or_default();
     let ck = args
         .get("connector_keys")
         .map(Value::py_str)
         .unwrap_or_default();
     if cx.caller.api {
-        security::refuse_internal_tables(&query).map_err(ToolError::permission)?;
-        // Never the tables of pipes the caller cannot see, nor a connector for other teams
-        // (rc15; best effort: true isolation needs a database user per team).
+        // Never reach a connector reserved for other teams or unserved instances, nor the
+        // tables of pipes the caller cannot see (rc15; best effort: true isolation needs a
+        // database user per team).
         let caller = caller_access(cx).await?;
         // A named SQL backend must be one of the instances this API serves, even for an
         // administrator. Its own registrations determine the hidden tables, not the default's.
         connector(cx, Some(&ck))?;
         access::guard::check_connector_teams(cx.state, &caller, &ck)
             .map_err(|e| ToolError::permission(e.detail_text()))?;
-        if !caller.is_admin() {
+        let hidden = if caller.is_admin() {
+            None
+        } else {
             let index = access::pipe_index(cx.state, Some(&ck))
                 .await
                 .map_err(|e| ToolError::other(api_error_str(&e)))?;
-            crate::sql_guard::check_definition(&query, &index.hidden_targets(&caller))
-                .map_err(|e| ToolError::permission(e.replace("a SQL definition", "a query")))?;
-        }
+            Some(index.hidden_targets(&caller))
+        };
+        sql_guard::check_sql(
+            &query,
+            &SqlPolicy::ReadOnlyApiQuery {
+                hidden: hidden.as_ref(),
+            },
+        )
+        .map_err(map_sql_err)?;
+    } else {
+        sql_guard::check_sql(&query, &SqlPolicy::ReadOnlyStdioQuery).map_err(map_sql_err)?;
     }
     let limit = usize::try_from(clamp_limit(args.get("limit"))).unwrap_or(1);
     let offset =

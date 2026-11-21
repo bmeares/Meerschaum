@@ -458,6 +458,9 @@ impl SqlConnector {
         chunk_minutes: Option<i64>,
     ) -> (SuccessTuple, Map) {
         let mut changed = Map::new();
+        if let Err(e) = self.ensure_schema().await {
+            return (SuccessTuple::fail(e.to_string()), changed);
+        }
         if let Some(refused) = self.protected_refusal(pipe, "repartition") {
             return (refused, changed);
         }
@@ -471,6 +474,7 @@ impl SqlConnector {
                 return (refused, changed);
             }
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         let result = self
             .partition_pipe_inner(pipe, chunk_minutes, &mut changed)
             .await;
@@ -592,7 +596,7 @@ impl SqlConnector {
                 ));
             }
         }
-        let res = self.drop_pipe(&updated).await;
+        let res = self.drop_pipe_table(&updated).await;
         if !res.success {
             return SuccessTuple::fail(format!(
                 "Failed to drop {pipe} during repartition:\n{}",

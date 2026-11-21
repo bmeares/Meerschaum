@@ -165,6 +165,7 @@ impl SqlConnector {
         pipe: &Pipe,
         args: &FetchArgs,
     ) -> ConnectorResult<String> {
+        self.ensure_schema().await?;
         // Resolve cross-pipe templates (`{{ Pipe() }}` in the SQL definition) first.
         let pipe = self.prepare_pipe(pipe).await;
         let mut args = args.clone();

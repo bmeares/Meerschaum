@@ -126,14 +126,6 @@ pub(crate) struct HostTerminals {
     catalog_gate: tokio::sync::Mutex<()>,
 }
 
-struct NoSessions;
-#[async_trait::async_trait]
-impl meerschaum_server::webterm::SessionLookup for NoSessions {
-    async fn username(&self, _: &str) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-}
-
 impl HostTerminals {
     fn new(root: &Path) -> Self {
         Self {
@@ -158,10 +150,8 @@ impl HostTerminals {
         }
         let native = meerschaum_core::self_exe::native_executable()
             .ok_or("Host API terminals require the standalone native launcher.")?;
-        let mut config = WebtermConfig::new(
+        let mut config = WebtermConfig::headless(
             state,
-            Arc::new(NoSessions),
-            Arc::new(|_| String::new()),
             ShellCommand::new(native.to_string_lossy().into_owned()),
         );
         let directory = self.catalog.0.join("tmux");

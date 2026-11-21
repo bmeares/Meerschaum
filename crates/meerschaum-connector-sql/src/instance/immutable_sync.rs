@@ -45,6 +45,7 @@ impl SqlConnector {
         args: &FetchArgs,
         newest: bool,
     ) -> ConnectorResult<Option<DateBound>> {
+        self.ensure_schema().await?;
         let dt = sql_item_name(&column(pipe, "datetime")?, self.flavor, None);
         let agg = if newest { "MAX" } else { "MIN" };
         let source = self.fetch_query(pipe, args).await?;
@@ -135,6 +136,7 @@ impl SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Vec<(String, DateBound)>> {
+        self.ensure_schema().await?;
         require_postgres(self)?;
         let target = self.immutable_target_query(pipe, query).await?;
         let dt = sql_item_name(&column(pipe, "datetime")?, self.flavor, None);
@@ -168,6 +170,7 @@ impl SqlConnector {
         watermarks: &[(String, DateBound)],
         joined: bool,
     ) -> ConnectorResult<Option<Frame>> {
+        self.ensure_schema().await?;
         require_postgres(self)?;
         if watermarks.is_empty() {
             return self.fetch(pipe, args).await;
@@ -335,6 +338,7 @@ impl SqlConnector {
     ) -> ConnectorResult<Frame> {
         use meerschaum_connector::CPI_PRIME;
 
+        self.ensure_schema().await?;
         let (series, offset) = self.cpi_columns(pipe, query)?;
         let source = self.fetch_query(pipe, args).await?;
         let mut conditions = Vec::with_capacity(polynomials.len());

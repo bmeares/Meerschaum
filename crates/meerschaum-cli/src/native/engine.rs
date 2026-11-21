@@ -145,13 +145,12 @@ pub fn registry_with(
             .or_else(|| session.instance(keys, config_ref).ok())
     };
     let mut native = StaticRegistry::new().with_instance(&inst.keys(), inst.conn());
-    if inplace
+    let inplace_enabled = inplace
         && config_ref
             .get(&["system", "experimental", "inplace_sync"])
-            .is_none_or(|v| v.truthy())
-        && let Instance::Sql(sql) = inst
-    {
-        native = native.with_plugin_sync(&inst.keys(), Arc::new(Inplace(sql.clone())));
+            .is_none_or(|v| v.truthy());
+    if inplace_enabled {
+        native = native.with_inplace_sync(true);
     }
     let engine_defaults = EngineConfig::from_config(config_ref, Some(&config_ref.paths().root_dir));
     let graph_options = meerschaum_engine::GraphOptions {
@@ -255,9 +254,14 @@ pub fn registry_with(
     );
     // Native plugins' host calls reuse the session's connectors.
     registry.set_session(session.clone());
+    let exposed: Arc<dyn meerschaum_engine::ConnectorRegistry> = if inplace_enabled {
+        meerschaum_engine::registry::with_inplace_sync(registry.clone(), true)
+    } else {
+        registry.clone()
+    };
     Ok(EngineRegistry {
         python,
-        registry: registry.clone(),
+        registry: exposed,
         native: registry,
         config,
     })
@@ -283,147 +287,6 @@ fn unavailable_reason(plugins_dirs: &[std::path::PathBuf], keys: &str) -> Option
     } else {
         format!("no installed plugin provides the connector type '{typ}'.")
     })
-}
-
-/// PARITY: v4 returns the SQL in-place sync message directly (without a chunk envelope).
-struct Inplace(Arc<meerschaum_connector_sql::SqlConnector>);
-#[meerschaum_connector::async_trait]
-impl meerschaum_engine::PluginSync for Inplace {
-    fn is_fetch_optimization(&self) -> bool {
-        true
-    }
-
-    async fn sync_native(
-        &self,
-        pipe: &meerschaum_core::Pipe,
-        args: &meerschaum_engine::SyncArgs,
-        _env: &meerschaum_engine::sync::SyncEnv<'_>,
-        observer: Option<&dyn meerschaum_engine::sync::DeltaObserver>,
-    ) -> meerschaum_core::success::SyncResult {
-        use meerschaum_connector_sql::instance::fetch::metadef_bound;
-        use meerschaum_connector_sql::queries::metadef::Bound;
-        use meerschaum_engine::SyncBegin;
-        // A progress-only observer (chunk events) must not divert the direct in-place sync.
-        let Some(observer) = observer.filter(|o| o.records_deltas()) else {
-            return self.sync(pipe, args).await;
-        };
-        // PARITY: v4 syncs a pipe whose source is its instance in place, so the table keeps
-        // the definition's column types (a frame round trip would re-enforce the configured
-        // dtypes and alter, e.g., NUMERIC to TEXT). The ledger is recorded from the in-place
-        // sync's own staged rows right before it merges them, so it covers exactly what
-        // commits, with no second read of the source.
-        struct Ledger<'a> {
-            pipe: &'a meerschaum_core::Pipe,
-            observer: &'a dyn meerschaum_engine::sync::DeltaObserver,
-            /// The pipe's dtypes as the in-place sync read its table (`pipe_dtypes`).
-            dtypes: std::sync::Mutex<Option<meerschaum_kernel::enforce::PipeDtypesContext>>,
-        }
-        impl Ledger<'_> {
-            /// The staged rows come back with the database's types (SQLite returns
-            /// timestamps as text): enforce the pipe's dtypes so the ledger sees datetimes
-            /// (or integers) on the pipe's axis, as on the frame path.
-            fn enforced(
-                &self,
-                delta: &meerschaum_kernel::Frame,
-            ) -> Option<meerschaum_kernel::Frame> {
-                let ctx = self
-                    .dtypes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone()?;
-                meerschaum_kernel::enforce::pipe_enforce_dtypes(
-                    meerschaum_kernel::enforce::PipeInput::Frame(delta.clone()),
-                    &ctx,
-                )
-                .ok()
-            }
-        }
-        #[meerschaum_connector::async_trait]
-        impl meerschaum_connector_sql::instance::inplace::InplaceObserver for Ledger<'_> {
-            async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String> {
-                let enforced = self.enforced(delta);
-                self.observer
-                    .before_commit(self.pipe, enforced.as_ref().unwrap_or(delta))
-                    .await
-            }
-
-            // A replacing in-place sync (rc15): the whole window is marked, not only its rows.
-            async fn before_replace(
-                &self,
-                delta: &meerschaum_kernel::Frame,
-                begin: Option<&meerschaum_connector::DateBound>,
-                end: Option<&meerschaum_connector::DateBound>,
-            ) -> Result<(), String> {
-                let enforced = self.enforced(delta);
-                self.observer
-                    .before_replace(self.pipe, enforced.as_ref().unwrap_or(delta), begin, end)
-                    .await
-            }
-
-            // The in-place sync reads the table's state anyway: no catalog read of our own.
-            fn pipe_dtypes(&self, dtypes: &meerschaum_kernel::enforce::PipeDtypesContext) {
-                *self.dtypes.lock().unwrap_or_else(|e| e.into_inner()) = Some(dtypes.clone());
-            }
-        }
-        let begin = match &args.begin {
-            SyncBegin::Default => Bound::Default,
-            SyncBegin::At(b) => metadef_bound(Some(b)),
-            SyncBegin::Unbounded => Bound::None,
-        };
-        let ledger = Ledger {
-            pipe,
-            observer,
-            dtypes: std::sync::Mutex::new(None),
-        };
-        // `replace` (rc15): the window is replaced instead of diffed.
-        let result = self
-            .0
-            .sync_pipe_inplace_replacing(
-                pipe,
-                args.params.as_ref(),
-                begin,
-                metadef_bound(args.end.as_ref()),
-                args.check_existing,
-                args.replace,
-                Some(&ledger),
-            )
-            .await;
-        let mut result =
-            meerschaum_engine::sync::result_from_message(result.success, result.message);
-        if result.success
-            && let Err(e) = observer.after_commit(pipe, &result).await
-        {
-            result = meerschaum_core::success::SyncResult::new(false, e);
-        }
-        result
-    }
-    async fn sync(
-        &self,
-        pipe: &meerschaum_core::Pipe,
-        args: &meerschaum_engine::SyncArgs,
-    ) -> meerschaum_core::success::SyncResult {
-        use meerschaum_connector_sql::instance::fetch::metadef_bound;
-        use meerschaum_connector_sql::queries::metadef::Bound;
-        use meerschaum_engine::SyncBegin;
-        let begin = match &args.begin {
-            SyncBegin::Default => Bound::Default,
-            SyncBegin::At(b) => metadef_bound(Some(b)),
-            SyncBegin::Unbounded => Bound::None,
-        };
-        let result = self
-            .0
-            .sync_pipe_inplace_replacing(
-                pipe,
-                args.params.as_ref(),
-                begin,
-                metadef_bound(args.end.as_ref()),
-                args.check_existing,
-                args.replace,
-                None,
-            )
-            .await;
-        meerschaum_engine::sync::result_from_message(result.success, result.message)
-    }
 }
 
 pub fn build(
@@ -498,7 +361,7 @@ mod tests {
     use super::*;
     use meerschaum_connector::{DataQuery, async_trait};
     use meerschaum_core::{Pipe, Value};
-    use meerschaum_engine::PluginSync;
+    use meerschaum_engine::SyncHooks;
     use meerschaum_engine::sync::{DeltaObserver, SyncEnv};
     use meerschaum_kernel::Frame;
 
@@ -578,7 +441,8 @@ mod tests {
             .unwrap();
         let native = StaticRegistry::new()
             .with_instance("sql:wiring", sql.clone())
-            .with_source("sql:wiring", sql.clone());
+            .with_source("sql:wiring", sql.clone())
+            .with_inplace_sync(true);
         let defaults = Default::default();
         let env = SyncEnv {
             delivery: None,
@@ -588,14 +452,14 @@ mod tests {
             filter_params_index_limit: 250,
             known: None,
         };
-        let result = Inplace(sql.clone())
-            .sync_native(
-                &pipe,
-                &Default::default(),
-                &env,
-                Some(&AppendAfterSnapshot(sql.clone())),
-            )
-            .await;
+        let result = meerschaum_engine::sync::sync_pipe(
+            &env,
+            &pipe,
+            None,
+            &Default::default(),
+            Some(&AppendAfterSnapshot(sql.clone())),
+        )
+        .await;
         assert!(result.success, "{}", result.message);
         assert_eq!(
             sql.get_pipe_rowcount(&pipe, &DataQuery::default())
@@ -686,7 +550,7 @@ mod tests {
             StaticRegistry::new()
                 .with_instance(keys, sql.clone())
                 .with_source(keys, sql.clone())
-                .with_plugin_sync(keys, Arc::new(Inplace(sql.clone())))
+                .with_inplace_sync(true)
                 .with_table_reference(move |pipe| {
                     let sp = table_ref.sql_pipe(pipe).map_err(|e| e.to_string())?;
                     Ok(table_ref.pipe_table_name(&sp))
@@ -841,7 +705,7 @@ mod tests {
             StaticRegistry::new()
                 .with_instance(keys, sql.clone())
                 .with_source(keys, sql.clone())
-                .with_plugin_sync(keys, Arc::new(Inplace(sql.clone())))
+                .with_inplace_sync(true)
                 .with_table_reference(move |pipe| {
                     let sp = table_ref.sql_pipe(pipe).map_err(|e| e.to_string())?;
                     Ok(table_ref.pipe_table_name(&sp))
@@ -939,35 +803,25 @@ mod tests {
             assert!(sql.register_pipe(p).await.success);
         }
 
-        /// The in-place sync, locking `w9_second` (as an operator would, from another
-        /// process) right after `w9_first` synced.
+        /// Lock `w9_second` (as an operator would, from another process) right after `w9_first`
+        /// synced.
         struct LockAfterFirst {
-            inner: Inplace,
             sql: Arc<meerschaum_connector_sql::SqlConnector>,
             locked: Pipe,
         }
         #[async_trait]
-        impl PluginSync for LockAfterFirst {
-            async fn sync(
+        impl SyncHooks for LockAfterFirst {
+            async fn pre_sync(&self, _pipe: &Pipe, _args: &meerschaum_engine::SyncArgs) {}
+            async fn post_sync(
                 &self,
                 pipe: &Pipe,
-                args: &meerschaum_engine::SyncArgs,
-            ) -> meerschaum_core::success::SyncResult {
-                self.inner.sync(pipe, args).await
-            }
-            async fn sync_native(
-                &self,
-                pipe: &Pipe,
-                args: &meerschaum_engine::SyncArgs,
-                env: &SyncEnv<'_>,
-                observer: Option<&dyn DeltaObserver>,
-            ) -> meerschaum_core::success::SyncResult {
-                let result = self.inner.sync_native(pipe, args, env, observer).await;
+                _args: &meerschaum_engine::SyncArgs,
+                _result: &meerschaum_core::success::SyncResult,
+            ) {
                 if pipe.metric_key() == "w9_first" {
                     let edited = self.sql.edit_pipe(&self.locked, false).await;
                     assert!(edited.success, "{}", edited.message);
                 }
-                result
             }
         }
         let locked = Pipe::builder(keys, "w9_second")
@@ -980,14 +834,11 @@ mod tests {
             StaticRegistry::new()
                 .with_instance(keys, sql.clone())
                 .with_source(keys, sql.clone())
-                .with_plugin_sync(
-                    keys,
-                    Arc::new(LockAfterFirst {
-                        inner: Inplace(sql.clone()),
-                        sql: sql.clone(),
-                        locked,
-                    }),
-                )
+                .with_inplace_sync(true)
+                .with_hooks(Arc::new(LockAfterFirst {
+                    sql: sql.clone(),
+                    locked,
+                }))
                 .with_table_reference(move |pipe| {
                     let sp = table_ref.sql_pipe(pipe).map_err(|e| e.to_string())?;
                     Ok(table_ref.pipe_table_name(&sp))
@@ -1106,7 +957,7 @@ mod tests {
             StaticRegistry::new()
                 .with_instance(keys, sql.clone())
                 .with_source(keys, sql.clone())
-                .with_plugin_sync(keys, Arc::new(Inplace(sql.clone())))
+                .with_inplace_sync(true)
                 .with_table_reference(move |pipe| {
                     let sp = table_ref.sql_pipe(pipe).map_err(|e| e.to_string())?;
                     Ok(table_ref.pipe_table_name(&sp))

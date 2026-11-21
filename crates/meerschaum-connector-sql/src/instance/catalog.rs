@@ -50,6 +50,9 @@ pub(crate) struct CatalogCache {
     /// The columns types a static pipe's definition stages (by the pipe's table and a digest of
     /// its parameters), see [`CatalogCache::staged`].
     staged: HashMap<(TableKey, u64), (Instant, IndexMap<String, String>)>,
+    /// Internal `mrsm:*` tables that completed initialization (table, indices/constraints, and
+    /// MySQL history precision upgrade) in this process and have not been invalidated since.
+    internal_ready: HashMap<TableKey, IndexMap<String, String>>,
 }
 
 fn key(table: &str, schema: Option<&str>) -> TableKey {
@@ -238,6 +241,31 @@ impl CatalogCache {
         );
     }
 
+    /// Whether an internal `mrsm:*` table completed initialization in this process without being
+    /// invalidated since.
+    pub(crate) fn is_internal_ready(&self, table: &str, schema: Option<&str>) -> bool {
+        self.internal_ready.contains_key(&key(table, schema))
+    }
+
+    /// The columns types of an initialized internal `mrsm:*` table, if still valid.
+    pub(crate) fn internal_ready_cols(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+    ) -> Option<IndexMap<String, String>> {
+        self.internal_ready.get(&key(table, schema)).cloned()
+    }
+
+    /// Record that an internal `mrsm:*` table completed initialization with `cols_types`.
+    pub(crate) fn put_internal_ready(
+        &mut self,
+        table: &str,
+        schema: Option<&str>,
+        cols_types: &IndexMap<String, String>,
+    ) {
+        bounded(&mut self.internal_ready).insert(key(table, schema), cols_types.clone());
+    }
+
     /// Forget everything.
     pub(crate) fn clear(&mut self) {
         self.generation = self.generation.wrapping_add(1);
@@ -247,6 +275,7 @@ impl CatalogCache {
         self.indices.clear();
         self.conflict.clear();
         self.staged.clear();
+        self.internal_ready.clear();
     }
 
     /// Forget what `sql` may change, if it changes the schema of a table (see [`ddl_scope`]).
@@ -277,6 +306,7 @@ impl CatalogCache {
         self.indices.retain(|k, _| !named(k));
         self.conflict.retain(|(k, _), _| !named(k));
         self.staged.retain(|(k, _), _| !named(k));
+        self.internal_ready.retain(|k, _| !named(k));
     }
 
     /// Forget one table.
@@ -290,6 +320,7 @@ impl CatalogCache {
         self.indices.retain(|k, _| !named(k));
         self.conflict.retain(|(k, _), _| !named(k));
         self.staged.retain(|(k, _), _| !named(k));
+        self.internal_ready.retain(|k, _| !named(k));
     }
 }
 
@@ -455,6 +486,26 @@ impl super::SqlConnector {
     /// Forget the catalog answers about one table.
     pub(crate) fn forget_catalog_table(&self, table: &str) {
         self.catalog().forget_table(table);
+    }
+
+    /// Forget all cached metadata for `table` (used by callers such as `Pipe.clear_caches()`).
+    pub fn forget_table(&self, table: &str) {
+        self.forget_catalog_table(table);
+    }
+
+    /// Read-only peek of `pipe`'s cached `{column: DB TYPE}` layout from `CatalogCache` without
+    /// querying the database (`None` when the cache has no fresh entry, e.g. right after table
+    /// creation, DDL invalidation, drop, failure, or `forget_table`).
+    pub fn cached_columns_types(
+        &self,
+        pipe: &meerschaum_core::Pipe,
+    ) -> Option<IndexMap<String, String>> {
+        let ttl = self.catalog_ttl()?;
+        let sp = self.sql_pipe(pipe).ok()?;
+        let schema = self.get_pipe_schema(&sp);
+        let reflected = super::reflect::uses_reflection(self.flavor);
+        self.catalog()
+            .cols_types(&sp.target, schema.as_deref(), reflected, ttl)
     }
 }
 
