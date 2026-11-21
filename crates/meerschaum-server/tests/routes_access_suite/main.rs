@@ -17,6 +17,7 @@ mod pipe_operation_admission;
 mod pipe_operation_reads;
 mod plugin_tokens;
 mod registered_pipes_hydration;
+mod registration_lookup;
 mod replace_api;
 mod routes;
 mod tls;

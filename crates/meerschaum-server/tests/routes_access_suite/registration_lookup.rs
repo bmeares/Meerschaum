@@ -1,0 +1,303 @@
+//! Whether a pipe is registered is asked of the instance on every request, for that pipe's keys
+//! alone: the work of a data read does not grow with the number of registered pipes, and the
+//! answer is as fresh as the instance (a pipe another process deletes or registers is seen at the
+//! next request).
+
+use std::sync::Arc;
+
+use crate::common::{MemoryInstance, SECRET, login, req, send};
+use axum::Router;
+use axum::http::StatusCode;
+use meerschaum_connector::{InstanceConnector, SyncOptions, pipe_ops};
+use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_valkey::{MemoryBackend, ValkeyConnector};
+use meerschaum_core::{Map, Pipe, Value};
+use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
+use meerschaum_kernel::value::Value as KValue;
+use meerschaum_server::{AppState, ServerConfig};
+
+const SOURCE: &str = "sql:source";
+
+struct Served {
+    conn: Arc<SqlConnector>,
+    app: Router,
+    uri: String,
+    _dir: tempfile::TempDir,
+}
+
+/// A server (`--no-auth`) over a fresh SQLite instance.
+async fn served() -> Served {
+    let dir = tempfile::tempdir().unwrap();
+    let uri = format!("sqlite:///{}", dir.path().join("lookup.db").display());
+    let conn = Arc::new(SqlConnector::from_uri("lookup", &uri).await.unwrap());
+    let mut cfg = ServerConfig::for_root(&conn.keys(), dir.path());
+    cfg.no_auth = true;
+    cfg.no_dash = true;
+    cfg.no_webterm = true;
+    let instance: Arc<dyn InstanceConnector> = conn.clone();
+    let state = AppState::builder(cfg, instance)
+        .secret(SECRET.to_vec())
+        .build()
+        .unwrap();
+    Served {
+        conn,
+        app: meerschaum_server::app(state),
+        uri,
+        _dir: dir,
+    }
+}
+
+fn pipe(conn: &dyn InstanceConnector, metric: &str) -> Pipe {
+    let parameters: Value =
+        serde_json::from_value(serde_json::json!({"columns": {"datetime": "ts"}})).unwrap();
+    Pipe::builder(SOURCE, metric)
+        .instance(&conn.connector_keys())
+        .parameters(parameters.to_map())
+        .build()
+        .unwrap()
+}
+
+/// Register `metric` with one row.
+async fn register(conn: &dyn InstanceConnector, metric: &str) {
+    register_pipe(conn, &pipe(conn, metric)).await;
+}
+
+async fn register_pipe(conn: &dyn InstanceConnector, pipe: &Pipe) {
+    let res = conn.register_pipe(pipe).await;
+    assert!(res.success, "{res}");
+    let context = pipe_ops::dtypes_context(conn, pipe, pipe.parameters())
+        .await
+        .unwrap();
+    let frame = pipe_enforce_dtypes(
+        PipeInput::Docs(vec![
+            [
+                ("ts".into(), KValue::Str("2026-01-01".into())),
+                ("value".into(), KValue::Int(1)),
+            ]
+            .into_iter()
+            .collect(),
+        ]),
+        &context,
+    )
+    .unwrap();
+    let res = conn.sync_pipe(pipe, frame, &SyncOptions::default()).await;
+    assert!(res.success, "{res}");
+}
+
+/// Register `metric` without data.
+async fn register_only(conn: &dyn InstanceConnector, metric: &str) {
+    let res = conn.register_pipe(&pipe(conn, metric)).await;
+    assert!(res.success, "{res}");
+}
+
+/// Register `count` other pipes (`filler_*`).
+async fn register_fillers(conn: &SqlConnector, count: usize) {
+    for i in 0..count {
+        register_only(conn, &format!("filler_{i}")).await;
+    }
+}
+
+async fn get(app: &Router, uri: &str) -> crate::common::Resp {
+    send(app, req("GET", uri, None, None)).await
+}
+
+/// `GET .../data` of `metric`: its status and the statements the instance ran for it.
+async fn data_read(s: &Served, metric: &str) -> (StatusCode, Vec<String>) {
+    s.conn.enable_query_log();
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/{metric}/None/data")).await;
+    let log = s.conn.take_query_log();
+    (r.status, log)
+}
+
+/// The statements of a warm data read (after one read has populated the server's caches).
+async fn warm_data_read(s: &Served, metric: &str) -> Vec<String> {
+    let (status, _) = data_read(s, metric).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, log) = data_read(s, metric).await;
+    assert_eq!(status, StatusCode::OK, "{log:#?}");
+    log
+}
+
+/// The part of a statement that filters rows (between `WHERE` and `ORDER BY`).
+fn filter_of(statement: &str) -> &str {
+    let filter = statement.split_once("WHERE").map_or("", |(_, rest)| rest);
+    filter
+        .split_once("ORDER BY")
+        .map_or(filter, |(head, _)| head)
+}
+
+#[tokio::test]
+async fn a_data_read_runs_the_same_statements_however_many_pipes_are_registered() {
+    let small = served().await;
+    register(small.conn.as_ref(), "target").await;
+    let alone = warm_data_read(&small, "target").await;
+
+    let large = served().await;
+    register(large.conn.as_ref(), "target").await;
+    register_fillers(&large.conn, 60).await;
+    let crowded = warm_data_read(&large, "target").await;
+    assert_eq!(alone.len(), crowded.len(), "{alone:#?}\n{crowded:#?}");
+    // Every read of the pipes table names the pipe: none lists the whole catalog.
+    for statement in crowded.iter().filter(|s| s.contains("FROM mrsm_pipes")) {
+        assert!(
+            filter_of(statement).contains("metric_key"),
+            "a catalog read: {statement}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unregistered_pipe_is_refused_on_the_registered_only_reads() {
+    let s = served().await;
+    register_fillers(&s.conn, 3).await;
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/missing/None/data")).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text());
+    assert!(
+        r.text()
+            .contains("Pipe must be registered with the datetime column specified."),
+        "{}",
+        r.text()
+    );
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/missing/None/csv")).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text());
+    // Same keys, another location: not the registered pipe.
+    register(s.conn.as_ref(), "located").await;
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/located/elsewhere/data")).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text());
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/located/None/data")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+}
+
+#[tokio::test]
+async fn a_pipe_another_process_deletes_is_unregistered_at_the_next_read() {
+    let s = served().await;
+    register(s.conn.as_ref(), "target").await;
+    assert_eq!(data_read(&s, "target").await.0, StatusCode::OK);
+    let other = SqlConnector::from_uri("lookup_other", &s.uri)
+        .await
+        .unwrap();
+    let res = other.delete_pipe(&pipe(&other, "target")).await;
+    assert!(res.success, "{res}");
+    assert_eq!(data_read(&s, "target").await.0, StatusCode::CONFLICT);
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/target/None/csv")).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text());
+}
+
+#[tokio::test]
+async fn a_pipe_another_process_registers_is_registered_at_the_next_read() {
+    let s = served().await;
+    assert_eq!(data_read(&s, "target").await.0, StatusCode::CONFLICT);
+    let other = SqlConnector::from_uri("lookup_other", &s.uri)
+        .await
+        .unwrap();
+    register(&other, "target").await;
+    assert_eq!(data_read(&s, "target").await.0, StatusCode::OK);
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/target/None/csv")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+}
+
+#[tokio::test]
+async fn keys_that_read_as_filters_are_matched_exactly() {
+    let s = served().await;
+    // The wildcard is filter syntax in a keys query; a numeric key must stay text.
+    for metric in ["*", "123"] {
+        register(s.conn.as_ref(), metric).await;
+    }
+    let r = get(&s.app, &format!("/pipes/{SOURCE}/%2A/None/data")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let (status, _) = data_read(&s, "123").await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = data_read(&s, "1234").await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn internal_pipes_are_refused_on_the_generic_routes() {
+    let s = served().await;
+    for suffix in ["/data", "/csv"] {
+        let r = get(&s.app, &format!("/pipes/mrsm/engine_runs/None{suffix}")).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{suffix}: {}", r.text());
+    }
+}
+
+#[tokio::test]
+async fn a_valkey_instance_sees_registrations_by_their_exact_keys() {
+    let backend = Arc::new(MemoryBackend::new());
+    let conn = Arc::new(ValkeyConnector::with_backend(
+        "lookup",
+        Map::new(),
+        backend.clone(),
+    ));
+    let other = ValkeyConnector::with_backend("lookup", Map::new(), backend);
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = ServerConfig::for_root("valkey:lookup", dir.path());
+    cfg.no_auth = true;
+    cfg.no_dash = true;
+    cfg.no_webterm = true;
+    let state = AppState::builder(cfg, conn.clone())
+        .secret(SECRET.to_vec())
+        .build()
+        .unwrap();
+    for metric in ["target", "123", "*"] {
+        register_only(conn.as_ref(), metric).await;
+    }
+    for metric in ["target", "123", "*"] {
+        assert!(
+            state
+                .is_registered(&pipe(conn.as_ref(), metric), None)
+                .await
+                .unwrap(),
+            "{metric}"
+        );
+    }
+    assert!(
+        !state
+            .is_registered(&pipe(conn.as_ref(), "missing"), None)
+            .await
+            .unwrap()
+    );
+    let res = other.delete_pipe(&pipe(&other, "target")).await;
+    assert!(res.success, "{res}");
+    assert!(
+        !state
+            .is_registered(&pipe(conn.as_ref(), "target"), None)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_hidden_registered_pipe_stays_hidden_and_an_unregistered_one_stays_unregistered() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = Arc::new(MemoryInstance::new("fixture"));
+    instance.seed_user("admin", "pass", Some("admin"));
+    instance.seed_user("otto", "pw", None);
+    let mut private = pipe(instance.as_ref(), "private");
+    let parameters: Value = serde_json::from_value(serde_json::json!({
+        "columns": {"datetime": "ts"},
+        "access": {"owner": "admin", "visibility": "private"}
+    }))
+    .unwrap();
+    private.set_parameters(parameters.to_map());
+    register_pipe(instance.as_ref(), &private).await;
+    let mut cfg = crate::common::config(dir.path());
+    cfg.no_dash = true;
+    cfg.no_webterm = true;
+    let state = AppState::builder(cfg, instance.clone())
+        .secret(SECRET.to_vec())
+        .build()
+        .unwrap();
+    let app = meerschaum_server::app(state);
+    let otto = login(&app, "otto", "pw", None).await;
+    let admin = login(&app, "admin", "pass", None).await;
+    for suffix in ["data", "csv"] {
+        let uri = format!("/pipes/{SOURCE}/private/None/{suffix}");
+        let r = send(&app, req("GET", &uri, Some(&otto), None)).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{suffix}: {}", r.text());
+        let r = send(&app, req("GET", &uri, Some(&admin), None)).await;
+        assert_eq!(r.status, StatusCode::OK, "{suffix}: {}", r.text());
+        let uri = format!("/pipes/{SOURCE}/missing/None/{suffix}");
+        let r = send(&app, req("GET", &uri, Some(&otto), None)).await;
+        assert_eq!(r.status, StatusCode::CONFLICT, "{suffix}: {}", r.text());
+    }
+}

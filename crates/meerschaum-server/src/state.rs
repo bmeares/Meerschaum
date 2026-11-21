@@ -507,19 +507,64 @@ impl AppState {
         Ok(Arc::new(PipeHandle::new(pipe)))
     }
 
-    /// `is_pipe_registered(pipe, pipes(instance_keys, refresh=True))`.
+    /// `is_pipe_registered(pipe, pipes(instance_keys, refresh=True))`: whether the instance
+    /// lists the pipe's keys now.
+    ///
+    /// On a SQL or Valkey instance the listing is asked for the pipe's connector and metric keys
+    /// alone (the same `registered_pipes` read, filtered), so the cost does not grow with the
+    /// catalog; the location is matched here exactly as the full catalog would match it. Other
+    /// instances (API, plugins) define their own filters, so they list the whole catalog.
     pub async fn is_registered(
         &self,
         pipe: &Pipe,
         instance_keys: Option<&str>,
     ) -> Result<bool, ApiError> {
-        let dict = self.pipes(instance_keys, true).await?;
         let lk = pipe.location_key().map(String::from);
-        Ok(dict
-            .get(pipe.connector_keys())
-            .and_then(|m| m.get(pipe.metric_key()))
-            .is_some_and(|l| l.contains_key(&lk)))
+        let conn = self.get_api_connector(instance_keys)?;
+        let Some(query) = keyed_registration_query(conn.as_ref(), pipe) else {
+            let dict = self.pipes(instance_keys, true).await?;
+            return Ok(dict
+                .get(pipe.connector_keys())
+                .and_then(|m| m.get(pipe.metric_key()))
+                .is_some_and(|l| l.contains_key(&lk)));
+        };
+        let entries = conn
+            .registered_pipes(&query)
+            .await
+            .map_err(|e| ApiError::exception("Failed to fetch pipes' keys", e))?;
+        Ok(entries.iter().any(|(_, entry)| {
+            entry.connector_keys == pipe.connector_keys()
+                && entry.metric_key == pipe.metric_key()
+                && normalize_location(entry.location_key.as_deref()) == lk
+        }))
     }
+}
+
+/// The keys query that lists exactly the registrations `pipe`'s connector and metric keys name
+/// (possibly more, never fewer), when `conn`'s filters are known to compare keys as text: `None`
+/// for other instances and for keys a keys query reads as filter syntax (a negation, the `*`
+/// wildcard, a null spelling, the internal `mrsm` keys the unfiltered listing leaves out).
+fn keyed_registration_query(conn: &dyn InstanceConnector, pipe: &Pipe) -> Option<PipesKeysQuery> {
+    if !matches!(conn.connector_type(), "sql" | "valkey") {
+        return None;
+    }
+    let negation = meerschaum_core::static_config::negation_prefix();
+    let literal = |key: &str| {
+        !key.is_empty()
+            && !key.starts_with('_')
+            && !negation.is_empty()
+            && !key.starts_with(negation)
+            && !matches!(key, "*" | "None" | "[None]" | "null")
+    };
+    let (ck, mk) = (pipe.connector_keys(), pipe.metric_key());
+    if ck == meerschaum_connector::policy::INTERNAL_CONNECTOR_KEYS || !literal(ck) || !literal(mk) {
+        return None;
+    }
+    Some(PipesKeysQuery {
+        connector_keys: vec![ck.to_string()],
+        metric_keys: vec![mk.to_string()],
+        ..Default::default()
+    })
 }
 
 /// Load a pipe's parameters from the instance (`Pipe.attributes`: the instance's attributes

@@ -1463,7 +1463,7 @@ async fn a_credential_never_holds_more_than_its_owner() {
 fn form(fields: &[(&str, &str)]) -> Option<(&'static str, Vec<u8>)> {
     let body: Vec<String> = fields
         .iter()
-        .map(|(k, v)| format!("{k}={}", meerschaum_connector_api::wire::quote_plus(v)))
+        .map(|(k, v)| format!("{k}={}", meerschaum_core::pyfmt::quote_plus(v)))
         .collect();
     Some((
         "application/x-www-form-urlencoded",

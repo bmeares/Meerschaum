@@ -296,25 +296,39 @@ pub async fn prune_finished(state: &AppState) {
         let record = json!({"name": name, "metadata": meta, "ended": stopped,
             "summary_expires": stopped.timestamp().saturating_add(state.config.execution_retention[2] as i64)});
         let path = archive.join(format!("{name}.json"));
-        if meerschaum_core::team_scope::write_private(&path, &record.to_string()).is_ok() {
+        let record = record.to_string();
+        // The summary is on disk before its worker is deleted (off the async workers).
+        let archived = tokio::task::spawn_blocking(move || {
+            meerschaum_core::team_scope::write_private(&path, &record).is_ok()
+        })
+        .await
+        .unwrap_or(false);
+        if archived {
             let _ = state.jobs.delete(&name).await;
         }
     }
-    if let Ok(files) = std::fs::read_dir(&archive) {
-        for file in files.flatten() {
-            if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
-                continue;
-            }
-            let record = std::fs::read(file.path())
-                .ok()
-                .and_then(|v| serde_json::from_slice::<Json>(&v).ok());
-            if record
-                .as_ref()
-                .and_then(|v| v["summary_expires"].as_i64())
-                .is_some_and(|v| v <= now.timestamp())
-            {
-                let _ = std::fs::remove_file(file.path());
-            }
+    // Every retained summary is a file to read: off the async workers, under the maintenance lock.
+    let _ = tokio::task::spawn_blocking(move || remove_expired_summaries(&archive, now)).await;
+}
+
+/// Remove the archived summaries in `archive` whose `summary_expires` has passed at `now`.
+fn remove_expired_summaries(archive: &std::path::Path, now: chrono::DateTime<chrono::Utc>) {
+    let Ok(files) = std::fs::read_dir(archive) else {
+        return;
+    };
+    for file in files.flatten() {
+        if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
+            continue;
+        }
+        let record = std::fs::read(file.path())
+            .ok()
+            .and_then(|v| serde_json::from_slice::<Json>(&v).ok());
+        if record
+            .as_ref()
+            .and_then(|v| v["summary_expires"].as_i64())
+            .is_some_and(|v| v <= now.timestamp())
+        {
+            let _ = std::fs::remove_file(file.path());
         }
     }
 }
