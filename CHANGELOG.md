@@ -4,6 +4,50 @@
 
 ## Meerschaum 5
 
+### 5.1.2
+
+Maintenance release: leaner Docker images that share layers, stricter SQL checks for non-administrators, and console, web terminal and sync fixes.
+
+#### Before upgrading from 5.1.1
+
+- **Non-administrator SQL is checked more strictly.** Through the API and MCP, a query or pipe definition from a caller who is not an administrator is now refused when any SQL dialect would read it as more than one statement or as a write: a `;` inside a dollar-quoted string (`$$a;b$$`), or a mutating keyword after `#` or after `--` with no space. Administrators and local `mrsm` commands are unaffected.
+- **Docker images run as UID and GID 1000.** This was already the default; images built by the release workflow no longer inherit the build host's IDs.
+
+#### Highlights & Fixes
+
+- **Smaller downloads when updating Docker images.**  
+  The `full`, `rust-full`, `slim` and `rust` images now share their common layers (the `mrsm` binary, the Python wheel, the plugin compiler), and operating-system layers stay identical between patch releases, so `docker pull` fetches only what changed.
+
+- **Smaller `mrsm` binary.**  
+  Release binaries and wheels are stripped of symbols and no longer build unused Arrow and Polars features. A panic backtrace keeps its message and location; stack frames show addresses instead of function names.
+
+- **Internal tables stay unreachable through SQL comments.**  
+  The API and MCP SQL checks read a query the way each database flavor does, so a table name hidden behind `#`, `--` or a nested `/* */` comment is refused on every flavor.
+
+- **Console requests to the API ignore proxies and redirects.**  
+  The Dash console's calls to its own API server no longer honor `HTTP_PROXY` or follow redirects, so a session's credentials are only ever sent to that server.
+
+- **Job logs keep streaming past the session token's lifetime.**  
+  A log stream opened in the console renews its authorization while it runs, and ends when the session's credential is rotated or revoked.
+
+- **Web terminal fixes.**  
+  A refused new window no longer blocks later ones, panes on API-only hosts get `TERM`, and a closed session tells the browser to stop instead of reconnecting.
+
+- **The Users page follows the acting team.**  
+  An administrator viewing the console as a team sees and manages that team's users only; switch back to `Everyone` to manage all users.
+
+- **One console permission check.**  
+  An isolated team member's permissions are computed in one place, so the result no longer depends on which console page loaded first.
+
+- **In-place syncs stay on the pipe's instance.**  
+  A pipe whose source is the engine's home database but whose instance is another database no longer runs its sync inside the source database.
+
+- **Dropped engine metrics are reported.**  
+  A sync metric that cannot be written within its time budget now logs a warning (at most once a minute) instead of disappearing, and Oracle instances no longer lose their internal tables' ready state after index DDL.
+
+- **For contributors.**  
+  Rust integration tests build as 45 suite binaries instead of 411, `scripts/check_architecture.py` enforces crate layering and test wiring in CI, and `GLOSSARY.md`, `docs/adr/` and `CODING_STANDARDS.md` describe the codebase's terms, decisions and review rules.
+
 ### 5.1.1
 
 Maintenance release with console UX improvements, credential handling fixes in `stack.yaml`, and Docker stack / isolated-team fixes.
