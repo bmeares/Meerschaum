@@ -751,3 +751,82 @@ fn new_config_files_are_owner_only() {
         }
     }
 }
+
+#[test]
+fn writing_missing_stack_default_preserves_all_mrsm_references_including_lists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    write(
+        &root,
+        "meerschaum.yaml",
+        "instance: sql:main\nconnectors:\n  sql:\n    main:\n      flavor: timescaledb-ha\n      \
+         host: 127.0.0.1\n      port: 5466\n      username: sra\n      password: super-secret-db-pw\n      \
+         database: sra\n",
+    );
+    let config = config_with(&root, &[]);
+    let _ = config.get(&["stack"]);
+    let stack_path = config.paths().config_dir.join("stack.yaml");
+    let text = std::fs::read_to_string(&stack_path).unwrap();
+    for expected in [
+        "MRSM{!meerschaum}",
+        "MRSM{!system}",
+        "MRSM{!api}",
+        "MRSM{meerschaum:connectors:sql:main:port}:5432",
+        "MRSM{meerschaum:connectors:api:main:port}:MRSM{meerschaum:connectors:api:main:port}",
+        "http://localhost:MRSM{meerschaum:connectors:api:main:port}/healthcheck",
+        "MRSM{meerschaum:connectors:valkey:main:port}:6379",
+        "MRSM{meerschaum:connectors:sql:main:database}",
+        "MRSM{meerschaum:connectors:sql:main:username}",
+        "MRSM{meerschaum:connectors:sql:main:password}",
+        "MRSM{stack:docker-compose.yaml:services:db:hostname}:5432",
+    ] {
+        assert!(text.contains(expected), "missing {expected} in:\n{text}");
+    }
+    assert!(
+        !text.contains("super-secret-db-pw"),
+        "password leaked into stack.yaml:\n{text}"
+    );
+}
+
+#[test]
+fn writing_loaded_stack_preserves_mrsm_config_and_list_references() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    write(
+        &root,
+        "meerschaum.yaml",
+        "instance: sql:main\nconnectors:\n  sql:\n    main:\n      flavor: timescaledb-ha\n      \
+         host: 127.0.0.1\n      port: 5466\n      username: sra\n      password: super-secret-db-pw\n      \
+         database: sra\n",
+    );
+    let config = config_with(&root, &[]);
+    // Load `meerschaum` first so `meerschaum:api_instance` is substituted in memory (matching
+    // normal CLI / Python startup), then load `stack` and write it back after a small change.
+    let _ = config.get(&["meerschaum"]);
+    let mut stack = config.get(&["stack"]).unwrap().to_map();
+    stack.insert("project_name".into(), Value::Str("custom-proj".into()));
+    let mut to_write = meerschaum_core::config::ConfigMap::new();
+    to_write.insert(
+        "stack".into(),
+        meerschaum_core::config::ConfigValue::from_value(&Value::Map(stack)),
+    );
+    assert!(config.with_state(|s| s.write_config_lossless(Some(&to_write), None)));
+
+    let stack_path = config.paths().config_dir.join("stack.yaml");
+    let text = std::fs::read_to_string(&stack_path).unwrap();
+    assert!(text.contains("project_name: custom-proj"), "{text}");
+    for expected in [
+        "MRSM{!meerschaum}",
+        "MRSM{!system}",
+        "MRSM{!api}",
+        "MRSM{meerschaum:connectors:sql:main:port}:5432",
+        "MRSM{meerschaum:connectors:sql:main:password}",
+        "MRSM{stack:docker-compose.yaml:services:db:hostname}:5432",
+    ] {
+        assert!(text.contains(expected), "missing {expected} in:\n{text}");
+    }
+    assert!(
+        !text.contains("super-secret-db-pw"),
+        "secret expanded into stack.yaml:\n{text}"
+    );
+}

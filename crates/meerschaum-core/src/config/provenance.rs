@@ -122,8 +122,61 @@ pub struct KeyOrigins {
     pub file: Option<ConfigValue>,
     /// The value the registry would hold if it loaded the key now (every layer, substituted).
     pub resolved: Option<ConfigValue>,
+    /// The same resolution when top-level keys referenced by `MRSM{...}` inside `key` (such as
+    /// `MRSM{!meerschaum}` in `stack.yaml`) were already loaded and substituted in the live
+    /// registry (`search_and_substitute` reads already-loaded keys as substituted and unloaded
+    /// ones with `substitute: false`).
+    pub resolved_substituted: Option<ConfigValue>,
     /// The origin of each leaf of the key, by path below the key.
     pub leaves: HashMap<Vec<String>, Origin>,
+}
+
+/// Top-level config keys (other than `self_key`, `file`, and `env`) referenced by `MRSM{...}`
+/// patterns anywhere inside `value` (maps, lists, and strings).
+fn referenced_top_keys(value: &ConfigValue, self_key: &str) -> Vec<String> {
+    fn walk(value: &ConfigValue, self_key: &str, out: &mut Vec<String>) {
+        match value {
+            ConfigValue::Str(text) if text.contains("MRSM{") => {
+                let mut rest = text.as_str();
+                while let Some(start) = rest.find("MRSM{") {
+                    rest = &rest[start + 5..];
+                    let Some(end) = rest.find('}') else {
+                        break;
+                    };
+                    let inner = &rest[..end];
+                    let first = inner.split(':').next().unwrap_or_default();
+                    let top = first.strip_prefix('!').unwrap_or(first);
+                    if !top.is_empty()
+                        && top != self_key
+                        && !secrets::RESERVED_KEYS.contains(&top)
+                        && !out.iter().any(|existing| existing == top)
+                    {
+                        out.push(top.to_string());
+                    }
+                    rest = &rest[end + 1..];
+                }
+            }
+            ConfigValue::Map(m) => {
+                for v in m.values() {
+                    walk(v, self_key, out);
+                }
+            }
+            ConfigValue::List(items) | ConfigValue::Tuple(items) | ConfigValue::Set(items) => {
+                for v in items {
+                    walk(v, self_key, out);
+                }
+            }
+            ConfigValue::Pairs(pairs) => {
+                for (_, v) in pairs {
+                    walk(v, self_key, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(value, self_key, &mut out);
+    out
 }
 
 impl KeyOrigins {
@@ -288,12 +341,35 @@ impl ConfigState {
                 }
             }
         }
+        let referenced: Vec<String> = scratch
+            .config
+            .get(key)
+            .map(|v| referenced_top_keys(v, key))
+            .unwrap_or_default();
         let opts = GetOptions {
             patch: false,
             substitute: true,
             write_missing: false,
             warn: false,
         };
+        if !referenced.is_empty() {
+            let mut scratch_sub = self.scratch();
+            if let Some(raw_copy) = result
+                .file
+                .clone()
+                .or_else(|| self.defaults.get(key).cloned())
+            {
+                scratch_sub.config.insert(key.to_string(), raw_copy);
+            }
+            for (layer, _) in &stages {
+                scratch_sub.replay(layer);
+            }
+            for ref_key in &referenced {
+                let _ = scratch_sub.get_config_lossless(std::slice::from_ref(ref_key), opts);
+            }
+            let (valid_sub, resolved_sub) = scratch_sub.get_config_lossless(&keys, opts);
+            result.resolved_substituted = valid_sub.then_some(resolved_sub);
+        }
         let (valid, resolved) = scratch.get_config_lossless(&keys, opts);
         result.resolved = valid.then_some(resolved);
         result
@@ -313,6 +389,7 @@ impl ConfigState {
         merge(
             caller,
             origins.resolved.as_ref(),
+            origins.resolved_substituted.as_ref(),
             origins.file.as_ref(),
             defaults.as_ref(),
             caller_links,
@@ -339,9 +416,11 @@ impl ConfigState {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn merge(
     caller: &ConfigValue,
     base: Option<&ConfigValue>,
+    base_alt: Option<&ConfigValue>,
     file: Option<&ConfigValue>,
     defaults: Option<&ConfigValue>,
     links: Option<&ConfigValue>,
@@ -351,10 +430,11 @@ fn merge(
     let is_map_or_none = |v: Option<&ConfigValue>| v.is_none_or(|v| v.as_map().is_some());
     if let ConfigValue::Map(c) = caller
         && is_map_or_none(base)
+        && is_map_or_none(base_alt)
         && is_map_or_none(file)
         && !c.is_empty()
     {
-        if base.is_none() && file.is_none() {
+        if base.is_none() && base_alt.is_none() && file.is_none() {
             // A new subtree: the caller's, with its own originals restored.
             return Some(restore_links(caller, links));
         }
@@ -364,6 +444,7 @@ fn merge(
             let merged = merge(
                 v,
                 base.and_then(|b| b.get(k)),
+                base_alt.and_then(|b| b.get(k)),
                 file.and_then(|f| f.get(k)),
                 defaults.and_then(|d| d.get(k)),
                 links.and_then(|l| l.get(k)),
@@ -380,43 +461,42 @@ fn merge(
         }
         return Some(ConfigValue::Map(out));
     }
-    match base {
-        Some(b) if same(caller, b) => {
-            // Unchanged: as the file has it, or a default; never what only a layer holds.
-            if let Some(f) = file {
-                return Some(f.clone());
-            }
-            // A default, with the caller's `MRSM{...}` originals restored (v4).
-            let is_default = defaults.is_some_and(|d| same(d, caller));
-            (is_default
-                || origins
-                    .origin(path)
-                    .is_some_and(Origin::persisted_unchanged))
-            .then(|| restore_links(caller, links))
+    let unchanged =
+        base.is_some_and(|b| same(caller, b)) || base_alt.is_some_and(|b| same(caller, b));
+    if unchanged {
+        // Unchanged: as the file has it, or a default; never what only a layer holds.
+        if let Some(f) = file {
+            return Some(f.clone());
         }
-        _ => {
-            // Changed by the caller.
-            if let Some(ConfigValue::Str(original)) = links
-                && original.contains("MRSM{")
-            {
-                return Some(ConfigValue::Str(original.clone()));
-            }
-            if let Some(f) = file
-                && holds_reference(f)
-                && holds_known_secret(caller)
-            {
-                // A resolved secret the file holds as a reference (a rotated secret's stale copy).
-                return Some(f.clone());
-            }
-            if holds_known_secret(caller)
-                && let Some(Origin::Secret { under, .. }) = origins.origin(path)
-                && !under.persisted_unchanged()
-            {
-                // A secret an environment reference produced.
-                return None;
-            }
-            Some(caller.clone())
+        // A default, with the caller's `MRSM{...}` originals restored (v4).
+        let is_default = defaults.is_some_and(|d| same(d, caller));
+        (is_default
+            || origins
+                .origin(path)
+                .is_some_and(Origin::persisted_unchanged))
+        .then(|| restore_links(caller, links))
+    } else {
+        // Changed by the caller.
+        if let Some(ConfigValue::Str(original)) = links
+            && original.contains("MRSM{")
+        {
+            return Some(ConfigValue::Str(original.clone()));
         }
+        if let Some(f) = file
+            && holds_reference(f)
+            && holds_known_secret(caller)
+        {
+            // A resolved secret the file holds as a reference (a rotated secret's stale copy).
+            return Some(f.clone());
+        }
+        if holds_known_secret(caller)
+            && let Some(Origin::Secret { under, .. }) = origins.origin(path)
+            && !under.persisted_unchanged()
+        {
+            // A secret an environment reference produced.
+            return None;
+        }
+        Some(caller.clone())
     }
 }
 

@@ -1297,11 +1297,6 @@ fn with_secret_files(rt: &mut Runtime<'_>, keys: &[&str], value: Value, warn_: b
     if keys != ["stack", "docker-compose.yaml"] {
         return value;
     }
-    let image = value
-        .get("services")
-        .and_then(|services| services.get("api"))
-        .and_then(|api| api.get("image"))
-        .map(Value::py_str);
     let setting = rt
         .config()
         .get_with(
@@ -1315,12 +1310,12 @@ fn with_secret_files(rt: &mut Runtime<'_>, keys: &[&str], value: Value, warn_: b
         )
         .1;
     let setting = (!setting.is_null()).then_some(setting);
-    let form = secrets::api_form(image.as_deref(), setting.as_ref());
     let dir = secrets::secrets_dir(&rt.config().paths().path("STACK_RESOURCES_PATH"));
     let mut externalized = value.clone();
     let written = secrets::prepare_dir(&dir).and_then(|salt| {
         let (valkey_password, extra_warnings) = stack_valkey_password(rt, &mut externalized, &dir);
-        let mut done = secrets::externalize(&mut externalized, &dir, &form, &salt);
+        let mut done =
+            secrets::externalize_with_setting(&mut externalized, &dir, setting.as_ref(), &salt);
         let (valkey, warnings) =
             secrets::externalize_valkey(&mut externalized, &dir, valkey_password.as_deref(), &salt);
         done.services.push(valkey);
