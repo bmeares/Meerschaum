@@ -1,5 +1,6 @@
 #! /usr/bin/env bash
 # Usage: scripts/docker/buildx.sh [--push] [--v4-only] [--platform P] [--arch-tags] [--merge]
+#                                [--candidate REPOSITORY --metadata-dir DIR] [--cache-ref REF]
 #
 # Builds the image variants (Dockerfile, docs/design/v5-build.md):
 #   minimal/slim: base Python wheel; full: Python extras and both build toolchains;
@@ -21,15 +22,26 @@
 #                 every `--push --arch-tags` job succeeded. The `-<arch>` tags stay in the registry as
 #                 the architectures' own images.
 #   --sdk-artifacts DIR  use the normalized, verified wheel/CLI context instead of compiling the SDK.
+#   --candidate REPOSITORY  (with --platform P, one platform) push every image to the staging
+#                 repository as `REPOSITORY:<version>-<group>-<arch>-<run>-<attempt>` (GITHUB_RUN_ID and
+#                 GITHUB_RUN_ATTEMPT), without provenance attestations (one image manifest each), write
+#                 BuildKit's metadata (`containerimage.digest`) to `--metadata-dir DIR/<group>.json`,
+#                 then pull each image by digest and smoke-test exactly those bytes. $GITHUB_OUTPUT then
+#                 names the `REPOSITORY@sha256:...` references (.github/workflows/docker-build.yaml).
+#   --cache-ref REF  (with --platform P) import the BuildKit cache from `REF:<target>-<arch>` of every target
+#                 and export each build's complete cache (mode=max) to its own `REF:<target>-<arch>`.
 #
 # Pre-release versions (dev, rc, aN, bN) default to amd64 and only get version-qualified tags,
 # never `latest`/`full`/`slim`. Final releases include both amd64 and arm64.
 # Pushing requires a 5.x version (the wheels' version, from the Cargo workspace).
-# When $GITHUB_OUTPUT is set, writes `slim_image` and `full_image` (the version-qualified tags).
+# When $GITHUB_OUTPUT is set, writes `slim_image`, `full_image`, `rust_image` and `rust_full_image` (the
+# version-qualified tags, or with --candidate the tested digest references).
+# The image's user is MRSM_IMAGE_UID:MRSM_IMAGE_GID (default: the caller's `id -u`/`id -g`, so a local
+# build matches the developer's bind mounts; release builds pin 1000:1000).
 # Experimental features must be enabled and docker buildx must be installed (see scripts/setup.sh).
 #
 # For tests: BUILDX_DRY_RUN=1 prints every docker command (`+ docker ...`) instead of running it and
-# skips the requirements refresh, the `docker pull` and the smoke test (tests/test_docker_buildx.py).
+# skips the requirements refresh, the candidate pulls and the smoke test (tests/test_docker_buildx.py).
 set -euo pipefail
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -43,6 +55,9 @@ platform=""
 arch_tags=""
 merge=""
 sdk_artifacts=""
+candidate=""
+metadata_dir=""
+cache_ref=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --push)      push="--push" ;;
@@ -52,6 +67,15 @@ while [ $# -gt 0 ]; do
     --sdk-artifacts)
       [ $# -ge 2 ] || { echo 'buildx.sh: --sdk-artifacts needs a directory' >&2; exit 2; }
       sdk_artifacts="$2"; shift ;;
+    --candidate)
+      [ $# -ge 2 ] || { echo 'buildx.sh: --candidate needs a repository' >&2; exit 2; }
+      candidate="$2"; shift ;;
+    --metadata-dir)
+      [ $# -ge 2 ] || { echo 'buildx.sh: --metadata-dir needs a directory' >&2; exit 2; }
+      metadata_dir="$2"; shift ;;
+    --cache-ref)
+      [ $# -ge 2 ] || { echo 'buildx.sh: --cache-ref needs a reference' >&2; exit 2; }
+      cache_ref="$2"; shift ;;
     --platform)
       [ $# -ge 2 ] || { echo "buildx.sh: --platform needs a value" >&2; exit 2; }
       platform="$2"; shift ;;
@@ -88,15 +112,31 @@ if [ -n "$arch_tags" ]; then
     exit 2
   fi
 fi
-if [ -n "$merge" ] && { [ -n "$arch_tags" ] || [ -n "$platform" ] || [ "$push" = "--push" ]; }; then
-  echo "buildx.sh: --merge takes no --push, --platform or --arch-tags." >&2
+if [ -n "$merge" ] && { [ -n "$arch_tags" ] || [ -n "$platform" ] || [ "$push" = "--push" ] || [ -n "$candidate" ] || [ -n "$cache_ref" ]; }; then
+  echo "buildx.sh: --merge takes no --push, --platform, --arch-tags, --candidate or --cache-ref." >&2
+  exit 2
+fi
+if [ -n "$candidate" ]; then
+  if [ -z "$platform" ] || [[ "$platform" == *,* ]] || [ -z "$metadata_dir" ] || [ "$push" = "--push" ] || [ -n "$arch_tags" ] || [ -n "$v4_only" ]; then
+    echo "buildx.sh: --candidate needs --platform (one platform) and --metadata-dir, and takes no --push, --arch-tags or --v4-only." >&2
+    exit 2
+  fi
+  case "$candidate" in
+    *:*|*@*|"") echo "buildx.sh: --candidate takes a repository without a tag or digest." >&2; exit 2 ;;
+  esac
+elif [ -n "$metadata_dir" ]; then
+  echo "buildx.sh: --metadata-dir is for --candidate." >&2
+  exit 2
+fi
+if [ -n "$cache_ref" ] && { [ -z "$platform" ] || [[ "$platform" == *,* ]]; }; then
+  echo "buildx.sh: --cache-ref needs --platform with exactly one platform." >&2
   exit 2
 fi
 
 ### The wheels' version: the Cargo workspace version in PEP 440 form (scripts/check_packaging.py).
 mrsm_version=$($PYTHON_BIN scripts/check_packaging.py --version)
-mrsm_uid=$(id -u)
-mrsm_gid=$(id -g)
+mrsm_uid="${MRSM_IMAGE_UID:-$(id -u)}"
+mrsm_gid="${MRSM_IMAGE_GID:-$(id -g)}"
 
 prerelease=""
 case "$mrsm_version" in
@@ -158,7 +198,6 @@ fi
 
 if [ -z "$dry_run" ]; then
   ./scripts/docker/update_requirements.sh
-  docker pull "$python_image"
 fi
 
 ### --platform wins; else the builder's own platform when loading (a manifest list cannot be loaded) and
@@ -169,6 +208,17 @@ if [ -n "$platform" ]; then
 elif [ "$push" = "--push" ]; then
   platform_args=(--platform "$platforms")
 fi
+
+### --candidate: push to the staging repository (exactly one image manifest per build) and keep
+### BuildKit's metadata; the images are tested after pulling them back by digest.
+output_args=("$push")
+candidate_id="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+if [ -n "$candidate" ]; then
+  output_args=(--push --provenance=false --sbom=false)
+  [ -n "$dry_run" ] || mkdir -p "$metadata_dir"
+fi
+build_targets=(slim full rust rust-full)
+[ -n "$v4_only" ] && build_targets=(default)
 
 build() {
   ### build <target or ""> <dep_group> <tags...>
@@ -183,9 +233,21 @@ build() {
     sdk_args=(--build-context "sdk=$sdk_artifacts" --build-arg sdk_source=artifacts)
   fi
   for t in "$@"; do tag_args+=(-t "$t"); done
+  local cache_args=() metadata_args=() cached
+  if [ -n "$cache_ref" ]; then
+    for cached in "${build_targets[@]}"; do
+      cache_args+=(--cache-from "type=registry,ref=$cache_ref:$cached-$(arch_of "$platform")")
+    done
+    cache_args+=(--cache-to "type=registry,ref=$cache_ref:${target:-default}-$(arch_of "$platform"),mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true")
+  fi
+  if [ -n "$candidate" ]; then
+    metadata_args=(--metadata-file "$metadata_dir/${target:-default}.json")
+  fi
   echo "Building tags (target ${target:-default}): $*"
-  run docker buildx build --progress plain "$push" \
+  run docker buildx build --progress plain "${output_args[@]}" \
     --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+    ${cache_args[@]+"${cache_args[@]}"} \
+    ${metadata_args[@]+"${metadata_args[@]}"} \
     ${sdk_args[@]+"${sdk_args[@]}"} \
     ${target_args[@]+"${target_args[@]}"} \
     --build-arg dep_group="$dep_group" \
@@ -199,7 +261,9 @@ build() {
 ### The tags one image is built under: all of them, or (--arch-tags) only its architecture's own tag,
 ### from which --merge builds the rest.
 tags_for() {
-  if [ -n "$arch_tags" ]; then
+  if [ -n "$candidate" ]; then
+    echo "$candidate:$mrsm_version-$1-$(arch_of "$platform")-$candidate_id"
+  elif [ -n "$arch_tags" ]; then
     echo "$image:$mrsm_version-$1-$(arch_of "$platform")"
   else
     final_tags "$1"
@@ -228,6 +292,37 @@ else
     while IFS= read -r t; do variant_tags+=("$t"); done < <(tags_for "$variant")
     build "$variant" minimal "${variant_tags[@]}"
   done
+fi
+
+### --candidate: the pushed digests, from BuildKit's metadata, pulled back so every check below and
+### in the workflow runs against exactly the bytes in the staging repository.
+if [ -n "$candidate" ]; then
+  declare -A refs=()
+  for target in "${build_targets[@]}"; do
+    if [ -n "$dry_run" ]; then
+      refs[$target]="$candidate@sha256:$(printf '%064d' 0)"
+      continue
+    fi
+    digest="$($PYTHON_BIN -c 'import json, sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$metadata_dir/$target.json")"
+    [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "buildx.sh: no image digest for $target" >&2; exit 1; }
+    refs[$target]="$candidate@$digest"
+  done
+  for target in "${build_targets[@]}"; do
+    run docker pull --quiet --platform "$platform" "${refs[$target]}"
+  done
+  if [ -z "${SKIP_SMOKE:-}" ] && [ -z "$dry_run" ]; then
+    ./scripts/docker/smoke_image.sh --full-image "${refs[full]}" --slim-image "${refs[slim]}" \
+      --rust-image "${refs[rust]}" --rust-full-image "${refs[rust-full]}"
+  fi
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    {
+      echo "slim_image=${refs[slim]}"
+      echo "full_image=${refs[full]}"
+      echo "rust_image=${refs[rust]}"
+      echo "rust_full_image=${refs[rust-full]}"
+    } >> "$GITHUB_OUTPUT"
+  fi
+  exit 0
 fi
 
 ### Smoke-test the images that were loaded locally (scripts/docker/smoke_image.sh): `curl` in every

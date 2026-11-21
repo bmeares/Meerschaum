@@ -7,6 +7,7 @@ only that project's containers and volumes are removed. No legacy test stack is 
 
 import argparse
 import collections
+import concurrent.futures
 import json
 import os
 from pathlib import Path
@@ -281,13 +282,22 @@ def validate_partition(baseline, lanes):
 def validate(args):
     root = args.root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=False)
-    baseline = collection(args.python, root / 'full', root / 'full.json')
+    # Each lane is collected with its own `MRSM_TEST_FLAVORS` and `--mrsm-shard`, exactly as it runs:
+    # modules that parametrize from the flavors collect different items per lane, and an item that
+    # only the unsharded catalog has (or only a lane has) would otherwise never run. The passes are
+    # independent processes with their own roots and reserved ports, so they run concurrently.
+    passes = {None: ('full', None), **{lane: (lane, lane) for lane in SHARDS}}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(passes)) as pool:
+        futures = {
+            key: pool.submit(collection, args.python, root / name, root / f'{name}.json', shard)
+            for key, (name, shard) in passes.items()
+        }
+        results = {key: future.result() for key, future in futures.items()}
+    baseline = results.pop(None)
     unknown = sorted({item['shard'] for item in baseline} - set(SHARDS))
     if unknown:
         raise ValueError(f'Unknown shard(s) in collection: {unknown}')
-    # pytest_shard computes each item's shard deterministically from the full catalog, so a
-    # single unsharded collection pass proves complete, disjoint coverage across all lanes.
-    lanes = {lane: baseline for lane in SHARDS}
+    lanes = results
     counts = validate_partition(baseline, lanes)
     (root / 'partition.json').write_text(json.dumps({'total': len(baseline), 'shards': counts}, indent=2) + '\n')
     print(json.dumps({'total': len(baseline), 'shards': counts}, indent=2))

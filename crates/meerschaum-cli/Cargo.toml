@@ -130,7 +130,7 @@ vt100 = "0.16"
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 # The web terminal's websocket in tests/webterm_restricted.rs (the version meerschaum-server's
 # tests use).
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
 [lints]

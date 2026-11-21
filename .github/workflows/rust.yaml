@@ -88,6 +88,33 @@ jobs:
           if [ "$FORCE_FULL" = true ]; then event=workflow_call; fi
           python3 scripts/ci/changes.py --event "$event" --ref "$GITHUB_REF" --before "$BEFORE" --after "$GITHUB_SHA" --base "$BASE"
 
+  # ---------------------------------------------------------------- hosted: guardrails on every change
+  # Stdlib-only and seconds long, so it runs on every push and pull request whatever changed (also when
+  # `changes` reuses a release candidate): the architecture rules, and the public-file hygiene scan
+  # over the tracked text files this change adds or modifies (every tracked file when the base is unknown).
+  guardrails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 1, persist-credentials: false, ref: '${{ github.sha }}' }
+      # The ratchet lists may only shrink: compare them with the pull request's base.
+      - name: Fetch the base for the ratchets
+        if: ${{ github.event.pull_request.base.sha != '' }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$BASE"
+      - name: Architecture rules and public-file hygiene
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          MRSM_ARCH_RATCHET_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          files="$RUNNER_TEMP/hygiene-files.txt"
+          python3 scripts/ci/changes.py --event "$GITHUB_EVENT_NAME" --ref "$GITHUB_REF" --before "$BEFORE" \
+            --after "$GITHUB_SHA" --base "$BASE" --list-files "$files"
+          MRSM_CI_HYGIENE_FILES="$files" MRSM_CI_ACCEL=0 scripts/rust/ci.sh guardrails
+
   # ---------------------------------------------------------------- hosted: formatting (a quick gate)
   fmt:
     needs: changes
@@ -143,24 +170,8 @@ jobs:
       - name: Disk guard (drops the release/ci layers, then cargo clean, below 10 GB free)
         run: scripts/rust/ci.sh disk-guard
       - name: Prepare the native API test interpreter
-        run: |
-          # The reference-interpreter setup also supplies uv on self-hosted runners.
-          scripts/parity/setup_reference.sh
-          native_uv="$(command -v uv || printf '%s\n' "$HOME/.local/bin/uv")"
-          ci_cache="${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}"
-          native_test_env="$ci_cache/native-api-venv"
-          wanted="$(python3 -c 'import sys; print(sys.version_info[:2])')"
-          deps_hash="$({ cat requirements/api.txt requirements/dash.txt requirements/sql.txt requirements/pandas.txt requirements/polars.txt; printf '%s\n' "pip $wanted"; } | sha256sum | cut -d' ' -f1)"
-          if [ ! -x "$native_test_env/bin/python" ] || \
-             [ "$("$native_test_env/bin/python" -c 'import sys; print(sys.version_info[:2])' 2>/dev/null || true)" != "$wanted" ] || \
-             [ "$(cat "$native_test_env/.deps-hash" 2>/dev/null || true)" != "$deps_hash" ]; then
-            mkdir -p "$ci_cache"
-            python3 -m venv --clear --without-pip "$native_test_env"
-            "$native_uv" pip install --python "$native_test_env/bin/python" pip -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt -r requirements/polars.txt
-            echo "$deps_hash" > "$native_test_env/.deps-hash"
-          fi
-          echo "PYTHON_BIN=$native_test_env/bin/python" >> "$GITHUB_ENV"
-          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+        # Shared by the host's runners: one locked, never-cleared venv per requirements, interpreter and week.
+        run: scripts/rust/ci.sh native-api-venv
       - name: Build the native Python extension
         # Since D14 several cargo tests start real Python workers that import `meerschaum`, which
         # requires the extension. A debug build, so it reuses the dependencies `cargo nextest` /
@@ -209,7 +220,7 @@ jobs:
       - name: meerschaum feature matrix
         run: scripts/rust/ci.sh frontcrate
 
-  # crates.io packaging dry-run (docs/design/v5-build.md "Publishing to crates.io"): `cargo package
+  # crates.io packaging dry-run (crates/README.md "Publishing (crates.io)"): `cargo package
   # --workspace --no-verify` writes every tarball (explicit `include` lists, lockstep `=<ver>` internal
   # dependencies, publish metadata) and scripts/rust/check_packages.py rejects an archive of 10 MB or
   # more or one that ships tests, fixtures or benches.
@@ -375,7 +386,7 @@ jobs:
   summary:
     name: summary
     if: ${{ !cancelled() }}
-    needs: [ changes, fmt, clippy, test, frontcrate, package, parity, check, duckdb-platforms ]
+    needs: [ changes, guardrails, fmt, clippy, test, frontcrate, package, parity, check, duckdb-platforms ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

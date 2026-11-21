@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Build from sealed SDK bytes and publish the exact Docker images that passed checks."""
+"""Build from sealed SDK bytes and publish the exact Docker images that passed checks.
+
+A candidate run pushes each architecture's images to the GHCR staging repository and records their
+digests (`record`); the amd64 `full` image is pulled by digest on the native Docker runner for the
+installed Team executor suite (`executors`). Publication fetches both receipts from that successful
+run (`fetch`), checks them against a freshly verified sealed SDK and the staging registry (`check`),
+and copies exactly those digests to Docker Hub registry to registry (`promote`): nothing is rebuilt.
+"""
 from __future__ import annotations
 
 import argparse
@@ -33,8 +40,17 @@ EXECUTOR_CASES = (
 )
 
 
+# The user every published image runs as (the uid of 5.0 and 5.1 images): a runner's own uid never leaks in.
+IMAGE_USER = '1000:1000'
+CANDIDATES = 'candidate'
+# BuildKit target of each published group: `minimal` and `slim` are one image.
+TARGET_OF = {'minimal': 'slim', 'slim': 'slim', 'full': 'full', 'rust': 'rust', 'rust-full': 'rust-full'}
+DIGEST = re.compile('sha256:[0-9a-f]{64}')
+SCHEMA = 2
+
+
 class MissingImages(ValueError):
-    """A valid candidate's local images have been pruned or are on another daemon."""
+    """A valid receipt's candidate digests are no longer in the staging registry."""
 
 
 def command(*args: str):
@@ -43,6 +59,43 @@ def command(*args: str):
 
 def version() -> str:
     return subprocess.check_output(['python3', 'scripts/check_packaging.py', '--version'], text=True).strip()
+
+
+def candidate_repository() -> str:
+    """The staging repository on GHCR: `ghcr.io/<owner>/<repository>/candidate`, in lower case."""
+    return f'ghcr.io/{candidates.repository().lower()}/{CANDIDATES}'
+
+
+def registry_image(reference: str) -> tuple[dict, dict]:
+    """The raw manifest and the image configuration of one registry reference."""
+    manifest = command('docker', 'buildx', 'imagetools', 'inspect', '--raw', reference)
+    config = command('docker', 'buildx', 'imagetools', 'inspect', '--format', '{{json .Image}}', reference)
+    return manifest, config
+
+
+def registry_digest(reference: str) -> str:
+    """The digest a registry serves for a tag or digest reference (the `Digest:` line of the summary)."""
+    summary = subprocess.check_output(['docker', 'buildx', 'imagetools', 'inspect', reference], text=True)
+    for line in summary.splitlines():
+        key, _, value = line.partition(':')
+        if key.strip() == 'Digest' and DIGEST.fullmatch(value.strip()):
+            return value.strip()
+    raise ValueError(f'The registry reported no digest for {reference}.')
+
+
+def check_registry_image(reference: str, entry: dict, platform: str, commit: str) -> None:
+    """The reference is one image manifest with the recorded config, platform, source and user."""
+    try:
+        manifest, config = registry_image(reference)
+    except subprocess.CalledProcessError as error:
+        raise MissingImages(f'{reference} is not in the registry.') from error
+    if 'manifests' in manifest or manifest.get('config', {}).get('digest') != entry['config']:
+        raise ValueError(f'{reference} is not the single image manifest that was tested.')
+    settings = config.get('config') or {}
+    if (f'{config.get("os")}/{config.get("architecture")}' != platform
+            or (settings.get('Labels') or {}).get('org.opencontainers.image.revision') != commit
+            or settings.get('User') != IMAGE_USER):
+        raise ValueError(f'{reference} has the wrong platform, source revision or user.')
 
 
 def prepare_sdk(run_id: str, platform: str, output: Path) -> dict:
@@ -81,10 +134,6 @@ def prepare_sdk(run_id: str, platform: str, output: Path) -> dict:
     return info
 
 
-def inspect_image(reference: str) -> dict:
-    return command('docker', 'image', 'inspect', reference)[0]
-
-
 def check_executor_image(image_id: str, sdk: Path, info: dict) -> None:
     """Exercise the sealed Linux image with generated Teams on the native Docker runner."""
     wheels = list((sdk / 'wheels').glob('*.whl'))
@@ -119,129 +168,181 @@ def check_executor_image(image_id: str, sdk: Path, info: dict) -> None:
             raise ValueError('The installed executor suite did not exercise every selected case.')
 
 
-def required_checks(platform: str) -> dict:
-    checks = {'runtime_smokes': 'success', 'size_gate': 'success', 'facade_smoke': 'success'}
-    if platform == 'linux/amd64':
-        checks['installed_team_executors'] = 'success'
-    return checks
+def required_checks() -> dict:
+    return {'runtime_smokes': 'success', 'size_gate': 'success', 'facade_smoke': 'success'}
 
 
-def record_images(output: Path, platform: str, sdk: Path) -> dict:
+def needs_executors(platform: str) -> bool:
+    """The installed Team executor suite runs on the native amd64 Docker runner."""
+    return platform == 'linux/amd64'
+
+
+def record_images(output: Path, platform: str, sdk: Path, metadata: Path, repository: str) -> dict:
+    """Record the digests the build pushed to the staging repository and the smokes tested."""
     info = json.loads((sdk / 'sdk-info.json').read_text())
     source = gate.artifacts.checkout()
     if info['source'] != source or info['platform'] != platform:
         raise ValueError('The images must use the sealed SDK for this source and platform.')
-    arch = platform.split('/')[1]
+    if repository != candidate_repository():
+        raise ValueError('Candidates must be staged in this repository\'s GHCR namespace.')
     images = {}
-    tag_prefix = f'{IMAGE}:candidate-{os.environ["GITHUB_RUN_ID"]}-{os.environ.get("GITHUB_RUN_ATTEMPT", "1")}-{arch}'
     for group in GROUPS:
-        image = inspect_image(f'{IMAGE}:{version()}-{group}')
-        if (f'{image["Os"]}/{image["Architecture"]}' != platform
-                or image['Config']['Labels'].get('org.opencontainers.image.revision') != source['commit']):
-            raise ValueError(f'Image {group} has the wrong source or platform.')
-        if not re.fullmatch('sha256:[0-9a-f]{64}', image['Id']):
-            raise ValueError('Invalid Docker image ID.')
-        local = f'{tag_prefix}-{group}'
-        subprocess.run(['docker', 'tag', image['Id'], local], check=True)
-        images[group] = {'id': image['Id'], 'local_tag': local}
-    if platform == 'linux/amd64':
-        check_executor_image(images['full']['id'], sdk, info)
-    record = {'schema': 1, 'source': source, 'version': version(), 'platform': platform,
-              'sdk': info, 'run_id': os.environ['GITHUB_RUN_ID'],
-              'checks': required_checks(platform),
-              'images': images}
+        built = json.loads((metadata / f'{TARGET_OF[group]}.json').read_text())
+        entry = {'digest': built.get('containerimage.digest'),
+                 'config': built.get('containerimage.config.digest')}
+        if not all(isinstance(value, str) and DIGEST.fullmatch(value) for value in entry.values()):
+            raise ValueError(f'The {group} build recorded no image digest.')
+        check_registry_image(f'{repository}@{entry["digest"]}', entry, platform, source['commit'])
+        images[group] = entry
+    record = {'schema': SCHEMA, 'source': source, 'version': version(), 'platform': platform,
+              'sdk': info, 'run_id': os.environ['GITHUB_RUN_ID'], 'repository': repository,
+              'checks': required_checks(), 'images': images}
     output.write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
     return record
 
 
-def validate_record(path: Path, platform: str, sdk_run: str, *, local: bool = True,
+def validate_record(path: Path, platform: str, sdk_run: str, *, registry: bool = True,
                     sdk: Path | None = None) -> dict:
     record = json.loads(path.read_text())
     source = gate.artifacts.checkout()
-    if (record.get('schema') != 1 or record.get('source') != source
+    if (record.get('schema') != SCHEMA or record.get('source') != source
             or record.get('version') != version() or record.get('platform') != platform
+            or record.get('repository') != candidate_repository()
             or record.get('sdk', {}).get('source') != source
             or record['sdk'].get('candidate_run_id') != sdk_run
             or record['sdk'].get('platform') != platform
             or set(record.get('images', {})) != set(GROUPS)
-            or record.get('checks') != required_checks(platform)):
-        raise ValueError('Docker candidate source, SDK, platform, image catalog or checks differ.')
+            or record.get('checks') != required_checks()):
+        raise ValueError('Docker candidate source, SDK, platform, repository, image catalog or checks differ.')
     if sdk is not None and record['sdk'] != json.loads((sdk / 'sdk-info.json').read_text()):
         raise ValueError('Docker candidate SDK checksums differ from the sealed SDK.')
-    missing = []
     for group, entry in record['images'].items():
-        if not re.fullmatch('sha256:[0-9a-f]{64}', entry['id']):
-            raise ValueError('Invalid candidate image ID.')
-        if not local:
-            continue
-        try:
-            image = inspect_image(entry['id'])
-        except subprocess.CalledProcessError:
-            missing.append(group)
-            continue
-        if (image['Id'] != entry['id'] or f'{image["Os"]}/{image["Architecture"]}' != platform
-                or image['Config']['Labels'].get('org.opencontainers.image.revision') != source['commit']):
-            raise ValueError('The local image differs from the verified candidate.')
-    if missing:
-        raise MissingImages(f'Tested candidate images are missing: {missing}. Rebuild explicitly and rerun every gate.')
+        if set(entry) != {'digest', 'config'} or not all(DIGEST.fullmatch(str(v)) for v in entry.values()):
+            raise ValueError('Invalid candidate image digest.')
+        if record['images'][TARGET_OF[group]] != entry:
+            raise ValueError('`minimal` and `slim` must be the same tested image.')
+    if registry:
+        missing = []
+        for group, entry in record['images'].items():
+            try:
+                check_registry_image(f'{record["repository"]}@{entry["digest"]}', entry, platform,
+                                     source['commit'])
+            except MissingImages:
+                missing.append(group)
+        if missing:
+            raise MissingImages(f'Tested candidate digests are missing from the staging registry: {missing}. '
+                                'Dispatch a new candidate run; every gate runs again.')
     return record
+
+
+def executor_record(path: Path, record: dict) -> dict:
+    """The installed Team executor receipt for exactly this candidate's `full` image."""
+    executors = json.loads(path.read_text())
+    if (executors.get('schema') != SCHEMA or executors.get('source') != record['source']
+            or executors.get('run_id') != record['run_id'] or executors.get('platform') != record['platform']
+            or executors.get('image') != record['images']['full']
+            or executors.get('installed_team_executors') != 'success'):
+        raise ValueError('The installed Team executor receipt does not cover this candidate.')
+    return executors
+
+
+def check_executors(record_path: Path, output: Path, platform: str, sdk_run: str, sdk: Path) -> dict:
+    """Pull the tested `full` image by digest and run the installed Team executor suite on it."""
+    if not needs_executors(platform):
+        raise ValueError(f'The installed Team executor suite runs on linux/amd64, not {platform}.')
+    record = validate_record(record_path, platform, sdk_run, sdk=sdk)
+    if record['run_id'] != os.environ['GITHUB_RUN_ID']:
+        raise ValueError('The executor suite tests the candidate of its own run.')
+    full = record['images']['full']
+    reference = f'{record["repository"]}@{full["digest"]}'
+    subprocess.run(['docker', 'pull', '--quiet', '--platform', platform, reference], check=True)
+    local = command('docker', 'image', 'inspect', reference)[0]['Id']
+    # The classic image store names an image by its config digest, the containerd store by its manifest.
+    if local not in (full['config'], full['digest']):
+        raise ValueError('The pulled image differs from the tested candidate.')
+    check_executor_image(local, sdk, record['sdk'])
+    receipt = {'schema': SCHEMA, 'source': record['source'], 'run_id': record['run_id'],
+               'platform': platform, 'image': full, 'installed_team_executors': 'success'}
+    output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+    return receipt
 
 
 def fetch_images(run_id: str, platform: str, sdk_run: str, output: Path) -> dict:
     candidates.trusted_run(run_id, 'docker-build.yaml', commit=gate.artifacts.checkout()['commit'])
-    name = 'docker-candidate-' + platform.split('/')[1]
-    if name not in candidates.available(run_id):
-        raise ValueError('Docker candidate receipt is missing or expired.')
-    candidates.download(run_id, output, name)
-    path = output / 'docker-candidate.json'
-    record = validate_record(path, platform, sdk_run, local=False)
+    arch = platform.split('/')[1]
+    names = {'docker-candidate-' + arch: output / 'candidate'}
+    if needs_executors(platform):
+        names['docker-executors-' + arch] = output / 'executors'
+    available = candidates.available(run_id)
+    if not names.keys() <= available:
+        raise ValueError('Docker candidate receipts are missing or expired.')
+    for name, directory in names.items():
+        candidates.download(run_id, directory, name)
+    record = validate_record(output / 'candidate' / 'docker-candidate.json', platform, sdk_run,
+                             registry=False)
     if record['run_id'] != run_id:
         raise ValueError('Docker receipt belongs to another Actions run.')
+    if needs_executors(platform):
+        executor_record(output / 'executors' / 'docker-executors.json', record)
     return record
 
 
-def promote(path: Path, platform: str, sdk_run: str, *, dry_run: bool = False,
+def check_publication(receipts: Path, platform: str, sdk_run: str, sdk: Path | None = None) -> dict:
+    """Everything publication requires: the receipts, the sealed SDK and the staged digests."""
+    record = validate_record(receipts / 'candidate' / 'docker-candidate.json', platform, sdk_run, sdk=sdk)
+    if needs_executors(platform):
+        executor_record(receipts / 'executors' / 'docker-executors.json', record)
+    return record
+
+
+def promote(receipts: Path, platform: str, sdk_run: str, *, dry_run: bool = False,
             sdk: Path | None = None) -> None:
-    record = validate_record(path, platform, sdk_run, sdk=sdk)
-    arch = platform.split('/')[1]
+    """Copy the tested digests to the architecture tags of the public repository, registry to registry."""
     # Validate the whole catalog before the first registry mutation.
-    for group, image in record['images'].items():
+    record = check_publication(receipts, platform, sdk_run, sdk=sdk)
+    arch = platform.split('/')[1]
+    for group in GROUPS:
+        entry = record['images'][group]
         tag = f'{IMAGE}:{record["version"]}-{group}-{arch}'
-        commands = [['docker', 'tag', image['id'], tag], ['docker', 'push', tag]]
-        for args in commands:
-            if dry_run:
-                print(' '.join(args))
-            else:
-                subprocess.run(args, check=True)
+        # One source manifest is copied as it is (no index around it), so the tag serves the tested digest.
+        args = ['docker', 'buildx', 'imagetools', 'create', '--prefer-index=false', '-t', tag,
+                f'{record["repository"]}@{entry["digest"]}']
         if dry_run:
+            print(' '.join(args))
             continue
-        manifest = command('docker', 'buildx', 'imagetools', 'inspect', '--raw', tag)
-        if manifest.get('config', {}).get('digest') != image['id']:
-            raise ValueError(f'The pushed {group} config digest differs from the tested image.')
+        subprocess.run(args, check=True)
+        if registry_digest(tag) != entry['digest']:
+            raise ValueError(f'The published {group} digest differs from the tested image.')
+        check_registry_image(tag, entry, platform, record['source']['commit'])
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('sdk', 'record', 'fetch', 'check', 'promote'))
+    parser.add_argument('command', choices=('sdk', 'record', 'executors', 'fetch', 'check', 'promote'))
     parser.add_argument('--platform', choices=tuple(TARGETS), required=True)
     parser.add_argument('--sdk-run-id', required=True)
     parser.add_argument('--image-run-id')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--sdk', type=Path)
     parser.add_argument('--record', type=Path)
+    parser.add_argument('--receipts', type=Path, help='directory of a fetched candidate (`fetch --output`)')
+    parser.add_argument('--metadata-dir', type=Path)
+    parser.add_argument('--repository')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     try:
         if args.command == 'sdk':
             prepare_sdk(args.sdk_run_id, args.platform, args.output)
         elif args.command == 'record':
-            record_images(args.output, args.platform, args.sdk)
+            record_images(args.output, args.platform, args.sdk, args.metadata_dir, args.repository)
+        elif args.command == 'executors':
+            check_executors(args.record, args.output, args.platform, args.sdk_run_id, args.sdk)
         elif args.command == 'fetch':
             fetch_images(args.image_run_id, args.platform, args.sdk_run_id, args.output)
         elif args.command == 'check':
-            validate_record(args.record, args.platform, args.sdk_run_id, sdk=args.sdk)
+            check_publication(args.receipts, args.platform, args.sdk_run_id, sdk=args.sdk)
         else:
-            promote(args.record, args.platform, args.sdk_run_id, dry_run=args.dry_run, sdk=args.sdk)
+            promote(args.receipts, args.platform, args.sdk_run_id, dry_run=args.dry_run, sdk=args.sdk)
     except MissingImages as error:
         parser.exit(2, str(error) + '\n')
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:

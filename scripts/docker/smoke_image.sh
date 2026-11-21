@@ -10,7 +10,10 @@
 #     instance (with the web console, no terminal, a random port) and `curl --fail` against it in the same
 #     container, which must answer within 90 seconds; once more with HTTPS (`--keyfile` / `--certfile`, a
 #     self-signed certificate made with `openssl`), where the unchanged plain-HTTP healthcheck must still
-#     answer and the console must load over `https://` (its Python host calls the server back).
+#     answer and the console must load over `https://` (its Python host calls the server back);
+#   - full, rust and rust-full: the native Factory manifest the image ships describes exactly the files
+#     the image contains (`write_native_factory_manifest.py --verify-export` over `docker export`, with
+#     the owners and modes the image records). Needs a host `python3` (3.11 or newer).
 #
 #   --full-image IMAGE   checked as a full image (curl, git, ssh, mrsm, the API healthcheck).
 #   --slim-image IMAGE   checked as a slim image (curl, mrsm).
@@ -51,6 +54,22 @@ cleanup() {
 trap cleanup EXIT
 
 failures=0
+manifest_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/write_native_factory_manifest.py"
+
+factory_manifest() {
+  ### factory_manifest <image>: the shipped native Factory manifest matches the final image's files.
+  local image="$1" user container status=0 out
+  user="$(docker image inspect -f '{{.Config.User}}' "$image")"
+  container="$(docker create "$image")"
+  if out="$(docker export "$container" | python3 -I "$manifest_tool" --verify-export - --runtime-uid "${user%%:*}" 2>&1)"; then
+    echo "  ok:   native Factory manifest matches the image: $out"
+  else
+    echo "  FAIL: native Factory manifest matches the image"
+    printf '%s\n' "$out" | tail -n 20 | sed 's/^/    | /'
+    failures=$((failures + 1))
+  fi
+  docker rm -f -v "$container" >/dev/null 2>&1 || true
+}
 ### Seconds to wait for a server in an image: an image of another architecture runs under
 ### emulation (arm64 under QEMU on the x86_64 builders), where the API host and its console take
 ### minutes to start (about 3 for the console), not seconds.
@@ -251,6 +270,7 @@ SCOPED_ROUTE_SMOKE
 
 for image in "${rust_images[@]}" "${rust_full_images[@]}"; do
   echo "== $image (native, no Python)"
+  factory_manifest "$image"
   check "native SQL, jobs and API without Python" "$image" bash -c "$native_script"
 done
 for image in "${rust_images[@]}"; do
@@ -269,6 +289,7 @@ for image in "${slim_images[@]}"; do
 done
 for image in "${full_images[@]}"; do
   echo "== $image (full)"
+  factory_manifest "$image"
   check "Rust build toolchain" "$image" bash -c "$toolchain_script"
   check "curl" "$image" curl --version
   check "Vim editor" "$image" vim --version

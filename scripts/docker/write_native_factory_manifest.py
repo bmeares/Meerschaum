@@ -12,7 +12,11 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import shutil
 import stat
+import sys
+import tarfile
+import tempfile
 
 
 MANIFEST = '/usr/local/share/meerschaum/native-factory.json'
@@ -235,14 +239,145 @@ def write(root: Path, payload: bytes):
         raise
 
 
+# Where the material a manifest can describe lives in an image (paths without the leading `/`).
+_ATTESTED_PREFIXES = (CLI[1:], POLICY[1:], COMPILERS[1:], MANIFEST[1:])
+
+
+def _attested_candidate(name: str) -> bool:
+    """Whether an image path may be part of a manifest: extract it for the comparison."""
+    if name.startswith(_ATTESTED_PREFIXES):
+        return True
+    parts = name.split('/')
+    return (len(parts) >= 6 and parts[:2] == ['usr', 'local'] and parts[2] in ('lib', 'lib64')
+            and parts[3].startswith('python') and parts[4] == 'site-packages'
+            and (parts[5] == '_meerschaum_mrsm.py' and len(parts) == 6
+                 or parts[5] == 'meerschaum' and '__pycache__' not in parts))
+
+
+def _attested_paths(manifest: dict) -> set[str]:
+    paths = {manifest['cli']['path']}
+    if manifest.get('sdk'):
+        paths |= {manifest['sdk']['root'] + '/' + name for name in manifest['sdk']['files']}
+    if manifest.get('compiler'):
+        paths.add(manifest['compiler']['policy']['path'])
+        paths |= {manifest['compiler']['snapshot'] + '/' + name for name in manifest['compiler']['files']}
+    return paths
+
+
+def verify_export(stream, runtime_uid: int, scratch: Path | None = None) -> dict:
+    """Check an image's exported filesystem (`docker export`) against its own Factory manifest.
+
+    The build attests a reconstruction of the final image, so this reads the final image itself:
+    the manifest it ships must be exactly what `build` writes for the files it contains (no missing,
+    extra or changed SDK or compiler file, the same CLI and policy), and every attested file and
+    its ancestor directories keep the owners and modes the tar records: regular, single-link, not
+    group- or world-writable, and not writable by the runtime user.
+    """
+    headers: dict[str, tarfile.TarInfo] = {}
+    linked: set[str] = set()
+    irregular: set[str] = set()
+
+    def canonical_member(raw: str) -> str:
+        name = raw
+        while name.startswith(('./', '/')):
+            name = name[2:] if name.startswith('./') else name[1:]
+        name = name.rstrip('/')
+        if name and name != '.' and any(part in ('', '.', '..') for part in name.split('/')):
+            raise ValueError(f'The image export has a noncanonical path: {raw!r}')
+        return '' if name == '.' else name
+
+    with tempfile.TemporaryDirectory(prefix='mrsm-factory-export-', dir=scratch) as directory:
+        root = Path(directory)
+        with tarfile.open(fileobj=stream, mode='r|') as archive:
+            for member in archive:
+                name = canonical_member(member.name)
+                if not name:
+                    continue
+                if member.isdir() or _attested_candidate(name):
+                    headers[name] = member
+                if member.islnk():
+                    linked.update({name, canonical_member(member.linkname)})
+                if not _attested_candidate(name):
+                    continue
+                if not (member.isdir() or member.isreg()):
+                    irregular.add('/' + name)
+                destination = root / name
+                if member.isdir():
+                    destination.mkdir(mode=0o755, parents=True, exist_ok=True)
+                elif member.isreg():
+                    destination.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                    source = archive.extractfile(member)
+                    with open(destination, 'wb') as target:
+                        shutil.copyfileobj(source, target, 1024 * 1024)
+                    destination.chmod(0o444)
+        shipped_path = root / MANIFEST[1:]
+        if not shipped_path.is_file():
+            raise ValueError('The image has no native Factory manifest.')
+        shipped = shipped_path.read_bytes()
+        manifest = strict_json(shipped)
+        sdk = manifest.get('sdk')
+        # Ownership is checked from the tar headers below; the extracted copies belong to this user.
+        try:
+            expected = build(root, manifest.get('release'), manifest.get('architecture'),
+                             sdk['root'] if sdk else None, runtime_uid=-1)
+        except FileNotFoundError as error:
+            raise ValueError(f'Factory material is missing from the image: {error.filename}') from error
+        if expected != shipped:
+            actual = strict_json(expected)
+            differing = sorted(key for key in set(manifest) | set(actual) if manifest.get(key) != actual.get(key))
+            raise ValueError(f'The image manifest does not describe the image files: {differing} differ.')
+    scopes = [manifest['cli']['path']]
+    if sdk:
+        scopes += [sdk['root'] + '/meerschaum/', sdk['root'] + '/_meerschaum_mrsm.py']
+    if manifest.get('compiler'):
+        scopes += [manifest['compiler']['policy']['path'], COMPILERS]
+    for path in sorted(irregular):
+        if any(path == scope or scope.endswith('/') and path.startswith(scope) for scope in scopes):
+            raise ValueError(f'Attested Factory material is a link or special file in the image: {path}')
+    checked = set()
+    for path in sorted(_attested_paths(manifest)):
+        name = path[1:]
+        if name in linked:
+            raise ValueError(f'Attested Factory material is hard-linked: {path}')
+        parts = name.split('/')
+        for depth in range(1, len(parts) + 1):
+            item = '/'.join(parts[:depth])
+            if item in checked:
+                continue
+            checked.add(item)
+            header = headers.get(item)
+            directory = depth < len(parts)
+            if (header is None or not (header.isdir() if directory else header.isreg())
+                    or header.mode & 0o022
+                    or header.uid == runtime_uid and header.mode & 0o200):
+                raise ValueError(f'Attested Factory material is writable or nonregular in the image: /{item}')
+    return manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--rootfs', required=True, type=Path)
-    parser.add_argument('--release', required=True)
-    parser.add_argument('--architecture', required=True, choices=('x86_64', 'aarch64'))
+    parser.add_argument('--rootfs', type=Path)
+    parser.add_argument('--release')
+    parser.add_argument('--architecture', choices=('x86_64', 'aarch64'))
     parser.add_argument('--sdk-root')
     parser.add_argument('--runtime-uid', type=int, default=1000)
+    parser.add_argument('--verify-export', metavar='TAR',
+                        help='check an image export (`docker export`; `-` for stdin) against its manifest')
     args = parser.parse_args()
+    if args.verify_export:
+        try:
+            if args.verify_export == '-':
+                manifest = verify_export(sys.stdin.buffer, args.runtime_uid)
+            else:
+                with open(args.verify_export, 'rb') as stream:
+                    manifest = verify_export(stream, args.runtime_uid)
+        except (ValueError, OSError, tarfile.TarError) as error:
+            parser.exit(1, f'native Factory manifest: {error}\n')
+        parts = [name for name in ('cli', 'sdk', 'compiler') if manifest.get(name)]
+        print(f"The image's native Factory manifest matches its files ({', '.join(parts)}).")
+        return
+    if args.rootfs is None or args.release is None or args.architecture is None:
+        parser.error('--rootfs, --release and --architecture are required')
     write(args.rootfs, build(args.rootfs, args.release, args.architecture,
                             args.sdk_root, args.runtime_uid))
 
