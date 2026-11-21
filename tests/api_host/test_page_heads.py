@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-`@web_page(theme=..., head=[...])` and `add_head(...)` (rc15 Q23): the console's index carries the
+`@web_page(theme=..., head=[...])` and `add_head(...)`: the console's index carries the
 `add_head()` tags and the script that applies each page's theme and tags; a page-contract page's
 document loads exactly one theme stylesheet and its tags; `theme='light'` and custom themes turn
 the `dbc_dark` overrides off unless asked for.

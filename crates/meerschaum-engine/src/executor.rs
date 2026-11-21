@@ -418,7 +418,7 @@ pub struct ExecutorOptions {
     pub lease_wait: Duration,
     /// How often to retry a held lease.
     pub lease_poll: Duration,
-    /// `--chunk-pipelining` (R6). Not implemented in this wave; ignored.
+    /// `--chunk-pipelining` (R6). Not implemented yet; ignored.
     pub chunk_pipelining: bool,
     /// Use this run ID instead of a generated readable UTC ID.
     pub run_id: Option<String>,

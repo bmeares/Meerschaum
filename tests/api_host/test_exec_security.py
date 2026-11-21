@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Wave 18 (FX7): the dashboard's Exec button never runs an action in the host.
+The dashboard's Exec button never runs an action in the host.
 
 The host-local fallback of the first draft started a hidden job in the host process whenever the
 server's `POST /execute` could not be reached (no `server_url`, a connection error, a route the
@@ -56,7 +56,7 @@ os.environ[HOST_CONFIG_ENV] = json.dumps({'server_url': f'http://127.0.0.1:{serv
 
 
 def test_exec_never_runs_an_action_in_the_host(sandbox):
-    """RV2 #1: no `server_url` (a bare host) used to start the action as a local job, unchecked."""
+    """No `server_url` (a bare host) used to start the action as a local job, unchecked."""
     root, plugins = sandbox
     out = extract_json(run_python(root, plugins, '''
 import json, time, pathlib

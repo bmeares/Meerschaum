@@ -257,7 +257,7 @@ the `timescaledb://` / `timescaledb-ha://` / `postgis://` schemes (e.g.
 `timescaledb-ha://test:test1234@localhost:5459/testdb`).
 
 `MRSM_TEST_TIMESCALE_HA_URI` separately enables the TimescaleDB-HA geometry SRID tests in
-`tests/queries_drivers_suite/w17c_geometry_srid.rs`. Use the `timescaledb-ha://` scheme to exercise the PostGIS
+`tests/queries_drivers_suite/geometry_srid.rs`. Use the `timescaledb-ha://` scheme to exercise the PostGIS
 column types; `timescaledb://` and `postgresql://` use text geometry storage, even on a server
 with PostGIS installed. The tests compare insert and update SRIDs, inferred geometry types,
 and the GeoPackage spatial reference with v4.1.4.
@@ -301,7 +301,7 @@ MySQL / MariaDB and SQL Server store internal string keys as bounded VARCHAR / N
 repeated keys retain the general staging path (DuckDB internal writes reject these keys
 explicitly, because v4 has no staged upsert template for DuckDB). Static temporary internal pipes cache their
 metadata after creation; `drop_pipe` invalidates the cache. Warm engine state writes therefore
-need one DML statement. `tests/queries_drivers_suite/w5sql.rs` checks this along with cached façade reads, SQLite UTC
+need one DML statement. `tests/queries_drivers_suite/internal_upserts_and_sqlite_docs.rs` checks this along with cached façade reads, SQLite UTC
 sync times, raw document timestamps, and `{SQLITE_DB_PATH}` resolution.
 
 Cold PostgreSQL-family internal pipe writes serialize table and index initialization with a
@@ -370,7 +370,7 @@ in a separate run.
   MSSQL also passed the server cross-implementation scenario. The strengthened
   `instance_leases` expiry-takeover race was rerun successfully on all those deployments.
 - DuckDB full run with `--release --features duckdb,oracle`: 1,039 passed. The focused
-  `instance_inplace`, `instance_leases`, and `w5sql` run passed 63 tests, including all three
+  `instance_inplace`, `instance_leases`, and `internal_upserts_and_sqlite_docs` run passed 63 tests, including all three
   ICU-sensitive in-place cases, shared-file concurrency, and primary/composite internal MERGE.
 - Oracle (`--features oracle`): the full run reported 935 passed and 7 failed. One failure was
   a test-table collision caused by identifier truncation discarding the random suffix; after
@@ -410,5 +410,5 @@ because their in-memory parameter mutations would discard the snapshot.
 
 Internal (`mrsm`) string keys longer than 255 characters on MySQL / MariaDB / MSSQL fail with a
 clear message instead of a driver error. A DuckDB internal upsert batch that repeats a key keeps
-the last row; null keys are still rejected. `tests/queries_drivers_suite/w6b_templates.rs` covers all of this
+the last row; null keys are still rejected. `tests/queries_drivers_suite/cross_pipe_templates.rs` covers all of this
 (`w6b_` table prefix); the cross-implementation scenario gained a templated in-place child.

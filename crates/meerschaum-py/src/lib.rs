@@ -92,7 +92,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_function(wrap_pyfunction!(polars_bridge::polars_roundtrip, m)?)?;
 
-    // The DataFrame library setting: `frame_from_arrow`, the root pin (rc15, Q54)
+    // The DataFrame library setting: `frame_from_arrow`, the root pin
     dataframe_api::register(m)?;
 
     // meerschaum-kernel
@@ -112,7 +112,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(kernel_api::get_pd_type_from_db_type, m)?)?;
 
     // meerschaum-core
-    // The config registry: `get_config`, `read_config`, `write_config`, backups, ... (wave 15, O)
+    // The config registry: `get_config`, `read_config`, `write_config`, backups, ...
     config_api::register(m)?;
     m.add_function(wrap_pyfunction!(core_api::replace_pipes_syntax, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::hash_password, m)?)?;
@@ -134,7 +134,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(engine_api::engine_health, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_run_events, m)?)?;
 
-    // D14 runway (wave 8)
+    // D14 runway
     m.add_function(wrap_pyfunction!(d14_api::sql_item_name, m)?)?;
     m.add_function(wrap_pyfunction!(d14_api::build_where, m)?)?;
     m.add_function(wrap_pyfunction!(d14_api::d14_get_pipe_metadef, m)?)?;
@@ -143,7 +143,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(d14_api::get_chunk_interval, m)?)?;
     m.add_function(wrap_pyfunction!(d14_api::get_chunk_bounds, m)?)?;
 
-    // Pipe.verify() and the façade session (wave 9)
+    // Pipe.verify() and the façade session
     m.add_function(wrap_pyfunction!(verify_api::verify_pipe, m)?)?;
     m.add_function(wrap_pyfunction!(verify_api::register_connector, m)?)?;
     m.add_function(wrap_pyfunction!(native_plugin_api::native_plugin_names, m)?)?;
@@ -156,12 +156,12 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_class::<native_plugin_api::PyNativeConnector>()?;
-    // `bootstrap plugins` for the console's New plugin (rc28)
+    // `bootstrap plugins` for the console's New plugin
     plugin_bootstrap_api::register(m)?;
     team_api::register(m)?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
-    // The native action dispatcher from Python (wave 16, P2)
+    // The native action dispatcher from Python
     m.add_function(wrap_pyfunction!(entry_api::entry, m)?)?;
     m.add_function(wrap_pyfunction!(entry_api::run_action, m)?)?;
     m.add_function(wrap_pyfunction!(entry_api::core_actions, m)?)?;
@@ -174,34 +174,34 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compose_api::compose_dir_paths, m)?)?;
     m.add_function(wrap_pyfunction!(compose_api::compose_installed_plugins, m)?)?;
 
-    // `Pipe.sync()` for explicit data (wave 13)
+    // `Pipe.sync()` for explicit data
     m.add_function(wrap_pyfunction!(sync_api::sync_pipe, m)?)?;
     m.add_function(wrap_pyfunction!(sync_api::parse_sql_uri, m)?)?;
 
     m.add_class::<pipe_api::PyPipe>()?;
 
-    // `Pipe` methods over an instance: get_data, filter_existing, deduplicate, ... (wave 15, L2)
+    // `Pipe` methods over an instance: get_data, filter_existing, deduplicate, ...
     pipe_methods_api::register(m)?;
 
-    // Protected connectors and `Pipe.verify_schema()` (rc15, Q20 / Q32)
+    // Protected connectors and `Pipe.verify_schema()`
     instance_features_api::register(m)?;
 
-    // Per-pipe sync status: `pipe.get_sync_status()`, `mrsm.get_sync_statuses()` (rc15, C2)
+    // Per-pipe sync status: `pipe.get_sync_status()`, `mrsm.get_sync_statuses()`
     status_api::register(m)?;
     m.add_function(wrap_pyfunction!(metrics_api::engine_metrics, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_api::initialize_engine_metrics, m)?)?;
 
-    // The access model: permissions, roles, teams, pipe access and locks (rc15, K2)
+    // The access model: permissions, roles, teams, pipe access and locks
     access_api::register(m)?;
 
-    // `meerschaum.jobs.Job`, the executors and `utils.daemon.Daemon` over `meerschaum-jobs` (wave 16, S)
+    // `meerschaum.jobs.Job`, the executors and `utils.daemon.Daemon` over `meerschaum-jobs`
     m.add_function(wrap_pyfunction!(main_api::main, m)?)?;
     jobs_api::register(m)?;
 
-    // PyYAML-compatible YAML codec with a lossless Python boundary (wave 13)
+    // PyYAML-compatible YAML codec with a lossless Python boundary
     yaml_api::register(m)?;
 
-    // The `APIConnector` client and the `ValkeyConnector` (wave 16, S)
+    // The `APIConnector` client and the `ValkeyConnector`
     api_client_api::register(m)?;
     valkey_api::register(m)?;
 

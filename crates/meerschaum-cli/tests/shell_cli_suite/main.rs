@@ -18,8 +18,11 @@ mod format;
 mod graceful_shutdown;
 #[cfg(unix)]
 mod interrupt_shell;
+mod invalid_root;
 #[cfg(unix)]
 mod live_sync_pty;
+#[cfg(unix)]
+mod native_actions;
 mod non_admin_commands;
 #[cfg(unix)]
 mod non_admin_shell;
@@ -31,17 +34,14 @@ mod progress_interrupt;
 #[cfg(unix)]
 #[allow(dead_code)]
 mod prompts_pty;
-#[cfg(unix)]
-mod residual_actions_a;
 mod shell;
 mod shell_completion_scripts;
 mod shell_completions;
 mod shell_screens;
 #[cfg(unix)]
+mod show_views;
+#[cfg(unix)]
 mod tui_pty;
 #[cfg(unix)]
 mod version_help_no_worker;
-#[cfg(unix)]
-mod w18_show;
-mod w9_invalid_root;
 mod wiring_parity;

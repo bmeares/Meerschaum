@@ -544,7 +544,7 @@ pub async fn filter_existing_frame(
         date_bound_only: false,
         enforce_dtypes: false,
         filter_params_index_limit: env.filter_params_index_limit,
-        // Declared text / index columns keep their null-like strings (rc15 Q18).
+        // Declared text / index columns keep their null-like strings.
         literal_null_markers: meerschaum_kernel::diff::literal_null_markers(
             &columns_map(pipe),
             ctx,

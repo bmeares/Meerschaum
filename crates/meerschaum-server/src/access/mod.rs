@@ -1,4 +1,4 @@
-//! Who may see and do what through the API (the access model, contract K3).
+//! Who may see and do what through the API (the access model).
 //!
 //! Every request resolves an [`Access`]: the authenticated principal ([`crate::auth::Principal`],
 //! a user or a token) and the rules' [`rules::Principal`] (username, administrator flag,
@@ -7,7 +7,7 @@
 //! [`Access::can_lock`] about a pipe's parameters. The rules are
 //! [`meerschaum_core::access`]'s ([`rules`]).
 //!
-//! - **Effective permissions** (AC2): an administrator holds every permission; otherwise the
+//! - **Effective permissions**: an administrator holds every permission; otherwise the
 //!   user's explicit permissions (`attributes.scopes`), else its stored role
 //!   (`attributes.role`), else the server's default role (`api:permissions:default_role`).
 //!   A credential's own scopes (a JWT's `scopes` claim, an API key's scopes) are intersected with

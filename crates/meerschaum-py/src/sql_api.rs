@@ -1,5 +1,5 @@
 //! `meerschaum-connector-sql` bound into `meerschaum._core`: the `SqlConnector` instance methods behind
-//! the v4 `SQLConnector` façade (design §4.4, D12), and its raw SQL (`sql_*`, rc15 Q53).
+//! the v4 `SQLConnector` façade (design §4.4, D12), and its raw SQL (`sql_*`).
 //!
 //! `_core.SqlConnector(label, attributes)` is built from the same attributes the Python
 //! `SQLConnector` resolved (its `__dict__`: `flavor`, `uri`, `host`, `port`, `username`,
@@ -402,7 +402,7 @@ impl PySqlConnector {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Raw SQL (`SQLConnector.read` / `exec` / `exec_queries` / `value` / `to_sql`, rc15 Q53;
+    // Raw SQL (`SQLConnector.read` / `exec` / `exec_queries` / `value` / `to_sql`;
     // see `sql_raw_api.rs`)
 
     /// Run a row-returning statement (`?` / `$n` / `@Pn` / `:n` placeholders bound to `params`):
@@ -770,30 +770,6 @@ impl PySqlConnector {
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let c = self.conn();
         let res = block_on(py, async move { c.drop_pipe(&p).await });
-        success_to_py(py, &res)
-    }
-
-    /// `pipe_ops::forget_engine_state(self, pipe)`: forget the Syncing Engine's state of `pipe`
-    /// (ledger entries, edge cursors, definition hash) where this instance keeps it
-    /// (`_mrsm_internal` on schema flavors, namespaced by the instance schema). The façade
-    /// calls it after a successful drop, delete or full clear.
-    #[pyo3(signature = (pipe))]
-    fn forget_engine_state<'py>(
-        &self,
-        py: Python<'py>,
-        pipe: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyTuple>> {
-        let p = core_pipe(pipe, ParamsView::Resolved)?;
-        let c = self.conn();
-        let res = block_on(py, async move {
-            let local = meerschaum_connector::pipe_ops::forget_engine_state(c.as_ref(), &p).await;
-            // GAP-002: also the state written onto other instances (cross-instance children).
-            let remote = c.forget_remote_engine_state(&p).await;
-            if !remote.success {
-                tracing::warn!("{}", remote.message);
-            }
-            local
-        });
         success_to_py(py, &res)
     }
 

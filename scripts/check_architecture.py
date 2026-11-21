@@ -168,7 +168,7 @@ SINGLE_HOME_DEFINITIONS: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
      "resolving a request's Console viewer"),
     ('rs', ('fn dollar_tag_len', 'fn strip_sql_noise', 'fn is_read_only_query', 'fn is_bare_identifier*',
             'fn check_read_only*', 'fn check_internal_tables*'),
-     'crates/meerschaum-server/src/sql_guard.rs', "the SQL guard's lexer and read-only checks"),
+     'crates/meerschaum-server/src/sql_guard/', "the SQL guard's lexer and read-only checks"),
     ('rs', ('fn forget_engine_state_after',), 'crates/meerschaum-connector/src/',
      'resetting engine state after a rewrite'),
 )

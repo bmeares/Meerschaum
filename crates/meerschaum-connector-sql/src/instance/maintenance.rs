@@ -70,7 +70,7 @@ fn size_change_message(
 }
 
 impl SqlConnector {
-    /// `Pipe.get_rowcount(estimate=True)` (contract C1): the database's estimate of the rows
+    /// `Pipe.get_rowcount(estimate=True)`: the database's estimate of the rows
     /// in the pipe's table from catalog statistics ([`crate::queries::estimate`]), or the exact
     /// count when the flavor has no estimate (SQLite, GeoPackage, DuckDB), the estimate is
     /// missing, negative or zero, or the table is small (fewer than

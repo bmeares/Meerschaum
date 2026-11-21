@@ -18,7 +18,7 @@ refuses it again when asked anyway.
   for a viewer.
 - `visible_refs(viewer, instance)`: the `pipe_ref`s a viewer may see on an instance (one read of
   the registered pipes), for filtering runs, statuses, graphs and counts.
-- `can_see_email(viewer, username)`: AC13 (admins, and managers of a team the user is in).
+- `can_see_email(viewer, username)`: admins, and managers of a team the user is in.
 
 Under `--no-auth` the viewer is an administrator. Locally (the CLI, Python) nothing here applies:
 the instance's credentials are the trust boundary; locks are enforced by the core everywhere.
@@ -456,8 +456,8 @@ def visible_pipelines(
     registry_parameters: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    The saved Pipelines of `instance` that `viewer` may see (their registry pipe's `access`,
-    AC7), as `list_pipelines()` reads them (or the `definitions` a caller already read). A
+    The saved Pipelines of `instance` that `viewer` may see (their registry pipe's `access`),
+    as `list_pipelines()` reads them (or the `definitions` a caller already read). A
     Pipeline's members the viewer may not see are left out of its `targets` and counted
     (`hidden_members`). `include_members=False` omits members entirely for list cards, so
     listing saved names does not walk their member instances.
@@ -738,7 +738,7 @@ def attributes_with_rights(
 def can_see_email(viewer: Viewer, username: Optional[str], user_teams: Optional[Iterable[Any]] = None) -> bool:
     """
     Whether the viewer may see `username`'s email address: their own, or as an administrator or
-    a manager of a team the user is in (`meerschaum.core.access.can_see_email`, AC13).
+    a manager of a team the user is in (`meerschaum.core.access.can_see_email`).
     """
     if viewer.no_auth or viewer.is_admin:
         return True

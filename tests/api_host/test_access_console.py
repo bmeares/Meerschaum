@@ -3,8 +3,8 @@
 # vim:fenc=utf-8
 
 """
-The web console's access model (rc15 wave 2: AC1, AC2, AC4, AC5, AC7, AC11, AC13), in process on
-the sandbox's SQLite instance, as real users with real console sessions (`SIGN_IN`):
+The web console's access model, in process on the sandbox's SQLite instance, as real users with
+real console sessions (`SIGN_IN`):
 
 - each role sees the pages, buttons and pipes it may (Viewer, Editor, Operator, a team's manager,
   a team's member, another team's member, an administrator), and a hidden pipe's keys never reach
@@ -13,7 +13,8 @@ the sandbox's SQLite instance, as real users with real console sessions (`SIGN_I
   Sync and says how to unlock;
 - New pipe gives the pipe the viewer's access (owner, primary team) and refuses a team the
   viewer is not in;
-- Users & Teams: the Email column and addresses follow AC13; teams are an administrator's to
+- Users & Teams: the Email column and addresses show only to administrators and a team's
+  managers; teams are an administrator's to
   create, rename and delete, and their managers' to fill;
 - a new instance's login page creates the first account as an administrator, once;
 - Pipelines and runs show only what the viewer may see (hidden members are a count).
@@ -360,7 +361,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_users_and_teams_follow_the_email_rule_and_team_roles(sandbox):
     """
-    Users & Teams (AC11, AC13): an administrator sees every user with Type, Role and Email; a
+    Users & Teams: an administrator sees every user with Type, Role and Email; a
     team's manager sees its members with their emails (and nobody else's); a member sees the
     members of their teams without emails; only administrators create, rename and delete teams;
     managers change their team's members; deleting a team says what moves to Everyone.
@@ -440,7 +441,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_a_new_instance_creates_its_first_admin_from_the_login_page_once(sandbox):
     """
-    AC1: while the API's user store has no users, the login page is Create admin account, which
+    While the API's user store has no users, the login page is Create admin account, which
     makes the first account an administrator and signs it in; then the page is the login form,
     the form refuses a second first admin, and registration stays closed (no Create account).
     """
@@ -485,7 +486,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_pipelines_and_runs_show_hidden_members_as_a_count(sandbox):
     """
-    AC7: a saved Pipeline with a member the viewer may not see lists that member only as a count,
+    A saved Pipeline with a member the viewer may not see lists that member only as a count,
     may not be run by them, and is hidden altogether when its registry pipe is another team's; the
     engine's views leave out or anonymize the pipes they may not see.
     """
@@ -536,8 +537,8 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_the_console_sql_guard_refuses_what_the_server_refuses(sandbox):
     """
-    AC8 in the console (`meerschaum.api.dash.sql_guard`, the server's rules): Meerschaum's own
-    tables, text-query functions, config references and the tables of pipes the viewer cannot
+    The SQL guard in the console (`meerschaum.api.dash.sql_guard`, the server's rules):
+    Meerschaum's own tables, text-query functions, config references and the tables of pipes the viewer cannot
     see (bare, quoted, qualified or in a string) are refused for non-administrators; catalog reads
     only while the instance has pipes they cannot see.
     """

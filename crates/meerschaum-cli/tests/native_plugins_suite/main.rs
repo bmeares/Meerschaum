@@ -23,10 +23,12 @@ mod native_single_file;
 mod native_source_plugin;
 mod plugin_lifecycle;
 mod plugin_manifest_cache;
+mod plugin_package_venv_actions;
 #[cfg(unix)]
 mod plugin_token_scopes;
+#[cfg(unix)]
+mod prune_venvs;
 mod register_plugin_hook;
-mod residual_actions_b;
 mod rust_plugin_admin;
 #[cfg(unix)]
 mod self_upgrade;
@@ -35,5 +37,3 @@ mod single_file_parity;
 #[cfg(unix)]
 mod single_file_server;
 mod venvs;
-#[cfg(unix)]
-mod w9_venvs;

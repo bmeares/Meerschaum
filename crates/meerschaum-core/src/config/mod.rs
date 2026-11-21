@@ -69,7 +69,7 @@ pub const ROOT_DIR_MARKER: &str = "{__MRSM_ROOT_DIR__}";
 /// The marker substring replaced by this release's version, as the Python package writes it
 /// (PEP 440, `5.1.0rc1`), in [`DEFAULT_CONFIG_JSON`]: the stack's `api` image tag
 /// (`bmeares/meerschaum:{__MRSM_VERSION__}-full`), so a root without a `stack.yaml` always runs the
-/// API server of the version that wrote the compose file (`PARITY.md` W18PK-001).
+/// API server of the version that wrote the compose file (see `PARITY.md`, the stack's `api` image).
 pub const VERSION_MARKER: &str = "{__MRSM_VERSION__}";
 
 /// The header written at the top of `meerschaum.yaml` (`default_header_comment`).
@@ -878,7 +878,7 @@ struct FileSelection {
 /// goes to a temporary file in the same directory (created with the replaced file's mode, owner
 /// and group where permitted), is synced, and is renamed over the target. A failure removes only
 /// the temporary file. Extended attributes, ACLs and SELinux labels are not copied (the new
-/// file gets the directory's defaults; PARITY.md W15O-2). Where a temporary file cannot be used
+/// file gets the directory's defaults; see PARITY.md, `write_config`). Where a temporary file cannot be used
 /// (a bind-mounted single file, a writable file in a read-only directory) the file is rewritten
 /// in place, as v4 does.
 ///

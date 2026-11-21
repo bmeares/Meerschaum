@@ -994,7 +994,7 @@ def start_plugin_run(
     execution = {**(execution or {}), **record}
     properties = {'mrsm_execution': execution}
     if username:
-        ### The run is the user's, in their primary team (AC9).
+        ### The run is the user's, in their primary team.
         from meerschaum.jobs import ownership_properties
         properties.update(ownership_properties(username, viewer_model.viewer_for(username).primary_team))
     try:

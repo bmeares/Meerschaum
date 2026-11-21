@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The live event stream of the Rust Syncing Engine in Python (design §5.7, wave 9):
+The live event stream of the Rust Syncing Engine in Python (design §5.7):
 `Pipeline.sync(on_event=...)` and `pipe.sync(parents=..., children=..., on_event=...)`.
 
 Events are plain dicts delivered on the calling thread while the run executes on the engine's

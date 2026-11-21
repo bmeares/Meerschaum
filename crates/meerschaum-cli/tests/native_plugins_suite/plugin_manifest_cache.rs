@@ -230,7 +230,7 @@ fn plugin_flags_still_reach_actions_through_the_worker() {
 
 /// `mrsm help` / `mrsm -h` read the cached manifest and start no Python: when the plugins
 /// changed since it was written (or nothing was cached yet), help says how to refresh it, and
-/// after `reload` it lists the new action without the hint (rc15 review).
+/// after `reload` it lists the new action without the hint.
 #[test]
 fn help_says_when_the_cached_plugin_actions_are_stale() {
     const HINT: &str = "The plugins changed since their actions were last loaded";

@@ -1,4 +1,4 @@
-//! `GET /healthcheck/ready` tells the truth about the Python API host (rc32): `503` (`starting`)
+//! `GET /healthcheck/ready` tells the truth about the Python API host: `503` (`starting`)
 //! while the server starts, `200` only once a host it needs serves, `503` (`host_unavailable`)
 //! while that host is not serving (it never got ready, refused to start, or died and is being
 //! restarted) with no timeout turning it into a `200`, and `503` (`draining`) from the moment the

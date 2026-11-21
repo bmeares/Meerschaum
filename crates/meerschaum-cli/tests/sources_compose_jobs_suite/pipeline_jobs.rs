@@ -1,4 +1,4 @@
-//! rc15 (Q31, Q23, Q26): `start pipeline NAME` / `stop pipeline NAME` run a saved Pipeline's
+//! `start pipeline NAME` / `stop pipeline NAME` run a saved Pipeline's
 //! background job; action chains serialize under the hidden `chain` action while v4's
 //! `start pipeline ... -P {...}` jobs on disk keep running; `--loop` repeats any action; and a
 //! looping job records its laps (job health).

@@ -1,4 +1,4 @@
-//! Crash injection with a real process death and a restart (§14, wave 9), on SQLite in a
+//! Crash injection with a real process death and a restart (§14), on SQLite in a
 //! temporary directory and on PostgreSQL-family (`MRSM_TEST_PG_URI`, schema `w9_engine`).
 //!
 //! `tests/crash.rs` fails a node in process (the executor sees the error and records the run).

@@ -56,8 +56,8 @@ Asciinema v3 is bundled locally (`docs/zensical/assets/vendor/asciinema-player.*
 
 ## Generated & Test-Checked Pages
 
-- **`docs/zensical/reference/mcp/tools.md`** is generated from `crates/meerschaum-server/src/mcp/docs.rs` (`python3 scripts/generate_mcp_docs.py`) and verified by `cargo test -p meerschaum-server --test mcp_docs`. Do not hand-edit it.
-- **`docs/zensical/reference/api-instance/permissions.md`** contains a `<!-- non-admin-commands:start --> ... <!-- non-admin-commands:end -->` block verified by `crates/meerschaum-server/tests/rc15_access_matrix.rs`. Keep that block unchanged when editing surrounding prose.
+- **`docs/zensical/reference/mcp/tools.md`** is generated from `crates/meerschaum-server/src/mcp/docs.rs` (`python3 scripts/generate_mcp_docs.py`) and verified by `cargo test -p meerschaum-server --test mcp_suite -- mcp_docs::`. Do not hand-edit it.
+- **`docs/zensical/reference/api-instance/permissions.md`** contains a `<!-- non-admin-commands:start --> ... <!-- non-admin-commands:end -->` block verified by `crates/meerschaum-server/tests/routes_access_suite/access_matrix.rs`. Keep that block unchanged when editing surrounding prose.
 
 ## Required Verification Before Committing Docs Changes
 

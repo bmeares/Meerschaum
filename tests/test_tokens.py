@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-Token edge cases found in v4.1.x (wave 17b):
+Token edge cases found in v4.1.x:
 
 - an instance which stores the `scopes` JSON column as text (SQLite) made `get_token_model()` raise
   `scopes: Input should be a valid list` and `get_token_scopes()` return the string `'["pipes:read"]'`;

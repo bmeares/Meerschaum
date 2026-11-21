@@ -122,7 +122,7 @@ print('JSON:' + json.dumps({
     assert out['order'][0] == 'sql'
 
 
-#: Secrets under names and in shapes a list of secret words misses (the rc15 review found each
+#: Secrets under names and in shapes a list of secret words misses (a review found each
 #: one in the page's responses): an allowlist shows none of them.
 REVIEW_SECRETS = {
     'pass': 'PASS-s3cret-01',

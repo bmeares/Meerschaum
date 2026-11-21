@@ -975,7 +975,7 @@ fn init_provisions_plugins_on_the_first_run() {
     assert!(installed < required && required < setup, "{ran:?}");
 }
 
-/// rc15 (S4): `up` checks every job it would start before it registers or syncs anything: a
+/// `up` checks every job it would start before it registers or syncs anything: a
 /// name another project's job has refuses the whole `up`, listing the names.
 #[test]
 fn up_refuses_foreign_collisions_before_registering_or_syncing() {
@@ -1038,7 +1038,7 @@ fn up_refuses_foreign_collisions_before_registering_or_syncing() {
     assert!(instance.events.is_empty(), "{:?}", instance.events);
 }
 
-/// rc15 (Q22/Q30): a project's `local` job that its systemd executor takes over is not deleted
+/// A project's `local` job that its systemd executor takes over is not deleted
 /// before it starts again (the move stops it and keeps its logs); other owned jobs still are.
 #[test]
 fn up_starts_a_job_moving_to_systemd_without_deleting_it_first() {

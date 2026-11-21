@@ -1,4 +1,4 @@
-//! Raw SQL through the Rust connector (rc15 Q50 / Q53): what `SQLConnector.read`, `exec`,
+//! Raw SQL through the Rust connector: what `SQLConnector.read`, `exec`,
 //! `exec_queries`, `value` and `to_sql` call instead of SQLAlchemy.
 //!
 //! The façade (`meerschaum/connectors/sql/_native.py`) turns the caller's statement into text

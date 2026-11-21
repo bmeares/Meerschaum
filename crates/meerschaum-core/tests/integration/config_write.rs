@@ -1,5 +1,5 @@
 //! `write_config` never deletes, truncates or half-writes a config file: those files hold
-//! credentials (wave 15, task O).
+//! credentials.
 
 use meerschaum_core::config::{Config, ConfigMap, ConfigOptions, ConfigValue};
 

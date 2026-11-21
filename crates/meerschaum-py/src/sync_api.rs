@@ -438,7 +438,7 @@ pub(crate) fn attribute_maps(
 /// enforce_dtypes=True, chunksize=-1, infer=False, params=None, force=False, retries=10,
 /// min_seconds=1.0, workers=None, kwargs=None, connectors=None, attributes=None, inplace=True,
 /// replace=False, debug=False)`: sync the data into the pipe's table through the engine's
-/// ordinary flow (`replace`: the rows replace the window `[begin, end)`, rc15)
+/// ordinary flow (`replace`: the rows replace the window `[begin, end)`)
 /// (module docs). `connector` is the pipe instance's `_core.SqlConnector` (`None` for an
 /// instance that is not SQL: `api:`, `valkey:`, custom); `infer` syncs from the pipe's source
 /// instead of `df` (v4's `pipe.sync()` without data); `connectors` maps keys to the other

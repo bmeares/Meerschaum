@@ -9,7 +9,7 @@
 //!   (`is_session_authenticated(session_id)`); the user name behind it names the terminal.
 //!   An unknown session gets v4's `401` "Unauthorized / Please log in" page (and a websocket
 //!   that is accepted, told why and closed straight away). The terminal needs the permission
-//!   `webterm:use` (rc15's access model, [`crate::access`]): administrators, the role
+//!   `webterm:use` (the access model, [`crate::access`]): administrators, the role
 //!   `operator`, and users given it. Under `start api --secure`
 //!   (`api:permissions:actions:non_admin: false`) only administrators get a shell. An open
 //!   terminal is authorized again every [`REAUTHORIZE_EVERY`]: when the session ends (a logout,

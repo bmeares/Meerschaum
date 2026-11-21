@@ -437,8 +437,9 @@ fn api_inbound_denial_keeps_outbound_callbacks_and_worker_pairs() {
     const TEST: &str =
         "team_scope::sandbox::tests::api_inbound_denial_keeps_outbound_callbacks_and_worker_pairs";
     if let Ok(port) = std::env::var(CHILD) {
-        // SAFETY: dedicated child only; no pointers or caller-owned memory involved.
         assert_eq!(
+            // SAFETY: `PR_SET_NO_NEW_PRIVS` takes integer arguments only and affects only this
+            // dedicated test subprocess, which a sandbox may restrict.
             unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
             0
         );
@@ -541,8 +542,9 @@ fn metadata_network_denial_preserves_only_connected_worker_pairs_and_is_inherite
         assert!(raw >= 0);
         // SAFETY: raw is the unique new descriptor from socket above.
         let existing = unsafe { OwnedFd::from_raw_fd(raw) };
-        // SAFETY: this affects only the dedicated test subprocess and touches no pointers.
         assert_eq!(
+            // SAFETY: `PR_SET_NO_NEW_PRIVS` takes integer arguments only and affects only this
+            // dedicated test subprocess, which a sandbox may restrict.
             unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
             0
         );

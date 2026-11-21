@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Wave 15 (L) test plugin: a deterministic `fetch()` source.
+Test plugin: a deterministic `fetch()` source.
 
 `parameters['fetch']['mode']` selects what `fetch()` returns: `frame` (a list of documents, the
 default), `generator` (chunks of documents), `hook` (every chunk goes to `chunk_hook` and the

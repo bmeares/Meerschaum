@@ -2,12 +2,12 @@
 # vim:fenc=utf-8
 
 """
-The CLI progress spinner and the process's signals (wave 17b, PARITY W17T-003), in real PTYs:
+The CLI progress spinner and the process's signals (PARITY W17T-003), in real PTYs:
 
 - `mrsm.entry()` in an embedding Python process: Ctrl-C while the spinner is drawn raises
   `KeyboardInterrupt` and the interpreter keeps running (the spinner's signal guard belongs to the
   `mrsm` program only);
-- `python -m meerschaum` and the standalone binary: Ctrl-C cancels the action (wave 18, decision 1):
+- `python -m meerschaum` and the standalone binary: Ctrl-C cancels the action:
   the spinner is cleared, `Interrupted.` is printed and the exit status is 130; SIGTERM still ends
   the process by the signal;
 - `start api`: the server keeps its own graceful shutdown on SIGINT.

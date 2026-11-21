@@ -18,7 +18,7 @@ fn static_toml_matches_python() {
         .and_then(|e| e.as_map_mut())
         .expect("environment table");
     assert!(environment.shift_remove("compose_root").is_some());
-    // rc15 (Q54, PARITY.md RC15-R3-001): `environment.dataframe`, `MRSM_DATAFRAME`.
+    // PARITY.md RC15-R3-001: `environment.dataframe`, `MRSM_DATAFRAME`.
     assert!(environment.shift_remove("dataframe").is_some());
     // 5.1: `environment.config_file` / `environment.patch_file`, `MRSM_CONFIG_FILE` and
     // `MRSM_PATCH_FILE` (files holding what `MRSM_CONFIG` / `MRSM_PATCH` would hold).

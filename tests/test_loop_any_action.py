@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-`--loop` for any action (rc15, Q23): a plugin action repeats like `sync pipes --loop`, so a
+`--loop` for any action: a plugin action repeats like `sync pipes --loop`, so a
 plugin does not need its own `while True` loop, and the job reports its laps (`job.health`).
 Each lap calls the action once with `loop=False`; an action whose function takes `loop` keeps
 4.1's contract (it receives `loop=True` and repeats by itself). A plugin action's `-s` schedule

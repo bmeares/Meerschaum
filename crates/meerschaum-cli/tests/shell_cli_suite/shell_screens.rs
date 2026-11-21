@@ -22,7 +22,7 @@
 //! 5. **Additive v5 actions.** Five menu/help scenarios use explicit row overlays from
 //!    `fixtures/shell_screens_v5_actions.json` for the changed vocabulary and resulting
 //!    geometry. All other cells still compare against the unchanged v4 recording.
-//! 6. **`help`.** The shell's `help` prints the grouped action list and every option (rc15)
+//! 6. **`help`.** The shell's `help` prints the grouped action list and every option
 //!    where v4 printed the `show actions` table, so in `long_output` the two snapshots between
 //!    `help` and the next command compare the prompt row only, and the screen must show the end
 //!    of the help (its last option).
@@ -552,7 +552,7 @@ fn with_v5_actions(name: &str, label: &str, mut expected: Snapshot) -> Snapshot 
     if let Some(cursor) = overlay.get("cursor") {
         expected.cursor = serde_json::from_value(cursor.clone()).unwrap();
     }
-    // AC10 adds `show teams` before tokens. The immutable v4 tab sequence consequently
+    // v5 adds `show teams` before tokens. The immutable v4 tab sequence consequently
     // reaches teams at the bottom of this viewport; full wrap coverage is exercised below.
     if name == "menu_scroll" && matches!(label, "tab wraps to original" | "shift-tab to last") {
         expected.lines[22] = expected.lines[22].replace("tokens", "teams");

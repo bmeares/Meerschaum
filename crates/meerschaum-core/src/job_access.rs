@@ -1,4 +1,4 @@
-//! Who a job belongs to, and who may see it (decision AC9 of 5.0.0rc15; the people asking are
+//! Who a job belongs to, and who may see it (the people asking are
 //! [`access::Principal`]s).
 //!
 //! A job started through the API server (`POST /jobs/{name}`, `POST /execute`,

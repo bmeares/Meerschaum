@@ -456,7 +456,7 @@ impl ConnectionSpec {
                 (Some(configured), Some(from_uri))
                     if configured.driver_family() != from_uri.driver_family() =>
                 {
-                    // Intentional fix (PARITY.md, wave 17b): v4 keeps the label's flavor here,
+                    // Intentional fix (PARITY.md): v4 keeps the label's flavor here,
                     // then generates SQL for the wrong dialect on the URI's database.
                     Some(from_uri)
                 }

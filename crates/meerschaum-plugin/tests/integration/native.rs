@@ -205,6 +205,7 @@ fn discovery_precedence_cache_and_invalidation() {
     // SAFETY: discovery roots contain only copies of the trusted SDK example.
     let a = unsafe { discovery::cached_manifest(&dirs, &cache) }.unwrap();
     let modified = std::fs::metadata(&cache).unwrap().modified().unwrap();
+    // SAFETY: the discovery roots hold only copies of the trusted SDK example plugin.
     let b = unsafe { discovery::cached_manifest(&dirs, &cache) }.unwrap();
     assert_eq!(a, b);
     assert_eq!(
@@ -215,6 +216,7 @@ fn discovery_precedence_cache_and_invalidation() {
     let mut stale = a.clone();
     stale["schema_version"] = json!(3);
     std::fs::write(&cache, serde_json::to_vec(&stale).unwrap()).unwrap();
+    // SAFETY: the discovery roots hold only copies of the trusted SDK example plugin.
     let refreshed = unsafe { discovery::cached_manifest(&dirs, &cache) }.unwrap();
     assert_eq!(refreshed, a);
     let persisted: serde_json::Value =
@@ -232,11 +234,14 @@ fn discovery_precedence_cache_and_invalidation() {
         format!("{}\n# edited\n", include_str!("../../examples/plugin.toml")),
     )
     .unwrap();
+    // SAFETY: the discovery roots hold only copies of the trusted SDK example plugin (its
+    // `plugin.toml` edited only by a comment).
     let c = unsafe { discovery::cached_manifest(&dirs, &cache) }.unwrap();
     assert_ne!(a["fingerprint"], c["fingerprint"]);
     std::fs::write(&cache, "broken JSON").unwrap();
     assert_eq!(
         c,
+        // SAFETY: the same trusted SDK example copies as above.
         unsafe { discovery::cached_manifest(&dirs, &cache) }.unwrap()
     );
 }

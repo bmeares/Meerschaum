@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The console's Pipes pages (rc15 Q3, Q4, Q27, B5): the table's rows, filters, search, sort, pages
+The console's Pipes pages: the table's rows, filters, search, sort, pages
 and slow columns; a pipe's page (routes, tabs, actions only for sessions that may run them,
 confirmations, Copy); New pipe (flavor-correct preview limits, the datetime guess, parameters,
 registration rules). In process, on the sandbox's SQLite instance; no server.

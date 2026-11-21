@@ -615,7 +615,7 @@ impl Reader {
         }
     }
 
-    /// `Pipe.get_rowcount(estimate=True)` (contract C1): the instance's row estimate from
+    /// `Pipe.get_rowcount(estimate=True)`: the instance's row estimate from
     /// catalog statistics, exact where there is none or counting is cheap; bounds, `params` and
     /// `remote` make it exact ([`Reader::get_rowcount`]).
     pub async fn get_rowcount_estimate(
@@ -701,7 +701,7 @@ impl Reader {
         };
         if args.as_docs {
             // A SQL instance answers a missing table with no documents itself, and an
-            // unreachable database with an error (rc15 Q17), so no `exists` check first.
+            // unreachable database with an error, so no `exists` check first.
             if self.sql.is_none() && !self.exists(pipe).await? {
                 return Ok(Data::Docs(Vec::new()));
             }
@@ -1003,7 +1003,7 @@ impl Reader {
         opts: &FilterOpts,
     ) -> Result<FilterOut, String> {
         let ctx = self.context(pipe, None, true).await?;
-        // Declared text / index columns keep their null-like strings (rc15 Q18).
+        // Declared text / index columns keep their null-like strings.
         let literal_null_markers =
             meerschaum_kernel::diff::literal_null_markers(&pipe_ops::columns_map(pipe), &ctx);
         let params = FilterExistingParams {

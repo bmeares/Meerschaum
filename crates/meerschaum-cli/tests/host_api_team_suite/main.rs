@@ -6,9 +6,6 @@ mod engine_api_state;
 mod engine_events_live;
 mod engine_views;
 mod execution_alias_resolution;
-#[cfg(unix)]
-mod f2_protected_jobs;
-mod f2_verify_schema;
 #[cfg(target_os = "linux")]
 mod graph_transport;
 #[cfg(unix)]
@@ -22,7 +19,9 @@ mod https_api;
 #[cfg(target_os = "linux")]
 mod logical_alias_copy;
 mod logical_alias_engine;
-mod p1_locks_binary;
+mod pipe_locks_cli;
+#[cfg(unix)]
+mod protected_jobs;
 mod server_modes;
 mod team_config_writes;
 #[cfg(target_os = "linux")]
@@ -33,6 +32,7 @@ mod team_runtime;
 mod team_sandbox_probe;
 #[cfg(target_os = "linux")]
 mod team_source_namespace;
+mod verify_schema_and_protected_sql;
 #[cfg(unix)]
 mod webterm_job_context;
 #[cfg(unix)]

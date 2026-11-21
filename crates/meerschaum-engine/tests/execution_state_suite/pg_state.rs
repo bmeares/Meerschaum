@@ -1,4 +1,4 @@
-//! Engine state persists on PostgreSQL-family instances (wave 9): run history, node rows,
+//! Engine state persists on PostgreSQL-family instances: run history, node rows,
 //! definition hashes and edge cursors written by one graph run are read back by the next, so a
 //! caught-up child is `skip`ped (not re-planned as a first engine run) and new parent data makes
 //! it `incremental`.

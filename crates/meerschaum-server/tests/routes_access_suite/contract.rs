@@ -120,7 +120,7 @@ fn normalize(v: &Json, key: Option<&str>, slots: &Slots, version: &str) -> Json 
     }
 }
 
-/// The rc15 access model's intended changes read as v4's (PARITY.md RC15-P3-002, -003): a pipe
+/// The v5 access model's intended changes read as v4's (PARITY.md RC15-P3-002, -003): a pipe
 /// registered through the API is its creator's (`parameters.access` with the caller as owner,
 /// Everyone's team, the default visibility and edit mode), and registering needs
 /// `pipes:register` (`pipes:write` still works).
@@ -146,7 +146,7 @@ fn v4_view(v: Json, owner: &str) -> Json {
 }
 
 /// Exchanges whose v4 answer the access model changes on purpose (PARITY.md RC15-P3-001): the
-/// recording's user had every scope (v4: no `scopes` attribute), while an rc15 user without
+/// recording's user had every scope (v4: no `scopes` attribute), while a v5 user without
 /// permissions of their own has the default role (`editor`), which creates no jobs and deletes no
 /// accounts. `(step, status, detail)`.
 const PROTECTED_TABLE_DETAIL: &str =
@@ -183,7 +183,7 @@ fn seeded_state(fixture: &Json, root: &std::path::Path) -> (AppState, Arc<common
     }
     cfg.connectors = connectors;
     cfg.no_dash = true;
-    // The recording ran with v4's defaults: open self-registration (off by default since rc15).
+    // The recording ran with v4's defaults: open self-registration (off by default in v5).
     cfg.registration_users = true;
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     instance.seed_user(

@@ -111,7 +111,7 @@ async fn scopes_and_api_keys() {
     assert_eq!(r.status, StatusCode::OK);
     let r = send(&app, req("POST", "/pipes/a/b/c/register", Some(&key), None)).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
-    // rc15: registering a pipe needs `pipes:register` (`pipes:write` still does for credentials
+    // Registering a pipe needs `pipes:register` (`pipes:write` still does for credentials
     // made before it existed).
     assert_eq!(
         r.json()["detail"],
@@ -1055,7 +1055,7 @@ fn jobs_scope_app() -> (axum::Router, Arc<common::MemoryInstance>, tempfile::Tem
 
 /// The dispatcher's view for [`jobs_scope_app`]: `show` is an action, so a non-administrator who
 /// could run the job `j` (`show version`) may answer its prompts (5.1: a job whose command they
-/// could not run, such as a shell's, they may not; `p5_job_access.rs`).
+/// could not run, such as a shell's, they may not; `job_access.rs`).
 struct ShowAction;
 
 #[async_trait]

@@ -6,7 +6,7 @@
 //! status codes, [`crate::envelope`]). Reads (`GET`, and `POST .../read`) need `pipes:read`,
 //! writes `pipes:write`.
 //!
-//! **Access (rc15).** A caller who is not an administrator sees the runs of the pipes it can see
+//! **Access.** A caller who is not an administrator sees the runs of the pipes it can see
 //! (a run is visible when one of its pipes is; the nodes of hidden pipes are anonymized,
 //! [`crate::access::runs`]), the ledger and state of pipes it can see, and the raw state rows of
 //! those pipes only; writing engine state (ledger entries, cursors, states, runs, events,

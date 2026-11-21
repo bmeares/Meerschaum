@@ -698,7 +698,7 @@ pub const REMOTE_STATE_HASH_PREFIX: &str = "remote:";
 /// records that engine state of the pipe `pipe_ref` (its ledger entries and the edge cursors in
 /// which it is the parent) was written onto `state_instance`, another instance (a cross-instance
 /// child's, §5.1). A removed pipe's home instance reads the markers to find that state
-/// ([`forget_remote_engine_state`], GAP-002). A marker never equals a pipe's own key, so
+/// ([`forget_remote_engine_state`]). A marker never equals a pipe's own key, so
 /// readers of the definition hash ignore it; it reuses `engine_state` so no table, column or
 /// route is added.
 pub fn remote_state_key(pipe_ref: &str, state_instance: &str) -> String {
@@ -739,7 +739,7 @@ pub async fn remote_state_instances<C: InstanceConnector + ?Sized>(
     out
 }
 
-/// Forget the Syncing Engine's state of `pipe` that lives on **other instances** (GAP-002): its
+/// Forget the Syncing Engine's state of `pipe` that lives on **other instances** (see PARITY.md, cross-instance cursor cleanup): its
 /// ledger entries and the edge cursors in which it is the parent, written onto the instances of
 /// its cross-instance children. The instances come from the remote-state markers on the pipe's
 /// home instance `conn` ([`remote_state_instances`]); `provider` reaches them. A marker is
@@ -981,7 +981,7 @@ pub fn literal_param_safe(text: &str) -> bool {
         && !lower.contains("drop ")
 }
 
-/// The first row of `pipe` whose `column` is exactly `value` (FX1).
+/// The first row of `pipe` whose `column` is exactly `value`.
 ///
 /// A `params` filter is not an exact match: a leading `_` negates it (a username `_alice`
 /// matched every other user's row), null-like text matches nulls, and the SQL keyword blocklist
@@ -1020,7 +1020,7 @@ pub async fn exact_row<C: InstanceConnector + ?Sized>(
     }))
 }
 
-/// The users pipe's `user_id` for an exact `username` (FX1: never the `params` grammar).
+/// The users pipe's `user_id` for an exact `username` (never the `params` grammar).
 pub async fn user_id_of_username<C: InstanceConnector + ?Sized>(
     conn: &C,
     username: &str,
@@ -1048,7 +1048,7 @@ pub async fn username_of_user_id<C: InstanceConnector + ?Sized>(
 
 /// `get_data([field], params={'user_id': user_id})[field][0]`.
 ///
-/// FX1: an unknown user has no fields (`None`), never the row of `user_id IS NULL`, and the
+/// An unknown user has no fields (`None`), never the row of `user_id IS NULL`, and the
 /// row is matched on its exact `user_id`.
 pub async fn user_field<C: InstanceConnector + ?Sized>(
     conn: &C,
@@ -1135,7 +1135,7 @@ pub async fn default_edit_user<C: InstanceConnector + ?Sized>(
     let pipe = conn.get_users_pipe();
     let user_id = match resolve_user_id(conn, user).await {
         Ok(Some(id)) if !id.is_null() => id,
-        // FX1: an unknown user is not edited (a row with a null `user_id` is nobody's).
+        // An unknown user is not edited (a row with a null `user_id` is nobody's).
         Ok(_) => {
             return SuccessTuple::fail(format!(
                 "User '{0}' does not exist. Register user '{0}' before editing.",

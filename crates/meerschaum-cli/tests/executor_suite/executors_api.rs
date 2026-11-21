@@ -345,7 +345,7 @@ fn api_executor_round_trip_against_a_loopback_server() {
         text(&out).contains("MRSM_TEST_MARK")
     });
 
-    // rc15 (C3): the job's metadata carries its health (a job without laps: unknown).
+    // The job's metadata carries its health (a job without laps: unknown).
     let meta = raw_response(server.port, "/jobs/alpha");
     assert!(meta.contains(r#""health":{"#), "{meta}");
     assert!(meta.contains(r#""state":"unknown""#), "{meta}");

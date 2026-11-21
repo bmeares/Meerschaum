@@ -842,7 +842,7 @@ impl BrowserAuth for ShortLivedSessions {
 }
 
 /// A Pipeline run the console follows by its session cookie outlives the short-lived bearer the
-/// session is authorized with (rc25 ended it at the first access check after the bearer's 60
+/// session is authorized with (it used to end at the first access check after the bearer's 60
 /// seconds, and the page gave up on the stream), and still ends when the session does.
 #[tokio::test(start_paused = true)]
 async fn a_console_stream_outlives_its_bearer_and_ends_with_its_session() {

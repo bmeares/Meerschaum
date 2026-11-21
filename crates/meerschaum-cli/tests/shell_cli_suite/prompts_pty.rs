@@ -1,5 +1,5 @@
-//! The prompts of wave 18 in a real pseudo-terminal: secrets echo `*` (decision 2) and the
-//! `bootstrap pipes` questions open a filtering dropdown of suggestions (decision 4).
+//! The interactive prompts in a real pseudo-terminal: secrets echo `*` and the
+//! `bootstrap pipes` questions open a filtering dropdown of suggestions.
 //!
 //! Temporary root and home, empty plugins directory, a SQLite instance of the test's own, no
 //! inherited `MRSM_*`.
@@ -362,7 +362,7 @@ fn a_password_prompt_echoes_a_star_per_character() {
         &setup.base,
         &["register", "users", "bob", "-i", "sql:w18sh"],
     );
-    // rc15: the first user of an instance is first offered the admin type.
+    // The first user of an instance is first offered the admin type.
     term.wait_screen("the admin question", 60, |s| {
         s.contains("Make 'bob' an admin?")
     });
@@ -796,7 +796,7 @@ fn bootstrap_pipes_asks_for_the_query_in_the_editor_first() {
     assert!(shown.contains("\"datetime\": \"ts\""), "{shown}");
 }
 
-/// `bootstrap jobs` calls the flags after `:` the action chain's (rc15 Q31), like `edit jobs`.
+/// `bootstrap jobs` calls the flags after `:` the action chain's, like `edit jobs`.
 #[test]
 fn bootstrap_jobs_names_the_chain_flags() {
     let setup = Setup::new("bootstrap-jobs-chain");
@@ -830,7 +830,7 @@ fn bootstrap_jobs_names_the_chain_flags() {
 }
 
 /// Chain steps with `--timeout-seconds` run in a child whose output this process relays through
-/// a pipe: on a terminal they keep the terminal's styles, like the summary (rc15 Q14).
+/// a pipe: on a terminal they keep the terminal's styles, like the summary.
 #[test]
 fn relayed_chain_steps_keep_the_terminal_styles() {
     let setup = Setup::new("relayed-styles");

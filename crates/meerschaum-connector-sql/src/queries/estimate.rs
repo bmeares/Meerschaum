@@ -1,4 +1,4 @@
-//! Row estimates from catalog statistics (`Pipe.get_rowcount(estimate=True)`, contract C1).
+//! Row estimates from catalog statistics (`Pipe.get_rowcount(estimate=True)`).
 //!
 //! Each query returns one integer (or `NULL`) and never scans the table:
 //!

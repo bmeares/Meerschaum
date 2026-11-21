@@ -1,4 +1,4 @@
-//! The DataFrame library of a root (`meerschaum:dataframe`, rc15 Q54).
+//! The DataFrame library of a root (`meerschaum:dataframe`).
 //!
 //! Meerschaum 5.0.0rc15 returns Polars DataFrames by default (`dataframe: polars` in the default
 //! `meerschaum` config, so a fresh root's `meerschaum.yaml` is written with it). A root created by

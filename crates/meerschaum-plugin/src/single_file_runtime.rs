@@ -2316,6 +2316,8 @@ unsafe fn decode(free: unsafe extern "C" fn(OwnedBytes), result: CallResult) -> 
         // SAFETY: host guarantees readable bytes until free.
         unsafe { std::slice::from_raw_parts(result.payload.ptr, result.payload.len) }.to_vec()
     };
+    // SAFETY: the caller passes the `free_bytes` of the host that produced `result`, and the
+    // payload is returned to it exactly once, after the copy above.
     unsafe {
         free(result.payload);
     }
@@ -2377,12 +2379,16 @@ impl<P: Plugin> Export<P> {
                     n
                 });
                 Some(ActiveHost {
+                    // SAFETY: the prefix above shows a complete v1 table, and the host keeps it
+                    // readable through this synchronous call; `RowsHostV1` is `Copy`.
                     table: unsafe { *host },
                     generation,
                 })
             };
             let _scope = Scope(HOST.with(|h| h.replace(active)));
             let envelope: Value =
+                // SAFETY: non-empty `bytes` have a non-null pointer (checked above), and the host
+                // keeps them alive through this synchronous call; they are parsed before it returns.
                 serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
             let method = envelope["request"]["method"]
                 .as_str()

@@ -1,4 +1,4 @@
-//! The per-pipe sync status of an `api:` instance (rc15 contract C2): the server records the
+//! The per-pipe sync status of an `api:` instance: the server records the
 //! syncs posted to `POST /pipes/.../data` on its own instance, a v5 client records its own
 //! outcomes through `POST /engine/sync-status` (and marks its data posts so nothing is recorded
 //! twice), and `GET /engine/sync-status` reads them, re-keyed with the client's `api:` keys.

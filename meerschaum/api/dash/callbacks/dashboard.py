@@ -1150,7 +1150,7 @@ def query_data_click(
     if limit_value is None:
         limit_value = 100
 
-    ### Database errors raise (rc15): show them instead of failing the callback.
+    ### Database errors raise: show them instead of failing the callback.
     try:
         df = pipe.get_data(
             params=params_query,

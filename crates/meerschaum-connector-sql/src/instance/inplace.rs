@@ -427,7 +427,7 @@ impl SqlConnector {
         // SQLite has no datetime type: datetimes are text, compared as text. A definition's
         // computed datetime (`date(ts)` is '2024-01-03') is rewritten in the canonical form the
         // other syncs write (`YYYY-MM-DD HH:MM:SS.ffffff`), so that bounds, joins and re-syncs
-        // compare like for like (rc15 B1).
+        // compare like for like.
         let sqlite_family = matches!(flavor, Flavor::Sqlite | Flavor::Geopackage);
         let sqlite_dt_cols: Vec<String> = if sqlite_family {
             state
@@ -439,7 +439,7 @@ impl SqlConnector {
         } else {
             Vec::new()
         };
-        // `replace` (rc15 Q19): the fetched window is authoritative.
+        // `replace`: the fetched window is authoritative.
         let replace = replace || fetch_replace(pipe);
         if replace && (matches!(begin, Bound::Str(_)) || matches!(end, Bound::Str(_))) {
             return SuccessTuple::fail(format!(
@@ -1858,7 +1858,7 @@ impl SqlConnector {
         args.db_version = db_version.as_deref();
         if upsert {
             // The unique key's own columns / expressions; where that key treats NULL keys as
-            // distinct, the statements compare them (rc15 S3).
+            // distinct, the statements compare them.
             let (target, key_null_safe) =
                 match self.upsert_conflict_target(&sp, &args.join_cols).await {
                     Some((target, null_safe)) => (Some(target), null_safe),

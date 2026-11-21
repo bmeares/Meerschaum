@@ -1,5 +1,5 @@
 //! v4-pattern streams (`LegacyStream`, §5.6 compatibility path) report every callback
-//! `pipe.sync()` as a flush (wave 9): a `stream_flushed` event with trigger `callback` (rows,
+//! `pipe.sync()` as a flush: a `stream_flushed` event with trigger `callback` (rows,
 //! begin/end, success), a ledger entry written before the data commit, and the same children
 //! triggering as a `subscribe` stream (§5.10 "Stream-flush triggering"). A callback that syncs
 //! a pipe outside the graph stays a bare `pipe.sync()` (R1) and reports nothing.
@@ -225,7 +225,7 @@ async fn callback_syncs_are_flushes_that_write_the_ledger_and_trigger_children()
             .all(|f| f.0.as_ref().is_none_or(|r| !r.as_str().contains("copies")))
     );
 
-    // Every callback sync recorded its pipe's sync status (rc15 C2): the stream's and the
+    // Every callback sync recorded its pipe's sync status: the stream's and the
     // mirror's. (Successes within five seconds are held, so the stored rows may be the first's.)
     use meerschaum_connector::InstanceConnector;
     for (ck, mk) in [(CONNECTOR, "readings"), ("legacy:mirror", "copies")] {

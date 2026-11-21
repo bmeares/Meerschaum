@@ -1,4 +1,4 @@
-//! Teams over HTTP (rc15 access model, AC3, AC12), in the `users` route group and the v5 shape
+//! Teams over HTTP (the access model), in the `users` route group and the v5 shape
 //! (`{"success", "message", ...}`, [`crate::envelope`]). Teams live on the server's instance (its
 //! user store) like users and tokens ([`meerschaum_connector::teams`]).
 //!

@@ -77,7 +77,7 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
             meerschaum_connector_api::routes::METADATA,
             post(create_metadata),
         );
-    // A pipe's access and locks (rc15, the v5 shape).
+    // A pipe's access and locks (the v5 shape).
     super::pipe_access::routes(app)
 }
 
@@ -178,7 +178,7 @@ async fn handle(
     Ok((conn, h))
 }
 
-/// Authorize `scopes` (the caller's effective permissions, rc15) and return its access.
+/// Authorize `scopes` (the caller's effective permissions) and return its access.
 async fn authorize(ctx: &Ctx, scopes: &[&str]) -> Result<Access, ApiError> {
     access::require(&ctx.state, &ctx.headers, scopes).await
 }
@@ -323,8 +323,8 @@ where
 // Registration and attributes
 // ------------------------------------------------------------------------------------------------
 
-/// `POST .../register`. Registering needs `pipes:register` (rc15; `pipes:write` still works for
-/// credentials made before it). The new pipe's owner is the caller (an administrator may name
+/// `POST .../register`. Registering needs `pipes:register` (`pipes:write` still works for
+/// credentials made before 5.0.0rc15). The new pipe's owner is the caller (an administrator may name
 /// another) and its team defaults to the caller's primary team; its SQL definition passes the
 /// SQL guard ([`crate::sql_guard`]); a connector reserved for other teams is refused.
 async fn register_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult {
@@ -1523,7 +1523,7 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
     let columns = q.opt_str("columns");
     let special_dtypes =
         pipe_methods::special_input_hints(q.opt_str("new_special_cols").as_deref())?;
-    // `replace=true` (rc15): the rows replace the window `[begin, end)` matching `params`; with no
+    // `replace=true`: the rows replace the window `[begin, end)` matching `params`; with no
     // rows the window is cleared. A bound that is not sent is the posted rows' own range (as for
     // `pipe.sync(df, replace=True)`); `None` (or empty) is no bound on that side.
     let replace = q.bool("replace", false)?;
@@ -1672,7 +1672,7 @@ async fn sync_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiResult
         params: window_params,
     };
     let defaults = ctx.state.config.pipe_defaults.clone();
-    // The pipe's sync status (rc15 C2) records this sync (`routes::sync_status`).
+    // The pipe's sync status records this sync (`routes::sync_status`).
     let (started, status_headers) = (std::time::Instant::now(), ctx.headers.clone());
     let registration = meerschaum_connector::sync_metrics::observed_registration(&pipe);
     if !blocking {
@@ -2090,7 +2090,7 @@ async fn get_pipe_rowcount(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> A
     let q = &ctx.query;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
     let end = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("end"), defaults).await?;
-    // A count the instance fails to read is a `500`, not `0` (rc15 Q17).
+    // A count the instance fails to read is a `500`, not `0`.
     let query = DataQuery {
         begin: begin.clone(),
         end: end.clone(),

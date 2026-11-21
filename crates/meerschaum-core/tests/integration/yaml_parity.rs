@@ -63,7 +63,7 @@ fn outcome(result: Result<NodeRef, PyYamlError>) -> J {
 }
 
 /// Cases where the released `yaml.load` (PyYAML's full `Loader`) builds arbitrary Python objects
-/// and the native codec refuses them like `SafeLoader` does (PARITY.md, "Wave 13").
+/// and the native codec refuses them like `SafeLoader` does (PARITY.md, the native YAML codec).
 const PYTHON_TAG_DEVIATIONS: &[&str] = &[
     "python_object_tag",
     "python_apply_tag",
@@ -373,7 +373,7 @@ fn without_v5_defaults(spec: J) -> J {
                 {
                     uvicorn.remove("workers");
                 }
-                // `api.dash.callbacks_require_session` (rc15, PARITY.md RC15-D-001) is v5-only.
+                // `api.dash.callbacks_require_session` (PARITY.md RC15-D-001) is v5-only.
                 if let Some(dash) = parsed
                     .get_mut("api")
                     .and_then(|a| a.get_mut("dash"))
@@ -381,12 +381,12 @@ fn without_v5_defaults(spec: J) -> J {
                 {
                     dash.remove("callbacks_require_session");
                 }
-                // `api.shutdown.grace_seconds` (rc31: graceful shutdown) is v5-only.
+                // `api.shutdown.grace_seconds` (graceful shutdown) is v5-only.
                 if let Some(api) = parsed.get_mut("api").and_then(J::as_object_mut) {
                     api.remove("shutdown");
                 }
-                // Intentional defaults: Polars output and closed registration after the
-                // first administrator, with role-based actions (RC15-R3-001, AC1/AC2).
+                // Intentional defaults: Polars output and closed registration after the first
+                // administrator, with role-based actions (PARITY.md RC15-R3-001, RC15-P3-004).
                 if let Some(meerschaum) = parsed.get_mut("meerschaum").and_then(J::as_object_mut) {
                     meerschaum.remove("dataframe");
                 }

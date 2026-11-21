@@ -1,4 +1,4 @@
-//! Per-pipe sync status (rc15 contract C2): the latest outcome of each pipe's syncs.
+//! Per-pipe sync status: the latest outcome of each pipe's syncs.
 //!
 //! Every sync path records how a pipe's latest sync went, on the pipe's own instance: `sync
 //! pipes` (the engine's flat and graph runs, the laps of `--loop` jobs), `--listen` callback

@@ -619,7 +619,7 @@ async fn the_job_log_stream_accepts_the_console_session_cookie() {
 
 #[tokio::test]
 async fn the_job_log_stream_follows_the_log_permissions() {
-    // rc15 (AC9): the stream is the log `GET /logs/{name}` serves, under the same rule: the
+    // The stream is the log `GET /logs/{name}` serves, under the same rule: the
     // permissions to read jobs and logs, on a job the caller can see. Running actions (the
     // console key, `--secure`) is not asked of a reader.
     let root = tempfile::tempdir().unwrap();
@@ -699,7 +699,7 @@ async fn the_job_log_stream_is_the_creators_and_the_administrators() {
 
 #[tokio::test]
 async fn the_job_log_stream_is_its_team_s() {
-    // rc15 (AC9): a job started through the API is its owner's team's.
+    // A job started through the API is its owner's team's.
     use meerschaum_connector::InstanceConnector;
     let root = tempfile::tempdir().unwrap();
     let instance = Arc::new(common::MemoryInstance::new("fixture"));

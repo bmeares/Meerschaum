@@ -1,5 +1,5 @@
-//! A host whose Python cannot serve as a worker fails fast, once and clearly, and never hangs
-//! (wave 18, FX2). The interpreters here are fake shell wrappers around the system `python3`
+//! A host whose Python cannot serve as a worker fails fast, once and clearly, and never hangs.
+//! The interpreters here are fake shell wrappers around the system `python3`
 //! (`-S -s`: no site-packages, so no real `meerschaum` is ever found), and the `meerschaum` they
 //! find is a stub package written to a temporary `PYTHONPATH`.
 

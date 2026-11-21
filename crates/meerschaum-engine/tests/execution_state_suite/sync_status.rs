@@ -1,4 +1,4 @@
-//! The per-pipe sync status (rc15 contract C2) every engine sync records on SQLite: bare syncs
+//! The per-pipe sync status every engine sync records on SQLite: bare syncs
 //! (`Engine::sync_pipe`, the path of Python's `pipe.sync()` and worker callbacks), flat and graph
 //! runs (one record per node, after its retries), failures counting until a success, the
 //! debounce of successes and reads that see the latest sync, the status owner of nested syncs,

@@ -3,7 +3,7 @@
 //!
 //! `meerschaum-connector-sql`: the v5 SQL connector (see `docs/design/v5.0.0.md` §4.1, §6.2, D13).
 //!
-//! This wave covers the flavor-aware query-building layer (ported function by function from
+//! This crate covers the flavor-aware query-building layer (ported function by function from
 //! `meerschaum/utils/sql.py`, `meerschaum/utils/dtypes/sql.py` and `meerschaum/connectors/sql/`)
 //! and the driver layer (`sqlx` pools for the PostgreSQL, MySQL and SQLite / GeoPackage
 //! families; `tiberius` for MSSQL, `duckdb` and `oracle` behind their cargo features).

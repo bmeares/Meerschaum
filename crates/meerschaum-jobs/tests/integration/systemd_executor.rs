@@ -169,7 +169,7 @@ fn props_without_target(text: &str) -> Value {
     let mut v = Value::from_json_str(text).unwrap();
     if let Some(m) = v.as_map_mut() {
         m.shift_remove("target");
-        // Additive rc6 Job identity metadata is outside the v4 comparison.
+        // v5's additive Job identity metadata is outside the v4 comparison.
         if let Some(execution) = m.shift_remove("mrsm_execution") {
             assert_eq!(
                 execution.get("kind").and_then(Value::as_str),
@@ -532,7 +532,7 @@ fn status_pid_timestamps_results_match() {
         .unwrap();
     props.shift_remove("label");
     props.shift_remove("target");
-    // rc6 adds explicit kind metadata to new Jobs; v4 has no such field.
+    // v5 adds explicit kind metadata to new Jobs; v4 has no such field.
     assert_eq!(
         props["mrsm_execution"].get("kind").and_then(Value::as_str),
         Some("persistent_job")
@@ -1090,7 +1090,7 @@ fn units_of_other_roots_are_scoped_listed_and_exported() {
 fn a_local_job_moves_to_systemd_and_keeps_its_logs() {
     let r = Roots::new();
     let ctx = r.ctx("weather/root");
-    // A local job from before rc15 (its properties and a log; no process).
+    // A local job from before 5.0.0rc15 (its properties and a log; no process).
     let mut local = Job::new(
         "weather sync",
         Some(vec!["sync".into(), "pipes".into(), "--loop".into()]),

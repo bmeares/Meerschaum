@@ -1,4 +1,4 @@
-//! The DataFrame library setting at the boundary (rc15, Q54).
+//! The DataFrame library setting at the boundary.
 //!
 //! - `frame_from_arrow(data, as_polars=False, dtypes=None)`: the one conversion from Arrow data
 //!   (any PyCapsule producer, or a list of record batches) to a pandas or Polars frame, through the

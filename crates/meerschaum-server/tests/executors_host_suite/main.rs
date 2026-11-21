@@ -1,6 +1,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod execute_authorization;
 mod execution_callbacks;
 mod execution_graph_lineage;
 mod execution_request_expiry;
@@ -9,7 +10,6 @@ mod executor_api_capability;
 mod executor_api_terminal_policy;
 mod executor_plugin_delivery;
 mod executor_source_ceiling;
-mod fx7_exec_policy;
 mod host_backlog;
 mod host_callback_transport;
 #[cfg(unix)]

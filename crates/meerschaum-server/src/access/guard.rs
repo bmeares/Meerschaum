@@ -1,4 +1,4 @@
-//! What a caller may write into a pipe's parameters through the API (AC4, AC5, AC8): the
+//! What a caller may write into a pipe's parameters through the API: the
 //! checks the pipe routes, the Pipelines routes and the MCP tools share.
 //!
 //! - **New pipes** ([`stamp_new_pipe`]): the owner is the caller (an administrator may name

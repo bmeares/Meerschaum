@@ -938,7 +938,7 @@ impl PyValkeyConnector {
         } else {
             sync_frame(py, df)?
         };
-        // `replace=True` (rc15): the rows replace the window `[begin, end)` matching `params`; a
+        // `replace=True`: the rows replace the window `[begin, end)` matching `params`; a
         // bound that is not given is the rows' own datetime range, as for `pipe.sync`.
         let kw_item = |key: &str| -> PyResult<Option<Bound<'py, PyAny>>> {
             match _kw {

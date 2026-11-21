@@ -2,7 +2,7 @@
 //! DAG of a selection (`mrsm show graph`) is drawn by the CLI (`meerschaum-cli`'s
 //! `format::graph`): the engine keeps the data ([`crate::selection::Subgraph`]), the CLI owns
 //! the styling. The live `ratatui` view and the console's Plotly timeline render from the same
-//! [`RunRecord`] and event stream in later waves.
+//! [`RunRecord`] and event stream.
 
 use std::fmt::Write as _;
 

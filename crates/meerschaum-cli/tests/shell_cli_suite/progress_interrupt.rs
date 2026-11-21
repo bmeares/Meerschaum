@@ -1,6 +1,6 @@
 //! A Ctrl-C (SIGINT) or SIGTERM which ends the process while the progress spinner is drawn must
-//! leave the spinner line cleared (wave 17b). Ctrl-C cancels the action and exits 130 with
-//! `Interrupted.` (wave 18); SIGTERM still ends the process "killed by the signal".
+//! leave the spinner line cleared. Ctrl-C cancels the action and exits 130 with
+//! `Interrupted.`; SIGTERM still ends the process "killed by the signal".
 //!
 //! The action is `show data` on a pipe whose table is a SQLite view that takes many seconds to
 //! read, run in a real PTY. Temporary root, empty plugins directory, no inherited `MRSM_*`.
@@ -241,7 +241,7 @@ fn interrupted_while_drawn(byte: Option<&str>, signal: Option<&str>) {
         "the interrupted process reported success"
     );
     if byte.is_some() {
-        // Ctrl-C cancels the action (wave 18, decision 1): `Interrupted.`, exit status 130, not a
+        // Ctrl-C cancels the action: `Interrupted.`, exit status 130, not a
         // process killed by the signal. SIGTERM below still ends the process by the signal.
         assert_eq!(status.exit_code(), 130, "{status:?}");
         assert!(

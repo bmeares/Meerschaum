@@ -1,5 +1,5 @@
 //! Internal engine hypertables use 7-day chunks and a 7-day compression window,
-//! migrating legacy rc17 (43200 µs) and 5.0 (30-day) defaults without touching
+//! migrating legacy 5.0.0rc17 (43200 µs) and 5.0 (30-day) defaults without touching
 //! custom admin intervals or retained history.
 use chrono::{TimeDelta, Utc};
 use meerschaum_connector::pipe_ops::engine_state_parameters;

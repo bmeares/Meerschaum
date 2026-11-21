@@ -1,4 +1,4 @@
-//! `mrsm --version` and `mrsm --help` never start a Python worker (wave 18, decision 5).
+//! `mrsm --version` and `mrsm --help` never start a Python worker.
 //!
 //! The plugins directory holds a plugin, so validating the plugin trees would start the
 //! interpreter. `MRSM_PYTHON` is a script which records every start; a control command which does

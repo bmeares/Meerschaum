@@ -184,7 +184,7 @@ fn v4_view(got: &mut Json, read_only: bool) {
     }
 }
 
-/// rc15's access model (PARITY.md RC15-P3-002): a pipe registered through the API is its
+/// v5's access model (PARITY.md RC15-P3-002): a pipe registered through the API is its
 /// creator's, so its parameters gain `access` with the caller as owner (Everyone's team, the
 /// default visibility and edit mode), which v4 never stored. Read as v4's answer.
 fn without_stamped_access(v: Json, owner: &str) -> Json {

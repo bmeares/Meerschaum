@@ -230,6 +230,9 @@ fn compiled_entry(
         std::fs::write(wrapper, code).unwrap();
     }
     compile(&found.candidates[0]);
+    // SAFETY: the library was just built from this test's own source through the SDK's
+    // generated ABI v1 exports (or the SDK vtable in the legacy wrapper), and it stays on disk in
+    // `root`, which the caller keeps alive with the plugin.
     let plugin =
         unsafe { meerschaum_plugin::LoadedPlugin::load(&found.candidates[0].library) }.unwrap();
     (root, plugin)
@@ -584,6 +587,8 @@ fn cargo_builds_are_lightweight_shared_and_keep_failure_diagnostics() {
     eprintln!("Second plugin build: {:?}", start.elapsed());
     assert_eq!(dependency.metadata().unwrap().modified().unwrap(), modified);
     for (candidate, id) in [(first, 1), (second, 2)] {
+        // SAFETY: both libraries were just built from this test's own sources through the SDK's
+        // generated ABI v1 exports.
         let plugin = unsafe { meerschaum_plugin::LoadedPlugin::load(&candidate.library) }.unwrap();
         assert_eq!(
             plugin
@@ -871,6 +876,8 @@ fn hello() -> (bool, String) {
         &candidate.library,
     )
     .unwrap();
+    // SAFETY: the library was just built from this test's own source (and its local `helper`
+    // crate) through the SDK's generated ABI v1 exports.
     let library = unsafe { meerschaum_plugin::LoadedPlugin::load(&candidate.library) }.unwrap();
     assert_eq!(
         library.action("hello", json!({})).unwrap().message,
@@ -951,6 +958,8 @@ fn r#type(kwargs: &Value) -> (bool, String) {
     assert!(found.skipped.is_empty(), "{:?}", found.skipped);
     assert_eq!(found.candidates[0].version, "1.2.3");
     compile(&found.candidates[0]);
+    // SAFETY: the library was just built from this test's own source through the SDK's
+    // generated ABI v1 exports.
     let plugin =
         unsafe { meerschaum_plugin::LoadedPlugin::load(&found.candidates[0].library) }.unwrap();
     assert_eq!(plugin.version, "1.2.3");

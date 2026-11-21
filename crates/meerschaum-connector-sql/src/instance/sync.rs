@@ -172,8 +172,8 @@ fn current_timestamp(unit: meerschaum_core::dtypes::PrecisionUnit, as_int: bool)
     ))
 }
 
-/// The columns of the pipe whose null-like strings (`'None'`, `'NA'`, `''`, ...) are text
-/// (rc15 Q18): declared text columns and text index columns
+/// The columns of the pipe whose null-like strings (`'None'`, `'NA'`, `''`, ...) are text:
+/// declared text columns and text index columns
 /// ([`meerschaum_core::dtypes::null_marker_text_columns`]).
 pub(crate) fn null_marker_columns(sp: &SqlPipe, state: &PipeState) -> Vec<String> {
     let index: Vec<String> = columns_map(sp).into_values().collect();

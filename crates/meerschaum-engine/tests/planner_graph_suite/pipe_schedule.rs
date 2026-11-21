@@ -175,7 +175,7 @@ async fn all_scheduled_selection_idles_until_due() {
     assert!((1..=3).contains(&ran.len()), "{ran:?}");
 }
 
-/// S4 (rc15): a scheduled pipe with parents in the run does not follow its schedule. The loop
+/// A scheduled pipe with parents in the run does not follow its schedule. The loop
 /// says so once when it starts (naming the pipe and why), and the plan lists it as a warning.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_scheduled_child_is_warned_about_once() {

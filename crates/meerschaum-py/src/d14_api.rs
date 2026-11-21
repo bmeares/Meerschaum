@@ -344,7 +344,7 @@ pub fn get_parameters<'py>(
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     crate::core_api::emit_warnings(py, warnings, 2)?;
     let resolved_map = me.parameters().clone();
-    // `MRSM{}` symlinks resolve against the live config in the registry (wave 15, O).
+    // `MRSM{}` symlinks resolve against the live config in the registry.
     let resolved = crate::config_api::substitute_parameters(py, &resolved_map)?;
     let symlinks = PyDict::new(py);
     let mut templates = Vec::new();

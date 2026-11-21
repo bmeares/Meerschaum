@@ -68,7 +68,7 @@ pub struct MemoryInstance {
     fail_permission_reads: std::sync::atomic::AtomicBool,
     /// When set, the reads of users' IDs and of tokens fail (authentication must fail closed).
     fail_identity_reads: std::sync::atomic::AtomicBool,
-    /// When set, the reads of pipes' data, row counts and sync times fail (rc15 Q17: the routes
+    /// When set, the reads of pipes' data, row counts and sync times fail (the routes
     /// answer `500`, not an empty pipe).
     fail_data_reads: std::sync::atomic::AtomicBool,
     /// How many times the registered pipes were listed (`fetch_pipes_keys`) and one pipe's

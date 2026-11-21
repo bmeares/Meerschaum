@@ -1,4 +1,4 @@
-//! The per-pipe sync status routes (rc15 contract C2), in the `engine` route group:
+//! The per-pipe sync status routes, in the `engine` route group:
 //!
 //! - `GET /engine/sync-status` (`pipes:read`): the statuses recorded on the server's instance
 //!   (`?instance_keys=` like the pipe routes), or one pipe's with `?pipe_ref=` (either the
@@ -9,7 +9,7 @@
 //!   merged into that pipe's status on the server's instance. `{"success": true, "message":
 //!   "...", "status": {...}}`.
 //!
-//! **Access (rc15).** A caller who is not an administrator reads the statuses of the pipes it can
+//! **Access.** A caller who is not an administrator reads the statuses of the pipes it can
 //! see, and records outcomes only for pipes it may change.
 //!
 //! Statuses are keyed with the server's instance keys; the client re-keys them with its own

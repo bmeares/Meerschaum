@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""RC33 test plugin: an action that loops by itself and reports its laps (`mrsm.jobs.report_lap`)."""
+"""Test plugin: an action that loops by itself and reports its laps (`mrsm.jobs.report_lap`)."""
 
 __version__ = '0.1.0'
 

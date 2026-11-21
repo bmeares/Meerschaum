@@ -2,10 +2,9 @@
 # vim:fenc=utf-8
 
 """
-rc15 wave 2, the access model through an `api:` instance (decisions AC2, AC3, AC4, AC5, AC12,
-AC13): the Python API reaches teams, a pipe's access and locks, users' roles and permissions
-through a real `mrsm start api` (a SQLite instance behind it), and the server decides who may
-see and change what.
+The access model through an `api:` instance: the Python API reaches teams, a pipe's access and
+locks, users' roles and permissions through a real `mrsm start api` (a SQLite instance behind
+it), and the server decides who may see and change what.
 """
 
 from __future__ import annotations

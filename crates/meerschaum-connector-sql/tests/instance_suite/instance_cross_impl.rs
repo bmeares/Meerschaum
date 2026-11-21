@@ -354,7 +354,7 @@ fn stable_dump(mut d: J) -> J {
     d
 }
 
-/// rc15 B1 (deliberate): v5 types the computed columns of an in-place table (`val2` of
+/// Deliberate: v5 types the computed columns of an in-place table (`val2` of
 /// `xi_templated_out`), which v4's `CREATE TABLE ... AS SELECT` leaves untyped: on SQLite an
 /// untyped `date(ts)` / `AVG(x)` column is what made re-syncs duplicate rows. Such a column of
 /// `other` is compared as "typed where v4 is untyped" (its declared type and its table's DDL
@@ -514,7 +514,7 @@ async fn cross_implementation_sqlite() {
     // Reads: both implementations read both databases.
     let py_read_py = py.run(&["read", &s(db("py.db")), sp]);
     let py_read_rs = py.run(&["read", &s(db("rs.db")), sp]);
-    // rc15 B1 (deliberate): a computed in-place column v4 leaves untyped (`NULL`) is typed by v5.
+    // Deliberate: a computed in-place column v4 leaves untyped (`NULL`) is typed by v5.
     let mut py_read_rs_typed = py_read_rs.clone();
     if let (Some(reads), Some(rs_reads)) =
         (py_read_py.as_object(), py_read_rs_typed.as_object_mut())

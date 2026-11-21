@@ -33,7 +33,7 @@ def test_external_uv_installs_without_pip_or_uv_module(tmp_path):
     uv_bin = shutil.which('uv')
     if uv_bin is None:
         pytest.skip('uv executable required')
-    from tests.test_w9_venvs import _make_wheel
+    from tests.test_venv_request_ledger import _make_wheel
     wheels = tmp_path / 'wheels'
     wheels.mkdir()
     _make_wheel(wheels, 'bridge_dependency', '1.0')

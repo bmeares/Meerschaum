@@ -28,7 +28,7 @@ async fn get_actions(ctx: Ctx) -> ApiResult {
 }
 
 /// `POST /actions/{action}`: run an action with v4's keyword arguments. Administrators run any
-/// action; another caller (rc15 access model) needs `actions:execute`, runs only what the
+/// action; another caller needs `actions:execute`, runs only what the
 /// console offers ([`crate::execute_policy`]: no shell, no `sql`, no `python`, ...) and only on
 /// pipes it may change ([`crate::execute_access`]), its keywords read as the command line they
 /// stand for ([`crate::execute_access::sysargs_of_keywords`]).

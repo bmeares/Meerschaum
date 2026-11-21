@@ -1,4 +1,4 @@
-//! Fail-fast first connections (D23-style polish for rc2, DECISIONS item 23).
+//! Fail-fast first connections.
 //!
 //! `sqlx` retries a refused connection until its pool acquire timeout (30 s), and a host that
 //! never answers holds the first query for as long. The first connection a driver makes in a

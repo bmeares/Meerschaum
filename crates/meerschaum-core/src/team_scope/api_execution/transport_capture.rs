@@ -319,7 +319,9 @@ mod tests {
         let spec = Spec::read(&file).unwrap();
         let directory = file.parent().unwrap();
         let state = directory.join("state");
-        // This isolated child executes one test and cannot race environment mutation.
+        // SAFETY: this re-executed child runs only this test (`--test-threads=1` and its exact
+        // name), and neither the harness nor `sandbox` starts a thread that reads the environment,
+        // so no other thread can observe `set_var`.
         unsafe {
             std::env::set_var(sandbox::SPEC_VAR, &file);
         }
@@ -332,6 +334,8 @@ mod tests {
         .unwrap();
         let peer = state.join("peer-config.json");
         write_private(&peer, "{\"meerschaum\":{\"instance\":\"api:peer\"}}").unwrap();
+        // SAFETY: still the single-threaded re-executed child above; `sandbox::enforce` and
+        // `with_api_transport` start no threads.
         unsafe {
             std::env::set_var("MRSM_CONFIG_FILE", &peer);
             std::env::set_var(sandbox::SPEC_VAR, &peer);

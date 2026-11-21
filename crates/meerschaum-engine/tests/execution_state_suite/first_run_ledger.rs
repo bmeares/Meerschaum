@@ -1,6 +1,6 @@
 //! An edge without a cursor (its first engine run, e.g. right after a reset) is decided by the
 //! parent's unconsumed ledger entries, including those the parent writes earlier in the same
-//! run, not only by comparing watermarks (wave 9). Late rows that a parent upserts inside the
+//! run, not only by comparing watermarks. Late rows that a parent upserts inside the
 //! child's already-synced range do not move the parent's watermark, yet the child must re-sync
 //! them, as a v4 plain sync of both pipes does.
 //!

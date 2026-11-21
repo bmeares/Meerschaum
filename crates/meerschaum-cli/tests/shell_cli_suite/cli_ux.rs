@@ -1,4 +1,4 @@
-//! rc15 CLI usability: `mrsm help`, the grouped action list, `show actions` without truncated
+//! CLI usability: `mrsm help`, the grouped action list, `show actions` without truncated
 //! names, one error print, the undefined-connector message, `mrsm python file.py` and the
 //! colors rules (`NO_COLOR`, `FORCE_COLOR`, piped output, jobs).
 //!
@@ -479,7 +479,7 @@ impl std::io::Write for Buf {
     }
 }
 
-/// Warnings and debug output are styled by stderr's own terminal check (rc15 Q14): `2> err.log`
+/// Warnings and debug output are styled by stderr's own terminal check: `2> err.log`
 /// gets plain text while stdout is a terminal, and a terminal stderr keeps its styles while
 /// stdout goes to a file.
 #[test]

@@ -37,7 +37,7 @@ const OTHER_ADMIN_SESSION: &str = "22222222-2222-4222-8222-222222222222";
 /// `bob`, an operator (the role with `webterm:use`).
 const USER_SESSION: &str = "33333333-3333-4333-8333-333333333333";
 /// A session of a user name the instance does not have: v4 only asked the session store, so a
-/// session with a user name was enough; since rc15 the user must exist.
+/// session with a user name was enough; in v5 the user must exist.
 const GHOST_SESSION: &str = "44444444-4444-4444-8444-444444444444";
 /// `ed`, a user without permissions of their own: the default role, `editor`, which has no
 /// terminal.
@@ -144,7 +144,7 @@ fn server_config(root: &Path, flags: ServerFlags, non_admin: Option<bool>) -> Se
         let Some(CoreValue::Map(permissions)) = api.get_mut("permissions") else {
             panic!("`api:permissions`");
         };
-        // rc15 no longer ships `api:permissions:actions`: a config that sets it adds it.
+        // v5 no longer ships `api:permissions:actions`: a config that sets it adds it.
         let actions = permissions
             .entry("actions".to_string())
             .or_insert_with(|| CoreValue::Map(Default::default()));
@@ -378,7 +378,7 @@ async fn the_page_requires_an_authorized_session() {
     assert!(unknown.text().contains("href=\"/dash/login\""));
 
     // A logged-in user who is not an administrator gets a shell with `webterm:use` (the role
-    // `operator`, rc15); v4 gave every logged-in user one.
+    // `operator`); v4 gave every logged-in user one.
     let user = send(&app, get(USER_SESSION)).await;
     assert_eq!(user.status, StatusCode::OK);
     // The default role (`editor`) has no terminal: a page that says so.
@@ -457,7 +457,7 @@ async fn ending(socket: &mut Socket, within: Duration) -> (String, bool, Option<
 
 #[tokio::test]
 async fn non_admin_users_follow_api_permissions_actions_non_admin() {
-    // The terminal's gate (rc15): administrators, and users with `webterm:use` (the role
+    // The terminal's gate: administrators, and users with `webterm:use` (the role
     // `operator`) while `api:permissions:actions:non_admin` allows non-administrators (its
     // default; `start api --secure` and `false` close it). v4's other key
     // (`system:api:permissions:actions:non_admin`, undefined by default) is not consulted.
@@ -1519,7 +1519,7 @@ async fn tmux_windows_are_bounded_across_reconnects() {
     assert_eq!(count(), webterm::MAX_SESSION_WINDOWS);
 }
 
-/// Q15: with tmux enabled, the terminal's sessions live on a tmux server of their own (a socket
+/// With tmux enabled, the terminal's sessions live on a tmux server of their own (a socket
 /// under the root, never the user's default server), started with Meerschaum's configuration
 /// (the window list on top), named as before; the server this process started stops with the API.
 #[tokio::test]
@@ -1647,7 +1647,7 @@ async fn terminals_run_on_their_own_tmux_server_with_meerschaums_config() {
     assert!(!webterm::stop_owned_server(&socket));
 }
 
-/// RC28: a tmux server that already runs on the terminal's own socket (started by an earlier
+/// A tmux server that already runs on the terminal's own socket (started by an earlier
 /// release, whose configuration turned the status line off, or left behind by an API that did not
 /// stop cleanly) gets Meerschaum's configuration again when a terminal attaches, so the window
 /// list shows; it is not this process's to stop.
@@ -1762,7 +1762,7 @@ const JOB_ENV: &[(&str, &str)] = &[
     ("MRSM__COMPOSE_PROJECT", "rc25"),
     // Every job's environment (`meerschaum_jobs::Job::env`): a shell with it has no editor.
     ("MRSM_NONINTERACTIVE", "true"),
-    // RC31: a server restarted by an unattended script carries it; a shell with it asks nothing
+    // A server restarted by an unattended script carries it; a shell with it asks nothing
     // (`python` exits at once, `bootstrap pipes` refuses to ask).
     ("MRSM_NOASK", "1"),
 ];
@@ -1771,7 +1771,7 @@ const JOB_ENV: &[(&str, &str)] = &[
 const JOB_ENV_PROBE: &str = "echo ctx:${MRSM_DAEMON_ID--}:${MRSM_SYSTEMD_LOG_PATH--}:${MRSM_SYSTEMD_RESULT_PATH--}:${MRSM_SYSTEMD_STDIN_PATH--}:${MRSM_SYSTEMD_DELETE_JOB--}:${INVOCATION_ID--}:${JOURNAL_STREAM--}:${MRSM__COMPOSE_PROJECT--}:${MRSM_NONINTERACTIVE--}:${MRSM_NOASK--} keep:$MRSM_RC25_KEEP\n";
 const JOB_ENV_CLEAN: &str = "ctx:-:-:-:-:-:-:-:-:-:- keep:kept";
 
-/// RC25: on a server that runs as a Meerschaum `systemd` job, a terminal's `mrsm` inherited the
+/// On a server that runs as a Meerschaum `systemd` job, a terminal's `mrsm` once inherited the
 /// job's variables, wrapped itself as that job ("an interactive shell cannot start in a job") and
 /// the terminal showed `[CLOSED]`. The terminal's shell never carries the job context, also when
 /// the caller passes it explicitly; its own configuration stays.
@@ -2005,7 +2005,7 @@ async fn a_tmux_sessions_own_job_context_is_unset() {
 
 /// End to end through the terminal's route: the real `mrsm` shell in a server
 /// whose environment is a `systemd` job's stays interactive, and the job's log, result and FIFO
-/// are untouched. Before RC25 the shell wrapped itself as the job and the page showed `[CLOSED]`.
+/// are untouched. Unscrubbed, the shell wraps itself as the job and the page shows `[CLOSED]`.
 /// Workspace tests build `mrsm-cli` beside this test's `deps` directory. `MRSM_TEST_BIN` may
 /// override it; only local single-crate runs without either binary may skip this regression.
 #[tokio::test]
@@ -2100,7 +2100,7 @@ async fn the_mrsm_shell_stays_interactive_on_a_jobs_server() {
     })
     .await;
     assert!(quiet.is_err(), "the shell ended: {quiet:?}");
-    // RC28: the console's Exec button asks whether the shell waits at an empty prompt; the
+    // The console's Exec button asks whether the shell waits at an empty prompt; the
     // editor's shell says so (the plain line reader never did, so Exec was always refused).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {

@@ -1,4 +1,4 @@
-//! The access commands of rc15 wave 2 (AC10, FX2, the `copy pipes` rule of AC4) on SQLite
+//! The access commands (teams, users, pipe access and locks, the `copy pipes` rule) on SQLite
 //! instances in a temporary root:
 //!
 //! - in process, through the dispatcher with scripted answers and a scripted editor: `register
@@ -775,10 +775,10 @@ mod binary {
     }
 }
 
-/// The same commands over an `api:` instance, where the server decides (AC6): teams, a pipe's
+/// The same commands over an `api:` instance, where the server decides: teams, a pipe's
 /// access and its locks go through the server's routes (which check who may), `show users`
 /// shows what the server shows the caller (other users' emails only to administrators and the
-/// managers of a team they are in, AC13), and `delete teams` counts the server's pipes and jobs.
+/// managers of a team they are in), and `delete teams` counts the server's pipes and jobs.
 mod api {
     use super::*;
     use std::io::Write;

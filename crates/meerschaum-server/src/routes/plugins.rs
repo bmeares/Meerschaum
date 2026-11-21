@@ -73,7 +73,7 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
         }
         Principal::User(user) => user,
         Principal::Token(_) => {
-            // RC30: publishing with client credentials or an API key acts as its owner,
+            // Publishing with client credentials or an API key acts as its owner,
             // with the token's scopes capped by that owner's current permissions.
             let access =
                 crate::access::require_fresh(&state, &ctx.headers, &["plugins:write"]).await?;

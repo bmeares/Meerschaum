@@ -178,7 +178,7 @@ def test_systemd_executor_paths_and_unit_text():
 
 
 def test_job_health_reports_the_laps_of_a_loop(local_jobs):
-    """`job.health` (C3): the laps a looping job records, as a plain dict."""
+    """`job.health`: the laps a looping job records, as a plain dict."""
     job = local_jobs(['show', 'version', '--loop', '--min-seconds', '0.2'])
     health = job.health
     assert set(health) == {

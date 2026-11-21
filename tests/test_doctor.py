@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-`mrsm doctor` through the Python façade (wave 17c): `meerschaum.entry()` and
+`mrsm doctor` through the Python façade: `meerschaum.entry()` and
 `meerschaum.actions.actions['doctor']` run the same native dispatcher in-process, on a throwaway
 SQLite instance (the sqlite flavor needs no service). The binary-level behavior (shadowing
 `meerschaum` copies, unreachable servers, read-only runs) is covered by

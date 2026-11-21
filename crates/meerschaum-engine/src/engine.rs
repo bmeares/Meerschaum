@@ -1590,7 +1590,7 @@ impl Engine {
                 .filter_map(|r| graph.node(r).map(|n| (&n.pipe_ref, &n.record.parameters)));
             let (parsed, mut warnings) =
                 crate::cadence::PipeSchedules::parse(cadence.as_ref(), roots, Utc::now());
-            // Said once per loop (S4): a scheduled pipe with parents does not follow its schedule.
+            // Said once per loop: a scheduled pipe with parents does not follow its schedule.
             warnings.extend(crate::cadence::ignored_schedules(&graph, &sub));
             for message in warnings {
                 tracing::warn!("{message}");

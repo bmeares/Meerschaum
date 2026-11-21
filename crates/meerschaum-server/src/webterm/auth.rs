@@ -182,7 +182,7 @@ async fn authorize_console(inner: &Inner, session_id: &str, fresh: bool) -> Acce
 /// Who `username` may open a terminal as (the part of [`authorize`] after the session).
 pub(super) async fn authorize_user(state: &AppState, username: &str, fresh: bool) -> Access {
     let username = username.to_string();
-    // FIX (intentional v4 change, rc15 access model): v4 gave every logged-in user a shell
+    // FIX (intentional v4 change, access model): v4 gave every logged-in user a shell
     // unless `--secure`; the terminal now needs `webterm:use` (administrators, the role
     // `operator`, or the permission given), and `--secure` keeps it for administrators. v4 also
     // asked only the session store: the session's user must still be a user of the instance.

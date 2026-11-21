@@ -1,4 +1,4 @@
-//! The per-pipe sync status (rc15 contract C2) from the command line: `sync pipes` records each
+//! The per-pipe sync status from the command line: `sync pipes` records each
 //! pipe's outcome (from a job, with the job's name), `copy pipes` records the copy on the
 //! destination, and `show pipes` ends with a line for each pipe whose latest sync failed.
 //!

@@ -1,4 +1,4 @@
-//! Null-only columns of `pd.DataFrame(docs).convert_dtypes()` (wave 13). Reference values were
+//! Null-only columns of `pd.DataFrame(docs).convert_dtypes()`. Reference values were
 //! read from pandas 2.3: a missing key or a float `nan` next to `None` is `float64` and becomes
 //! `Int64`; `[None, None]` and `pd.NA` stay `object`.
 

@@ -1,7 +1,7 @@
 //! `/jobs/*`, `/logs/{name}` and the logs websocket `/logs/{name}/ws` (`api/routes/_jobs.py`),
 //! delegated to a [`JobsBackend`](crate::backends::JobsBackend).
 //!
-//! **Who sees and controls a job** (decision AC9; the rule is
+//! **Who sees and controls a job** (the rule is
 //! [`meerschaum_core::job_access`]): a job started through the API (this route group, `POST
 //! /execute`, `POST /pipelines/{name}/sync`) or the console records its `owner` (the caller) and
 //! `team` (the caller's primary team). Its team's members and administrators see it (and its
@@ -449,7 +449,7 @@ async fn create_job(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult
     };
     let sysargs = creation_sysargs(&name, &sysargs, properties.as_ref());
     // A caller who is not an administrator runs what the console offers, on the pipes it may
-    // change (rc15, P3: the checks of `POST /execute`, `crate::execute_access`).
+    // change (the checks of `POST /execute`, `crate::execute_access`).
     if !access.no_auth
         && !access.full_admin()
         && !crate::execute_policy::check_bound_job_command(&ctx.state, &access, &sysargs).await?

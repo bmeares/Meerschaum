@@ -103,7 +103,7 @@ async fn postgres_types_and_exec_queries() {
             schema.field(2).data_type(),
             &DataType::Timestamp(TimeUnit::Microsecond, None)
         );
-        // `NUMERIC` travels as decimal text tagged `numeric` (Wave 15 L, W15L-005): every value
+        // `NUMERIC` travels as decimal text tagged `numeric` (PARITY.md W15L-005): every value
         // keeps the scale the database stored, which one `Decimal128` scale per column could not.
         assert_eq!(schema.field(3).data_type(), &DataType::Utf8);
         assert_eq!(

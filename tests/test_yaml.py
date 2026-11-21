@@ -1,5 +1,5 @@
 """
-Wave 13 (task G): the native YAML codec (`meerschaum._core.yaml`) and its Python façade
+The native YAML codec (`meerschaum._core.yaml`) and its Python façade
 (`meerschaum.utils.yaml`).
 
 Three layers:
@@ -58,7 +58,7 @@ def parity():
 
 
 # Cases where the released `yaml.load` (PyYAML's full `Loader`) builds arbitrary Python objects
-# and the native codec refuses them with the `SafeLoader` error (PARITY.md, Wave 13).
+# and the native codec refuses them with the `SafeLoader` error (PARITY.md, the native YAML codec).
 PYTHON_TAG_DEVIATIONS = {
     'python_object_tag', 'python_apply_tag', 'python_name_tag', 'python_module_tag',
     'python_str_tag', 'python_complex_tag', 'python_dict_tag', 'python_list_tag',
@@ -497,13 +497,13 @@ def _without_v5_defaults(spec):
         except ValueError:
             return spec
         parsed.get('system', {}).pop('engine', None)
-        ### PARITY (rc15, RC15-D-001): console callbacks need a session by default.
+        ### PARITY (RC15-D-001): console callbacks need a session by default.
         parsed.get('api', {}).get('dash', {}).pop('callbacks_require_session', None)
-        ### v5 (rc31): the API server's graceful shutdown.
+        ### v5: the API server's graceful shutdown.
         parsed.get('api', {}).pop('shutdown', None)
-        ### PARITY (rc15, RC15-R3-001): a new root returns Polars DataFrames by default.
+        ### PARITY (RC15-R3-001): a new root returns Polars DataFrames by default.
         parsed.get('meerschaum', {}).pop('dataframe', None)
-        ### PARITY (rc15, AC1/AC2): registration closes after bootstrap; role permissions
+        ### PARITY (RC15-P3-004): registration closes after bootstrap; role permissions
         ### replace the implicit action grant. The access suites verify the new defaults.
         permissions = parsed.get('api', {}).get('permissions', {})
         if 'registration' in permissions and 'actions' not in permissions:
@@ -515,7 +515,7 @@ def _without_v5_defaults(spec):
 
 def _without_dataframe_default(value):
     """
-    `value` without the `dataframe: polars` default a new `meerschaum.yaml` carries since rc15
+    `value` without the `dataframe: polars` default a new `meerschaum.yaml` carries in v5
     (PARITY.md RC15-R3-001), which v4.1.4's lacks: the YAML line and the tagged mapping entry.
     """
     if isinstance(value, str):
@@ -586,9 +586,9 @@ def test_config_cases_match_released_reference(parity, tmp_path):
         ### `warn()` wraps long lines at the terminal width, and the temporary root's path length
         ### decides where: compare the warnings without whitespace.
         expected, got = _unwrapped(expected), _unwrapped(got, tmp_path / 'root')
-        ### PARITY (wave 13, PARITY.md): the Rust default config carries `system:engine`.
+        ### PARITY (PARITY.md): the Rust default config carries `system:engine`.
         expected, got = _without_v5_defaults(expected), _without_v5_defaults(got)
-        ### PARITY (wave 17c, W17K1-002..004): the v5 stack defaults.
+        ### PARITY (W17K1-002..004): the v5 stack defaults.
         got = _v4_stack(got)
         ### PARITY (5.1.1): `write_missing` preserves `MRSM{...}` references inside lists in
         ### `stack.yaml` (ports, healthcheck, Grafana datasource), whereas v4.1.4 expanded them.
@@ -612,7 +612,7 @@ def test_config_cases_match_released_reference(parity, tmp_path):
             ):
                 stack_text = stack_text.replace(v5_ref, v4_val)
             got['files'] = {**got['files'], 'stack.yaml': stack_text}
-        ### PARITY (rc15, RC15-R3-001): `dataframe: polars` in a new `meerschaum.yaml`.
+        ### PARITY (RC15-R3-001): `dataframe: polars` in a new `meerschaum.yaml`.
         got = _without_dataframe_default(got)
         if got != expected:
             failures.append((case['name'], {

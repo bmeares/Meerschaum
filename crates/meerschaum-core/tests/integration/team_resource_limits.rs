@@ -170,6 +170,8 @@ mod linux_enforcement {
                 assert_eq!(mem.current, mem.maximum);
 
                 // Ignore SIGXFSZ so `write` returns EFBIG instead of killing the process.
+                // SAFETY: `SIG_IGN` installs no handler, so no code runs in signal context, and
+                // this child process (`--exact child_runner`) has no other code relying on SIGXFSZ.
                 #[allow(unsafe_code)]
                 unsafe {
                     libc::signal(libc::SIGXFSZ, libc::SIG_IGN);

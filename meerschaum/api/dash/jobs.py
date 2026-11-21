@@ -80,7 +80,7 @@ def is_automatic_job(job):
 
 def job_visible_to_session(job, session_id):
     """
-    Whether the session's viewer may see a job (AC9, `meerschaum.jobs.can_see_job`): a job
+    Whether the session's viewer may see a job (`meerschaum.jobs.can_see_job`): a job
     started through the API or the console is its team's (a console run is private to its owner,
     the team's managers and administrators); a local job is Everyone's.
     """

@@ -185,6 +185,8 @@ struct StringT {
 /// # Safety
 /// `data` must point to at least `row + 1` values of type `T`.
 unsafe fn at<T: Copy>(data: *const u8, row: usize) -> T {
+    // SAFETY: the caller guarantees `row + 1` values of `T` at `data`; `read_unaligned` needs no
+    // alignment, and `T: Copy` makes the bitwise read a plain copy.
     unsafe { std::ptr::read_unaligned(data.cast::<T>().add(row)) }
 }
 
@@ -299,18 +301,31 @@ pub fn cell(v: Ptr, ty: &ColumnType, row: usize, notes: &mut Notes) -> Result<Sq
     }
     // SAFETY: the data pointer of a valid vector.
     let d = unsafe { (api().duckdb_vector_get_data)(v) } as *const u8;
-    // SAFETY (all `at` calls below): the vector holds `row` of the declared physical type.
+    // Every `at` call below reads one value of the physical type DuckDB stores for `ty.id`
+    // (`duckdb.h`); `ty` is the vector's own column type and the caller passes a `row` below the
+    // chunk's size, so the read stays inside the vector's data.
     Ok(match ty.id {
+        // SAFETY: a BOOLEAN vector stores one u8 (`bool`) per row; see above.
         BOOLEAN => SqlValue::Bool(unsafe { at::<u8>(d, row) } != 0),
+        // SAFETY: a TINYINT vector stores one i8 per row; see above.
         TINYINT => SqlValue::Int(unsafe { at::<i8>(d, row) } as i64),
+        // SAFETY: a SMALLINT vector stores one i16 per row; see above.
         SMALLINT => SqlValue::Int(unsafe { at::<i16>(d, row) } as i64),
+        // SAFETY: a INTEGER vector stores one i32 per row; see above.
         INTEGER => SqlValue::Int(unsafe { at::<i32>(d, row) } as i64),
+        // SAFETY: a BIGINT vector stores one i64 per row; see above.
         BIGINT => SqlValue::Int(unsafe { at::<i64>(d, row) }),
+        // SAFETY: a UTINYINT vector stores one u8 per row; see above.
         UTINYINT => SqlValue::Int(unsafe { at::<u8>(d, row) } as i64),
+        // SAFETY: a USMALLINT vector stores one u16 per row; see above.
         USMALLINT => SqlValue::Int(unsafe { at::<u16>(d, row) } as i64),
+        // SAFETY: a UINTEGER vector stores one u32 per row; see above.
         UINTEGER => SqlValue::Int(unsafe { at::<u32>(d, row) } as i64),
+        // SAFETY: a UBIGINT vector stores one u64 per row; see above.
         UBIGINT => SqlValue::UInt(unsafe { at::<u64>(d, row) }),
+        // SAFETY: a FLOAT vector stores one f32 per row; see above.
         FLOAT => SqlValue::Float(unsafe { at::<f32>(d, row) } as f64),
+        // SAFETY: a DOUBLE vector stores one f64 per row; see above.
         DOUBLE => SqlValue::Float(unsafe { at::<f64>(d, row) }),
         HUGEINT => {
             let i = hugeint(d, row);
@@ -323,8 +338,11 @@ pub fn cell(v: Ptr, ty: &ColumnType, row: usize, notes: &mut Notes) -> Result<Sq
         DECIMAL => {
             let (_, scale, internal) = ty.decimal.ok_or("decimal without a type")?;
             let raw: i128 = match internal {
+                // SAFETY: a DECIMAL with SMALLINT storage holds one i16 per row.
                 SMALLINT => (unsafe { at::<i16>(d, row) }) as i128,
+                // SAFETY: a DECIMAL with INTEGER storage holds one i32 per row.
                 INTEGER => (unsafe { at::<i32>(d, row) }) as i128,
+                // SAFETY: a DECIMAL with BIGINT storage holds one i64 per row.
                 BIGINT => (unsafe { at::<i64>(d, row) }) as i128,
                 _ => hugeint(d, row),
             };
@@ -334,6 +352,7 @@ pub fn cell(v: Ptr, ty: &ColumnType, row: usize, notes: &mut Notes) -> Result<Sq
             )
         }
         TIMESTAMP | TIMESTAMP_TZ | TIMESTAMP_S | TIMESTAMP_MS | TIMESTAMP_NS => {
+            // SAFETY: every TIMESTAMP variant stores one i64 per row.
             let raw = unsafe { at::<i64>(d, row) };
             // PARITY: `infinity` / `-infinity` are `datetime.max` / `datetime.min`, as the Python
             // `duckdb` package returns them (DuckDB stores them as `i64::MAX` / `-i64::MAX`).
@@ -366,6 +385,7 @@ pub fn cell(v: Ptr, ty: &ColumnType, row: usize, notes: &mut Notes) -> Result<Sq
             }
         }
         DATE => {
+            // SAFETY: a DATE vector stores one i32 (days since the epoch) per row.
             let days = unsafe { at::<i32>(d, row) };
             if days == i32::MAX || days == -i32::MAX {
                 notes.clamped = true;
@@ -378,6 +398,7 @@ pub fn cell(v: Ptr, ty: &ColumnType, row: usize, notes: &mut Notes) -> Result<Sq
             SqlValue::Date(epoch_date(days).ok_or_else(|| format!("date out of range: {days}"))?)
         }
         TIME => {
+            // SAFETY: a TIME vector stores one i64 (microseconds) per row.
             let us = unsafe { at::<i64>(d, row) };
             SqlValue::Time(
                 NaiveTime::from_num_seconds_from_midnight_opt(
@@ -388,6 +409,7 @@ pub fn cell(v: Ptr, ty: &ColumnType, row: usize, notes: &mut Notes) -> Result<Sq
             )
         }
         TIME_NS => {
+            // SAFETY: a TIME_NS vector stores one i64 (nanoseconds) per row.
             let ns = unsafe { at::<i64>(d, row) };
             SqlValue::Time(
                 NaiveTime::from_num_seconds_from_midnight_opt(
@@ -510,8 +532,13 @@ fn render_in(v: Ptr, row: usize, nested: bool, notes: &mut Notes) -> String {
     // SAFETY: data pointer of a valid vector.
     let d = unsafe { (api().duckdb_vector_get_data)(v) } as *const u8;
     let a = api();
-    // SAFETY (every unsafe block below): reads follow the physical layout of each type in duckdb.h.
+    // The blocks below read each nested type's physical layout as `duckdb.h` defines it, from a
+    // valid `v` and a `row` inside it (the caller's row, or a child index DuckDB's own list
+    // entries, array size or union tag produce).
     match id {
+        // SAFETY: a LIST or MAP vector stores one `duckdb_list_entry` per row, and its
+        // `offset..offset + length` range lies inside the child vector (a MAP's child is a
+        // STRUCT of key and value vectors).
         LIST | MAP => unsafe {
             let entry: ListEntryT = at(d, row);
             let child = (a.duckdb_list_vector_get_child)(v);
@@ -538,6 +565,8 @@ fn render_in(v: Ptr, row: usize, nested: bool, notes: &mut Notes) -> String {
                 format!("[{}]", items.join(", "))
             }
         },
+        // SAFETY: an ARRAY's child vector holds exactly `array_size` values per parent row, so
+        // `row * size..(row + 1) * size` lies inside it; `t.0` is this vector's live type.
         ARRAY => unsafe {
             let size = (a.duckdb_array_type_array_size)(t.0) as usize;
             let child = (a.duckdb_array_vector_get_child)(v);
@@ -546,6 +575,8 @@ fn render_in(v: Ptr, row: usize, nested: bool, notes: &mut Notes) -> String {
                 .collect();
             format!("[{}]", items.join(", "))
         },
+        // SAFETY: a STRUCT has `child_count` child vectors, each with a value at the parent's
+        // `row`; `free_cstr` frees each DuckDB-allocated child name once.
         STRUCT => unsafe {
             let n = (a.duckdb_struct_type_child_count)(t.0);
             let parts: Vec<String> = (0..n)
@@ -560,6 +591,8 @@ fn render_in(v: Ptr, row: usize, nested: bool, notes: &mut Notes) -> String {
                 .collect();
             format!("{{{}}}", parts.join(", "))
         },
+        // SAFETY: a UNION is a STRUCT whose child 0 holds one u8 tag per row and whose member
+        // `tag` is child `tag + 1`, with a value at the same `row`.
         UNION => unsafe {
             let tagv = (a.duckdb_struct_vector_get_child)(v, 0);
             let tag = at::<u8>((a.duckdb_vector_get_data)(tagv) as *const u8, row) as u64;
@@ -570,6 +603,8 @@ fn render_in(v: Ptr, row: usize, nested: bool, notes: &mut Notes) -> String {
                 notes,
             )
         },
+        // SAFETY: an ENUM stores one dictionary index per row in its internal type (u8, u16 or
+        // u32), and DuckDB only stores indices inside the type's dictionary.
         ENUM => unsafe {
             let internal = (a.duckdb_enum_internal_type)(t.0);
             let idx = match internal {

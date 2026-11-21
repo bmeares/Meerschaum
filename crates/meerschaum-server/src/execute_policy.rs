@@ -197,7 +197,7 @@ pub const NON_ADMIN_OMIT_ACTIONS: &[&str] = &[
 /// between the action and the subaction.
 pub const DENIED_SUBACTIONS: &[(&str, &[&str])] = &[
     // Print the configuration (with connector passwords), the environment, another job's output,
-    // or every user's email address (rc15: the server shows emails only to administrators and
+    // or every user's email address (the server shows emails only to administrators and
     // the managers of a user's teams).
     // A masked inventory still includes admin-only addresses and other teams' connector keys.
     // Non-administrators inspect connectors through the scoped API / console instead.
@@ -222,7 +222,7 @@ pub const DENIED_SUBACTIONS: &[(&str, &[&str])] = &[
         &["config", "connector", "plugin", "user", "venv", "team"],
     ),
     ("copy", &["connector"]),
-    // Users and teams are the administrators' (rc15): the server's `/teams` routes let a team's
+    // Users and teams are the administrators': the server's `/teams` routes let a team's
     // managers change its members.
     (
         "register",
@@ -1129,7 +1129,7 @@ mod tests {
         assert!(check_non_admin(&s(&["show", "-i", "x", "environment"])).is_err());
         assert!(check_non_admin(&s(&["show", "--nopretty", "config"])).is_err());
         assert!(check_non_admin(&s(&["edit", "pipes"])).is_ok());
-        // Users' emails and teams are the administrators' (rc15).
+        // Users' emails and teams are the administrators'.
         assert!(check_non_admin(&s(&["show", "users"])).is_err());
         assert!(check_non_admin(&s(&["register", "teams", "data"])).is_err());
         assert!(check_non_admin(&s(&["edit", "team", "data"])).is_err());

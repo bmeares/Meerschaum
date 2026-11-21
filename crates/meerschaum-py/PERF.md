@@ -434,7 +434,7 @@ With 24 pipes on timescaledb-ha, the dump took 1,610 ms in python mode and 1,440
 mode, and the incremental sync took 3,540 ms and 1,700 ms.
 
 **Root causes (none was connection, pool or runtime setup).** The Rust connector is built once
-per Python `SQLConnector`, and the pool and the Tokio runtime are reused. `tests/test_w9u_pool_reuse.py`
+per Python `SQLConnector`, and the pool and the Tokio runtime are reused. `tests/test_connection_pool_reuse.py`
 now asserts this through `pg_stat_activity`.
 
 1. *Cross-pipe templates re-resolved on every access* (PARITY row 36). `pipe.parameters` is read
@@ -468,7 +468,7 @@ now asserts this through `pg_stat_activity`.
   internal upsert ("expression is of type text").
 - Stale prepared statements (SQLSTATE 0A000, "cached plan must not change result type") are
   retried on a connection with a cleared statement cache. Describes of empty reads use their own
-  statement text. Tests: `crates/meerschaum-connector-sql/tests/queries_drivers_suite/w9u_pg_params.rs`.
+  statement text. Tests: `crates/meerschaum-connector-sql/tests/queries_drivers_suite/postgres_bound_params.rs`.
 
 **Per-flavor microbenchmark** (one pipe, 36 rows, fresh process, median of 15 calls, best of 3
 rounds, ms; python / rust):

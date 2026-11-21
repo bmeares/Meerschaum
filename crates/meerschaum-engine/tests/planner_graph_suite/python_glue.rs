@@ -246,7 +246,7 @@ import_plugins()
         result.inserted, 1,
         "callback counts belong to the enclosing node"
     );
-    // The plugin's sync (with its `pipe.sync()` callback inside) is one recorded sync (C2).
+    // The plugin's sync (with its `pipe.sync()` callback inside) is one recorded sync.
     let status = env
         .conn
         .get_sync_status(&pipe)

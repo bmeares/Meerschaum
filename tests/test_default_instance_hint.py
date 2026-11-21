@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-rc15 Q9 for Python: when nothing answers at the default `sql:main` as shipped, the connection
+For Python: when nothing answers at the default `sql:main` as shipped, the connection
 error says what to do next, once per process (the CLI adds its own wording per command).
 The Rust connector is replaced by a stub that fails like a real first connection.
 """

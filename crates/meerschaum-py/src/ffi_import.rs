@@ -194,8 +194,9 @@ fn stream_error(stream: &mut FFI_ArrowArrayStream, code: i32) -> ArrowError {
         // SAFETY: `get_last_error` is the producer's callback on an unreleased stream; it returns
         // null or a NUL-terminated string valid until the next call on the stream.
         let ptr = unsafe { get_last_error(raw) };
-        // SAFETY: non-null per the check, NUL-terminated per the C Stream Interface.
         (!ptr.is_null()).then(|| {
+            // SAFETY: non-null per the check, NUL-terminated per the C Stream Interface, and read
+            // before any further call on the stream can invalidate it.
             unsafe { CStr::from_ptr(ptr) }
                 .to_string_lossy()
                 .into_owned()

@@ -13,7 +13,7 @@ The console's **Users & Teams** page (`/dash/users`, `/dash/teams`):
 
 Who sees what (`meerschaum.api.dash.access`): administrators see every user; other users see
 themselves and the members of their teams (a manager of Everyone sees every user). An email
-address is shown to administrators and to the managers of a team the user is in (AC13).
+address is shown to administrators and to the managers of a team the user is in.
 
 The instance connector's own user and team methods do the work (`register_user`, `edit_user`,
 `delete_user`, `get_users`, `mrsm.Team`); nothing here writes the stores directly.
@@ -235,7 +235,7 @@ def visible_user_rows(
 
 
 def email_visible(who: Any, row: Dict[str, Any]) -> bool:
-    """Whether the viewer may see this user's email address (AC13)."""
+    """Whether the viewer may see this user's email address."""
     viewer_obj, _, _, _ = _viewer_fields(who)
     return access.can_see_email(viewer_obj, row['username'], list(row.get('teams', {})))
 

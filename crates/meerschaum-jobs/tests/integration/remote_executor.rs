@@ -507,7 +507,7 @@ fn project_style_ownership_survives_the_round_trip() {
 
 #[test]
 fn an_api_job_belongs_to_whoever_its_server_recorded() {
-    // rc15 (AC9): the server records the caller as the job's owner, whatever the request says;
+    // The server records the caller as the job's owner, whatever the request says;
     // `Job::access()` reports the server's record, not this client's own properties.
     let dir = tempfile::tempdir().unwrap();
     let remote = Arc::new(FakeRemote::default());

@@ -530,7 +530,7 @@ async fn mysql_latin1_database_keeps_unicode_state() {
     let id = run.run_id().unwrap().to_string();
     let state = chain.engine().state().clone();
 
-    // The planner's reason survives the round trip (in plain words since rc15, T1).
+    // The planner's reason survives the round trip (in plain words).
     let stored = state.load_run(&id).await.unwrap().expect("the run row");
     assert_eq!(stored.nodes.len(), 2, "{:?} {}", stored.nodes, run.message);
     let raw = stored.node(&chain.raw).unwrap();

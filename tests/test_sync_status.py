@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-The per-pipe sync status (rc15 contract C2) from Python: `pipe.sync()` records its outcome on
+The per-pipe sync status from Python: `pipe.sync()` records its outcome on
 the pipe's instance, `pipe.get_sync_status()` reads it and `mrsm.get_sync_statuses()` reads every
 pipe's, failures count until a success, and a job's syncs carry the job's name. The status is
 written in the background: a read sees the latest sync, a script keeps its last sync when it

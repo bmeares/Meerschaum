@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The `meerschaum.testing` pytest plugin (rc15 Q35): `mrsm_root`, `mrsm_instance`, `mrsm_pipe`,
+The `meerschaum.testing` pytest plugin: `mrsm_root`, `mrsm_instance`, `mrsm_pipe`,
 `mrsm_api` and `render_page`. Each test runs a pytest session with `-p meerschaum.testing` in a
 subprocess (`pytester`), so the session's root, environment and API host are its own.
 """

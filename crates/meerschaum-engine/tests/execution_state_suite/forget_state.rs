@@ -1,4 +1,4 @@
-//! Dropping, deleting or fully clearing a pipe forgets its Syncing Engine state (wave 9): the
+//! Dropping, deleting or fully clearing a pipe forgets its Syncing Engine state: the
 //! ledger entries it produced, the edge cursors it is part of and its definition hash, so a pipe
 //! recreated under the same keys starts fresh, as in v4 (which has no engine state). Partial
 //! clears keep the state; run history is always kept.

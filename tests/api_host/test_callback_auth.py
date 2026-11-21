@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Console callbacks need a console session (rc15 Q21/Q29): the API host answers a callback request
+Console callbacks need a console session: the API host answers a callback request
 (`POST /dash/_dash-update-component`) without a valid session with `401`, unless the callback is
 public: the console's page router, login and registration callbacks, callbacks registered by a
 `@dash_plugin(public=True)` function and `@web_callback(..., public=True)`. A callback is named by

@@ -644,7 +644,7 @@ impl SqlConnector {
                 let style = crate::where_clause::WhereStyle {
                     sqlite_no_index_on_lists: is_dt_bound,
                 };
-                // Declared text / index columns match null-like strings as text (rc15 Q18).
+                // Declared text / index columns match null-like strings as text.
                 let literal = super::sync::null_marker_columns(sp, state);
                 let w =
                     crate::where_clause::build_where_literal(&valid, flavor, true, style, &literal);

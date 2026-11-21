@@ -98,7 +98,7 @@ fn api_error_str(e: &ApiError) -> String {
     }
 }
 
-/// The caller's access (rc15): over HTTP its effective permissions, teams and visibility;
+/// The caller's access: over HTTP its effective permissions, teams and visibility;
 /// over stdio (and under `--no-auth`) everything (local trust).
 pub async fn caller_access(cx: &ToolCx<'_>) -> Result<Access, ToolError> {
     match (&cx.caller.principal, cx.caller.api) {
@@ -264,7 +264,7 @@ pub async fn resolve_pipe(
         .await
         .map_err(|e| ToolError::other(api_error_str(&e)))?;
     check_protected_target(&pipe)?;
-    // Over HTTP: only the pipes the caller can see (rc15).
+    // Over HTTP: only the pipes the caller can see.
     if cx.caller.api {
         let caller = caller_access(cx).await?;
         if !caller.can_see_pipe(&pipe) {
@@ -376,7 +376,7 @@ pub async fn get_pipes(
         .map_err(|e| ToolError::other(e.to_string()))?;
     type Grouped = IndexMap<String, IndexMap<String, Vec<Pipe>>>;
     let mut grouped: Grouped = IndexMap::new();
-    // Over HTTP: only the pipes the caller can see (rc15).
+    // Over HTTP: only the pipes the caller can see.
     let caller = if cx.caller.api {
         Some(caller_access(cx).await?)
     } else {
@@ -617,7 +617,7 @@ async fn call_builtin(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, 
             )
             .await
             .map_err(|error| ToolError::permission(api_error_str(&error)))?;
-            // The pipe's sync status (rc15 C2), like a data post.
+            // The pipe's sync status, like a data post.
             crate::routes::sync_status::record_server_sync(
                 &conn,
                 &pipe,
@@ -1180,7 +1180,7 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
                 .await
                 .map_err(|error| ToolError::permission(api_error_str(&error)))?;
         }
-        // The new pipe is the caller's (rc15), and its SQL passes the SQL guard.
+        // The new pipe is the caller's, and its SQL passes the SQL guard.
         let stamped = access::guard::stamp_new_pipe(&caller, pipe.raw_parameters())
             .map_err(|e| ToolError::permission(e.detail_text()))?;
         access::guard::check_parameters(cx.state, &caller, &conn, &pipe, None, &stamped)
@@ -1265,7 +1265,7 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
         meerschaum_core::value::apply_patch_maps(&old, &parameters)
     };
     if cx.caller.api {
-        // `access` and `locks` need the rights to change them; SQL passes the SQL guard (rc15).
+        // `access` and `locks` need the rights to change them; SQL passes the SQL guard.
         let caller = caller_access(cx).await?;
         new = access::guard::merge_edit(&caller, &old, new)
             .map_err(|e| ToolError::permission(e.detail_text()))?;
@@ -1307,7 +1307,7 @@ async fn read_sql(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
         .unwrap_or_default();
     if cx.caller.api {
         // Never reach a connector reserved for other teams or unserved instances, nor the
-        // tables of pipes the caller cannot see (rc15; best effort: true isolation needs a
+        // tables of pipes the caller cannot see (best effort: true isolation needs a
         // database user per team).
         let caller = caller_access(cx).await?;
         // A named SQL backend must be one of the instances this API serves, even for an
@@ -1403,7 +1403,7 @@ async fn execute_action(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
     if let Err(m) = security::check_action_chain(&cx.server.config, &chain) {
         return fail(m);
     }
-    // A caller who is not an administrator (rc15): what the console offers, on the pipes it may
+    // A caller who is not an administrator: what the console offers, on the pipes it may
     // change, as for `POST /execute` and `POST /actions/{action}`.
     if let Some(caller) = remote_caller.as_ref()
         && !caller.no_auth

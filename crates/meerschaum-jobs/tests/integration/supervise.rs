@@ -566,7 +566,7 @@ fn log_files(root: &std::path::Path, name: &str) -> Vec<String> {
 }
 
 /// A job deleted before its supervisor got going is never brought back: the supervisor used to
-/// create the job's directory again, run the worker and record its result (wave-1 gate).
+/// create the job's directory again, run the worker and record its result.
 #[test]
 fn a_job_deleted_before_its_supervisor_starts_stays_deleted() {
     let dir = tempfile::tempdir().unwrap();

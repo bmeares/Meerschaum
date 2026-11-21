@@ -1,4 +1,4 @@
-//! The access model for the Python façade (rc15 contract K2): `meerschaum.core.access` calls
+//! The access model for the Python façade: `meerschaum.core.access` calls
 //! these, so the console and the Python API apply exactly the rules the API server applies
 //! ([`meerschaum_core::access`]).
 //!

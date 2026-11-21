@@ -51,7 +51,7 @@ def test_json_filter_quotes_do_not_change_the_predicate(pipe, value):
 
 def test_null_marker_identifiers_are_text(pipe):
     """
-    rc15 Q18 (v4.1.4 added a SQL NULL row on the second sync): a declared text ID 'None' is the
+    v4.1.4 added a SQL NULL row on the second sync; here a declared text ID 'None' is the
     text 'None', so re-syncing it changes nothing, and `params={'id': 'None'}` matches it.
     """
     marker = mrsm.Pipe(

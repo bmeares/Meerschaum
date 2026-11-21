@@ -1,7 +1,7 @@
-//! The MCP tools v5 adds (Q12): saved Pipelines (`list_pipelines`, `plan_pipeline`,
+//! The MCP tools v5 adds: saved Pipelines (`list_pipelines`, `plan_pipeline`,
 //! `sync_pipeline`), runs (`list_runs`, `get_run`), jobs (`list_jobs`, `get_job_logs`) and
 //! connectors (`list_connectors`); `sync_pipe` with `parents` / `children`; the pipe tools'
-//! refusal of the internal `mrsm` keys (B2); scopes and route groups like the HTTP routes.
+//! refusal of the internal `mrsm` keys; scopes and route groups like the HTTP routes.
 
 use std::sync::{Arc, Mutex};
 

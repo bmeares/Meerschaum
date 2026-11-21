@@ -212,7 +212,7 @@ async fn stmt_counters(driver: &SqlDriver) -> (i64, i64) {
 
 /// Small statements are prepared once per connection and never closed: `sqlx` 0.9.0 does not set
 /// `TCP_NODELAY`, so a `COM_STMT_CLOSE` (no reply) followed by the pool's ping on release stalls
-/// ~40 ms and keeps the connection busy (wave 17b, `Backend::PERSISTENT_STATEMENTS`).
+/// ~40 ms and keeps the connection busy (`Backend::PERSISTENT_STATEMENTS`).
 #[tokio::test]
 async fn mysql_small_statements_are_prepared_once() {
     for var in ["MRSM_TEST_MYSQL_URI", "MRSM_TEST_MARIADB_URI"] {

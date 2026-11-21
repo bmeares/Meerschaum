@@ -245,7 +245,7 @@ impl SqlConnector {
             space_partition: false,
             id_distinct_count: None,
             chunk_interval: None,
-            // rc15 S3: NULL-safe upsert keys as v4's constraint on PostgreSQL 15+.
+            // NULL-safe upsert keys as v4's constraint on PostgreSQL 15+.
             nulls_not_distinct: crate::queries::index::null_safe_unique_index(self.flavor, sp)
                 && self.supports_nulls_not_distinct().await,
         };

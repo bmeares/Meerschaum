@@ -151,7 +151,7 @@ pub enum EventKind {
     /// A stream source flushed a micro-batch (§5.6), or a v4-pattern (`LegacyStream`)
     /// connector's callback called `pipe.sync()` (trigger `callback`).
     ///
-    /// The fields after `trigger` are additive (wave 9) and default when absent.
+    /// The fields after `trigger` are additive and default when absent.
     StreamFlushed {
         /// Rows flushed (the rows handed to the sync, before diffing).
         rows: u64,

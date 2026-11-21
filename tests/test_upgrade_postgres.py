@@ -1,5 +1,5 @@
 """
-Wave 17c: `mrsm upgrade postgres`, `mrsm backup postgres` and `mrsm restore postgres` end to end,
+`mrsm upgrade postgres`, `mrsm backup postgres` and `mrsm restore postgres` end to end,
 against real containers, and the façade's view of them.
 
 The Docker tests are opt-in (`MRSM_TEST_DOCKER=1`): they need Docker with Compose, the images

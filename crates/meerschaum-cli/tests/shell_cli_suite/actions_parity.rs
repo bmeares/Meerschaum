@@ -168,7 +168,7 @@ fn actions_match_v4_transcripts() {
                     }
                 }
                 // v4 styled its output even off a terminal (the transcripts carry its escape
-                // sequences); v5 prints plain text there unless `FORCE_COLOR` is set (rc15).
+                // sequences); v5 prints plain text there unless `FORCE_COLOR` is set.
                 cmd.env("MRSM_ROOT_DIR", &root)
                     .env("MRSM_PLUGINS_DIR", &plugins)
                     .env("COLUMNS", &columns)
@@ -194,7 +194,7 @@ fn actions_match_v4_transcripts() {
                 let rc = out.status.code().unwrap_or(-1) as i64;
                 let compare = strings(&step["compare"]);
                 let mut diffs = Vec::new();
-                // Intended rc15 differences (wave 2, PARITY RC15-P2-1 and RC15-P2-2): `show
+                // Intended differences (PARITY RC15-P2-1 and RC15-P2-2): `show
                 // connectors` masks secrets by the web console's rules (a fixed-width mask, and the
                 // shipped `sql:main` username is masked because it equals its password); `show
                 // users` is a table that says when there are no users, and `--nopretty` prints one
@@ -228,7 +228,7 @@ fn actions_match_v4_transcripts() {
                         step["stderr"].as_str().unwrap()
                     ));
                 }
-                // Intended wave-18 difference (PARITY W18-SW-005): `--nopretty` exits 1 when the
+                // Intended difference (PARITY W18-SW-005): `--nopretty` exits 1 when the
                 // result is a failure; v4 exited 0 whatever the command returned. The overlay
                 // names each affected step; nothing else may differ.
                 let expected_rc = match args.join(" ").as_str() {

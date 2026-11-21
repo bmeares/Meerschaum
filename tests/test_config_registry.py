@@ -1,5 +1,5 @@
 """
-Wave 15 (task O): the config registry owned by the Rust extension, seen from Python.
+The config registry owned by the Rust extension, seen from Python.
 
 Every scenario runs in a fresh interpreter against a temporary root (`MRSM_ROOT_DIR`), because the
 config tree, the environment patches and the files are process-global. Coverage: lossless YAML

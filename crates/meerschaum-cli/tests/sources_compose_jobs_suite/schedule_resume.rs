@@ -132,8 +132,8 @@ fn run_once_without_reset(root: &std::path::Path) -> usize {
 
 /// A job restarted between two fires resumes the recorded next fire and runs it once: the fire
 /// after it is the schedule's next one, not the occurrence the restarted trigger began with
-/// (RC32 found a nightly backup that ran twice in a row after an upgrade restart), one interval
-/// after the resumed fire (RC33 found a `daily` job whose next run was counted from the restart).
+/// (a nightly backup once ran twice in a row after an upgrade restart), one interval
+/// after the resumed fire (a `daily` job's next run was once counted from the restart).
 #[test]
 fn a_resumed_fire_runs_once_and_the_next_one_follows_it() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());

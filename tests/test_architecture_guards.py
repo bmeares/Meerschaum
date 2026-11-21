@@ -108,7 +108,7 @@ def test_local_server_http_catches_every_raw_client(tmp_path):
 def test_single_home_catches_a_second_definition(tmp_path):
     _write(tmp_path, 'meerschaum/api/dash/viewer.py',
            'class Viewer:\n    pass\ndef current_viewer():\n    return Viewer()\n')
-    _write(tmp_path, 'crates/meerschaum-server/src/sql_guard.rs',
+    _write(tmp_path, 'crates/meerschaum-server/src/sql_guard/lexer.rs',
            'fn dollar_tag_len() {}\nfn check_read_only_tokens() {}\n')
     _write(tmp_path, 'crates/meerschaum-connector/src/pipe_ops.rs', 'pub fn forget_engine_state_after() {}\n')
     _write(tmp_path, 'crates/meerschaum-server/src/mcp/security.rs',

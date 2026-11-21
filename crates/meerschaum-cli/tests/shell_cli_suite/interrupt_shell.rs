@@ -1,4 +1,4 @@
-//! Ctrl-C while an action runs (wave 18, decision 1), in a real pseudo-terminal: it cancels only
+//! Ctrl-C while an action runs, in a real pseudo-terminal: it cancels only
 //! that action. The shell prints `Interrupted.`, goes back to its prompt and keeps working;
 //! `mrsm <action>` exits 130 with no panic or traceback; a program the shell started keeps the
 //! terminal's Ctrl-C and a second one within two seconds kills it.

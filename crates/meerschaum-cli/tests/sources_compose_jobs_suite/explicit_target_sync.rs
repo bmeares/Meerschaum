@@ -1,5 +1,5 @@
 //! `mrsm sync pipes` over a `{{ Pipe() }}` chain whose referenced pipe sets an explicit
-//! `target` (wave 8 task O): the reference must render the registered table, not the default
+//! `target`: the reference must render the registered table, not the default
 //! name (it failed with `no such table` before). Temporary root, empty plugins directory.
 
 use std::path::PathBuf;

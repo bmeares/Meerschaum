@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The console's access model in a browser (rc15 wave 2: AC1, AC2, AC4, AC5, AC7, AC11, AC13):
+The console's access model in a browser:
 
 - a new instance's login page creates the first account as an administrator;
 - each role (Viewer, Editor, Operator, a team's manager and member, another team's member, an

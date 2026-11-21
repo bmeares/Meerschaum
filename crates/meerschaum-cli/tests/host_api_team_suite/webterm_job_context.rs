@@ -1,4 +1,4 @@
-//! RC25: a web terminal on a server that runs as a Meerschaum `systemd` job showed `[CLOSED]`.
+//! A web terminal on a server that runs as a Meerschaum `systemd` job used to show `[CLOSED]`.
 //! The terminal's `mrsm` inherited the job's variables (`MRSM_SYSTEMD_LOG_PATH`, ...), wrapped
 //! itself as that job (`meerschaum_jobs::systemd_job`), refused to start an interactive shell
 //! ("The job has no action to run (an interactive shell cannot start in a job).") and exited.
@@ -47,7 +47,7 @@ impl FakeJob {
                 path("rc25-api.result.json"),
             ),
             ("MRSM_SYSTEMD_STDIN_PATH".into(), path("rc25-api.stdin")),
-            // What `meerschaum_jobs::Job::env` gives every job (RC28: the terminal's shell lost
+            // What `meerschaum_jobs::Job::env` gives every job (the terminal's shell once lost
             // its editor, toolbar and readiness to it).
             ("MRSM_NONINTERACTIVE".into(), "true".into()),
         ]
@@ -212,7 +212,7 @@ fn a_terminal_shell_stays_interactive_under_a_jobs_environment() {
 }
 
 /// Without the scrub, the same shell is the job's wrapper: it exits and writes the job's result.
-/// (What the terminal on an API run as a `systemd` job did before RC25.)
+/// (What the terminal on an API run as a `systemd` job used to do.)
 #[test]
 fn without_the_scrub_the_shell_wraps_itself_as_the_job() {
     let job = FakeJob::new();

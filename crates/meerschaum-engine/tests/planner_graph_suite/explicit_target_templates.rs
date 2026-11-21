@@ -1,6 +1,6 @@
 //! `{{ Pipe('a', 'b') }}` renders the referenced pipe's *registered* table: a reference is built
 //! from keys only, so the engine's registry must load the parameters (an explicit `target`) from
-//! the referenced pipe's own instance, including a different instance (wave 8 task O; the CLI's
+//! the referenced pipe's own instance, including a different instance (the CLI's
 //! `sync pipes` failed with `no such table` before).
 
 use std::sync::Arc;

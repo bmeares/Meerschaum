@@ -10,7 +10,7 @@ use meerschaum_core::{Map, Value};
 
 // v5-only engine defaults are intentionally absent from the released v4 fixture.
 fn v4_view(value: &Value) -> Value {
-    // AC1/AC2 deliberately close registration and remove the implicit action grant. Compare
+    // v5 deliberately closes registration and removes the implicit action grant. Compare
     // these shipped defaults as v4 saw them; the access tests verify the new behavior itself.
     if let Some(m) = value.as_map()
         && m.contains_key("registration")
@@ -44,16 +44,16 @@ fn v4_view(value: &Value) -> Value {
                         && v.get("inclusive_cap").is_some()
                         && v.get("flat_ledger").is_some())
                 })
-                // `api.shutdown.grace_seconds` (rc31: graceful shutdown) is v5-only.
+                // `api.shutdown.grace_seconds` (graceful shutdown) is v5-only.
                 .filter(|(k, v)| {
                     !(k.as_str() == "shutdown"
                         && v.as_map().is_some_and(|m| m.contains_key("grace_seconds")))
                 })
-                // `api.dash.callbacks_require_session` (rc15, PARITY.md RC15-D-001) is v5-only.
+                // `api.dash.callbacks_require_session` (PARITY.md RC15-D-001) is v5-only.
                 .filter(|(k, v)| {
                     !(k.as_str() == "callbacks_require_session" && matches!(v, Value::Bool(_)))
                 })
-                // `meerschaum.dataframe` (rc15, PARITY.md RC15-R3-001) is v5-only.
+                // `meerschaum.dataframe` (PARITY.md RC15-R3-001) is v5-only.
                 .filter(|(k, v)| {
                     !(k.as_str() == "dataframe"
                         && matches!(v, Value::Str(s) if s == "polars" || s == "pandas"))

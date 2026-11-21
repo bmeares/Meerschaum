@@ -1,4 +1,4 @@
-//! What a caller who is not an administrator may run through `POST /execute` (rc15 access
+//! What a caller who is not an administrator may run through `POST /execute` (the access
 //! model), on top of [`crate::execute_policy`]'s list of what the console offers.
 //!
 //! The job `POST /execute` starts runs on the server with the instance's own credentials, which

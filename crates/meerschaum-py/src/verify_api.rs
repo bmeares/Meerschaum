@@ -17,7 +17,7 @@
 //! ([`crate::logging`]).
 //!
 //! The Python side (`meerschaum/core/Pipe/_verify.py`) hands over the connectors; there is no
-//! Python orchestration left for the cases of the earlier waves (see `PARITY.md`, Wave 15, L).
+//! Python orchestration left for these cases (see `PARITY.md`).
 
 use chrono::Duration;
 use meerschaum_cli::dispatch::Runtime;

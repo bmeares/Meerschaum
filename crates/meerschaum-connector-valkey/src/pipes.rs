@@ -48,7 +48,7 @@ pub fn index_columns(pipe: &Pipe) -> Vec<String> {
         .collect()
 }
 
-/// The columns whose null-like strings (`'None'`, `'NA'`, `''`, ...) are text (rc15 Q18): the
+/// The columns whose null-like strings (`'None'`, `'NA'`, `''`, ...) are text: the
 /// declared text columns and the text index columns
 /// ([`meerschaum_core::dtypes::null_marker_text_columns`]; the stored `valkey.dtypes` are the
 /// inferred ones).
@@ -787,7 +787,7 @@ impl ValkeyConnector {
                 omit_columns: query.omit_columns.clone(),
                 reset_index: true,
                 coerce_types: false,
-                // Declared text / index columns match null-like strings as text (rc15 Q18).
+                // Declared text / index columns match null-like strings as text.
                 literal_null_markers: null_marker_columns(pipe, parameters),
             }
         };

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Wave 18 (FX7, RV2 follow-up): the static-asset routes of the API host cannot be walked out of their
+The static-asset routes of the API host cannot be walked out of their
 directories. Dash's `/dash/assets/*`, the plugin assets (`/dash/_plugin-assets/<plugin>/*`, Flask's
 `send_from_directory`), the console's `/static/*`, and the page-contract assets
 (`/_pages/_assets/*`) are asked for files outside their directories with every spelling of `..`

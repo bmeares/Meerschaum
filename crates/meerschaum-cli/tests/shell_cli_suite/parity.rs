@@ -179,7 +179,7 @@ fn parse_arguments_matches_python() {
     report("parse_arguments", &failures, cases.len());
 }
 
-/// v4's serialized chain (`["start", "pipeline", ...]`) in its rc15 form (`["chain", ...]`).
+/// v4's serialized chain (`["start", "pipeline", ...]`) in its v5 form (`["chain", ...]`).
 fn v4_chain_to_current(value: &Value) -> Value {
     match value.as_array() {
         Some(items) if items.len() >= 2 && items[0] == "start" && items[1] == "pipeline" => {
@@ -191,7 +191,7 @@ fn v4_chain_to_current(value: &Value) -> Value {
     }
 }
 
-/// A v4 entry step of a serialized chain, with its action words in the rc15 form.
+/// A v4 entry step of a serialized chain, with its action words in the v5 form.
 fn v4_chain_step_to_current(step: &Value) -> Value {
     let mut step = step.clone();
     if let Some(map) = step.as_object_mut() {
@@ -248,7 +248,7 @@ fn chains_and_pipelines_match_python() {
                 chain["remove_api_executor_keys"]
             ));
         }
-        // rc15 (Q31): chains serialize under the hidden `chain` action instead of v4's
+        // Chains serialize under the hidden `chain` action instead of v4's
         // `start pipeline` (which now starts saved Pipelines); the payload is v4's, and v4's
         // form still compresses (and runs) the same.
         let pipeline = sysargs::get_pipeline_sysargs(&before, &after, None);
@@ -486,7 +486,7 @@ fn argument_spec_matches_python_parser() {
             failures.push(format!("{dest}: missing in Rust"));
             continue;
         };
-        // The help text is written for today's behavior (rc15): only its presence is checked.
+        // The help text is written for today's behavior: only its presence is checked.
         if rs["help"].as_str().is_none_or(|h| h.trim().is_empty()) {
             failures.push(format!("{dest}.help: missing"));
         }
@@ -632,7 +632,7 @@ fn global_help_lists_every_v4_option() {
         rs_flags, expected,
         "--help does not list every option string"
     );
-    // The v4 option groups keep their titles and order, with "Access options" (rc15: the flags
+    // The v4 option groups keep their titles and order, with "Access options" (v5: the flags
     // of `edit pipes access`, `lock pipes` and `register teams`) after "Pipes" and "Pipeline
     // options" after "Sync".
     let titles = |text: &str| -> Vec<String> {
@@ -724,7 +724,7 @@ const REMOVED_FROM_ACTION_HELP: &[(&str, &str, &str)] = &[(
 
 /// `mrsm <action> [<subaction>] --help` prints help for every recorded v4 page, and that help
 /// still mentions every flag the v4 page did ([`REMOVED_FROM_ACTION_HELP`] lists the
-/// exceptions). The text itself is today's (rc15: no byte-for-byte v4 comparison).
+/// exceptions). The text itself is today's (no byte-for-byte v4 comparison).
 #[test]
 fn per_action_help_keeps_every_v4_page() {
     let fixture = load("args.json");
@@ -918,7 +918,7 @@ fn dispatch_skeleton() {
         1
     );
     // PARITY (W18-SW-005): v4 exits 0 here (`--nopretty` skips the code that sets the status);
-    // v5 exits 1 when the command fails (wave 18, decision 10).
+    // v5 exits 1 when the command fails.
     assert_eq!(
         dispatch::main(
             &s(&["show", "config", "synthetic_missing_key", "--nopretty"]),

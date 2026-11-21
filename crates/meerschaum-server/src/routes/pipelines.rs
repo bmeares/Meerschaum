@@ -15,7 +15,7 @@
 //! | `POST`/`DELETE /pipelines/leases` | `pipes:write` | The metadata leases of Pipeline edits |
 //! | `GET`/`PATCH /pipelines/{name}/access`, `POST .../lock`, `.../unlock` | `pipes:read` / `pipes:write` | The Pipeline's access and locks (as for pipes, [`super::pipe_access`]) |
 //!
-//! **Access (rc15).** A saved Pipeline carries `access` and `locks` like a pipe (its registration
+//! **Access.** A saved Pipeline carries `access` and `locks` like a pipe (its registration
 //! pipe's parameters): the routes answer `404` for a Pipeline the caller cannot see, its new
 //! registration is the caller's (in the caller's primary team), and changing it needs edit rights
 //! on it. Members the caller cannot see are left out of every answer and counted
@@ -1466,7 +1466,7 @@ async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiResult {
 }
 
 /// The scheduled jobs that run Pipeline `name`: the ones `caller` may see (sorted), and how many
-/// others there are (a job of another team is only counted, rc15 AC9).
+/// others there are (a job of another team is only counted).
 async fn referencing_jobs(
     ctx: &Ctx,
     conn: &Arc<dyn InstanceConnector>,

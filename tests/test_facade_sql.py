@@ -235,7 +235,7 @@ def test_a_pipe_on_an_instance_that_cannot_be_built():
 
 def test_raw_sql_without_the_sql_extra(tmp_path):
     """
-    rc15 Q53: `read`, `exec`, `value`, `exec_queries` and `to_sql` run on the Rust connector, so
+    `read`, `exec`, `value`, `exec_queries` and `to_sql` run on the Rust connector, so
     they work without SQLAlchemy; only `.engine` names `meerschaum[sql]` (D16).
     """
     import os

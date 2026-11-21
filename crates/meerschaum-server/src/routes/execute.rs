@@ -137,7 +137,7 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
         )
         .await
         .map_err(|message| ApiError::new(403, message))?;
-        // The pipes the command selects (rc15 access model).
+        // The pipes the command selects (the access model).
         crate::execute_access::check(&ctx.state, &caller, &args).await?;
     }
     // 5.1: a command allowed only as team execution: a job started for it must carry the mark
@@ -336,8 +336,8 @@ pub fn start_cleanup(state: &AppState) {
 
 /// `POST /execute`. The console's pipe operations (Sync, Verify, Clear, Drop, Delete of pipes
 /// and Pipelines) need `jobs:execute`, the operation's permission and edit rights on the pipes
-/// they select; any other action also needs `actions:execute` and `jobs:write` (rc15,
-/// [`crate::execute_access`]).
+/// they select; any other action also needs `actions:execute` and `jobs:write`
+/// ([`crate::execute_access`]).
 async fn execute(ctx: Ctx, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let caller = crate::access::require(&ctx.state, &ctx.headers, &["jobs:execute"]).await?;

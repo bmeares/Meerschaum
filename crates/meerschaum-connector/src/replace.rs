@@ -1,4 +1,4 @@
-//! Replacing syncs ([`SyncOptions::replace`], rc15): the frame's rows replace the pipe's rows of
+//! Replacing syncs ([`SyncOptions::replace`]): the frame's rows replace the pipe's rows of
 //! a window `[begin, end)` (matching `params`). The instances share the window rules here; each
 //! deletes the window and writes the rows its own way (SQL in one transaction).
 

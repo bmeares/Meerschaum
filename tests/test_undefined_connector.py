@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-An undefined connector (rc15 S4): Python says where connectors come from, like the CLI does,
+An undefined connector: Python says where connectors come from, like the CLI does,
 instead of a traceback and "Missing flavor" / "Missing 'host'".
 """
 

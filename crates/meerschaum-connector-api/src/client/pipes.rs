@@ -127,7 +127,7 @@ fn thousands(n: usize) -> String {
 }
 
 /// The error of a read the server failed (`5xx`: its instance errored or could not be reached),
-/// rc15 Q17: a failed read is an error, not an empty pipe. `4xx` answers (an unregistered pipe,
+/// A failed read is an error, not an empty pipe. `4xx` answers (an unregistered pipe,
 /// a table not created yet) keep v4's empty results.
 fn server_failed(pipe: &Pipe, what: &str, response: &ApiResponse) -> Option<ConnectorError> {
     (response.status >= 500).then(|| {
@@ -620,7 +620,7 @@ impl APIConnector {
             return self.write_engine_pipe(pipe.metric_key(), &df).await.into();
         }
         let begin = Instant::now();
-        // A replacing sync (rc15): `opts.replace` with the window the engine resolved, or
+        // A replacing sync: `opts.replace` with the window the engine resolved, or
         // `replace=True` among the keyword arguments of a direct `APIConnector.sync_pipe(...)`
         // call, whose `begin` / `end` (when given) go along as they are and whose missing
         // bounds the server takes from the posted rows (never the whole table).
@@ -951,7 +951,7 @@ impl APIConnector {
                     .unwrap_or(QueryValue::None),
             ),
         ]);
-        // Q17: an unreachable server or a failed read (`5xx`) is an error, not an empty pipe;
+        // An unreachable server or a failed read (`5xx`) is an error, not an empty pipe;
         // an unregistered pipe (`409`) or one without a table yet (`400`) has no data. A
         // `limit` the server refuses (`413`, over its `max_response_row_limit`) is an error too.
         let response = self.get(&r_url, opts).await?;
@@ -1428,7 +1428,7 @@ impl APIConnector {
     }
 
     /// `get_pipe_rowcount(pipe, estimate=True)`: `GET /pipes/{keys}/rowcount?estimate=true`
-    /// (the server's catalog estimate, contract C1). Bounds, `params` and `remote` make the
+    /// (the server's catalog estimate). Bounds, `params` and `remote` make the
     /// count exact; a server that refuses the parameter (a `4xx`) is asked for the exact count.
     pub async fn get_pipe_rowcount_estimate(
         &self,

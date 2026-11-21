@@ -283,7 +283,7 @@ impl SqlConnector {
         Ok(self.driver().read_docs_frame(&sql).await.ok())
     }
 
-    /// `SQLConnector.to_sql(df, name, if_exists=...)` without SQLAlchemy (rc15 Q53): the table is
+    /// `SQLConnector.to_sql(df, name, if_exists=...)` without SQLAlchemy: the table is
     /// created from `column_types` (the database type of each column, as pandas' `to_sql` would
     /// create it) when it does not exist or when `if_exists` is [`IfExists::Replace`] (dropped
     /// first), [`IfExists::Fail`] refuses an existing table, and the rows are inserted with

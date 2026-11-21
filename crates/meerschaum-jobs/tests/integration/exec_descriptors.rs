@@ -19,6 +19,8 @@ fn inheritable(fd: i32) {
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     assert!(flags >= 0);
     assert_eq!(
+        // SAFETY: `F_SETFD` takes an integer flag set on the same live descriptor; no memory is
+        // passed.
         unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) },
         0
     );
@@ -42,7 +44,11 @@ fn descriptor_probe_child() {
     // Numeric descriptors may be absent or reused by the child harness. Raw pread/recv return
     // EBADF/ESPIPE/ENOTSOCK safely; PEEK + DONTWAIT cannot consume or block another channel.
     let file_count =
+        // SAFETY: `file_bytes` is a live local buffer of exactly `file_bytes.len()` writable
+        // bytes; `pread` writes at most that many and touches no other memory, whatever `file` is.
         unsafe { libc::pread(file, file_bytes.as_mut_ptr().cast(), file_bytes.len(), 0) };
+    // SAFETY: `stream_bytes` is a live local buffer of exactly `stream_bytes.len()` writable
+    // bytes; `recv` writes at most that many and touches no other memory, whatever `socket` is.
     let stream_count = unsafe {
         libc::recv(
             socket,
@@ -138,10 +144,12 @@ fn sealed_native_exec_discards_inheritable_main_file_and_connected_stream_but_pr
     assert_eq!(bytes, STREAM_SECRET);
     // The operation runs only in the forked child; the parent's original flags stay unchanged.
     assert_eq!(
+        // SAFETY: `F_GETFD` on the live descriptor `file` owns; no memory is passed.
         unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
         0
     );
     assert_eq!(
+        // SAFETY: `F_GETFD` on the live descriptor `socket` owns; no memory is passed.
         unsafe { libc::fcntl(socket.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
         0
     );

@@ -471,7 +471,7 @@ impl InstanceConnector for APIConnector {
             .and_then(|v| v.as_map().cloned()))
     }
 
-    // The access model (rc15) lives on the server: teams, users' permissions and emails, a
+    // The access model lives on the server: teams, users' permissions and emails, a
     // pipe's access and locks travel over the routes it enforces (`client/access.rs`).
 
     async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
@@ -497,7 +497,7 @@ impl InstanceConnector for APIConnector {
         }
     }
 
-    /// The address as the server shows it to this caller (AC13: other users' addresses only
+    /// The address as the server shows it to this caller (other users' addresses only
     /// to administrators and the managers of a team they are in).
     async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
         Ok(self

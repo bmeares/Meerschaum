@@ -132,7 +132,7 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>, literal: &[String]
             .get(&col.name)
             .cloned()
             .unwrap_or_else(|| column_kind(&col.data));
-        // A literal column's null-like strings are values (rc15 Q18).
+        // A literal column's null-like strings are values.
         let normalize = !literal.contains(&col.name);
         let data = match &col.data {
             ColumnData::Native(s) if matches!(s.dtype(), DataType::String) => {
@@ -829,8 +829,8 @@ pub struct FilterExistingParams {
     pub enforce_dtypes: bool,
     /// `pipes:sync:filter_params_index_limit` (default 250).
     pub filter_params_index_limit: usize,
-    /// The pipe's columns whose null-like strings are values (rc15 Q18,
-    /// `meerschaum_core::dtypes::null_marker_text_columns`): the backtrack request matches them
+    /// The pipe's columns whose null-like strings are values
+    /// (`meerschaum_core::dtypes::null_marker_text_columns`): the backtrack request matches them
     /// as text and the diff compares them as text. Empty: v4's rule everywhere.
     pub literal_null_markers: Vec<String>,
 }

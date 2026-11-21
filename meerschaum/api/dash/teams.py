@@ -72,7 +72,7 @@ def teams_by_user(teams: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
 
 
 def everyone_managers(teams: List[Dict[str, Any]]) -> List[str]:
-    """The managers of Everyone (they manage every user: AC13)."""
+    """The managers of Everyone (they manage every user)."""
     for team in teams:
         if team['builtin']:
             return sorted(username for username, role in team['members'].items() if role == 'manager')

@@ -388,7 +388,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         }
         tokio::time::sleep(POLL).await;
     }
-    // A caller who is not an administrator follows the runs of pipes it can see (rc15); the
+    // A caller who is not an administrator follows the runs of pipes it can see; the
     // events of hidden pipes reach it anonymized.
     let caller = selected
         .fresh_headers(&state, auth.headers(), SCOPES)

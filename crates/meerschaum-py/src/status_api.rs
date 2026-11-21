@@ -1,4 +1,4 @@
-//! Per-pipe sync status (rc15 contract C2) for the Python façade: `pipe.get_sync_status()` and
+//! Per-pipe sync status for the Python façade: `pipe.get_sync_status()` and
 //! `mrsm.get_sync_statuses(instance)` read the `mrsm:engine_sync_status` rows every sync path
 //! records ([`meerschaum_connector::sync_status`]) through the instance connector's trait
 //! methods, so an `api:` instance asks its server (`GET /engine/sync-status`).

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Raw SQL through the Rust connector (rc15, Q50 / Q53).
+Raw SQL through the Rust connector.
 
 `SQLConnector.read()`, `exec()` / `execute()`, `exec_queries()`, `value()` and `to_sql()` run on
 the connector's Rust connection pool (`meerschaum._core.SqlConnector`, the one `Pipe` methods

@@ -1186,7 +1186,7 @@ def create_job_from_form(
         if not allowed:
             return False, message or "You may not run this command as a job."
     try:
-        ### The job is the session user's, in their primary team (AC9).
+        ### The job is the session user's, in their primary team.
         from meerschaum.jobs import ownership_properties
         from meerschaum.api.dash.access import resolve_viewer
         viewer = resolve_viewer(session_id=session_id)

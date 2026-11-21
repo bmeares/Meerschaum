@@ -1023,7 +1023,7 @@ async fn execute_follows_the_actions_allowlist() {
 }
 
 #[tokio::test]
-async fn rc6_disabled_native_routes_do_not_reappear() {
+async fn disabled_native_routes_do_not_reappear() {
     let dir = tempfile::tempdir().unwrap();
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     let mut cfg = common::config(dir.path());
@@ -1060,7 +1060,7 @@ async fn rc6_disabled_native_routes_do_not_reappear() {
 }
 
 #[tokio::test]
-async fn rc6_terminal_validation_never_starts_a_worker() {
+async fn terminal_validation_never_starts_a_worker() {
     let (app, jobs, _root) = jobs_app();
     let admin = common::login(&app, "admin", "pass", None).await;
     let allowed = send(
@@ -1078,7 +1078,7 @@ async fn rc6_terminal_validation_never_starts_a_worker() {
 }
 
 #[tokio::test]
-async fn rc6_cleanup_runs_without_an_execute_request() {
+async fn cleanup_runs_without_an_execute_request() {
     let root = tempfile::tempdir().unwrap();
     let instance = Arc::new(common::MemoryInstance::new("fixture"));
     let jobs = Arc::new(RecordingJobs::default());
@@ -1107,7 +1107,7 @@ async fn rc6_cleanup_runs_without_an_execute_request() {
 }
 
 #[tokio::test]
-async fn rc6_successful_output_lasts_24_hours_and_failures_last_seven_days() {
+async fn successful_output_lasts_24_hours_and_failures_last_seven_days() {
     let (app, jobs, root) = jobs_app();
     let admin = common::login(&app, "admin", "pass", None).await;
     jobs.success.store(true, Ordering::SeqCst);

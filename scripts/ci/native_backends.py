@@ -53,10 +53,11 @@ TESTS = {
     'valkey_misc': NativeTest('meerschaum-connector-valkey', 'integration', 'valkey_misc::'),
     'pipeline_metadata_move': NativeTest('meerschaum-connector-valkey', 'integration',
                                          'pipeline_metadata_move::'),
-    'rc15_fail_closed': NativeTest('meerschaum-connector-valkey', 'integration', 'rc15_fail_closed::'),
+    'fail_closed_user_reads': NativeTest('meerschaum-connector-valkey', 'integration',
+                                         'fail_closed_user_reads::'),
     'valkey_registration': NativeTest('meerschaum-connector-valkey', 'integration',
                                       'valkey_registration::'),
-    'w18_fail_fast': NativeTest('meerschaum-connector-valkey', 'integration', 'w18_fail_fast::'),
+    'connect_fail_fast': NativeTest('meerschaum-connector-valkey', 'integration', 'connect_fail_fast::'),
     'valkey_replay': NativeTest('meerschaum-connector-valkey', 'integration', 'valkey_replay::'),
 }
 # These tests are `#[ignore]`d in ordinary runs: their filter is the test's full path.

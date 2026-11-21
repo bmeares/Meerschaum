@@ -1,4 +1,4 @@
-//! Who the jobs of a root belong to (decision AC9; the rule is
+//! Who the jobs of a root belong to (the rule is
 //! [`meerschaum_core::job_access`]): a job's `owner` / `team`, the jobs of a team, and the update
 //! of those jobs when the team is renamed or deleted.
 //!
