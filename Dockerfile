@@ -210,7 +210,8 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
   && rm -f /rootfs/usr/bin/ldconfig \
   && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
-  && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir"
+  && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir" \
+  && install -d -m 0700 -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs$mrsm_root_dir/executors"
 COPY --from=py-slim /install/ /rootfs/usr/local/
 ### `mrsm` is a Python console script now (the CLI runs from the extension), so every start imports the
 ### launcher's modules. The wheel is installed without byte code and /usr/local is root-owned at run
@@ -289,7 +290,8 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
   && install -d -o "$mrsm_uid" -g "$mrsm_gid" \
       "/rootfs/home/$mrsm_user" "/rootfs/home/$mrsm_user/.cache" "/rootfs/home/$mrsm_user/.cache/pycache" \
-      "/rootfs$mrsm_root_dir"
+      "/rootfs$mrsm_root_dir" \
+  && install -d -m 0700 -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs$mrsm_root_dir/executors"
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/bashrc /rootfs/home/$mrsm_user/.bashrc
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/tmux.conf /rootfs/home/$mrsm_user/.tmux.conf
 RUN install -d -m 0755 -o 0 -g 0 /rootfs/var/lib/meerschaum \
@@ -388,7 +390,8 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
   && ln -sf vi /rootfs/usr/bin/vim \
   && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
-  && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir"
+  && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir" \
+  && install -d -m 0700 -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs$mrsm_root_dir/executors"
 RUN install -d -m 0755 -o 0 -g 0 /rootfs/var/lib/meerschaum \
   && install -d -m 0700 -o 1000 -g 1000 /rootfs/var/lib/meerschaum/factory
 COPY --from=native-selected /out/mrsm /rootfs/usr/local/bin/mrsm

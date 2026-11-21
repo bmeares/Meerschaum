@@ -751,3 +751,138 @@ fn new_config_files_are_owner_only() {
         }
     }
 }
+
+#[test]
+fn writing_missing_stack_default_preserves_all_mrsm_references_including_lists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    write(
+        &root,
+        "meerschaum.yaml",
+        "instance: sql:main\nconnectors:\n  sql:\n    main:\n      flavor: timescaledb-ha\n      \
+         host: 127.0.0.1\n      port: 5466\n      username: sra\n      password: super-secret-db-pw\n      \
+         database: sra\n",
+    );
+    let config = config_with(&root, &[]);
+    let _ = config.get(&["stack"]);
+    let stack_path = config.paths().config_dir.join("stack.yaml");
+    let text = std::fs::read_to_string(&stack_path).unwrap();
+    for expected in [
+        "MRSM{!meerschaum}",
+        "MRSM{!system}",
+        "MRSM{!api}",
+        "MRSM{meerschaum:connectors:sql:main:port}:5432",
+        "MRSM{meerschaum:connectors:api:main:port}:MRSM{meerschaum:connectors:api:main:port}",
+        "http://localhost:MRSM{meerschaum:connectors:api:main:port}/healthcheck",
+        "MRSM{meerschaum:connectors:valkey:main:port}:6379",
+        "MRSM{meerschaum:connectors:sql:main:database}",
+        "MRSM{meerschaum:connectors:sql:main:username}",
+        "MRSM{meerschaum:connectors:sql:main:password}",
+        "MRSM{stack:docker-compose.yaml:services:db:hostname}:5432",
+    ] {
+        assert!(text.contains(expected), "missing {expected} in:\n{text}");
+    }
+    assert!(
+        !text.contains("super-secret-db-pw"),
+        "password leaked into stack.yaml:\n{text}"
+    );
+}
+
+#[test]
+fn writing_loaded_stack_preserves_mrsm_config_and_list_references() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    write(
+        &root,
+        "meerschaum.yaml",
+        "instance: sql:main\nconnectors:\n  sql:\n    main:\n      flavor: timescaledb-ha\n      \
+         host: 127.0.0.1\n      port: 5466\n      username: sra\n      password: super-secret-db-pw\n      \
+         database: sra\n",
+    );
+    let config = config_with(&root, &[]);
+    // Load `meerschaum` first so `meerschaum:api_instance` is substituted in memory (matching
+    // normal CLI / Python startup), then load `stack` and write it back after a small change.
+    let _ = config.get(&["meerschaum"]);
+    let mut stack = config.get(&["stack"]).unwrap().to_map();
+    stack.insert("project_name".into(), Value::Str("custom-proj".into()));
+    let mut to_write = meerschaum_core::config::ConfigMap::new();
+    to_write.insert(
+        "stack".into(),
+        meerschaum_core::config::ConfigValue::from_value(&Value::Map(stack)),
+    );
+    assert!(config.with_state(|s| s.write_config_lossless(Some(&to_write), None)));
+
+    let stack_path = config.paths().config_dir.join("stack.yaml");
+    let text = std::fs::read_to_string(&stack_path).unwrap();
+    assert!(text.contains("project_name: custom-proj"), "{text}");
+    for expected in [
+        "MRSM{!meerschaum}",
+        "MRSM{!system}",
+        "MRSM{!api}",
+        "MRSM{meerschaum:connectors:sql:main:port}:5432",
+        "MRSM{meerschaum:connectors:sql:main:password}",
+        "MRSM{stack:docker-compose.yaml:services:db:hostname}:5432",
+    ] {
+        assert!(text.contains(expected), "missing {expected} in:\n{text}");
+    }
+    assert!(
+        !text.contains("super-secret-db-pw"),
+        "secret expanded into stack.yaml:\n{text}"
+    );
+}
+
+/// 5.1.1: in a Docker stack's API container `MRSM_CONFIG` holds the stack host's configuration;
+/// a connector the console reserved for a team in the container's own `meerschaum.yaml` is never
+/// replaced by a stale copy from it, while `MRSM_PATCH` (explicit) still applies.
+#[test]
+fn mrsm_config_never_shadows_a_team_reserved_connector() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    write(
+        &root,
+        "meerschaum.yaml",
+        "connectors:\n  sql:\n    bwg:\n      flavor: timescaledb-ha\n      host: db\n      \
+         port: 5432\n      username: mrsm_bwg\n      password: team-pw\n      database: bwg\n      \
+         teams:\n      - bwg\n    plain:\n      flavor: sqlite\n      database: /tmp/a.db\n",
+    );
+    let host = r#"{"meerschaum": {"connectors": {"sql": {
+        "bwg": {"flavor": "timescaledb", "host": "old", "database": "meerschaum", "password": "old-pw"},
+        "plain": {"database": "/tmp/b.db"},
+        "anchored": {"flavor": "postgresql", "host": "db", "database": "anchored"}
+    }}}}"#;
+    let config = config_with(&root, &[("MRSM_CONFIG", host.to_string())]);
+    let bwg = |key: &str| {
+        config
+            .get(&["meerschaum", "connectors", "sql", "bwg", key])
+            .unwrap()
+    };
+    assert_eq!(bwg("database"), s("bwg"));
+    assert_eq!(bwg("host"), s("db"));
+    assert_eq!(bwg("password"), s("team-pw"));
+    // An unreserved connector still takes the stack's value; a new one is still added.
+    let plain = config
+        .get(&["meerschaum", "connectors", "sql", "plain", "database"])
+        .unwrap();
+    assert_eq!(plain, s("/tmp/b.db"));
+    assert!(
+        config
+            .get(&["meerschaum", "connectors", "sql", "anchored"])
+            .is_some()
+    );
+
+    // An explicit MRSM_PATCH still changes a reserved connector.
+    let patched = config_with(
+        &root,
+        &[
+            ("MRSM_CONFIG", host.to_string()),
+            (
+                "MRSM_PATCH",
+                r#"{"meerschaum": {"connectors": {"sql": {"bwg": {"host": "db2"}}}}}"#.to_string(),
+            ),
+        ],
+    );
+    let host_value = patched
+        .get(&["meerschaum", "connectors", "sql", "bwg", "host"])
+        .unwrap();
+    assert_eq!(host_value, s("db2"));
+}

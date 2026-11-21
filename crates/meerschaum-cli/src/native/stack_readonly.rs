@@ -144,6 +144,51 @@ pub fn revision(datasource: &Value, schemas: &[String]) -> String {
     hex::encode(hash.finalize())[..16].to_string()
 }
 
+/// Non-empty Docker Compose `profiles` entries on a service (`None` when absent or empty).
+fn service_profiles(service: &Map) -> Option<Vec<String>> {
+    let items: Vec<String> = match service.get("profiles") {
+        Some(Value::List(values)) => values
+            .iter()
+            .filter(|v| !v.is_null())
+            .map(Value::py_str)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Some(Value::Str(single)) => {
+            let trimmed = single.trim();
+            if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                vec![trimmed.to_string()]
+            }
+        }
+        _ => Vec::new(),
+    };
+    (!items.is_empty()).then_some(items)
+}
+
+/// Choose `profiles` for `grafana_readonly` so Docker Compose never validates it when `db` is
+/// excluded by profiles, and does not run it unnecessarily when `grafana` is gated by profiles.
+fn resolved_profiles(db: &Map, grafana: &Map) -> Option<Vec<String>> {
+    match (service_profiles(db), service_profiles(grafana)) {
+        (Some(db_profiles), Some(grafana_profiles)) => {
+            let shared: Vec<String> = db_profiles
+                .iter()
+                .filter(|p| grafana_profiles.contains(p))
+                .cloned()
+                .collect();
+            Some(if shared.is_empty() {
+                db_profiles
+            } else {
+                shared
+            })
+        }
+        (Some(db_profiles), None) => Some(db_profiles),
+        (None, Some(grafana_profiles)) => Some(grafana_profiles),
+        (None, None) => None,
+    }
+}
+
 /// Add [`SERVICE`] to the compose config and make `grafana` wait for it. `Err`: the stack has no
 /// `db` service to take `psql` from (or no `grafana`).
 pub fn add_role_setup(
@@ -166,12 +211,9 @@ pub fn add_role_setup(
     else {
         return Err("the stack has no services".into());
     };
-    if !services
-        .get("grafana")
-        .is_some_and(|g| g.as_map().is_some())
-    {
+    let Some(grafana_ref) = services.get("grafana").and_then(Value::as_map).cloned() else {
         return Err("the stack has no `grafana` service".into());
-    }
+    };
     let Some(db) = services.get("db").and_then(Value::as_map).cloned() else {
         return Err("the stack has no `db` service to set the role up with".into());
     };
@@ -224,6 +266,18 @@ pub fn add_role_setup(
         }
         _ => {}
     }
+    let readonly_profiles = resolved_profiles(&db, &grafana_ref);
+    // `grafana` may be active while `grafana_readonly` is not (its profiles follow `db`'s):
+    // then `grafana`'s dependency on it must be optional, or Compose rejects the project.
+    let optional_dependency = readonly_profiles
+        .as_ref()
+        .is_some_and(|profiles| service_profiles(&grafana_ref).as_ref() != Some(profiles));
+    if let Some(profiles) = readonly_profiles {
+        service.insert(
+            "profiles".into(),
+            Value::List(profiles.into_iter().map(|p| s(&p)).collect()),
+        );
+    }
     services.insert(SERVICE.into(), Value::Map(service));
 
     let Some(Value::Map(grafana)) = services.get_mut("grafana") else {
@@ -243,6 +297,9 @@ pub fn add_role_setup(
     };
     let mut completed = Map::new();
     completed.insert("condition".into(), s("service_completed_successfully"));
+    if optional_dependency {
+        completed.insert("required".into(), Value::Bool(false));
+    }
     depends.insert(SERVICE.into(), Value::Map(completed));
     grafana.insert("depends_on".into(), Value::Map(depends));
     let environment = grafana
@@ -502,5 +559,108 @@ mod tests {
         assert_eq!(a, revision(&old_default("x", "1"), &schemas));
         assert_ne!(a, revision(&old_default("x", "2"), &schemas));
         assert_ne!(a, revision(&old_default("x", "1"), &[]));
+    }
+
+    #[test]
+    fn grafana_readonly_inherits_compose_profiles() {
+        let source = MainSource::Switched {
+            host: "db".into(),
+            port: 5432,
+            database: "meerschaum".into(),
+        };
+        let schemas: Vec<String> = Vec::new();
+        let setup = RoleSetup {
+            owner_user: "mrsm",
+            owner_password: "owner",
+            password: "ro",
+            schemas: &schemas,
+            revision: "rev1",
+        };
+        let profiles_of = |compose: &Value| -> Option<Vec<String>> {
+            compose
+                .get("services")
+                .and_then(|s| s.get(SERVICE))
+                .and_then(|s| s.get("profiles"))
+                .and_then(Value::as_list)
+                .map(|items| items.iter().map(Value::py_str).collect())
+        };
+
+        // Both `db` and `grafana` disabled via `profiles: [unused]`.
+        let mut both = value(
+            r#"{"services": {
+                "db": {"image": "timescale/timescaledb-ha:pg18", "profiles": ["unused"]},
+                "grafana": {"image": "grafana/grafana:latest", "profiles": ["unused"]}
+            }}"#,
+        );
+        add_role_setup(&mut both, &source, &setup).unwrap();
+        assert_eq!(profiles_of(&both), Some(vec!["unused".into()]));
+
+        // Only `db` has profiles: `grafana_readonly` must inherit `db`'s profiles so
+        // `depends_on: db` never fails compose validation.
+        let mut db_only = value(
+            r#"{"services": {
+                "db": {"image": "timescale/timescaledb-ha:pg18", "profiles": ["legacy", "unused"]},
+                "grafana": {"image": "grafana/grafana:latest"}
+            }}"#,
+        );
+        add_role_setup(&mut db_only, &source, &setup).unwrap();
+        assert_eq!(
+            profiles_of(&db_only),
+            Some(vec!["legacy".into(), "unused".into()])
+        );
+        let required_of = |compose: &Value| -> Option<Value> {
+            compose
+                .get("services")
+                .and_then(|s| s.get("grafana"))
+                .and_then(|g| g.get("depends_on"))
+                .and_then(|d| d.get(SERVICE))
+                .and_then(|d| d.get("required"))
+                .cloned()
+        };
+        // `grafana` stays active without `db`'s profile: its dependency must be optional.
+        assert_eq!(required_of(&db_only), Some(Value::Bool(false)));
+        assert_eq!(required_of(&both), None);
+
+        // Only `grafana` has profiles: `grafana_readonly` only activates with `grafana`.
+        let mut grafana_only = value(
+            r#"{"services": {
+                "db": {"image": "timescale/timescaledb-ha:pg18"},
+                "grafana": {"image": "grafana/grafana:latest", "profiles": ["observability"]}
+            }}"#,
+        );
+        add_role_setup(&mut grafana_only, &source, &setup).unwrap();
+        assert_eq!(
+            profiles_of(&grafana_only),
+            Some(vec!["observability".into()])
+        );
+
+        // Overlapping profiles pick the intersection; disjoint profiles fall back to `db`'s.
+        let mut overlap = value(
+            r#"{"services": {
+                "db": {"image": "timescale/timescaledb-ha:pg18", "profiles": ["core", "unused"]},
+                "grafana": {"image": "grafana/grafana:latest", "profiles": ["unused", "obs"]}
+            }}"#,
+        );
+        add_role_setup(&mut overlap, &source, &setup).unwrap();
+        assert_eq!(profiles_of(&overlap), Some(vec!["unused".into()]));
+
+        let mut disjoint = value(
+            r#"{"services": {
+                "db": {"image": "timescale/timescaledb-ha:pg18", "profiles": ["db_only"]},
+                "grafana": {"image": "grafana/grafana:latest", "profiles": ["obs"]}
+            }}"#,
+        );
+        add_role_setup(&mut disjoint, &source, &setup).unwrap();
+        assert_eq!(profiles_of(&disjoint), Some(vec!["db_only".into()]));
+
+        // Neither service has profiles: `grafana_readonly` omits `profiles`.
+        let mut none = value(
+            r#"{"services": {
+                "db": {"image": "timescale/timescaledb-ha:pg18"},
+                "grafana": {"image": "grafana/grafana:latest"}
+            }}"#,
+        );
+        add_role_setup(&mut none, &source, &setup).unwrap();
+        assert_eq!(profiles_of(&none), None);
     }
 }

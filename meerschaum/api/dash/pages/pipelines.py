@@ -42,8 +42,8 @@ def _query(href):
 
 
 def _registry(query):
-    from meerschaum.api.dash.engine import get_instance
-    return str(get_instance(query.get('instance', [None])[0]))
+    from meerschaum.api.dash.engine import display_instance_keys
+    return display_instance_keys(query.get('instance', [None])[0])
 
 
 def _instance_options():

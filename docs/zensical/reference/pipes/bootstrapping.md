@@ -7,7 +7,7 @@ The `bootstrap pipes` action includes a setup wizard to guide you through the pr
     The below example demonstrates how to create a pipe from an existing SQL database table.
 
     In this case, the remote table is called `weather_table` and has a datetime column `timestamp` and ID column `station`. The pipe has the definition `SELECT * FROM weather_table`.
-    <asciinema-player src="/assets/casts/bootstrap.cast"></asciinema-player>
+    <asciinema-player src="/assets/casts/bootstrap.cast" rows="20" idle-time-limit="2" poster="npt:0:05"></asciinema-player>
 
 To get started, run the following command:
 

@@ -8,12 +8,11 @@ from meerschaum.api.dash import performance
 
 
 def route(pathname=None, href=None):
-    from meerschaum.api.dash.engine import get_instance, instance_problem
+    from meerschaum.api.dash.engine import page_instance
     selected = performance.selection(href)
     requested = selected['instance']
-    instance = str(get_instance(requested))
+    instance, problem, _ = page_instance(requested)
     window = selected['window']
-    problem = instance_problem(requested)
     return [
         build_pages_navbar(instance_keys=instance),
         dcc.Location(id='performance-location', refresh=False),

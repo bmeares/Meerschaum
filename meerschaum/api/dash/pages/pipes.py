@@ -53,7 +53,15 @@ def split_path(pathname):
     return [unquote(part) for part in rest.split('/')] if rest else []
 
 
-def table_layout(instance_keys, global_instance, filters, allowed_new=False, problem=None, viewer=None):
+def table_layout(
+    instance_keys,
+    global_instance,
+    filters,
+    allowed_new=False,
+    problem=None,
+    viewer=None,
+    instance_blocked=False,
+):
     """The Pipes table: the header with New pipe, the filters, the table and its pages."""
     from meerschaum.api.dash.pipes_table import (
         build_table_layout, SORT_COLUMNS, STATUS_FILTERS, SCOPE_FILTERS,
@@ -96,7 +104,10 @@ def table_layout(instance_keys, global_instance, filters, allowed_new=False, pro
         dcc.Store(id='pipes-stats-request', data=None),
         html.Div(id='pipes-stats-dummy', hidden=True),
         dcc.Store(id='pipes-page-meta', data={
-            'instance': instance_keys, 'global': global_instance, 'filters': filters,
+            'instance': instance_keys,
+            'global': global_instance,
+            'filters': filters,
+            'instance_blocked': bool(instance_blocked),
         }),
         html.Div(id='pipes-search-url', hidden=True),
         html.Main(
@@ -178,9 +189,7 @@ def layout(pathname=None, href=None):
     query = urlparse(href or '').query
     filters = filters_from_search(query)
     requested = filters.get('instance', None)
-    instance = engine.get_instance(requested)
-    instance_keys = str(instance)
-    problem = engine.instance_problem(requested)
+    instance_keys, problem, instance_blocked = engine.page_instance(requested)
     global_instance = global_instance_keys()
     session_data = pipes_access.session_data_from_context()
     parts = split_path(pathname)
@@ -211,8 +220,10 @@ def layout(pathname=None, href=None):
         problem = None
     else:
         allowed_new, _ = pipes_access.can_register(session_data)
-        page = table_layout(instance_keys, global_instance, filters, allowed_new=allowed_new,
-                            problem=problem, viewer=viewer)
+        page = table_layout(
+            instance_keys, global_instance, filters, allowed_new=allowed_new,
+            problem=problem, viewer=viewer, instance_blocked=instance_blocked,
+        )
         problem = None
 
     if problem:

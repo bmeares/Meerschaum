@@ -841,7 +841,8 @@ def build_overview_body(data: Dict[str, Any], instance: str):
     href = '/dash/performance?' + urlencode({'instance': instance})
     if not summary.get('syncs'):
         return [html.P('No syncs in this sample.' if not complete else
-                       'No syncs in the last 24 hours.', className='text-muted'),
+                       'No syncs in the last 24 hours.',
+                       className='text-muted overview-none overview-performance-empty'),
                 html.Small('This view is limited; refine its filters in Performance.', className='text-muted')
                 if not complete else None,
                 dcc.Link('View performance →', href=href, className='overview-more')]

@@ -862,6 +862,22 @@ fn stack_services() {
         ..services[0].clone()
     };
     assert_eq!(judge_service(&starting, "mrsm").status, Status::Warn);
+    // One-shot `grafana_readonly` init container exiting 0 is healthy; non-zero still fails.
+    let init_ok = ServiceFact {
+        service: "grafana_readonly".into(),
+        container: "mrsm-grafana_readonly-1".into(),
+        state: "exited".into(),
+        status: "Exited (0) 2 minutes ago".into(),
+        ..services[0].clone()
+    };
+    let init_verdict = judge_service(&init_ok, "mrsm");
+    assert_eq!(init_verdict.status, Status::Pass);
+    assert!(init_verdict.detail.starts_with("completed:"));
+    let init_fail = ServiceFact {
+        status: "Exited (1) 2 minutes ago".into(),
+        ..init_ok
+    };
+    assert_eq!(judge_service(&init_fail, "mrsm").status, Status::Fail);
 }
 
 #[test]

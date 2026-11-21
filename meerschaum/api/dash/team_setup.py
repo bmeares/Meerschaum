@@ -406,6 +406,56 @@ def refresh_connectors() -> bool:
     return added
 
 
+def instance_policy_warning(instance: Optional[str], conn: Any = None) -> Optional[str]:
+    """
+    Warn when a team's configured default `instance` is blocked by the API's
+    `api:permissions:instances` policy (`allow_multiple_instances` / `allowed_instance_keys`).
+    """
+    if not instance:
+        return None
+    from meerschaum.api.dash.engine import instance_policy_problem
+    default_keys = str(conn) if conn is not None else None
+    problem = instance_policy_problem(str(instance), default_keys=default_keys)
+    if not problem:
+        return None
+    return (
+        f"Warning: {problem} Members of this team will not be able to use '{instance}' "
+        f"until `api:permissions:instances` allows it."
+    )
+
+
+def config_write_problem() -> Optional[str]:
+    """
+    Why this process cannot save a connector to its configuration file (checked before a team's
+    database is made, so a refusal never leaves a database without its connector), or `None`.
+    """
+    if os.name != 'posix':
+        return None
+    try:
+        from meerschaum.config.paths import CONFIG_DIR_PATH
+        directory = str(CONFIG_DIR_PATH)
+    except Exception:
+        return None
+    path = _connectors_file()
+    problems = []
+    if os.path.isdir(directory) and not os.access(directory, os.W_OK | os.X_OK):
+        problems.append(f"the directory '{directory}' is not writable")
+    if path and not os.access(path, os.R_OK | os.W_OK):
+        problems.append(f"'{path}' is not readable and writable")
+    if not problems:
+        return None
+    try:
+        user = f"UID {os.geteuid()}"
+    except Exception:
+        user = 'this user'
+    return (
+        "The team's connector could not be saved: " + ' and '.join(problems)
+        + f" by {user}. Fix the ownership (for a Docker stack: "
+        "`docker compose exec -u 0 api chown -R meerschaum:meerschaum /meerschaum/config`) "
+        "and try again."
+    )
+
+
 def create_team(
     name: str,
     isolated: bool = True,
@@ -447,7 +497,14 @@ def create_team(
             return False, message
         keys = f'sql:{label}'
         if connector_attributes(keys):
-            return False, f"The connector '{keys}' already exists."
+            return False, (
+                f"The connector '{keys}' already exists (in this instance's configuration, or in "
+                "the stack host's configuration given through `MRSM_CONFIG`). Choose another "
+                "name, or remove the old connector first."
+            )
+        write_problem = config_write_problem()
+        if write_problem:
+            return False, write_problem
         base = str(base or default_base() or '')
         if base not in database_bases():
             return False, "Choose a PostgreSQL-family connector to branch from."
@@ -498,9 +555,9 @@ def create_team(
         database=(made['summary'] if made else None),
         grafana_org=grafana_org,
     )
+    target_conn = conn if conn is not None else _api_connector()
     try:
-        team = mrsm.Team(name, instance=(conn if conn is not None else _api_connector()),
-                         attributes=attributes)
+        team = mrsm.Team(name, instance=target_conn, attributes=attributes)
         success, message = team.register()
     except Exception as e:
         success, message = False, str(e)
@@ -512,6 +569,9 @@ def create_team(
             )
         return False, message
     access.forget()
+    policy_warning = instance_policy_warning(instance, conn=target_conn)
+    if policy_warning:
+        notes.append(policy_warning)
     message = f"Created team '{name}'"
     if made:
         message += f" with the {storage} '{database_name}' (connector '{instance}')"
@@ -576,7 +636,11 @@ def edit_team_settings(
     if not success:
         return False, message
     access.forget()
-    return True, f"Saved the settings of team '{name}'."
+    message = f"Saved the settings of team '{name}'."
+    policy_warning = instance_policy_warning(instance, conn=conn)
+    if policy_warning:
+        message += '\n' + policy_warning
+    return True, message
 
 
 def grafana_org_id(attributes: Optional[Dict[str, Any]]) -> Optional[int]:

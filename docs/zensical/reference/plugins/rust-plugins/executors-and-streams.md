@@ -1,20 +1,12 @@
 # Executors and Streaming Connectors in Rust Plugins
 
-A Rust plugin can provide a **job executor** (the native counterpart of `@make_executor`) and
-**streaming connectors** whose data `mrsm sync pipes --listen` lands as it arrives (the
-counterpart of an `IS_STREAMING` connector's `subscribe`). Both run in-process; no Python worker
-is started for them.
+A Rust plugin can provide a **job executor** (native counterpart of `@make_executor`) and **streaming connectors** for `mrsm sync pipes --listen` (counterpart of `IS_STREAMING` / `subscribe`). Both run in-process without starting a Python worker.
 
-The complete, tested examples are
-[`native_executor.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_executor.rs)
-(a `procs:<label>` executor that runs each job as a local process) and
-[`native_stream.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_stream.rs)
-(a `ticker:<label>` streaming connector and a plugin-level `subscribe`).
+See the complete, tested examples: [`native_executor.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_executor.rs) (`procs:<label>`) and [`native_stream.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_stream.rs) (`ticker:<label>`).
 
 ## 👷 Executors
 
-An executor manages [background jobs](../../background-jobs/executors.md) by name. Declare its
-type under the manifest's top-level `executor_types` and return it from `Plugin::executor`:
+An executor manages [background jobs](../../background-jobs/executors.md) by name. Declare its type under `executor_types` in `manifest()` and return it from `Plugin::executor`:
 
 ```rust
 use meerschaum_plugin::executor::{Executor, mrsm_command};
@@ -26,17 +18,11 @@ struct Procs;
 impl Plugin for Procs {
     fn manifest(&self) -> Value {
         Manifest::new()
-            .executor_type(
-                "procs",
-                ["get_job_names", "get_job_metadata", "create_job"],
-                "Run jobs as local processes.",
-            )
+            .executor_type("procs", ["get_job_names", "get_job_metadata", "create_job"], "Run jobs as local processes.")
             .into()
     }
 
     fn executor(&self, request: &Request) -> Option<Box<dyn Executor>> {
-        // `request.label` is the label of `procs:<label>`, `request.config` its configuration,
-        // `request.context["root_dir"]` the Meerschaum root the jobs belong to.
         (request.connector_type == "procs").then(|| Box::new(ProcsExecutor) as _)
     }
 }
@@ -44,19 +30,18 @@ impl Plugin for Procs {
 struct ProcsExecutor;
 
 impl Executor for ProcsExecutor {
-    fn get_job_names(&self) -> Result<Vec<String>> { /* ... */ Ok(vec![]) }
-    fn get_job_metadata(&self, name: &str) -> Result<Value> { /* ... */ Ok(Value::Null) }
-    fn create_job(&self, name: &str, sysargs: &[String], properties: &Value) -> Result<SuccessTuple> {
-        // Start `mrsm <sysargs>` with `mrsm_command()` (the host's own `mrsm`), then report.
+    fn get_job_names(&self) -> Result<Vec<String>> { Ok(vec![]) }
+    fn get_job_metadata(&self, _name: &str) -> Result<Value> { Ok(Value::Null) }
+    fn create_job(&self, name: &str, _sysargs: &[String], _properties: &Value) -> Result<SuccessTuple> {
+        let _cmd = mrsm_command(); // host's own `mrsm` command
         Ok(SuccessTuple::ok(format!("Started job '{name}'.")))
     }
-    // start_job, stop_job, delete_job, get_logs, monitor_logs, ...
 }
 
 meerschaum_plugin::export_plugin!(Procs);
 ```
 
-Then use `procs:<label>` wherever executor keys are accepted:
+Use it anywhere executor keys are accepted (CLI `-e`, shell `executor`, `meerschaum:executor` config, Compose, or `mrsm.Job(..., executor_keys='procs:main')`):
 
 ```bash
 mrsm sync pipes -c plugin:noaa -d -e procs:main --name noaa
@@ -65,44 +50,30 @@ mrsm show logs noaa -e procs:main
 mrsm stop jobs noaa -e procs:main
 ```
 
-The shell's `executor procs:main` command, `meerschaum:executor` in your configuration (also
-in a compose project's `config`) and `mrsm.Job(..., executor_keys='procs:main')` in Python work
-the same way; in Python, `job.executor` is a `NativeExecutor` with the methods of
-`meerschaum.jobs.Executor`. Shell and command-line completion suggest the declared types
-(`procs:main`, or the configured labels). The executor's configuration is the connector
-configuration of `procs:<label>` (`meerschaum:connectors:procs:<label>` in `edit config`, or
-`MRSM_PROCS_<LABEL>`). Every method may make
-[host calls](advanced.md#talking-to-meerschaum) (`host::plugin_config()`, `host::pipe(...)`),
-with the trust of the process that uses the executor.
-
-The API server's `/jobs` routes (and the web console and MCP job tools) manage the server's
-local jobs only, as in v4; plugin executors are reached from the command line, the shell,
-configuration, compose and Python.
+Executor config comes from `meerschaum:connectors:procs:<label>` (or `MRSM_PROCS_<LABEL>`). Every method may make [host calls](advanced.md#talking-to-meerschaum) with the calling process's trust. The API server's `/jobs` routes, web console, and MCP job tools manage local server jobs only.
 
 ### The methods
 
-`Executor` mirrors Python's `meerschaum.jobs.Executor`. Every method has a default, so you
-implement only what your executor supports:
+`Executor` mirrors `meerschaum.jobs.Executor`. Unimplemented methods return "not supported" (or derive from other methods):
 
 | Method | Returns | Default |
 |---|---|---|
-| `get_job_names()` | every job, hidden ones included | not supported |
+| `get_job_names()` | All job names (including hidden) | not supported |
 | `get_job_exists(name)` | `bool` | `name` in `get_job_names()` |
 | `get_jobs()` | `{name: metadata}` | `get_job_names()` + `get_job_metadata()` |
-| `get_job_metadata(name)` | metadata, or `Value::Null` when the job does not exist | not supported |
-| `get_job_properties(name)` | the job's properties | `metadata.daemon.properties` |
-| `get_job_status(name)` | `running`, `paused` or `stopped` | `metadata.daemon.status` |
-| `get_job_began` / `get_job_ended` / `get_job_paused(name)` | ISO timestamps | `properties.process.began` / `ended` / `paused` |
-| `create_job(name, sysargs, properties)` | success tuple (create **and** start) | not supported |
-| `start_job` / `stop_job` / `pause_job` / `delete_job(name)` | success tuple | not supported |
-| `get_logs(name)` | the log text | not supported |
-| `get_job_stop_time(name)` | ISO timestamp of a manual stop | not supported |
-| `monitor_logs(name, options)` | a `LogStream` (see below) | not supported |
+| `get_job_metadata(name)` | Metadata JSON, or `Value::Null` | not supported |
+| `get_job_properties(name)` | Job properties JSON | `metadata.daemon.properties` |
+| `get_job_status(name)` | `running`, `paused`, or `stopped` | `metadata.daemon.status` |
+| `get_job_began` / `_ended` / `_paused(name)` | ISO timestamps | `properties.process.began` / `ended` / `paused` |
+| `create_job(name, sysargs, properties)` | `SuccessTuple` (create **and** start) | not supported |
+| `start_job` / `stop_job` / `pause_job` / `delete_job(name)` | `SuccessTuple` | not supported |
+| `get_logs(name)` / `get_job_stop_time(name)` | Log text / ISO timestamp | not supported |
+| `monitor_logs(name, options)` | `Box<dyn LogStream>` | not supported |
 | `get_job_is_blocking_on_stdin(name)` | `bool` | not supported |
-| `get_job_prompt_kwargs(name)` | the pending prompt's keyword arguments | not supported |
-| `write_stdin(name, data)` | write one answer line to the job's stdin | not supported |
+| `get_job_prompt_kwargs(name)` | Pending prompt kwargs | not supported |
+| `write_stdin(name, data)` | Write one `\n`-terminated line | not supported |
 
-Metadata has the shape the local and `api:` executors report:
+Expected metadata shape:
 
 ```json
 {"sysargs": ["sync", "pipes"], "result": [true, "Success"], "restart": false,
@@ -110,183 +81,90 @@ Metadata has the shape the local and `api:` executors report:
             "properties": {"process": {"began": "2026-01-01T00:00:00+00:00", "ended": null}}}}
 ```
 
-A method you leave out is reported to the user as
-`` `pause_job` is not supported by the 'procs:main' executor. `` (actions fail with that message;
-listings show such a job as `stopped` without timestamps). Any other error from a method (an I/O
-error, a panic) is printed as a warning naming the executor and the method, so a broken executor
-is never silently shown as a stopped job. The `sysargs` given to `create_job`
-never contain `-d` or `-e` / `--executor-keys`.
+Key behaviors:
 
-**Starting a job.** A job runs `mrsm <sysargs>`. Use `executor::mrsm_command()` for the program:
-it is the host's own command (the `mrsm` binary, or `python -P -m meerschaum` when Meerschaum runs
-from the Python package), so the job uses the same installation and environment.
-
-**State.** A new executor value is built for every call, so keep job state outside it: in files
-(as the example does under `<root_dir>/procs_jobs/<label>/`), a database, or a static map keyed by
-label. Key file state on `request.context["root_dir"]`, not on `MRSM_ROOT_DIR`: one process may
-manage the jobs of several roots (`mrsm compose` runs in the host's root and manages the jobs of
-each project's root).
-
-**Following logs.** `monitor_logs` returns a `LogStream`; the host calls
-`next_lines(timeout)` until you return `LogEvent::End(result)` (only when
-`options.stop_on_exit` is set and the job stopped) or the user stops watching:
-
-```rust
-impl LogStream for Tail {
-    fn next_lines(&mut self, timeout: Duration) -> Result<LogEvent> {
-        // Return LogEvent::Lines(new_lines), LogEvent::Timeout after `timeout`,
-        // or LogEvent::End(Some(result)).
-    }
-}
-```
-
-**Prompts.** While the host follows a job's log with input accepted (`show logs`, or `start job`
-in the foreground), each `LogEvent::Timeout` makes it ask `get_job_is_blocking_on_stdin`; when
-that is `true`, it reads the user's answer and calls `write_stdin(name, data)` (one line, ending
-in `\n`). Executors without those two methods never receive input.
+- **Spawning & state:** Start jobs with `executor::mrsm_command()` + `sysargs` (`sysargs` never contains `-d` or `-e`). A fresh executor is built per call, so store state in files keyed by `request.context["root_dir"]` (not `MRSM_ROOT_DIR`, since Compose manages multiple roots), a DB, or a static map.
+- **Following logs:** `monitor_logs` returns a `LogStream` whose `next_lines(timeout)` yields `LogEvent::Lines(vec)`, `LogEvent::Timeout`, or `LogEvent::End(Some(result))` (when `options.stop_on_exit` is set).
+- **Prompts:** On each `LogEvent::Timeout` during interactive `show logs` / foreground `start job`, the host polls `get_job_is_blocking_on_stdin` and forwards answers via `write_stdin`.
 
 ## 📡 Streaming connectors
 
-A streaming connector pushes rows as they arrive instead of answering `fetch`. Mark the
-connector type `"is_streaming": true` with `"subscribe"` in its `methods` (or list `subscribe`
-under the plugin's `data_functions` for `plugin:<name>`) and implement `Plugin::subscribe`:
+Mark a connector `"is_streaming": true` with `"subscribe"` in its `methods` (or list `subscribe` under `data_functions` for `plugin:<name>`) and implement `Plugin::subscribe`:
 
 ```rust
 use meerschaum_plugin::subscribe::{Batch, ChannelSubscription, Subscription};
 
 fn subscribe(&self, request: &Request) -> Result<Box<dyn Subscription>> {
-    // `request.context["pipe"]` is the pipe, `request.context["kwargs"]` the sync's keyword
-    // arguments (`begin`, `end`, `params`, `chunksize`, `check_existing`, plugin flags, ...),
-    // the same ones a Python `subscribe(pipe, ..., **kwargs)` receives.
     let topic = request.context["pipe"]["parameters"]["fetch"]["topic"].clone();
-    // A producer thread feeds a bounded channel: `send` blocks while the host is busy.
     let (sender, subscription) = ChannelSubscription::new(16);
     std::thread::spawn(move || {
         for frame in read_messages(topic) {
-            if sender.send(frame).is_err() {
-                return; // the host closed the subscription
-            }
+            if sender.send(frame).is_err() { return; }
         }
     });
     Ok(Box::new(subscription))
 }
 ```
 
-Then listen:
-
 ```bash
 mrsm register pipe -c ticker:office -m readings -i sql:local
 mrsm sync pipes -c ticker:office -i sql:local --listen
 ```
 
-The host **pulls**: it calls `next_batch(timeout)` on your subscription, hands each batch to the
-engine's micro-batching sink (`parameters['stream']`: `idle_ms`, `max_latency_ms`, `max_rows`,
-`max_bytes`) and asks again only once the sink accepted it, so a slow instance slows your source
-down instead of filling memory. `next_batch` may block (on a channel, a socket, a sleep) up to the
-timeout:
+The host pulls batches via `next_batch(timeout)` and feeds the micro-batching sink (`parameters['stream']`: `idle_ms`, `max_latency_ms`, `max_rows`, `max_bytes`), naturally backpressuring slow instances:
 
 | Return | Meaning |
 |---|---|
-| `Batch::data(frame)` | rows to sync |
-| `Batch::with_ack(frame, token)` | rows whose `token` your `ack(tokens)` receives once they committed (acknowledge-after-commit, like MQTT QoS 1 or Kafka offsets). An empty frame with a token (a filtered message) is acknowledged with the next committed flush |
-| `Batch::Timeout` | nothing new yet |
-| `Batch::End` | the source ended; the engine subscribes again after a backoff |
+| `Batch::data(frame)` | Rows to sync. |
+| `Batch::with_ack(frame, token)` | Rows whose `token` is passed to `ack(tokens)` after commit (empty frames still ack on next flush). |
+| `Batch::Timeout` | Nothing new before `timeout`. |
+| `Batch::End` | Stream ended; engine resubscribes after backoff. |
 
-An error from `next_batch` (or `subscribe`) closes the subscription and the engine resubscribes
-with exponential backoff, emitting `stream_restarted`. Tokens belong to the subscription that
-returned them: `ack` only ever receives tokens of its own subscription. Batches still buffered when
-a subscription ended are never acknowledged on the next one (their source redelivers them), so a
-token may be reused across subscriptions (MQTT packet ids, per-session offsets). `close()` is called once when the listener
-stops. Committed flushes trigger the stream's children (`--listen --children`) exactly like a
-Python `subscribe` stream. A subscription may implement `Subscription` directly instead of using
-`ChannelSubscription`; the example's `ticker` does, with no thread at all.
-
-`next_batch`, `ack` and `close` are not serialized with your plugin's other calls (one blocking
-`next_batch` never holds up a `fetch` or another subscription), so share state between them only
-through synchronized types. `subscribe` and each of these calls may make
-[host calls](advanced.md#talking-to-meerschaum) (`pipe.get_sync_time()`, `host::plugin_config()`,
-...) on their own thread, so a source can resume from the pipe's newest row or keep a cursor in
-its config; a producer thread of a `ChannelSubscription` cannot.
-
-## 🔌 The wire contract
-
-Executors and subscriptions are ordinary JSON methods of the plugin ABI; data crosses as an Arrow
-C stream like `fetch`. The SDK implements them for you; a plugin written against the C ABI
-directly answers:
-
-| Method | Context | Reply |
-|---|---|---|
-| `executor.<method>` (every method above) | `{name?, sysargs?, properties?, mrsm, root_dir?}` | the method's JSON value; status 3 when unsupported |
-| `executor.write_stdin` | `{name, data, mrsm, root_dir?}` | `null` |
-| `executor.monitor_logs` | `{name, strip_timestamps, stop_on_exit, mrsm, root_dir?}` | `{"handle": u64}` |
-| `executor.next_logs` | `{handle, timeout_ms}` | `{"status": "lines" \| "timeout" \| "end", "lines": [...], "result": [bool, str] \| null}` |
-| `executor.close_logs` | `{handle}` | `null` |
-| `subscribe` | `{pipe, kwargs}` | `{"handle": u64}` |
-| `next_batch` | `{handle, timeout_ms}` | `{"status": "batch" \| "timeout" \| "end", "ack": u64 \| null, "redelivered": bool}`, rows in the output stream |
-| `ack_batches` | `{handle, tokens}` | `null` |
-| `close_subscription` | `{handle}` | `null` |
-
-For `executor.*` calls, the request's `connector_type` and `label` are the executor keys and
-`config` is the executor's configuration. `mrsm` is the host's command (see above) and `root_dir`
-the root the jobs belong to. For `subscribe`, `kwargs` are the sync's keyword arguments. A
-`next_batch` reply with status `batch`, an `ack` and no rows is an empty batch whose token is
-still acknowledged.
+Errors from `subscribe` or `next_batch` close the stream, emit `stream_restarted`, and resubscribe with exponential backoff. Ack tokens are per-subscription (safe to reuse across reconnects), `close()` runs on stop, and committed flushes trigger `--listen --children`. `next_batch`, `ack`, and `close` run concurrently with other plugin calls and may make [host calls](advanced.md#talking-to-meerschaum) on their own thread (producer threads of `ChannelSubscription` cannot).
 
 ## 📄 Single-file plugins
 
-A single `.rs` file declares both without a Cargo project. An executor is a module marked
-`#[make_executor]`, named after the executor type (`#[make_executor(name = "...")]` to choose
-another). Its functions are the methods of the table above with the same names; a method you
-leave out answers "not supported", and the derived ones (`get_job_exists`, `get_jobs`,
-`get_job_properties`, `get_job_status`, `get_job_began` / `_ended` / `_paused`) fall back on the
-others as in the SDK:
+Declare executors with `#[make_executor]` (custom name via `#[make_executor(name = "...")]`; `local`, `systemd`, `api`, `none` are reserved) and streaming connectors with `fn subscribe` inside `#[make_connector]` (or top-level for `plugin:<name>`):
 
 ```rust
 #[make_executor]
 mod procs {
-    // Any function may take `executor: &ExecutorInfo`: `executor.label`, `executor.config`,
-    // `executor.root_dir` (the root the jobs belong to) and `executor.mrsm` (the command that
-    // starts `mrsm <sysargs>`).
-    fn get_job_names(executor: &ExecutorInfo) -> Vec<String> { /* ... */ }
-    fn get_job_metadata(executor: &ExecutorInfo, name: &str) -> Value { /* null when missing */ }
-    fn create_job(executor: &ExecutorInfo, name: &str, sysargs: Vec<String>, properties: &Value) -> (bool, String) { /* ... */ }
-    fn stop_job(name: &str) -> (bool, String) { /* ... */ }
-    fn get_logs(executor: &ExecutorInfo, name: &str) -> Option<String> { /* ... */ }
-    fn write_stdin(name: &str, data: &str) -> Result<()> { /* ... */ }
-    // Each call is one `next_logs`. `show logs` follows a job through this method; without
-    // it, only `show logs --nopretty` (which reads `get_logs`) shows the logs.
-    fn monitor_logs(name: &str, stop_on_exit: bool) -> impl FnMut(Duration) -> LogEvent { /* ... */ }
+    fn get_job_names(executor: &ExecutorInfo) -> Vec<String> { vec![] }
+    fn get_job_metadata(executor: &ExecutorInfo, name: &str) -> Value { Value::Null }
+    fn create_job(executor: &ExecutorInfo, name: &str, sysargs: Vec<String>, properties: &Value) -> (bool, String) {
+        (true, format!("Started job '{name}' under {}.", executor.root_dir.display()))
+    }
+    fn monitor_logs(name: &str, stop_on_exit: bool) -> impl FnMut(Duration) -> LogEvent {
+        move |_timeout| LogEvent::End(None)
+    }
 }
-```
 
-Every function may also return a `Result` of its type, and `SuccessTuple` is accepted wherever
-`(bool, String)` is.
-
-A streaming connector is a `fn subscribe` inside a `#[make_connector]` module (or at the top
-level, for `plugin:<name>`). It receives the pipe, the connector and the sync's keyword arguments
-and returns a closure the host calls for each `next_batch`, a value of a type implementing
-`Subscription`, or the SDK's `Box<dyn Subscription>` (a `ChannelSubscription` fed by a producer
-thread works too). A `subscribe` with other parameters or another return type is an ordinary
-helper:
-
-```rust
 #[make_connector]
 mod ticker {
     fn subscribe(pipe: &Pipe, kwargs: &Value) -> Result<impl FnMut(Duration) -> Batch> {
         let mut next = 0;
         Ok(move |_timeout: Duration| {
             next += 1;
-            // Batch::Rows(rows), Batch::RowsAck(rows, token), Batch::Data { rows, ack,
-            // redelivered }, Batch::Timeout or Batch::End.
             Batch::RowsAck(vec![json!({"id": next})], next)
         })
     }
-    // Optional: called with the committed tokens.
     fn ack(tokens: &[u64]) -> Result<()> { Ok(()) }
 }
 ```
 
-Rows are JSON objects (`Vec<Value>`) as `fetch` returns them; the rows ABI carries them in the
-`next_batch` reply's `data`, with the same `status`, `ack` and `redelivered` fields as the table
-above. The closure may block up to its timeout. Dropping it closes the subscription. The
-[single-file reference](advanced.md#executors) lists every parameter and return type.
+`ExecutorInfo` provides `executor_type`, `label`, `config`, `root_dir`, `mrsm`, and `keys()`. Single-file `Batch` variants are `Rows(rows)`, `RowsAck(rows, token)`, `Data { rows, ack, redelivered }`, `Timeout`, and `End`; you may also return `impl Subscription` or `Box<dyn Subscription>` (`ChannelSubscription`). Without `monitor_logs`, only `show logs --nopretty` (`get_logs`) displays logs. See [Single-file reference](advanced.md#single-file-reference) for general single-file rules.
+
+## 🔌 The wire contract
+
+Direct C ABI plugins answer these JSON methods (rows travel as Arrow C streams, or JSON `data` under the rows ABI):
+
+| Method | Context | Reply |
+|---|---|---|
+| `executor.<method>` | `{name?, sysargs?, properties?, mrsm, root_dir?}` | Method JSON value (status `3` if unsupported) |
+| `executor.write_stdin` | `{name, data, mrsm, root_dir?}` | `null` |
+| `executor.monitor_logs` | `{name, strip_timestamps, stop_on_exit, mrsm, root_dir?}` | `{"handle": u64}` |
+| `executor.next_logs` | `{handle, timeout_ms}` | `{"status": "lines" \| "timeout" \| "end", "lines": [...], "result": [bool, str] \| null}` |
+| `executor.close_logs` | `{handle}` | `null` |
+| `subscribe` | `{pipe, kwargs}` | `{"handle": u64}` |
+| `next_batch` | `{handle, timeout_ms}` | `{"status": "batch" \| "timeout" \| "end", "ack": u64 \| null, "redelivered": bool}` + output stream |
+| `ack_batches` / `close_subscription` | `{handle, tokens?}` | `null` |

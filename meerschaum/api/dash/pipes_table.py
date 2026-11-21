@@ -205,9 +205,9 @@ def error_text(error: Any, connector: Any = None) -> str:
 def global_instance_keys() -> str:
     """The console's global instance (the instance selector's cookie), else the API's."""
     from meerschaum.api import get_api_connector
-    from meerschaum.api.dash.engine import get_instance
+    from meerschaum.api.dash.engine import display_instance_keys
     try:
-        return str(get_instance())
+        return display_instance_keys()
     except Exception:
         return str(get_api_connector())
 

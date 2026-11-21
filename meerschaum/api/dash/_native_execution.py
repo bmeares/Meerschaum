@@ -101,7 +101,7 @@ def _validate(value, viewer):
     source = value['source']
     if (not isinstance(source, dict)
             or set(source) != {'primary_team', 'team_id', 'isolated', 'runs_code'}
-            or source['primary_team'] != viewer.primary_team
+            or source['primary_team'] != getattr(viewer, 'real_primary_team', viewer.primary_team)
             or source['isolated'] is not True or source['runs_code'] is not False
             or not isinstance(source['team_id'], str)):
         raise ValueError('The native execution source changed.')
@@ -162,8 +162,10 @@ def project(viewer, session_id):
         if not capability['tracked_api'] or not native['policy']['non_admin_actions']:
             return refused
         permissions = _permissions(viewer) - {'actions:execute', 'webterm:use'}
+        ### Acting as a team (the navbar's Team switcher) is a console view: Main runs actions
+        ### under the account's real identity, so they stay withheld until All teams.
         allowed = (capability['tracked_api'] and native['policy']['non_admin_actions']
-                   and flags['actions_execute'])
+                   and flags['actions_execute'] and not getattr(viewer, 'acting_team', None))
         if allowed:
             permissions |= {'actions:execute'}
         # A current native refusal removes these scopes; this overlay never adds job scopes.

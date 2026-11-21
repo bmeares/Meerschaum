@@ -61,6 +61,9 @@ pub const OFFICIAL_REPOSITORY: &str = "bmeares/meerschaum";
 /// The salt of the revision labels (in the secrets directory).
 const SALT_FILENAME: &str = ".revision_salt";
 
+/// The custom API services whose directories this module manages (one name per line).
+const MANAGED_MANIFEST: &str = ".managed_services";
+
 /// The `api` service's files.
 pub const API_CONFIG_FILENAME: &str = "mrsm_config.json";
 /// The `api` service's patch file.
@@ -146,8 +149,13 @@ pub fn image_reason(image: Option<&str>) -> Option<String> {
     }
 }
 
-/// How the `api` service with `image` gets its configuration, given `stack:api_config_files`.
-pub fn api_form(image: Option<&str>, setting: Option<&Value>) -> ApiForm {
+/// How a Meerschaum API service (`service`) with `image` gets its configuration, given
+/// `stack:api_config_files`.
+pub fn api_form_for_service(
+    service: &str,
+    image: Option<&str>,
+    setting: Option<&Value>,
+) -> ApiForm {
     match setting_bool(setting) {
         Some(true) => return ApiForm::Files,
         Some(false) => return ApiForm::Environment(None),
@@ -156,13 +164,18 @@ pub fn api_form(image: Option<&str>, setting: Option<&Value>) -> ApiForm {
     match image_reason(image) {
         None => ApiForm::Files,
         Some(reason) => ApiForm::Environment(Some(format!(
-            "The stack's `api` service gets its configuration in `MRSM_CONFIG` / `MRSM_PATCH`, so \
+            "The stack's `{service}` service gets its configuration in `MRSM_CONFIG` / `MRSM_PATCH`, so \
              every connector's credentials are in `stack/docker-compose.yaml` and in `docker \
              inspect`: {reason}. Use a 5.1.0 or newer image, or set \
              `stack:{API_SETTING}: true` if this image reads `MRSM_CONFIG_FILE` (`false` keeps \
              the environment without this warning)."
         ))),
     }
+}
+
+/// How the `api` service with `image` gets its configuration, given `stack:api_config_files`.
+pub fn api_form(image: Option<&str>, setting: Option<&Value>) -> ApiForm {
+    api_form_for_service("api", image, setting)
 }
 
 /// The value of `name` in a compose `environment` (a map or a `KEY=value` list), as text. `None`
@@ -299,12 +312,77 @@ const API_VARIABLES: &[(&str, &str, &str)] = &[
     ("MRSM_PATCH", "MRSM_PATCH_FILE", API_PATCH_FILENAME),
 ];
 
-/// Move the services' credentials out of the compose config into files under `host_dir` (see
-/// the module documentation). `compose` is changed in place; nothing is written here.
-pub fn externalize(
+fn is_safe_service_dir(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
+}
+
+fn externalize_api_service(
+    name: &str,
+    service: &mut Map,
+    host_dir: &Path,
+    form: &ApiForm,
+    salt: &str,
+    warnings: &mut Vec<String>,
+) -> ServiceFiles {
+    let mut service_files = ServiceFiles {
+        service: name.to_string(),
+        files: Vec::new(),
+    };
+    let environment = service.get("environment");
+    let present: Vec<_> = API_VARIABLES
+        .iter()
+        .filter(|(var, _, _)| env_get(environment, var).is_some())
+        .collect();
+    let own_files = API_VARIABLES
+        .iter()
+        .any(|(_, file_var, _)| env_has(environment, file_var));
+    if !present.is_empty() {
+        match form {
+            ApiForm::Environment(warning) => warnings.extend(warning.clone()),
+            ApiForm::Files if own_files => warnings.push(format!(
+                "The stack's `{name}` service sets `MRSM_CONFIG_FILE` or `MRSM_PATCH_FILE` \
+                 itself: its `MRSM_CONFIG` / `MRSM_PATCH` stay in its environment."
+            )),
+            ApiForm::Files => {
+                let mut environment = service
+                    .get("environment")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Map(Map::new()));
+                for (var, file_var, filename) in present {
+                    let Some(text) = env_get(Some(&environment), var) else {
+                        continue;
+                    };
+                    if text.contains("<DOLLAR>") {
+                        warnings.push(format!(
+                            "The stack's `{name}` service's `{var}` uses Docker Compose \
+                             interpolation: it stays in the service's environment."
+                        ));
+                        continue;
+                    }
+                    service_files.files.push((filename.to_string(), text));
+                    env_remove(&mut environment, var);
+                    super::os_sql_stack::set_environment(
+                        &mut environment,
+                        file_var,
+                        &format!("{CONTAINER_DIR}/{filename}"),
+                        true,
+                    );
+                }
+                service.insert("environment".into(), environment);
+            }
+        }
+    }
+    if !service_files.files.is_empty() {
+        mount(service, &host_dir.join(name));
+        set_label(service, &revision(salt, name, &service_files.files));
+    }
+    service_files
+}
+
+fn externalize_inner(
     compose: &mut Value,
     host_dir: &Path,
-    api: &ApiForm,
+    form_for: &dyn Fn(&str, Option<&str>) -> ApiForm,
     salt: &str,
 ) -> Externalized {
     let mut out = Externalized::default();
@@ -316,62 +394,17 @@ pub fn externalize(
         return out;
     };
 
-    // `api`: MRSM_CONFIG / MRSM_PATCH.
-    let mut api_files = ServiceFiles {
-        service: "api".into(),
-        files: Vec::new(),
+    // `api`: MRSM_CONFIG / MRSM_PATCH (kept at index 0 for fixed service ordering).
+    let api_files = if let Some(Value::Map(service)) = services.get_mut("api") {
+        let image = service.get("image").map(Value::py_str);
+        let form = form_for("api", image.as_deref());
+        externalize_api_service("api", service, host_dir, &form, salt, &mut out.warnings)
+    } else {
+        ServiceFiles {
+            service: "api".into(),
+            files: Vec::new(),
+        }
     };
-    if let Some(Value::Map(service)) = services.get_mut("api") {
-        let environment = service.get("environment");
-        let present: Vec<_> = API_VARIABLES
-            .iter()
-            .filter(|(var, _, _)| env_get(environment, var).is_some())
-            .collect();
-        let own_files = API_VARIABLES
-            .iter()
-            .any(|(_, file_var, _)| env_has(environment, file_var));
-        if !present.is_empty() {
-            match api {
-                ApiForm::Environment(warning) => out.warnings.extend(warning.clone()),
-                ApiForm::Files if own_files => out.warnings.push(
-                    "The stack's `api` service sets `MRSM_CONFIG_FILE` or `MRSM_PATCH_FILE` \
-                     itself: its `MRSM_CONFIG` / `MRSM_PATCH` stay in its environment."
-                        .into(),
-                ),
-                ApiForm::Files => {
-                    let mut environment = service
-                        .get("environment")
-                        .cloned()
-                        .unwrap_or_else(|| Value::Map(Map::new()));
-                    for (var, file_var, filename) in present {
-                        let Some(text) = env_get(Some(&environment), var) else {
-                            continue;
-                        };
-                        if text.contains("<DOLLAR>") {
-                            out.warnings.push(format!(
-                                "The stack's `api` service's `{var}` uses Docker Compose \
-                                 interpolation: it stays in the service's environment."
-                            ));
-                            continue;
-                        }
-                        api_files.files.push((filename.to_string(), text));
-                        env_remove(&mut environment, var);
-                        super::os_sql_stack::set_environment(
-                            &mut environment,
-                            file_var,
-                            &format!("{CONTAINER_DIR}/{filename}"),
-                            true,
-                        );
-                    }
-                    service.insert("environment".into(), environment);
-                }
-            }
-        }
-        if !api_files.files.is_empty() {
-            mount(service, &host_dir.join("api"));
-            set_label(service, &revision(salt, "api", &api_files.files));
-        }
-    }
     out.services.push(api_files);
 
     // `grafana`: the administrator password (`with_grafana_sign_in`).
@@ -439,7 +472,61 @@ pub fn externalize(
         }
     }
     out.services.push(readonly_files);
+
+    // Additional custom Meerschaum API services (e.g. `api-sra`, `api-bwg`) that set
+    // `MRSM_CONFIG` or `MRSM_PATCH`.
+    let extra_names: Vec<String> = services
+        .iter()
+        .filter(|(name, svc)| {
+            !matches!(name.as_str(), "api" | "grafana" | "valkey")
+                && name.as_str() != readonly
+                && is_safe_service_dir(name)
+                && svc.as_map().is_some_and(|m| {
+                    let env = m.get("environment");
+                    API_VARIABLES
+                        .iter()
+                        .any(|(var, _, _)| env_get(env, var).is_some())
+                })
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in extra_names {
+        if let Some(Value::Map(service)) = services.get_mut(&name) {
+            let image = service.get("image").map(Value::py_str);
+            let form = form_for(&name, image.as_deref());
+            let files =
+                externalize_api_service(&name, service, host_dir, &form, salt, &mut out.warnings);
+            out.services.push(files);
+        }
+    }
     out
+}
+
+/// Move the services' credentials out of the compose config into files under `host_dir` (see
+/// the module documentation). `compose` is changed in place; nothing is written here.
+pub fn externalize(
+    compose: &mut Value,
+    host_dir: &Path,
+    api: &ApiForm,
+    salt: &str,
+) -> Externalized {
+    externalize_inner(compose, host_dir, &|_, _| api.clone(), salt)
+}
+
+/// Like [`externalize`], computing each API service's [`ApiForm`] from its own `image` and
+/// `stack:api_config_files`.
+pub fn externalize_with_setting(
+    compose: &mut Value,
+    host_dir: &Path,
+    api_setting: Option<&Value>,
+    salt: &str,
+) -> Externalized {
+    externalize_inner(
+        compose,
+        host_dir,
+        &|service, image| api_form_for_service(service, image, api_setting),
+        salt,
+    )
 }
 
 /// Whether `image` is one of Valkey's own images (`valkey/valkey`, `valkey/valkey-bundle`), whose
@@ -616,30 +703,85 @@ fn write_readable(path: &Path, contents: &str) -> std::io::Result<()> {
 /// Write the services' files under `dir` (prepared by [`prepare_dir`]) and remove the ones no
 /// longer wanted (a service back on its environment keeps no copy of its credentials).
 pub fn write_files(dir: &Path, services: &[ServiceFiles]) -> Result<(), String> {
+    let write_one =
+        |service: &str, known: &[&str], wanted: &[(String, String)]| -> Result<(), String> {
+            let subdir = dir.join(service);
+            let failed =
+                |e: &dyn std::fmt::Display| format!("Cannot write {}: {e}", subdir.display());
+            if !wanted.is_empty() {
+                std::fs::create_dir_all(&subdir).map_err(|e| failed(&e))?;
+                set_mode(&subdir, 0o755).map_err(|e| failed(&e))?;
+                for (name, contents) in wanted {
+                    write_readable(&subdir.join(name), contents).map_err(|e| failed(&e))?;
+                }
+            }
+            for name in known {
+                if !wanted.iter().any(|(wanted, _)| wanted == name) {
+                    let _ = std::fs::remove_file(subdir.join(name));
+                }
+            }
+            if wanted.is_empty() {
+                // Only when empty: something the user put there is kept.
+                let _ = std::fs::remove_dir(&subdir);
+            }
+            Ok(())
+        };
+
     for (service, known) in SERVICES {
         let wanted = services
             .iter()
             .find(|s| s.service == *service)
             .map(|s| s.files.as_slice())
             .unwrap_or_default();
-        let subdir = dir.join(service);
-        let failed = |e: &dyn std::fmt::Display| format!("Cannot write {}: {e}", subdir.display());
-        if !wanted.is_empty() {
-            std::fs::create_dir_all(&subdir).map_err(|e| failed(&e))?;
-            set_mode(&subdir, 0o755).map_err(|e| failed(&e))?;
-            for (name, contents) in wanted {
-                write_readable(&subdir.join(name), contents).map_err(|e| failed(&e))?;
-            }
+        write_one(service, known, wanted)?;
+    }
+
+    // Custom API services (`api-sra`, ...): only directories this module wrote before (listed in
+    // its manifest) are ever cleaned, so a user's own files under `stack/secrets/` are kept.
+    let manifest = dir.join(MANAGED_MANIFEST);
+    let previous: Vec<String> = std::fs::read_to_string(&manifest)
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|l| is_safe_service_dir(l))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let api_known = &[API_CONFIG_FILENAME, API_PATCH_FILENAME];
+    let builtin: Vec<&str> = SERVICES.iter().map(|(s, _)| *s).collect();
+    let mut managed: Vec<String> = Vec::new();
+    for entry in services {
+        let name = entry.service.as_str();
+        if builtin.contains(&name)
+            || !is_safe_service_dir(name)
+            || managed.iter().any(|m| m == name)
+        {
+            continue;
         }
-        for name in *known {
-            if !wanted.iter().any(|(wanted, _)| wanted == name) {
-                let _ = std::fs::remove_file(subdir.join(name));
-            }
+        if !entry.files.is_empty() {
+            write_one(name, api_known, &entry.files)?;
+            managed.push(name.to_string());
+        } else if previous.iter().any(|p| p == name) {
+            write_one(name, api_known, &[])?;
         }
-        if wanted.is_empty() {
-            // Only when empty: something the user put there is kept.
-            let _ = std::fs::remove_dir(&subdir);
+    }
+    for name in &previous {
+        if managed.contains(name) || builtin.contains(&name.as_str()) {
+            continue;
         }
+        let path = dir.join(name);
+        // Never follow a symlink out of the secrets directory.
+        if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+            continue;
+        }
+        write_one(name, api_known, &[])?;
+    }
+    if managed.is_empty() {
+        let _ = std::fs::remove_file(&manifest);
+    } else {
+        meerschaum_core::team_scope::write_private(&manifest, &(managed.join("\n") + "\n"))
+            .map_err(|e| format!("Cannot write {}: {e}", manifest.display()))?;
     }
     Ok(())
 }
@@ -976,5 +1118,87 @@ mod tests {
             assert!(is_valkey_image(Some(image)), "{image}");
         }
         assert!(!is_valkey_image(Some("redis:7")));
+    }
+
+    #[test]
+    fn custom_api_services_are_externalized_and_cleaned_up() {
+        let mut compose = value(&format!(
+            r#"{{"services": {{
+                "api": {{"image": "bmeares/meerschaum:5.1.0-full",
+                         "environment": {{"MRSM_CONFIG": {cfg}}}}},
+                "api-sra": {{"image": "bmeares/meerschaum:5.1.0-full",
+                             "environment": {{"MRSM_CONFIG": {cfg}, "MRSM_PATCH": "{{\"a\": 1}}"}}}},
+                "api-legacy": {{"image": "bmeares/meerschaum:5.0.2-full",
+                                "environment": {{"MRSM_CONFIG": {cfg}}}}}
+            }}}}"#,
+            cfg = serde_json::to_string(CONFIG).unwrap(),
+        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = secrets_dir(tmp.path());
+        let salt = prepare_dir(&dir).unwrap();
+        let done = externalize_with_setting(&mut compose, &dir, None, &salt);
+        assert_eq!(done.warnings.len(), 1, "{:?}", done.warnings);
+        assert!(
+            done.warnings[0].contains("`api-legacy`"),
+            "{:?}",
+            done.warnings
+        );
+
+        let services = compose.get("services").unwrap();
+        for name in ["api", "api-sra"] {
+            let svc = services.get(name).unwrap();
+            let env = svc.get("environment");
+            assert_eq!(env_get(env, "MRSM_CONFIG"), None, "{name}");
+            assert_eq!(
+                env_get(env, "MRSM_CONFIG_FILE").as_deref(),
+                Some("/run/secrets/meerschaum/mrsm_config.json"),
+                "{name}"
+            );
+            assert!(
+                svc.get("volumes")
+                    .unwrap()
+                    .py_str()
+                    .contains(&format!("/{name}:/run/secrets/meerschaum:z,ro")),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            env_get(
+                services.get("api-sra").unwrap().get("environment"),
+                "MRSM_PATCH_FILE"
+            )
+            .as_deref(),
+            Some("/run/secrets/meerschaum/mrsm_patch.json")
+        );
+        // Legacy custom API stays on environment.
+        let legacy = services.get("api-legacy").unwrap();
+        assert_eq!(
+            env_get(legacy.get("environment"), "MRSM_CONFIG").as_deref(),
+            Some(CONFIG)
+        );
+        assert_eq!(env_get(legacy.get("environment"), "MRSM_CONFIG_FILE"), None);
+
+        write_files(&dir, &done.services).unwrap();
+        assert!(dir.join("api").join(API_CONFIG_FILENAME).is_file());
+        assert!(dir.join("api-sra").join(API_CONFIG_FILENAME).is_file());
+        assert!(dir.join("api-sra").join(API_PATCH_FILENAME).is_file());
+        assert!(!dir.join("api-legacy").exists());
+
+        // A user's own directory (never written by this module) is never touched.
+        let mine = dir.join("my-service");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::write(mine.join(API_CONFIG_FILENAME), "{}").unwrap();
+
+        // Removing `api-sra` cleans up its managed secret files and empty directory.
+        let remaining: Vec<_> = done
+            .services
+            .into_iter()
+            .filter(|s| s.service != "api-sra")
+            .collect();
+        write_files(&dir, &remaining).unwrap();
+        assert!(dir.join("api").join(API_CONFIG_FILENAME).is_file());
+        assert!(!dir.join("api-sra").exists());
+        assert!(mine.join(API_CONFIG_FILENAME).is_file());
+        assert!(!dir.join(MANAGED_MANIFEST).exists());
     }
 }

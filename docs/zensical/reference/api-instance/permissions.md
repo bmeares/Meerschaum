@@ -1,43 +1,39 @@
 # 🛡️ Permissions and Rate Limits
 
-An API server decides three things about every request: whether the route is served at all (route groups), who may call it (authentication and [scopes](/reference/api-instance/tokens/#scopes)), and how often (rate limits). All of it lives under `api:permissions` in your config (`mrsm edit config api`).
+An API server controls three layers under `api:permissions` (`mrsm edit config api`): enabled route groups, authentication and [scopes](/reference/api-instance/tokens/#scopes), and rate limits.
 
 ## Route groups
 
-Every route belongs to a group, and a group that is not served answers `404` (it is not proxied to plugins either, so a plugin cannot serve a core path you turned off).
+Disabled core groups return `404` and are never proxied to plugins.
 
 | Group | Routes |
 |---|---|
-| `pipes` | `/pipes/*` and `/metadata` |
-| `pipelines` | `/pipelines` and `/pipelines/*` (saved Pipelines) |
-| `engine` | `/engine/*` (engine state, run history, run event streams) |
-| `actions` | `/actions/*` and `/execute*` (running actions) |
-| `jobs` | `/jobs/*` and `/logs/*` |
+| `pipes` | `/pipes/*`, `/metadata` |
+| `pipelines` | `/pipelines`, `/pipelines/*` |
+| `engine` | `/engine/*` |
+| `actions` | `/actions/*`, `/execute*` |
+| `jobs` | `/jobs/*`, `/logs/*` |
 | `connectors` | `/connectors` |
-| `users`, `tokens`, `plugins` | `/users/*` and `/teams/*`, `/tokens/*`, `/plugins/*` |
+| `users`, `tokens`, `plugins` | `/users/*`, `/teams/*`, `/tokens/*`, `/plugins/*` |
 | `version` | `/version`, `/version/mrsm` |
-| `misc` | `/healthcheck`, `/info`, `/chaining`, `/favicon.ico` (and `/id` with `--debug`) |
-| `index` | `/` (a redirect to the console or the docs) |
+| `misc` | `/healthcheck`, `/info`, `/chaining`, `/favicon.ico` (`--debug`: `/id`) |
+| `index` | `/` (redirect) |
 | `mcp` | `/mcp` ([MCP server](/reference/mcp/)) |
-| `dash` | the web console's own pages (the Python API host reads it) |
+| `dash` | Web console pages |
 
-`/login` is always served unless you disable it explicitly. The API docs (`/docs`, `/redoc`, `/openapi.json`), the web terminal and plugin routes are not core groups.
-
-A request's group is decided on its decoded path, the path the API host would serve: `/%64ocs` is `/docs` and `/my%2Dplugin/data` is `/my-plugin/data`, for the allowlist, the public preset and rate limits alike.
+`/login` stays enabled unless explicitly disabled. `/docs`, `/redoc`, `/openapi.json`, the web terminal, and plugin routes are outside core groups. All checks match the URL-decoded path (so `/%64ocs` matches `/docs`).
 
 ```yaml
 api:
   permissions:
     routes:
-      ### Glob patterns of the groups to serve (missing or null: every group).
-      allowlist: ['*']
-      ### Groups to turn off, whatever the allowlist says (`login` too).
-      disabled: ['actions']
+      allowlist: ['*']          # Glob patterns to serve (null/omitted: all)
+      disabled: ['actions']     # Always disabled (`login` included)
 ```
 
 ## The public preset
 
-For a server whose job is to publish plugin routes and plugin pages to anyone (a public dashboard, a data feed), the public preset turns everything else off:
+To expose only plugin routes and plugin pages (such as a public dashboard), set the public preset or pass `mrsm start api --public`:
 
 ```yaml
 api:
@@ -45,61 +41,47 @@ api:
     preset: public
 ```
 
-or, for one run, `mrsm start api --public`.
+This serves only `/login`, `/healthcheck`, `/version`, `@api_plugin` routes, plugin pages (plus console login when required), and their static assets. Console pages, webterm, `/actions`, `/execute`, registration, API docs, and all other core groups are turned off.
 
-It serves only `/login`, `/healthcheck`, `/version`, `@api_plugin` routes, plugin pages (and the console's login page, for plugin pages that require a login) and the static files they need. The web console's own pages, the web terminal, `/actions`, `/execute`, user registration, the API docs (`/docs`, `/redoc`, `/openapi.json`) and every other core route group are off. The server says so at startup:
-
-```text
-Public preset: serving only /login, /healthcheck, /version, plugin routes and plugin pages; ...
-```
-
-Your explicit route settings still apply on top of the preset. A group the allowlist names (any pattern but the default `*`) is served too, and `disabled` still turns groups off:
+Explicit `allowlist` patterns (other than `*`) and `disabled` entries still apply on top:
 
 ```yaml
 api:
   permissions:
     preset: public
     routes:
-      ### Also serve the pipe routes (for `api:` connectors syncing into this server) and the docs.
       allowlist: ['pipes', 'docs']
-      ### No version endpoint either.
       disabled: ['version']
 ```
 
 ## Roles and teams
 
-The first account on an empty instance is an administrator, even when user registration is off. After that, only administrators create accounts unless you turn on `api:permissions:registration:users` (default `false`). A self-registered account joins **Everyone** and receives the default role, set with `api:permissions:default_role` (`editor` by default).
+The first account on an empty instance becomes an administrator even with registration disabled. Afterward, self-registration requires `api:permissions:registration:users: true` (default `false`); new users join **Everyone** with `api:permissions:default_role` (`editor`).
 
 | Role | Permissions |
 |---|---|
-| **Viewer** | Read visible pipes, Pipelines, runs, jobs, logs, plugins and the connectors list; manage their own account and tokens. |
-| **Editor** | Viewer, plus register, define, edit and sync pipes, read SQL, and start existing jobs. |
-| **Operator** | Editor, plus execute actions, open the web terminal and create, stop, pause or delete jobs. |
-| **Admin** | Every permission, user and team administration, and connector details (user type `admin`). |
+| **Viewer** | Read visible pipes, Pipelines, runs, jobs, logs, plugins, and connectors list; manage own account and tokens. |
+| **Editor** | Viewer, plus register, define, edit, and sync pipes, read SQL, and start existing jobs. |
+| **Operator** | Editor, plus execute actions, use the web terminal, and create, stop, pause, or delete jobs. |
+| **Admin** | All permissions, user/team administration, and connector details (user type `admin`). |
 
-An administrator may set a role or an explicit permission list for a user. Explicit permissions replace the role; an empty list grants no permissions. A token's scopes are intersected with its owner's current permissions, so reducing the user's rights also reduces existing tokens. Lists made before the new scopes existed keep their earlier meanings: `pipes:write` also registers and defines pipes, and `actions:execute` also opens the terminal. New lists can use `pipes:register`, `pipes:define_sql` and `webterm:use` independently. See [token scopes](/reference/api-instance/tokens/#scopes).
+Explicit user permission lists replace the role (an empty list grants nothing). Token scopes always intersect with the owner's current permissions, so demoting a user immediately narrows existing tokens. Legacy lists keep compatibility (`pipes:write` implies registering/defining pipes; `actions:execute` implies terminal access), while new lists can grant `pipes:register`, `pipes:define_sql`, and `webterm:use` separately; see [token scopes](/reference/api-instance/tokens/#scopes).
 
-Every user belongs to the built-in team **Everyone**, which cannot be left, renamed or deleted. Administrators create additional teams, appoint managers and choose memberships. Managers add and remove members of their own teams and manage those teams' pipe access. A user's primary team supplies the team for the pipes and jobs they create. Renaming a team updates its pipes and job display names. Deleting it moves pipes and legacy jobs to Everyone; registered private job history retains its original identity as an owner/admin archive. A replacement team or account with the same name does not inherit that history; see [job access](../background-jobs/access.md).
+Every user belongs to **Everyone** (cannot be left, renamed, or deleted). Administrators create teams and appoint managers; a user's primary team owns their new pipes and jobs. Deleting a team moves its pipes and legacy jobs to Everyone, while registered private job history remains an owner/admin archive ([job access](../background-jobs/access.md)).
 
-Pipes without access settings belong to Everyone and remain shared. A pipe's `access` parameters choose its owner, team, visibility (**team**, **private**, or **everyone**) and who may edit it (**team** or **owner**). Only its owner, team managers and administrators may change its access or locks. The server stamps new pipes with the caller as owner; a caller cannot impersonate another owner when registering. [Pipe access and locks](/reference/pipes/access-and-locks/) describes the settings and Python API.
-
-The HTTP API, MCP and console enforce these rights and filter hidden members from Pipelines, runs, events, lineage and searches. Jobs started through them belong to their creator and primary team; local jobs belong to Everyone. Email addresses are visible to their owners, administrators, and managers of a team the user belongs to. Local SQL / Valkey credentials are the trust boundary: direct CLI and Python access with them sees everything. Pipe locks apply everywhere, including local access, and no force flag bypasses them.
-
-A team can be **isolated** from Everyone and given a database, connectors and plugins of its own: see [Teams on One Instance](/reference/api-instance/teams/).
-
-A connector's `teams: [Data, Operations]` attribute restricts who may use it through the API. Setting SQL definitions requires `pipes:define_sql`; the server refuses internal tables and the tables of pipes the caller cannot see, before and after templates resolve. These SQL checks are best effort. True isolation needs separate connectors and database users with appropriate database permissions.
+Pipes default to Everyone; see [Pipe access and locks](/reference/pipes/access-and-locks/) for `access` settings and locks (locks apply everywhere, including local CLI/Python). Connector `teams: [Data, Operations]` restricts API connector use, and `pipes:define_sql` applies best-effort checks against internal and hidden tables—use separate database users for strict SQL isolation. For isolated teams with dedicated databases and sandboxes, see [Teams on One Instance](/reference/api-instance/teams/).
 
 ## Who may run actions
 
-Actions need `actions:execute` and the terminal needs `webterm:use` (Operator and administrators by default). Pipe Sync and Verify controls need `pipes:write` and edit rights on each selected pipe; they do not require arbitrary action execution. Pipeline sync checks every member it would change; a sync-locked member is skipped using its existing data. Remote action selections may not include pipes the caller cannot see or change.
+Remote actions require `actions:execute` and the web terminal requires `webterm:use` (Operator and Admin). Pipe **Sync** and **Verify** only require `pipes:write` and edit access on the pipe.
 
-Remote actions run on this server. A nonadministrator's command (`POST /execute`, `POST /jobs/{name}`, `POST /actions/{action}`, the console's Execute box and MCP's `execute_action`) runs only Meerschaum actions, core or from a plugin they may use, never `sh`, `os`, `python` and the like: a word that names no action, which the command line runs as a shell command, is refused, in every step of a chain. The web terminal follows the same rule: a nonadministrator's terminal is the `mrsm` shell in restricted mode, which asks the server before it runs each command and runs it only if `POST /execute` would allow that user to (with the same permissions, on the same pipes). It never runs a shell command, `!command`, `python` or anything else that is not a Meerschaum action, starts no other program (an action that would open an editor or a SQL client says so instead), offers tmux nothing to act on, keeps its history to itself and forwards input only to jobs the user could have started (the same holds for answering a job's prompts over the API). A job a nonadministrator creates through `POST /jobs/{name}` keeps the server's working directory and log file: its `cwd`, `logs` and `target` properties are ignored. A command that names jobs (`show jobs`, `attach logs`, `stop jobs`, `delete jobs`, `-d --name` with an existing job's name), from the terminal, `POST /execute` or any other action route, acts only on jobs the user may see and with the permissions the job routes require; one that names no job acts on every job, so it is refused while any job is hidden from the user. The server decides the mode from the user's role when the terminal opens and checks it again while it is open: a promotion or a demotion closes the terminal, and the next one opens in the new mode. Administrators get the full shell, as before. One exception: a member of an isolated team whose members may install plugins runs commands as the team's own sandboxed processes where the server can hold them there (team execution: `POST /execute` and `POST /jobs/{name}` start the team's jobs, the terminal is a team terminal, and `POST /actions/{action}` and MCP's `execute_action` refuse them), and any program the sandbox lets them reach is then theirs to run; see [Commands of a team that runs code](teams.md#commands-of-a-team-that-runs-code). Members of other isolated teams get no terminal at all.
+Non-administrators can only run approved Meerschaum actions via `POST /execute`, `POST /jobs/{name}`, `POST /actions/{action}`, console **Exec**, MCP `execute_action`, and the web terminal—never shell commands (`sh`, `os`, `python`, `!command`), editors, or SQL clients. Their web terminal runs in restricted mode, validating each command against the server and closing if their role changes. `POST /jobs/{name}` ignores non-admin `cwd`, `logs`, and `target` properties, and job commands act only on visible jobs.
 
-### What a nonadministrator may run
+For isolated teams, members with plugin-write access run sandboxed team commands and team terminals (`POST /actions/{action}` and MCP `execute_action` refuse them; see [Commands of a team that runs code](teams.md#commands-of-a-team-that-runs-code)). Eligible registered teams without plugin writes can run [API-only commands](../team-executors.md#commands-under-the-callers-identity).
 
-The shared non-administrator command policy permits the following commands through the terminal, `POST /execute`, `POST /jobs/{name}`, `POST /actions/{action}` and MCP's `execute_action`, and only on the objects the matching API route would let them act on, with that route's permission: every pipe a command selects must be readable (`show`) or changeable (the others, with `pipes:delete` or `pipes:drop` where the route needs it); Pipelines and jobs must be named and visible to them; `show tokens` lists only their own tokens. Any other command is refused, and so is a command added to Meerschaum later until it is added here. A plugin's actions follow the plugin's grants instead: a granted plugin's action runs with the server's credentials and is not scoped to the user.
+### Allowed non-administrator commands
 
-The native API-only executor also supports filtered graph and run reads, named job logs, explicit pipe copies and noninteractive Pipeline registration and editing. [Commands under the caller’s identity](../team-executors.md#commands-under-the-callers-identity).
+Every command below is scoped to objects the caller may read or modify with matching API permissions (`show tokens` lists only their own; granted plugin actions follow the plugin's grants):
 
 <!-- non-admin-commands:start -->
 | Action | Subactions |
@@ -123,61 +105,44 @@ The native API-only executor also supports filtered graph and run reads, named j
 | `pause` | `jobs` |
 | `restart` | `jobs`, `daemons` |
 <!-- non-admin-commands:end -->
- Nonadministrators cannot redirect them to another executor or inspect server configuration with `show connectors`; use the console's Connectors page for the details your account may see. For Pipe registration and sensitive parameter edits, use the console or dedicated Pipe endpoints. Restricted API keys keep these limits even when their owner is an administrator.
 
-`api:permissions:actions:non_admin: false` (`start api --secure`) further restricts actions, terminals and console mutations to administrators. Meerschaum 4's explicit `actions:non_admin: true` maps the default role to Operator for compatibility, unless `default_role` is set explicitly. The shipped configuration leaves that compatibility key unset and uses Editor.
+Non-administrators cannot redirect commands to another executor or run `show connectors`. Restricted API keys keep these limits even when owned by an administrator.
+
+`api:permissions:actions:non_admin: false` (`mrsm start api --secure`) restricts actions, terminals, and console mutations to administrators. Meerschaum 4's `actions:non_admin: true` maps the default role to Operator unless `default_role` is set.
 
 ## Permissions fail closed
 
-When the server cannot read a user's permissions, teams or credentials, it refuses the request with `503` and asks to try again. It never treats a failed read as a default permission grant. Password login fails the same way. Identities are cached for at most five seconds and pipe access for three seconds; changes through this server clear those caches immediately. This holds for every instance type (SQL, Valkey, `api:` and custom instance connectors). Local `register tokens` and `edit tokens` refuse without changing anything when they cannot read the owner's permissions.
+Failed permission, team, or credential reads return `503` instead of granting defaults (including password login, all instance backends, and local `register`/`edit tokens`). Identities cache up to 5 seconds and pipe access up to 3 seconds, invalidated immediately on mutations.
 
 ## Rate limits
 
-Rate limits are token buckets per client and route group: `requests` per `seconds`.
+Rate limits use per-client token buckets (`requests` per `seconds`, default window 60s; `max`/`window_seconds` also accepted):
 
 ```yaml
 api:
   permissions:
     rate_limits:
       login: {requests: 10, seconds: 60}
-      ### `max` and `window_seconds` are accepted too.
       pipes: {max: 1000, window_seconds: 60}
-      ### A path prefix limits a plugin's routes (here `/my-plugin` and everything under it).
       /my-plugin: {requests: 30, seconds: 60}
-      ### A glob over the groups: every other group.
       '*': {requests: 600, seconds: 60}
 ```
 
-- A key is a route group (the table above, plus `login`, `docs`, `mcp`, `webterm` and `other` for anything else, such as plugin routes), a glob pattern over them (`'*'`, `'pipe*'`), or a path prefix starting with `/`.
-- A path prefix matches the path itself and everything below it (`/my-plugin` covers `/my-plugin/data`, not `/my-plugins`), compared with the decoded path (`/my%2Dplugin/data` counts too); the longest prefix wins and all the paths under it share one bucket per client. Otherwise the first matching group pattern applies, with a bucket per group.
-- Without `seconds`, the window is one minute.
-- A limited request gets `429` with `Retry-After`.
-- An entry the server cannot use (a count below 1, a window that is not a positive number, a key it does not know inside an entry, a name that matches no route group) is reported at startup, naming the entry, and the rest of the config still applies.
-
-The client is the connection's address, or behind a trusted proxy (`api:server:forwarded_allow_ips`, `api:server:proxy_headers`) the first untrusted `X-Forwarded-For` address.
+Keys match route groups (plus `login`, `docs`, `mcp`, `webterm`, `other`), globs, or decoded `/prefix` paths (longest prefix wins). Throttled requests receive `429` with `Retry-After`. Client IP uses the peer address, or the first untrusted `X-Forwarded-For` behind trusted proxies (`api:server:forwarded_allow_ips`, `api:server:proxy_headers`). Invalid entries warn at startup without disabling other rules.
 
 ## Request size limits
 
-Request bodies are limited before the server reads them: a declared `Content-Length` over the limit is refused at once, and a chunked body is refused when it streams past it. Either way the client gets `413` and nothing larger than the limit is buffered. Meerschaum 4 had no limits.
+Body limits apply before buffering (`Content-Length` or streaming chunked bodies return `413`):
 
 ```yaml
 api:
   limits:
-    ### `/login`, `/users/register` and `/tokens/*` (64 KiB).
-    auth_bytes: 65536
-    ### Every other JSON or form body, `/execute` and MCP (16 MiB).
-    body_bytes: 16777216
-    ### Pipe data sync, `POST /pipes/{connector}/{metric}/{location}/data` (1 GiB).
-    data_bytes: 1073741824
-    ### Requests forwarded to the API host: plugin routes and console callbacks (16 MiB).
-    proxy_bytes: 16777216
+    auth_bytes: 65536           # /login, /users/register, /tokens/* (64 KiB)
+    body_bytes: 16777216        # JSON/form, /execute, MCP (16 MiB)
+    data_bytes: 1073741824      # Pipe data sync (1 GiB)
+    proxy_bytes: 16777216       # Requests proxied to Python API host (16 MiB)
   host:
-    ### How long a forwarded request waits for the API host to start answering.
-    response_seconds: 300
+    response_seconds: 300       # Timeout waiting for host response start (504)
 ```
 
-- Each value is a whole number of bytes. `null` turns that one limit off. A value that is not a byte count (text, a negative number, zero, one too large) stops `start api` with an error naming the key, so a typo never removes a limit.
-- Forwarded requests are counted as they stream to the API host, never buffered.
-- Responses, downloads, event streams and websockets are never limited. The engine routes (64 MiB) and plugin archive uploads (128 MiB) keep their own limits.
-- A forwarded request whose API host does not start answering within `api:host:response_seconds` gets `504`; once the answer starts, it is never timed (`null` waits forever).
-- The server asks the API host every 30 seconds whether it answers. After three checks in a row without an answer (10 seconds each), the host process is stopped (SIGTERM, then SIGKILL after a grace period) and started again, with a restart delay that doubles up to a minute.
+Set a limit to `null` to disable it (invalid values abort `start api`). Responses, streams, and websockets are unlimited; engine routes (64 MiB) and plugin uploads (128 MiB) keep their own caps. The server health-checks the Python API host every 30s and restarts it after three missed 10s probes.

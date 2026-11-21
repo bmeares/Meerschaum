@@ -17,6 +17,11 @@ use uuid::Uuid;
 pub const DIRECTORY: &str = "executors";
 /// Public directory mounted into the main API and read by `mrsm stack up` on the host.
 pub const DESIRED: &str = "desired";
+/// Optional environment override for the public desired directory inside container stacks so
+/// mounting it does not cause Docker to pre-create `/meerschaum/executors` as `root:root`.
+pub const DESIRED_DIR_ENV: &str = "MRSM_EXECUTOR_DESIRED_DIR";
+/// Mount target for the public desired directory inside the `api` service container.
+pub const CONTAINER_DESIRED_DIR: &str = "/run/meerschaum/executors/desired";
 
 /// One desired or retired executor, with stable UUID identity through team renames.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,6 +66,14 @@ impl Registry {
 
     /// Public desired files; mount only this directory into a stack's API service.
     pub fn desired_dir(&self) -> PathBuf {
+        if let Some(override_dir) = std::env::var_os(DESIRED_DIR_ENV).filter(|v| !v.is_empty()) {
+            let configured_root = std::env::var_os("MRSM_ROOT_DIR")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from);
+            if configured_root.is_none_or(|r| self.root == r.join(DIRECTORY)) {
+                return PathBuf::from(override_dir);
+            }
+        }
         self.root.join(DESIRED)
     }
 
@@ -86,8 +99,8 @@ impl Registry {
                     .join("initialized")
                     .try_exists()
                     .map_err(|_| "Could not inspect executor initialization state.")?;
-                let populated = |name: &str| -> Result<bool, String> {
-                    match std::fs::read_dir(self.root.join(name)) {
+                let populated_path = |path: &Path| -> Result<bool, String> {
+                    match std::fs::read_dir(path) {
                         Ok(mut entries) => entries
                             .next()
                             .transpose()
@@ -97,7 +110,14 @@ impl Registry {
                         Err(_) => Err("Could not inspect existing executor identities.".into()),
                     }
                 };
-                if initialized || populated("keys")? || populated(DESIRED)? {
+                let populated = |name: &str| populated_path(&self.root.join(name));
+                // The public directory survives losing the private root (in a container it is the
+                // host's bind mount, `desired_dir()`), so it signals an initialized deployment.
+                if initialized
+                    || populated("keys")?
+                    || populated(DESIRED)?
+                    || populated_path(&self.desired_dir())?
+                {
                     return Err("The private executor registry is missing from an initialized deployment. Restore its private backup before reconciling executors.".into());
                 }
                 Ok(Desired::default())

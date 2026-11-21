@@ -590,6 +590,28 @@ def test_config_cases_match_released_reference(parity, tmp_path):
         expected, got = _without_v5_defaults(expected), _without_v5_defaults(got)
         ### PARITY (wave 17c, W17K1-002..004): the v5 stack defaults.
         got = _v4_stack(got)
+        ### PARITY (5.1.1): `write_missing` preserves `MRSM{...}` references inside lists in
+        ### `stack.yaml` (ports, healthcheck, Grafana datasource), whereas v4.1.4 expanded them.
+        if isinstance(got, dict) and isinstance(got.get('files'), dict) and 'stack.yaml' in got['files']:
+            stack_text = got['files']['stack.yaml']
+            for v5_ref, v4_val in (
+                ('MRSM{meerschaum:connectors:sql:main:port}:5432', '5432:5432'),
+                (
+                    'MRSM{meerschaum:connectors:api:main:port}:MRSM{meerschaum:connectors:api:main:port}',
+                    '8000:8000',
+                ),
+                (
+                    'http://localhost:MRSM{meerschaum:connectors:api:main:port}/healthcheck',
+                    'http://localhost:8000/healthcheck',
+                ),
+                ('MRSM{meerschaum:connectors:valkey:main:port}:6379', '6379:6379'),
+                ('database: MRSM{meerschaum:connectors:sql:main:database}', 'database: meerschaum'),
+                ('user: MRSM{meerschaum:connectors:sql:main:username}', 'user: mrsm'),
+                ('password: MRSM{meerschaum:connectors:sql:main:password}', 'password: mrsm'),
+                ('url: MRSM{stack:docker-compose.yaml:services:db:hostname}:5432', 'url: db:5432'),
+            ):
+                stack_text = stack_text.replace(v5_ref, v4_val)
+            got['files'] = {**got['files'], 'stack.yaml': stack_text}
         ### PARITY (rc15, RC15-R3-001): `dataframe: polars` in a new `meerschaum.yaml`.
         got = _without_dataframe_default(got)
         if got != expected:

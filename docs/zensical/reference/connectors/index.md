@@ -132,7 +132,7 @@ with allow_protected():
 To create a new connector (or redefine an existing one), run the command `bootstrap connector` and answer the following prompts. The new connector will be added to your configuration file (which may be accessed with `edit config`).
 
 ??? example "🎦 Watch an example"
-    <asciinema-player src="/assets/casts/bootstrap-connector.cast" size="small"></asciinema-player>
+    <asciinema-player src="/assets/casts/bootstrap-connector.cast" rows="20" idle-time-limit="2" poster="npt:0:05"></asciinema-player>
 
 ## ❌ Deleting a Connector
 To delete a connector, run the command `delete connectors` with the `-c` connector keys flag:

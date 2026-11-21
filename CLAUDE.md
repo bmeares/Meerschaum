@@ -140,6 +140,8 @@ scripts/transition/run.sh [--flavors ...]        # v4 -> v5 upgrade harness (REA
 ./scripts/build.sh                                # docs, check_packaging --write, wheel + sdist (never upload its wheel)
 ```
 
+Docs & changelog style (brevity, example-first writing, asciinema embeds, `llms.txt` hygiene): read `.claude/skills/docs/SKILL.md` before editing `docs/zensical/` or release notes.
+
 `MRSM_CORE_TRACE=1` prints per-stage timings of each boundary call to stderr. Releases follow
 `.claude/skills/release/SKILL.md`.
 

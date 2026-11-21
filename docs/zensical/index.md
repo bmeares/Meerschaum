@@ -36,9 +36,7 @@ Group related Pipes into a **[Pipeline](reference/pipelines/index.md)** to run t
 
 <div class="mrsm-home-demo" markdown="1">
 
-<asciinema-player src="/assets/casts/v5-first-pipe.cast" title="Create and sync a Pipe" preload="true"></asciinema-player>
-
-<p class="mrsm-caption">Genuine CLI recording from 5.0.0rc16. Playback pauses are extended for reading.</p>
+<asciinema-player src="/assets/casts/v5-first-pipe.cast" title="Create and sync a Pipe" autoplay="true" loop="true" preload="true" rows="18" idle-time-limit="2" poster="npt:0:04"></asciinema-player>
 
 </div>
 

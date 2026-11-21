@@ -1265,6 +1265,12 @@ def sign_out_button_click(
     if session_id:
         delete_session(session_id)
     clear_session_cookie(dash.callback_context.response)
+    try:
+        from meerschaum.api.dash.access import TEAM_COOKIE_NAME
+        if dash.callback_context.response is not None:
+            dash.callback_context.response.delete_cookie(TEAM_COOKIE_NAME, path='/')
+    except Exception:
+        pass
     return endpoints['dash'], {}
 
 

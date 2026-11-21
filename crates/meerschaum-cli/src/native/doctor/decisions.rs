@@ -766,6 +766,13 @@ pub fn judge_service(s: &ServiceFact, project: &str) -> Verdict {
     if s.state == "running" {
         return Verdict::pass(detail);
     }
+    // One-shot stack init services (`grafana_readonly`) exit 0 after finishing setup.
+    if s.service == crate::native::stack_readonly::SERVICE
+        && s.state == "exited"
+        && exit_code(&s.status) == Some(0)
+    {
+        return Verdict::pass(format!("completed: {detail}"));
+    }
     // A service stopped on purpose (`docker stop`, `mrsm stack stop`) exits 0, or 137 / 143 for
     // the signal that stopped it: a warning, not a failure.
     if s.state == "exited" && matches!(exit_code(&s.status), Some(0 | 137 | 143)) {

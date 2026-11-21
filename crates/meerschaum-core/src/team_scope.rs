@@ -583,7 +583,25 @@ pub struct ScopeFiles {
 }
 
 /// Create `dir` (and its parents) readable by its owner only.
+///
+/// 5.1.1: when that is refused because `dir` or its nearest existing ancestor is a root-owned
+/// placeholder holding only empty directories (Docker creates the missing parents of a bind
+/// mount target as `root:root`; 5.1.0 stacks mounted `/meerschaum/executors/desired` and left
+/// `/meerschaum/executors` root-owned in the API's volume), the placeholder is moved aside
+/// (`.<name>.root-owned-<nanos>`, nothing is deleted) and the directory is created again.
 pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    match create_private_dir_once(dir) {
+        Err(error)
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                && set_aside_root_owned_placeholder(dir) =>
+        {
+            create_private_dir_once(dir)
+        }
+        other => other,
+    }
+}
+
+fn create_private_dir_once(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
@@ -591,6 +609,69 @@ pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
     Ok(())
+}
+
+/// Whether `dir` holds nothing but (recursively) empty directories, within small bounds.
+#[cfg(unix)]
+fn only_empty_directories(dir: &Path, depth: usize) -> bool {
+    if depth > 3 {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let mut count = 0usize;
+    for entry in entries {
+        count += 1;
+        if count > 16 {
+            return false;
+        }
+        let Ok(entry) = entry else {
+            return false;
+        };
+        let Ok(kind) = entry.file_type() else {
+            return false;
+        };
+        if !kind.is_dir() || !only_empty_directories(&entry.path(), depth + 1) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Move a root-owned placeholder directory blocking `dir` aside (see [`create_private_dir`]).
+/// Returns whether one was moved.
+#[cfg(unix)]
+fn set_aside_root_owned_placeholder(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Some(blocker) = dir
+        .ancestors()
+        .find(|p| std::fs::symlink_metadata(p).is_ok())
+    else {
+        return false;
+    };
+    let Ok(meta) = std::fs::symlink_metadata(blocker) else {
+        return false;
+    };
+    // Only a real root-owned directory (never a symlink) we do not own (we are not root: the
+    // chmod or mkdir was refused) holding no files.
+    if !meta.is_dir() || meta.uid() != 0 || !only_empty_directories(blocker, 0) {
+        return false;
+    }
+    let (Some(parent), Some(name)) = (blocker.parent(), blocker.file_name()) else {
+        return false;
+    };
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let aside = parent.join(format!(".{}.root-owned-{nanos}", name.to_string_lossy()));
+    std::fs::rename(blocker, aside).is_ok()
+}
+
+#[cfg(not(unix))]
+fn set_aside_root_owned_placeholder(_dir: &Path) -> bool {
+    false
 }
 
 /// Write `contents` to `path`, readable by its owner only, atomically, unless it already holds

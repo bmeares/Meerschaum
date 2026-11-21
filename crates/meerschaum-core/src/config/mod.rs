@@ -1564,6 +1564,7 @@ impl ConfigState {
             if !self.defaults.contains_key(mk) {
                 continue;
             }
+            let raw_default = self.defaults.get(mk).cloned().unwrap_or(ConfigValue::Null);
             let default_dict = if substitute {
                 let defaults = self.defaults.clone();
                 match self.search_and_substitute_lossless(&defaults) {
@@ -1582,19 +1583,20 @@ impl ConfigState {
                 .cloned()
                 .unwrap_or_else(ConfigValue::new_map);
             let value = default_dict.get(mk).cloned().unwrap_or(ConfigValue::Null);
-            config.insert(mk.clone(), value.clone());
+            config.insert(mk.clone(), value);
             if default_symlinks.truthy() {
-                for target in [&mut config, &mut config_to_write] {
-                    let links = target
-                        .entry(symlinks_key.to_string())
-                        .or_insert_with(ConfigValue::new_map);
-                    if let Some(m) = links.as_map_mut() {
-                        let existing = m.get(mk).cloned().unwrap_or_else(ConfigValue::new_map);
-                        m.insert(mk.clone(), apply_patch(&existing, &default_symlinks));
-                    }
+                let links = config
+                    .entry(symlinks_key.to_string())
+                    .or_insert_with(ConfigValue::new_map);
+                if let Some(m) = links.as_map_mut() {
+                    let existing = m.get(mk).cloned().unwrap_or_else(ConfigValue::new_map);
+                    m.insert(mk.clone(), apply_patch(&existing, &default_symlinks));
                 }
             }
-            config_to_write.insert(mk.clone(), value);
+            // Write the raw unsubstituted default so `MRSM{...}` references inside lists
+            // (such as `stack.yaml` ports, healthchecks, and Grafana datasources) as well as
+            // maps are preserved verbatim on disk.
+            config_to_write.insert(mk.clone(), raw_default);
         }
 
         if !config_to_write.is_empty() && write_missing {

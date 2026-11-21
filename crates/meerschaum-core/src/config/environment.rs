@@ -97,7 +97,70 @@ impl ConfigState {
                 };
                 let _ = self.get_config_lossless(std::slice::from_ref(key), opts);
             }
+            // 5.1.1: `MRSM_CONFIG` is the stack host's whole configuration in a Docker stack's API
+            // container; a connector reserved for a team in the instance's own configuration (the
+            // console's New team writes it there) is never replaced by a stale copy from it.
+            let protect = var == &static_config().environment.config
+                || var == &static_config().environment.config_file;
+            let reserved = if protect {
+                team_reserved_connectors(&self.config)
+            } else {
+                Vec::new()
+            };
             self.config = super::apply_config_patch(&self.config, &patch);
+            for (typ, label, original) in reserved {
+                let Some(entry) = self
+                    .config
+                    .get_mut("meerschaum")
+                    .and_then(ConfigValue::as_map_mut)
+                    .and_then(|m| m.get_mut("connectors"))
+                    .and_then(ConfigValue::as_map_mut)
+                    .and_then(|m| m.get_mut(&typ))
+                    .and_then(ConfigValue::as_map_mut)
+                else {
+                    continue;
+                };
+                if entry.get(&label) != Some(&original) {
+                    entry.insert(label.clone(), original);
+                    self.warn(format!(
+                        "The connector '{typ}:{label}' is reserved for a team in this instance's \
+                         configuration; {var} also defines it, and that definition is ignored. \
+                         Remove or update '{typ}:{label}' in the stack host's configuration."
+                    ));
+                }
+            }
         }
     }
+}
+
+/// The connectors of `config` reserved for a team (a non-empty `teams`): `(type, label, value)`.
+fn team_reserved_connectors(
+    config: &super::lossless::ConfigMap,
+) -> Vec<(String, String, ConfigValue)> {
+    let Some(types) = config
+        .get("meerschaum")
+        .and_then(|m| m.get("connectors"))
+        .and_then(ConfigValue::as_map)
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (typ, labels) in types {
+        let Some(labels) = labels.as_map() else {
+            continue;
+        };
+        for (label, attributes) in labels {
+            let reserved = match attributes.get("teams") {
+                Some(ConfigValue::List(items)) | Some(ConfigValue::Tuple(items)) => {
+                    !items.is_empty()
+                }
+                Some(ConfigValue::Str(s)) => !s.trim().is_empty(),
+                _ => false,
+            };
+            if reserved {
+                out.push((typ.clone(), label.clone(), attributes.clone()));
+            }
+        }
+    }
+    out
 }
