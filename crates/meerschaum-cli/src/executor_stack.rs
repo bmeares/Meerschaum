@@ -952,9 +952,15 @@ fn apply_desired_with_image(
             Ok(Value::Map(compose))
         };
     };
-    let mount = value(
-        json!({"type": "bind", "source": directory.display().to_string(), "target": "/meerschaum/executors/desired", "bind": {"create_host_path": false}}),
-    );
+    // Mount the public desired directory outside `/meerschaum/executors` so Docker never
+    // pre-creates `/meerschaum/executors` as `root:root` inside an existing `api_root` volume
+    // (which would otherwise block `meerschaum` UID 1000 from writing the job catalog).
+    let mount = value(json!({
+        "type": "bind",
+        "source": directory.display().to_string(),
+        "target": crate::executor_registry::CONTAINER_DESIRED_DIR,
+        "bind": {"create_host_path": false}
+    }));
     let volumes = api
         .entry("volumes".into())
         .or_insert_with(|| Value::List(Vec::new()));
@@ -962,6 +968,15 @@ fn apply_desired_with_image(
         Value::List(volumes) => volumes.push(mount),
         _ => return Err("The API service's volumes must be a list.".into()),
     }
+    let env = api
+        .entry("environment".into())
+        .or_insert_with(|| Value::Map(Map::new()));
+    crate::native::os_sql_stack::set_environment(
+        env,
+        crate::executor_registry::DESIRED_DIR_ENV,
+        crate::executor_registry::CONTAINER_DESIRED_DIR,
+        true,
+    );
     let mut networks = map_entry(&mut compose, "networks")?.clone();
     let mut volumes = map_entry(&mut compose, "volumes")?.clone();
     let mut secrets = map_entry(&mut compose, "secrets")?.clone();
@@ -1273,6 +1288,20 @@ mod tests {
         assert_eq!(service["cap_drop"], json!(["ALL"]));
         assert_eq!(service["mem_limit"], 4 * 1024 * 1024 * 1024u64);
         assert_eq!(service["memswap_limit"], service["mem_limit"]);
+        let api = &result["services"]["api"];
+        assert!(
+            api["volumes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["target"] == crate::executor_registry::CONTAINER_DESIRED_DIR),
+            "API desired mount should sit outside /meerschaum/executors: {:?}",
+            api["volumes"]
+        );
+        assert_eq!(
+            api["environment"][crate::executor_registry::DESIRED_DIR_ENV],
+            crate::executor_registry::CONTAINER_DESIRED_DIR
+        );
         assert_eq!(service["cpus"], 2.0);
         assert_eq!(service["pids_limit"], 1024);
         assert_eq!(result["networks"][&name]["internal"], true);

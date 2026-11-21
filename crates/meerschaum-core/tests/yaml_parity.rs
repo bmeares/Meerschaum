@@ -571,11 +571,51 @@ fn registry_config_cases_match_python() {
         expected_names.sort();
         assert_eq!(actual_files, expected_names, "case {name} files");
         for (file, text) in expected_files {
-            let actual = common::v4_stack_text(
+            let mut actual = common::v4_stack_text(
                 &std::fs::read_to_string(dir.join(file))
                     .unwrap()
                     .replace(&meerschaum_core::config::paths::posix(&root), "{ROOT}"),
             );
+            // 5.1.1: `write_missing` preserves `MRSM{...}` references inside lists in `stack.yaml`
+            // (ports, healthcheck, Grafana datasource), whereas v4.1.4 expanded list entries.
+            if file == "stack.yaml" {
+                for (v5_ref, v4_val) in [
+                    (
+                        "MRSM{meerschaum:connectors:sql:main:port}:5432",
+                        "5432:5432",
+                    ),
+                    (
+                        "MRSM{meerschaum:connectors:api:main:port}:MRSM{meerschaum:connectors:api:main:port}",
+                        "8000:8000",
+                    ),
+                    (
+                        "http://localhost:MRSM{meerschaum:connectors:api:main:port}/healthcheck",
+                        "http://localhost:8000/healthcheck",
+                    ),
+                    (
+                        "MRSM{meerschaum:connectors:valkey:main:port}:6379",
+                        "6379:6379",
+                    ),
+                    (
+                        "database: MRSM{meerschaum:connectors:sql:main:database}",
+                        "database: meerschaum",
+                    ),
+                    (
+                        "user: MRSM{meerschaum:connectors:sql:main:username}",
+                        "user: mrsm",
+                    ),
+                    (
+                        "password: MRSM{meerschaum:connectors:sql:main:password}",
+                        "password: mrsm",
+                    ),
+                    (
+                        "url: MRSM{stack:docker-compose.yaml:services:db:hostname}:5432",
+                        "url: db:5432",
+                    ),
+                ] {
+                    actual = actual.replace(v5_ref, v4_val);
+                }
+            }
             let want = text.as_str().unwrap();
             assert_eq!(
                 actual.replace("\ndataframe: polars\n\n", "\n"),

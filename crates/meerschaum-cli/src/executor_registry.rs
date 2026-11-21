@@ -17,6 +17,11 @@ use uuid::Uuid;
 pub const DIRECTORY: &str = "executors";
 /// Public directory mounted into the main API and read by `mrsm stack up` on the host.
 pub const DESIRED: &str = "desired";
+/// Optional environment override for the public desired directory inside container stacks so
+/// mounting it does not cause Docker to pre-create `/meerschaum/executors` as `root:root`.
+pub const DESIRED_DIR_ENV: &str = "MRSM_EXECUTOR_DESIRED_DIR";
+/// Mount target for the public desired directory inside the `api` service container.
+pub const CONTAINER_DESIRED_DIR: &str = "/run/meerschaum/executors/desired";
 
 /// One desired or retired executor, with stable UUID identity through team renames.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,6 +66,14 @@ impl Registry {
 
     /// Public desired files; mount only this directory into a stack's API service.
     pub fn desired_dir(&self) -> PathBuf {
+        if let Some(override_dir) = std::env::var_os(DESIRED_DIR_ENV).filter(|v| !v.is_empty()) {
+            let configured_root = std::env::var_os("MRSM_ROOT_DIR")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from);
+            if configured_root.is_none_or(|r| self.root == r.join(DIRECTORY)) {
+                return PathBuf::from(override_dir);
+            }
+        }
         self.root.join(DESIRED)
     }
 

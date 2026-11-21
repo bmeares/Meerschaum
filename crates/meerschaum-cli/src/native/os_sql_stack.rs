@@ -940,7 +940,7 @@ pub fn grafana_sign_in_environment(
 
 /// Set `name` in a compose `environment` (a map or a `KEY=value` list); `force` replaces an
 /// existing value.
-pub(super) fn set_environment(environment: &mut Value, name: &str, value: &str, force: bool) {
+pub(crate) fn set_environment(environment: &mut Value, name: &str, value: &str, force: bool) {
     match environment {
         Value::Map(map) => {
             if force || !map.contains_key(name) {
