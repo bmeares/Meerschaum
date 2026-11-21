@@ -168,16 +168,24 @@ CONSOLE_OWN_PATHS = frozenset(
 )
 
 _nav_context: contextvars.ContextVar = contextvars.ContextVar('mrsm_console_nav', default=None)
+_UNSET = object()
 
 
 @contextlib.contextmanager
-def console_nav_context(pathname: Optional[str] = None, session_id: Optional[str] = None):
+def console_nav_context(
+    pathname: Optional[str] = None,
+    session_id: Optional[str] = None,
+    acting_team: Any = _UNSET,
+):
     """
     Build the navbars inside this block for the page at `pathname`, seen by the user of
     `session_id`. The console's router (`callbacks/dashboard.py`) renders every page inside it;
     elsewhere (a callback) the navbar reads the request's session cookie and referrer instead.
     """
-    token = _nav_context.set({'pathname': pathname, 'session_id': session_id})
+    payload: Dict[str, Any] = {'pathname': pathname, 'session_id': session_id}
+    if acting_team is not _UNSET:
+        payload['acting_team'] = acting_team
+    token = _nav_context.set(payload)
     try:
         yield
     finally:
@@ -315,19 +323,28 @@ def _page_label(label: str) -> str:
     return ' / '.join((part[0].upper() + part[1:]) for part in parts) or str(label)
 
 
-def get_plugin_nav_pages() -> Dict[str, List[Tuple[str, str]]]:
+#: Multi-page groups in the Pages dropdown with more than this many items start collapsed
+#: (unless the viewer is currently on a page inside that group), keeping the menu compact.
+PAGES_GROUP_COLLAPSE_THRESHOLD: int = 3
+
+
+def get_plugin_nav_pages(viewer: Any = None) -> Dict[str, List[Tuple[str, str]]]:
     """
     The pages plugins add to the console (`@web_page` pages, native plugin pages and layout
     pages), grouped by their page group: `{group: [(label, path), ...]}`. These are the
     navbar's Pages menu.
+
+    When `viewer` is provided and isolated, pages belonging to plugins `viewer` may not use are
+    omitted.
     """
     paths, pages = _console_tables()
     if paths is None:
         return {}
-    from meerschaum.plugins import _plugin_endpoints_to_pages
+    from meerschaum.plugins import _plugin_endpoints_to_pages, _get_parent_plugin
     custom = sys.modules.get('meerschaum.api.dash.callbacks.custom', None)
     contract_pages = getattr(custom, 'contract_pages', None) or {}
     dash_prefix = endpoints['dash']
+    isolated = bool(viewer is not None and getattr(viewer, 'is_isolated', False))
 
     def _console_path(endpoint: str) -> str:
         endpoint = str(endpoint)
@@ -335,12 +352,30 @@ def get_plugin_nav_pages() -> Dict[str, List[Tuple[str, str]]]:
             return '/' + endpoint.lstrip('/')
         return dash_prefix + '/' + endpoint.lstrip('/')
 
+    def _plugin_allowed(plugin_name: Optional[str]) -> bool:
+        if not isolated or not plugin_name:
+            return True
+        try:
+            name = str(plugin_name)
+            return bool(viewer.can_use_plugin(name) or viewer.can_use_plugin(name.lower()))
+        except Exception:
+            return False
+
     groups: Dict[str, List[Tuple[str, str]]] = {}
     seen = set()
     for group, pages_dicts in list(_plugin_endpoints_to_pages.items()):
         for endpoint, page in list(pages_dicts.items()):
             path = _console_path(endpoint).rstrip('/')
             if path in CONSOLE_OWN_PATHS or path in seen or path not in paths:
+                continue
+            plugin_name = None
+            try:
+                func = page.get('function', None) if isinstance(page, dict) else None
+                if func is not None:
+                    plugin_name = _get_parent_plugin(function=func)
+            except Exception:
+                plugin_name = None
+            if not _plugin_allowed(plugin_name or group):
                 continue
             seen.add(path)
             groups.setdefault(_group_label(group), []).append(
@@ -351,8 +386,12 @@ def get_plugin_nav_pages() -> Dict[str, List[Tuple[str, str]]]:
         path = str(path).rstrip('/')
         if path in CONSOLE_OWN_PATHS or path in seen or path not in paths:
             continue
+        meta = contract_pages.get(path, None) or {}
+        group = meta.get('page_group', None)
+        plugin_name = meta.get('plugin', None) or group
+        if not _plugin_allowed(plugin_name):
+            continue
         seen.add(path)
-        group = (contract_pages.get(path, None) or {}).get('page_group', None)
         groups.setdefault(_group_label(group), []).append((_page_label(label), path))
     return groups
 
@@ -394,30 +433,31 @@ def build_logo_row():
     )
 
 
-def usable_instance_keys(keys: List[str]) -> List[str]:
+def usable_instance_keys(keys: List[str], viewer: Any = None) -> List[str]:
     """
     The instance connectors among `keys` the current viewer may use: those of their teams and
     those their teams were granted (every unrestricted one, unless they are walled off).
-    Outside a request nothing is filtered (the router fills the selector per request).
+    Outside a request nothing is filtered unless `viewer` is supplied.
     """
     try:
         from meerschaum.api.dash import access
         from meerschaum.api.dash.connector_listing import connector_team_allows
-        if not access._in_request():
-            return list(keys)
-        viewer = access.current_viewer()
+        if viewer is None:
+            if not access._in_request():
+                return list(keys)
+            viewer = access.current_viewer()
         return [key for key in keys if connector_team_allows(key, viewer)]
     except Exception:
         return []
 
 
-def _instance_options(selected: Optional[str] = None) -> List[Dict[str, str]]:
+def _instance_options(selected: Optional[str] = None, viewer: Any = None) -> List[Dict[str, str]]:
     from meerschaum.api.dash.connector_listing import is_internal_connector
     labels = [
         keys for keys in get_connector_labels(*instance_types)
         if not is_internal_connector(*keys.split(':', 1))
     ]
-    labels = usable_instance_keys(labels)
+    labels = usable_instance_keys(labels, viewer=viewer)
     if selected and selected not in labels:
         labels = [selected] + labels
     return [
@@ -441,6 +481,7 @@ def _global_instance_value() -> Optional[str]:
 def build_pages_instance_select(
     select_id: str = 'pages-instance-select',
     value: Optional[str] = None,
+    viewer: Any = None,
 ) -> Any:
     """
     The console's global instance selector. Choosing an instance rewrites the `mrsm-instance`
@@ -460,7 +501,7 @@ def build_pages_instance_select(
             dbc.Select(
                 id=select_id,
                 size='sm',
-                options=_instance_options(value),
+                options=_instance_options(value, viewer=viewer),
                 value=value,
                 class_name='dbc_dark custom-select custom-select-sm instance-select',
             ),
@@ -470,20 +511,159 @@ def build_pages_instance_select(
     )
 
 
-def _build_pages_menu(pathname: Optional[str]) -> Any:
-    groups = get_plugin_nav_pages()
+def build_pages_team_select(
+    state: Dict[str, Any],
+    select_id: str = 'pages-team-select',
+) -> Any:
+    """
+    The console's "acting as" team selector (shown next to the global instance selector for
+    administrators when teams exist, and for users belonging to multiple teams). Choosing a team
+    writes the `mrsm-team` cookie (`assets/global_instance.js`, read by `access.get_viewer`) and
+    narrows instances, pipes, connectors, plugins, jobs and permissions to that team.
+    """
+    viewer = state.get('viewer', None)
+    if viewer is None or not state.get('signed_in'):
+        return None
+    try:
+        from meerschaum.api.dash.access import available_acting_teams
+        options = available_acting_teams(viewer)
+    except Exception:
+        return None
+    if not options:
+        return None
+    acting = getattr(viewer, 'acting_team', None) or ''
+    return html.Div(
+        [
+            html.Label('Team', htmlFor=select_id, className='visually-hidden'),
+            dbc.Select(
+                id=select_id,
+                size='sm',
+                options=options,
+                value=acting,
+                class_name=(
+                    'dbc_dark custom-select custom-select-sm team-select'
+                    + (' team-select-acting' if acting else '')
+                ),
+            ),
+        ],
+        className='console-nav-team',
+        title=(f"Acting as team: {acting}" if acting else "Team view"),
+    )
+
+
+def _strip_group_prefix(group: str, label: str) -> str:
+    """Strip a leading `<group> / ` prefix from a nested page label (`Anchored / Login` -> `Login`)."""
+    parts = [part.strip() for part in str(label).split('/') if part.strip()]
+    if len(parts) > 1 and parts[0].lower() == str(group).strip().lower():
+        return ' / '.join(parts[1:])
+    return ' / '.join(parts) or str(label)
+
+
+def _render_nested_pages(
+    entries: List[Tuple[str, str]],
+    current: str,
+    nested: bool = False,
+) -> Tuple[List[Any], bool]:
+    """
+    Render `(relative_label, path)` items into dropdown items and collapsible sub-groups for
+    multi-segment labels (`Admin / Users`, `Admin / Settings` -> `Admin` sub-group).
+    Returns `(components, any_active)`.
+    """
+    direct: List[Tuple[str, str]] = []
+    buckets: Dict[str, List[Tuple[str, str]]] = {}
+    order: List[Tuple[str, Any]] = []
+    for label, path in entries:
+        parts = [part.strip() for part in str(label).split('/') if part.strip()]
+        if len(parts) > 1:
+            head, tail = parts[0], ' / '.join(parts[1:])
+            if head not in buckets:
+                buckets[head] = []
+                order.append(('bucket', head))
+            buckets[head].append((tail, path))
+        else:
+            item = (parts[0] if parts else str(label), path)
+            direct.append(item)
+            order.append(('item', item))
+
+    items: List[Any] = []
+    any_active = False
+    for kind, payload in order:
+        if kind == 'item':
+            label, path = payload
+            is_current = current == path
+            any_active = any_active or is_current
+            items.append(dbc.DropdownMenuItem(
+                label,
+                href=path,
+                active=is_current,
+                class_name=('console-nav-pages-nested-item' if nested else ''),
+            ))
+            continue
+        head = payload
+        children_entries = buckets[head]
+        if len(children_entries) == 1:
+            tail, path = children_entries[0]
+            is_current = current == path
+            any_active = any_active or is_current
+            items.append(dbc.DropdownMenuItem(
+                f"{head} / {tail}",
+                href=path,
+                active=is_current,
+                class_name=('console-nav-pages-nested-item' if nested else ''),
+            ))
+            continue
+        sub_items, sub_active = _render_nested_pages(children_entries, current, nested=True)
+        any_active = any_active or sub_active
+        items.append(html.Details(
+            [
+                html.Summary(
+                    [
+                        html.Span(head, className='console-nav-pages-group-name'),
+                        html.Span(str(len(children_entries)), className='console-nav-pages-group-count'),
+                    ],
+                    className='console-nav-pages-group-toggle console-nav-pages-subgroup-toggle',
+                ),
+                html.Div(sub_items, className='console-nav-pages-group-items'),
+            ],
+            open=(sub_active or len(children_entries) <= PAGES_GROUP_COLLAPSE_THRESHOLD),
+            className='console-nav-pages-group console-nav-pages-subgroup',
+        ))
+    return items, any_active
+
+
+def _build_pages_menu(pathname: Optional[str], viewer: Any = None) -> Any:
+    groups = get_plugin_nav_pages(viewer=viewer)
     if not groups:
         return None
     current = '/' + str(pathname or '').strip('/')
-    items = []
+    items: List[Any] = []
     active = False
     for group, group_pages in groups.items():
-        if len(groups) > 1:
-            items.append(dbc.DropdownMenuItem(group, header=True))
-        for label, path in group_pages:
+        if len(group_pages) == 1:
+            label, path = group_pages[0]
             is_current = current == path
             active = active or is_current
             items.append(dbc.DropdownMenuItem(label, href=path, active=is_current))
+            continue
+        stripped = [(_strip_group_prefix(group, label), path) for label, path in group_pages]
+        group_items, group_active = _render_nested_pages(stripped, current, nested=True)
+        active = active or group_active
+        should_open = group_active or len(group_pages) <= PAGES_GROUP_COLLAPSE_THRESHOLD
+        items.append(html.Details(
+            [
+                html.Summary(
+                    [
+                        html.Span(group, className='console-nav-pages-group-name'),
+                        html.Span(str(len(group_pages)), className='console-nav-pages-group-count'),
+                    ],
+                    className='console-nav-pages-group-toggle',
+                ),
+                html.Div(group_items, className='console-nav-pages-group-items'),
+            ],
+            open=should_open,
+            className='console-nav-pages-group',
+            **{'data-mrsm-pages-group': group},
+        ))
     return dbc.DropdownMenu(
         items,
         label='Pages',
@@ -603,15 +783,19 @@ def build_pages_navbar(
             id=f'console-nav-{section}',
             class_name='console-nav-link',
         )))
-    pages_menu = _build_pages_menu(state['pathname'])
+    pages_menu = _build_pages_menu(state['pathname'], viewer=state.get('viewer', None))
     if pages_menu is not None:
         links.append(pages_menu)
 
     right = []
+    team_select = build_pages_team_select(state)
+    if team_select is not None:
+        right.append(team_select)
     if instance_select:
         right.append(build_pages_instance_select(
             select_id=instance_select_id,
             value=instance_keys,
+            viewer=(state.get('viewer') if state.get('signed_in') else None),
         ))
     right.append(dbc.Nav(
         [_build_user_menu(state, paths, active)],

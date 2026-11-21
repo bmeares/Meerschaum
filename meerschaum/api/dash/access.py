@@ -149,6 +149,10 @@ def core():
 # The viewer
 # ------------------------------------------------------------------------------------------------
 
+#: The cookie storing the viewer's active "acting as" team (empty / absent = All teams).
+TEAM_COOKIE_NAME: str = 'mrsm-team'
+
+
 @dataclass
 class Viewer:
     """Who is looking at a console page, with what rights."""
@@ -165,6 +169,27 @@ class Viewer:
     grants: Dict[str, Any] = field(default_factory=dict)
     #: Fresh Main-only execution projection; never retained in the base Viewer cache.
     native_execution: Any = None
+    #: When narrowed via the navbar Team switcher (`mrsm-team` cookie), the team being acted as,
+    #: plus the underlying real identity so the switcher always knows what teams may be chosen.
+    acting_team: Optional[str] = None
+    real_is_admin: Optional[bool] = None
+    base_teams: Optional[Dict[str, str]] = None
+    base_is_isolated: Optional[bool] = None
+
+    @property
+    def is_real_admin(self) -> bool:
+        """Whether the underlying signed-in account is an administrator (even when acting as a team)."""
+        return bool(self.is_admin if self.real_is_admin is None else self.real_is_admin)
+
+    @property
+    def real_teams(self) -> Dict[str, str]:
+        """The account's real team memberships before any navbar team narrowing."""
+        return dict(self.teams if self.base_teams is None else self.base_teams)
+
+    @property
+    def real_is_isolated(self) -> bool:
+        """Whether the underlying account is isolated before any navbar team narrowing."""
+        return bool(self.is_isolated if self.base_is_isolated is None else self.base_is_isolated)
 
     @property
     def is_isolated(self) -> bool:
@@ -228,6 +253,7 @@ class Viewer:
             'teams': dict(self.teams),
             'primary_team': self.primary_team,
             'grants': dict(self.grants or {}),
+            'acting_team': self.acting_team,
         }
 
 
@@ -237,12 +263,15 @@ ANONYMOUS = Viewer()
 SYSTEM = Viewer(username=None, signed_in=True, is_admin=True)
 
 _viewer_cache: Dict[str, Tuple[float, Viewer]] = {}
+_teams_cache: Optional[Tuple[float, List[Any]]] = None
 _viewer_lock = threading.Lock()
 
 
 def forget(username: Optional[str] = None) -> None:
     """Drop the cached viewers (of one user, or all): their rights are read again."""
+    global _teams_cache
     with _viewer_lock:
+        _teams_cache = None
         if username is None:
             _viewer_cache.clear()
             _refs_cache.clear()
@@ -250,6 +279,202 @@ def forget(username: Optional[str] = None) -> None:
         for key in [key for key, (_, viewer) in _viewer_cache.items() if viewer.username == username]:
             _viewer_cache.pop(key, None)
         _refs_cache.clear()
+
+
+def _cached_teams(conn: Any = None) -> List[Any]:
+    """Cached team records on the API instance (TTL `VIEWER_TTL_SECONDS`)."""
+    global _teams_cache
+    now = time.monotonic()
+    if conn is None:
+        with _viewer_lock:
+            if _teams_cache is not None and now - _teams_cache[0] < VIEWER_TTL_SECONDS:
+                return list(_teams_cache[1])
+    from meerschaum.api import get_api_connector
+    target = conn if conn is not None else get_api_connector()
+    try:
+        records = list(target.get_teams() or [])
+    except Exception:
+        return []
+    if conn is None:
+        with _viewer_lock:
+            _teams_cache = (now, list(records))
+    return records
+
+
+def _request_acting_team() -> Optional[str]:
+    """
+    The active "acting as" team for the current web request (`mrsm-team` cookie, or an explicit
+    override in `components.console_nav_context`), or `None` for the full All-teams view.
+    """
+    try:
+        from meerschaum.api.dash import components
+        ctx = components._nav_context.get()
+        if isinstance(ctx, dict) and 'acting_team' in ctx:
+            val = ctx.get('acting_team')
+            return str(val).strip() or None if val is not None else None
+    except Exception:
+        pass
+    raw = None
+    try:
+        import dash
+        raw = (dash.callback_context.cookies or {}).get(TEAM_COOKIE_NAME)
+    except Exception:
+        pass
+    if not raw:
+        try:
+            import flask
+            if flask.has_request_context():
+                raw = flask.request.cookies.get(TEAM_COOKIE_NAME)
+        except Exception:
+            return None
+    if not raw:
+        return None
+    from urllib.parse import unquote
+    cleaned = unquote(str(raw)).strip()
+    return cleaned or None
+
+
+def available_acting_teams(viewer: Optional[Viewer], conn: Any = None) -> List[Dict[str, str]]:
+    """
+    The options for the navbar Team switcher (`[{'label': ..., 'value': ...}]`), or `[]` when the
+    viewer has nothing to switch between (`<= 1` choice, anonymous, or `no_auth`).
+    """
+    if viewer is None or not viewer.signed_in or viewer.no_auth:
+        return []
+    if viewer.is_real_admin:
+        records = _cached_teams(conn)
+        names = sorted(
+            {
+                str(getattr(record, 'name', None) or (record.get('name') if isinstance(record, dict) else ''))
+                for record in records
+            }
+            - {'', EVERYONE}
+            - {
+                str(getattr(record, 'name', None) or (record.get('name') if isinstance(record, dict) else ''))
+                for record in records
+                if core().is_everyone(
+                    str(getattr(record, 'name', None) or (record.get('name') if isinstance(record, dict) else ''))
+                )
+            },
+            key=str.lower,
+        )
+        if not names:
+            return []
+        return (
+            [{'label': 'All teams (Admin)', 'value': ''}]
+            + [{'label': name, 'value': name} for name in names]
+            + [{'label': EVERYONE, 'value': EVERYONE}]
+        )
+
+    own = sorted((t for t in viewer.real_teams if t != EVERYONE), key=str.lower)
+    in_everyone = not viewer.real_is_isolated
+    if not own or (len(own) == 1 and not in_everyone):
+        return []
+    options = [{'label': 'All teams', 'value': ''}] + [{'label': name, 'value': name} for name in own]
+    if in_everyone:
+        options.append({'label': EVERYONE, 'value': EVERYONE})
+    return options
+
+
+def apply_acting_team(
+    viewer: Viewer,
+    requested_team: Optional[str],
+    conn: Any = None,
+) -> Viewer:
+    """
+    Narrow `viewer` to act as `requested_team` (never widens permissions or grants).
+
+    - Administrators may act as any registered team (with `manager` role in that team and
+      `is_admin=False` so every team restriction applies) or as `Everyone`.
+    - Non-administrators may act as any team they belong to (keeping their real role in that
+      team) or as `Everyone` when they are not isolated.
+    - Unknown or unauthorized team names are ignored safely (returns `viewer` unchanged).
+    """
+    if not requested_team or not viewer.signed_in or viewer.no_auth:
+        return viewer
+    target = str(requested_team).strip()
+    if not target:
+        return viewer
+
+    real_is_admin = viewer.is_real_admin
+    real_teams = viewer.real_teams
+    real_is_isolated = viewer.real_is_isolated
+
+    if core().is_everyone(target):
+        if not real_is_admin and real_is_isolated:
+            return viewer
+        projected = Viewer(
+            username=viewer.username,
+            signed_in=True,
+            is_admin=False,
+            permissions=viewer.permissions,
+            teams={EVERYONE: 'member'},
+            primary_team=EVERYONE,
+            no_auth=False,
+            grants={},
+            acting_team=EVERYONE,
+            real_is_admin=real_is_admin,
+            base_teams=real_teams,
+            base_is_isolated=real_is_isolated,
+        )
+        projected.principal = _principal(projected)
+        return projected
+
+    records = _cached_teams(conn)
+    canonical = None
+    for record in records:
+        name = str(
+            getattr(record, 'name', None)
+            or (record.get('name') if isinstance(record, dict) else '')
+        )
+        if name and name.lower() == target.lower() and not core().is_everyone(name):
+            canonical = name
+            break
+
+    if real_is_admin:
+        if canonical is None:
+            return viewer
+        team_name = canonical
+        role = 'manager'
+    else:
+        matched = None
+        for existing_name, existing_role in real_teams.items():
+            if existing_name != EVERYONE and existing_name.lower() == target.lower():
+                matched = (existing_name, existing_role)
+                break
+        if matched is None:
+            return viewer
+        team_name = canonical or matched[0]
+        role = matched[1]
+
+    try:
+        grants = dict(core().team_grants([(team_name, role)], records, team_name) or {})
+    except Exception:
+        grants = {'isolated': True}
+    isolated = bool(grants.get('isolated', False))
+    teams = {team_name: role} if isolated else {EVERYONE: 'member', team_name: role}
+    permissions = viewer.permissions
+    if isolated:
+        permissions = permissions - frozenset(core().withheld_permissions(grants))
+    if _secure() and not viewer.no_auth:
+        permissions = permissions - SECURE_WITHHELD
+
+    projected = Viewer(
+        username=viewer.username,
+        signed_in=True,
+        is_admin=False,
+        permissions=permissions,
+        teams=teams,
+        primary_team=team_name,
+        no_auth=False,
+        grants=grants,
+        acting_team=team_name,
+        real_is_admin=real_is_admin,
+        base_teams=real_teams,
+        base_is_isolated=real_is_isolated,
+    )
+    projected.principal = _principal(projected)
+    return projected
 
 
 #: What a non-administrator may not do from the console on a server started with `--secure`
@@ -544,15 +769,17 @@ def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Option
     with _viewer_lock:
         entry = _viewer_cache.get(session_id, None)
     if entry is not None and now - entry[0] < VIEWER_TTL_SECONDS:
-        from meerschaum.api.dash._native_execution import project
-        return project(entry[1], session_id)
-    from meerschaum.api.dash.sessions import get_username_from_session
-    username = get_username_from_session(session_id)
-    viewer = viewer_for(username) if username else ANONYMOUS
-    with _viewer_lock:
-        if len(_viewer_cache) > 4096:
-            _viewer_cache.clear()
-        _viewer_cache[session_id] = (now, viewer)
+        base_viewer = entry[1]
+    else:
+        from meerschaum.api.dash.sessions import get_username_from_session
+        username = get_username_from_session(session_id)
+        base_viewer = viewer_for(username) if username else ANONYMOUS
+        with _viewer_lock:
+            if len(_viewer_cache) > 4096:
+                _viewer_cache.clear()
+            _viewer_cache[session_id] = (now, base_viewer)
+    acting_team = _request_acting_team()
+    viewer = apply_acting_team(base_viewer, acting_team) if acting_team else base_viewer
     from meerschaum.api.dash._native_execution import project
     return project(viewer, session_id)
 
