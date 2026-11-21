@@ -12,7 +12,7 @@ def get_pipeline_cards(state):
     instance = state.get('instance-select.value')
     connector = engine.get_instance(instance)
     registry = str(connector)
-    viewer = access.get_viewer((state or {}).get('session-store.data', None) or {})
+    viewer = access.resolve_viewer((state or {}).get('session-store.data', None) or {})
     definitions = access.visible_pipelines(connector, viewer=viewer, definitions=list_pipelines(connector))
     cards = []
     for name, definition in sorted(definitions.items()):

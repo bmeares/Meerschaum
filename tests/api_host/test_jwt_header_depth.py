@@ -6,7 +6,7 @@ the signature and lets the `RecursionError` escape (GHSA-8wjv-2p76-3863).
 
 import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PLUGIN = '''
 import fastapi

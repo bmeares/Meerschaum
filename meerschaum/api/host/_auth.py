@@ -125,10 +125,3 @@ def decode_internal_token(token: Optional[str]) -> Union[Dict[str, Any], None]:
     return claims
 
 
-def mint_internal_token(minutes: int = 5) -> str:
-    """
-    Return a token the Rust server accepts as the host's (`X-Mrsm-Host-Token`): an HS256 JWT signed
-    with the API secret whose `mrsm_host` claim is `mcp`, valid for `minutes`.
-    """
-    from meerschaum.api.host._server_client import mint_internal_token as _mint_internal_token
-    return _mint_internal_token(minutes=minutes)

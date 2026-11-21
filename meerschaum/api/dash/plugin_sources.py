@@ -3,105 +3,19 @@
 # vim:fenc=utf-8
 
 """
-Plugin source inspection and Dash source-browser/editor UI.
-The Dash-free domain logic (path/symlink validation, bounded archive reading,
-authoring policy, digest-checked CAS saves, and syntax tokenization) lives in
-`meerschaum.api.dash._plugins`.
+The Dash source browser and editor of a plugin's files. The Dash-free domain logic (path and
+symlink validation, bounded archive reading, authoring policy, digest-checked saves, and syntax
+tokenization) is `meerschaum.api.dash._plugins._lifecycle`'s.
 """
 
 from __future__ import annotations
 
-import os  # noqa: F401 (patched via `source.os` in fallback tests)
 import pathlib
-import tarfile  # noqa: F401 (patched via `source.tarfile` in archive tests)
 import uuid
 
-from meerschaum.utils.typing import Any, List, Optional, Tuple
-from meerschaum.api.dash._plugins import _fs, _lifecycle, _policy
-
-MAX_FILE_BYTES = _fs.MAX_FILE_BYTES
-MAX_ARCHIVE_BYTES = _fs.MAX_ARCHIVE_BYTES
-MAX_SCAN_BYTES = _fs.MAX_SCAN_BYTES
-MAX_FILES = _fs.MAX_FILES
-MAX_ENTRIES = _fs.MAX_ENTRIES
-MAX_PATH_BYTES = _fs.MAX_PATH_BYTES
-MAX_PATH_PARTS = _fs.MAX_PATH_PARTS
-TEXT_SUFFIXES = _fs.TEXT_SUFFIXES
-SKIP_PARTS = _fs.SKIP_PARTS
-
-AUTHORING_OFF = _policy.AUTHORING_OFF
-AUTHORING_ADMINS = _policy.AUTHORING_ADMINS
-
-SourceChanged = _fs.SourceChanged
-source_digest = _fs.source_digest
-_read_file = _fs.read_file_no_follow
-_replace_checked_path = _fs.replace_checked_path
-
-may_read_source = _policy.may_read_source
-authoring_refusal = _policy.authoring_refusal
-may_author = _policy.may_author
-
-SOURCE_MODES = _lifecycle.SOURCE_MODES
-TOKEN_STYLES = _lifecycle.TOKEN_STYLES
-MAX_TOKEN_RUNS = _lifecycle.MAX_TOKEN_RUNS
-source_mode = _lifecycle.source_mode
-
-
-def source_files(kind: str, name: str, session: Any) -> List[str]:
-    return _lifecycle.source_files(
-        kind,
-        name,
-        session,
-        max_scan_bytes=MAX_SCAN_BYTES,
-        max_file_bytes=MAX_FILE_BYTES,
-        max_files=MAX_FILES,
-        max_entries=MAX_ENTRIES,
-        max_archive_bytes=MAX_ARCHIVE_BYTES,
-    )
-
-
-def read_source_with_digest(kind: str, name: str, selected: str, session: Any) -> Tuple[str, str]:
-    """A source file's text and the digest of its bytes (what a save is checked against)."""
-    return _lifecycle.read_source_with_digest(
-        kind,
-        name,
-        selected,
-        session,
-        max_scan_bytes=MAX_SCAN_BYTES,
-        max_file_bytes=MAX_FILE_BYTES,
-        max_files=MAX_FILES,
-        max_entries=MAX_ENTRIES,
-        max_archive_bytes=MAX_ARCHIVE_BYTES,
-    )
-
-
-def read_source(kind: str, name: str, selected: str, session: Any) -> str:
-    return read_source_with_digest(kind, name, selected, session)[0]
-
-
-def save_source(
-    name: str,
-    selected: str,
-    text: Any,
-    expected: Any,
-    session: Any,
-) -> Tuple[bool, str, Optional[str]]:
-    """Save `text` as an installed plugin's listed file `selected`, checked against `expected`."""
-    return _lifecycle.save_source(
-        name,
-        selected,
-        text,
-        expected,
-        session,
-        max_file_bytes=MAX_FILE_BYTES,
-        max_files=MAX_FILES,
-        max_entries=MAX_ENTRIES,
-    )
-
-
-def source_tokens(path: str, source: str) -> dict:
-    """Highlighted source runs for `assets/plugin_source.js`."""
-    return _lifecycle.source_tokens(path, source, max_token_runs=MAX_TOKEN_RUNS)
+from meerschaum.utils.typing import Any, Optional
+from meerschaum.api.dash._plugins import _lifecycle
+from meerschaum.api.dash._plugins._policy import PluginRights
 
 
 ########################################################################################
@@ -143,22 +57,22 @@ def language_logo(language: str, class_name: str = ''):
 def build_source_browser(
     kind: str,
     name: str,
-    session: Any,
+    rights: PluginRights,
     selected: Optional[str] = None,
     edit: bool = False,
     notice: Any = None,
 ):
     """
     A plugin's source: the file tree and the chosen file (`selected`, else the entry point).
-    Those who may author the plugin (`may_author`) can edit an installed plugin's files (`edit`
+    Those who may author the plugin (`rights.can_author(name)`) can edit an installed plugin's files (`edit`
     opens `selected` for editing, as New plugin does); `notice` is shown above the files.
     """
     from dash import html, dcc
     import dash_bootstrap_components as dbc
-    if not may_read_source(kind, session, name):
+    if not rights.can_read_source(kind, name):
         return None
     try:
-        files = source_files(kind, name, session)
+        files = _lifecycle.source_files(kind, name, rights)
     except Exception:
         return dbc.Alert('Source preview is unavailable for this plugin.', color='secondary')
     if not files:
@@ -166,7 +80,7 @@ def build_source_browser(
     first = selected if selected in files else files[0]
     editing = (
         {'path': first, 'nonce': uuid.uuid4().hex}
-        if edit and kind == 'installed' and may_author(session, name) else None
+        if edit and kind == 'installed' and rights.can_author(name) else None
     )
     return html.Section([
         html.Div(html.H4('Source'), className='plugin-source-header'),
@@ -290,7 +204,7 @@ def source_preview(
     if editing:
         data = {
             'path': path,
-            'mode': source_mode(path),
+            'mode': _lifecycle.source_mode(path),
             'source': source,
             'digest': digest,
             'editing': True,
@@ -313,7 +227,7 @@ def source_preview(
             className='plugin-source-code plugin-source-editor-code',
         )
     else:
-        data = {**source_tokens(path, source), 'digest': digest, 'editing': False}
+        data = {**_lifecycle.source_tokens(path, source), 'digest': digest, 'editing': False}
         toolbar = [logo, html.Code(path), html.Span(f'{lines:,} lines', className='text-muted')]
         if editable:
             toolbar.append(_source_action_button(

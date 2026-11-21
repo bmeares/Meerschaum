@@ -9,15 +9,8 @@ team, `get_connector()` refuses and `get_config()` omits the connectors outside 
 Plugin code cannot set or clear the team through the public API, and threads it starts keep it.
 """
 
-import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox, write_plugin  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-6000:]
-    line = [line for line in result.stdout.splitlines() if line.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import SIGN_IN, run_python, write_plugin, extract_json
 
 
 PROBE = '''
@@ -42,7 +35,7 @@ def probe():
 
 def test_the_lookup_check_in_a_shared_worker_and_its_limits(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, PROBE + '''
+    out = extract_json(run_python(root, plugins, PROBE + '''
 import json, threading
 from concurrent.futures import ThreadPoolExecutor
 import meerschaum as mrsm
@@ -137,7 +130,7 @@ def test_the_lookup_check_in_the_api_host(sandbox):
 ''' + '\n'.join('                ' + line for line in PROBE.splitlines()) + '''
                 return probe()
     ''')
-    out = _json(run_python(root, plugins, SIGN_IN + '''
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
 import json
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector

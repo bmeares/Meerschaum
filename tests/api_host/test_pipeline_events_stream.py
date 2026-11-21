@@ -6,19 +6,12 @@ paints live statuses and chunk progress and asks for refreshes, and a run withou
 a slow fallback poll.
 """
 
-import json
-import pathlib
 import shutil
 import subprocess
-import textwrap
 
 import pytest
 
-from tests.api_host._helpers import AS_VIEWER, REPO, run_python, sandbox  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
+from tests.api_host._helpers import AS_VIEWER, REPO, run_python, check
 
 
 def test_stream_path_and_poll_intervals(sandbox):

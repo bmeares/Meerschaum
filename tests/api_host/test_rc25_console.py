@@ -7,15 +7,8 @@ RC25 console fixes, in process on the sandbox's SQLite instance (no server, no b
 opening a pipe's Data tab never downloads a CSV by itself.
 """
 
-import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-6000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json
 
 
 def test_data_tab_downloads_csv_only_on_a_click(sandbox):
@@ -26,7 +19,7 @@ def test_data_tab_downloads_csv_only_on_a_click(sandbox):
     says). That request carries the button's rendered `n_clicks`; only a click downloads.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SIGN_IN + '''
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
 import json
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector
@@ -87,7 +80,7 @@ def test_performance_names_pipes_as_python_writes_them(sandbox):
     may not see keeps its placeholder.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash import performance
 ref = 'sql:main|plugin:noaa|weather|None'
@@ -124,13 +117,15 @@ def test_installed_plugins_offer_icon_actions_and_update_only_when_newer(sandbox
     repository included), for administrators. The detail page links back to All plugins.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SIGN_IN + '''
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
 import json, pathlib
 from unittest.mock import patch
 from meerschaum.config import paths
 from meerschaum.api import get_api_connector
 from meerschaum.api.dash import build_dash_app, plugins as pages
 build_dash_app()
+from meerschaum.api.dash._plugins import _lifecycle
+from meerschaum.api.dash._plugins._policy import rights_for_session
 from meerschaum.api.dash.callbacks import plugins as callbacks
 from meerschaum.plugins._origins import write_plugin_origin
 admin = sign_in('rc25-plugins-admin', user_type='admin')
@@ -141,7 +136,7 @@ for name, origin in (('rc25_old', 'api:elsewhere'), ('rc25_same', 'api:this_serv
     (plugin_root / name / '__init__.py').write_text("__version__ = '1.0.0'\\n")
     if origin:
         assert write_plugin_origin(name, origin, plugin_root)
-installed = {plugin['name']: plugin for plugin in pages.get_installed_plugins(check_packages=False)}
+installed = {plugin['name']: plugin for plugin in _lifecycle.get_installed_plugins(check_packages=False)}
 for plugin in installed.values():
     plugin['version'] = '1.0.0'
 table = pages.build_installed_plugins_table(list(installed.values()), admin=True)
@@ -163,16 +158,16 @@ asked = []
 def remote(name, origin):
     asked.append((name, origin))
     return {'rc25_old': '1.2.0', 'rc25_same': '1.0.0'}.get(name)
-with patch.object(pages, 'get_installed_plugins', return_value=list(installed.values())), \\
-     patch.object(pages, 'remote_plugin_version', side_effect=remote):
+with patch.object(_lifecycle, 'get_installed_plugins', return_value=list(installed.values())), \\
+     patch.object(_lifecycle, 'remote_plugin_version', side_effect=remote):
     slot_ids = [{'type': 'plugin-update-slot', 'index': name} for name in sorted(slots)]
     button_ids = [{'type': 'plugin-action', 'action': 'update', 'index': name} for name in sorted(slots)]
     shown = callbacks.show_plugin_updates(store, slot_ids, button_ids, admin)
     hidden_for_reader = callbacks.show_plugin_updates(store, slot_ids, button_ids, reader)
 ### This server's repository is the API's own instance (no `api:this_server` connector here).
 with patch.object(type(get_api_connector()), 'get_plugin_version', return_value='2.0.0', create=True) as local:
-    this_server = pages.remote_plugin_version('rc25_same', 'api:this_server')
-detail = pages.build_installed_plugin_detail('rc25_old', admin)
+    this_server = _lifecycle.remote_plugin_version('rc25_same', 'api:this_server')
+detail = pages.build_installed_plugin_detail('rc25_old', rights_for_session(admin))
 back = next(node for node in walk(detail) if getattr(node, 'href', None) == '/dash/plugins')
 print('JSON:' + json.dumps({
     'buttons': [(b['id']['action'], b['id']['index'], b.get('aria-label'), b.get('title'),
@@ -180,7 +175,7 @@ print('JSON:' + json.dumps({
     'slots': slots, 'store': sorted(store), 'asked': sorted(asked),
     'shown': shown, 'hidden_for_reader': hidden_for_reader,
     'this_server': this_server, 'local_calls': local.call_count,
-    'newer': [pages.is_newer_version(a, b) for a, b in (('1.2.0', '1.0.0'), ('1.0.0', '1.0.0'),
+    'newer': [_lifecycle.is_newer_version(a, b) for a, b in (('1.2.0', '1.0.0'), ('1.0.0', '1.0.0'),
               ('0.9', '1.0.0'), ('1.0.0rc2', '1.0.0rc1'), (None, '1.0.0'), ('1.0.0', None), ('x', '1.0'))],
     'back': [type(back).__name__, back.children, back.className],
     'detail_text': str(detail),
@@ -209,7 +204,7 @@ print('JSON:' + json.dumps({
 def test_plugin_source_tree_uses_folder_and_language_icons(sandbox):
     """Folders show a folder icon that opens with them; Python and Rust files show their language."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash import plugin_sources as source
 tree = source.source_tree(['__init__.py', 'callbacks/console.py', 'src/lib.rs', 'plugin.toml'], '__init__.py')
@@ -238,12 +233,12 @@ def test_an_unreadable_session_store_answers_503_and_never_signs_out(sandbox):
     connections (the driver's own error), not a mocked read.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SIGN_IN + '''
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
 import json, time
 import meerschaum as mrsm
 from starlette.testclient import TestClient
 from meerschaum.api.host import build_app
-from meerschaum.api.dash import sessions
+from meerschaum.api.dash import sessions, session_store
 app = build_app()
 client = TestClient(app)
 dependencies = client.get('/dash/_dash-dependencies').json()
@@ -278,17 +273,17 @@ out = {'healthy': fire(valid)}
 pipe = sessions.get_instance_sessions_pipe()
 assert pipe.sync([{'session_id': expired['session-id'], 'data': '{"username":"rc25-session-expired"}',
                    'expires': int(time.time()) - 10}], check_existing=False)[0]
-sessions._cache_drop(expired['session-id'])
+session_store._cache_drop(expired['session-id'])
 out['expired'] = fire(expired)
 sessions.delete_session(gone['session-id'])
 out['deleted'] = fire(gone)
 
 ### The store becomes unreadable: the same pipe on an instance that refuses connections.
-store = sessions._instance_pipe
-sessions._instance_pipe = mrsm.Pipe('mrsm', 'sessions', instance='sql:refused', temporary=True,
+store = session_store._instance_pipe
+session_store._instance_pipe = mrsm.Pipe('mrsm', 'sessions', instance='sql:refused', temporary=True,
                                     parameters=store.parameters)
 out['cached'] = fire(valid)  # within the 5 s cache: unchanged behavior
-sessions._session_cache.pop(valid['session-id'], None)  # the 5 s cache has expired
+session_store._session_cache.pop(valid['session-id'], None)  # the 5 s cache has expired
 out['unreadable'] = fire(valid)
 try:
     sessions.get_session_data(valid['session-id'], use_cache=False)
@@ -300,9 +295,9 @@ try:
     sessions.update_session(valid['session-id'], {'x': 1})
 except sessions.SessionStoreUnavailable:
     out['update_session'] = 'unavailable'
-out['old_read'] = repr(sessions._instance_pipe.get_doc(params={'session_id': valid['session-id']}))
-sessions._instance_pipe = store
-sessions._session_cache.pop(valid['session-id'], None)
+out['old_read'] = repr(session_store._instance_pipe.get_doc(params={'session_id': valid['session-id']}))
+session_store._instance_pipe = store
+session_store._session_cache.pop(valid['session-id'], None)
 out['recovered'] = fire(valid)
 print('JSON:' + json.dumps(out))
 ''', extra_env={'MRSM_SQL_REFUSED': 'postgresql://u:p@127.0.0.1:1/db'}))
@@ -327,11 +322,11 @@ def test_update_checks_stay_bounded_while_a_repository_hangs(sandbox):
     up. Updating a plugin forgets its cached repository versions.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json, threading, time
 from unittest.mock import patch
 import meerschaum as mrsm
-from meerschaum.api.dash import plugins as pages
+from meerschaum.api.dash._plugins import _lifecycle as pages
 release = threading.Event()
 started, lock = [], threading.Lock()
 

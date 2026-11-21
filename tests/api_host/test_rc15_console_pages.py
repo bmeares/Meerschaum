@@ -17,17 +17,12 @@ import tempfile
 
 import pytest
 
-from tests.api_host._helpers import FAKE_VIEWERS, AS_VIEWER, run_python, sandbox  # noqa: F401
-
-
-def _json(result):
-    assert result.returncode == 0, result.stderr[-4000:]
-    return json.loads(result.stdout.split('JSON:')[-1])
+from tests.api_host._helpers import FAKE_VIEWERS, AS_VIEWER, run_python, extract_json
 
 
 def test_new_job_form_builds_the_start_job_command(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash.jobs import (
     build_new_job_sysargs, job_command_preview, validate_new_job_name, job_action_options,
@@ -91,7 +86,7 @@ def test_new_job_form_lists_the_instances_pipes(sandbox):
     the pipes is shown in the form rather than leaving it empty.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json, shlex
 from types import SimpleNamespace
 import meerschaum as mrsm
@@ -203,7 +198,7 @@ def test_job_status_is_one_word_and_last_run_its_own_column(sandbox):
     ran is the Last Run column's (`job_last_run`), with the exact times in its title.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -277,7 +272,7 @@ def test_job_status_dot_follows_the_health_state(sandbox):
     Overview's colors: red, amber), and its text is the state's one word.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from types import SimpleNamespace
 from meerschaum.api.dash.jobs import build_status_children, STATUS_EMOJI
@@ -313,7 +308,7 @@ print('JSON:' + json.dumps({
 
 def test_new_job_creates_starts_and_restarts_a_job(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, FAKE_VIEWERS + '''
+    out = extract_json(run_python(root, plugins, FAKE_VIEWERS + '''
 import json, time
 import meerschaum.api.dash.callbacks.jobs as cj
 from meerschaum.api.dash import sessions
@@ -369,7 +364,7 @@ def test_jobs_tab_is_a_grouped_table_with_a_filter(sandbox):
     filter box past eight jobs; `?status=` the jobs in one state.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from types import SimpleNamespace
 from meerschaum.api.dash import dash_app
@@ -472,7 +467,7 @@ print('JSON:' + json.dumps({
 
 def test_users_admin_actions_and_the_last_admin(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 import meerschaum as mrsm
 from meerschaum.core import User
@@ -618,13 +613,13 @@ def plugins_root():
 
 def test_installed_plugins_list_kinds_versions_and_provides(sandbox, plugins_root):
     root, plugins = plugins_root
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
-from meerschaum.api.dash.plugins import (
+from meerschaum.api.dash.plugins import build_installed_plugins_table
+from meerschaum.api.dash._plugins import _lifecycle as mp
+from meerschaum.api.dash._plugins._lifecycle import (
     get_installed_plugins, plugin_kind_label, packages_label, plugin_action_sysargs, THIS_SERVER_REPOSITORY,
-    build_installed_plugins_table,
 )
-import meerschaum.api.dash.plugins as mp
 mp.this_server_env = lambda username=None: {'MRSM_API_THIS_SERVER': 'http://127.0.0.1:1'}
 listed = {p['name']: p for p in get_installed_plugins()}
 out = {
@@ -685,19 +680,22 @@ def test_installs_from_a_private_server_read_its_plugins_with_a_short_lived_toke
     the connector is the server's URL alone. The connector works as `api:this_server`.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json, time
 import jwt
 import meerschaum.api as api
-import meerschaum.api.dash.execute as execute
 from meerschaum.api import get_api_connector
 from meerschaum.api._oauth2 import manager
 from meerschaum.core import User
-import meerschaum.api.dash.plugins as mp
+from meerschaum.api.dash._plugins import _lifecycle as mp
 
 conn = get_api_connector()
 assert conn.register_user(User('c-plug-admin', 'correct-horse-1', type='admin', instance=conn))[0]
-execute.server_url = lambda: 'http://127.0.0.1:1'
+import os
+from meerschaum.api.host import HOST_CONFIG_ENV
+os.environ[HOST_CONFIG_ENV] = json.dumps({
+    **json.loads(os.environ.get(HOST_CONFIG_ENV) or '{}'), 'server_url': 'http://127.0.0.1:1',
+})
 public = mp.plugin_action_sysargs('install', 'w7_x', username='c-plug-admin')
 api.private = True
 install = mp.plugin_action_sysargs('install', 'w7_x', username='c-plug-admin')
@@ -731,7 +729,7 @@ print('JSON:' + json.dumps({
     assert out['no_auth'] == {'MRSM_API_THIS_SERVER': 'http://127.0.0.1:1'}
 
     ### The job's environment defines a working `api:this_server` that sends the token.
-    checked = _json(run_python(root, plugins, '''
+    checked = extract_json(run_python(root, plugins, '''
 import json
 import meerschaum as mrsm
 conn = mrsm.get_connector('api:this_server')
@@ -742,7 +740,7 @@ print('JSON:' + json.dumps([conn.login_scheme, conn.host, conn.port, bool(conn.a
 
 def test_tokens_page_has_a_new_token_button_and_no_caption(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from meerschaum.api.dash import dash_app, pages
 import meerschaum.api.dash.callbacks.tokens as ct
@@ -793,7 +791,7 @@ def test_token_forms_fit_a_phone_and_say_grant_all_in_plain_words(sandbox):
     is plain text.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from types import SimpleNamespace
 from meerschaum.api.dash import dash_app, pages

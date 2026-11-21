@@ -2,12 +2,13 @@
 # vim:fenc=utf-8
 
 """
-The Pipelines pages' words (rc15 T1): sync windows in words instead of dictionaries, run counts
+The Pipelines pages' words : sync windows in words instead of dictionaries, run counts
 without the zeros, plain event lines, "dependencies" on the canvas, and Pipeline cards that count
 the Pipes a Pipeline syncs.
 """
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python
+from tests.api_host.conftest import api_host_deps_ready, sandbox  # noqa: F401
 
 
 def check(result):

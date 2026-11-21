@@ -1,10 +1,6 @@
 """rc16 Lineage routing, connector inspection, and bounded plugin source readers."""
 
-from tests.api_host._helpers import AS_VIEWER, SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
+from tests.api_host._helpers import AS_VIEWER, SIGN_IN, run_python, check
 
 
 def test_standalone_lineage_never_loads_a_none_pipeline(sandbox):
@@ -121,7 +117,8 @@ import io, os, pathlib, tarfile
 from meerschaum.api import get_api_connector
 from meerschaum.config import paths
 from meerschaum.core import Plugin, User
-from meerschaum.api.dash import plugin_sources as source
+from meerschaum.api.dash._plugins import _fs, _lifecycle
+from meerschaum.api.dash._plugins._policy import rights_for_session
 admin = sign_in('rc16-source-admin', user_type='admin')
 reader = sign_in('rc16-source-reader', role='viewer')
 denied = sign_in('rc16-source-denied', role='custom', permissions=[])
@@ -132,29 +129,29 @@ code = "raise RuntimeError('source must never execute')\\n"
 (package / '__init__.py').write_text(code)
 (package / 'helper.py').write_text('VALUE = 42\\n')
 (package / 'binary.py').write_bytes(b'a\\0b')
-(package / 'huge.py').write_bytes(b'x' * (source.MAX_FILE_BYTES + 1))
+(package / 'huge.py').write_bytes(b'x' * (_fs.MAX_FILE_BYTES + 1))
 outside = pathlib.Path(paths.ROOT_DIR_PATH) / 'outside.py'
 outside.write_text('PRIVATE_OUTSIDE = 1')
 (package / 'linked.py').symlink_to(outside)
 (package / 'linked_dir').symlink_to(outside.parent, target_is_directory=True)
 (plugin_root / 'rc16_alias').symlink_to(package, target_is_directory=True)
-assert '__init__.py' in source.source_files('installed','rc16_source',admin)
-assert 'linked.py' not in source.source_files('installed','rc16_source',admin)
-assert source.read_source('installed','rc16_source','__init__.py',admin) == code
+assert '__init__.py' in _lifecycle.source_files('installed','rc16_source', rights_for_session(admin))
+assert 'linked.py' not in _lifecycle.source_files('installed','rc16_source', rights_for_session(admin))
+assert _lifecycle.read_source('installed','rc16_source','__init__.py', rights_for_session(admin)) == code
 from unittest.mock import patch
-with patch.object(source.os, 'supports_dir_fd', set()):
-    assert source.read_source('installed','rc16_source','__init__.py',admin) == code
+with patch.object(os, 'supports_dir_fd', set()):
+    assert _lifecycle.read_source('installed','rc16_source','__init__.py', rights_for_session(admin)) == code
 def refused(call, error=(ValueError, PermissionError, OSError)):
     try: call()
     except error: return
     raise AssertionError('Unsafe source request succeeded.')
-with patch.object(source.os, 'supports_dir_fd', set()):
-    refused(lambda: source._read_file(package, 'linked.py'))
+with patch.object(os, 'supports_dir_fd', set()):
+    refused(lambda: _fs.read_file_no_follow(package, 'linked.py'))
 for file in ('../outside.py','/outside.py','linked.py','linked_dir/outside.py','binary.py','huge.py','..\\\\outside.py'):
-    refused(lambda file=file: source.read_source('installed','rc16_source',file,admin))
-refused(lambda: source.source_files('installed','rc16_alias',admin))
+    refused(lambda file=file: _lifecycle.read_source('installed','rc16_source',file, rights_for_session(admin)))
+refused(lambda: _lifecycle.source_files('installed','rc16_alias', rights_for_session(admin)))
 for session in (reader, denied, {}):
-    refused(lambda session=session: source.read_source('installed','rc16_source','__init__.py',session), PermissionError)
+    refused(lambda session=session: _lifecycle.read_source('installed','rc16_source','__init__.py', rights_for_session(session)), PermissionError)
 
 c = get_api_connector()
 plugin = Plugin('rc16_repository', user_id=c.get_user_id(User('rc16-source-admin', instance=c)))
@@ -167,18 +164,17 @@ with tarfile.open(archives / 'rc16_repository.tar.gz', 'w:gz') as archive:
         archive.addfile(info, io.BytesIO(data))
     info=tarfile.TarInfo('rc16_repository/link.py'); info.type=tarfile.SYMTYPE; info.linkname=str(outside)
     archive.addfile(info)
-files = source.source_files('repository','rc16_repository',reader)
+files = _lifecycle.source_files('repository','rc16_repository', rights_for_session(reader))
 assert files == ['rc16_repository/__init__.py'], files
-assert source.read_source('repository','rc16_repository',files[0],reader) == code
+assert _lifecycle.read_source('repository','rc16_repository',files[0], rights_for_session(reader)) == code
 assert not (pathlib.Path(paths.ROOT_DIR_PATH) / 'rc16_repository').exists()
 for file in ('../outside.py','/absolute.py','rc16_repository/link.py'):
-    refused(lambda file=file: source.read_source('repository','rc16_repository',file,reader))
-refused(lambda: source.source_files('repository','rc16_repository',denied), PermissionError)
-refused(lambda: source.source_files('repository','rc16_repository',{}), PermissionError)
+    refused(lambda file=file: _lifecycle.read_source('repository','rc16_repository',file, rights_for_session(reader)))
+refused(lambda: _lifecycle.source_files('repository','rc16_repository', rights_for_session(denied)), PermissionError)
+refused(lambda: _lifecycle.source_files('repository','rc16_repository', rights_for_session({})), PermissionError)
 # Revoking plugins:read takes effect for the next file selection, without a viewer TTL.
 assert c.set_user_attributes(User('rc16-source-reader', instance=c), {'role':'custom','scopes':[]})[0]
-refused(lambda: source.read_source('repository','rc16_repository',files[0],reader), PermissionError)
+refused(lambda: _lifecycle.read_source('repository','rc16_repository',files[0], rights_for_session(reader)), PermissionError)
 # A small archive that expands past the preview budget is refused before tar metadata is read.
-source.MAX_SCAN_BYTES = 1024
-refused(lambda: source.source_files('repository','rc16_repository',admin))
+refused(lambda: _lifecycle.source_files('repository','rc16_repository', rights_for_session(admin), max_scan_bytes=1024))
 '''))

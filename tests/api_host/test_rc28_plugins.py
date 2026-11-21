@@ -17,16 +17,10 @@ import tempfile
 
 import pytest
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json
 
 #: The host configuration of a server that serves the web terminal.
 WEBTERM_ON = {'mrsm_instance': 'sql:apihosttest', 'webterm': True}
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
 
 
 @pytest.fixture
@@ -53,30 +47,31 @@ def test_new_plugin_writes_bootstrap_plugins_files(plugins_dir):
     names and collisions are checked as the wizard checks them.
     """
     root, plugins = plugins_dir
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json, pathlib
 from meerschaum import _core
-from meerschaum.api.dash import plugins as mp
+from meerschaum.api.dash._plugins import _lifecycle as mp
+from meerschaum.api.dash._plugins._policy import rights_for_session
 admin = sign_in('rc28-admin', user_type='admin')
 choices = mp.new_plugin_choices('demo')
 created = {}
 for name, language, packaging in [('py_file', 'Python', 'file'), ('py_pkg', 'Python', 'package'),
                                   ('rs_file', 'Rust', 'file'), ('rs-pkg', 'Rust', 'package')]:
     created[name] = mp.create_new_plugin(name, language, packaging, ['fetch', 'action'], 'sing song',
-                                         'ts', None, admin)
+                                         'ts', None, rights_for_session(admin))
 plugins = pathlib.Path(choices['directories'][0])
 files = sorted(str(p.relative_to(plugins)) for p in plugins.rglob('*') if p.is_file())
 refused = {
-    'taken': mp.create_new_plugin('py_file', 'Rust', 'package', ['fetch'], '', '', None, admin),
-    'taken_other_language': mp.create_new_plugin('rs_file', 'Python', 'file', ['fetch'], '', '', None, admin),
-    'traversal': mp.create_new_plugin('../escape', 'Python', 'file', ['fetch'], '', '', None, admin),
-    'reserved': mp.create_new_plugin('mrsm', 'Python', 'file', ['fetch'], '', '', None, admin),
-    'empty': mp.create_new_plugin('  ', 'Python', 'file', ['fetch'], '', '', None, admin),
-    'rust_name': mp.create_new_plugin('2nd', 'Rust', 'file', ['fetch'], '', '', None, admin),
-    'no_features': mp.create_new_plugin('nofeat', 'Python', 'file', [], '', '', None, admin),
-    'no_action': mp.create_new_plugin('noaction', 'Python', 'file', ['action'], ' ', '', None, admin),
-    'elsewhere': mp.create_new_plugin('elsewhere', 'Python', 'file', ['fetch'], '', '', '/tmp', admin),
-    'language': mp.create_new_plugin('cobol', 'COBOL', 'file', ['fetch'], '', '', None, admin),
+    'taken': mp.create_new_plugin('py_file', 'Rust', 'package', ['fetch'], '', '', None, rights_for_session(admin)),
+    'taken_other_language': mp.create_new_plugin('rs_file', 'Python', 'file', ['fetch'], '', '', None, rights_for_session(admin)),
+    'traversal': mp.create_new_plugin('../escape', 'Python', 'file', ['fetch'], '', '', None, rights_for_session(admin)),
+    'reserved': mp.create_new_plugin('mrsm', 'Python', 'file', ['fetch'], '', '', None, rights_for_session(admin)),
+    'empty': mp.create_new_plugin('  ', 'Python', 'file', ['fetch'], '', '', None, rights_for_session(admin)),
+    'rust_name': mp.create_new_plugin('2nd', 'Rust', 'file', ['fetch'], '', '', None, rights_for_session(admin)),
+    'no_features': mp.create_new_plugin('nofeat', 'Python', 'file', [], '', '', None, rights_for_session(admin)),
+    'no_action': mp.create_new_plugin('noaction', 'Python', 'file', ['action'], ' ', '', None, rights_for_session(admin)),
+    'elsewhere': mp.create_new_plugin('elsewhere', 'Python', 'file', ['fetch'], '', '', '/tmp', rights_for_session(admin)),
+    'language': mp.create_new_plugin('cobol', 'COBOL', 'file', ['fetch'], '', '', None, rights_for_session(admin)),
 }
 print('JSON:' + json.dumps({
     'languages': choices['languages'],
@@ -129,19 +124,20 @@ def test_authoring_is_gated_like_the_web_terminal(plugins_dir):
     root, plugins = plugins_dir
     code = '''
 import json
-from meerschaum.api.dash import plugin_sources as ps, plugins as mp
+from meerschaum.api.dash._plugins import _lifecycle as mp
+from meerschaum.api.dash._plugins._policy import rights_for_session
 admin = sign_in('rc28-gate-admin', user_type='admin')
 operator = sign_in('rc28-gate-operator', role='operator')
 viewer = sign_in('rc28-gate-viewer', role='viewer')
 print('JSON:' + json.dumps({
-    'admin': ps.authoring_refusal(admin),
-    'operator': ps.authoring_refusal(operator),
-    'viewer': ps.authoring_refusal(viewer),
-    'anonymous': ps.authoring_refusal({}),
-    'create_as_operator': mp.create_new_plugin('nope', 'Python', 'file', ['fetch'], '', '', None, operator),
+    'admin': rights_for_session(admin).authoring_refusal(),
+    'operator': rights_for_session(operator).authoring_refusal(),
+    'viewer': rights_for_session(viewer).authoring_refusal(),
+    'anonymous': rights_for_session({}).authoring_refusal(),
+    'create_as_operator': mp.create_new_plugin('nope', 'Python', 'file', ['fetch'], '', '', None, rights_for_session(operator)),
 }))
 '''
-    served = _json(_run(root, plugins, code))
+    served = extract_json(_run(root, plugins, code))
     assert served['admin'] is None
     for who in ('operator', 'viewer', 'anonymous'):
         assert served[who] == 'Only administrators and team plugin managers can create and edit plugins.', who
@@ -149,13 +145,13 @@ print('JSON:' + json.dumps({
     assert not list(plugins.iterdir())
 
     off = 'Creating and editing plugins is turned off on this server.'
-    no_webterm = _json(_run(root, plugins, code, host_config={'mrsm_instance': 'sql:apihosttest'}))
+    no_webterm = extract_json(_run(root, plugins, code, host_config={'mrsm_instance': 'sql:apihosttest'}))
     assert no_webterm['admin'] == off
-    no_auth = _json(_run(root, plugins, code, host_config={
+    no_auth = extract_json(_run(root, plugins, code, host_config={
         'mrsm_instance': 'sql:apihosttest', 'no_auth': True, 'webterm': False,
     }))
     assert no_auth['admin'] == off
-    no_uploads = _json(_run(root, plugins, code, extra_env={
+    no_uploads = extract_json(_run(root, plugins, code, extra_env={
         'MRSM_CONFIG': json.dumps({'api': {'permissions': {'registration': {'plugins': False}}}}),
     }))
     assert no_uploads['admin'] == off
@@ -181,25 +177,26 @@ def test_saving_stays_inside_the_plugin_and_refuses_changed_files(plugins_dir):
     (plugins / 'rc28_single.py').write_text('def fetch(pipe, **kwargs):\n    return []\n')
     (plugins / 'rc28_link.py').symlink_to(outside)
     try:
-        out = _json(_run(root, plugins, '''
+        out = extract_json(_run(root, plugins, '''
 import json, os, pathlib
-from meerschaum.api.dash import plugin_sources as ps
+from meerschaum.api.dash._plugins import _fs, _lifecycle
+from meerschaum.api.dash._plugins._policy import rights_for_session
 admin = sign_in('rc28-save-admin', user_type='admin')
 operator = sign_in('rc28-save-operator', role='operator')
 package = pathlib.Path(os.environ['MRSM_PLUGINS_DIR']) / 'rc28_pkg'
 util = package / 'helpers' / 'util.py'
-listed = ps.source_files('installed', 'rc28_pkg', admin)
-text, digest = ps.read_source_with_digest('installed', 'rc28_pkg', 'helpers/util.py', admin)
+listed = _lifecycle.source_files('installed', 'rc28_pkg', rights_for_session(admin))
+text, digest = _lifecycle.read_source_with_digest('installed', 'rc28_pkg', 'helpers/util.py', rights_for_session(admin))
 inode = util.stat().st_ino
-saved = ps.save_source('rc28_pkg', 'helpers/util.py', 'VALUE = 2\\n', digest, admin)
+saved = _lifecycle.save_source('rc28_pkg', 'helpers/util.py', 'VALUE = 2\\n', digest, rights_for_session(admin))
 after = {'text': util.read_text(), 'mode': oct(util.stat().st_mode & 0o777),
          'new_inode': util.stat().st_ino != inode,
          'leftovers': sorted(p.name for p in util.parent.iterdir())}
-stale = ps.save_source('rc28_pkg', 'helpers/util.py', 'VALUE = 3\\n', digest, admin)
-_, fresh = ps.read_source_with_digest('installed', 'rc28_pkg', 'helpers/util.py', admin)
+stale = _lifecycle.save_source('rc28_pkg', 'helpers/util.py', 'VALUE = 3\\n', digest, rights_for_session(admin))
+_, fresh = _lifecycle.read_source_with_digest('installed', 'rc28_pkg', 'helpers/util.py', rights_for_session(admin))
 util.write_text('VALUE = 4\\n')
-changed = ps.save_source('rc28_pkg', 'helpers/util.py', 'VALUE = 5\\n', fresh, admin)
-single_text, single_digest = ps.read_source_with_digest('installed', 'rc28_single', 'rc28_single.py', admin)
+changed = _lifecycle.save_source('rc28_pkg', 'helpers/util.py', 'VALUE = 5\\n', fresh, rights_for_session(admin))
+single_text, single_digest = _lifecycle.read_source_with_digest('installed', 'rc28_single', 'rc28_single.py', rights_for_session(admin))
 out = {
     'listed': listed,
     'saved': saved[:2],
@@ -207,17 +204,17 @@ out = {
     'stale': stale[:2],
     'changed': changed[:2],
     'kept': util.read_text(),
-    'single': ps.save_source('rc28_single', 'rc28_single.py', single_text + '# more\\n', single_digest, admin)[:2],
-    'operator': ps.save_source('rc28_pkg', 'helpers/util.py', 'X = 1\\n', ps.source_digest(b'VALUE = 4\\n'), operator)[:2],
-    'traversal': ps.save_source('rc28_pkg', '../rc28_single.py', 'X = 1\\n', fresh, admin)[:2],
-    'absolute': ps.save_source('rc28_pkg', '/etc/passwd', 'X = 1\\n', fresh, admin)[:2],
-    'link': ps.save_source('rc28_pkg', 'linked.py', 'X = 1\\n', fresh, admin)[:2],
-    'link_dir': ps.save_source('rc28_pkg', 'linked_dir/x.py', 'X = 1\\n', fresh, admin)[:2],
-    'unlisted': ps.save_source('rc28_pkg', 'helpers/new.py', 'X = 1\\n', fresh, admin)[:2],
-    'linked_plugin': ps.save_source('rc28_link', 'rc28_link.py', 'X = 1\\n', fresh, admin)[:2],
-    'too_big': ps.save_source('rc28_pkg', 'helpers/util.py', 'x' * (ps.MAX_FILE_BYTES + 1), ps.source_digest(b'VALUE = 4\\n'), admin)[:2],
-    'nul': ps.save_source('rc28_pkg', 'helpers/util.py', 'a\\0b', ps.source_digest(b'VALUE = 4\\n'), admin)[:2],
-    'no_digest': ps.save_source('rc28_pkg', 'helpers/util.py', 'X = 1\\n', None, admin)[:2],
+    'single': _lifecycle.save_source('rc28_single', 'rc28_single.py', single_text + '# more\\n', single_digest, rights_for_session(admin))[:2],
+    'operator': _lifecycle.save_source('rc28_pkg', 'helpers/util.py', 'X = 1\\n', _fs.source_digest(b'VALUE = 4\\n'), rights_for_session(operator))[:2],
+    'traversal': _lifecycle.save_source('rc28_pkg', '../rc28_single.py', 'X = 1\\n', fresh, rights_for_session(admin))[:2],
+    'absolute': _lifecycle.save_source('rc28_pkg', '/etc/passwd', 'X = 1\\n', fresh, rights_for_session(admin))[:2],
+    'link': _lifecycle.save_source('rc28_pkg', 'linked.py', 'X = 1\\n', fresh, rights_for_session(admin))[:2],
+    'link_dir': _lifecycle.save_source('rc28_pkg', 'linked_dir/x.py', 'X = 1\\n', fresh, rights_for_session(admin))[:2],
+    'unlisted': _lifecycle.save_source('rc28_pkg', 'helpers/new.py', 'X = 1\\n', fresh, rights_for_session(admin))[:2],
+    'linked_plugin': _lifecycle.save_source('rc28_link', 'rc28_link.py', 'X = 1\\n', fresh, rights_for_session(admin))[:2],
+    'too_big': _lifecycle.save_source('rc28_pkg', 'helpers/util.py', 'x' * (_fs.MAX_FILE_BYTES + 1), _fs.source_digest(b'VALUE = 4\\n'), rights_for_session(admin))[:2],
+    'nul': _lifecycle.save_source('rc28_pkg', 'helpers/util.py', 'a\\0b', _fs.source_digest(b'VALUE = 4\\n'), rights_for_session(admin))[:2],
+    'no_digest': _lifecycle.save_source('rc28_pkg', 'helpers/util.py', 'X = 1\\n', None, rights_for_session(admin))[:2],
     'final': util.read_text(),
 }
 print('JSON:' + json.dumps(out))
@@ -290,11 +287,12 @@ def test_callbacks_refuse_non_authors_and_save_for_authors(plugins_dir):
     """
     root, plugins = plugins_dir
     (plugins / 'rc28_cb.py').write_text('VALUE = 1\n')
-    out = _json(_run(root, plugins, _fire_code() + '''
-from meerschaum.api.dash import plugin_sources as ps
+    out = extract_json(_run(root, plugins, _fire_code() + '''
+from meerschaum.api.dash._plugins import _fs, _lifecycle
+from meerschaum.api.dash._plugins._policy import rights_for_session
 admin = sign_in('rc28-cb-admin', user_type='admin')
 operator = sign_in('rc28-cb-operator', role='operator')
-_, digest = ps.read_source_with_digest('installed', 'rc28_cb', 'rc28_cb.py', admin)
+_, digest = _lifecycle.read_source_with_digest('installed', 'rc28_cb', 'rc28_cb.py', rights_for_session(admin))
 
 def source_action(action, session, text='VALUE = 2\\n', editing=True):
     return fire('plugin-source-context.data', [[{
@@ -376,10 +374,11 @@ def test_language_column_shows_the_languages_logos(plugins_dir):
     root, plugins = plugins_dir
     (plugins / 'rc28_lang_py.py').write_text('def fetch(pipe, **kwargs):\n    return []\n')
     (plugins / 'rc28_lang_rs.rs').write_text('fn setup() -> (bool, String) { (true, "ok".into()) }\n')
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json
 from meerschaum.api.dash import plugins as mp
-plugins = mp.get_installed_plugins(check_packages=False)
+from meerschaum.api.dash._plugins import _lifecycle
+plugins = _lifecycle.get_installed_plugins(check_packages=False)
 table = mp.build_installed_plugins_table(plugins, admin=True).to_plotly_json()
 print('JSON:' + json.dumps(table, default=lambda o: o.to_plotly_json()))
 '''))
@@ -402,16 +401,17 @@ def test_the_portable_save_path_keeps_the_same_rules(plugins_dir):
     package.mkdir()
     (package / '__init__.py').write_text('VALUE = 1\n')
     (package / 'link').symlink_to(root.parent, target_is_directory=True)
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json, os, pathlib
-from meerschaum.api.dash import plugin_sources as ps
+from meerschaum.api.dash._plugins import _fs, _lifecycle
+from meerschaum.api.dash._plugins._policy import rights_for_session
 plugins = pathlib.Path(os.environ['MRSM_PLUGINS_DIR'])
-digest = ps.source_digest(b'VALUE = 1\\n')
+digest = _fs.source_digest(b'VALUE = 1\\n')
 def attempt(parts, data, expected):
     try:
-        ps._replace_checked_path(plugins, parts, data, expected)
+        _fs.replace_checked_path(plugins, parts, data, expected)
         return 'ok'
-    except ps.SourceChanged:
+    except _fs.SourceChanged:
         return 'changed'
     except (OSError, ValueError) as e:
         return type(e).__name__ + ': ' + str(e)

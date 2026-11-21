@@ -12,7 +12,7 @@ console session or an API token unless `auth=False`, with browsers sent to the l
 import json
 import os
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PLUGIN = '''
 import pathlib

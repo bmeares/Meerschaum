@@ -142,24 +142,6 @@ def build_pipe_sysargs(
     return args, ''
 
 
-def mint_bearer(username: Optional[str], minutes: int = 5) -> Optional[str]:
-    """
-    Return a short-lived bearer token for `username`, signed with the API secret the server
-    shares (`None` without a username, e.g. `--no-auth`).
-    """
-    from meerschaum.api.host._server_client import mint_user_bearer
-    return mint_user_bearer(username, minutes=minutes)
-
-
-def server_url() -> Optional[str]:
-    """
-    Return the URL of the Rust server that runs this host (`server_url` in the host
-    configuration), if it gave one.
-    """
-    from meerschaum.api.host._server_client import server_url as _server_url
-    return _server_url()
-
-
 def _fetch_json(path: str, username: Optional[str] = None, timeout: float = 5.0) -> Any:
     """
     `GET` `path` of the server (with a bearer for `username` if there is one) and return its JSON.
@@ -213,21 +195,6 @@ def omit_flags() -> frozenset:
     return frozenset(get_policy().get('omit_flags') or [])
 
 
-def _error_message(error: Any) -> str:
-    """
-    The message of an error response: the v5 routes' `{"success": false, "message": ...}`, or
-    FastAPI's `{"detail": ...}`, or the HTTP reason.
-    """
-    from meerschaum.api.host._server_client import ServerHTTPError, extract_error_message
-    if isinstance(error, ServerHTTPError):
-        return error.message
-    try:
-        raw = error.read()
-    except Exception:
-        return str(getattr(error, 'reason', error))
-    return extract_error_message(raw, fallback=str(getattr(error, 'reason', error)))
-
-
 def post_execute(sysargs: List[str], username: Optional[str], metadata=None) -> Tuple[Dict[str, Any], str]:
     """
     `POST /execute` to the server. Return `(response, message)`; `response` is
@@ -237,7 +204,7 @@ def post_execute(sysargs: List[str], username: Optional[str], metadata=None) -> 
     fallback).
     """
     from meerschaum.api.host._server_client import (
-        AnonymousAuth, ServerHTTPError, get_client,
+        ServerAuthError, ServerHTTPError, UserBearerAuth, get_client,
     )
     client = get_client()
     if not client.available:
@@ -245,13 +212,6 @@ def post_execute(sysargs: List[str], username: Optional[str], metadata=None) -> 
             'success': False,
             'msg': "The console has no server to run actions through (`server_url` is not set).",
         }, ''
-    headers: Dict[str, str] = {}
-    try:
-        token = mint_bearer(username)
-    except Exception as e:
-        return {'success': False, 'msg': f"Could not authorize the action: {e}"}, ''
-    if token:
-        headers['Authorization'] = f"Bearer {token}"
     payload = {
         'sysargs': list(sysargs),
         **{
@@ -263,11 +223,12 @@ def post_execute(sysargs: List[str], username: Optional[str], metadata=None) -> 
         body = client.request_json(
             'POST',
             '/execute',
-            auth=AnonymousAuth(),
-            headers=headers,
+            auth=UserBearerAuth(username),
             json_body=payload,
             timeout=30,
         )
+    except ServerAuthError as e:
+        return {'success': False, 'msg': f"Could not authorize the action: {e}"}, ''
     except ServerHTTPError as e:
         if e.status in (404, 405, 501):
             return {
@@ -315,16 +276,6 @@ def run_action(sysargs: List[str], username: Optional[str], metadata=None) -> Di
         'job': job,
         'stream': stream,
     }
-
-
-def _from_envelope(body: Any) -> Any:
-    """
-    Read a v5 route's `{"success", "message", ...}` the way the callers do: its one data field
-    (`/execute/runs` -> the list of runs), or `[success, message]` when it has none
-    (`/execute/validate`, `.../retain`). Other bodies (older servers) are returned as they are.
-    """
-    from meerschaum.api.host._server_client import decode_envelope
-    return decode_envelope(body)
 
 
 def execution_request(path, username, method='GET', body=None):

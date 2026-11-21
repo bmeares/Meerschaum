@@ -15,6 +15,8 @@ import tempfile
 import textwrap
 import subprocess
 
+from typing import Optional
+
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -67,14 +69,15 @@ STARLETTE_HTTPX_WARNING_FILTER = 'ignore:Using `httpx` with `starlette.testclien
 
 
 #: Python for a test's code: `fake_viewers(...)` makes every console access check (the
-#: `meerschaum.api.dash.access` viewer of a session) see the viewer named for that session's ID:
+#: `meerschaum.api.dash.viewer.resolve_viewer` of a session, which `access` and `sessions` ask)
+#: see the viewer named for that session's ID:
 #: `fake_viewers({'admin': {'admin': True}, 'bob': {'role': 'viewer'}}, default={'admin': True})`
 #: (each value: `access.make_viewer()` keywords, plus an optional `username`, else the session ID).
 #: Sessions named nowhere (and no default) are anonymous.
 FAKE_VIEWERS = '''
 def fake_viewers(viewers=None, default=None):
-    from meerschaum.api.dash import access as _access
-    def _get_viewer(session_data=None, session_id=None, **kwargs):
+    from meerschaum.api.dash import access as _access, viewer as _viewer_model
+    def _resolve_viewer(session_data=None, session_id=None, **kwargs):
         if session_id is None and isinstance(session_data, dict):
             session_id = session_data.get('session-id')
         spec = (viewers or {}).get(session_id, default)
@@ -83,25 +86,22 @@ def fake_viewers(viewers=None, default=None):
         spec = dict(spec)
         username = spec.pop('username', session_id)
         return _access.make_viewer(username, **spec)
-    _access.get_viewer = _get_viewer
-    return _get_viewer
+    _viewer_model.resolve_viewer = _access.resolve_viewer = _resolve_viewer
+    return _resolve_viewer
 '''
 
 
 def extract_json(result, prefix: str = 'JSON:') -> dict:
     """Assert subprocess `result` exited 0 and parse the last `JSON:` line from stdout."""
-    assert result.returncode == 0, result.stderr[-6000:]
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
     lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
     assert lines, f"No {prefix!r} line in stdout:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}"
     return json.loads(lines[-1][len(prefix):])
 
 
-_json = extract_json
-
-
 def check(result) -> str:
     """Assert subprocess `result` exited 0 and return its stdout."""
-    assert result.returncode == 0, result.stderr[-6000:]
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
     return result.stdout
 
 
@@ -184,19 +184,19 @@ def sign_in(username, user_type=None, role=None, permissions=None, teams=None, s
 
 #: Python to put before a test's code: `as_viewer(username='tester', admin=True, role=None,
 #: permissions=None, teams=None)` makes every console check see that viewer (the access model's
-#: one seam, `meerschaum.api.dash.access.get_viewer`) without a user or a session, for tests of
+#: one seam, `meerschaum.api.dash.viewer.resolve_viewer`) without a user or a session, for tests of
 #: something other than who may do what; `as_viewer(None)` is an anonymous visitor. `sign_in`
 #: signs in a real user instead.
 AS_VIEWER = '''
 def as_viewer(username='tester', admin=True, role=None, permissions=None, teams=None):
-    from meerschaum.api.dash import access as _access
+    from meerschaum.api.dash import access as _access, viewer as _viewer_model
     if username is None:
         _viewer = _access.ANONYMOUS
     else:
         _viewer = _access.make_viewer(
             username, admin=admin, role=role, permissions=permissions, teams=teams,
         )
-    _access.get_viewer = lambda *args, **kwargs: _viewer
+    _viewer_model.resolve_viewer = _access.resolve_viewer = lambda *args, **kwargs: _viewer
     return _viewer
 '''
 
@@ -238,20 +238,3 @@ def ensure_api_host_deps() -> bool:
     if _DEPS_SKIP_REASON is not None:
         pytest.skip(_DEPS_SKIP_REASON)
     return True
-
-
-@pytest.fixture(scope='module')
-def sandbox():
-    """A temporary root and plugins directory (uses the process-cached dependency probe)."""
-    ensure_api_host_deps()
-    scratch = pathlib.Path.home() / '.cache' / 'mrsm-api-host-tests'
-    scratch.mkdir(parents=True, exist_ok=True)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-', dir=scratch))
-    plugins = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-apihost-plugins-', dir=scratch))
-    import shutil
-    try:
-        yield root, plugins
-    finally:
-        ### Also when the check skips or fails: the directories are never left behind.
-        shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(plugins, ignore_errors=True)

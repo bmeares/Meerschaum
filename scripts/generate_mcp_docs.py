@@ -7,7 +7,7 @@ Generate `docs/zensical/reference/mcp/tools.md` from the MCP registry.
 
 The registry is the Rust server's (`crates/meerschaum-server/src/mcp/`: v4's generated
 `registry.json` plus v5's additions in `v5.rs`), so the page is rendered there, by the
-`mcp_docs` test of `meerschaum-server`. Run this after adding or changing a tool, resource, or
+`mcp_docs` module of `meerschaum-server`'s `mcp_suite` test binary. Run this after adding or changing a tool, resource, or
 prompt so the published reference cannot drift from the code:
 
     python scripts/generate_mcp_docs.py
@@ -36,8 +36,8 @@ def main(argv) -> int:
     if not check:
         env['MRSM_UPDATE_MCP_DOCS'] = '1'
     command = [
-        cargo, 'test', '-q', '-p', 'meerschaum-server', '--test', 'mcp_docs',
-        '--', 'the_tool_reference_page_is_current',
+        cargo, 'test', '-q', '-p', 'meerschaum-server', '--test', 'mcp_suite',
+        '--', '--exact', 'mcp_docs::the_tool_reference_page_is_current',
     ]
     result = subprocess.run(command, cwd=REPO_ROOT, env=env)
     if result.returncode != 0:

@@ -88,8 +88,8 @@ def download_job_logs(n_clicks, session_store_data):
         raise PreventUpdate
 
     ### Job logs may contain connector URIs and query text: `logs:read`, on a job the viewer sees.
-    from meerschaum.api.dash.access import get_viewer
-    if not get_viewer(session_store_data).can('logs:read'):
+    from meerschaum.api.dash.access import resolve_viewer
+    if not resolve_viewer(session_store_data).can('logs:read'):
         raise PreventUpdate
 
     ctx = dash.callback_context.triggered
@@ -178,9 +178,9 @@ def manage_job_button_click(
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     job_name = component_dict['index']
     manage_job_action = component_dict['action']
-    from meerschaum.api.dash.access import get_viewer
+    from meerschaum.api.dash.access import resolve_viewer
     from meerschaum.api.dash.jobs import job_rights
-    if not job_rights(get_viewer(session_data)).get(manage_job_action, False):
+    if not job_rights(resolve_viewer(session_data)).get(manage_job_action, False):
         username = get_username_from_session(session_id)
         return (
             alert_from_success_tuple((False, f"User '{username}' may not {manage_job_action} jobs.")),
@@ -283,9 +283,9 @@ def job_delete_modal(
 
     ### Confirm button: actually delete the job (`jobs:delete`).
     session_id = (session_data or {}).get('session-id', None)
-    from meerschaum.api.dash.access import get_viewer
+    from meerschaum.api.dash.access import resolve_viewer
     from meerschaum.api.dash.jobs import job_rights
-    if not job_rights(get_viewer(session_data)).get('delete', False):
+    if not job_rights(resolve_viewer(session_data)).get('delete', False):
         username = get_username_from_session(session_id)
         return True, alert_from_success_tuple(
             (False, f"User '{username}' may not delete jobs.")
@@ -487,8 +487,8 @@ def render_job_page_from_url(
 
 
 def _viewer_of(session_id: Optional[str]):
-    from meerschaum.api.dash.access import get_viewer
-    return get_viewer(session_id=(str(session_id) if session_id else None))
+    from meerschaum.api.dash.access import resolve_viewer
+    return resolve_viewer(session_id=(str(session_id) if session_id else None))
 
 
 def _signed_in(session_id: Optional[str]) -> bool:
@@ -1139,7 +1139,8 @@ def _policy_answer(sysargs: List[str], username: Optional[str]) -> Tuple[bool, s
     the job must then carry `mrsm_team_execution`, so that it runs only in the team's sandbox).
     """
     from meerschaum.api.dash import execute as _execute
-    if not _execute.server_url():
+    from meerschaum.api.host._server_client import get_client
+    if not get_client().available:
         return False, "The console has no server to check this command with.", False
     try:
         allowed = _execute.execution_request('/execute/validate', username, method='POST',
@@ -1187,8 +1188,8 @@ def create_job_from_form(
     try:
         ### The job is the session user's, in their primary team (AC9).
         from meerschaum.jobs import ownership_properties
-        from meerschaum.api.dash.access import get_viewer
-        viewer = get_viewer(session_id=session_id)
+        from meerschaum.api.dash.access import resolve_viewer
+        viewer = resolve_viewer(session_id=session_id)
         properties = ownership_properties(
             None if viewer.no_auth else viewer.username,
             None if viewer.no_auth else viewer.primary_team,
@@ -1302,8 +1303,8 @@ def job_logs_outputs(trigger_id, triggered_value, is_open, meta, session_store_d
         return no_update, no_update, None, None, True
 
     ### Job logs may contain connector URIs and query text: `logs:read`, on a job the viewer sees.
-    from meerschaum.api.dash.access import get_viewer
-    if not get_viewer(session_store_data).can('logs:read'):
+    from meerschaum.api.dash.access import resolve_viewer
+    if not resolve_viewer(session_store_data).can('logs:read'):
         raise PreventUpdate
     session_id = (session_store_data or {}).get('session-id')
 

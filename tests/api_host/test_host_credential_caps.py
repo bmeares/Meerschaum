@@ -6,9 +6,8 @@ keeps no more than the token holds now. The rule is one implementation
 (`meerschaum.core.access.credential_permissions`, the core's `credential_permissions`).
 """
 
-import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin, extract_json
 
 PLUGIN = '''
 import fastapi
@@ -46,12 +45,6 @@ def status(path, credential):
 """
 
 
-def _json(result) -> dict:
-    lines = [line for line in result.stdout.splitlines() if line.startswith('JSON:')]
-    assert lines, result.stdout + result.stderr
-    return json.loads(lines[-1][len('JSON:'):])
-
-
 def test_a_deleted_owners_api_key_is_refused(sandbox):
     root, plugins = sandbox
     write_plugin(plugins, 'caps_plugin', PLUGIN)
@@ -67,7 +60,7 @@ assert instance.delete_user(owner)[0]
 out['deleted'] = status('/caps/read', key)
 print('JSON:' + json.dumps(out))
 """)
-    assert _json(result) == {'present': 200, 'deleted': 401}
+    assert extract_json(result) == {'present': 200, 'deleted': 401}
 
 
 def test_a_demoted_administrators_jwt_keeps_only_the_new_role(sandbox):
@@ -85,7 +78,7 @@ out['viewer_write'] = status('/caps/write', jwt)
 out['viewer_read'] = status('/caps/read', jwt)
 print('JSON:' + json.dumps(out))
 """)
-    assert _json(result) == {'admin_write': 200, 'viewer_write': 403, 'viewer_read': 200}
+    assert extract_json(result) == {'admin_write': 200, 'viewer_write': 403, 'viewer_read': 200}
 
 
 def test_a_token_jwt_keeps_no_more_than_its_token(sandbox):
@@ -109,7 +102,7 @@ out['after_write'] = status('/caps/write', jwt)
 out['after_read'] = status('/caps/read', jwt)
 print('JSON:' + json.dumps(out))
 """)
-    assert _json(result) == {'before': 200, 'after_write': 403, 'after_read': 200}
+    assert extract_json(result) == {'before': 200, 'after_write': 403, 'after_read': 200}
 
 
 def test_credential_fingerprints_match_the_rust_server(sandbox):
@@ -121,7 +114,7 @@ import meerschaum.api._oauth2 as oauth2
 oauth2.SECRET = b'0123456789abcdef'
 print('JSON:' + json.dumps(oauth2.credential_fingerprint('$pbkdf2-sha256$1$c2FsdA$aGFzaA')))
 """)
-    assert _json(result) == 'yTngG9oGz5X69a6RX22jLw'
+    assert extract_json(result) == 'yTngG9oGz5X69a6RX22jLw'
 
 
 def test_user_jwts_end_with_a_password_change_or_a_reregistered_name(sandbox):
@@ -155,7 +148,7 @@ assert instance.register_user(User(name, 'third-password', instance=instance))[0
 out['after_reregistration'] = status('/caps/read', fresh)
 print('JSON:' + json.dumps(out))
 """)
-    assert _json(result) == {
+    assert extract_json(result) == {
         'bound': 200,
         'claimless': 401,
         'after_password_change': 401,
@@ -183,12 +176,12 @@ set_session(legacy, {'username': name, 'credential': None})
 out = {'bound': get_username_from_session(bound), 'legacy': get_username_from_session(legacy)}
 assert instance.delete_user(User(name, instance=instance))[0]
 assert instance.register_user(User(name, 'second-password', instance=instance))[0]
-from meerschaum.api.dash import sessions
-sessions._credential_checks.clear()
+from meerschaum.api.dash import session_store
+session_store._credential_checks.clear()
 out['after_reregistration'] = get_username_from_session(bound)
 print('JSON:' + json.dumps(out))
 """)
-    assert _json(result) == {'bound': 'caps-console', 'legacy': None, 'after_reregistration': None}
+    assert extract_json(result) == {'bound': 'caps-console', 'legacy': None, 'after_reregistration': None}
 
 
 def test_a_username_that_looks_like_a_token_id_stays_a_user(sandbox):
@@ -235,7 +228,7 @@ out = {
 }
 print('JSON:' + json.dumps(out))
 """)
-    out = _json(result)
+    out = extract_json(result)
     assert out['twin'][0] == 200 and out['twin'][1]['kind'] == 'User', out
     assert out['token'][0] == 200 and out['token'][1]['kind'] == 'Token', out
     assert out['loner'][0] == 200 and out['loner'][1]['kind'] == 'User', out

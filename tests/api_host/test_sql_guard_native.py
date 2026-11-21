@@ -1,13 +1,7 @@
 """Console SQL authorization uses server parsing, physical aliases and the actual source."""
 
-import json
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
-
-
-def _json(result):
-    assert result.returncode == 0, result.stderr[-7000:]
-    return json.loads(next(line[5:] for line in result.stdout.splitlines() if line.startswith('JSON:')))
+from tests.api_host._helpers import run_python, extract_json
 
 
 SETUP = '''
@@ -23,7 +17,7 @@ viewer = access.make_viewer('guard-reader', role='editor', teams={'data': 'membe
 
 def test_physical_sqlite_targets_and_preview_use_the_shared_guard(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SETUP + '''
+    out = extract_json(run_python(root, plugins, SETUP + '''
 from meerschaum.api.dash import pipe_writes
 from meerschaum.utils.sql import truncate_item_name
 logical = 'hidden_' + 'segment_' * 150
@@ -58,7 +52,7 @@ assert hidden.delete()[0]
 
 def test_postgresql_identifier_clipping_is_shared_and_offline(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SETUP + '''
+    out = extract_json(run_python(root, plugins, SETUP + '''
 pg = mrsm.get_connector('sql', 'guardoffline', flavor='postgresql', host='127.0.0.1',
                         port=1, database='guard', username='guard', password='guard',
                         schema='public')
@@ -85,7 +79,7 @@ print('JSON:' + json.dumps({
 
 def test_definitions_check_the_source_and_its_instance_policy(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SETUP + '''
+    out = extract_json(run_python(root, plugins, SETUP + '''
 from meerschaum.api import permissions_config
 import os
 source = mrsm.get_connector('sql', 'guardsource', flavor='sqlite',
@@ -121,7 +115,7 @@ assert secret.delete()[0] and public.delete()[0]
 
 def test_admin_object_rights_do_not_replace_the_define_sql_scope(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SETUP + '''
+    out = extract_json(run_python(root, plugins, SETUP + '''
 from types import SimpleNamespace
 from meerschaum.api.dash import new_pipe, pipe_writes
 narrow = SimpleNamespace(no_auth=False, is_admin=True, can=lambda permission: False)

@@ -1,10 +1,5 @@
 """Pipeline workspace selection, draft, and approval contracts without browser timing."""
-import json
-from tests.api_host._helpers import run_python, sandbox, FAKE_VIEWERS  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stderr[-6000:]
+from tests.api_host._helpers import run_python, FAKE_VIEWERS, check
 
 
 def test_selection_shell_is_lazy_and_query_resolution_is_display_only(sandbox):

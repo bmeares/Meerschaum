@@ -124,7 +124,7 @@ def referenced_refs(pipe: mrsm.Pipe, parameters: Dict[str, Any]) -> List[str]:
         except Exception:
             continue
         if other is not None:
-            refs.append(access._ref(other.instance_keys, other.connector_keys, other.metric_key, other.location_key))
+            refs.append(access.pipe_ref(other.instance_keys, other.connector_keys, other.metric_key, other.location_key))
     return list(dict.fromkeys(refs))
 
 

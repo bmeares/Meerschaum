@@ -4,19 +4,21 @@
 
 """
 Focused tests for:
-1. `UrllibTransport` & `MainServerClient` hardening (WS-7b):
+1. `UrllibTransport` & `MainServerClient` hardening:
    - bypasses `HTTP_PROXY` / `HTTPS_PROXY` (`ProxyHandler({})`),
    - refuses 3xx redirects (`_NoRedirect`),
    - validates origin & root-relative paths,
    - enforces response byte bounds (`ResponseTooLargeError`),
    - strictly separates explicit auth modes (`SessionCookieAuth` vs `InternalHostAuth` vs
      `SessionBoundBearerAuth` vs `UserBearerAuth`).
-2. `mrsm-team` (`acting_team`) consistency across Connectors, Plugins, and Performance callbacks
-   and page loads (WS-7a), plus immediate `access.forget()` -> `host/_team_scope` invalidation
-   and zero `sessions` -> `access` import cycle.
+2. `mrsm-team` (`acting_team`) consistency across Connectors, Plugins, Performance and Users
+   callbacks and page loads, plus immediate `access.forget()` -> `host/_team_scope` invalidation,
+   and session rights that do not depend on import order.
 """
 
 from __future__ import annotations
+
+import pytest
 
 from tests.api_host._helpers import SIGN_IN, extract_json, run_python
 
@@ -173,7 +175,8 @@ from meerschaum.api import get_api_connector
 from meerschaum.connectors import get_connector
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
-from meerschaum.api.dash import access, components, performance, plugin_sources, team_setup
+from meerschaum.api.dash import access, components, performance, team_setup
+from meerschaum.api.dash._plugins._policy import rights_for_session
 from meerschaum.api.dash.pages import connectors as connectors_page
 from meerschaum.api.dash.callbacks import connectors_page as connectors_cb
 from meerschaum.api.dash.callbacks import plugins as plugins_cb
@@ -233,9 +236,10 @@ with components.console_nav_context('/dash/connectors', admin_session['session-i
 with components.console_nav_context('/dash/plugins', admin_session['session-id'], acting_team='act-alpha'):
     alert_act, _, _ = plugins_cb.run_plugin_action('install', 'p_beta', admin_session)
     assert 'administrators' in str(alert_act).lower() or 'team' in str(alert_act).lower() or 'not' in str(alert_act).lower()
-    assert plugin_sources.may_read_source('repository', admin_session, 'p_alpha') is True
-    assert plugin_sources.may_read_source('repository', admin_session, 'p_beta') is False
-    assert plugin_sources.authoring_refusal(admin_session) is not None
+    rights = rights_for_session(admin_session)
+    assert rights.can_read_source('repository', 'p_alpha') is True
+    assert rights.can_read_source('repository', 'p_beta') is False
+    assert rights.authoring_refusal() is not None
 
 # 3. Performance: metrics visibility ceiling narrows to `act-alpha` (refuses `ref_beta`).
 with components.console_nav_context('/dash/performance', admin_session['session-id'], acting_team='act-alpha'):
@@ -283,52 +287,165 @@ print('JSON:' + json.dumps({
     }
 
 
-def test_sessions_never_imports_access_and_works_standalone(sandbox):
+@pytest.mark.parametrize('first', ['sessions', 'access'])
+def test_session_rights_do_not_depend_on_which_module_was_imported_first(sandbox, first):
+    """
+    `sessions.is_session_authenticated` / `session_is_admin` ask the one viewer computation
+    (`meerschaum.api.dash.viewer`): an isolated team's member never holds `actions:execute`
+    (their role's included), whether or not `access` was ever imported, and importing `sessions`
+    alone never imports `access`.
+    """
     root, plugins = sandbox
-    out = extract_json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, f'''
 import json, sys, uuid
+import meerschaum as mrsm
 from meerschaum.core import User
 from meerschaum.api import get_api_connector
+FIRST = {first!r}
+if FIRST == 'access':
+    from meerschaum.api.dash import access
 import meerschaum.api.dash.sessions as sessions
+access_imported = 'meerschaum.api.dash.access' in sys.modules
 
-assert 'meerschaum.api.dash.access' not in sys.modules
 conn = get_api_connector()
-assert conn.register_user(User('sa-admin', 'correct-horse-9', type='admin', instance=conn))[0]
-assert conn.register_user(User('sa-viewer', 'correct-horse-9', instance=conn))[0]
-sid_admin = str(uuid.uuid4())
-sid_viewer = str(uuid.uuid4())
-assert sessions.set_session(sid_admin, {'username': 'sa-admin'})
-assert sessions.set_session(sid_viewer, {'username': 'sa-viewer'})
-
-# Standalone (before `access` is imported):
-standalone = {
-    'admin_is_admin': sessions.session_is_admin(sid_admin),
-    'viewer_is_admin': sessions.session_is_admin(sid_viewer),
-    'admin_auth': sessions.is_session_authenticated(sid_admin),
-    'viewer_auth': sessions.is_session_authenticated(sid_viewer),
-    'access_imported': 'meerschaum.api.dash.access' in sys.modules,
-}
-
-# After importing `access`, the resolver hook is registered:
-from meerschaum.api.dash import access
-after = {
-    'admin_is_admin': sessions.session_is_admin(sid_admin),
-    'viewer_is_admin': sessions.session_is_admin(sid_viewer),
-    'admin_auth': sessions.is_session_authenticated(sid_admin),
-    'viewer_auth': sessions.is_session_authenticated(sid_viewer),
-}
-print('JSON:' + json.dumps({'standalone': standalone, 'after': after}))
+team = mrsm.Team('order-wall-' + FIRST, instance=conn, attributes={{'isolated': True}})
+assert team.register()[0]
+for name, user_type in [('admin', 'admin'), ('operator', None), ('walled', None)]:
+    user = User(name + '-' + FIRST, 'correct-horse-9', type=user_type, instance=conn)
+    assert conn.register_user(user)[0]
+    if user_type is None:
+        assert conn.set_user_attributes(User(user.username, instance=conn), {{'role': 'operator'}})[0]
+assert team.add_members('walled-' + FIRST, role='member')[0]
+out = {{}}
+for name in ('admin', 'operator', 'walled'):
+    sid = str(uuid.uuid4())
+    assert sessions.set_session(sid, {{'username': name + '-' + FIRST}})
+    out[name] = [sessions.is_session_authenticated(sid), sessions.session_is_admin(sid)]
+out['access_imported'] = access_imported
+print('JSON:' + json.dumps(out))
 '''))
-    assert out['standalone'] == {
-        'admin_is_admin': True,
-        'viewer_is_admin': False,
-        'admin_auth': True,
-        'viewer_auth': False,
-        'access_imported': False,
+    assert out == {
+        'admin': [True, True],
+        'operator': [True, False],
+        'walled': [False, False],
+        'access_imported': first == 'access',
     }
-    assert out['after'] == {
-        'admin_is_admin': True,
-        'viewer_is_admin': False,
-        'admin_auth': True,
-        'viewer_auth': False,
+
+
+def test_credentials_come_only_from_typed_auth_modes(sandbox):
+    """
+    A caller's `headers=` may not carry credential headers; `post_execute` sends the user's
+    bearer through `UserBearerAuth` (a minting failure is "Could not authorize the action"); a
+    plugin page mints its session-bound bearer once and uses it for both of its requests.
+    """
+    root, plugins = sandbox
+    out = extract_json(run_python(root, plugins, '''
+import json, uuid
+from unittest import mock
+import flask
+from meerschaum.api.host import _server_client as server_client
+from meerschaum.api.host._server_client import AnonymousAuth, InMemoryTransport, use_transport
+from meerschaum.api.dash import execute, sessions, viewer as viewer_model
+from meerschaum.api.dash._extension_pages import remote_layout
+
+out = {}
+with use_transport(InMemoryTransport(responses=[(200, {})] * 4)) as client:
+    for header in ('Authorization', 'cookie', 'X-Mrsm-Host-Token', 'x-mrsm-user'):
+        try:
+            client.request('GET', '/version', auth=AnonymousAuth(), headers={header: 'x'})
+            out[header] = 'sent'
+        except ValueError:
+            out[header] = 'refused'
+
+answer = {'success': True, 'message': 'Started.', 'job': 'execute-a', 'stream': None}
+transport = InMemoryTransport(responses=[(200, answer)])
+with use_transport(transport), \\
+     mock.patch.object(server_client, 'mint_user_bearer', return_value='minted-token'):
+    out['run'] = execute.run_action(['show', 'version'], 'exec-user')['job']
+out['bearer'] = transport.requests[0].headers.get('authorization')
+with use_transport(InMemoryTransport(responses=[])), \\
+     mock.patch.object(server_client, 'mint_user_bearer', side_effect=RuntimeError('no secret')):
+    out['refused'] = execute.run_action(['show', 'version'], 'exec-user')['msg']
+
+session_id = str(uuid.uuid4())
+mints = []
+def mint(*args, **kwargs):
+    mints.append(kwargs.get('scopes'))
+    return 'page-token'
+catalog = {'plugins': {'p': {'metadata': {'registry': {'pages': {
+    'state': 'complete', 'entries': [{'selector': {'kind': 'page', 'path': 'p/page'}}],
+}}}}}}
+transport = InMemoryTransport(responses=[(200, {'confined': True}), (200, catalog)])
+app = flask.Flask('pages')
+with app.test_request_context('/dash/p/page', headers={'cookie': f'mrsm-session-id={session_id}'}), \\
+     use_transport(transport), \\
+     mock.patch.object(server_client, 'mint_session_bound_bearer', side_effect=mint), \\
+     mock.patch.object(sessions, 'get_username_from_session', return_value='page-user'), \\
+     mock.patch.object(viewer_model, 'viewer_for',
+                       return_value=viewer_model.make_viewer('page-user', role='viewer')):
+    handled, layout = remote_layout('/dash/p/page')
+out['page'] = [handled, type(layout).__name__]
+out['mints'] = len(mints)
+out['page_bearers'] = [request.headers.get('authorization') for request in transport.requests]
+print('JSON:' + json.dumps(out))
+'''))
+    assert out == {
+        'Authorization': 'refused',
+        'cookie': 'refused',
+        'X-Mrsm-Host-Token': 'refused',
+        'x-mrsm-user': 'refused',
+        'run': 'execute-a',
+        'bearer': 'Bearer minted-token',
+        'refused': 'Could not authorize the action: no secret',
+        'page': [True, 'Iframe'],
+        'mints': 1,
+        'page_bearers': ['Bearer page-token', 'Bearer page-token'],
+    }
+
+
+def test_users_page_list_and_changes_follow_the_acting_team(sandbox):
+    """
+    Like Pipes and Connectors, Users & Teams is the acting team's view: an administrator acting
+    as a team sees that team's users and may not add users (no dialog, a refused submit) until
+    they switch back to All teams, where both work.
+    """
+    root, plugins = sandbox
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
+import json
+from dash.exceptions import PreventUpdate
+from dash._callback_context import context_value
+from dash._utils import AttributeDict
+from meerschaum.api.dash import build_dash_app
+build_dash_app()
+from meerschaum.api.dash import components
+from meerschaum.api.dash.callbacks import users as users_cb
+
+admin = sign_in('ua-admin', user_type='admin')
+sign_in('ua-member', teams={'ua-team': 'member'})
+sign_in('ua-outsider', teams={'ua-other': 'member'})
+context_value.set(AttributeDict(**{'triggered_inputs': [{'prop_id': 'users-add-button.n_clicks', 'value': 1}]}))
+
+def view(acting_team, username):
+    with components.console_nav_context('/dash/users', admin['session-id'], acting_team=acting_team):
+        listed = str(users_cb.render_users_page('/dash/users', None, 1, None, 'users', admin)[0])
+        try:
+            users_cb.open_users_dialog(1, [], None, None, None, None, admin)
+            dialog = True
+        except PreventUpdate:
+            dialog = False
+        added = users_cb.submit_add_user(
+            1, username, 'correct-horse-7', 'correct-horse-7', None, None, 'viewer', [], 0, admin,
+        )
+    return {
+        'member': 'ua-member' in listed,
+        'outsider': 'ua-outsider' in listed,
+        'dialog': dialog,
+        'added': 'Added' in str(added[2]),
+    }
+
+print('JSON:' + json.dumps({'acting': view('ua-team', 'ua-new-1'), 'all': view(None, 'ua-new-2')}))
+'''))
+    assert out == {
+        'acting': {'member': True, 'outsider': False, 'dialog': False, 'added': False},
+        'all': {'member': True, 'outsider': True, 'dialog': True, 'added': True},
     }

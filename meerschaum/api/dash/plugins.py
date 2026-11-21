@@ -11,110 +11,20 @@ under `meerschaum.api.dash._plugins`.
 
 from __future__ import annotations
 
-from meerschaum.utils.typing import List, Tuple, SuccessTuple, Optional, WebState, Dict, Any
+from meerschaum.utils.typing import List, Tuple, SuccessTuple, Optional, Dict, Any
 from meerschaum.utils.packages import import_dcc, import_html
 from meerschaum.api import debug, get_api_connector, endpoints, CHECK_UPDATE
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 from meerschaum.core import Plugin
-import meerschaum.api.dash.access as access
 from meerschaum.api.dash.components import build_cards_grid, build_icon, alert_from_success_tuple
 from meerschaum.api.dash.plugin_sources import build_source_browser, language_logo
 from meerschaum.api.dash.plugin_publish import build_publish_dialog
-from meerschaum.api.dash._plugins import _fs, _lifecycle, _policy
+from meerschaum.api.dash._plugins import _fs, _lifecycle
+from meerschaum.api.dash._plugins._policy import PluginRights, is_plugin_owner
 
 PLUGINS_PER_PAGE: int = 12
 PLUGINS_GRID_COLUMNS: int = 3
-
-#: Re-exported Dash-free domain constants & policy/lifecycle helpers.
-THIS_SERVER_REPOSITORY: str = _lifecycle.THIS_SERVER_REPOSITORY
-THIS_SERVER_TOKEN_MINUTES: int = _lifecycle.THIS_SERVER_TOKEN_MINUTES
-NEW_PLUGIN_PLACEHOLDER: str = _lifecycle.NEW_PLUGIN_PLACEHOLDER
-REMOTE_VERSION_SECONDS: float = _lifecycle.REMOTE_VERSION_SECONDS
-REMOTE_VERSION_TIMEOUT_SECONDS: float = _lifecycle.REMOTE_VERSION_TIMEOUT_SECONDS
-REMOTE_VERSION_WORKERS: int = _lifecycle.REMOTE_VERSION_WORKERS
-_remote_versions_in_flight = _lifecycle._remote_versions_in_flight
-
-MANAGE_REFUSAL: str = _policy.MANAGE_REFUSAL
-NO_WRITING_TEAM: str = _policy.NO_WRITING_TEAM
-
-foreign_plugin_message = _policy.foreign_plugin_message
-_manages_everything = _policy.manages_everything
-can_see_plugin = _policy.can_see_plugin
-visible_plugin_names = _policy.visible_plugin_names
-team_plugins = _policy.team_plugins
-may_manage_plugins = _policy.may_manage_plugins
-may_manage_plugin = _policy.may_manage_plugin
-manageable_plugin_names = _policy.manageable_plugin_names
-may_install_plugin = _policy.may_install_plugin
-plugin_action_refusal = _policy.plugin_action_refusal
-
-is_safe_plugin_name = _fs.is_safe_plugin_name
-_discover_plugin_files = _fs.discover_plugin_files
-
-writing_team = _lifecycle.writing_team
-claim_plugin = _lifecycle.claim_plugin
-release_plugin = _lifecycle.release_plugin
-describe_provides = _lifecycle.describe_provides
-get_installed_plugins = _lifecycle.get_installed_plugins
-plugin_kind_label = _lifecycle.plugin_kind_label
-packages_label = _lifecycle.packages_label
-remote_plugin_version = _lifecycle.remote_plugin_version
-forget_remote_versions = _lifecycle.forget_remote_versions
-is_newer_version = _lifecycle.is_newer_version
-plugins_read_token = _lifecycle.plugins_read_token
-this_server_env = _lifecycle.this_server_env
-start_plugin_run = _lifecycle.start_plugin_run
-plugin_run_record = _lifecycle.plugin_run_record
-reconcile_plugin_run = _lifecycle.reconcile_plugin_run
-new_plugin_choices = _lifecycle.new_plugin_choices
-plugin_url = _lifecycle.plugin_url
-create_new_plugin = _lifecycle.create_new_plugin
-update_plugin_description = _lifecycle.update_plugin_description
-
-
-def plugin_update_versions(names: List[str], viewer: Any = None) -> Dict[str, str]:
-    """Check origin repositories for newer plugin versions (honouring local test patches)."""
-    custom_fetcher = (
-        remote_plugin_version
-        if remote_plugin_version is not _lifecycle.remote_plugin_version
-        else None
-    )
-    return _lifecycle.plugin_update_versions(
-        names,
-        viewer=viewer,
-        get_installed=get_installed_plugins,
-        fetch_remote_version=custom_fetcher,
-        timeout=REMOTE_VERSION_TIMEOUT_SECONDS,
-    )
-
-
-def plugin_action_sysargs(
-    action: str,
-    name: str,
-    origin: Optional[str] = None,
-    username: Optional[str] = None,
-) -> Tuple[Optional[List[str]], Dict[str, str], str]:
-    """Return `(sysargs, env, message)` for a plugin action (honouring `this_server_env` patches)."""
-    return _lifecycle.plugin_action_sysargs(
-        action,
-        name,
-        origin=origin,
-        username=username,
-        env_provider=this_server_env,
-    )
-
-
-def _installed_versions() -> Dict[str, Any]:
-    """`{name: version}` of the installed plugins (`{}` when they cannot be read)."""
-    return _lifecycle.installed_versions(get_installed=get_installed_plugins)
-
-
-def is_plugin_owner(plugin_name: str, session_data: Dict[str, Any]) -> bool:
-    """Check whether the currently logged in user is the owner of a plugin."""
-    return _policy.is_plugin_owner(
-        plugin_name, session_data, conn=get_api_connector(), debug=debug,
-    )
 
 
 ########################################################################################
@@ -145,7 +55,7 @@ def build_installed_plugins_table(
     for plugin in plugins:
         name = plugin['name']
         managed = name in manageable
-        packages_text, packages_missing = packages_label(plugin)
+        packages_text, packages_missing = _lifecycle.packages_label(plugin)
         provides = [
             dbc.Badge(item, color='secondary', class_name='me-1')
             for item in plugin['provides']
@@ -254,15 +164,15 @@ def update_check_store(plugins: List[Dict[str, Any]]) -> Any:
     )
 
 
-def build_installed_plugins_tab(admin: bool = False, viewer: Any = None) -> Any:
+def build_installed_plugins_tab(rights: PluginRights) -> Any:
     """The Installed tab: the table, or a short empty state."""
-    manageable = None
     try:
-        plugins = get_installed_plugins()
-        if viewer is not None:
-            plugins = [plugin for plugin in plugins if can_see_plugin(viewer, plugin['name'])]
-            admin = _manages_everything(viewer)
-            manageable = manageable_plugin_names(viewer, [plugin['name'] for plugin in plugins])
+        plugins = [
+            plugin for plugin in _lifecycle.get_installed_plugins()
+            if rights.can_see(plugin['name'])
+        ]
+        admin = rights.manages_everything
+        manageable = rights.manageable_names([plugin['name'] for plugin in plugins])
     except Exception as e:
         return alert_from_success_tuple((False, f"Failed to read the installed plugins: {e}"))
     if not plugins:
@@ -282,7 +192,7 @@ def build_installed_plugins_tab(admin: bool = False, viewer: Any = None) -> Any:
 
 def _build_plugin_card(
     plugin_name: str,
-    session_data: Dict[str, Any],
+    username: Optional[str],
     *,
     detail: bool = False,
     admin: bool = False,
@@ -298,7 +208,7 @@ def _build_plugin_card(
     plugin_username = conn.get_plugin_username(plugin, debug=debug)
     plugin_version = (conn.get_plugin_version(plugin, debug=debug) or '').strip()
 
-    owner = is_plugin_owner(plugin_name, session_data)
+    owner = is_plugin_owner(plugin_name, username, conn=conn, debug=debug)
     desc_textarea_kw = {
         'value': desc,
         'readOnly': not owner,
@@ -438,24 +348,19 @@ def _build_plugin_card(
 
 
 def get_plugins_cards(
-    state: Optional[WebState] = None,
+    rights: PluginRights,
     search_term: Optional[str] = None,
-    session_data: Optional[Dict[str, Any]] = None,
     page: int = 1,
     per_page: int = PLUGINS_PER_PAGE,
-    admin: bool = False,
-    viewer: Any = None,
 ) -> Tuple[List[dbc.Card], List[SuccessTuple], int, int]:
     """Return the cards, alerts, total page count, and total plugin count."""
     alerts: List[SuccessTuple] = []
-    if session_data is None:
-        session_data = {}
-
-    all_names = sorted(get_api_connector().get_plugins(search_term=search_term) or [])
-    if viewer is not None:
-        all_names = visible_plugin_names(viewer, all_names)
-        admin = _manages_everything(viewer)
-    may_install = admin or (viewer is not None and may_manage_plugins(viewer))
+    all_names = rights.visible_names(
+        sorted(get_api_connector().get_plugins(search_term=search_term) or [])
+    )
+    admin = rights.manages_everything
+    may_install = admin or rights.can_manage_any
+    username = getattr(rights.viewer, 'username', None)
     total = len(all_names)
     if per_page <= 0:
         per_page = PLUGINS_PER_PAGE
@@ -464,14 +369,14 @@ def get_plugins_cards(
     start = (page - 1) * per_page
     page_names = all_names[start:start + per_page]
 
-    installed = _installed_versions() if may_install else {}
+    installed = _lifecycle.installed_versions() if may_install else {}
     cards = [
         _build_plugin_card(
             name,
-            session_data,
+            username,
             admin=admin,
             installed=installed,
-            can_install=(admin or (may_install and may_install_plugin(viewer, name, installed))),
+            can_install=(admin or (may_install and rights.can_install(name, installed))),
         )
         for name in page_names
     ]
@@ -480,18 +385,14 @@ def get_plugins_cards(
 
 def build_plugins_listing(
     search_term: Optional[str],
-    session_data: Optional[Dict[str, Any]],
+    rights: PluginRights,
     page: int = 1,
-    admin: bool = False,
-    viewer: Any = None,
 ) -> Tuple[Any, int, int]:
     """Build the repository listing (summary + cards grid)."""
     cards, _alerts, total_pages, total = get_plugins_cards(
+        rights,
         search_term=search_term,
-        session_data=session_data,
         page=page,
-        admin=admin,
-        viewer=viewer,
     )
 
     if not cards and not search_term:
@@ -535,15 +436,8 @@ def _build_empty_plugins_placeholder() -> Any:
     )
 
 
-def build_plugin_detail(
-    plugin_name: str,
-    session_data: Optional[Dict[str, Any]],
-    admin: bool = False,
-    viewer: Any = None,
-) -> Any:
+def build_plugin_detail(plugin_name: str, rights: PluginRights) -> Any:
     """Build the detail view for a single repository plugin."""
-    if session_data is None:
-        session_data = {}
 
     back_button = dbc.Button(
         '← Plugins',
@@ -553,9 +447,8 @@ def build_plugin_detail(
         class_name='plugin-back-button',
     )
 
-    if viewer is not None:
-        admin = _manages_everything(viewer)
-    hidden = viewer is not None and not can_see_plugin(viewer, plugin_name)
+    admin = rights.manages_everything
+    hidden = not rights.can_see(plugin_name)
     existing = [] if hidden else (get_api_connector().get_plugins(search_term=plugin_name) or [])
     if plugin_name not in existing:
         return html.Div([
@@ -565,25 +458,25 @@ def build_plugin_detail(
             html.H3(f"404: Plugin '{plugin_name}' not found."),
         ], className='plugin-detail-wrapper')
 
-    may_install = admin or (viewer is not None and may_manage_plugins(viewer))
-    installed = _installed_versions() if may_install else {}
+    may_install = admin or rights.can_manage_any
+    installed = _lifecycle.installed_versions() if may_install else {}
     return html.Div([
         back_button,
         _build_plugin_card(
             plugin_name,
-            session_data,
+            getattr(rights.viewer, 'username', None),
             detail=True,
             admin=admin,
             installed=installed,
-            can_install=(admin or (may_install and may_install_plugin(viewer, plugin_name, installed))),
+            can_install=(admin or (may_install and rights.can_install(plugin_name, installed))),
         ),
-        build_source_browser('repository', plugin_name, session_data),
+        build_source_browser('repository', plugin_name, rights),
     ], className='plugin-detail-wrapper')
 
 
 def build_installed_plugin_detail(
     name: str,
-    session: Any,
+    rights: PluginRights,
     selected: Optional[str] = None,
     edit: bool = False,
     created: bool = False,
@@ -591,25 +484,24 @@ def build_installed_plugin_detail(
     """An installed plugin's metadata and source, restricted to those who may manage it."""
     back = dcc.Link('← All plugins', href='/dash/plugins', className='plugin-back-link')
     missing = html.Div([back, html.H5('This plugin is not installed.')], className='console-empty')
-    try:
-        who = access.resolve_viewer(session if session is not None else {}, fresh=True)
-    except Exception:
-        return missing
-    if not is_safe_plugin_name(name) or not can_see_plugin(who, name):
+    if not _fs.is_safe_plugin_name(name) or not rights.can_see(name):
         return missing
     installed = next(
-        (plugin for plugin in get_installed_plugins(check_packages=False) if plugin['name'] == name),
+        (
+            plugin for plugin in _lifecycle.get_installed_plugins(check_packages=False)
+            if plugin['name'] == name
+        ),
         None,
     )
     if not installed:
         return missing
-    if not _policy.may_read_source('installed', session, name):
+    if not rights.can_read_source('installed', name):
         return html.Div(
             [back, html.H5("Installed source is available to administrators and the plugin's team.")],
             className='console-empty',
         )
     from meerschaum.api.dash.connector_listing import mask_text
-    description = installed.get('description') or _lifecycle.installed_description(name, session)
+    description = installed.get('description') or _lifecycle.installed_description(name, rights)
     actions = plugin_action_buttons(installed, size='md')
     actions.append(dbc.Button('Publish', id='plugin-publish-open', n_clicks=0, color='primary'))
     if installed.get('origin'):
@@ -661,7 +553,7 @@ def build_installed_plugin_detail(
         build_source_browser(
             'installed',
             name,
-            session,
+            rights,
             selected=selected,
             edit=edit,
             notice=(
@@ -673,7 +565,7 @@ def build_installed_plugin_detail(
                 ) if created else None
             ),
         ),
-        build_publish_dialog(name, installed.get('origin'), session),
+        build_publish_dialog(name, installed.get('origin'), rights),
     ], className='plugin-detail-wrapper')
 
 

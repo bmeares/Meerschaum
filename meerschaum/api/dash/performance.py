@@ -43,7 +43,7 @@ def metrics(instance_keys: Optional[str], session: Any, window='24h', pipe=None,
     import meerschaum as mrsm
     from meerschaum.api.dash import access, engine
     from meerschaum.api.dash.connector_listing import connector_team_allows
-    who = access.resolve_viewer(session if session is not None else {}, fresh=True)
+    who = access.resolve_viewer(session, fresh=True)
     if not who.can_read_pipes:
         raise PermissionError('Performance is not available to your account.')
     instance = engine.get_instance(instance_keys, strict=True)

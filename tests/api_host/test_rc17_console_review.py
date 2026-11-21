@@ -1,10 +1,6 @@
 """RC17 console regressions use disposable SQLite hosts and synthetic credentials only."""
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
+from tests.api_host._helpers import SIGN_IN, run_python, check
 
 
 def test_encoded_credentials_never_reappear_in_inspection_or_connection_errors(sandbox):
@@ -197,7 +193,9 @@ def test_source_previews_reject_duplicate_archives_and_stale_or_forged_sessions(
 import io, pathlib, tarfile
 from unittest.mock import patch
 from meerschaum.api import get_api_connector
-from meerschaum.api.dash import plugin_sources as source, plugins as plugin_pages, sessions
+from meerschaum.api.dash import plugins as plugin_pages, sessions
+from meerschaum.api.dash._plugins import _fs, _lifecycle
+from meerschaum.api.dash._plugins._policy import rights_for_session
 from meerschaum.api.dash.callbacks import plugins as callbacks
 from meerschaum.config import paths
 from meerschaum.core import Plugin, User
@@ -209,9 +207,9 @@ package.mkdir()
 code = "raise RuntimeError('INSPECTION_MUST_NOT_EXECUTE')\\n<script>window.reviewExecuted = true</script>"
 (package/'__init__.py').write_text(code)
 # Metadata and source rendering use discovery / cached manifests, never import plugin code.
-detail = plugin_pages.build_installed_plugin_detail('review_source',admin)
+detail = plugin_pages.build_installed_plugin_detail('review_source',rights_for_session(admin))
 assert 'plugin-source-content' in str(detail)
-assert source.read_source('installed','review_source','__init__.py',admin) == code
+assert _lifecycle.read_source('installed','review_source','__init__.py', rights_for_session(admin)) == code
 assert 'INSPECTION_MUST_NOT_EXECUTE' in str(callbacks.show_plugin_source(
     '__init__.py',{'kind':'installed','name':'review_source'},admin))
 for session in (reader,{'session-id':'unknown','username':'review-source-admin','admin':True},{}):
@@ -232,19 +230,19 @@ def refused(call):
     except (ValueError,PermissionError,OSError): return
     raise AssertionError('Unsafe source preview succeeded.')
 archive([('review/__init__.py','first'),('review/__init__.py','second')])
-refused(lambda: source.read_source('repository','review_repository','review/__init__.py',reader))
+refused(lambda: _lifecycle.read_source('repository','review_repository','review/__init__.py', rights_for_session(reader)))
 archive([('review/__init__.py','safe')])
-assert source.read_source('repository','review_repository','review/__init__.py',reader) == 'safe'
-oversized = 'review/'+'x'*source.MAX_PATH_BYTES+'.py'
-too_deep = '/'.join(['part']*source.MAX_PATH_PARTS+['file.py'])
+assert _lifecycle.read_source('repository','review_repository','review/__init__.py', rights_for_session(reader)) == 'safe'
+oversized = 'review/'+'x'*_fs.MAX_PATH_BYTES+'.py'
+too_deep = '/'.join(['part']*_fs.MAX_PATH_PARTS+['file.py'])
 multibyte = 'review/'+'é'*600+'.py'
 archive([('review/__init__.py','safe'),(oversized,'skip'),(too_deep,'skip'),(multibyte,'skip')])
-assert source.source_files('repository','review_repository',reader) == ['review/__init__.py']
+assert _lifecycle.source_files('repository','review_repository', rights_for_session(reader)) == ['review/__init__.py']
 for path in (oversized,too_deep,multibyte):
-    refused(lambda path=path: source.read_source('repository','review_repository',path,reader))
+    refused(lambda path=path: _lifecycle.read_source('repository','review_repository',path, rights_for_session(reader)))
 malformed = 'review/bad'+chr(0xDCFF)+'.py'
 archive([('review/__init__.py','safe'),(malformed,'skip')])
-assert source.source_files('repository','review_repository',reader) == ['review/__init__.py']
+assert _lifecycle.source_files('repository','review_repository', rights_for_session(reader)) == ['review/__init__.py']
 assert callbacks.show_plugin_source(malformed,{'kind':'repository','name':'review_repository'},reader) == (
     'This file cannot be previewed. Choose another source file.')
 # The actual Dash response also remains200; an unpaired surrogate never reaches its output.
@@ -267,18 +265,14 @@ with tarfile.open(archive_path,'w:gz',format=tarfile.PAX_FORMAT) as stream:
     body=b'safe'; info=tarfile.TarInfo('review/__init__.py'); info.size=len(body)
     info.pax_headers={'comment':'x'*8192}
     stream.addfile(info,io.BytesIO(body))
-with patch.object(source,'MAX_SCAN_BYTES',2048), \\
-     patch.object(source.tarfile,'open',side_effect=AssertionError('Tar parsed before the expansion cap.')) as parser:
-    refused(lambda: source.source_files('repository','review_repository',reader))
+with patch.object(tarfile,'open',side_effect=AssertionError('Tar parsed before the expansion cap.')) as parser:
+    refused(lambda: _lifecycle.source_files('repository','review_repository',rights_for_session(reader),max_scan_bytes=2048))
     assert parser.call_count == 0
 archive([('review/__init__.py','safe')])
-with patch.object(source,'MAX_ARCHIVE_BYTES',1):
-    refused(lambda: source.source_files('repository','review_repository',reader))
-with patch.object(source,'MAX_ENTRIES',1):
-    archive([('review/a.py','a'),('review/b.py','b')])
-    refused(lambda: source.source_files('repository','review_repository',reader))
-with patch.object(source,'MAX_FILES',1):
-    refused(lambda: source.source_files('repository','review_repository',reader))
+refused(lambda: _lifecycle.source_files('repository','review_repository',rights_for_session(reader),max_archive_bytes=1))
+archive([('review/a.py','a'),('review/b.py','b')])
+refused(lambda: _lifecycle.source_files('repository','review_repository',rights_for_session(reader),max_entries=1))
+refused(lambda: _lifecycle.source_files('repository','review_repository',rights_for_session(reader),max_files=1))
 archive([('review/__init__.py','safe')])
 sessions.delete_session(reader['session-id'])
 assert 'not available' in callbacks.show_plugin_source(

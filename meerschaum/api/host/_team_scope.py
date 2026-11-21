@@ -21,6 +21,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any, Dict, Optional
+from meerschaum.api.dash.viewer import register_invalidation_hook
 
 #: How long the team of a user is reused (the identity cache of the Rust server is as long).
 TTL_SECONDS: float = 5.0
@@ -128,15 +129,8 @@ def forget(username: Optional[str] = None) -> None:
             _cache.pop(str(username), None)
 
 
-def _register_access_invalidation() -> None:
-    try:
-        from meerschaum.api.dash.access import register_invalidation_hook
-        register_invalidation_hook(forget)
-    except Exception:
-        pass
-
-
-_register_access_invalidation()
+### A change of anyone's rights (`meerschaum.api.dash.viewer.forget`) drops their team scope too.
+register_invalidation_hook(forget)
 
 
 class TeamScopeMiddleware:

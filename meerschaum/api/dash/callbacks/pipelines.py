@@ -27,14 +27,14 @@ from meerschaum.api.dash.components import alert_from_success_tuple, build_icon
 def _may_read(session) -> bool:
     """The Pipelines pages are for viewers who may read pipes (`pipes:read`)."""
     from meerschaum.api.dash import access
-    return access.resolve_viewer(session if session is not None else {}).can_read_pipes
+    return access.resolve_viewer(session).can_read_pipes
 
 
 def _visible_ref(ref, session) -> bool:
     """Whether the viewer may see the pipe of a `pipe_ref` the browser sent."""
     from meerschaum.api.dash import access
     return bool(ref) and access.ref_is_visible(
-        access.resolve_viewer(session if session is not None else {}), str(ref),
+        access.resolve_viewer(session), str(ref),
     )
 from meerschaum.api.dash import engine as _engine
 from meerschaum.utils.packages import import_html, import_dcc
@@ -363,7 +363,7 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False, dr
     if not _visible_ref(ref, session_data):
         raise PreventUpdate
     from meerschaum.api.dash import access
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     instance_keys, connector_keys, metric_key, location_key = _engine.split_ref(ref)
     visible = access.visible_pipe(connector_keys, metric_key, location_key, instance_keys, viewer=viewer)
     may_sync = visible is not None and access.can_edit_pipe(viewer, visible)
@@ -528,7 +528,7 @@ def sync_selected_pipe(clicks, context, selection, scope, begin, end, pipeline, 
     from meerschaum.api.dash import access
     try:
         instance, connector, metric, location = _engine.split_ref(ref)
-        viewer = access.resolve_viewer(session if session is not None else {})
+        viewer = access.resolve_viewer(session)
         pipe = access.visible_pipe(connector, metric, location, instance, viewer=viewer)
         if pipe is None:
             raise PermissionError('This Pipe is not available.')
@@ -759,7 +759,7 @@ def render_pipeline_graph(pathname, definition, draft, refresh, prefs, search, s
                 node['context'] = node['pipe_ref'] not in members
         from meerschaum.api.dash import access
         shared = {}
-        viewer = access.resolve_viewer(session_data if session_data is not None else {})
+        viewer = access.resolve_viewer(session_data)
         for name, other in access.visible_pipelines(instance, viewer=viewer).items():
             if name == definition.get('name'):
                 continue
@@ -1233,7 +1233,7 @@ def cancel_node_execution(clicks, pipeline_clicks, live_run, runs, selected, ses
             raise ValueError('This execution is unavailable or belongs to another session.')
         ### One's own run, or anyone's with `jobs:stop`.
         from meerschaum.api.dash import access
-        viewer = access.resolve_viewer(session if session is not None else {})
+        viewer = access.resolve_viewer(session)
         if not (viewer.can('jobs:stop') or (viewer.username and getattr(job, 'owner', None) == viewer.username)):
             raise PermissionError('Your account may not stop this execution.')
         result = job.stop()

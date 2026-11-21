@@ -32,7 +32,7 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 import dash_bootstrap_components as dbc
 from meerschaum.core import Plugin, User
 from meerschaum.api.dash import debug
-from meerschaum.api.dash import access
+from meerschaum.api.dash import access, teams as team_records
 from meerschaum.api.dash import team_setup
 
 USERS_PER_PAGE: int = 50
@@ -118,10 +118,10 @@ def get_user_rows(conn=None, teams: Optional[List[Dict[str, Any]]] = None) -> Li
             details = {}
     if teams is None:
         try:
-            teams = access.list_teams(conn)
+            teams = team_records.list_teams(conn)
         except Exception:
             teams = []
-    memberships = access.teams_by_user(teams)
+    memberships = team_records.teams_by_user(teams)
     rows = []
     for name in names:
         doc = details.get(name)
@@ -225,7 +225,7 @@ def visible_user_rows(
         return list(rows)
     if not username:
         return []
-    if username in access.everyone_managers(teams or []):
+    if username in team_records.everyone_managers(teams or []):
         return list(rows)
     viewer_teams = set(viewer_obj.own_teams)
     return [
@@ -247,7 +247,7 @@ def sees_any_email(who: Any, teams: Optional[List[Dict[str, Any]]] = None) -> bo
         return True
     if viewer_obj.managed_teams:
         return True
-    return bool(username) and username in access.everyone_managers(teams or [])
+    return bool(username) and username in team_records.everyone_managers(teams or [])
 
 
 ########################################################################################
@@ -321,7 +321,7 @@ def add_user(
     for team in (teams or []):
         if not team or team == access.EVERYONE:
             continue
-        team_success, team_message = access.set_team_member(team, str(username).strip(), 'member', conn=conn)
+        team_success, team_message = team_records.set_team_member(team, str(username).strip(), 'member', conn=conn)
         if not team_success:
             return False, f"Added '{username}', but not to team '{team}': {team_message}"
     return success, message
@@ -377,11 +377,11 @@ def set_user_teams(
     for team, role in sorted(wanted.items()):
         if current.get(team) == role:
             continue
-        success, message = access.set_team_member(team, username, role, conn=conn)
+        success, message = team_records.set_team_member(team, username, role, conn=conn)
         if not success:
             return False, message
     for team in sorted(set(current) - set(wanted)):
-        success, message = access.set_team_member(team, username, None, conn=conn)
+        success, message = team_records.set_team_member(team, username, None, conn=conn)
         if not success:
             return False, message
     return True, "Success"
@@ -414,39 +414,7 @@ def end_user_sessions(
     from meerschaum.api.dash import sessions
     access.forget(username)
     ended = 0
-    session_ids: List[str] = []
-    try:
-        if sessions._use_instance_store():
-            pipe = sessions.get_instance_sessions_pipe()
-            if pipe.exists():
-                for doc in pipe.get_docs(select_columns=['session_id', 'data']) or []:
-                    try:
-                        data = json.loads(doc.get('data') or '{}')
-                    except Exception:
-                        continue
-                    if isinstance(data, dict) and data.get('username') == username:
-                        session_ids.append(str(doc.get('session_id')))
-        else:
-            from meerschaum.api import get_cache_connector
-            cache = get_cache_connector()
-            if cache is None:
-                session_ids = [
-                    str(session_id)
-                    for session_id, data in list(getattr(sessions, '_active_sessions', {}).items())
-                    if isinstance(data, dict) and data.get('username') == username
-                ]
-            else:
-                prefix = sessions.SESSION_KEY_TEMPLATE.format(session_id='')
-                for key in cache.client.scan_iter(match=prefix + '*'):
-                    key = key.decode('utf-8') if isinstance(key, bytes) else str(key)
-                    try:
-                        data = json.loads(cache.get(key) or '{}')
-                    except Exception:
-                        continue
-                    if isinstance(data, dict) and data.get('username') == username:
-                        session_ids.append(key[len(prefix):])
-    except Exception:
-        session_ids = []
+    session_ids = sessions.user_session_ids(username)
 
     for session_id in session_ids:
         try:
@@ -674,7 +642,7 @@ def get_users_cards(
     """
     alerts: List[SuccessTuple] = []
     session = (state or {}).get('session-store.data', None) if isinstance(state, dict) else None
-    who = access.resolve_viewer(session if session is not None else {}, fresh=True)
+    who = access.resolve_viewer(session, fresh=True)
     rows = visible_user_rows(get_user_rows(), who)
     all_names = sorted(row['username'] for row in rows)
     if search_term:
@@ -702,7 +670,7 @@ def build_users_listing(
     """
     viewer_obj, username, is_admin, _ = _viewer_fields(viewer_info)
     try:
-        teams = access.list_teams()
+        teams = team_records.list_teams()
     except Exception:
         teams = []
     rows = visible_user_rows(get_user_rows(teams=teams), viewer_info, teams)
@@ -822,7 +790,7 @@ def build_user_detail(username: str, viewer_info: Any = None) -> Any:
         class_name='plugin-back-button',
     )
     try:
-        teams = access.list_teams()
+        teams = team_records.list_teams()
     except Exception:
         teams = []
     rows = {row['username']: row for row in visible_user_rows(get_user_rows(teams=teams), viewer_info, teams)}

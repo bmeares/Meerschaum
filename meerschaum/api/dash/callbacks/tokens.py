@@ -57,8 +57,8 @@ def refresh_tokens_button_click(
     ### unauthenticated sessions.
     ### Every signed-in user manages their own tokens (a token holds at most its user's
     ### permissions, intersected when it is used).
-    from meerschaum.api.dash.access import get_viewer
-    viewer = get_viewer(session_data)
+    from meerschaum.api.dash.access import resolve_viewer
+    viewer = resolve_viewer(session_data)
     if not (viewer.signed_in or viewer.no_auth):
         return (
             html.P("You are not authenticated."),
@@ -103,8 +103,8 @@ def create_tokens_button_click(
 
 def _register_form(session_data: Optional[Dict[str, Any]], agent: bool) -> Any:
     """The New token (or New agent token) form for the session's user, if there is one."""
-    from meerschaum.api.dash.access import get_viewer
-    viewer = get_viewer(session_data)
+    from meerschaum.api.dash.access import resolve_viewer
+    viewer = resolve_viewer(session_data)
     if not (viewer.signed_in or viewer.no_auth):
         return dash.no_update
     session_id = (session_data or {}).get('session-id', None)
@@ -261,8 +261,8 @@ def register_token_click(
         raise PreventUpdate
     ### A token is its user's: only a signed-in user registers one (whatever the browser sends;
     ### the server intersects its scopes with the user's permissions whenever it is used).
-    from meerschaum.api.dash.access import get_viewer
-    viewer = get_viewer(session_data)
+    from meerschaum.api.dash.access import resolve_viewer
+    viewer = resolve_viewer(session_data)
     if not viewer.signed_in or not viewer.username:
         raise PreventUpdate
 

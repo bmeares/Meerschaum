@@ -15,10 +15,10 @@ def remote_layout(pathname, location_href=None):
     from meerschaum.api.dash.sessions import (
         get_session_id_from_request, get_username_from_session,
     )
-    from meerschaum.api.dash.access import viewer_for
+    from meerschaum.api.dash.viewer import viewer_for
     from meerschaum.api import no_auth
     from meerschaum.api.host._server_client import (
-        SessionBoundBearerAuth, get_client, mint_session_bound_bearer,
+        BearerTokenAuth, get_client, mint_session_bound_bearer,
     )
 
     if no_auth:
@@ -34,12 +34,14 @@ def remote_layout(pathname, location_href=None):
         return False, None
     viewer = viewer_for(username)
     scopes = tuple(sorted(viewer.permissions))
-    # Verify the live session credential before calling Main; never adopt a deleted/re-registered user.
-    if not mint_session_bound_bearer(session_id, username=username, scopes=scopes, seconds=60):
+    # Verify the live session credential before calling Main; never adopt a deleted/re-registered
+    # user. The one bearer (bound to that credential, valid for a minute) serves both requests.
+    token = mint_session_bound_bearer(session_id, username=username, scopes=scopes, seconds=60)
+    if not token:
         return True, html.P('Sign in again to view this plugin page.')
     if not client.available:
         return True, html.P('The confined plugin page service is unavailable.')
-    auth = SessionBoundBearerAuth(session_id, username=username, scopes=scopes, seconds=60)
+    auth = BearerTokenAuth(token)
     try:
         # Classification comes only from Main's constructor-owned typed backend, never
         # from a Python isolation guess, environment marker or failed catalog response.

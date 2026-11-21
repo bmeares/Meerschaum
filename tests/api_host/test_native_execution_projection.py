@@ -7,8 +7,10 @@ import json, uuid
 from dataclasses import replace
 from unittest import mock
 from meerschaum.api.dash import access
+from meerschaum.api.dash import viewer as viewer_model
 from meerschaum.api.dash import _native_execution as native
 from meerschaum.api.host._server_client import InMemoryTransport, RawResponse, use_transport
+from meerschaum.api.host import _server_client as server_client
 
 SESSION = str(uuid.uuid4())
 TEAM = str(uuid.uuid4())
@@ -38,11 +40,11 @@ transport = InMemoryTransport(responses=[
 ])
 with use_transport(transport), \
      mock.patch.object(native, '_binding', return_value=('alice', 'credential-one')), \
-     mock.patch.object(access, 'viewer_for', return_value=viewer), \
-     mock.patch.object(sessions, 'get_username_from_session', return_value='alice'):
+     mock.patch.object(viewer_model, 'viewer_for', return_value=viewer), \
+     mock.patch.object(viewer_model, 'get_username_from_session', return_value='alice'):
     allowed = access.resolve_viewer(session_id=SESSION)
     refused = access.resolve_viewer(session_id=SESSION)
-    cached = access._viewer_cache[SESSION][1]
+    cached = viewer_model._viewer_cache[SESSION][1]
 assert len(transport.requests) == 2
 assert allowed.can('actions:execute') and allowed.can('jobs:write')
 assert not allowed.can('webterm:use') and not allowed.native_execution.terminal_exec
@@ -270,7 +272,8 @@ with use_transport(forbid_transport), \
      mock.patch.object(access, 'may_run_pipe_action', return_value=(True, '')), \
      mock.patch.object(detail, '_meta_pipe', return_value=pipe), \
      mock.patch.object(native, 'pipe_action', side_effect=typed), \
-     mock.patch.object(execute, 'mint_bearer', side_effect=AssertionError('No new JWT')), \
+     mock.patch.object(server_client, 'mint_user_bearer', side_effect=AssertionError('No new JWT')), \
+     mock.patch.object(server_client, 'mint_session_bound_bearer', side_effect=AssertionError('No new JWT')), \
      mock.patch.object(webterm, 'webterm_enabled', return_value=True):
     for action in ['sync', 'verify']:
         store, alert = start({'type': 'manage-pipe-button', 'index': json.dumps(meta), 'action': action})

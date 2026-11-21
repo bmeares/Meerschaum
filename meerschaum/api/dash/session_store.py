@@ -2,7 +2,10 @@
 # vim:fenc=utf-8
 
 """
-Define caching functions for session management.
+The console's session store: session IDs, the `mrsm-session-id` cookie, and the session data of
+each signed-in browser (the instance's sessions pipe, Valkey, or this process), with a short
+per-process cache. It decides nothing about rights: `meerschaum.api.dash.viewer` turns a session's
+user into a viewer, and `meerschaum.api.dash.sessions` is the plugin-facing module over both.
 """
 
 import json
@@ -10,8 +13,8 @@ import time
 import uuid
 import threading
 
-from meerschaum.utils.typing import Union, Dict, Any, Optional
-from meerschaum.api import debug, no_auth
+from meerschaum.utils.typing import Union, Dict, Any, List, Optional
+from meerschaum.api import debug
 from meerschaum.api import get_cache_connector, get_api_connector
 from meerschaum.core import User
 from meerschaum.config import get_config
@@ -453,151 +456,40 @@ def delete_session(session_id: str):
     conn.client.delete(session_key)
 
 
-_viewer_resolver: Any = None
-
-
-def register_viewer_resolver(fn: Any) -> None:
+def user_session_ids(username: str) -> List[str]:
     """
-    Register the higher-level viewer resolver (`meerschaum.api.dash.access.resolve_viewer`)
-    so session-level compatibility helpers never import `access.py`.
+    The IDs of every session of `username` in the store (the instance's sessions pipe, Valkey, or
+    this process), or `[]` when the store cannot be read.
     """
-    global _viewer_resolver
-    _viewer_resolver = fn
-
-
-def _standalone_user_access(session_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Direct user lookup used only when `meerschaum.api.dash.access` has not been imported.
-    Never imports `access.py`.
-    """
-    username = get_username_from_session(session_id)
-    if not username:
-        return None
-    conn = get_api_connector()
-    user = User(str(username), instance=conn)
-    user_id = conn.get_user_id(user)
-    if user_id is None:
-        return None
-    user.user_id = user_id
-    user_type = conn.get_user_type(user)
-    is_admin = str(user_type or '').lower() == 'admin'
-    if is_admin:
-        return {'is_admin': True, 'can_act': True}
-    from meerschaum.api import get_uvicorn_config
-    import meerschaum.core.access as core_access
-    host_cfg = get_uvicorn_config()
-    host_cfg = host_cfg if isinstance(host_cfg, dict) else {}
-    if (
-        host_cfg.get('actions_non_admin', True) is False
-        or get_config('api', 'permissions', 'actions', 'non_admin', warn=False) is False
-    ):
-        return {'is_admin': False, 'can_act': False}
-    attributes = conn.get_user_attributes(user) or {}
-    default_role = host_cfg.get('default_role', None)
-    if default_role not in ('viewer', 'editor', 'operator'):
-        default_role = str(core_access.default_role())
-    perms = {str(p) for p in core_access.user_permissions(user_type, attributes, default_role)}
-    can_act = 'actions:execute' in perms or '*' in perms
-    return {'is_admin': False, 'can_act': can_act}
-
-
-def is_session_authenticated(session_id: Optional[str]) -> bool:
-    """
-    Return whether a session's user may run actions: the `actions:execute` permission of their
-    effective permissions (administrators; users whose role or permissions include it, such as
-    the Operator role; nobody but administrators under `--secure`). `--no-auth` allows everyone.
-
-    Reading pages needs only a session (`is_session_active`); what a page shows and which of
-    its buttons appear follow the viewer's permissions (`meerschaum.api.dash.access`).
-
-    Parameters
-    ----------
-    session_id: str
-        The session UUID.
-
-    Returns
-    -------
-    A bool whether the session is authenticated to perform actions.
-    """
-    if debug:
-        dprint(f"Checking authentication for {session_id=}")
-
-    if no_auth:
-        return True
-
-    session_id = valid_session_id(session_id)
-    if session_id is None:
-        return False
-
+    session_ids: List[str] = []
     try:
-        if _viewer_resolver is not None:
-            viewer = _viewer_resolver(session_id=session_id)
-            return bool(viewer.signed_in and viewer.can('actions:execute'))
-        info = _standalone_user_access(session_id)
-        return bool(info and info['can_act'])
+        if _use_instance_store():
+            pipe = get_instance_sessions_pipe()
+            if pipe.exists():
+                for doc in pipe.get_docs(select_columns=['session_id', 'data']) or []:
+                    try:
+                        data = json.loads(doc.get('data') or '{}')
+                    except Exception:
+                        continue
+                    if isinstance(data, dict) and data.get('username') == username:
+                        session_ids.append(str(doc.get('session_id')))
+            return session_ids
+        cache = get_cache_connector()
+        if cache is None:
+            return [
+                str(session_id)
+                for session_id, data in list(_active_sessions.items())
+                if isinstance(data, dict) and data.get('username') == username
+            ]
+        prefix = SESSION_KEY_TEMPLATE.format(session_id='')
+        for key in cache.client.scan_iter(match=prefix + '*'):
+            key = key.decode('utf-8') if isinstance(key, bytes) else str(key)
+            try:
+                data = json.loads(cache.get(key) or '{}')
+            except Exception:
+                continue
+            if isinstance(data, dict) and data.get('username') == username:
+                session_ids.append(key[len(prefix):])
     except Exception:
-        return False
-
-
-def public_callback(func):
-    """
-    Mark a console callback public: the API host runs it for visitors without a session.
-    Only the login and registration callbacks are; plugins use `@web_callback(..., public=True)`
-    or `@dash_plugin(public=True)`. Place it above `@dash_app.callback(...)`.
-    """
-    from meerschaum.plugins import _mark_public_callback
-    return _mark_public_callback(func)
-
-
-def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool:
-    """
-    Return whether a callback's `session-store` state belongs to an
-    authenticated session.
-
-    The API host answers a callback request (`POST /dash/_dash-update-component`) only for a
-    valid console session unless the callback is public (`meerschaum.api.host._callbacks`), but
-    `api:dash:callbacks_require_session: false` turns that off, and a session is not an
-    authorization: a callback that runs actions takes `State('session-store', 'data')` and checks
-    it through this function (the `actions:execute` permission) before doing any work. A callback
-    that reads or writes pipes, users or jobs checks the viewer's permissions and the pipe's
-    access instead (`meerschaum.api.dash.access.resolve_viewer(session_store_data)`).
-
-    Parameters
-    ----------
-    session_store_data: Optional[Dict[str, Any]]
-        The `session-store` component's `data` dict, as passed into the callback.
-
-    Returns
-    -------
-    A `bool` indicating whether the session may perform actions.
-    """
-    if not isinstance(session_store_data, dict):
-        return False
-
-    session_id = session_store_data.get('session-id', None)
-    if not session_id:
-        return is_session_authenticated(None)
-
-    return is_session_authenticated(str(session_id))
-
-
-def session_is_admin(session_id: str) -> bool:
-    """
-    Check whether a session ID corresponds to an admin user (read again every few seconds, so a
-    demotion applies at once).
-    """
-    if debug:
-        dprint(f"Check admin for {session_id=}")
-    if no_auth:
-        return True
-    session_id = valid_session_id(session_id)
-    if session_id is None:
-        return False
-    try:
-        if _viewer_resolver is not None:
-            viewer = _viewer_resolver(session_id=session_id)
-            return bool(viewer.signed_in and viewer.is_admin)
-        info = _standalone_user_access(session_id)
-        return bool(info and info['is_admin'])
-    except Exception:
-        return False
+        return []
+    return session_ids

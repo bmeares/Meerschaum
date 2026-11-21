@@ -4,7 +4,7 @@ This file grants no transport/backend authority. Only a fixed authenticated Main
 may restore an action scope; normal Core object/Team rules remain unchanged.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 import uuid
 
@@ -20,7 +20,7 @@ class NativeExecution:
 
 
 def _binding(session_id):
-    from meerschaum.api.dash.sessions import get_session_data
+    from meerschaum.api.dash.session_store import get_session_data
     data = get_session_data(session_id, use_cache=False)
     if not isinstance(data, dict):
         return None
@@ -96,15 +96,8 @@ def _validate(value, viewer):
     return value
 
 
-def _principal(viewer):
-    from meerschaum.api.dash.access import _principal as object_principal
-    return object_principal(viewer)
-
-
 def _replace(viewer, permissions, execution):
-    projected = replace(viewer, permissions=frozenset(permissions), native_execution=execution)
-    projected.principal = _principal(projected)
-    return projected
+    return viewer.narrowed(permissions=frozenset(permissions), native_execution=execution)
 
 
 def api_only(viewer):
@@ -115,8 +108,8 @@ def api_only(viewer):
 def _permissions(viewer):
     permissions = frozenset(viewer.permissions)
     if '*' in permissions:
-        from meerschaum.api.dash.access import all_permissions
-        permissions = (permissions - {'*'}) | frozenset(all_permissions())
+        import meerschaum.core.access as core_access
+        permissions = (permissions - {'*'}) | frozenset(str(name) for name in core_access.ALL_PERMISSIONS)
     return permissions
 
 

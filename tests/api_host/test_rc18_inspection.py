@@ -1,10 +1,6 @@
 """Connector modal permissions and literal, highlighted plugin source previews."""
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
+from tests.api_host._helpers import SIGN_IN, run_python, check
 
 
 def test_connector_modals_recheck_roles_and_team_membership(sandbox):
@@ -22,6 +18,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from meerschaum.api import get_api_connector
 from meerschaum.api.dash import dash_app, connector_listing, sessions, access
+from meerschaum.api.dash import viewer as viewer_model
 from meerschaum.api.dash.callbacks import connectors_page as callbacks
 from meerschaum.api.dash.pages import connectors
 from meerschaum.core import User
@@ -46,7 +43,7 @@ with patch.object(callbacks.dash, 'ctx', trigger), \\
     assert get_api_connector().edit_user(User('modal-admin', type='user', instance=get_api_connector()))[0]
     result = callbacks.connector_info_click([2], admin)
     assert 'db.invalid' not in str(result) and 'Supported keys' not in str(result)
-    with patch.object(access, '_secure', return_value=True):
+    with patch.object(viewer_model, 'secure_mode', return_value=True):
         for session in (ops, admin):
             result = callbacks.connector_info_click([3], session)
             assert result[1] == 'Connector' and 'not available' in str(result[2])
@@ -89,6 +86,8 @@ def test_plugin_tree_metadata_and_highlighting_keep_source_literal(sandbox):
 import json, pathlib
 from meerschaum.config import paths
 from meerschaum.api.dash import plugin_sources as source, plugins as pages
+from meerschaum.api.dash._plugins import _lifecycle
+from meerschaum.api.dash._plugins._policy import rights_for_session
 from meerschaum.api.dash.callbacks import plugins as callbacks
 admin = sign_in('tree-admin', user_type='admin')
 package = pathlib.Path(paths.PLUGINS_DIR_PATHS[0]) / 'tree_source'
@@ -101,7 +100,7 @@ cache.mkdir(exist_ok=True)
     'version':'1.2.3', 'required':['requests','plugin:helper'], 'connectors':['weather'],
     'data_functions':['fetch'], 'actions':[{'name':'show_weather'}],
 }}}))
-detail = str(pages.build_installed_plugin_detail('tree_source', admin))
+detail = str(pages.build_installed_plugin_detail('tree_source', rights_for_session(admin)))
 for expected in ('Read synthetic weather data.', '1.2.3', 'Python', 'Package',
                  'Connector: weather', 'Data source', 'show weather', 'requests',
                  'plugin:helper', 'plugin-source-tree', 'helpers', 'readings.py'):
@@ -145,7 +144,7 @@ large = data_of(source.source_preview('large.rs', 'fn value() { let x = 1; }\\n'
 assert len(large['runs']) > 5000 and styled(large, 'keyword').count('fn') == 1500
 ### A hostile, fragmented file is highlighted up to the bound, then plain.
 hostile = data_of(source.source_preview('hostile.py', '1+' * 100000))
-assert len(hostile['runs']) <= source.MAX_TOKEN_RUNS + 1 and hostile['runs'][-1][1] == -1
+assert len(hostile['runs']) <= _lifecycle.MAX_TOKEN_RUNS + 1 and hostile['runs'][-1][1] == -1
 assert sum(length for length, _ in hostile['runs']) == 200000
 tree = str(source.source_tree(['src/plugin.rs','src/nested/helper.rs','plugin.toml'],'src/plugin.rs'))
 assert 'plugin-source-select' in tree and 'src/nested/helper.rs' in tree

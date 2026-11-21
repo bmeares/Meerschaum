@@ -10,19 +10,13 @@ job that went away hidden, a new one rebuilding the table). The browser flows ar
 `tests/console/test_rc28_jobs.py`.
 """
 
-import json
 
-from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
-
-
-def _json(result):
-    assert result.returncode == 0, result.stderr[-4000:]
-    return json.loads(result.stdout.split('JSON:')[-1])
+from tests.api_host._helpers import AS_VIEWER, run_python, extract_json
 
 
 def test_snapshots_come_from_one_cached_listing(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json, time
 from meerschaum.jobs import Job
 import meerschaum.api.dash.jobs as jm
@@ -80,7 +74,7 @@ print('JSON:' + json.dumps(out))
 
 def test_the_table_refreshes_only_what_changed(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from types import SimpleNamespace
 from dash import no_update

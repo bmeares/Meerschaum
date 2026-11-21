@@ -58,7 +58,7 @@ def _is_table_path(pathname: Optional[str]) -> bool:
 )
 def init_pipes_filters(pathname, search, page_meta, session_data):
     """Fill the key and tag filters from the URL and the instance's keys."""
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     if not _is_table_path(pathname) or not viewer.can_read_pipes:
         raise PreventUpdate
     filters = pipes_table.filters_from_search(search)
@@ -192,7 +192,7 @@ def load_pipes_rows(search, refresh_clicks, pathname, page_meta, session_data, r
     a new `generation`, which drops the statistics computed so far. A URL that changed only its
     search or status keeps the rows (those narrow the table without a new read).
     """
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     if not _is_table_path(pathname) or not viewer.can_read_pipes:
         raise PreventUpdate
     refreshed = dash.callback_context.triggered_id == 'pipes-refresh-button'
@@ -303,7 +303,7 @@ def fill_pipes_stats(rendered, rows_store, sort, search, status, stats, session_
     filtering by status; the table renders again with them. Only pipes the viewer may see are
     read (`pipes_table.compute_stats` checks the store's rows again).
     """
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     if not rows_store or not isinstance(rendered, dict) or not viewer.can_read_pipes:
         raise PreventUpdate
     generation = rows_store.get('generation', 0)
@@ -433,7 +433,7 @@ def _meta_pipe(meta: Optional[Dict[str, Any]], session_data: Optional[Dict[str, 
     """
     if not meta:
         raise PreventUpdate
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     pipe = access.visible_pipe_from_meta(meta, viewer=viewer)
     if pipe is None:
         raise PreventUpdate
@@ -454,7 +454,7 @@ def render_pipe_detail_tab(active_tab, edit, refresh, meta, session_data):
     built for: a slow tab answered after the next one was chosen is not shown (see below). It
     also carries whether the pipe is registered (`None`: its instance could not be read).
     """
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     if not viewer.can_read_pipes or not meta:
         raise PreventUpdate
     try:
@@ -525,7 +525,7 @@ dash_app.clientside_callback(
 )
 def show_runs_tab(meta, session_data):
     """Runs appears only on instances that keep engine runs."""
-    if not access.resolve_viewer(session_data if session_data is not None else {}).can_read_pipes:
+    if not access.resolve_viewer(session_data).can_read_pipes:
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     return {} if pipe_detail.runs_available(pipe.instance_connector) else {'display': 'none'}
@@ -567,7 +567,7 @@ def toggle_pipe_edit(n_clicks, edit, active_tab, session_data, meta=None):
     """Edit makes the parameters, definition, lineage and rows editable; Done ends it."""
     if not n_clicks:
         raise PreventUpdate
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     if not access.can_edit_pipe(viewer, _meta_pipe(meta, session_data)):
         raise PreventUpdate
     edit = not bool(edit)
@@ -587,7 +587,7 @@ def _start_action(sysargs: List[str], action: str, session_data, ref: str):
     """Run `sysargs` on the server; return `(store, alert)`."""
     from meerschaum.api.dash.execute import run_action
     import shlex
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     try:
         result = run_action(sysargs, viewer.username)
     except Exception as e:
@@ -640,7 +640,7 @@ def run_pipe_action(sync_clicks, verify_clicks, confirm_clicks, confirm, typed, 
     else:
         action = 'sync' if trigger == 'pipe-action-sync' else 'verify'
     ### Its permission, edit rights on this pipe and its locks (the server checks them again).
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     allowed, reason = access.may_run_pipe_action(viewer, pipe, action)
     if not allowed:
         return dash.no_update, alert_from_success_tuple((False, reason)), False
@@ -699,7 +699,7 @@ def open_pipe_confirm(clear_clicks, drop_clicks, delete_clicks, cancel_clicks, m
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     action = trigger[len('pipe-manage-'):]
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     allowed, reason = access.may_run_pipe_action(viewer, pipe, action)
     if not allowed:
         return no, no, no, no, no, no, no, alert_from_success_tuple((False, reason))
@@ -743,7 +743,7 @@ def open_pipe_copy(copy_clicks, cancel_clicks, session_data):
         if not cancel_clicks:
             raise PreventUpdate
         return False, []
-    if not copy_clicks or not access.resolve_viewer(session_data if session_data is not None else {}).can_register_pipes()[0]:
+    if not copy_clicks or not access.resolve_viewer(session_data).can_register_pipes()[0]:
         raise PreventUpdate
     return True, []
 
@@ -791,7 +791,7 @@ def copy_pipe_click(n_clicks, connector_keys, metric_key, location_key, instance
     """
     if not n_clicks:
         raise PreventUpdate
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     allowed, reason = viewer.can_register_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason)), dash.no_update, dash.no_update, dash.no_update
@@ -873,7 +873,7 @@ def after_pipe_action(refresh, action_store, meta, session_data):
     """
     if not refresh or not action_store or action_store.get('action') != 'delete':
         raise PreventUpdate
-    if not access.resolve_viewer(session_data if session_data is not None else {}).can_read_pipes:
+    if not access.resolve_viewer(session_data).can_read_pipes:
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     registered, _ = pipe_detail.registration(pipe)
@@ -942,7 +942,7 @@ def update_pipe_fetch(n_clicks, text, meta, session_data):
     """Update a non-SQL pipe's `fetch` parameters (Definition, in Edit mode)."""
     if not n_clicks:
         raise PreventUpdate
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     allowed, reason = viewer.can_write_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason))
@@ -1019,7 +1019,7 @@ def open_pipe_access(access_clicks, cancel_clicks, meta, session_data):
     if not access_clicks:
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
     if not access.can_manage_access(viewer, parameters):
         raise PreventUpdate
@@ -1060,7 +1060,7 @@ def save_pipe_access(n_clicks, owner, team, visibility, edit, meta, session_data
         raise PreventUpdate
     from meerschaum.api.dash import pipe_writes
     pipe = _meta_pipe(meta, session_data)
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     owner = None if owner in (None, '', NO_OWNER) else owner
     success, message = pipe_writes.set_access(pipe, owner, team, visibility, edit, viewer=viewer)
     if not success:
@@ -1096,7 +1096,7 @@ def open_pipe_locks(locks_clicks, cancel_clicks, meta, session_data):
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
-    if not access.can_lock(access.resolve_viewer(session_data if session_data is not None else {}), parameters):
+    if not access.can_lock(access.resolve_viewer(session_data), parameters):
         raise PreventUpdate
     return True, access.pipe_locks(parameters), []
 
@@ -1118,7 +1118,7 @@ def save_pipe_locks(n_clicks, locks, meta, session_data):
         raise PreventUpdate
     from meerschaum.api.dash import pipe_writes
     pipe = _meta_pipe(meta, session_data)
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     success, message = pipe_writes.set_locks(pipe, list(locks or []), viewer=viewer)
     if not success:
         return dash.no_update, alert_from_success_tuple((False, message)), dash.no_update, dash.no_update
@@ -1159,7 +1159,7 @@ def preview_new_pipe(n_clicks, connector_keys, query, instance_keys, datetime_co
     """Run the query (first rows only); its columns fill the Datetime and ID pickers."""
     if not n_clicks:
         raise PreventUpdate
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     allowed, reason = viewer.can_register_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason)), dash.no_update, dash.no_update
@@ -1229,7 +1229,7 @@ def register_new_pipe(
     if not clicks.get(trigger):
         raise PreventUpdate
     no = dash.no_update
-    viewer = access.resolve_viewer(session_data if session_data is not None else {})
+    viewer = access.resolve_viewer(session_data)
     allowed, reason = viewer.can_register_pipes()
     if not allowed:
         return alert_from_success_tuple((False, reason)), no, no, no, no, no
@@ -1306,7 +1306,7 @@ def edit_pipe_relations(
     if not triggered or not triggered_id or not any(trigger.get('value') for trigger in triggered):
         raise PreventUpdate
 
-    viewer = access.resolve_viewer(session_store_data if session_store_data is not None else {})
+    viewer = access.resolve_viewer(session_store_data)
     try:
         pipe = access.visible_pipe_from_meta(json.loads(triggered_id['index']), viewer=viewer)
     except (TypeError, ValueError):

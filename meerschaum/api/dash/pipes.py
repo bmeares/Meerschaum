@@ -32,7 +32,7 @@ from meerschaum.api.dash.components import (
     build_sign_out_button,
     build_logo_row,
 )
-from meerschaum.api.dash.access import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.config import get_config
 import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
@@ -295,8 +295,8 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
     alerts = [alert_from_success_tuple(pipes)]
     if not isinstance(pipes, list):
         pipes = []
-    from meerschaum.api.dash.access import get_viewer, visible_pipes
-    pipes = visible_pipes(get_viewer(session_data), pipes)
+    from meerschaum.api.dash.access import resolve_viewer, visible_pipes
+    pipes = visible_pipes(resolve_viewer(session_data), pipes)
 
     max_num_pipes_cards = get_config('dash', 'max_num_pipes_cards')
     overflow_pipes = pipes[max_num_pipes_cards:]

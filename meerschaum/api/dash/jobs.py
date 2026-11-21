@@ -85,10 +85,10 @@ def job_visible_to_session(job, session_id):
     the team's managers and administrators); a local job is Everyone's.
     """
     from meerschaum.api import no_auth
-    from meerschaum.api.dash.access import get_viewer
+    from meerschaum.api.dash.access import resolve_viewer
     if no_auth:
         return True
-    viewer = get_viewer(session_id=(str(session_id) if session_id else None))
+    viewer = resolve_viewer(session_id=(str(session_id) if session_id else None))
     if not viewer.signed_in:
         return False
     if viewer.is_admin:
@@ -145,8 +145,8 @@ def may_manage_jobs(session_id: Optional[str]) -> bool:
     Whether a session may control jobs from the console at all (start, stop, pause, delete or
     create one: the job permissions) on a server that serves the `jobs` routes.
     """
-    from meerschaum.api.dash.access import get_viewer
-    rights = job_rights(get_viewer(session_id=(str(session_id) if session_id else None)))
+    from meerschaum.api.dash.access import resolve_viewer
+    rights = job_rights(resolve_viewer(session_id=(str(session_id) if session_id else None)))
     return any(value for key, value in rights.items() if key != 'logs')
 
 

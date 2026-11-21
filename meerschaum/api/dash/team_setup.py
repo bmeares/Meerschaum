@@ -21,18 +21,22 @@ reads. Only administrators create teams and change their settings (checked by th
 
 The connector of a new database is written to the configuration
 (`meerschaum:connectors:sql:<label>`) and to this process's live config; the API server and the
-jobs read the file (`refresh_connectors()` does the same here for connectors another process
-wrote).
+jobs read the file (`meerschaum.api.dash.connectors_file.refresh_connectors()` does the same here
+for connectors another process wrote).
 """
 
 from __future__ import annotations
 
 import copy
 import os
-import threading
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Dict, List, Optional, SuccessTuple, Tuple
+from meerschaum.api.dash.connectors_file import (
+    CONFIG_LOCK,
+    connectors_file,
+    remember_connectors_file,
+)
 
 #: The storage choices of the New team dialog: `(value, label)`.
 STORAGE_CHOICES: Tuple[Tuple[str, str], ...] = (
@@ -46,8 +50,6 @@ DATABASE_FLAVORS: Tuple[str, ...] = (
     'timescaledb', 'timescaledb-ha', 'postgresql', 'postgis', 'citus',
 )
 
-_LOCK = threading.RLock()
-_connectors_mtime: Optional[float] = None
 
 
 def _core():
@@ -137,7 +139,7 @@ def connector_choices() -> List[str]:
 def plugin_choices() -> List[str]:
     """The installed plugins a team may be granted."""
     try:
-        from meerschaum.api.dash.plugins import get_installed_plugins
+        from meerschaum.api.dash._plugins._lifecycle import get_installed_plugins
         return [plugin['name'] for plugin in get_installed_plugins(check_packages=False)]
     except Exception:
         return []
@@ -221,7 +223,7 @@ def write_connector(keys: str, attributes: Dict[str, Any]) -> SuccessTuple:
     from meerschaum.config._read_config import read_config
     from meerschaum.config._edit import write_config
     typ, _, label = str(keys).partition(':')
-    with _LOCK:
+    with CONFIG_LOCK:
         try:
             disk = read_config(
                 keys=['meerschaum'], write_missing=False, substitute=False,
@@ -237,13 +239,13 @@ def write_connector(keys: str, attributes: Dict[str, Any]) -> SuccessTuple:
         if not write_config({'meerschaum': section}):
             return False, f"The connector '{keys}' could not be written to the configuration."
         ### The connector holds a generated password: the file is readable by its owner only.
-        made_private = _owner_only(_connectors_file())
+        made_private = _owner_only(connectors_file())
         if made_private is not None:
             return False, made_private
         live = get_config('meerschaum', 'connectors', warn=False)
         if isinstance(live, dict):
             live.setdefault(typ, {})[label] = copy.deepcopy(attributes)
-        _remember_mtime()
+        remember_connectors_file()
     return True, "Success"
 
 
@@ -292,7 +294,7 @@ def move_reservations(old: str, new: str) -> Optional[str]:
     from meerschaum.config import get_config
     from meerschaum.config._read_config import read_config
     from meerschaum.config._edit import write_config
-    with _LOCK:
+    with CONFIG_LOCK:
         try:
             disk = read_config(
                 keys=['meerschaum'], write_missing=False, substitute=False,
@@ -318,7 +320,7 @@ def move_reservations(old: str, new: str) -> Optional[str]:
                     for label, attributes in labels.items():
                         if isinstance(attributes, dict) and 'teams' in attributes:
                             live[typ].setdefault(label, {})['teams'] = attributes['teams']
-            _remember_mtime()
+            remember_connectors_file()
         except Exception as e:
             return f"The connectors reserved for team '{old}' were not updated: {e}"
     return None
@@ -327,18 +329,6 @@ def move_reservations(old: str, new: str) -> Optional[str]:
 def retired_reservation(name: str, team_id: Optional[str]) -> str:
     """What a deleted team's reservations become (a name no team can have)."""
     return str(_native().team_reservation_retired(str(name), team_id))
-
-
-def _connectors_file() -> Optional[str]:
-    try:
-        from meerschaum.config.paths import CONFIG_DIR_PATH
-        for name in ('meerschaum.yaml', 'meerschaum.yml', 'meerschaum.json'):
-            path = os.path.join(str(CONFIG_DIR_PATH), name)
-            if os.path.exists(path):
-                return path
-    except Exception:
-        pass
-    return None
 
 
 def _owner_only(path: Optional[str]) -> Optional[str]:
@@ -352,58 +342,6 @@ def _owner_only(path: Optional[str]) -> Optional[str]:
     except OSError as e:
         return f"The connector was written, but '{path}' could not be made private: {e}"
     return None
-
-
-def _remember_mtime() -> None:
-    global _connectors_mtime
-    path = _connectors_file()
-    try:
-        _connectors_mtime = os.path.getmtime(path) if path else None
-    except OSError:
-        _connectors_mtime = None
-
-
-def refresh_connectors() -> bool:
-    """
-    Pick up the connectors another process wrote to the configuration file since this one read it
-    (a team's database made with `bootstrap teams`): new labels are added to the live config, and
-    nothing in memory is replaced or removed. Returns whether anything was added. Cheap: one
-    `stat` unless the file changed.
-    """
-    global _connectors_mtime
-    path = _connectors_file()
-    if path is None:
-        return False
-    try:
-        mtime = os.path.getmtime(path)
-    except OSError:
-        return False
-    if _connectors_mtime is None:
-        _connectors_mtime = mtime
-        return False
-    if mtime == _connectors_mtime:
-        return False
-    added = False
-    with _LOCK:
-        _connectors_mtime = mtime
-        try:
-            from meerschaum.config import get_config
-            from meerschaum.config._read_config import read_config
-            disk = read_config(keys=['meerschaum'], write_missing=False, substitute=True)
-            fresh = (disk.get('meerschaum', None) or {}).get('connectors', None) or {}
-            live = get_config('meerschaum', 'connectors', warn=False)
-            if not isinstance(live, dict):
-                return False
-            for typ, labels in fresh.items():
-                if not isinstance(labels, dict):
-                    continue
-                for label, attributes in labels.items():
-                    if label not in live.setdefault(typ, {}):
-                        live[typ][label] = copy.deepcopy(attributes)
-                        added = True
-        except Exception:
-            return False
-    return added
 
 
 def instance_policy_warning(instance: Optional[str], conn: Any = None) -> Optional[str]:
@@ -436,7 +374,7 @@ def config_write_problem() -> Optional[str]:
         directory = str(CONFIG_DIR_PATH)
     except Exception:
         return None
-    path = _connectors_file()
+    path = connectors_file()
     problems = []
     if os.path.isdir(directory) and not os.access(directory, os.W_OK | os.X_OK):
         problems.append(f"the directory '{directory}' is not writable")

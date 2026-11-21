@@ -1,10 +1,7 @@
 """Publish packages current source without importing it; non-admin calls are refused."""
 
-import json
-
-from tests.api_host._helpers import run_python
-from tests.api_host.test_rc28_plugins import _json, _run, plugins_dir  # noqa: F401
-from tests.api_host._helpers import sandbox  # noqa: F401
+from tests.api_host._helpers import extract_json, run_python
+from tests.api_host.test_rc28_plugins import _run, plugins_dir  # noqa: F401
 
 
 def test_publish_archive_uses_current_sources_and_cli_filters(plugins_dir):
@@ -18,7 +15,7 @@ def test_publish_archive_uses_current_sources_and_cli_filters(plugins_dir):
     (package / '__pycache__' / 'helper.pyc').write_bytes(b'not source')
     (package / '.private').write_text('not for upload')
     (plugins / 'rc30_single.py').write_text('"""Single file."""\n__version__ = "1.0"\nVALUE = 1\n')
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import io, json, pathlib, tarfile
 from meerschaum import _core
 out = {}
@@ -50,20 +47,23 @@ print('JSON:' + json.dumps(out))
 def test_publish_refuses_non_admins_and_unconfigured_repositories(plugins_dir):
     root, plugins = plugins_dir
     (plugins / 'rc30_access.py').write_text('VALUE = 30\n')
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json, uuid
 from meerschaum.api.dash import plugin_publish as publish
+from meerschaum.api.dash._plugins._policy import rights_for_session
 admin = sign_in('rc30-admin', user_type='admin')
 viewer = sign_in('rc30-viewer', role='viewer')
 context = {'name': 'rc30_access', 'nonce': str(uuid.uuid4())}
+def as_(session):
+    return rights_for_session(session), session.get('session-id')
 print('JSON:' + json.dumps({
-    'anonymous': publish.publish(context, 'api:mrsm', {}),
-    'viewer': publish.publish(context, 'api:mrsm', viewer),
-    'login': publish.login_repository(context, 'api:mrsm', viewer, 'password',
+    'anonymous': publish.publish(context, 'api:mrsm', *as_({})),
+    'viewer': publish.publish(context, 'api:mrsm', *as_(viewer)),
+    'login': publish.login_repository(context, 'api:mrsm', *as_(viewer), 'password',
                                       'someone', 'secret', '', '', '')[:2],
-    'unknown': publish.publish(context, 'api:notconfigured', admin),
-    'traversal': publish.publish({'name': '../rc30_access'}, 'api:mrsm', admin),
-    'repositories': publish.repositories(viewer),
+    'unknown': publish.publish(context, 'api:notconfigured', *as_(admin)),
+    'traversal': publish.publish({'name': '../rc30_access'}, 'api:mrsm', *as_(admin)),
+    'repositories': publish.repositories(rights_for_session(viewer)),
 }))
 '''))
     for key in ('anonymous', 'viewer', 'login'):
@@ -75,7 +75,7 @@ print('JSON:' + json.dumps({
 
 def test_publish_storage_preserves_other_settings_and_reports_write_failures(plugins_dir):
     root, plugins = plugins_dir
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import copy, json, os
 from unittest.mock import patch
 import meerschaum as mrsm
@@ -125,7 +125,7 @@ assert publishing.browser_credentials(browser, ('session-a', 'api:rc30save'), 'h
 print('JSON:' + json.dumps({'preserved': True}))
 '''))
     assert out == {'preserved': True}
-    fresh = _json(run_python(root, plugins, '''
+    fresh = extract_json(run_python(root, plugins, '''
 import json, meerschaum as mrsm
 conn = mrsm.get_connector('api:rc30save')
 print('JSON:' + json.dumps({'saved': conn.api_key == 'fixture-key',

@@ -17,13 +17,7 @@ users with real console sessions (`SIGN_IN`):
 
 import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-6000:]
-    line = [line for line in result.stdout.splitlines() if line.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json
 
 
 SEED = SIGN_IN + '''
@@ -53,13 +47,13 @@ def make(mk, access=None):
 
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
-from meerschaum.api.dash import access, team_setup
+from meerschaum.api.dash import access, team_setup, teams as team_records, viewer as viewer_model
 '''
 
 
 def test_members_of_an_isolated_team_are_walled_off_from_everyone(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import overview, pipes_table, connector_listing, components
 from meerschaum.api.dash.users import visible_teams
 from meerschaum.connectors import get_connector
@@ -80,7 +74,7 @@ get_connector('sql', 'shared', flavor='sqlite', database=':memory:')
 
 out = {}
 for who, session in SESSIONS.items():
-    viewer = access.get_viewer(session)
+    viewer = access.resolve_viewer(session)
     rows = pipes_table.list_rows(conn, viewer=viewer, connector_keys=['ti:src']) if hasattr(pipes_table, 'list_rows') else []
     seen = sorted(
         mk for ck, mk, lk, parameters in access.registered_pipes(conn)
@@ -98,8 +92,8 @@ for who, session in SESSIONS.items():
             connector_listing.connector_team_allows(keys, viewer)
             for keys in ('sql:wetdb', 'sql:shared', INSTANCE)
         ],
-        'teams': sorted(t['name'] for t in visible_teams(access.list_teams(), access.resolve_viewer(session, fresh=True))),
-        'team_names': access._principal(viewer).team_names if viewer.principal is None else viewer.principal.team_names,
+        'teams': sorted(t['name'] for t in visible_teams(team_records.list_teams(), access.resolve_viewer(session, fresh=True))),
+        'team_names': viewer_model.principal_of(viewer).team_names if viewer.principal is None else viewer.principal.team_names,
     }
 
 ### Jobs: a local job is Everyone's; a team's job is its team's.
@@ -115,7 +109,7 @@ jobs = {
     'wet': FakeJob('wet', {'owner': 'ti-mixed', 'team': 'wetlands'}),
 }
 for who, session in SESSIONS.items():
-    out[who]['jobs'] = sorted(filter_visible_jobs(access.get_viewer(session), jobs))
+    out[who]['jobs'] = sorted(filter_visible_jobs(access.resolve_viewer(session), jobs))
 print('JSON:' + json.dumps(out, default=str))
 '''))
     ann, mixed, bob, admin = out['ann'], out['mixed'], out['bob'], out['admin']
@@ -148,7 +142,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_new_team_and_settings_dialogs(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash.callbacks import users as callbacks
 from meerschaum.api.dash.users import build_users_modals
 from meerschaum.config import get_config
@@ -257,13 +251,14 @@ out['settings_refused'] = str(refused[1])
 import os, time
 section = disk['meerschaum']
 section['connectors']['sql']['elsewhere'] = {'flavor': 'sqlite', 'database': 'x.db'}
-team_setup.refresh_connectors()
+from meerschaum.api.dash import connectors_file
+connectors_file.refresh_connectors()
 from meerschaum.config._edit import write_config
 time.sleep(0.05)
 assert write_config({'meerschaum': section})
-path = team_setup._connectors_file()
+path = connectors_file.connectors_file()
 os.utime(path, (time.time() + 5, time.time() + 5))
-out['refreshed'] = team_setup.refresh_connectors()
+out['refreshed'] = connectors_file.refresh_connectors()
 out['elsewhere'] = 'elsewhere' in get_config('meerschaum', 'connectors', 'sql')
 print('JSON:' + json.dumps(out, default=str))
 '''))
@@ -318,7 +313,7 @@ def test_grafana_follows_console_renames_and_deletions_by_saved_id(sandbox):
     the id saved in its attributes, and a Grafana failure is a warning, not a success.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash.callbacks import users as callbacks
 admin = sign_in('gf-admin', user_type='admin')
 calls = []
@@ -381,7 +376,7 @@ def test_a_deleted_teams_connector_is_not_inherited_by_name(sandbox):
     team moves its reservation; and a name a connector is still reserved for is refused.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.config._read_config import read_config
 attributes = {'flavor': 'sqlite', 'database': 'old.db'}
 assert team_setup.write_connector('sql:res_old', dict(attributes, teams=['ti-res']))[0]
@@ -391,12 +386,12 @@ out = {}
 ### A name a connector is still reserved for (no such team) is refused, by both dialogs.
 out['create_refused'] = team_setup.create_team('ti-left', isolated=True)
 team('ti-other')
-out['rename_refused'] = access.rename_team('ti-other', 'ti-left')
+out['rename_refused'] = team_records.rename_team('ti-other', 'ti-left')
 
 ### Delete: the connector stays, its reservation names no team.
 old = team('ti-res')
 old_id = old.id
-out['deleted'] = access.delete_team('ti-res')
+out['deleted'] = team_records.delete_team('ti-res')
 disk = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
 out['old_teams'] = disk['meerschaum']['connectors']['sql']['res_old']['teams']
 out['old_kept'] = disk['meerschaum']['connectors']['sql']['res_old']['database']
@@ -407,7 +402,7 @@ out['recreated'] = team_setup.create_team('ti-res', isolated=True)
 
 ### Rename: the reservation follows the team.
 team('ti-move')
-out['renamed'] = access.rename_team('ti-move', 'ti-moved')
+out['renamed'] = team_records.rename_team('ti-move', 'ti-moved')
 disk = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
 out['moved_teams'] = disk['meerschaum']['connectors']['sql']['res_move']['teams']
 print('JSON:' + json.dumps(out, default=str))
@@ -447,7 +442,7 @@ def test_a_team_connector_is_the_only_change_to_the_configuration_file(sandbox):
         "      host: api.example.com\n"
     )
     os.chmod(path, 0o644)
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.config._read_config import read_config
 from meerschaum.config import get_config
 out = {}
@@ -457,7 +452,7 @@ out['written'] = team_setup.write_connector(
                      'teams': ['ti-cfg']},
 )
 team('ti-cfg')
-out['renamed'] = access.rename_team('ti-cfg', 'ti-cfg2')
+out['renamed'] = team_records.rename_team('ti-cfg', 'ti-cfg2')
 print('JSON:' + json.dumps(out, default=str))
 ''', extra_env={
         'MRSM_SQL_MAIN': 'timescaledb://mrsm:env-only-pw-4242@127.0.0.1:1/meerschaum',
@@ -485,7 +480,7 @@ def test_isolated_team_instance_policy_refusal_never_falls_back_to_api_default(s
     cannot access), distinguishes policy denial from team isolation, and surfaces one clear alert.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import flask
 import meerschaum.api as api
 from meerschaum.connectors import get_connector
@@ -496,16 +491,16 @@ from meerschaum.api.dash.callbacks import pipes as pipes_cb
 team('whitedl', isolated=True, instance='sql:whitedl', connectors=['sql:whitedl'])
 get_connector('sql', 'whitedl', flavor='sqlite', database=':memory:', teams=['whitedl'])
 session = sign_in('whitedl-mgr', role='operator', teams={'whitedl': 'manager'})
-viewer = access.get_viewer(session)
+viewer = access.resolve_viewer(session)
 default = str(api.get_api_connector())
 
 app = flask.Flask('t')
 out = {'default': default}
 
-orig_in_request = access._in_request
-orig_current_viewer = access.current_viewer
-access._in_request = lambda: True
-access.current_viewer = lambda: viewer
+orig_in_request = viewer_model.in_request
+orig_current_viewer = viewer_model.current_viewer
+viewer_model.in_request = lambda: True
+viewer_model.current_viewer = access.current_viewer = lambda: viewer
 try:
     ### 1. API forbids additional instances (`allow_multiple_instances=False`, narrow allowlist).
     api.permissions_config.setdefault('instances', {})['allow_multiple_instances'] = False
@@ -561,8 +556,8 @@ try:
     with app.test_request_context('/dash/pipes'):
         out['allowed_page'] = list(engine.page_instance())
 finally:
-    access._in_request = orig_in_request
-    access.current_viewer = orig_current_viewer
+    viewer_model.in_request = orig_in_request
+    viewer_model.current_viewer = access.current_viewer = orig_current_viewer
 
 print('JSON:' + json.dumps(out, default=str))
 '''))
@@ -600,7 +595,7 @@ def test_team_setup_warns_when_api_instance_policy_blocks_team_instance(sandbox)
     succeeds but appends a warning note and renders a warning alert in the Users & Teams dialogs.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import meerschaum.api as api
 from meerschaum.api.dash.callbacks import users as callbacks
 
@@ -655,7 +650,7 @@ def test_pages_dropdown_nests_large_plugin_groups_and_respects_team_plugins(sand
     prefixes, nests sub-paths, and hides plugins disallowed for an isolated viewer.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import plotly.utils
 from meerschaum.api.dash import components
 from meerschaum.api.dash.callbacks import dashboard as dash_cb
@@ -735,8 +730,8 @@ try:
                 top_items.append(child.get('props', {}).get('children'))
         return {'details': details, 'top_items': top_items}
 
-    admin_viewer = access.get_viewer(admin)
-    iso_viewer = access.get_viewer(isolated)
+    admin_viewer = access.resolve_viewer(admin)
+    iso_viewer = access.resolve_viewer(isolated)
     out = {
         'pipes': summarize(components._build_pages_menu('/dash/pipes', viewer=admin_viewer)),
         'active_anchored': summarize(components._build_pages_menu('/dash/anchored/login', viewer=admin_viewer)),
@@ -771,7 +766,7 @@ def test_team_switcher_narrows_instances_pipes_connectors_plugins_and_jobs(sandb
     cookies.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import flask
 import plotly.utils
 from meerschaum.connectors import get_connector
@@ -833,7 +828,7 @@ def snapshot(session, team_cookie=None):
         cookies.append(f"mrsm-team={team_cookie}")
     headers['Cookie'] = '; '.join(cookies)
     with app.test_request_context('/dash/pipes', headers=headers):
-        viewer = access.get_viewer(session)
+        viewer = access.resolve_viewer(session)
         nav = plain(components.build_pages_navbar(pathname='/dash/pipes', session_id=session['session-id']))
         team_sel = find_id(nav, 'pages-team-select')
         inst_sel = find_id(nav, 'pages-instance-select')
@@ -950,25 +945,25 @@ def test_acting_team_fails_closed_when_team_lookup_unavailable(sandbox):
     closed (returning the unchanged base viewer) instead of dropping isolation or escalating grants.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import os
 from meerschaum.api.dash import team_setup
 
 team('fc-alpha', isolated=True, instance='sql:fcalpha', connectors=['sql:fcalpha'], plugins=['noaa'])
 team('fc-beta', isolated=True, instance='sql:fcbeta', connectors=['sql:fcbeta'], plugins=['usgs'])
 multi = sign_in('fc-multi', role='operator', teams={'fc-alpha': 'member', 'fc-beta': 'member'})
-base = access.get_viewer(multi)
+base = access.resolve_viewer(multi)
 
-orig_cached = access._cached_teams
+orig_cached = viewer_model._cached_teams
 try:
-    access._cached_teams = lambda conn: []
-    when_empty = access.apply_acting_team(base, 'fc-beta')
+    viewer_model._cached_teams = lambda conn: []
+    when_empty = viewer_model.apply_acting_team(base, 'fc-beta')
     def _boom(conn):
         raise RuntimeError('db down')
-    access._cached_teams = _boom
-    when_error = access.apply_acting_team(base, 'fc-beta')
+    viewer_model._cached_teams = _boom
+    when_error = viewer_model.apply_acting_team(base, 'fc-beta')
 finally:
-    access._cached_teams = orig_cached
+    viewer_model._cached_teams = orig_cached
 
 # Also verify `team_setup.create_team` aborts before `team_database_create` when config is unwritable.
 called = {'db_create': False}

@@ -9,15 +9,8 @@ confirmations, Copy); New pipe (flavor-correct preview limits, the datetime gues
 registration rules). In process, on the sandbox's SQLite instance; no server.
 """
 
-import json
 
-from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-6000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import AS_VIEWER, run_python, extract_json
 
 
 SEED = '''
@@ -36,7 +29,7 @@ def make(ck, mk, lk=None, **params):
 def test_routes_build_each_pipes_page_with_its_keys(sandbox):
     """`/dash/pipes`, `/dash/pipes/new` and a pipe's page (each encoded key round-trips)."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from urllib.parse import urlsplit
 from meerschaum.api.dash import build_dash_app
@@ -97,7 +90,7 @@ print('JSON:' + json.dumps(out))
 
 def test_table_rows_filters_search_sort_pages_and_slow_columns(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import pipes_table as pt
 import pandas as pd
 make('tbl', 'alpha', columns={'datetime': 'ts'}, tags=['prod', 'gvl'])
@@ -193,7 +186,7 @@ print('JSON:' + json.dumps(out))
 
 def test_jobs_index_matches_sync_jobs_and_pipeline_schedules(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import pipes_table as pt
 import meerschaum.jobs as jobs_module
 from meerschaum.core.Pipeline._saved import save_pipeline
@@ -255,7 +248,7 @@ print('JSON:' + json.dumps(out))
 
 def test_pipe_tabs_edit_mode_and_actions(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, extra_env={
+    out = extract_json(run_python(root, plugins, extra_env={
         'MRSM_SQL_ELSEWHERE': f"sqlite:///{root / 'elsewhere.db'}",
     }, code=SEED + '''
 import pandas as pd
@@ -345,7 +338,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_new_pipe_preview_limits_guess_and_registration(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import pandas as pd
 from meerschaum.api.dash import access, new_pipe as np_
 src = make('np', 'source', columns={'datetime': 'ts', 'id': 'station'})
@@ -418,7 +411,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_callbacks_refuse_sessions_that_may_not_act_and_need_the_metric_typed(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from unittest import mock
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
@@ -520,7 +513,7 @@ def test_secure_mode_leaves_actions_and_registration_to_administrators(sandbox):
     only administrators run actions, edit or register pipes in the console; everyone signed in reads.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import os, json
 os.environ['MRSM_API_HOST_CONFIG'] = json.dumps({'mrsm_instance': 'sql:apihosttest', 'actions_non_admin': False})
 import meerschaum as mrsm
@@ -556,7 +549,7 @@ def test_a_pipe_whose_instance_cannot_be_read_is_not_called_unregistered(sandbox
     returns to the table only once the pipe is read as gone.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, extra_env={
+    out = extract_json(run_python(root, plugins, extra_env={
         'MRSM_SQL_W7DOWN': 'postgresql://w7user:W7-down-s3cret@127.0.0.1:1/w7',
     }, code=AS_VIEWER + SEED + '''
 from unittest import mock
@@ -647,7 +640,7 @@ def test_connector_lists_leave_out_the_hosts_own_variables(sandbox):
     own environment variables read as connectors (`api:host`, `api:host_config`, the proxy token).
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, extra_env={
+    out = extract_json(run_python(root, plugins, extra_env={
         'MRSM_API_HOST_PROXY_TOKEN': 'w7-proxy-token-s3cret',
     }, code=SEED + '''
 from meerschaum.api.dash import build_dash_app
@@ -679,7 +672,7 @@ print('JSON:' + json.dumps({
 
 def test_the_search_is_in_the_url_and_only_key_filters_reload_the_rows(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
 from dash.exceptions import PreventUpdate
@@ -741,7 +734,7 @@ print('JSON:' + json.dumps(out))
 def test_switches_say_what_they_show(sandbox):
     """The read-only Parameters and Definition tabs name their switches in plain words."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash import pipe_detail
@@ -764,7 +757,7 @@ def test_the_table_is_escaped_html_and_its_statistics_follow_each_render(sandbox
     sorted header says so (`aria-sort`); each render asks for the statistics the page still needs.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from html.parser import HTMLParser
 from unittest import mock
 from dash._callback_context import context_value

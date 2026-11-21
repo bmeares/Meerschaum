@@ -1,6 +1,6 @@
 """rc6 console contracts: dynamic Inputs, worker classification, and custom login."""
 import json
-from tests.api_host._helpers import FAKE_VIEWERS, run_python, sandbox, write_plugin  # noqa: F401
+from tests.api_host._helpers import FAKE_VIEWERS, run_python, write_plugin
 
 
 def test_worker_kind_overrides_legacy_prefix(sandbox):

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import sys
 import contextlib
-import contextvars
 
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Any, Dict, Tuple
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.api.dash._support import get_shell_intro
+from meerschaum.api.dash.viewer import nav_context
 from meerschaum.api import endpoints, CHECK_UPDATE, docs_enabled, get_api_connector
 from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
 from meerschaum.utils.misc import get_connector_labels
@@ -167,7 +167,6 @@ CONSOLE_OWN_PATHS = frozenset(
     + ['/dash/login', '/dash/register']
 )
 
-_nav_context: contextvars.ContextVar = contextvars.ContextVar('mrsm_console_nav', default=None)
 _UNSET = object()
 
 
@@ -185,11 +184,11 @@ def console_nav_context(
     payload: Dict[str, Any] = {'pathname': pathname, 'session_id': session_id}
     if acting_team is not _UNSET:
         payload['acting_team'] = acting_team
-    token = _nav_context.set(payload)
+    token = nav_context.set(payload)
     try:
         yield
     finally:
-        _nav_context.reset(token)
+        nav_context.reset(token)
 
 
 def section_of_path(pathname: Optional[str]) -> Optional[str]:
@@ -238,7 +237,7 @@ def get_nav_state(pathname: Optional[str] = None, session_id: Optional[str] = No
     and `viewer` (`meerschaum.api.dash.access.Viewer`).
     """
     from meerschaum.api import no_auth
-    context = _nav_context.get() or {}
+    context = nav_context.get() or {}
     pathname = pathname or context.get('pathname', None)
     session_id = session_id or context.get('session_id', None)
     request = _current_request()
@@ -250,11 +249,11 @@ def get_nav_state(pathname: Optional[str] = None, session_id: Optional[str] = No
             from urllib.parse import urlparse
             pathname = urlparse(request.referrer).path
 
-    from meerschaum.api.dash.access import ANONYMOUS, get_viewer
+    from meerschaum.api.dash.access import ANONYMOUS, resolve_viewer
     viewer = ANONYMOUS
     if no_auth or session_id:
         try:
-            viewer = get_viewer(session_id=(str(session_id) if session_id else None))
+            viewer = resolve_viewer(session_id=(str(session_id) if session_id else None))
         except Exception:
             viewer = ANONYMOUS
     username, signed_in = viewer.username, bool(no_auth or viewer.signed_in)
@@ -304,8 +303,8 @@ def nav_section_allowed(section: str, state: Dict[str, Any]) -> bool:
     if permission and viewer is not None and not viewer.can(permission):
         return False
     if section == 'connectors':
-        from meerschaum.api.dash.access import _secure
-        if _secure() and not state.get('admin'):
+        from meerschaum.api.dash.viewer import secure_mode
+        if secure_mode() and not state.get('admin'):
             return False
     return True
 
@@ -440,12 +439,12 @@ def usable_instance_keys(keys: List[str], viewer: Any = None) -> List[str]:
     Outside a request nothing is filtered unless `viewer` is supplied.
     """
     try:
-        from meerschaum.api.dash import access
+        from meerschaum.api.dash.viewer import current_viewer, in_request
         from meerschaum.api.dash.connector_listing import connector_team_allows
         if viewer is None:
-            if not access._in_request():
+            if not in_request():
                 return list(keys)
-            viewer = access.current_viewer()
+            viewer = current_viewer()
         return [key for key in keys if connector_team_allows(key, viewer)]
     except Exception:
         return []
@@ -518,14 +517,14 @@ def build_pages_team_select(
     """
     The console's "acting as" team selector (shown next to the global instance selector for
     administrators when teams exist, and for users belonging to multiple teams). Choosing a team
-    writes the `mrsm-team` cookie (`assets/global_instance.js`, read by `access.get_viewer`) and
+    writes the `mrsm-team` cookie (`assets/global_instance.js`, read by `meerschaum.api.dash.viewer.resolve_viewer`) and
     narrows instances, pipes, connectors, plugins, jobs and permissions to that team.
     """
     viewer = state.get('viewer', None)
     if viewer is None or not state.get('signed_in'):
         return None
     try:
-        from meerschaum.api.dash.access import available_acting_teams
+        from meerschaum.api.dash.viewer import available_acting_teams
         options = available_acting_teams(viewer)
     except Exception:
         return None

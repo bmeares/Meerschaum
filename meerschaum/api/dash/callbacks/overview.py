@@ -27,8 +27,8 @@ def _viewer(session_data: Optional[Dict[str, Any]]):
     Who is looking at the Overview (`meerschaum.api.dash.access.Viewer`), if they may: a
     signed-in user (or `--no-auth`); else no update. Every tile counts only what they may see.
     """
-    from meerschaum.api.dash.access import get_viewer
-    viewer = get_viewer(session_data if isinstance(session_data, dict) else {})
+    from meerschaum.api.dash.access import resolve_viewer
+    viewer = resolve_viewer(session_data if isinstance(session_data, dict) else {})
     if not (viewer.no_auth or viewer.signed_in):
         raise PreventUpdate
     return viewer

@@ -26,7 +26,7 @@ import meerschaum as mrsm
 from meerschaum.api import get_api_connector
 from meerschaum.core import Plugin
 from meerschaum.utils.typing import Any, Dict, Iterable, List, Optional, SuccessTuple, Tuple
-import meerschaum.api.dash.access as access
+import meerschaum.api.dash.viewer as viewer_model
 from meerschaum.api.dash._plugins._archives import (
     decode_uploads,
     plan_upload,
@@ -58,14 +58,13 @@ from meerschaum.api.dash._plugins._policy import (
     AUTHORING_ADMINS,
     MANAGE_REFUSAL,
     NO_WRITING_TEAM,
-    authoring_refusal,
+    PluginRights,
     foreign_plugin_message,
     is_plugin_owner,
     manageable_plugin_names,
     manages_everything,
     may_manage_plugin,
     may_manage_plugins,
-    may_read_source,
     resolve_rights,
 )
 
@@ -151,7 +150,7 @@ def writing_team(viewer: Any, conn: Any = None) -> Optional[str]:
 
 def _forget_viewers() -> None:
     try:
-        access.forget()
+        viewer_model.forget()
     except Exception:
         pass
 
@@ -394,11 +393,10 @@ def packages_label(plugin: Dict[str, Any]) -> Tuple[str, bool]:
     return f"{len(required)} installed" if len(required) != 1 else '1 installed', False
 
 
-def installed_versions(*, get_installed: Optional[Any] = None) -> Dict[str, Any]:
+def installed_versions() -> Dict[str, Any]:
     """`{name: version}` of the installed plugins (`{}` when they cannot be read)."""
-    loader = get_installed or get_installed_plugins
     try:
-        return {p['name']: p.get('version') for p in loader(check_packages=False)}
+        return {p['name']: p.get('version') for p in get_installed_plugins(check_packages=False)}
     except Exception:
         return {}
 
@@ -440,30 +438,27 @@ def forget_remote_versions(name: str) -> None:
             _remote_versions.pop(key, None)
 
 
-def _version_future(name: str, origin: str, fetcher: Optional[Any] = None) -> Any:
+def _version_future(name: str, origin: str) -> Any:
     """The pending request for `(origin, name)` on the shared bounded thread pool."""
     global _remote_version_pool
     key = (str(origin), str(name))
     with _remote_versions_lock:
-        if fetcher is None:
-            future = _remote_versions_in_flight.get(key, None)
-            if future is not None and not future.done():
-                return future
+        future = _remote_versions_in_flight.get(key, None)
+        if future is not None and not future.done():
+            return future
         if _remote_version_pool is None:
             _remote_version_pool = ThreadPoolExecutor(
                 max_workers=REMOTE_VERSION_WORKERS, thread_name_prefix='mrsm-plugin-versions',
             )
-        future = _remote_version_pool.submit(fetcher or remote_plugin_version, name, origin)
-        if fetcher is None:
-            _remote_versions_in_flight[key] = future
+        future = _remote_version_pool.submit(remote_plugin_version, name, origin)
+        _remote_versions_in_flight[key] = future
 
-    if fetcher is None:
-        def _done(finished, key=key):
-            with _remote_versions_lock:
-                if _remote_versions_in_flight.get(key, None) is finished:
-                    _remote_versions_in_flight.pop(key, None)
+    def _done(finished, key=key):
+        with _remote_versions_lock:
+            if _remote_versions_in_flight.get(key, None) is finished:
+                _remote_versions_in_flight.pop(key, None)
 
-        future.add_done_callback(_done)
+    future.add_done_callback(_done)
     return future
 
 
@@ -482,8 +477,6 @@ def plugin_update_versions(
     names: List[str],
     viewer: Any = None,
     *,
-    get_installed: Optional[Any] = None,
-    fetch_remote_version: Optional[Any] = None,
     timeout: Optional[float] = None,
 ) -> Dict[str, str]:
     """
@@ -495,15 +488,14 @@ def plugin_update_versions(
         wanted = set(manageable_plugin_names(viewer, sorted(wanted)))
     if not wanted:
         return {}
-    loader = get_installed or get_installed_plugins
     installed = {
-        plugin['name']: plugin for plugin in loader(check_packages=False)
+        plugin['name']: plugin for plugin in get_installed_plugins(check_packages=False)
         if plugin['name'] in wanted and plugin.get('origin')
     }
     if not installed:
         return {}
     futures = {
-        _version_future(name, plugin['origin'], fetcher=fetch_remote_version): name
+        _version_future(name, plugin['origin']): name
         for name, plugin in installed.items()
     }
     wait_timeout = REMOTE_VERSION_TIMEOUT_SECONDS if timeout is None else timeout
@@ -529,22 +521,22 @@ def plugin_update_versions(
 def _validate_source_access(
     kind: str,
     name: str,
-    session: Any,
+    rights: PluginRights,
     *,
     conn: Any = None,
 ) -> None:
     if kind not in ('installed', 'repository') or not is_safe_plugin_name(name):
         raise ValueError('Invalid plugin source selection.')
     if kind == 'installed':
-        if not may_read_source(kind, session, name):
+        if not rights.can_read_source(kind, name):
             raise PermissionError('Plugin source is not available to your account.')
         return
-    if not may_read_source(kind, session):
+    if not rights.can_read_source(kind):
         raise PermissionError('Plugin source is not available to your account.')
     api_conn = conn if conn is not None else get_api_connector()
     ### A repository plugin hidden from the viewer reads as one that is not there.
     if (
-        not may_read_source(kind, session, name)
+        not rights.can_read_source(kind, name)
         or name not in (api_conn.get_plugins(search_term=name) or [])
     ):
         raise ValueError('This plugin is not in the repository.')
@@ -553,7 +545,7 @@ def _validate_source_access(
 def source_files(
     kind: str,
     name: str,
-    session: Any,
+    rights: PluginRights,
     *,
     max_scan_bytes: int = MAX_SCAN_BYTES,
     max_file_bytes: int = MAX_FILE_BYTES,
@@ -564,7 +556,7 @@ def source_files(
     archives_root: Optional[pathlib.Path] = None,
     conn: Any = None,
 ) -> List[str]:
-    _validate_source_access(kind, name, session, conn=conn)
+    _validate_source_access(kind, name, rights, conn=conn)
     if kind == 'installed':
         return installed_source_files(
             name, plugins_dirs, max_entries=max_entries, max_files=max_files,
@@ -584,7 +576,7 @@ def read_source_with_digest(
     kind: str,
     name: str,
     selected: str,
-    session: Any,
+    rights: PluginRights,
     *,
     max_scan_bytes: int = MAX_SCAN_BYTES,
     max_file_bytes: int = MAX_FILE_BYTES,
@@ -596,7 +588,7 @@ def read_source_with_digest(
     conn: Any = None,
 ) -> Tuple[str, str]:
     """A source file's text and the digest of its bytes (what a save is checked against)."""
-    _validate_source_access(kind, name, session, conn=conn)
+    _validate_source_access(kind, name, rights, conn=conn)
     relative_source_path(selected)
     if kind == 'installed':
         root, relative = installed_source_target(
@@ -619,8 +611,9 @@ def read_source_with_digest(
     return decode_source_bytes(data), source_digest(data)
 
 
-def read_source(kind: str, name: str, selected: str, session: Any, **kwargs) -> str:
-    return read_source_with_digest(kind, name, selected, session, **kwargs)[0]
+def read_source(kind: str, name: str, selected: str, rights: PluginRights, **kwargs) -> str:
+    """The text of a plugin's listed source file `selected` (`read_source_with_digest`)."""
+    return read_source_with_digest(kind, name, selected, rights, **kwargs)[0]
 
 
 def save_source(
@@ -628,7 +621,7 @@ def save_source(
     selected: str,
     text: Any,
     expected: Any,
-    session: Any,
+    rights: PluginRights,
     *,
     max_file_bytes: int = MAX_FILE_BYTES,
     max_files: int = MAX_FILES,
@@ -639,11 +632,11 @@ def save_source(
     Save `text` as an installed plugin's listed file `selected`, if it is unchanged on disk since
     it was loaded (its digest is `expected`). Returns `(success, message, new digest)`.
     """
-    refusal = authoring_refusal(session, name)
+    refusal = rights.authoring_refusal(name)
     if refusal:
         return False, refusal, None
     try:
-        _validate_source_access('installed', name, session)
+        _validate_source_access('installed', name, rights)
     except PermissionError:
         return False, AUTHORING_ADMINS, None
     except ValueError as e:
@@ -677,16 +670,16 @@ def save_source(
     return True, f"Saved {selected}.", source_digest(data)
 
 
-def installed_description(name: str, session: Any) -> Optional[str]:
+def installed_description(name: str, rights: PluginRights) -> Optional[str]:
     """Read a bounded entry-point docstring without importing the plugin."""
     try:
-        files = source_files('installed', name, session)
+        files = source_files('installed', name, rights)
         if 'plugin.toml' in files:
-            data = tomllib.loads(read_source('installed', name, 'plugin.toml', session))
+            data = tomllib.loads(read_source('installed', name, 'plugin.toml', rights))
             return (data.get('plugin') or data.get('package') or data).get('description')
         first = next((file for file in files if file.endswith('.py')), None)
         if first:
-            return ast.get_docstring(ast.parse(read_source('installed', name, first, session)))
+            return ast.get_docstring(ast.parse(read_source('installed', name, first, rights)))
     except Exception:
         pass
     return None
@@ -787,7 +780,7 @@ def create_new_plugin(
     action: Any,
     dt_col: Any,
     directory: Any,
-    session: Any,
+    rights: PluginRights,
     *,
     conn: Any = None,
 ) -> Tuple[bool, str, Optional[str]]:
@@ -795,13 +788,10 @@ def create_new_plugin(
     Create a plugin with `bootstrap plugins`'s own scaffold (`_core.bootstrap_plugin`).
     Returns `(success, message, URL of its source opened for editing)`.
     """
-    refusal = authoring_refusal(session)
+    refusal = rights.authoring_refusal()
     if refusal:
         return False, refusal, None
-    try:
-        who = access.resolve_viewer(session if session is not None else {}, fresh=True)
-    except Exception:
-        return False, MANAGE_REFUSAL, None
+    who = rights.viewer
     name = str(name or '').strip()
     if not name:
         return False, 'Enter the name of your new plugin.', None
@@ -840,7 +830,7 @@ def upload_plugin(
     name: Any,
     directory: Any,
     replace: Any,
-    session: Any,
+    rights: PluginRights,
     *,
     limit: int = MAX_UPLOAD_BYTES,
     max_files: Optional[int] = None,
@@ -850,11 +840,11 @@ def upload_plugin(
     Install the files a `dcc.Upload` holds as a plugin. Returns `(success, message, URL of the
     installed plugin's page)`.
     """
-    refusal = authoring_refusal(session)
+    refusal = rights.authoring_refusal()
     if refusal:
         return False, refusal, None
+    who = rights.viewer
     try:
-        who = access.resolve_viewer(session if session is not None else {}, fresh=True)
         plan = plan_upload(
             decode_uploads(contents, filenames, limit, max_files=max_files),
             name=name,
@@ -901,15 +891,15 @@ def upload_plugin(
 def update_plugin_description(
     plugin_name: str,
     description: Optional[str],
-    session_data: Optional[Dict[str, Any]],
+    username: Optional[str],
     *,
     conn: Any = None,
     debug: bool = False,
 ) -> SuccessTuple:
     """
-    Update a published plugin's description when the session's user owns it.
+    Update a published plugin's description when `username` owns it.
     """
-    if not is_plugin_owner(plugin_name, session_data, conn=conn, debug=debug):
+    if not is_plugin_owner(plugin_name, username, conn=conn, debug=debug):
         return (
             False,
             f"Failed to update description for plugin '{plugin_name}'"
@@ -943,7 +933,7 @@ def this_server_env(username: Optional[str] = None) -> Dict[str, str]:
     The environment that makes `api:this_server` this server (for an install job).
     """
     from meerschaum.api import no_auth, private
-    from meerschaum.api.dash.execute import server_url
+    from meerschaum.api.host._server_client import server_url
     url = server_url()
     if not url:
         return {}
@@ -958,8 +948,6 @@ def plugin_action_sysargs(
     name: str,
     origin: Optional[str] = None,
     username: Optional[str] = None,
-    *,
-    env_provider: Optional[Any] = None,
 ) -> Tuple[Optional[List[str]], Dict[str, str], str]:
     """
     Return `(sysargs, env, message)` for a plugin action: `install`, `reinstall`, `update`,
@@ -977,7 +965,7 @@ def plugin_action_sysargs(
     env: Dict[str, str] = {}
     if repository == THIS_SERVER_REPOSITORY:
         try:
-            env = (env_provider or this_server_env)(username)
+            env = this_server_env(username)
         except Exception as e:
             return None, {}, f"Cannot install from this server's repository: {e}"
         if not env:
@@ -1008,7 +996,7 @@ def start_plugin_run(
     if username:
         ### The run is the user's, in their primary team (AC9).
         from meerschaum.jobs import ownership_properties
-        properties.update(ownership_properties(username, access.viewer_for(username).primary_team))
+        properties.update(ownership_properties(username, viewer_model.viewer_for(username).primary_team))
     try:
         job = Job(name, sysargs, env=(env or None), executor_keys='local', _properties=properties)
         return job.start(), name

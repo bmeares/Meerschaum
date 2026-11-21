@@ -12,7 +12,7 @@ the `dbc_dark` overrides off unless asked for.
 import json
 import re
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PLUGIN = '''
 from meerschaum.plugins import web_page, add_head

@@ -22,7 +22,7 @@ html = import_html(check_update=CHECK_UPDATE)
 def _connector_row(keys, session, details=False):
     from meerschaum.api.dash.access import resolve_viewer
     from meerschaum.api.dash.connector_listing import list_connectors
-    who = resolve_viewer(session if session is not None else {}, fresh=True)
+    who = resolve_viewer(session, fresh=True)
     if not who.can_view_connectors or (details and not who.can_see_connector_details):
         raise PermissionError('Connector details are unavailable.')
     rows = list_connectors(viewer=who)
@@ -93,7 +93,7 @@ def test_connection_click(n_clicks: Optional[int], session_data: Optional[Dict[s
     if not n_clicks:
         raise PreventUpdate
     from meerschaum.api.dash.access import resolve_viewer
-    who = resolve_viewer(session_data if session_data is not None else {}, fresh=True)
+    who = resolve_viewer(session_data, fresh=True)
     if not who.can_test_connectors:
         return html.Span(
             'Only administrators can test connections.',

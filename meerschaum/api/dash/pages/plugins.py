@@ -7,9 +7,9 @@ The plugins of this server (`/dash/plugins`): the Installed tab (plugins install
 and the Repository tab (`?tab=repository`, the plugins published to this API), one published
 plugin's page (`/dash/plugins/{name}`) and one installed plugin's page
 (`/dash/plugins/installed/{name}`, `?file=...&edit=1` opens a file for editing). New plugin (the
-circled plus, for those who may author plugins: `plugin_sources.authoring_refusal`) asks
+circled plus, for those who may author plugins: `PluginRights.authoring_refusal`) asks
 `bootstrap plugins`'s questions in a dialog (Start from a template), or takes the plugin's files
-(Upload files: `plugin_upload`).
+(Upload files: `_plugins._lifecycle.upload_plugin`).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 import dash_bootstrap_components as dbc
 from meerschaum.api.dash.components import build_pages_navbar
 from meerschaum.api.dash.jobs import build_job_logs_modal
-from meerschaum.api.dash._plugins import upload_limit_bytes, size_label
+from meerschaum.api.dash._plugins._archives import upload_limit_bytes, size_label
 
 #: The two ways New plugin adds a plugin.
 NEW_PLUGIN_MODES = (('template', 'Start from a template'), ('upload', 'Upload files'))
@@ -49,7 +49,7 @@ def _field(label: str, control, field_id: str, hidden: bool = False, label_for: 
 def _upload_control():
     """
     The files of an uploaded plugin: one `.py` or `.rs` file, one archive, or a package's files
-    (`plugin_upload.plan_upload`). The zone names what was chosen (`callbacks/plugins.py`).
+    (`_plugins._archives.plan_upload`). The zone names what was chosen (`callbacks/plugins.py`).
     """
     return dcc.Upload(
         html.Div(

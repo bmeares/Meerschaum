@@ -34,12 +34,12 @@ STEPS = ('name', 'members', 'traversal', 'review')
 def _authenticated(session) -> bool:
     """The Pipelines pages are for viewers who may read pipes (`pipes:read`)."""
     from meerschaum.api.dash import access
-    return access.resolve_viewer(session if session is not None else {}).can_read_pipes
+    return access.resolve_viewer(session).can_read_pipes
 
 
 def _viewer(session):
     from meerschaum.api.dash import access
-    return access.resolve_viewer(session if session is not None else {})
+    return access.resolve_viewer(session)
 
 
 def _instance(search):
@@ -76,7 +76,7 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
     instance = _engine.get_instance(registry)
-    registry_parameters = dict(access._pipeline_registry(instance))
+    registry_parameters = dict(access.pipeline_registry(instance))
     definitions = access.visible_pipelines(instance, viewer=viewer, registry_parameters=registry_parameters)
     if not definitions:
         return []

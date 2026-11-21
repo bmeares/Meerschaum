@@ -17,8 +17,9 @@ Every HTTP call from the Python API host / Dash console back to the supervising 
 - **In-memory test transport** (`InMemoryTransport`): records requests and returns canned
   responses in-process with zero sockets.
 - **Explicit auth modes**: strongly separated (`AnonymousAuth`, `InternalHostAuth`,
-  `SessionCookieAuth`, `SessionBoundBearerAuth`, `UserBearerAuth`) so callers cannot
-  accidentally upgrade a cookie-ceiling request to `X-Mrsm-Host-Token`.
+  `SessionCookieAuth`, `SessionBoundBearerAuth`, `UserBearerAuth`, `BearerTokenAuth`) so callers
+  cannot accidentally upgrade a cookie-ceiling request to `X-Mrsm-Host-Token`; credential headers
+  (`Authorization`, `Cookie`, `X-Mrsm-Host-Token`, `X-Mrsm-User`) come only from the auth mode.
 - **Unified JWT minting**: consolidates internal host tokens, user bearers, scoped read tokens,
   and session-bound (`CREDENTIAL_CLAIM`) bearers in one place.
 """
@@ -27,7 +28,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -52,6 +52,10 @@ class ServerUnavailableError(ServerClientError):
 
 class ResponseTooLargeError(ServerClientError):
     """The server response exceeded the caller's byte bound."""
+
+
+class ServerAuthError(ServerClientError):
+    """The credentials of a request could not be made (e.g. minting the user's bearer failed)."""
 
 
 class ServerHTTPError(ServerClientError):
@@ -103,20 +107,6 @@ def server_url() -> Optional[str]:
     from meerschaum.api.host import get_host_config
     url = get_host_config().get('server_url', None)
     return str(url).rstrip('/') if url else None
-
-
-def _active_server_url() -> Optional[str]:
-    """
-    Resolve the current server URL, honoring test patches on `meerschaum.api.dash.execute.server_url`
-    when `execute` is already loaded.
-    """
-    execute_mod = sys.modules.get('meerschaum.api.dash.execute')
-    if execute_mod is not None:
-        fn = getattr(execute_mod, 'server_url', None)
-        if callable(fn) and fn is not server_url:
-            val = fn()
-            return str(val).rstrip('/') if val else None
-    return server_url()
 
 
 def validate_origin(base_url: Any) -> str:
@@ -234,7 +224,7 @@ def mint_user_bearer(
             expires=timedelta(minutes=minutes),
             scopes=list(scopes),
         )
-    from meerschaum.api.dash.access import viewer_for
+    from meerschaum.api.dash.viewer import viewer_for
     viewer = viewer_for(username)
     if not viewer.signed_in:
         return None
@@ -258,7 +248,7 @@ def mint_session_bound_bearer(
     (`CREDENTIAL_CLAIM`), verified freshly against the session store (never adopting a
     deleted/re-registered user during a wait).
     """
-    from meerschaum.api.dash.sessions import get_session_data, valid_session_id
+    from meerschaum.api.dash.session_store import get_session_data, valid_session_id
     from meerschaum.api._oauth2 import manager, CREDENTIAL_CLAIM, PRINCIPAL_CLAIM
     sid = valid_session_id(session_id)
     if not sid:
@@ -278,7 +268,7 @@ def mint_session_bound_bearer(
     if username is not None and session_user != username:
         return None
     if scopes is None:
-        from meerschaum.api.dash.access import viewer_for
+        from meerschaum.api.dash.viewer import viewer_for
         viewer = viewer_for(session_user)
         if not viewer.signed_in:
             return None
@@ -344,13 +334,27 @@ class UserBearerAuth:
     minutes: int = 5
 
 
+@dataclass(frozen=True)
+class BearerTokenAuth:
+    """
+    A bearer already minted for this request (`mint_session_bound_bearer` / `mint_user_bearer`),
+    for a caller that checks the credential before its first request and reuses it.
+    """
+
+    token: str = field(repr=False)
+
+
 AuthMode = Union[
     AnonymousAuth,
     InternalHostAuth,
     SessionCookieAuth,
     SessionBoundBearerAuth,
     UserBearerAuth,
+    BearerTokenAuth,
 ]
+
+#: Headers only an auth mode sets (lowercase): a caller's `headers=` may not carry them.
+CREDENTIAL_HEADERS = frozenset({'authorization', 'cookie', 'x-mrsm-host-token', 'x-mrsm-user'})
 
 
 def _auth_headers(auth: AuthMode) -> Dict[str, str]:
@@ -364,7 +368,7 @@ def _auth_headers(auth: AuthMode) -> Dict[str, str]:
             headers['X-Mrsm-User'] = str(auth.user)
         return headers
     if isinstance(auth, SessionCookieAuth):
-        from meerschaum.api.dash.sessions import SESSION_COOKIE_NAME, valid_session_id
+        from meerschaum.api.dash.session_store import SESSION_COOKIE_NAME, valid_session_id
         sid = valid_session_id(auth.session_id)
         if not sid:
             raise ValueError('A valid console session ID is required.')
@@ -388,18 +392,15 @@ def _auth_headers(auth: AuthMode) -> Dict[str, str]:
             raise PermissionError('A current console session is required.')
         return {'authorization': f'Bearer {token}'}
     if isinstance(auth, UserBearerAuth):
-        execute_mod = sys.modules.get('meerschaum.api.dash.execute')
-        if (
-            auth.scopes is None
-            and execute_mod is not None
-            and callable(getattr(execute_mod, 'mint_bearer', None))
-        ):
-            token = execute_mod.mint_bearer(auth.username, minutes=auth.minutes)
-        else:
-            token = mint_user_bearer(
-                auth.username, scopes=auth.scopes, minutes=auth.minutes,
-            )
-        return {'Authorization': f'Bearer {token}'} if token else {}
+        try:
+            token = mint_user_bearer(auth.username, scopes=auth.scopes, minutes=auth.minutes)
+        except Exception as e:
+            raise ServerAuthError(str(e)) from e
+        return {'authorization': f'Bearer {token}'} if token else {}
+    if isinstance(auth, BearerTokenAuth):
+        if not auth.token:
+            raise ServerAuthError('No bearer was minted for this request.')
+        return {'authorization': f'Bearer {auth.token}'}
     raise TypeError(f'Unsupported auth mode: {type(auth).__name__}')
 
 
@@ -443,11 +444,15 @@ class UrllibTransport:
     DEFAULT_ERROR_BYTES: int = 65536
 
     def __init__(self, base_url_provider: Optional[Callable[[], Optional[str]]] = None):
-        self._base_url_provider = base_url_provider or _active_server_url
+        self._base_url_provider = base_url_provider or server_url
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
             _NoRedirect(),
         )
+
+    def origin(self) -> Optional[str]:
+        """The configured server origin (`None` when this host was given none)."""
+        return self._base_url_provider()
 
     def send(
         self,
@@ -459,7 +464,7 @@ class UrllibTransport:
         timeout: float = 30.0,
         max_bytes: Optional[int] = None,
     ) -> RawResponse:
-        origin = validate_origin(self._base_url_provider())
+        origin = validate_origin(self.origin())
         clean_path = validate_path(path)
         limit = self.DEFAULT_MAX_BYTES if max_bytes is None else int(max_bytes)
         req = urllib.request.Request(
@@ -591,7 +596,7 @@ class MainServerClient:
         """Whether requests can be dispatched (an in-memory transport or a configured `server_url`)."""
         if not isinstance(self.transport, UrllibTransport):
             return True
-        return _active_server_url() is not None
+        return self.transport.origin() is not None
 
     def request(
         self,
@@ -609,6 +614,11 @@ class MainServerClient:
     ) -> RawResponse:
         merged_headers: Dict[str, str] = {}
         if headers:
+            refused = sorted(name for name in headers if str(name).lower() in CREDENTIAL_HEADERS)
+            if refused:
+                raise ValueError(
+                    f"Credential headers come only from the auth mode, not `headers=`: {refused}"
+                )
             merged_headers.update(headers)
         merged_headers.update(_auth_headers(auth))
 

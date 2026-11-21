@@ -6,7 +6,7 @@ The console's shell (design §8.1): the top navigation, the Overview at `/dash`,
 
 import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import SIGN_IN, run_python, write_plugin
 
 #: Synthetic secrets: none of them may reach the browser.
 SECRETS = ('Sup3rS3cretPw', 'An0therS3cret', 'patch-client-s3cret', 'tok3n-in-query')

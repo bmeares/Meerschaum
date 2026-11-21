@@ -4,18 +4,17 @@
 
 """
 Dash-free plugin access & authoring policy: `PluginRights` computed from a `Viewer`
-(resolved fresh via `meerschaum.api.dash.access.resolve_viewer`), consolidating
-visibility, management, installation, source reading, authoring, publishing, and
-repository ownership checks in one acyclic module.
+(`meerschaum.api.dash.viewer`), consolidating visibility, management, installation, source
+reading, authoring, publishing, and repository ownership checks in one acyclic module. A callback
+resolves its `PluginRights` once (`rights_for_session`) and passes them down.
 """
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 
-from meerschaum.utils.typing import Any, Dict, List, Optional
-import meerschaum.api.dash.access as access
+from meerschaum.utils.typing import Any, List, Optional
+import meerschaum.api.dash.viewer as viewer_model
 from meerschaum.api.dash._plugins._fs import discover_plugin_files, is_safe_plugin_name
 
 #: Why a viewer may not manage, author, or publish plugins.
@@ -34,7 +33,8 @@ def foreign_plugin_message(name: str) -> str:
 def _console_is_read_only() -> bool:
     """Whether non-administrators may not act from the console (`--secure`)."""
     try:
-        return bool(access._secure())
+        from meerschaum.api.dash.viewer import secure_mode
+        return bool(secure_mode())
     except Exception:
         return True
 
@@ -49,15 +49,8 @@ def _plugins_registration_enabled() -> bool:
 
 
 def _webterm_enabled() -> bool:
-    """
-    Whether the server serves the web terminal, read directly from host config without
-    importing Dash. If `meerschaum.api.dash.webterm` is already loaded (e.g. mocked in a
-    test), respect its `webterm_enabled()`.
-    """
+    """Whether the server serves the web terminal (the host configuration's `webterm`)."""
     try:
-        mod = sys.modules.get('meerschaum.api.dash.webterm')
-        if mod is not None and hasattr(mod, 'webterm_enabled'):
-            return bool(mod.webterm_enabled())
         from meerschaum.api.host import get_host_config
         return bool(get_host_config().get('webterm', False))
     except Exception:
@@ -249,7 +242,7 @@ def resolve_rights(
 def rights_for_session(session: Any, *, fresh: bool = True) -> PluginRights:
     """Resolve the session's viewer (fresh by default) and return its `PluginRights`."""
     try:
-        who = access.resolve_viewer(session if session is not None else {}, fresh=fresh)
+        who = viewer_model.resolve_viewer(session, fresh=fresh)
     except Exception:
         who = None
     return resolve_rights(who)
@@ -303,39 +296,18 @@ def plugin_action_refusal(
     ).action_refusal(action, name, installed=installed)
 
 
-def may_read_source(kind: str, session: Any, name: Optional[str] = None) -> bool:
-    return rights_for_session(session, fresh=True).can_read_source(kind, name)
-
-
-def authoring_refusal(session: Any, name: Optional[str] = None) -> Optional[str]:
-    return rights_for_session(session, fresh=True).authoring_refusal(name)
-
-
-def may_author(session: Any, name: Optional[str] = None) -> bool:
-    return authoring_refusal(session, name) is None
-
-
-def may_publish(session: Any, name: Optional[str] = None) -> bool:
-    return rights_for_session(session, fresh=True).can_publish(name)
-
-
 def is_plugin_owner(
     plugin_name: str,
-    session_data: Optional[Dict[str, Any]],
+    username: Optional[str],
     *,
     conn: Any = None,
     debug: bool = False,
 ) -> bool:
-    """Check whether the currently logged in user is the owner of a published plugin."""
+    """Whether `username` is the owner of the published plugin `plugin_name`."""
     from meerschaum.api import get_api_connector
-    from meerschaum.api.dash.sessions import get_username_from_session
     from meerschaum.core import Plugin
 
-    session_id = (session_data or {}).get('session-id', None)
-    if session_id is None:
-        return False
-    username = get_username_from_session(session_id)
-    if username is None:
+    if not username:
         return False
     api_conn = conn if conn is not None else get_api_connector()
     plugin_username = api_conn.get_plugin_username(Plugin(plugin_name), debug=debug)

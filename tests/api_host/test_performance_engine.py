@@ -1,15 +1,11 @@
 """The Performance page's Engine section reads the engine's history natively, for what a viewer may see."""
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import SIGN_IN, run_python, check
 
 
 def instance(root, name):
     """A separate SQLite instance per test: the sandbox (and its default instance) is per module."""
     return {'MRSM_SQL_APIHOSTTEST': f"sqlite:///{root / (name + '.db')}"}
-
-
-def check(result):
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
 
 
 #: Real engine history on the sandbox instance: a saved Pipeline `engine-demo` (`clean` with its

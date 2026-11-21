@@ -3,10 +3,11 @@
 # vim:fenc=utf-8
 
 """
-Dash-free plugin lifecycle & rights tests (`meerschaum.api.dash._plugins`):
+Dash-free plugin lifecycle & rights tests (`meerschaum.api.dash._plugins`'s modules):
 verifies `PluginRights`, safe path/symlink/archive-bomb rejection, template creation,
 source read/CAS save, description updates, team `claim`/`release` reconciliation via
-`reconcile_plugin_run`, and zero AST import cycles — all without importing Dash.
+`reconcile_plugin_run`, and an acyclic plugin cluster whose domain core imports no Dash-facing
+module, all without importing Dash.
 """
 
 from __future__ import annotations
@@ -20,15 +21,9 @@ import tempfile
 
 import pytest
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json
 
 WEBTERM_ON = {'mrsm_instance': 'sql:apihosttest', 'webterm': True}
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
 
 
 @pytest.fixture
@@ -50,10 +45,10 @@ def _run(root, plugins, code, host_config=None, extra_env=None):
 def test_plugin_rights_matrix_without_dash(plugins_dir):
     """`PluginRights` consolidates visibility, management, source, authoring, and publish policy without Dash."""
     root, plugins = plugins_dir
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json, sys
 from meerschaum.api.dash import access
-from meerschaum.api.dash._plugins import (
+from meerschaum.api.dash._plugins._policy import (
     AUTHORING_ADMINS,
     AUTHORING_OFF,
     MANAGE_REFUSAL,
@@ -134,22 +129,21 @@ print('JSON:' + json.dumps(out))
 def test_safe_paths_symlinks_and_archives_without_dash(plugins_dir):
     """Safe path, symlink `O_NOFOLLOW`, and zip/tar bomb checks run cleanly without Dash."""
     root, plugins = plugins_dir
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import io, json, os, pathlib, stat, sys, tarfile, zipfile
-from meerschaum.api.dash._plugins import (
+from meerschaum.api.dash._plugins._fs import (
     MAX_PATH_BYTES,
     MAX_PATH_PARTS,
     UploadError,
     checked_upload_path,
     is_safe_plugin_name,
-    plan_upload,
     read_file_no_follow,
     relative_source_path,
     replace_file_cas,
     source_digest,
     valid_plugin_name,
-    write_plugin,
 )
+from meerschaum.api.dash._plugins._archives import plan_upload, write_plugin
 
 dest = pathlib.Path(os.environ['MRSM_PLUGINS_DIR'])
 outside = dest.parent / 'df-secret.py'
@@ -217,7 +211,7 @@ def test_lifecycle_template_source_description_and_reconcile_without_dash(plugin
     and `reconcile_plugin_run` team claim/release.
     """
     root, plugins = plugins_dir
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json, os, pathlib, sys
 from types import SimpleNamespace
 
@@ -234,13 +228,14 @@ import meerschaum as mrsm
 from meerschaum.api import get_api_connector
 from meerschaum.core import Plugin, User
 from meerschaum.api.dash import access
-from meerschaum.api.dash._plugins import (
+from meerschaum.api.dash._plugins._lifecycle import (
     create_new_plugin,
     read_source_with_digest,
     reconcile_plugin_run,
     save_source,
     update_plugin_description,
 )
+from meerschaum.api.dash._plugins._policy import rights_for_session
 
 conn = get_api_connector()
 owner = sign_in('df-owner', user_type='admin')
@@ -253,19 +248,19 @@ assert team.edit()[0]
 access.forget()
 
 # 1. Template creation + automatic team claim
-created = create_new_plugin('df_demo', 'Python', 'file', ['fetch'], '', 'ts', None, writer)
+created = create_new_plugin('df_demo', 'Python', 'file', ['fetch'], '', 'ts', None, rights_for_session(writer))
 team_after_create = list(mrsm.Team('df-builders', instance=conn).attributes.get('plugins') or [])
 
 # 2. Source read + digest CAS save + stale-digest refusal
-text, digest = read_source_with_digest('installed', 'df_demo', 'df_demo.py', writer)
-saved_ok = save_source('df_demo', 'df_demo.py', text + '# edited\\n', digest, writer)
-saved_stale = save_source('df_demo', 'df_demo.py', text + '# stale\\n', digest, writer)
+text, digest = read_source_with_digest('installed', 'df_demo', 'df_demo.py', rights_for_session(writer))
+saved_ok = save_source('df_demo', 'df_demo.py', text + '# edited\\n', digest, rights_for_session(writer))
+saved_stale = save_source('df_demo', 'df_demo.py', text + '# stale\\n', digest, rights_for_session(writer))
 
 # 3. Repository description update (owner succeeds, non-owner refused)
 plugin = Plugin('df_pub', user_id=conn.get_user_id(User('df-owner', instance=conn)))
 assert conn.register_plugin(plugin)[0]
-desc_refused = update_plugin_description('df_pub', 'Hijacked', writer)
-desc_ok = update_plugin_description('df_pub', 'Updated Dash-free description.', owner)
+desc_refused = update_plugin_description('df_pub', 'Hijacked', 'df-team-writer')
+desc_ok = update_plugin_description('df_pub', 'Updated Dash-free description.', 'df-owner')
 stored_desc = (conn.get_plugin_attributes(Plugin('df_pub')) or {}).get('description')
 
 # 4. Team claim / release reconciliation via reconcile_plugin_run (without Dash!)
@@ -352,78 +347,82 @@ print('JSON:' + json.dumps(out))
     assert out['team_after_uninstall'] == ['df_demo']
 
 
-def test_plugin_cluster_import_graph_is_strictly_acyclic():
-    """
-    AST import graph across the entire plugin cluster (both top-level and function-local
-    imports) has strictly 0 cycles.
-    """
-    dash_root = pathlib.Path(__file__).resolve().parents[2] / 'meerschaum' / 'api' / 'dash'
-    cluster_files = [
-        *sorted((dash_root / '_plugins').glob('*.py')),
-        dash_root / 'plugins.py',
-        dash_root / 'plugin_sources.py',
-        dash_root / 'plugin_upload.py',
-        dash_root / 'plugin_publish.py',
-        dash_root / 'pages' / 'plugins.py',
-        dash_root / 'callbacks' / 'plugins.py',
-    ]
+DASH_ROOT = pathlib.Path(__file__).resolve().parents[2] / 'meerschaum' / 'api' / 'dash'
 
+#: The console modules the plugin domain core may import: none of them reaches the Dash app,
+#: a page, or the console's access, component or terminal modules.
+DASH_FREE_DEPENDENCIES = {
+    'meerschaum.api.dash._native_execution',
+    'meerschaum.api.dash._support',
+    'meerschaum.api.dash.connectors_file',
+    'meerschaum.api.dash.session_store',
+    'meerschaum.api.dash.viewer',
+}
+
+
+def _dash_import_graph():
+    """`{module: {imported console modules}}` over `meerschaum/api/dash` (function-local too)."""
     def mod_name(path: pathlib.Path) -> str:
-        rel = path.relative_to(dash_root.parents[2]).with_suffix('')
-        parts = list(rel.parts)
-        if parts[-1] == '__init__':
-            parts = parts[:-1]
-        return '.'.join(parts)
+        parts = list(path.relative_to(DASH_ROOT.parents[2]).with_suffix('').parts)
+        return '.'.join(parts[:-1] if parts[-1] == '__init__' else parts)
 
-    mods = {mod_name(p): p for p in cluster_files}
+    mods = {mod_name(path): path for path in DASH_ROOT.rglob('*.py')}
     graph = collections.defaultdict(set)
     for mod, path in mods.items():
-        tree = ast.parse(path.read_text(encoding='utf-8'))
-        for node in ast.walk(tree):
+        is_package = path.name == '__init__.py'
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
             if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name in mods and alias.name != mod:
-                        graph[mod].add(alias.name)
+                graph[mod].update(alias.name for alias in node.names if alias.name in mods)
             elif isinstance(node, ast.ImportFrom):
                 base = node.module or ''
-                if node.level > 0:
-                    pkg = mod.split('.')[:-node.level]
-                    base = '.'.join(pkg + ([base] if base else []))
-                if base in mods and base != mod:
-                    graph[mod].add(base)
+                if node.level:
+                    package = mod.split('.') if is_package else mod.split('.')[:-1]
+                    package = package[:len(package) - (node.level - 1)]
+                    base = '.'.join(package + ([base] if base else []))
+                ### `from package import module` imports that module (the console package's
+                ### `__init__` is lazy); any other name comes from `base` itself.
                 for alias in node.names:
-                    cand = f'{base}.{alias.name}' if base else alias.name
-                    if cand in mods and cand != mod:
-                        graph[mod].add(cand)
+                    if f'{base}.{alias.name}' in mods:
+                        graph[mod].add(f'{base}.{alias.name}')
+                    elif base in mods:
+                        graph[mod].add(base)
+        graph[mod].discard(mod)
+    return mods, graph
 
-    index = 0
-    indices, lowlink, stack, on_stack, cycles = {}, {}, [], set(), []
 
-    def strongconnect(v: str):
-        nonlocal index
-        indices[v] = lowlink[v] = index
-        index += 1
-        stack.append(v)
-        on_stack.add(v)
-        for w in sorted(graph.get(v, ())):
-            if w not in indices:
-                strongconnect(w)
-                lowlink[v] = min(lowlink[v], lowlink[w])
-            elif w in on_stack:
-                lowlink[v] = min(lowlink[v], indices[w])
-        if lowlink[v] == indices[v]:
-            scc = []
-            while True:
-                w = stack.pop()
-                on_stack.remove(w)
-                scc.append(w)
-                if w == v:
-                    break
-            if len(scc) > 1:
-                cycles.append(sorted(scc))
+def _reach(graph, start):
+    seen, stack = set(), list(start)
+    while stack:
+        mod = stack.pop()
+        if mod not in seen:
+            seen.add(mod)
+            stack.extend(graph.get(mod, ()))
+    return seen
 
-    for mod in sorted(mods):
-        if mod not in indices:
-            strongconnect(mod)
 
-    assert cycles == [], f"Unexpected import cycles in plugin cluster: {cycles}"
+def test_plugin_domain_core_imports_no_dash_facing_module():
+    """
+    The plugin domain core (`_plugins/*`) reaches only Dash-free console modules (function-local
+    imports included), so it is in no import cycle with the console's pages and access modules.
+    """
+    mods, graph = _dash_import_graph()
+    core = {mod for mod in mods if mod.startswith('meerschaum.api.dash._plugins')}
+    reached = _reach(graph, core) - core
+    assert reached <= DASH_FREE_DEPENDENCIES, sorted(reached - DASH_FREE_DEPENDENCIES)
+
+
+def test_plugin_modules_are_in_no_import_cycle():
+    """No plugin module (domain core, pages, publishing, source browser) is in an import cycle."""
+    mods, graph = _dash_import_graph()
+    plugin_mods = {
+        mod for mod in mods
+        if mod.startswith('meerschaum.api.dash._plugins')
+        or mod in (
+            'meerschaum.api.dash.plugins',
+            'meerschaum.api.dash.plugin_sources',
+            'meerschaum.api.dash.plugin_publish',
+            'meerschaum.api.dash.pages.plugins',
+        )
+    }
+    in_cycles = {mod for mod in plugin_mods if mod in _reach(graph, graph.get(mod, ()))}
+    assert in_cycles == set()

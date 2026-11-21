@@ -1,4 +1,8 @@
-"""Publish plugins with temporary browser credentials or saved API connector credentials."""
+"""
+Publish plugins with temporary browser credentials or saved API connector credentials. Each call
+takes the caller's `PluginRights` (resolved once per callback) and its console session ID, which
+keys the credentials a browser entered.
+"""
 from __future__ import annotations
 
 import copy
@@ -6,12 +10,8 @@ import threading
 import uuid
 from types import SimpleNamespace
 
-import meerschaum.api.dash.access as access
-from meerschaum.api.dash._plugins import (
-    PUBLISH_REFUSAL,
-    discover_plugin_files,
-    may_publish,
-)
+from meerschaum.api.dash._plugins._fs import discover_plugin_files
+from meerschaum.api.dash._plugins._policy import PUBLISH_REFUSAL, PluginRights
 
 _AUTH_FIELDS = ('username', 'password', 'client_id', 'client_secret', 'api_key')
 _LOCK = threading.Lock()
@@ -21,33 +21,31 @@ class PublishError(ValueError):
     """A local validation error whose message is safe to show in the dialog."""
 
 
-def repositories(session, name=None):
+def repositories(rights: PluginRights, name=None):
     """
-    Configured API repositories visible to who may publish (`may_publish`; the connectors their
-    account may see); no credentials go to Dash.
+    Configured API repositories visible to who may publish (`rights.can_publish`; the connectors
+    their account may see); no credentials go to Dash.
     """
-    if not may_publish(session, name):
+    if not rights.can_publish(name):
         return []
     from meerschaum.api.dash.connector_listing import list_connectors
-    who = access.resolve_viewer(session if session is not None else {}, fresh=True)
-    return [row['keys'] for row in list_connectors(who) if row['type'] == 'api']
+    return [row['keys'] for row in list_connectors(rights.viewer) if row['type'] == 'api']
 
 
-def _key(context, repository, session):
-    if not isinstance(context, dict) or not may_publish(session):
+def _key(context, repository, rights: PluginRights, session_id):
+    if not isinstance(context, dict) or not rights.can_publish():
         raise PermissionError(PUBLISH_REFUSAL)
     name = context.get('name')
     ### A plugin the session may not manage is not told apart from one that is not installed.
-    if name not in discover_plugin_files() or not may_publish(session, name):
+    if name not in discover_plugin_files() or not rights.can_publish(name):
         raise PublishError('This plugin is not installed.')
-    if repository not in repositories(session, name):
+    if repository not in repositories(rights, name):
         raise PublishError('Select a configured API repository.')
-    from meerschaum.api.dash.sessions import valid_session_id
-    session_id = valid_session_id((session or {}).get('session-id'))
+    from meerschaum.api.dash.session_store import valid_session_id
+    session_id = valid_session_id(session_id)
     # A no-auth console still keeps different dialogs' remote credentials separate.
     nonce = valid_session_id(context.get('nonce'))
-    who = access.resolve_viewer(session if session is not None else {}, fresh=True)
-    if not session_id and not (who.no_auth and nonce):
+    if not session_id and not (getattr(rights.viewer, 'no_auth', False) and nonce):
         raise PermissionError('Sign in before publishing a plugin.')
     return session_id or nonce, repository
 
@@ -73,9 +71,9 @@ def browser_credentials(browser, key, url):
     return fields
 
 
-def _connection(context, repository, session, credentials=None, browser=None):
+def _connection(context, repository, rights, session_id, credentials=None, browser=None):
     import meerschaum as mrsm
-    key = _key(context, repository, session)
+    key = _key(context, repository, rights, session_id)
     configured = mrsm.get_connector(repository)
     if configured is None:
         raise PublishError('The selected API repository is unavailable.')
@@ -177,9 +175,9 @@ def _authenticated(conn):
     return False
 
 
-def repository_status(context, repository, session, browser=None):
+def repository_status(context, repository, rights, session_id, browser=None):
     try:
-        key, conn, url = _connection(context, repository, session, browser=browser)
+        key, conn, url = _connection(context, repository, rights, session_id, browser=browser)
         if _authenticated(conn):
             return True, f'Ready to publish to {repository}.'
         return False, f'Sign in to {repository} to publish.'
@@ -192,7 +190,8 @@ def repository_status(context, repository, session, browser=None):
 def login_repository(
     context,
     repository,
-    session,
+    rights,
+    session_id,
     method,
     username,
     password,
@@ -213,7 +212,7 @@ def login_repository(
     ):
         return False, 'Fill in the credentials for the selected sign-in method.', browser
     try:
-        key, conn, url = _connection(context, repository, session, fields)
+        key, conn, url = _connection(context, repository, rights, session_id, fields)
         if not conn.login(warn=False)[0]:
             return False, 'Sign-in failed. Check your credentials and try again.', browser
         if persist is True:
@@ -237,10 +236,10 @@ def login_repository(
         return False, 'Could not sign in to this repository. Check its connection settings and try again.', browser
 
 
-def publish(context, repository, session, browser=None):
+def publish(context, repository, rights, session_id, browser=None):
     """Package current source with the CLI's archiver, then upload using the API client."""
     try:
-        key, conn, url = _connection(context, repository, session, browser=browser)
+        key, conn, url = _connection(context, repository, rights, session_id, browser=browser)
         if not _authenticated(conn):
             return False, 'Sign in to this repository before publishing.'
         from meerschaum import _core
@@ -267,11 +266,11 @@ def publish(context, repository, session, browser=None):
         return False, 'Publishing failed. Check the repository connection and your plugin permissions.'
 
 
-def build_publish_dialog(name, origin, session):
+def build_publish_dialog(name, origin, rights: PluginRights):
     from dash import dcc, html
     import dash_bootstrap_components as dbc
 
-    choices = repositories(session, name)
+    choices = repositories(rights, name)
     selected = origin if origin in choices else (choices[0] if choices else None)
 
     def field(label, identifier, secret=False):

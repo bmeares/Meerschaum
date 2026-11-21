@@ -14,12 +14,12 @@ from meerschaum.core.Pipeline._saved import (
 
 def _require_session(data):
     """A Pipeline's page is for viewers who may read pipes (`pipes:read`)."""
-    if not access.resolve_viewer(data if data is not None else {}).can_read_pipes:
+    if not access.resolve_viewer(data).can_read_pipes:
         raise PreventUpdate
 
 
 def _viewer(session):
-    return access.resolve_viewer(session if session is not None else {})
+    return access.resolve_viewer(session)
 
 
 def _require_pipeline_rights(session, name, instance, permission='pipes:write'):
@@ -318,8 +318,8 @@ def manage_jobs(pipeline, ticks, create, starts, stops, name, schedule, workers,
             args = job_arguments(pipeline, instance, schedule, workers, retries or 0, force)
             ### The job is the session user's, in their primary team (AC9).
             from meerschaum.jobs import ownership_properties
-            from meerschaum.api.dash.access import get_viewer
-            viewer = get_viewer(session_data=session)
+            from meerschaum.api.dash.access import resolve_viewer
+            viewer = resolve_viewer(session)
             job = Job(name, args, _properties=ownership_properties(
                 None if viewer.no_auth else viewer.username,
                 None if viewer.no_auth else viewer.primary_team,
