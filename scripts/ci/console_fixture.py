@@ -141,7 +141,7 @@ def main() -> None:
         if name == 'install':
             consumer.add_argument('--destination', type=Path, required=True)
     for command in (producer, recorder, *[commands.choices[name] for name in ('verify', 'install')]):
-        command.add_argument('--profile', choices=('debug', 'release'), required=True)
+        command.add_argument('--profile', choices=('debug', 'ci', 'release'), required=True)
     args = parser.parse_args()
     try:
         if args.command == 'build':

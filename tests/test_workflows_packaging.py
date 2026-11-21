@@ -428,7 +428,7 @@ def test_pytest_builds_once_and_consumes_verified_complete_artifacts(pytest_work
     builder = (REPO / 'scripts/ci/build_pytest.sh').read_text()
     assert 'maturin" build --profile ci --locked' in builder
     assert 'artifacts.py create --kind wheel --profile ci' in builder
-    assert 'artifacts.py create --kind binary --profile debug' in builder
+    assert 'artifacts.py create --kind binary --profile ci' in builder
     consumer = (REPO / 'scripts/ci/prepare_pytest.sh').read_text()
     assert consumer.index('artifacts.py verify') < consumer.index('-m pip install')
     assert 'artifacts.py overlay-wheel' in consumer, 'bundled native libraries must travel with the extension'

@@ -30,6 +30,11 @@ authors = ["Bennett Meares <bennett.meares@gmail.com>"]
 # reedline 0.52 and sysinfo 0.39 need 1.95, sqlx 0.9 needs 1.94. Recompute after dependency upgrades.
 rust-version = "1.95"
 
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
 # Shared dependency versions. Crates opt in with `foo = { workspace = true }`.
 # Add new shared entries here only when two or more crates need the same dependency;
 # crate-private dependencies go in the crate's own Cargo.toml with an explicit version.
@@ -83,11 +88,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # arrow, polars and pyo3 move together (crates/meerschaum-py/README.md "Dependency pins"): RecordBatches
 # cross between the kernel, the plugin ABI and the extension, and only one pyo3 can link libpython.
 # Arrow 60 needs Rust 1.88.
-arrow = "60"
+arrow = { version = "60", default-features = false, features = ["ipc"] }
 # Only the Polars features a code path needs (17b, sizes in crates/meerschaum-py/PERF.md): the
 # kernel uses eager frames, IPC (its Arrow bridge), string and temporal kernels and time zones.
-polars = { version = "0.55", features = ["dtype-full", "ipc", "strings", "temporal", "timezones"] }
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
+polars = { version = "0.55", default-features = false, features = ["dtype-full", "ipc", "strings", "temporal", "timezones"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "system-proxy"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 # `extension-module` is a feature of meerschaum-py (maturin turns it on), so `cargo test` links libpython.
@@ -133,6 +138,7 @@ sqlx-sqlite = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d0549085
 [profile.release]
 lto = "thin"
 codegen-units = 1
+strip = "symbols"
 
 # CI profile: a working build that is quick to produce, for the jobs that only need the code to run
 # (the pytest job's `_core` extension: `scripts/rust/build_py.sh --profile ci`). It inherits `release`
@@ -146,6 +152,7 @@ opt-level = 1
 lto = false
 codegen-units = 256
 debug = "line-tables-only"
+strip = "none"
 incremental = false
 
 # Dependencies carry no debug info (Polars alone is ~1 GB per feature set with it), as in `[profile.dev]`.

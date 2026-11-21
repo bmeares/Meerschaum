@@ -112,3 +112,6 @@ exclude = [
     # Test sources of the extension crate are not shipped in the sdist.
     "crates/meerschaum-py/tests/**",
 ]
+
+[tool.pytest.ini_options]
+norecursedirs = ["portable", "test_root", "tests/data", "docs", "target", ".venv*"]

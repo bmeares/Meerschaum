@@ -47,14 +47,13 @@ def _platform(command):
 def test_a_local_build_loads_for_the_builders_platform(tmp_path):
     result, commands = _buildx(tmp_path, '5.0.0rc2')
     assert result.returncode == 0, result.stderr
-    assert len(commands) == 5
+    assert len(commands) == 4
     for command in commands:
         assert ' --load ' in command and '--push' not in command
         assert _platform(command) is None, 'a loaded image cannot be a manifest list'
     assert [_tags(c) for c in commands] == [
-        [f'{IMAGE}:5.0.0rc2-minimal'],
+        [f'{IMAGE}:5.0.0rc2-minimal', f'{IMAGE}:5.0.0rc2-slim'],
         [f'{IMAGE}:5.0.0rc2-full', f'{IMAGE}:5.0.0rc2-api'],
-        [f'{IMAGE}:5.0.0rc2-slim'],
         [f'{IMAGE}:5.0.0rc2-rust'],
         [f'{IMAGE}:5.0.0rc2-rust-full'],
     ]
@@ -81,7 +80,10 @@ def test_a_per_architecture_push_pushes_only_the_architecture_tags(tmp_path, pla
         )
         assert result.returncode == 0, result.stderr
         assert [_tags(c) for c in commands] == [
-            [f'{IMAGE}:{version}-{name}-{arch}'] for name in ('minimal', 'full', 'slim', 'rust', 'rust-full')
+            [f'{IMAGE}:{version}-minimal-{arch}', f'{IMAGE}:{version}-slim-{arch}'],
+            [f'{IMAGE}:{version}-full-{arch}'],
+            [f'{IMAGE}:{version}-rust-{arch}'],
+            [f'{IMAGE}:{version}-rust-full-{arch}'],
         ], 'a release must not move latest/full/slim/api from one architecture'
         assert {_platform(c) for c in commands} == {platform}
         assert all(' --push ' in c for c in commands)
@@ -149,7 +151,7 @@ def test_a_sealed_sdk_context_replaces_source_compilation(tmp_path):
     (sdk / 'mrsm').write_bytes(b'verified-program')
     result, commands = _buildx(tmp_path, '5.0.0rc25', '--sdk-artifacts', str(sdk))
     assert result.returncode == 0, result.stderr
-    assert len(commands) == 5
+    assert len(commands) == 4
     assert all(f'--build-context sdk={sdk}' in c and '--build-arg sdk_source=artifacts' in c for c in commands)
     assert all('--label org.opencontainers.image.revision=' in c for c in commands)
 
@@ -159,7 +161,7 @@ def _dockerfile_stages() -> dict[str, str]:
     stages: dict[str, list[str]] = {}
     current = None
     for line in text.splitlines():
-        match = re.match(r'^FROM\s+\S+\s+AS\s+(\S+)\s*$', line)
+        match = re.match(r'^FROM\s+(?:--platform=\S+\s+)?\S+\s+AS\s+(\S+)\s*$', line)
         if match:
             current = match.group(1)
             stages[current] = [line]

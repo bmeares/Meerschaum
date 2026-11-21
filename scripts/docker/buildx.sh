@@ -206,18 +206,24 @@ tags_for() {
   fi
 }
 
-for tag in "${tags[@]}"; do
-  target=""
-  if [ -z "$v4_only" ]; then
-    case "$tag" in full) target=full ;; minimal) target=slim ;; esac
-  fi
-  specific_tags=()
-  while IFS= read -r t; do specific_tags+=("$t"); done < <(tags_for "$tag")
-  build "$target" "$tag" "${specific_tags[@]}"
-done
+if [ -n "$v4_only" ]; then
+  for tag in "${tags[@]}"; do
+    specific_tags=()
+    while IFS= read -r t; do specific_tags+=("$t"); done < <(tags_for "$tag")
+    build "" "$tag" "${specific_tags[@]}"
+  done
+else
+  ### `minimal` and `slim` are aliases of the same `--target slim` image: build it once with both tag sets.
+  slim_tags=()
+  while IFS= read -r t; do slim_tags+=("$t"); done < <(tags_for minimal)
+  while IFS= read -r t; do slim_tags+=("$t"); done < <(tags_for slim)
+  build slim minimal "${slim_tags[@]}"
 
-if [ -z "$v4_only" ]; then
-  for variant in slim rust rust-full; do
+  full_tags=()
+  while IFS= read -r t; do full_tags+=("$t"); done < <(tags_for full)
+  build full full "${full_tags[@]}"
+
+  for variant in rust rust-full; do
     variant_tags=()
     while IFS= read -r t; do variant_tags+=("$t"); done < <(tags_for "$variant")
     build "$variant" minimal "${variant_tags[@]}"
@@ -229,15 +235,16 @@ fi
 ### real inside the full image. A failure fails the build. `SKIP_SMOKE=1` skips it.
 if [ "$push" = "--load" ] && [ -z "${SKIP_SMOKE:-}" ] && [ -z "$dry_run" ]; then
   smoke_args=()
-  for tag in "${tags[@]}"; do
-    if [ "$tag" == "full" ]; then
-      smoke_args+=(--full-image "$image:$mrsm_version-$tag")
-    else
-      smoke_args+=(--image "$image:$mrsm_version-$tag")
-    fi
-  done
-  if [ -z "$v4_only" ]; then
-    smoke_args+=(--slim-image "$image:$mrsm_version-slim" --rust-image "$image:$mrsm_version-rust" --rust-full-image "$image:$mrsm_version-rust-full")
+  if [ -n "$v4_only" ]; then
+    for tag in "${tags[@]}"; do
+      if [ "$tag" == "full" ]; then
+        smoke_args+=(--full-image "$image:$mrsm_version-$tag")
+      else
+        smoke_args+=(--image "$image:$mrsm_version-$tag")
+      fi
+    done
+  else
+    smoke_args+=(--full-image "$image:$mrsm_version-full" --slim-image "$image:$mrsm_version-slim" --rust-image "$image:$mrsm_version-rust" --rust-full-image "$image:$mrsm_version-rust-full")
   fi
   ./scripts/docker/smoke_image.sh "${smoke_args[@]}"
 fi

@@ -144,12 +144,21 @@ jobs:
         run: scripts/rust/ci.sh disk-guard
       - name: Prepare the native API test interpreter
         run: |
-          native_test_env="$(mktemp -d "$RUNNER_TEMP/mrsm-native-python.XXXXXX")"
           # The reference-interpreter setup also supplies uv on self-hosted runners.
           scripts/parity/setup_reference.sh
           native_uv="$(command -v uv || printf '%s\n' "$HOME/.local/bin/uv")"
-          python3 -m venv --without-pip "$native_test_env"
-          "$native_uv" pip install --python "$native_test_env/bin/python" pip -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt -r requirements/polars.txt
+          ci_cache="${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}"
+          native_test_env="$ci_cache/native-api-venv"
+          wanted="$(python3 -c 'import sys; print(sys.version_info[:2])')"
+          deps_hash="$({ cat requirements/api.txt requirements/dash.txt requirements/sql.txt requirements/pandas.txt requirements/polars.txt; printf '%s\n' "pip $wanted"; } | sha256sum | cut -d' ' -f1)"
+          if [ ! -x "$native_test_env/bin/python" ] || \
+             [ "$("$native_test_env/bin/python" -c 'import sys; print(sys.version_info[:2])' 2>/dev/null || true)" != "$wanted" ] || \
+             [ "$(cat "$native_test_env/.deps-hash" 2>/dev/null || true)" != "$deps_hash" ]; then
+            mkdir -p "$ci_cache"
+            python3 -m venv --clear --without-pip "$native_test_env"
+            "$native_uv" pip install --python "$native_test_env/bin/python" pip -r requirements/api.txt -r requirements/dash.txt -r requirements/sql.txt -r requirements/pandas.txt -r requirements/polars.txt
+            echo "$deps_hash" > "$native_test_env/.deps-hash"
+          fi
           echo "PYTHON_BIN=$native_test_env/bin/python" >> "$GITHUB_ENV"
           echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Build the native Python extension

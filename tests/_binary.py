@@ -8,7 +8,7 @@ server fixtures), need one.
 - `MRSM_TEST_BIN` (else `MRSM_BIN`) names it explicitly. CI downloads it with a provenance manifest.
   Neither changes what the product runs: `MRSM_BIN` does, which is why the workflows pass
   `MRSM_TEST_BIN`.
-- Outside CI the newest `target/{release,debug}/mrsm` of this checkout is used when nothing is set.
+- Outside CI the newest `target/{release,ci,debug}/mrsm` of this checkout is used when nothing is set.
   CI never looks in `target/`: the shared runner checkout keeps binaries from earlier runs.
 - A binary is **checked** before it is used: its version must equal the extension's, and downloaded
   artifacts must match the actual checkout commit/tree, build profile and payload checksums.
@@ -148,7 +148,7 @@ def find_binary() -> Optional[str]:
     if explicit:
         candidates.append(explicit)
     elif not in_ci():
-        builds = [REPO / 'target' / profile / NAME for profile in ('release', 'debug')]
+        builds = [REPO / 'target' / profile / NAME for profile in ('release', 'ci', 'debug')]
         builds = [build for build in builds if _is_program(build)]
         builds.sort(key=lambda build: build.stat().st_mtime, reverse=True)
         candidates.extend(str(build) for build in builds[:1])

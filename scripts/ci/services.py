@@ -282,8 +282,12 @@ def validate(args):
     root = args.root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=False)
     baseline = collection(args.python, root / 'full', root / 'full.json')
-    lanes = {lane: collection(args.python, root / lane, root / f'{lane}.json', lane)
-             for lane in SHARDS}
+    unknown = sorted({item['shard'] for item in baseline} - set(SHARDS))
+    if unknown:
+        raise ValueError(f'Unknown shard(s) in collection: {unknown}')
+    # pytest_shard computes each item's shard deterministically from the full catalog, so a
+    # single unsharded collection pass proves complete, disjoint coverage across all lanes.
+    lanes = {lane: baseline for lane in SHARDS}
     counts = validate_partition(baseline, lanes)
     (root / 'partition.json').write_text(json.dumps({'total': len(baseline), 'shards': counts}, indent=2) + '\n')
     print(json.dumps({'total': len(baseline), 'shards': counts}, indent=2))

@@ -127,8 +127,11 @@ tempfile = "3"
 portable-pty = "0.9"
 vt100 = "0.16"
 # Self-signed certificates for `start api --keyfile/--certfile` (`server.rs`, tests/https_api.rs).
-rcgen = "0.14"
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 # The web terminal's websocket in tests/webterm_restricted.rs (the version meerschaum-server's
 # tests use).
-tokio-tungstenite = "0.30"
+tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+
+[lints]
+workspace = true

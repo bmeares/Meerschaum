@@ -9,16 +9,18 @@ ARG sdk_source=source
 
 FROM fedora:44 AS rust-toolchain
 
+ARG TARGETARCH
+
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
     CARGO_TERM_COLOR=never \
     CARGO_INCREMENTAL=0
 
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --setopt=install_weak_deps=False --nodocs \
       gcc gcc-c++ make pkgconf-pkg-config \
       git curl binutils \
-  && dnf clean all \
   && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
      | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
 
@@ -44,8 +46,9 @@ RUN mkdir -p /plugin/src \
 ### and is shared by `full` and `rust-full`; `compiler-policy` writes only the 200-byte
 ### release-bound /etc/meerschaum/native-runtime.json.
 FROM plugin-dependencies AS confined-compiler
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 \
-  && dnf clean all
+ARG TARGETARCH
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --setopt=install_weak_deps=False --nodocs python3
 COPY scripts/docker/native_compiler_snapshot.py scripts/docker/build_native_compiler_bundle.py /compiler-tools/
 COPY scripts/docker/compiler_source/ /compiler-source/
 RUN CARGO_HOME=/plugin-cargo cargo vendor --locked --versioned-dirs \
@@ -68,8 +71,9 @@ RUN --mount=type=cache,id=mrsm-v5-cargo-registry,target=/usr/local/cargo/registr
   && strip --strip-unneeded /out/mrsm
 
 FROM source-builder AS rust-builder
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip patchelf \
-  && dnf clean all \
+ARG TARGETARCH
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip patchelf \
   && python3 -m pip install --no-cache-dir 'maturin>=1.9,<2.0'
 COPY pyproject.toml README.md LICENSE NOTICE _meerschaum_mrsm.py ./
 COPY meerschaum ./meerschaum
@@ -91,11 +95,16 @@ COPY --from=sdk /wheels /out/wheels
 FROM native-${sdk_source} AS native-selected
 FROM wheel-${sdk_source} AS wheel-selected
 
+### Tiny build-platform Python helper shared by pure-Python attestation stages so arm64 builds
+### hash natively on $BUILDPLATFORM instead of under QEMU.
+FROM --platform=$BUILDPLATFORM fedora:44 AS py-tool
+ARG BUILDARCH
+RUN --mount=type=cache,id=mrsm-dnf-${BUILDARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --setopt=install_weak_deps=False --nodocs python3 curl-minimal
+
 ### Hash the completed native installation with builder-only Python. The runtime
 ### receives only the fixed manifest, never this tool or the builder interpreter.
-FROM fedora:44 AS factory-manifest-tools
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 \
-  && dnf clean all
+FROM py-tool AS factory-manifest-tools
 COPY scripts/docker/write_native_factory_manifest.py \
      scripts/docker/native_compiler_snapshot.py \
      scripts/docker/build_native_compiler_bundle.py /factory-tools/
@@ -115,9 +124,10 @@ RUN --mount=type=bind,from=confined-compiler,source=/confined-compiler/rootfs,ta
 ### ---------------------------------------------------------------------------------------------
 ### py-base: shared builder stage for installing Python wheels/extras into /install.
 FROM fedora:44 AS py-base
+ARG TARGETARCH
 
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip binutils findutils \
-  && dnf clean all
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip binutils findutils
 
 ### ---------------------------------------------------------------------------------------------
 ### py-slim: the Meerschaum wheel alone (no extras, --no-deps), installed into /install.
@@ -137,28 +147,25 @@ RUN --mount=type=bind,from=wheel-selected,source=/out/wheels,target=/wheels \
 ### the Meerschaum wheel. Cached across releases until `requirements/*.txt` changes.
 ### `--ignore-installed` so a package already provided by the builder's own Python is still
 ### installed into the prefix that is copied to the final image.
-### `PyYAML` is not an extra: the Python facade's `meerschaum.utils.yaml` still imports it at the
-### first config or pipe operation (D20 moves that into `_core`), and without it the facade would
-### try to `pip install` it at run time. Baked in here until the facade stops needing it.
 FROM py-base AS py-full-deps
 
+ARG TARGETARCH
 ARG dep_group=full
 
 COPY requirements/full.txt requirements/cli-tools.txt requirements/gui.txt \
      requirements/sql-mssql.txt requirements/sql-oracle.txt \
      requirements/sql-duckdb.txt requirements/sql-cockroachdb.txt /reqs/
 RUN --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
+    --mount=type=cache,id=mrsm-pip-${TARGETARCH},target=/root/.cache/pip \
     case "$dep_group" in \
       minimal) \
-        python3 -m pip install --no-cache-dir --no-compile --ignore-installed \
-          --root-user-action=ignore --prefix=/install PyYAML ;; \
+        mkdir -p /install ;; \
       *) \
-        python3 -m pip install --no-cache-dir --no-compile --ignore-installed \
+        python3 -m pip install --no-compile --ignore-installed \
           --root-user-action=ignore --prefix=/install \
           -r /reqs/full.txt -r /reqs/cli-tools.txt -r /reqs/gui.txt \
           -r /reqs/sql-mssql.txt -r /reqs/sql-oracle.txt \
-          -r /reqs/sql-duckdb.txt -r /reqs/sql-cockroachdb.txt \
-          PyYAML ;; \
+          -r /reqs/sql-duckdb.txt -r /reqs/sql-cockroachdb.txt ;; \
     esac \
   && MRSM_KEEP_HEADERS=1 /trim_install.sh /install \
   && if [ -d /install/bin ]; then ls -l /install/bin; fi
@@ -177,10 +184,12 @@ RUN --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install
 ### DuckDB's library needs.
 FROM fedora:44 AS duckdb-driver
 
+ARG TARGETARCH
 ARG duckdb_driver=
 
 RUN --mount=type=bind,source=scripts/rust/duckdb_lib.sh,target=/scripts/rust/duckdb_lib.sh \
     --mount=type=bind,source=crates/meerschaum-connector-sql/src/duckdb_lib,target=/crates/meerschaum-connector-sql/src/duckdb_lib \
+    --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
     mkdir -p /out \
   && if [ -n "$duckdb_driver" ]; then \
        dnf install -y --setopt=install_weak_deps=False --nodocs python3 curl-minimal \
@@ -195,8 +204,10 @@ RUN --mount=type=bind,source=scripts/rust/duckdb_lib.sh,target=/scripts/rust/duc
 ### Full images include DuckDB without forcing Python callers away from their Python driver.
 ### Install the C API on the system library path; do not set an explicit driver override.
 FROM fedora:44 AS full-duckdb-driver
+ARG TARGETARCH
 RUN --mount=type=bind,source=scripts/rust/duckdb_lib.sh,target=/scripts/rust/duckdb_lib.sh \
     --mount=type=bind,source=crates/meerschaum-connector-sql/src/duckdb_lib,target=/crates/meerschaum-connector-sql/src/duckdb_lib \
+    --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
     dnf install -y --setopt=install_weak_deps=False --nodocs python3 curl-minimal \
   && lib="$(MRSM_CI_CACHE=/tmp/duckdb-cache bash /scripts/rust/duckdb_lib.sh)" \
   && install -D -m 0755 "$lib" /out/usr/local/lib/libduckdb.so
@@ -214,12 +225,14 @@ RUN --mount=type=bind,source=scripts/rust/duckdb_lib.sh,target=/scripts/rust/duc
 ### calls (it returns None without it).
 FROM fedora:44 AS slim-os-rootfs
 
+ARG TARGETARCH
 ARG mrsm_user=meerschaum \
     mrsm_root_dir=/meerschaum \
     mrsm_uid=1000 \
     mrsm_gid=1000
 
-RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
       python3 python-unversioned-command bash coreutils-single ca-certificates tzdata vim-minimal libstdc++ curl-minimal libcurl-minimal \
   && dnf --installroot=/rootfs --use-host-config clean all \
@@ -300,12 +313,14 @@ ENTRYPOINT ["mrsm"]
 ### cached across releases.
 FROM fedora:44 AS full-os-rootfs
 
+ARG TARGETARCH
 ARG mrsm_user=meerschaum \
     mrsm_root_dir=/meerschaum \
     mrsm_uid=1000 \
     mrsm_gid=1000
 
-RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
       python3 python-unversioned-command bash coreutils-single ca-certificates tzdata \
       vim-minimal libstdc++ python3-pip python3-devel ncurses tmux less htop openssl curl-minimal libcurl-minimal git-core postgresql \
@@ -327,7 +342,7 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       "/rootfs$mrsm_root_dir" \
   && install -d -m 0700 -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs$mrsm_root_dir/executors" \
   && install -d -m 0755 -o 0 -g 0 /rootfs/var/lib/meerschaum \
-  && install -d -m 0700 -o 1000 -g 1000 /rootfs/var/lib/meerschaum/factory
+  && install -d -m 0700 -o "$mrsm_uid" -g "$mrsm_gid" /rootfs/var/lib/meerschaum/factory
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/bashrc /rootfs/home/$mrsm_user/.bashrc
 COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/tmux.conf /rootfs/home/$mrsm_user/.tmux.conf
 
@@ -351,6 +366,8 @@ RUN mkdir -p /rootfs/tmp/mrsm-warm/root /rootfs/tmp/mrsm-warm/plugins \
   status=$?; rm -rf /rootfs/tmp/mrsm-warm; exit $status
 
 FROM factory-manifest-tools AS full-attested
+ARG TARGETARCH
+ARG mrsm_uid=1000
 COPY --from=py-slim /install/ /attest-root/usr/local/
 RUN mkdir -p /attest-root/usr/local/bin /attest-root/usr/local/lib/meerschaum/compiler /attest-root/etc/meerschaum
 RUN --mount=type=bind,from=confined-compiler,source=/confined-compiler/rootfs/usr/local/lib/meerschaum/compiler,target=/attest-root/usr/local/lib/meerschaum/compiler,readonly \
@@ -430,30 +447,44 @@ ENTRYPOINT ["mrsm"]
 ### OS rootfs stages stay free of `mrsm` so `rust-full-os-rootfs` does not rerun `dnf install`
 ### when only the binary changes.
 FROM fedora:44 AS rust-os-rootfs
+ARG TARGETARCH
 ARG mrsm_user=meerschaum mrsm_root_dir=/meerschaum mrsm_uid=1000 mrsm_gid=1000
-RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
       bash coreutils-single ca-certificates tzdata libstdc++ curl-minimal vim-minimal \
   && dnf --installroot=/rootfs --use-host-config clean all \
-  && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/usr/share/locale/* \
+  && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
+  && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
+            /rootfs/usr/share/zoneinfo/posix /rootfs/etc/pki/ca-trust/extracted/java \
+            /rootfs/etc/pki/ca-trust/extracted/edk2 /rootfs/usr/lib64/ossl-modules/fips.so \
+            /rootfs/usr/share/pki/rpm-gpg /rootfs/etc/pki/rpm-gpg \
   && ln -sf vi /rootfs/usr/bin/vim \
   && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
   && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir" \
   && install -d -m 0700 -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs$mrsm_root_dir/executors" \
   && install -d -m 0755 -o 0 -g 0 /rootfs/var/lib/meerschaum \
-  && install -d -m 0700 -o 1000 -g 1000 /rootfs/var/lib/meerschaum/factory
+  && install -d -m 0700 -o "$mrsm_uid" -g "$mrsm_gid" /rootfs/var/lib/meerschaum/factory
 
 FROM rust-os-rootfs AS rust-full-os-rootfs
+ARG TARGETARCH
 ARG mrsm_user=meerschaum mrsm_uid=1000 mrsm_gid=1000
-RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
+RUN --mount=type=cache,id=mrsm-dnf-${TARGETARCH},target=/var/cache/libdnf5,sharing=locked \
+    dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       --setopt=install_weak_deps=False --nodocs \
       gcc gcc-c++ make cmake pkgconf-pkg-config openssl-devel git-core \
   && dnf --installroot=/rootfs --use-host-config clean all \
-  && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/usr/share/locale/* \
+  && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
+  && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
+            /rootfs/usr/share/zoneinfo/posix /rootfs/etc/pki/ca-trust/extracted/java \
+            /rootfs/etc/pki/ca-trust/extracted/edk2 /rootfs/usr/lib64/ossl-modules/fips.so \
+            /rootfs/usr/share/pki/rpm-gpg /rootfs/etc/pki/rpm-gpg \
   && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user/.cargo"
 
 FROM factory-manifest-tools AS rust-attested
+ARG TARGETARCH
+ARG mrsm_uid=1000
 RUN mkdir -p /attest-root/usr/local/bin
 RUN --mount=type=bind,from=native-selected,source=/out,target=/attest-root/usr/local/bin,readonly \
     set -eu; \
@@ -463,6 +494,8 @@ RUN --mount=type=bind,from=native-selected,source=/out,target=/attest-root/usr/l
       --release "$release" --architecture "$architecture" --runtime-uid "$mrsm_uid"
 
 FROM factory-manifest-tools AS rust-full-attested
+ARG TARGETARCH
+ARG mrsm_uid=1000
 RUN mkdir -p /attest-root/usr/local/bin /attest-root/usr/local/lib/meerschaum/compiler /attest-root/etc/meerschaum
 RUN --mount=type=bind,from=confined-compiler,source=/confined-compiler/rootfs/usr/local/lib/meerschaum/compiler,target=/attest-root/usr/local/lib/meerschaum/compiler,readonly \
     --mount=type=bind,from=compiler-policy,source=/compiler-policy/etc/meerschaum,target=/attest-root/etc/meerschaum,readonly \

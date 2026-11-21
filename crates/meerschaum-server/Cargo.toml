@@ -36,7 +36,7 @@ axum = { version = "0.8", features = ["ws", "multipart"] }
 # Crate-private: conflict checks of native plugin routes (the matcher axum itself uses).
 matchit = "0.8"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.7", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs"] }
 # `server` + `http2`: the HTTPS listener (`tls`) serves HTTP/1.1 and HTTP/2 itself.
 hyper = { version = "1", features = ["client", "http1", "http2", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
@@ -68,13 +68,16 @@ aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"] }
 
 [dev-dependencies]
 # Certificates for the HTTPS tests (`aws_lc_rs`: RSA keys too).
-rcgen = { version = "0.14", features = ["aws_lc_rs"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 regex = { workspace = true }
-tokio-tungstenite = "0.30"
+tokio-tungstenite = "0.29"
 # Real-instance tests: a SQLite / PostgreSQL-family instance behind the router, driven by the client.
 meerschaum-connector-sql = { workspace = true }
 # A Valkey instance (in memory) behind the router: its read errors must fail closed too.
 meerschaum-connector-valkey = { workspace = true }
 meerschaum-connector-api = { workspace = true, features = ["client"] }
+
+[lints]
+workspace = true

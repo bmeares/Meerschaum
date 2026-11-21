@@ -77,3 +77,6 @@ num-bigint = "0.5"
 
 [build-dependencies]
 pyo3-build-config = "0.30"
+
+[lints]
+workspace = true

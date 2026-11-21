@@ -26,11 +26,11 @@ before=$(du -sm "$prefix" | cut -f1)
 
 find "$prefix" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$prefix" -type f -name '*.pyc' -delete
-find "$prefix" -path '*/site-packages/*' -type d -name tests -prune -exec rm -rf {} +
+find "$prefix" -path '*/site-packages/*' -type d \( -name tests -o -name test \) -prune -exec rm -rf {} +
 if [ "${MRSM_KEEP_HEADERS:-}" != 1 ]; then
 find "$prefix" -path '*/site-packages/*' -type d -name include -prune -exec rm -rf {} +
 find "$prefix" -path '*/site-packages/*' -type f \
-  \( -name '*.h' -o -name '*.hpp' -o -name '*.pxd' -o -name '*.pxi' -o -name '*.pyx' \) -delete
+  \( -name '*.h' -o -name '*.hpp' -o -name '*.pxd' -o -name '*.pxi' -o -name '*.pyx' -o -name '*.a' \) -delete
 fi
 find "$prefix" -path '*/site-packages/*' ! -path '*/site-packages/meerschaum/_core/*' \
   -type f \( -name '*.so' -o -name '*.so.*' \) \
