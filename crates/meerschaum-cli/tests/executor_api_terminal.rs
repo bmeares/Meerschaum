@@ -573,7 +573,7 @@ assert all(proof.values()),proof
         }
         if seen.lock().unwrap().iter().any(|(token, args)| {
             token == "Bearer first-terminal-token" && args == &["show", "version"]
-        }) && output.contains("5.1.0")
+        }) && output.contains(env!("CARGO_PKG_VERSION"))
         {
             break;
         }
