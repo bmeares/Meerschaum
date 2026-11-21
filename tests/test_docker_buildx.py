@@ -152,3 +152,67 @@ def test_a_sealed_sdk_context_replaces_source_compilation(tmp_path):
     assert len(commands) == 5
     assert all(f'--build-context sdk={sdk}' in c and '--build-arg sdk_source=artifacts' in c for c in commands)
     assert all('--label org.opencontainers.image.revision=' in c for c in commands)
+
+
+def _dockerfile_stages() -> dict[str, str]:
+    text = (REPO / 'Dockerfile').read_text(encoding='utf-8')
+    stages: dict[str, list[str]] = {}
+    current = None
+    for line in text.splitlines():
+        match = re.match(r'^FROM\s+\S+\s+AS\s+(\S+)\s*$', line)
+        if match:
+            current = match.group(1)
+            stages[current] = [line]
+        elif current is not None:
+            stages[current].append(line)
+    return {name: '\n'.join(lines) for name, lines in stages.items()}
+
+
+def test_dockerfile_separates_stable_and_volatile_layers_for_caching():
+    stages = _dockerfile_stages()
+
+    # 1. Confined compiler snapshot must not depend on root Cargo.toml version bumps.
+    assert 'COPY Cargo.toml' not in stages['confined-compiler']
+    assert '--manifest ' not in stages['confined-compiler']
+    assert '--snapshot-only' in stages['confined-compiler']
+    assert '--policy-only' in stages['compiler-policy']
+
+    # 2. Third-party Python extras must not depend on the volatile Meerschaum wheel.
+    assert 'wheel-selected' not in stages['py-full-deps']
+    assert 'requirements/full.txt' in stages['py-full-deps']
+    assert '--no-deps' in stages['py-slim']
+
+    # 3. Rust OS rootfs stages must not copy `mrsm` before installing build tools.
+    assert 'native-selected' not in stages['rust-os-rootfs']
+    assert 'native-selected' not in stages['rust-full-os-rootfs']
+
+    # 4. Final `FROM scratch` stages layer stable assets before volatile release assets
+    #    so Docker Hub deduplicates unchanged layers across releases and variants.
+    def copy_sources(stage: str) -> list[str]:
+        return re.findall(r'^COPY\b[^\n]*--from=(\S+)', stages[stage], flags=re.M)
+
+    full_sources = copy_sources('full')
+    rust_full_sources = copy_sources('rust-full')
+    rust_sources = copy_sources('rust')
+    slim_sources = copy_sources('slim')
+
+    assert full_sources.index('py-full-deps') < full_sources.index('py-slim')
+    assert full_sources.index('confined-compiler') < full_sources.index('native-selected')
+    assert full_sources.index('native-selected') < full_sources.index('compiler-policy')
+    assert rust_full_sources.index('confined-compiler') < rust_full_sources.index('native-selected')
+    assert rust_sources.index('rust-os-rootfs') < rust_sources.index('native-selected')
+    assert slim_sources.index('slim-os-rootfs') < slim_sources.index('py-slim')
+
+    # Shared layers between variants must use identical COPY lines for registry deduplication.
+    for shared_copy in (
+        'COPY --from=confined-compiler /confined-compiler/rootfs/usr/local/lib/meerschaum/compiler/ /usr/local/lib/meerschaum/compiler/',
+        'COPY --from=confined-compiler /confined-compiler/compat/ /',
+        'COPY --from=rust-toolchain /usr/local/cargo/bin/ /usr/local/cargo/bin/',
+        'COPY --from=native-selected /out/mrsm /usr/local/bin/mrsm',
+        'COPY --from=compiler-policy /compiler-policy/etc/meerschaum/ /etc/meerschaum/',
+    ):
+        assert shared_copy in stages['full']
+        assert shared_copy in stages['rust-full']
+    assert 'COPY --from=native-selected /out/mrsm /usr/local/bin/mrsm' in stages['rust']
+    assert 'COPY --from=py-slim /install/ /usr/local/' in stages['slim']
+    assert 'COPY --from=py-slim /install/ /usr/local/' in stages['full']
