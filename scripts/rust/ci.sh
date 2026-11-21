@@ -193,6 +193,8 @@ step_fmt() {
   cargo fmt --all --check
   log "Packaging metadata and generated dependency tables"
   python3 -I "$REPO/scripts/check_packaging.py"
+  log "Architectural guardrails"
+  python3 -I "$REPO/scripts/check_architecture.py"
 }
 step_clippy() { log "cargo clippy --all-targets -- -D warnings"; cargo clippy --all-targets -- -D warnings; }
 step_doc() {
@@ -267,8 +269,10 @@ step_test()   {
     cargo test --locked -p meerschaum-cli --test team_sessions \
       --test host_api_terminals --test host_plugin_discovery --no-fail-fast
     # nextest runs every test in its own process (and does not run doc tests: those follow).
+    # Exclude the three launcher binaries already run above so they do not execute twice.
     log "cargo nextest run --workspace --no-fail-fast (DuckDB library: $MRSM_DUCKDB_LIB)"
-    cargo nextest run --workspace --no-fail-fast
+    cargo nextest run --workspace --no-fail-fast \
+      -E 'not (package(meerschaum-cli) and (binary(=team_sessions) | binary(=host_api_terminals) | binary(=host_plugin_discovery)))'
     log "cargo test --workspace --doc"
     cargo test --workspace --doc
   else
@@ -291,15 +295,36 @@ step_extension() {
     *) profile_args=(--profile "$profile") ;;
   esac
   log "Building the native extension ($profile) with $python"
-  "$python" -m venv "$scratch/tools"
-  "$scratch/tools/bin/python" -m pip install --quiet 'maturin>=1.9,<2.0'
+  local py_tag maturin_spec maturin_venv
+  py_tag="$("$python" -c 'import sys; print(f"py{sys.version_info[0]}.{sys.version_info[1]}")')"
+  maturin_spec='maturin>=1.9,<2.0'
+  maturin_venv="$scratch/tools"
+  if mkdir -p "$CI_CACHE" 2>/dev/null && [ -w "$CI_CACHE" ]; then
+    maturin_venv="$CI_CACHE/maturin-venv-$py_tag"
+    if command -v flock >/dev/null 2>&1; then
+      exec 9>"$CI_CACHE/.maturin-venv-$py_tag.lock"
+      flock 9
+    fi
+    if [ ! -x "$maturin_venv/bin/maturin" ] || \
+       [ "$(cat "$maturin_venv/.spec" 2>/dev/null || true)" != "$maturin_spec" ]; then
+      "$python" -m venv --clear "$maturin_venv"
+      "$maturin_venv/bin/python" -m pip install --quiet "$maturin_spec"
+      printf '%s\n' "$maturin_spec" > "$maturin_venv/.spec"
+    fi
+    if command -v flock >/dev/null 2>&1; then
+      exec 9>&-
+    fi
+  else
+    "$python" -m venv "$maturin_venv"
+    "$maturin_venv/bin/python" -m pip install --quiet "$maturin_spec"
+  fi
   # Scratch root and plugins for build_py.sh's import check (never the runner's config).
   mkdir -p "$scratch/root" "$scratch/plugins"
   # `build_py.sh` takes the tree's build lock (target/.build-py.lock) itself. `--debug`: the same
   # profile `cargo test --workspace` compiles, so most dependencies are shared (the release build
   # would add a second, optimized copy of every one); the debug extension keeps the oracle flavor (DuckDB's
   # own library is loaded at run time).
-  PYTHON="$python" MATURIN_BIN="$scratch/tools/bin/maturin" PYTHONPATH="$REPO" \
+  PYTHON="$python" MATURIN_BIN="$maturin_venv/bin/maturin" PYTHONPATH="$REPO" \
     MRSM_ROOT_DIR="$scratch/root" MRSM_PLUGINS_DIR="$scratch/plugins" \
     scripts/rust/build_py.sh "${profile_args[@]}"
   if [ -n "${GITHUB_ENV:-}" ] && [ "${MRSM_CI_EXPORT_PYTHON:-1}" != 0 ]; then
