@@ -1,5 +1,5 @@
-//! Raw SQL for the Python façade's `SQLConnector.read` / `exec` / `value` / `exec_queries`
-//! (rc15 Q50 / Q53): one caller-written statement with bound parameters, on the pool or inside
+//! Raw SQL for the Python façade's `SQLConnector.read` / `exec` / `value` / `exec_queries`:
+//! one caller-written statement with bound parameters, on the pool or inside
 //! an open transaction, whose rows keep what each flavor's Python driver returns.
 //!
 //! Rows come back as Arrow record batches. Every family but SQLite types its columns from the

@@ -1,6 +1,6 @@
 """The Jobs page: Jobs and Runs tabs, and a job's logs viewed in a modal."""
 import json
-from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, run_python
 
 
 def test_runs_is_a_tab_of_the_jobs_page(sandbox):

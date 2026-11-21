@@ -1,10 +1,6 @@
 """Overview reads bounded shared snapshots and rechecks access without a graph walk."""
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stderr[-6000:]
+from tests.api_host._helpers import run_python, check
 
 
 def test_overview_refresh_shares_one_definition_and_history_read(sandbox):

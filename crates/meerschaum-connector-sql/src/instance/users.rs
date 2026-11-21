@@ -71,6 +71,9 @@ pub(crate) fn parse_attributes(v: &SqlValue) -> Option<Map> {
 impl SqlConnector {
     /// `register_user(user)`.
     pub async fn register_user(&self, user: &mut User) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let valid = valid_username(&user.username);
         if !valid.success {
             return valid;
@@ -153,6 +156,9 @@ impl SqlConnector {
     ///
     /// PARITY: an unset email or type (`None != ''`) is written as `NULL` (`_users.py:157`).
     pub async fn edit_user(&self, user: &User) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let user_id = match &user.user_id {
             Some(id) => Some(id.clone()),
             None => match self.get_user_id(user).await {
@@ -217,6 +223,7 @@ impl SqlConnector {
 
     /// `get_user_id(user)`: the user's `user_id` if registered.
     pub async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
+        self.ensure_schema().await?;
         if !crate::driver::mysql_authority::active() && !self.ensure_instance_tables(true).await {
             return Ok(None);
         }
@@ -258,6 +265,7 @@ impl SqlConnector {
     }
 
     async fn user_column(&self, user: &User, column: &str) -> ConnectorResult<Option<SqlValue>> {
+        self.ensure_schema().await?;
         let Some(user_id) = self.resolve_user_id(user).await? else {
             return Ok(None);
         };
@@ -307,6 +315,7 @@ impl SqlConnector {
 
     /// `get_username(user_id)` (the `InstanceConnector` method, over `mrsm_users`).
     pub async fn get_username(&self, user_id: &Value) -> ConnectorResult<Option<Value>> {
+        self.ensure_schema().await?;
         let table = self.instance_table_name("mrsm_users");
         let query = format!(
             "SELECT {table}.username \nFROM {table} \nWHERE {table}.user_id = {}",
@@ -332,6 +341,7 @@ impl SqlConnector {
     ///
     /// [`InstanceConnector::register_first_user`]: meerschaum_connector::InstanceConnector::register_first_user
     pub async fn register_first_user(&self, user: &mut User) -> ConnectorResult<bool> {
+        self.ensure_schema().await?;
         let valid = valid_username(&user.username);
         if !valid.success {
             return Err(be(valid.message));
@@ -574,6 +584,9 @@ impl SqlConnector {
 
     /// `delete_user(user)`: delete the user, their tokens and the plugins they own.
     pub async fn delete_user(&self, user: &User) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let user_id = match self.resolve_user_id(user).await {
             Ok(Some(id)) => id,
             Ok(None) => {
@@ -628,6 +641,9 @@ impl SqlConnector {
     /// `set_user_attributes(user, attributes)`: replace the user's attributes and nothing else
     /// (their type, email and password stay).
     pub async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let user_id = match self.resolve_user_id(user).await {
             Ok(Some(id)) => id,
             Ok(None) => {
@@ -651,6 +667,7 @@ impl SqlConnector {
 
     /// `get_users()`: the registered usernames.
     pub async fn get_users(&self) -> ConnectorResult<Vec<String>> {
+        self.ensure_schema().await?;
         let _ = self.ensure_instance_tables(true).await;
         let table = self.instance_table_name("mrsm_users");
         let df = self

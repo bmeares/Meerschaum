@@ -11,7 +11,7 @@ it. Only arguments the tool's function cannot accept are reported as invalid arg
 
 import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PLUGIN = '''
 import json

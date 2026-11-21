@@ -14,7 +14,7 @@ use meerschaum_kernel::Frame;
 
 use crate::ident::{sql_item_name, truncate_item_name};
 use crate::instance::SqlConnector;
-use crate::instance::data::{DataQueryOptions, PipeState, pipe_dtypes};
+use crate::instance::data::{DataQueryOptions, PipeState, pipe_state_from_cols};
 use crate::instance::sync::{InternalSync, ToSqlExtras};
 use crate::pipe::SqlPipe;
 
@@ -93,12 +93,7 @@ impl SqlConnector {
         cached: Option<IndexMap<String, String>>,
     ) -> PipeState {
         match cached {
-            Some(cols_types) if !cols_types.is_empty() => PipeState {
-                exists: true,
-                dtypes: pipe_dtypes(sp, &cols_types, true),
-                explicit_dtypes: pipe_dtypes(sp, &cols_types, false),
-                cols_types,
-            },
+            Some(cols_types) if !cols_types.is_empty() => pipe_state_from_cols(sp, cols_types),
             _ => {
                 let start = Instant::now();
                 let state = self.pipe_state(sp).await;
@@ -117,7 +112,7 @@ impl SqlConnector {
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<PipeState> {
         match cached.filter(|c| !c.is_empty()) {
-            Some(c) => Ok(self.pipe_state_cached(sp, Some(c)).await),
+            Some(c) => Ok(pipe_state_from_cols(sp, c)),
             None => {
                 let start = Instant::now();
                 let state = self.pipe_state_checked(sp).await;
@@ -138,11 +133,10 @@ impl SqlConnector {
         remote: bool,
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<Option<DateBound>> {
-        if remote {
+        if remote || cached.as_ref().is_none_or(IndexMap::is_empty) {
             return self.get_sync_time(pipe, params, newest, remote).await;
         }
-        let pipe = &self.prepare_pipe(pipe).await;
-        let sp = self.sql_pipe(pipe)?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_cached_checked(&sp, cached).await?;
         self.sync_time_checked(&sp, &state, params, newest).await
     }
@@ -155,26 +149,12 @@ impl SqlConnector {
         query: &DataQuery,
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<Option<i64>> {
-        if query.remote {
+        if query.remote || cached.as_ref().is_none_or(IndexMap::is_empty) {
             return self.get_pipe_rowcount(pipe, query).await;
         }
-        let pipe = &self.prepare_pipe(pipe).await;
-        let sp = self.sql_pipe(pipe)?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_cached_checked(&sp, cached).await?;
-        let Some(sql) = self.get_pipe_rowcount_query(&sp, &state, query)? else {
-            return Ok(None);
-        };
-        // Without bounds or `params` the text only depends on the table: prepared once per
-        // pooled connection on PostgreSQL (see `SqlConnector::sync_time`).
-        let stable = query.begin.is_none()
-            && query.end.is_none()
-            && query.params.as_ref().is_none_or(|p| p.is_empty());
-        let value = if stable {
-            self.value_catalog_checked(&sql).await?
-        } else {
-            self.value_checked(&sql).await?
-        };
-        Ok(value.and_then(|v| v.as_i64()))
+        self.rowcount_with_state(&sp, &state, query).await
     }
 
     /// [`sync_pipe_result`](SqlConnector::sync_pipe_result), updating `pipe`'s in-memory
@@ -203,11 +183,14 @@ impl SqlConnector {
         opts: &SyncOptions,
         cached: Option<IndexMap<String, String>>,
     ) -> SyncResult {
+        if let Err(e) = self.ensure_schema().await {
+            return SyncResult::new(false, e.to_string());
+        }
         let mut resolved = self.prepare_pipe(pipe).await;
         let before = resolved.raw_parameters().clone();
         let cached_state = match cached.filter(|c| !c.is_empty()) {
             Some(c) => match self.sql_pipe(&resolved) {
-                Ok(sp) => Some(self.pipe_state_cached(&sp, Some(c)).await),
+                Ok(sp) => Some(pipe_state_from_cols(&sp, c)),
                 Err(e) => return SyncResult::new(false, e.to_string()),
             },
             None => None,
@@ -267,8 +250,7 @@ impl SqlConnector {
         opts: &DataQueryOptions,
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<(Option<Frame>, PipeState)> {
-        let pipe = &self.prepare_pipe(pipe).await;
-        let sp = self.sql_pipe(pipe)?;
+        let sp = self.bind_pipe(pipe).await?;
         let state = self.pipe_state_cached_checked(&sp, cached).await?;
         if !state.exists {
             return Ok((None, state));
@@ -279,7 +261,29 @@ impl SqlConnector {
         Ok((df, state))
     }
 
-    /// `SQLConnector.to_sql(df, name, if_exists=...)` without SQLAlchemy (rc15 Q53): the table is
+    /// Raw SQL documents for the Python façade's `get_pipe_docs()`, enforcing lazy schema
+    /// discovery and template resolution before reading.
+    pub async fn get_pipe_docs_frame_cached(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        no_order: bool,
+        cached: Option<IndexMap<String, String>>,
+    ) -> ConnectorResult<Option<Frame>> {
+        let sp = self.bind_pipe(pipe).await?;
+        let state = self.pipe_state_cached(&sp, cached).await;
+        if !state.exists {
+            return Ok(None);
+        }
+        let opts = DataQueryOptions {
+            no_order,
+            ..Default::default()
+        };
+        let sql = self.build_data_query(&sp, &state, query, &opts).await?;
+        Ok(self.driver().read_docs_frame(&sql).await.ok())
+    }
+
+    /// `SQLConnector.to_sql(df, name, if_exists=...)` without SQLAlchemy: the table is
     /// created from `column_types` (the database type of each column, as pandas' `to_sql` would
     /// create it) when it does not exist or when `if_exists` is [`IfExists::Replace`] (dropped
     /// first), [`IfExists::Fail`] refuses an existing table, and the rows are inserted with
@@ -298,6 +302,9 @@ impl SqlConnector {
         index_columns: &[String],
         chunksize: Option<i64>,
     ) -> (bool, String) {
+        if let Err(e) = self.ensure_schema().await {
+            return (false, e.to_string());
+        }
         let flavor = self.flavor();
         let schema = schema.or(self.schema()).map(str::to_string);
         let schema = if flavor.no_schema() { None } else { schema };

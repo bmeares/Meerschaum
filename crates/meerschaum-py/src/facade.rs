@@ -33,8 +33,7 @@ use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::config::Config;
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_engine::python::PythonRegistry;
-use meerschaum_engine::sync::{DeltaObserver, SyncArgs, SyncBegin, SyncEnv};
-use meerschaum_engine::{ConnectorRegistry, EngineConfig, PluginSync};
+use meerschaum_engine::{ConnectorRegistry, EngineConfig};
 use pyo3::prelude::*;
 
 /// The connector types the Rust crates implement themselves (no Python worker needed).
@@ -220,7 +219,6 @@ struct FacadeNative {
     instances: Mutex<HashMap<String, Arc<dyn InstanceConnector>>>,
     sql: Mutex<HashMap<String, Arc<SqlConnector>>>,
     attributes: HashMap<String, Map>,
-    inplace: Option<(String, Arc<SqlConnector>)>,
 }
 
 impl FacadeNative {
@@ -374,11 +372,6 @@ impl ConnectorRegistry for FacadeNative {
             .unwrap_or(100_000)
     }
 
-    fn plugin_sync(&self, keys: &str) -> Option<Arc<dyn PluginSync>> {
-        let (home, sql) = self.inplace.as_ref()?;
-        (full_keys(keys) == *home).then(|| Arc::new(Inplace(sql.clone())) as Arc<dyn PluginSync>)
-    }
-
     fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
         if let Some(sql) = self
             .sql
@@ -400,51 +393,6 @@ impl ConnectorRegistry for FacadeNative {
             return Ok(sql.pipe_table_name(&pipe));
         }
         pipe.target(None).map_err(|e| e.to_string())
-    }
-}
-
-/// v4's same-instance sync (`SQLConnector.sync_pipe_inplace`): `INSERT ... SELECT` from the
-/// source definition into the pipe's table. The message is v4's, without a chunk envelope.
-struct Inplace(Arc<SqlConnector>);
-
-#[meerschaum_connector::async_trait]
-impl PluginSync for Inplace {
-    fn is_fetch_optimization(&self) -> bool {
-        true
-    }
-
-    async fn sync(&self, pipe: &Pipe, args: &SyncArgs) -> meerschaum_core::success::SyncResult {
-        use meerschaum_connector_sql::instance::fetch::metadef_bound;
-        use meerschaum_connector_sql::queries::metadef::Bound;
-        let begin = match &args.begin {
-            SyncBegin::Default => Bound::Default,
-            SyncBegin::At(b) => metadef_bound(Some(b)),
-            SyncBegin::Unbounded => Bound::None,
-        };
-        // `replace` (rc15): the window is replaced instead of diffed.
-        let result = self
-            .0
-            .sync_pipe_inplace_replacing(
-                pipe,
-                args.params.as_ref(),
-                begin,
-                metadef_bound(args.end.as_ref()),
-                args.check_existing,
-                args.replace,
-                None,
-            )
-            .await;
-        meerschaum_engine::sync::result_from_message(result.success, result.message)
-    }
-
-    async fn sync_native(
-        &self,
-        pipe: &Pipe,
-        args: &SyncArgs,
-        _env: &SyncEnv<'_>,
-        _observer: Option<&dyn DeltaObserver>,
-    ) -> meerschaum_core::success::SyncResult {
-        self.sync(pipe, args).await
     }
 }
 
@@ -480,13 +428,6 @@ pub fn build_registry(
         sql.insert(full.clone(), conn.clone());
         instances.insert(full, conn.clone());
     }
-    let inplace = (input.inplace
-        && full_keys(&input.connector_keys) == full_keys(&input.instance_keys))
-    .then(|| {
-        sql.get(&full_keys(&input.instance_keys))
-            .map(|c| (full_keys(&input.instance_keys), c.clone()))
-    })
-    .flatten();
     let native = Arc::new(FacadeNative {
         session: session.clone(),
         config: std::sync::OnceLock::new(),
@@ -497,7 +438,6 @@ pub fn build_registry(
             .iter()
             .map(|(k, v)| (full_keys(k), v.clone()))
             .collect(),
-        inplace,
     });
     // The live config of the process, as of this call (`set_config()`, `MRSM_CONFIG` patches and
     // `write_config()` are seen by the next sync): the engine's defaults, backtrack and filter
@@ -505,9 +445,22 @@ pub fn build_registry(
     let _ = native.config.set(config.clone());
     let mut engine_config = EngineConfig::from_config(&config, Some(&config.paths().root_dir));
     engine_config.home_instance = full_keys(&input.instance_keys);
+    // v4's `Pipe.sync()` syncs a `sql:` pipe in place only when the pipe's source is
+    // its instance: the call's pipe and, in a graph run, the pipes that share its source and
+    // instance.
+    let inplace_home = (input.inplace
+        && full_keys(&input.connector_keys) == full_keys(&input.instance_keys))
+    .then(|| full_keys(&input.instance_keys));
+    let with_inplace = |registry: Arc<dyn ConnectorRegistry>| match inplace_home.clone() {
+        Some(home) => meerschaum_engine::registry::with_inplace_sync(
+            registry,
+            Arc::new(move |keys: &str| full_keys(keys) == home),
+        ),
+        None => registry,
+    };
     if !need_python {
         return Ok(Built {
-            registry: native,
+            registry: with_inplace(native),
             config: Some(engine_config),
         });
     }
@@ -531,7 +484,7 @@ pub fn build_registry(
     registry.set_session(session.clone());
     registry.set_config_writes(crate::native_plugin_api::config_writes_allowed(py));
     Ok(Built {
-        registry,
+        registry: with_inplace(registry),
         config: Some(engine_config),
     })
 }

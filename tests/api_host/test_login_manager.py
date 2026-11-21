@@ -11,9 +11,8 @@ so that the `api` extra (`fastapi`, `uvicorn`, `a2wsgi`, `python-multipart`, `Py
 host imports: `fastapi-login`, `python-jose` and `aiofiles` are not installed by any extra.
 """
 
-import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin, extract_json
 
 PLUGIN = '''
 import fastapi
@@ -41,12 +40,6 @@ def login_routes(app):
         await load_user_or_token(request, users=False)
         return True
 '''
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-4000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
 
 
 def test_depends_manager_resolves_the_user_of_a_bearer_jwt(sandbox):
@@ -99,7 +92,7 @@ def test_depends_manager_resolves_the_user_of_a_bearer_jwt(sandbox):
         }
         print('JSON:' + json.dumps(out))
     """)
-    out = _json(result)
+    out = extract_json(result)
     assert out['valid'] == [200, {'username': 'bob'}]
     assert out['no_header'][0] == 401
     assert out['wrong_secret'] == [401, {'detail': 'Invalid credentials'}]
@@ -140,7 +133,7 @@ def test_manager_creates_tokens_the_host_accepts(sandbox):
         }
         print('JSON:' + json.dumps(out))
     """)
-    assert _json(result) == {
+    assert extract_json(result) == {
         'sub': 'alice', 'scopes': ['pipes:read'], 'secret_is_shared': True, 'has_exp': True,
     }
 
@@ -189,7 +182,7 @@ def test_token_jwts_follow_backing_token_revocation_and_expiry(sandbox):
         out['deleted'] = status()
         print('JSON:' + json.dumps(out))
     """)
-    assert _json(result) == {'valid': 200, 'revoked': 401, 'expired': 401, 'deleted': 401}
+    assert extract_json(result) == {'valid': 200, 'revoked': 401, 'expired': 401, 'deleted': 401}
 
 
 def test_user_jwt_is_rejected_after_its_user_is_deleted(sandbox):
@@ -216,7 +209,7 @@ def test_user_jwt_is_rejected_after_its_user_is_deleted(sandbox):
         out['deleted'] = status()
         print('JSON:' + json.dumps(out))
     """)
-    assert _json(result) == {'valid': 200, 'repeated': 200, 'deleted': 401}
+    assert extract_json(result) == {'valid': 200, 'repeated': 200, 'deleted': 401}
 
 
 def test_the_host_imports_no_package_outside_the_api_extra(sandbox):
@@ -247,6 +240,6 @@ def test_the_host_imports_no_package_outside_the_api_extra(sandbox):
             'imported': sorted(m for m in sys.modules if m.split('.')[0] in BLOCKED),
         }))
     """)
-    out = _json(result)
+    out = extract_json(result)
     assert out['routes'] == ['/lm/maybe', '/lm/me', '/lm/optional-user', '/lm/token-only']
     assert out['imported'] == []

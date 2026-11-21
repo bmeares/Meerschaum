@@ -136,7 +136,7 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
         }
         // Fail closed: a failed read of the user's permissions or type is an error (`503`),
         // never v4's "no `scopes` attribute = every scope" or "no type = not an
-        // administrator". The token carries the user's effective permissions (rc15): its own,
+        // administrator". The token carries the user's effective permissions: its own,
         // else its role, else the server's default role; `*` for an administrator.
         let typ = conn
             .get_user_type(&user)
@@ -181,7 +181,7 @@ async fn login(ctx: Ctx, body: Body) -> ApiResult {
         if !correct {
             return Err(ApiError::invalid_credentials());
         }
-        // The token's scopes, capped by its owner's permissions (rc15).
+        // The token's scopes, capped by its owner's permissions.
         let scopes = match conn
             .get_token_model(&token_id)
             .await

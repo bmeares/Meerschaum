@@ -52,5 +52,8 @@ tempfile = "3"
 tokio = { workspace = true }
 base64 = "0.23"
 # The self-signed `wss://` server of `tests/wss.rs`.
-rcgen = "0.14"
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }
+
+[lints]
+workspace = true

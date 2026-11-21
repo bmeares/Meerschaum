@@ -39,3 +39,6 @@ meerschaum-connector-sql = { workspace = true }
 # Lease and stream tests against a disposable Valkey (`MRSM_TEST_VALKEY_URI`).
 meerschaum-connector-valkey = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

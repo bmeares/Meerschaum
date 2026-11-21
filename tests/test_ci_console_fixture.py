@@ -16,6 +16,11 @@ from scripts.ci.services import clean_environment
 from tests.test_ci_artifacts import producer, binary_manifest, git  # noqa: F401
 from tests.test_workflows_packaging import _evaluate_actions
 
+# pytest.yaml skips GitHub artifacts when the self-hosted runners share them on the host.
+LOCAL_HANDOFF_OFF = (
+    "!(vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release')"
+)
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -251,7 +256,8 @@ def test_workflows_produce_separate_fixtures_and_only_console_core_downloads_the
     debug = [step for step in pytest_workflow['jobs']['artifacts']['steps']
              if step.get('with', {}).get('name') == 'console-native-fixture-debug']
     assert len(debug) == 1 and debug[0]['with']['if-no-files-found'] == 'error'
-    assert debug[0]['if'] == "${{ env.MRSM_TEST_CONSOLE == '1' }}"
+    # Uploaded only for a console run, and not when the runners hand artifacts over on the host.
+    assert debug[0]['if'] == "${{ env.MRSM_TEST_CONSOLE == '1' && " + LOCAL_HANDOFF_OFF + ' }}'
     downloads = [step for step in pytest_workflow['jobs']['tests']['steps']
                  if step.get('uses', '').startswith('actions/download-artifact')
                  and 'console-native-fixture' in step.get('with', {}).get('path', '')]
@@ -272,9 +278,17 @@ def test_only_required_console_core_fetches_the_fixture(shard, required):
     step = next(step for step in workflow['jobs']['tests']['steps']
                 if step.get('uses', '').startswith('actions/download-artifact')
                 and 'console-native-fixture' in step.get('with', {}).get('path', ''))
-    assert bool(_evaluate_actions(step['if'], {
-        'matrix.shard': shard, 'env.MRSM_TEST_CONSOLE': required,
-    })) is (shard == 'core' and required == '1')
+    assert LOCAL_HANDOFF_OFF in step['if']
+    for local, reused_run, profile in (
+        ('', '', 'ci'), ('true', '', 'ci'), ('true', '123', 'ci'), ('true', '', 'release'),
+    ):
+        # The host-local handoff replaces the download only for a run's own non-release artifacts.
+        downloads = not (local == 'true' and not reused_run and profile != 'release')
+        assert bool(_evaluate_actions(step['if'], {
+            'matrix.shard': shard, 'env.MRSM_TEST_CONSOLE': required,
+            'vars.CI_LOCAL_ARTIFACTS': local, 'inputs.artifacts_run_id': reused_run,
+            'inputs.profile': profile,
+        })) is (shard == 'core' and required == '1' and downloads)
 
 
 @pytest.mark.parametrize('event,requested,expected', [

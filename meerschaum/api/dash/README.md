@@ -22,11 +22,17 @@ api/dash/
 ├── pipes_table.py     # the Pipes table: rows, filters in the URL, search/sort/pages, slow columns
 ├── pipe_detail.py     # a pipe's page: header actions, tabs, Manage dialogs (Copy, Clear, ...)
 ├── new_pipe.py        # New pipe: connectors, flavor-limited Preview, datetime guess, Register
-├── pipes_access.py    # who may read, act, edit and register on the Pipes pages
 ├── keys.py, pipes.py, jobs.py, plugins.py, tokens.py, users.py, connectors.py
 ├── execute.py         # what the Exec button, a pipe's Manage menu and "Follow logs" run
 ├── engine.py          # the Syncing Engine's graph, runs, Gantt bars and events (pipelines page)
-├── sessions.py        # the session store shared with the Rust server's terminal (5 s cache)
+├── session_store.py   # the session store shared with the Rust server's terminal (5 s cache)
+├── sessions.py        # the plugin-facing sessions API: the store, and whether a session may act
+├── viewer.py          # who is asking: the Viewer of a session (rights, acting team), Dash-free
+├── access.py          # what the viewer may see and do: pipes, Pipelines, jobs, users' rights
+├── teams.py           # the instance's teams: records, members, create / rename / delete
+├── _plugins/          # the Dash-free plugin core: rights (_policy), files (_fs, _archives),
+│                      #   lifecycle (_lifecycle); plugins.py, plugin_sources.py and
+│                      #   plugin_publish.py are its pages
 ├── webterm.py         # the terminal iframe (`/webterm/<session id>`) and its controls
 ├── _support.py        # stand-ins for the v4 internals v5 deleted (get_job, get_pipe_query, ...)
 └── assets/            # served by Dash at /dash/assets/ (ansi_up.js, logos, webterm_keys.js,

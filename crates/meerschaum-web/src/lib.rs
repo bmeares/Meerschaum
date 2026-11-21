@@ -27,6 +27,11 @@ pub mod native_pages;
 pub mod sessions;
 mod stream;
 pub mod webterm;
+
+/// The server's in-memory test instance, for this crate's unit tests.
+#[cfg(test)]
+#[path = "../../meerschaum-server/tests/common/memory.rs"]
+mod test_memory;
 pub use native_pages::{PageContent, PageHandler, PluginPage};
 pub use webterm::{ShellCommand, WebtermSettings};
 
@@ -75,7 +80,9 @@ pub(crate) struct WebState {
     pub server: AppState,
     pub config: WebConfig,
     /// The open job-log streams.
-    pub streams: Arc<stream::StreamSlots>,
+    pub streams: meerschaum_server::sse::StreamSlots,
+    /// Console session authentication for SSE streams.
+    pub browser_auth: Arc<dyn meerschaum_server::sse::BrowserAuth>,
     /// The Grafana proxy (`api:grafana`), when enabled.
     pub grafana: Option<Arc<grafana::GrafanaProxy>>,
 }
@@ -94,16 +101,16 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
     }
     let webterm = webterm::config(&server, &config);
     let server_state = server.clone();
+    let browser_auth: Arc<dyn meerschaum_server::sse::BrowserAuth> = Arc::new(
+        engine_auth::ConsoleSessionAuth::new(config.sessions.clone()),
+    );
     // The Pipelines page follows live runs (`/engine/runs/{run_id}/events/stream`) by cookie.
-    server
-        .engine_streams
-        .set_browser_auth(Arc::new(engine_auth::ConsoleSessionAuth {
-            config: config.clone(),
-        }));
+    server.engine_streams.set_browser_auth(browser_auth.clone());
     let state = WebState {
         server,
         config: config.clone(),
-        streams: Arc::new(stream::StreamSlots::default()),
+        streams: meerschaum_server::sse::StreamSlots::new("log streams"),
+        browser_auth,
         grafana: None,
     };
     let state = WebState {
@@ -160,15 +167,44 @@ pub(crate) fn cookie(headers: &HeaderMap) -> Option<String> {
 /// The session behind the request's cookie, with a `username`; the status to answer otherwise
 /// (`401`: none or unknown, `503`: the store failed). Never a redirect: the callers are
 /// `EventSource` streams, which cannot follow one to a login page.
-pub(crate) async fn session(state: &WebState, headers: &HeaderMap) -> Result<Json, StatusCode> {
+pub(crate) async fn session_from(
+    sessions: &dyn SessionStore,
+    headers: &HeaderMap,
+) -> Result<Json, StatusCode> {
     let Some(id) = cookie(headers) else {
         return Err(StatusCode::UNAUTHORIZED);
     };
-    match state.config.sessions.get(&id).await {
+    match sessions.get(&id).await {
         Ok(Some(data)) if data["username"].is_string() => Ok(data),
         Ok(_) => Err(StatusCode::UNAUTHORIZED),
         Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
     }
+}
+
+pub(crate) async fn session(state: &WebState, headers: &HeaderMap) -> Result<Json, StatusCode> {
+    session_from(state.config.sessions.as_ref(), headers).await
+}
+
+/// The bound user principal a console session names while it carries the user's current
+/// credential (`auth::load_from_bound_subject`); `None` for a session of nobody, of a deleted
+/// user, or one made before a password change or a re-registration.
+pub(crate) async fn bound_user_principal(
+    server: &AppState,
+    data: &Json,
+) -> Result<Option<(String, auth::Principal)>, meerschaum_server::error::ApiError> {
+    let Some(username) = data["username"].as_str().filter(|u| !u.is_empty()) else {
+        return Ok(None);
+    };
+    Ok(
+        auth::load_from_bound_subject(server, username, Some("user"), data["credential"].as_str())
+            .await?
+            .and_then(|principal| {
+                principal
+                    .as_user()
+                    .is_some()
+                    .then(|| (username.to_string(), principal))
+            }),
+    )
 }
 
 /// The user a console session names while it carries the user's current credential
@@ -184,46 +220,42 @@ pub(crate) async fn bound_username(
     if server.config.no_auth {
         return Ok(Some(username.to_string()));
     }
-    Ok(
-        auth::load_from_bound_subject(server, username, Some("user"), data["credential"].as_str())
-            .await?
-            .and_then(|principal| principal.as_user().map(|_| username.to_string())),
-    )
+    Ok(bound_user_principal(server, data)
+        .await?
+        .map(|(username, _)| username))
 }
 
-/// Request headers carrying a short-lived bearer token for the user of a console session, so
-/// that the API's own authorization (user existence, scopes, admin) applies to what the session
-/// does.
-pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderMap, StatusCode> {
+/// How long a bearer minted for a console session lives, in seconds.
+pub(crate) const CONSOLE_BEARER_SECONDS: i64 = 60;
+
+/// Request headers carrying a bearer token that lives `lifetime` seconds for the user of a
+/// console session, so that the API's own authorization (user existence, scopes, admin,
+/// credential binding) applies to what the session does.
+pub(crate) async fn api_headers_for(
+    server: &AppState,
+    data: &Json,
+    lifetime: i64,
+) -> Result<HeaderMap, StatusCode> {
     let mut headers = HeaderMap::new();
-    if state.server.config.no_auth {
+    if server.config.no_auth {
         return Ok(headers);
     }
-    let username = data["username"].as_str().unwrap_or("");
     let login = || StatusCode::UNAUTHORIZED;
     // The session must carry its user's current credential (a re-registered username or a
     // changed password ends it); the bearer minted for it carries the same.
     let credential = data["credential"].as_str();
-    let principal = match auth::load_from_bound_subject(
-        &state.server,
-        username,
-        Some("user"),
-        credential,
-    )
-    .await
-    {
-        Ok(Some(principal)) => principal,
+    let (username, principal) = match bound_user_principal(server, data).await {
+        Ok(Some(bound)) => bound,
         Ok(None) => return Err(login()),
         // A failed read refuses (fail closed).
         Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
     };
     // A failed scope read refuses the request (fail closed), it never grants every scope.
-    let mut scopes = auth::principal_scopes(&state.server, &principal)
+    let mut scopes = auth::principal_scopes(server, &principal)
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     if let Some(user) = principal.as_user() {
-        if state
-            .server
+        if server
             .instance()
             .get_user_id(user)
             .await
@@ -233,8 +265,7 @@ pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderM
         {
             return Err(login());
         }
-        if state
-            .server
+        if server
             .instance()
             .get_user_type(user)
             .await
@@ -249,7 +280,7 @@ pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderM
     let mut claims: Map = serde_json::from_value(json!({
         "sub": username,
         "scopes": scopes,
-        "exp": chrono::Utc::now().timestamp() + 60,
+        "exp": chrono::Utc::now().timestamp() + lifetime,
         (auth::PRINCIPAL_CLAIM): "user",
     }))
     .expect("claims");
@@ -261,12 +292,9 @@ pub(crate) async fn api_headers(state: &WebState, data: &Json) -> Result<HeaderM
     }
     headers.insert(
         header::AUTHORIZATION,
-        format!(
-            "Bearer {}",
-            auth::jwt_encode(&claims, state.server.secret())
-        )
-        .parse()
-        .expect("JWT header"),
+        format!("Bearer {}", auth::jwt_encode(&claims, server.secret()))
+            .parse()
+            .expect("JWT header"),
     );
     Ok(headers)
 }

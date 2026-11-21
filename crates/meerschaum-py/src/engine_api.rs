@@ -124,8 +124,9 @@ fn config(py: Python<'_>) -> PyResult<Arc<Config>> {
     crate::facade::publish_live_config(py)
 }
 
-/// One session (runtime, connectors, worker pool) per process: v4 job daemons fork, and a
-/// forked child must not reuse its parent's runtime threads.
+/// One session (connectors, worker pool) per process, on the extension's runtime
+/// ([`crate::runtime::runtime`], keyed by the process ID like this session): v4 job daemons
+/// fork, and a forked child must not reuse its parent's runtime threads.
 fn session() -> Session {
     static SESSION: Mutex<Option<(u32, Session)>> = Mutex::new(None);
     let pid = std::process::id();
@@ -135,7 +136,7 @@ fn session() -> Session {
     {
         return session.clone();
     }
-    let session = Session::new();
+    let session = Session::with_runtime(crate::runtime::runtime().handle().clone());
     *slot = Some((pid, session.clone()));
     session
 }

@@ -51,7 +51,7 @@ pub fn is_v5_path(path: &str) -> bool {
     if under("/pipelines") || under("/engine") || under("/execute") || under("/teams") {
         return true;
     }
-    // The routes rc15 adds under v4 prefixes: a pipe's access and locks, users' permissions.
+    // The routes v5 adds under v4 prefixes: a pipe's access and locks, users' permissions.
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     match segments.as_slice() {
         ["pipes", _, _, _, last] => matches!(*last, "access" | "lock" | "unlock"),

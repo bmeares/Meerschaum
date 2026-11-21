@@ -224,7 +224,7 @@ pub(super) fn disk_fact(_path: &Path) -> Option<DiskFact> {
     None
 }
 
-/// 5.1: isolated teams' filesystem sandbox: the mode, the level and what this system enforces
+/// Isolated teams' filesystem sandbox: the mode, the level and what this system enforces
 /// (Landlock ABI and features), and the sockets of concern a "filesystem only" sandbox does not
 /// stop.
 pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
@@ -279,7 +279,7 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
              `system.engine.python_team_sandbox` to `auto` or `require`.",
         ));
     }
-    // 5.1: whether Unix sockets are denied to team code (Landlock from Linux 7.1, else the
+    // Whether Unix sockets are denied to team code (Landlock from Linux 7.1, else the
     // seccomp filter: a probe process applies the sandbox as a team process would), and what
     // that means for web terminals.
     let denied = if isolated {
@@ -355,7 +355,7 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
             "unrestricted (default; set system.engine.python_team_max_* or python_team_egress to cap host-team processes)",
         ));
     }
-    // 5.1: per team that runs code, whether its members' commands may run here.
+    // Per team that runs code, whether its members' commands may run here.
     for team in crate::team_execution::code_running_teams(config) {
         let label = format!("team execution ({team})");
         match crate::team_execution::team_status(config, &team) {
@@ -507,7 +507,7 @@ pub(super) fn config_checks(
             other_vars.join(", ")
         ));
     }
-    // 5.1: `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` hold the same text in a file.
+    // `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` hold the same text in a file.
     let bad_patch = [
         "MRSM_CONFIG",
         "MRSM_PATCH",

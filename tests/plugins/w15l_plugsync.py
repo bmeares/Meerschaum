@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Wave 15 (L) test plugin: a `sync()` that calls `pipe.sync()` itself."""
+"""Test plugin: a `sync()` that calls `pipe.sync()` itself."""
 
 __version__ = '0.1.0'
 

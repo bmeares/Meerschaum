@@ -1,7 +1,7 @@
 //! Shared server state: the instance connector(s), the secret key, the backends, and the shared
 //! pipes dictionary (`meerschaum/api/__init__.py`: `get_api_connector`, `pipes`, `get_pipe`).
 //!
-//! The pipe cache keeps the v4 semantics (see `CLAUDE.md`, "API Server Pipe Cache"):
+//! The pipe cache keeps the v4 semantics (see `docs/agents/gotchas.md`, "Server and API connector"):
 //! `get_pipe(refresh=false)` returns the *shared* handle from the pipes dictionary, so cache
 //! entries (columns types) persist across requests until `DELETE .../cache` invalidates them;
 //! `get_pipe(refresh=true)` returns a throwaway handle that is never stored.

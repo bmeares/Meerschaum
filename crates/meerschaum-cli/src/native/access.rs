@@ -1,4 +1,4 @@
-//! `edit pipes access`, `lock pipes` and `unlock pipes` (rc15 wave 2, AC4 / AC5 / AC10), and the
+//! `edit pipes access`, `lock pipes` and `unlock pipes`, and the
 //! `copy pipes` rule (a copy keeps its source's locks and never takes its access).
 //!
 //! A pipe's access is its reserved parameter `access` ([`PipeAccess`]: `owner`, `team`,

@@ -1,10 +1,9 @@
 //! `meerschaum-jobs` bound into `meerschaum._core`: the Rust side of `meerschaum.jobs.Job`, the
-//! executors, `meerschaum.utils.daemon.Daemon` (a read/control façade) and the job listings
-//! (wave 16, task S).
+//! executors, `meerschaum.utils.daemon.Daemon` (a read/control façade) and the job listings.
 //!
 //! The Python classes are façades: every operation is one call into the Rust types of
 //! `meerschaum-jobs` (the same ones the `mrsm` binary and the API server use), so the on-disk
-//! layout, the status rules and the job-scan fix of wave 16 (M2: no process-table scan for a job
+//! layout, the status rules and the job-scan rule (no process-table scan for a job
 //! which has ended) are not re-implemented in Python.
 //!
 //! **Launching.** A job runs `<mrsm> <sysargs>` under a detached supervisor

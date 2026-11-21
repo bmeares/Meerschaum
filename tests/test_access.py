@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-The access model through the Python API (rc15 wave 2: AC3, AC4, AC5, AC12, FX1), on
+The access model through the Python API, on
 throwaway SQLite instances (and Valkey when the `valkey` flavor is selected):
 
 - the rules of `meerschaum.core.access` (the core's: permissions, roles, teams, visibility,
@@ -14,7 +14,7 @@ throwaway SQLite instances (and Valkey when the `valkey` flavor is selected):
 - teams (`mrsm.Team`, `mrsm.get_teams()`): CRUD, members and managers, renames and deletions
   carried into the pipes' access, a deleted user leaving their teams and pipes;
 - `user.role`, `user.permissions`, `user.teams`, `user.primary_team`;
-- FX1: users are looked up by their exact username (`_alice` never reaches `alice`'s row), on
+- users are looked up by their exact username (`_alice` never reaches `alice`'s row), on
   SQL instances and on the default (pipe-backed) store of a custom instance connector;
 - a Pipeline run skips a sync-locked member as `locked` without failing.
 """
@@ -132,7 +132,7 @@ def test_permissions_and_roles_follow_the_core():
 
     assert set(effective_permissions('admin')) == set(ALL_PERMISSIONS)
     assert set(effective_permissions(None, None, 'viewer')) == viewer
-    ### A scope list written before rc15 keeps what it allowed.
+    ### A scope list written before 5.0.0rc15 keeps what it allowed.
     legacy = set(user_permissions(None, {'scopes': ['pipes:read', 'pipes:write', 'actions:execute']}, 'viewer'))
     assert {'pipes:register', 'pipes:define_sql', 'webterm:use'} <= legacy
     assert set(user_permissions(None, {'scopes': ['*']}, 'viewer')) == set(ALL_PERMISSIONS)
@@ -488,7 +488,7 @@ def test_user_roles_and_permissions(conn):
 
 
 def _check_exact_user_lookups(conn) -> None:
-    """FX1: `_alice` is not `alice`, and an unknown user has nothing."""
+    """`_alice` is not `alice`, and an unknown user has nothing."""
     from meerschaum.core.User._User import verify_password
     alice = _register_user(conn, 'alice', password='alice-pass', type='admin', attributes={'who': 'alice'})
     under = _register_user(conn, '_alice', password='under-pass', attributes={'who': 'under'})

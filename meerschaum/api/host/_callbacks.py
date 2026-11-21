@@ -224,7 +224,7 @@ def _login_path() -> str:
 
 def _login_required_response():
     """
-    The `401` answering a callback without a session (the Q13 JSON shape).
+    The `401` answering a callback without a session, as JSON.
     """
     from flask import Response
     login_path = _login_path()

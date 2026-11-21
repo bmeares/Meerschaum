@@ -1,4 +1,4 @@
-//! `show teams`, `register teams`, `edit teams` and `delete teams` (rc15 wave 2, AC3 / AC10).
+//! `show teams`, `register teams`, `edit teams` and `delete teams`.
 //!
 //! Every user is a member of the built-in team **Everyone**, which cannot be deleted, renamed or
 //! left (its record may name managers). Other teams have members and managers (a manager is a

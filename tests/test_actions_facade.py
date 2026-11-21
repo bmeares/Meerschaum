@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The action façade (wave 16, D14): `meerschaum.actions`, `meerschaum.entry()` and `python -m
+The action façade (D14): `meerschaum.actions`, `meerschaum.entry()` and `python -m
 meerschaum` delegate to the native dispatcher. There are no Python action bodies to test, only the
 delegation (what reaches `_core`) and what an end user sees.
 

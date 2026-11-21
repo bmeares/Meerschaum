@@ -1,7 +1,7 @@
 # Meerschaum v5: build, CI and Docker
 
 Companion to `docs/design/v5.0.0.md` (§10.2 reference harness, §12.1 size gate, §13 milestones, §15 risks).
-Conventions for the crates themselves are in `crates/README.md`.
+Coding conventions are in `CODING_STANDARDS.md`; crate layering and crates.io publishing in `crates/README.md`.
 
 ## Build matrix
 
@@ -37,6 +37,11 @@ lanes. Changes to the harness, manifests, dependency lock or workflows select ev
 nightly/release calls cannot select a partial matrix. `rust / summary`, `pytest / summary` and
 `docs / summary` cover failures and cancellations; self-hosted jobs refuse fork PR code.
 
+`rust.yaml`'s hosted `guardrails` job runs on every push and pull request whatever changed:
+`scripts/check_architecture.py`, then `scripts/parity/check_fixture_hygiene.sh` over the changed
+tracked files (every tracked file for a dispatch or an unknown diff). Locally:
+`scripts/rust/ci.sh guardrails`.
+
 Console browser tests run once in the core lane on nightly and release candidates. The pinned
 Playwright package and Chromium must launch successfully; unavailable browser dependencies fail
 these required runs. Their native plugin fixture travels as a separate verified artifact from
@@ -63,6 +68,13 @@ the same repository, a successful release workflow, every mandatory gate and an 
 artifact catalog. A changed base, expired payload or unavailable proof runs the ordinary checks.
 Shipping artifacts still require the exact commit, profile and every payload digest.
 
+With the repository variable `CI_LOCAL_ARTIFACTS=true`, `pytest.yaml` hands the verified test wheel
+and CLI from the `artifacts` job to the test jobs through `$MRSM_CI_CACHE/pytest-artifacts/`
+(`scripts/ci/local_artifacts.py`) instead of a GitHub artifact round trip (about 178 MiB each way
+over the self-hosted host's uplink). Every runner of the run must share that host and cache
+directory. Reused artifacts (`artifacts_run_id`) and the `release` profile always use GitHub
+artifacts, and `prepare_pytest.sh` verifies both paths identically. Unset, nothing changes.
+
 When a candidate for the same commit is already queued or running, the hosted `changes` job of
 `rust.yaml` and `pytest.yaml` waits for it (at most 75 minutes; the job's timeout is 90) instead
 of competing with it for the self-hosted runners, then applies the same proof. A failed,
@@ -78,7 +90,7 @@ including after cancellation. Existing shared test services and production servi
 All unparameterized tests run once; parameterized cases are assigned by backend. A collection
 proof rejects missing, repeated, unknown or conflicting cases before the full run.
 
-| Lane | Workers | xdist scheduler | Release run (RC30) |
+| Lane | Workers | xdist scheduler | Measured release run |
 |---|---:|---|---:|
 | Core / SQLite / API-host / console browsers | 4 | `loadfile` | 20.9 min with `load` |
 | Oracle | 8 | `load` | 7.7 min |
@@ -93,7 +105,7 @@ Rust tests retain their own shared-fixture lock and a bounded nextest budget.
 
 Lanes are listed longest first and the matrix runs at most three at once (`max-parallel: 3`, one
 per self-hosted runner). Matrix jobs are created in that order, so the core lane takes the first
-free runner instead of queueing behind short lanes (it queued 5 to 17 minutes in RC26 to RC30).
+free runner instead of queueing behind short lanes (it queued 5 to 17 minutes when it was listed last).
 Raise `max-parallel` with the runner count. The core lane uses `--dist loadfile`: xdist's default
 `load` hands each worker one contiguous chunk of the collection and never rebalances it, so the
 whole browser suite ran on one worker for 18 to 20 minutes while the other three finished in 8
@@ -127,25 +139,20 @@ The final gate verifies required platforms and seals every artifact digest in
 gh workflow run release.yaml --ref main -f candidate_run_id=RUN_ID
 ```
 
-A future `v5*` tag must match the source version and point to an exact commit with a successful,
+A `v5*` tag must match the source version and point to an exact commit with a successful,
 unexpired sealed candidate. Tag validation downloads those same bytes; it does not rebuild or
 publish. Registry uploads, GitHub releases and Docker publication remain separately authorized
 release steps.
 
-Docker candidates take `candidate_run_id=SDK_RUN_ID` and consume that run's verified
-manylinux wheel and standalone CLI, avoiding another SDK compilation. Source builds
-remain available for local development. Publish with the same SDK run plus
-`image_run_id=DOCKER_RUN_ID`: the job pushes the image IDs that passed the candidate's
-smokes and size gates, then verifies registry config digests. Publication does not
-rebuild. Missing images stop it unless an explicit rebuild reruns every image gate.
-Dispatch the Docker candidate as soon as the SDK candidate succeeds (about 9 minutes on one
-self-hosted runner); it can overlap the other pre-publication steps. Promotion pushes the
-tested images without rebuilding (about 8 minutes, mostly upload).
+Docker candidates take `candidate_run_id=SDK_RUN_ID` and consume that run's verified manylinux
+wheel and standalone CLI; nothing is compiled. Dispatch the Docker candidate as soon as the SDK
+candidate succeeds; it can overlap the other pre-publication steps. How the images are built,
+tested and promoted is in "Docker publication" below.
 
 ### Build caches
 
 Each runner keeps its own physical Cargo target; no targets or build locks are merged. Hosted
-caches remain keyed by target/profile and save on `main` and `v5`. Self-hosted runners preserve
+caches remain keyed by target/profile and save on `main` only. Self-hosted runners preserve
 `target`, `.venv-ref` and `.venv-test`; sccache adds a bounded shared dependency cache. The disk
 guard measures the resolved target filesystem and its actual size, including symlinked targets.
 `cargo-nextest` still runs all selected Rust tests, followed by doctests. Tool downloads remain
@@ -232,16 +239,20 @@ Isolation between concurrent jobs:
 | `${MRSM_CI_CACHE}/duckdb`, `/bin`, `/sccache` | written by atomic `mv` (`duckdb_lib.sh`, `ci_tools.sh`); sccache is concurrent by design |
 | ports of the Rust tests | tests bind random free ports; the optional `MRSM_TEST_*_URI` services are not set in CI |
 | disk | each runner's `disk-guard` measures its own filesystem; sccache is capped at 20 GB; GitHub-hosted legs use no local disk |
+| `${MRSM_CI_CACHE}/native-api-venv-<key>` | one per requirements, interpreter (version and ABI) and ISO week; created once under `flock`, never cleared in place; keys older than 15 days are pruned (`ci.sh native-api-venv`) |
+| `${MRSM_CI_CACHE}/maturin-<version>-<abi>` | one per exact maturin and interpreter ABI, created once under `flock` (`ci.sh maturin`) |
+| `${MRSM_CI_CACHE}/pytest-artifacts/<run>-<attempt>` | only with `CI_LOCAL_ARTIFACTS=true` ("Artifact reuse"): written under a temporary name and renamed, removed after two days |
 
 A new runner starts with a cold `target/` (the first job there compiles everything once; sccache serves the dependencies).
 
 ## Running CI locally
 
-`scripts/rust/ci.sh` runs exactly the workflow's commands. With no arguments it runs `fmt clippy test build`.
+`scripts/rust/ci.sh` runs exactly the workflow's commands. With no arguments it runs `guardrails fmt clippy test build`.
 
 ```bash
 scripts/rust/ci.sh setup          # rustup (installed non-interactively if missing) + rust-toolchain.toml
-scripts/rust/ci.sh fmt clippy     # any subset, in order
+scripts/rust/ci.sh guardrails     # architecture rules + hygiene scan of tracked files (stdlib Python, seconds)
+scripts/rust/ci.sh fmt clippy     # any subset, in order (fmt also runs scripts/check_packaging.py)
 scripts/rust/ci.sh check          # the hosted legs
 scripts/rust/ci.sh disk-guard     # cargo clean if < MRSM_CI_MIN_FREE_GB (default 10) GiB free
 scripts/rust/ci.sh parity         # reference harness (below)
@@ -315,14 +326,32 @@ There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. One distribution 
 | `--target rust` | Native runtime | Native binary, OS libraries, no Python or compiler. |
 | `--target rust-full` | Native development | Native binary + Cargo/rustc and C/C++ tools, no Python. |
 
-Local source builds use Fedora 44's `rust-builder` stage and the repository's Rust
-toolchain. Release builds select the verified SDK context instead. BuildKit cache mounts
-retain source-build artifacts. The `py-slim` and
-`py-full` stages install into a prefix before copying into the runtime installroots.
-Slim trims development headers; full retains them for building dependencies. Full still explicitly includes PyYAML while public Python config I/O
-requires it; that is an outstanding D20 dependency, not part of the declared extras.
+Local source builds compile on Fedora 44 with the image's pinned Rust toolchain ("Base image and
+toolchain pins"): `native-builder` builds the standalone `mrsm` and `rust-builder` the wheel, both
+from `source-builder`. Release builds select the verified SDK context instead (`sdk_source`,
+`--sdk-artifacts`). Layer order keeps slow inputs cached across releases: the Cargo registry and
+`target/` live in BuildKit cache mounts (`mrsm-v5-cargo-*`), DNF and pip downloads in
+per-architecture cache mounts, and the confined compiler snapshot is built without the workspace
+manifests. `py-slim` (the wheel alone, the volatile layer) and `py-full-deps` (the extras, cached
+until `requirements/*.txt` change) install into prefixes that the final stages copy. Slim trims
+development headers; full keeps them for building dependencies. PyYAML arrives only as a
+dependency of the extras.
 
-`scripts/docker/buildx.sh [--push] [--v4-only] [--platform P] [--arch-tags] [--merge]` builds the following images:
+`slim` and `rust` drop the CA trust sources and the OpenSSL FIPS provider for their size budgets
+(add a CA by appending to `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` or setting
+`SSL_CERT_FILE`); `full` and `rust-full` keep both, so `update-ca-trust` works and OpenSSL starts on
+FIPS hosts. No image contains a package manager. `smoke_image.sh` checks that the native Factory
+manifest of `full`, `rust` and `rust-full` describes exactly the files of the final image
+(`write_native_factory_manifest.py --verify-export` over `docker export`).
+
+The final stages use `COPY --link`, so identical copies (`mrsm`, the wheel, the compiler snapshot)
+have one layer digest in every image. The two `--chown` copies into the user's home directory are
+the exception: a linked layer carries its own root-owned parent directories and would replace the
+home directory's ownership. The images run as `MRSM_IMAGE_UID:MRSM_IMAGE_GID`; CI pins `1000:1000`
+whatever account the runner uses (hosted runners are uid 1001), and `docker_candidate.py` refuses a
+candidate with any other user. A local `buildx.sh` defaults to the caller's ids so bind mounts match.
+
+`scripts/docker/buildx.sh [--push] [--v4-only] [--platform P] [--arch-tags] [--merge] [--candidate REPO --metadata-dir DIR] [--cache-ref REF]` builds the following images:
 
 - `minimal` on `--target slim`, retained as a compatibility tag.
 - `full` on `--target full`.
@@ -330,27 +359,15 @@ requires it; that is an outstanding D20 dependency, not part of the declared ext
 - `rust` and `rust-full`, with matching version-qualified and stable floating tags.
 
 Pre-releases (`dev`, `rc`, `aN`, `bN`) get only version-qualified tags. The script refuses to push the
-Rust targets for a version below 5. The legacy `--v4-only` option selects default-target images and omits the slim/native targets; the current
-Dockerfile still installs the v5 wheels.
-Docker release builds run on the existing **self-hosted Linux x86_64 runners**. Prereleases
+Rust targets for a version below 5. The legacy `--v4-only` option selects default-target images and
+omits the slim/native targets; the current Dockerfile still installs the v5 wheels. Prereleases
 select only `linux/amd64`; final releases also select `linux/arm64`.
 `scripts/ci/release_matrix.py` reads the Cargo version and selects the Docker, wheel, binary and
 matching smoke matrices on release candidate dispatches. Source distributions and crates.io packages
 remain platform independent. The complete wheel and binary matrix is retained for final releases.
-
-Each Docker architecture uses its own named BuildKit cache (`meerschaum-release-<arch>`), preserved
-between jobs with `keep-state: true`. The builder is limited to 16 CPUs and 64 GiB RAM, with cache
-GC budgets of 100 GB maximum use and 30 GB minimum free space. The orchestration uses the host's Python 3.11 or newer (no downloaded Ubuntu interpreter); the images build their own Python.
-The workflow serializes runs and architecture jobs because runners share a daemon and loaded image tags. It uses a temporary Docker
-configuration so registry login and builder selection do not change the user's configuration.
-The normal test-suite containers, deployed services and other builders are left alone.
-
-AMD64 runs natively. ARM64 uses QEMU (registered only for the ARM64 job); its first Rust build will be
-slower, while later builds can reuse its own cache. Both architectures load their images and pass the
-same size, CLI, API and offline facade checks before upload. The explicit `--platform` and
-`DOCKER_DEFAULT_PLATFORM` make builds and smoke containers use the selected architecture.
-`--push --arch-tags` uploads architecture-qualified tags; `--merge` joins only the selected release
-platforms, and CI checks every published variant's manifest. Prereleases never move floating tags.
+`--candidate` pushes to a staging repository and `--cache-ref` imports and exports a registry build
+cache (both in "Docker publication"); `--merge` joins only the selected release platforms, and CI
+checks every published variant's manifest. Prereleases never move floating tags.
 `tests/test_docker_buildx.py` checks command plans; `tests/test_workflows_packaging.py` checks both
 release policies and that each smoke job has a corresponding artifact.
 `scripts/docker/size_gate.sh [--warn-only] [--slim-max 250] [--full-max 2500] [--rust-max 250] [--rust-full-max 1600] [--slim-image I] [--full-image I]`
@@ -363,54 +380,102 @@ image with isolated root and plugins directories and networking disabled. It che
 CLI, config lookup, password hashing, public YAML config I/O and list-of-dicts Pipe sync/read,
 and rejects dependency-install requests. Any failed operation is a release blocker.
 
-Historical measurements on 2026-10-12, built from the committed scaffold (limits at that time):
+## Docker publication
 
-| Image | Size | Limit |
-|---|---|---|
-| `slim` | 86.4 MB | 200 MB |
-| `bmeares/meerschaum:full` (v4.0.0, current) | 1868.1 MB | 900 MB |
+**Not yet run on GitHub.** This path is implemented and unit-tested (`tests/test_ci_docker_candidate.py`,
+`tests/test_docker_buildx.py`, `tests/test_workflows_packaging.py`) but no candidate or publish run
+has executed it. Before relying on it for a release, run one candidate and check the list at the end
+of this section.
 
-The `mrsm` binary was still a 338 kB scaffold for the slim measurement. The scaffold-era budget for
-the binary, `_core` and any Python additions is the remaining ~110 MB. A first attempt on
-`fedora-minimal:44` came to 199.2 MB before any real binary existed, which is why `slim` uses an
-installroot rootfs.
+It exists because the self-hosted host uploads at under 1 MB/s: promoting 5.1.1 from that host took
+3 h 28 min for amd64 and 2 h 06 min for arm64. Image bytes now move between registries, and the
+self-hosted host only downloads.
+
+`docker-build.yaml`, dispatched with `candidate_run_id=SDK_RUN_ID` (a successful `release.yaml` run):
+
+1. `buildx` (one job per architecture, GitHub-hosted `ubuntu-24.04` and `ubuntu-24.04-arm`, no
+   QEMU) frees disk, logs in to GHCR with the workflow token and runs
+   `buildx.sh --candidate ghcr.io/<owner>/<repo>/candidate --cache-ref ghcr.io/<owner>/<repo>/buildcache`.
+   Each image is pushed by digest without provenance or SBOM (one image manifest), pulled back by
+   that digest, and the smokes, the size gate and the offline facade smoke run on those bytes.
+   `docker_candidate.py record` writes the `docker-candidate-<arch>` receipt (digest and config
+   digest per group). The cache imports every target's `buildcache:<target>-<arch>` and exports its
+   own (`mode=max`), so unchanged OS, dependency and compiler-snapshot layers keep their digests.
+2. `executors` (self-hosted amd64, the one job that compiles Rust) pulls the amd64 `full` digest
+   and runs the installed Team executor suite; its receipt is `docker-executors-amd64`. It pushes
+   nothing.
+
+Publish with the same SDK run plus `publish=true image_run_id=DOCKER_RUN_ID`:
+
+3. `promote` (hosted, per architecture) verifies the sealed SDK again, fetches both receipts from
+   the candidate run, checks that the digests are still staged, then copies exactly those digests to
+   `bmeares/meerschaum:<version>-<group>-<arch>` registry to registry
+   (`imagetools create --prefer-index=false`) and checks digest, config, platform, revision and user.
+4. `publish` (hosted) runs `buildx.sh --merge` and checks every multi-architecture tag's platforms.
+
+Publication never rebuilds. A missing staged digest stops it (exit code 2): dispatch a new candidate
+run, which reruns every gate, and publish that one. Only `buildx` may write packages; the Docker Hub
+secrets appear only in the publish-gated jobs. Repository variable `DOCKER_RUNNER=self-hosted` moves
+`buildx` back to the self-hosted runners (persistent per-architecture builders limited to 16 CPUs,
+64 GiB and a 100 GB cache; arm64 under QEMU; no registry cache). That fallback still stages on GHCR,
+so it uploads every image from the slow host.
+
+### Base image and toolchain pins
+
+Every Fedora stage starts from `ARG fedora_image=fedora:44@sha256:...`. The image's Rust is
+`ARG rust_toolchain` (an exact release, not `rust-toolchain.toml`'s `stable` channel), installed by
+`rustup-init` `ARG rustup_version`, checked against `rustup_sha256_amd64` / `rustup_sha256_arm64`.
+Nothing follows a moving tag or channel, so cached layers and the digests registries deduplicate
+change only when these lines change. Refresh them deliberately (monthly, for a CVE in the base, or
+for a new Rust release), knowing that every OS, dependency and snapshot layer is rebuilt and users
+pull it again:
+
+```bash
+docker buildx imagetools inspect fedora:44 | sed -n 's/^Digest: *//p'      # fedora_image digest
+curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml | sed -n '/^\[pkg.rustc\]/,/^version/p'
+curl -fsSL https://static.rust-lang.org/rustup/release-stable.toml           # rustup_version
+curl -fsSL https://static.rust-lang.org/rustup/archive/<version>/{x86_64,aarch64}-unknown-linux-gnu/rustup-init.sha256
+```
+
+### What the first candidate run must confirm
+
+1. The first `GITHUB_TOKEN` push creates the `candidate` and `buildcache` GHCR packages linked to the
+   repository, and `executors` (self-hosted) and `promote` (hosted) can pull them with `packages: read`.
+2. `buildx build --push --metadata-file` writes `containerimage.digest` and
+   `containerimage.config.digest`, and with `--provenance=false` the digest is one image manifest
+   (`record` refuses an index).
+3. The registry cache export succeeds (`image-manifest=true`); a second run shows cache hits for the
+   OS, dependency and compiler-snapshot stages, with layer digests unchanged.
+4. Disk: the `df -h /` lines around the `full` build on both hosted architectures (about 20 GB of
+   headroom is needed).
+5. The image user is `1000:1000` (the receipt enforces it).
+6. arm64 builds and smokes natively on `ubuntu-24.04-arm` within the 300-minute timeout, including
+   the native Factory manifest check.
+7. On the self-hosted daemon, `docker image inspect <repo@digest>` returns an `Id` equal to the
+   config or manifest digest.
+8. In a publish run, the Docker Hub tag's digest equals the candidate digest, then `--merge` and
+   the platform check pass.
+9. The pinned `rustup-init` and toolchain install; the toolchain directory name equals
+   `settings.toml`'s `default_toolchain`; files under `/home/meerschaum` stay user-owned; and
+   `docker image inspect -f '{{json .RootFS.Layers}}'` shows the `mrsm` layer shared by `full`, `rust`
+   and `rust-full`, and the compiler layer shared by `full` and `rust-full`.
 
 ## Crate names on crates.io (§15)
 
-`scripts/rust/check_crate_names.sh [--markdown] [NAME ...]` checks crates.io. The lookup is canonical,
-so `-` and `_` count as the same name. Results on 2026-10-12:
-
-| Crate | Status |
-|---|---|
-| `meerschaum` | free |
-| `meerschaum-core` | free |
-| `meerschaum-kernel` | free |
-| `meerschaum-connector-sql` | free |
-| `meerschaum-connector-valkey` | free |
-| `meerschaum-connector-api` | free |
-| `meerschaum-engine` | free |
-| `meerschaum-jobs` | free |
-| `meerschaum-compose` | free |
-| `meerschaum-server` | free |
-| `meerschaum-web` | free |
-| `meerschaum-plugin` | free |
-| `meerschaum-cli` | free |
-| `mrsm` | free |
-
-`meerschaum-py` is also free (it is `publish = false`: the extension ships in the PyPI wheel). `meerschaum-connector` and `meerschaum-worker` are free too (checked 2026-10-17). `meerschaum` is the front crate (`crates/meerschaum`, thin re-exports behind cargo features, plus the `mrsm` binary behind its default `cli` feature: `cargo install meerschaum`; `meerschaum-cli` is the internal library it calls); the other crates are internal. crates.io has no reservation mechanism. Claiming a name means
-publishing a version from the owner's account. Nothing is published until the maintainer authorizes it (the
-procedure and the order of the 15 crates are in `.agents/skills/release/SKILL.md` and `crates/README.md`
-"Publishing"); the first publication is `5.0.0-rc.1` (PyPI `5.0.0rc1`).
+The 15 published crates (the `meerschaum` front crate included) were claimed by publishing
+`5.0.0-rc.1`; `meerschaum-py` is `publish = false` (the extension ships in the PyPI wheel). The
+publication order is in `.claude/skills/release/SKILL.md` and `crates/README.md` "Publishing".
+`scripts/rust/check_crate_names.sh` checks whether a new crate name is free on crates.io (the
+lookup is canonical: `-` and `_` count as the same name).
 
 ## Release procedure (5.x)
 
-`.agents/skills/release/SKILL.md`, section "Meerschaum 5.x", is the ordered runbook: bump the version (Cargo
+`.claude/skills/release/SKILL.md`, section "Meerschaum 5.x", is the ordered runbook: bump the version (Cargo
 `[workspace.package]` and the lockstep `=` pins, `Cargo.lock`, `meerschaum/config/_version.py`, literals),
 `scripts/check_packaging.py`, `scripts/rust/ci.sh package` and `publish-dry-run`, dispatch `release.yaml` on the exact release commit, wait for its complete sealed candidate, download that run's verified wheels and sdist (`gh run download`), `twine check`, then the
 steps that need explicit authorization: PyPI `twine upload`, `cargo publish --workspace --exclude meerschaum-py`,
-the annotated tag (`v5.0.0rc1`) and a GitHub pre-release, and (separately) Docker. Releases are cut from
-`main` (the separate `v5` branch was retired after 5.0.1). The PyPI classifier is `Development Status ::
-4 - Beta` for a pre-release and `5 - Production/Stable` for 5.0.0 final. A pre-release gets only version-qualified
+the annotated tag (`v5.1.0rc1`) and a GitHub release, and (separately) Docker. Releases are cut from
+`main`. The PyPI classifier is `Development Status :: 5 - Production/Stable`. A pre-release gets only version-qualified
 Docker tags. The wheels uploaded are the CI artifacts of the release commit, never a local `python -m build` wheel
 (`linux_x86_64`, which PyPI rejects). The sdist needs a Rust toolchain and network access to crates.io and GitHub
 (the sqlx `[patch]` points at a git revision).
@@ -418,186 +483,22 @@ Docker tags. The wheels uploaded are the CI artifacts of the release commit, nev
 ## Fixture hygiene
 
 Recorded fixtures are scanned by `scripts/parity/check_fixture_hygiene.sh` (run by the parity job after
-the reference regeneration, and by hand before any commit that touches `crates/*/tests/fixtures`). It
-fails on captured process environments, Claude Code or desktop session variables, home directories,
-the maintainer's handle in a path or e-mail, private project names and credential shapes. Python
-helpers under `fixtures/` are excluded because they name the things they scrub. Generators that start
+the reference regeneration, by the `guardrails` job over changed files, and by hand before any commit
+that touches `crates/*/tests/fixtures`). It fails on captured process environments, Claude Code or
+desktop session variables, home directories, the maintainer's handle in a path or e-mail, private
+project names and credential shapes. By default it skips `*.py` (generators name what they scrub) and
+`*.md`. `--public [PATH ...]` (default: every tracked file) scans docs and code, Markdown and Python
+included, with every pattern except the captured-environment variable names, which code and docs
+mention legitimately. Each allowed exception is one pattern in one file, listed in the script.
+Generators that start
 a Python reference server or daemon must do so with `env -i` plus only `PATH`, a temporary `HOME`,
 `MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR` and `PYTHONHASHSEED=0`, and must replace minted credentials, pids,
 timestamps and absolute paths with placeholders before writing.
 
-## Active v5 hardening work order (2026-10-15)
+## Intentional changes to v4 behavior
 
-The initial `d50d5698` pytest CI run later completed with 1,726 passed, 363 skipped and two
-failures: the external-uv Rust subprocess had no compiled `_core`, and ENV-001 reproduced the
-known Python GeoArrow registry issue. Pytest CI now builds `_core` before starting integration
-services or tests; the native password facade also requires that prerequisite in Python mode.
-This setup repair adds no fallback or test skips. ENV-001 remains a separate test-environment issue.
-
-Implementation must preserve Python plugin compatibility while moving execution into Rust.
-Track behavioral findings in the [bug and behavior review ledger](../../crates/meerschaum-py/PARITY.md#bug-and-behavior-review-ledger).
-Parity is evidence for review, not a requirement to preserve every v4 bug: intentional changes
-to observable v4 behavior and corresponding reference-test rewrites require maintainer approval.
-Record the trigger, before/after behavior, compatibility impact, evidence and decision before
-changing reference expectations. A proposed fix is not an approved deviation.
-
-| Work | Acceptance criteria | Status |
-|---|---|---|
-| Parallel metadata actions, starting with `show partitions`, `show rowcounts` and `show sizes` | Bounded concurrency only for supported connectors; explicit single-worker mode; deterministic output and preserved per-pipe errors; measured overlapping reads and serial fallback tests | Implemented for capable native SQL connectors; overlap and exact output tests pass. Python/custom, API and Valkey connectors remain serial |
-| Concurrent engine-state initialization | Independent connectors can initialize tables and missing schemas concurrently; interrupted or failed initialization is recoverable; existing indexes are preserved; warm writes retain their cost | PostgreSQL coordination and missing-index recovery implemented; 940 SQL tests, focused engine regressions and 11 browser tests pass. CockroachDB coordination remains open |
-| Shared environment config layers | Compose reuses core parsing while preserving file/environment/patch precedence and config references | Implemented; core and compose parity tests pass |
-| Python bridge lifecycle and bootstrap | Repeated worker interrupts remain usable; venv locks release on failure; external uv works in an isolated interpreter | Implemented; focused lifecycle, worker, venv and package tests pass in both core modes |
-| pandas string dtype parity | Preserve Python merge results across pandas 2/3, string storage backends, null and empty deltas | Implemented; expanded core suites pass with pandas 2.3.3 and 3.0.3 in both modes. Wave 11 extends coverage to object dtype inference and special-value null sentinels; see the ledger |
-| Remaining CLI output parity | Restore pre/post-sync hook result lines and distinguish datetime partition durations from integer-axis intervals | Implemented; hook transcripts match released v4 and typed partition metadata distinguishes datetime durations without changing the public Python metadata shape |
-| Maintainer behavior review | Decide whether connector overrides should stop mutating shared v4 static defaults; review any intentional behavior changes and associated reference expectations together | V4-001 isolation fix and V5-007 supported Polars Object input approved on 2026-10-15; regression tests retain unrelated connector defaults and reject unsupported objects |
-| Native Compose execution | Route all lifecycle subactions through native jobs, connectors and engine; preserve ownership and project configuration | Implemented and exercised with real disposable jobs and syncs; fresh plugin setup still reaches Python core and remains a D14 gap |
-| D14 / D20 | Remove Python core and runtime dependency fallbacks while preserving the facade and plugin SDK | Password hashing now delegates unconditionally to Rust; metadata lookup uses the standard library; synchronous SQLite no longer requests an async driver. Pipe/config/actions migration remains incomplete |
-| Release-candidate gates | Remaining deployment replays, full flavor gates, packaging/image limits and Python-core removal | Six-flavor facade suites, scoped private replays and image size checks passed. Installed-package functional gates and D14/D20 removal remain blockers; current CLI benchmarks are complete |
-
-Metadata benchmark: `show partitions --nopretty` over 64 PostgreSQL pipes, each with four
-daily partitions and 64 rows, took a median 0.625 seconds with one worker and 0.192 seconds
-with four (3.26× speedup). Two warmups per setting preceded eight paired rounds with
-alternating order; all 20 runs produced identical output. Timing includes CLI startup and
-output capture. This measures loopback PostgreSQL with warm caches, without injected latency;
-it is not a network-latency projection. The disposable database was removed afterward.
-[Recorded samples](../../scripts/bench/results/2026-10-15-w10-metadata.json).
-
-The rebuilt release CLI also completed the SQLite/PostGIS sync, incremental-sync and chain
-benchmark matrix against v4.1.4: all 26 implementation/case entries passed their row-count
-checks, and v5 was faster in every paired case. This covers 10k, 100k and 1M syncs, 100k and
-1M incremental syncs, and three-pipe chains; graph-mode chains have no direct v4 counterpart.
-The disposable benchmark schema was removed afterward.
-[CLI report and samples](../../scripts/bench/results/2026-10-15-w10-hardening-cli.md).
-
-Wave 10 validation (historical; superseded for changed paths by Wave 11 below): workspace formatting, all-target Clippy and Rust tests passed
-(1,552 tests; three ignored subprocess entrypoints exercised by their parent tests).
-After the final boundary guards, PyO3 Clippy and all 16 unit tests passed again, followed by
-194 standalone core tests with one existing xfail in each pandas 2.3.3/3.0.3 × Python/Rust
-combination and 100 affected dataframe/filtering/dtype integration tests. The main SQLite
-Python suites passed separately: Rust mode 892 passed/12 skipped; Python mode 872 passed/
-31 skipped/one explicit local GeoArrow exclusion (ENV-001). All 11 browser tests passed.
-Packaging and fixture/changed-file hygiene checks passed. Reference fixtures and existing
-parity expectations were not rewritten. Those separate suite runs did not resolve V4-001's combined collection-order failure.
-The maintainer subsequently approved the isolation fix implemented in Wave 11.
-
-
-## Wave 11 continuation (2026-10-15)
-
-The maintainer raised the slim-image size budget to 250 MB; the full-image budget remains
-900 MB. No runtime contents need to be removed solely to meet the former 200 MB limit.
-
-The maintainer approved two behavior changes: per-connector SQL engine overrides now copy
-shared defaults (V4-001), and the existing native Polars input path preserves supported Object
-strings, UUIDs, bytes and Decimals while rejecting unsupported arbitrary objects (V5-007).
-Neither approval permits other observable v4 changes or weakening reference assertions.
-
-Compose lifecycle execution now uses native jobs and engine operations with project-scoped
-worker environments. Hook result output and datetime partition labels match released-reference
-behavior. Strict dataframe tests cover full-input dtype inference, special-value null sentinels,
-partial dtype maps and empty deltas. Plugin pages registered during Dash initialization are
-collected after initialization, fixing empty plugin apps discovered in private replays.
-
-D14 and D20 remain release blockers. Password hashing and verification now use Rust without a
-Python implementation. Standard-library distribution metadata replaces installer subprocesses,
-and synchronous SQLite/GeoPackage engines no longer request an async driver. These changes do
-not remove the remaining Python Pipe sync/fetch/verify branches, config read/write/sync logic,
-action fallbacks, formatting/job dependencies or fresh-plugin setup paths. A passing suite in
-Rust mode does not establish that all Python core execution has been removed.
-
-Private API-host replays used copied plugins, scratch roots, synthetic metadata and restricted
-network access. Across the two deployments, all 23 and four page routes and their page-router
-callbacks passed, including session propagation. Native secure-server checks passed for login,
-user lookup, console sessions, scoped-token reads and denied writes, revocation, redirects and
-MCP tool visibility. This does not establish all domain-data callbacks, middleware semantics,
-deployment-data geospatial exports or deployment from the final images. Three unchanged
-deployment export helpers were separately exercised with synthetic geometries: released v4
-and v5 matched GeoJSON output and GeoPackage row, CRS and geometry readback. The transport
-call was recorded locally; no remote export destination or original dataset was used. Raw
-deployment artifacts stay private.
-
-The initial commit's hosted wheel matrix (`d50d5698`) passed on Linux, Windows, macOS and
-experimental free-threaded Python. Self-hosted Rust and pytest jobs remained queued while the
-runner was offline; local gates use separate disposable database endpoints and do not establish
-remote CI success.
-
-
-Local validation: workspace formatting and all-target Clippy passed; workspace tests passed
-1,564 tests, with three ignored subprocess entrypoints exercised by their parent tests. Final
-password binding checks additionally match all 12 released-reference edge cases exactly
-(results, exception types/messages and warning counts). Core password tests cover 37 synthetic
-legacy digest/alias vectors, and the Python facade checks both core modes. The dataframe/core
-matrix passes 300 tests with one existing xfail in each pandas 2.3.3/3.0.3 × Python/Rust run,
-including 106 strict boundary regressions. All 11 browser tests and nine API-host tests passed.
-
-
-The private Compose replay exercised 35 configuration documents in native v5 and installed
-v4.1.4, preserving definitions for metadata checks and substituting synthetic SQLite operations
-and jobs for execution. Lifecycle statuses and synthetic row snapshots match, including the
-reference failures for empty-project and duplicate-definition cleanup. A shared two-project
-workflow preserves data until the last owner is removed. One initial subprocess failed while
-the debug binary was being relinked; fresh full-lifecycle and unchanged-state reruns passed, and
-the original failure remains in the private report. Subsequent checks use an immutable binary
-copy. This validates Compose structure and lifecycle, not original production fetches or jobs.
-
-
-Final slim image size is 200,384,701 bytes (200.38 MB), below the approved 250 MB limit.
-Its installed-package smoke ran read-only with networking and automatic installs disabled.
-Native CLI version, config lookup and password operations passed; public config writes failed
-because PyYAML is absent, and dict-based Pipe sync reached missing SQLAlchemy, typing and
-formatting dependencies (including `typing_extensions`, `pygments` and `rich`).
-The smoke correctly exits nonzero. These are D14/D20 release blockers, not an invitation to add
-those dependencies to the base wheel or to ship the remaining Python core fallback.
-
-
-The full image is 844,052,775 bytes (844.05 MB), below its unchanged 900 MB limit. Both exact
-byte-size gates pass. The final SDK and CLI wheels were exported and installed together into a
-clean offline environment. Installed-wheel and image functional checks remain failures:
-
-| Environment | Native CLI / config lookup / passwords | Public config roundtrip | Dict-based Pipe roundtrip | API host |
-|---|---|---|---|---|
-| Clean base-wheel environment | Pass | Fails: missing YAML support | Fails: remaining Python dependencies | Not a base-wheel extra |
-| Slim image | Pass | Fails: missing YAML support | Fails: remaining Python dependencies | Not a base-image extra |
-| Full image | Pass | Pass | Fails: implicit `semver>=3.0.2` install request | Fails: same install request; also warns about missing `uv` |
-
-Image probes used disabled networking, read-only runtime filesystems and writable scratch roots
-and home directories. Automatic install hooks were denied. The final full-image results use a
-writable scratch home, correcting an initial harness permission error. No packages or images
-were published. Size and packaging metadata success do not override these functional failures.
-
-
-Final review also confirmed V4-002 in installed released v4.1.4: dependency-version prechecks
-can call `pip_install` directly despite `MRSM_NO_AUTO_INSTALL`. The image smoke intercepted
-this request before execution; source inspection confirms the direct installer path. This
-inherited behavior needs maintainer review before repair, including the result returned when
-a version parser is unavailable. It was not introduced by the metadata lookup change.
-
-The full Python-mode facade suite passed against SQLite, PostGIS, TimescaleDB, MariaDB,
-MySQL and MSSQL: 1,725 passed, 40 skipped, one existing xfail and the explicit local GeoArrow
-exclusion (ENV-001). This combined run includes core and dataframe-boundary tests and retains
-the original static-default assertions. The self-hosted runner subsequently came online and
-was busy; the initial commit's Rust and pytest jobs were still queued at that check.
-
-
-An initial combined Rust-mode run found three generic Arrow roundtrip fixture failures
-(1,742 other tests passed). Pure PyArrow reproduces the same promotion from raw binary to
-GeoArrow after extension registration. The opaque-metadata fixture now uses a deliberately
-unregistered synthetic name; exact schema/data assertions and the real GeoArrow integration
-test are unchanged. The same-process geometry-plus-core check passes 195 tests with one
-existing xfail; this is test isolation, not a changed v4 behavior expectation.
-
-
-Final password error-path review found and repaired unsupported-digest exception and validation
-ordering differences. All 30 bounded released-v4 cases match the rebuilt extension exactly
-(exception type/message and warnings), and 12 facade tests pass across both core modes.
-Supported hashes use Rust exclusively. Unknown digest names consult standard-library lookup
-metadata for platform-specific errors; no password, salt or PBKDF2 work is delegated to Python.
-The final affected PyO3 Clippy check and extension build pass.
-
-
-The final combined Rust-mode facade suite passes: **1,755 passed, 21 skipped, one existing
-xfail**, across SQLite, PostGIS, TimescaleDB, MariaDB, MySQL and MSSQL. It includes the rebuilt
-password binding and the isolated Arrow fixture, with no deselections. The Python-mode full
-run passed 1,725 tests (40 skipped, one existing xfail, explicit ENV-001 exclusion); the final
-password and fixture changes additionally passed focused checks in both modes. Final PyO3
-unit tests pass all 16 cases. Both rebuilt images match the final wheel extension after the
-existing stripping step and match all 30 password error oracle cases.
+Parity is evidence for review, not a requirement to preserve every v4 bug. Intentional changes to
+observable v4 behavior, and the reference-test rewrites that go with them, require maintainer
+approval. Record the trigger, before/after behavior, compatibility impact, evidence and decision
+in the [bug and behavior review ledger](../../crates/meerschaum-py/PARITY.md#bug-and-behavior-review-ledger)
+before changing reference expectations. A proposed fix is not an approved deviation.

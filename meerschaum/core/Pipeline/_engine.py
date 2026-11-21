@@ -263,14 +263,13 @@ def forget_engine_state(pipe: Any, operation: str) -> None:
     Syncing Engine's state for the pipe (its ledger entries, the edge cursors it is part of and
     its definition hash), so a pipe recreated under the same keys starts fresh, as in v4.
 
-    The Rust instance connectors do this in their own drop, delete and clear paths
-    (`pipe_ops::forget_engine_state`, used by the CLI and the server); this covers every pipe
-    method call from Python, whichever implementation serves the instance (`operation` names the
-    method that succeeded). It is best effort and never raises, and does nothing on an instance
-    where the engine never ran (no `mrsm_engine_runs` table). Run history is kept.
-
-    On SQL instances the Rust connector forgets it where it keeps it (`_mrsm_internal` on
-    schema flavors, namespaced by the instance schema), so the placement rule lives in one place.
+    The façade calls this only for instances whose connectors do not forget the state
+    themselves: `api:` instances and plugin instance connectors. The Rust `sql:` and `valkey:`
+    instance connectors forget it in their own drop, delete and full clear
+    (`pipe_ops::forget_engine_state_after`), so `Pipe.drop/delete/clear` skip this for them.
+    `operation` names the method that succeeded. It is best effort and never raises, and does
+    nothing on an instance where the engine never ran (no `mrsm_engine_runs` table). Run history
+    is kept.
     """
     try:
         if str(pipe.connector_keys) == 'mrsm':
@@ -280,10 +279,7 @@ def forget_engine_state(pipe: Any, operation: str) -> None:
             return
         ### On an API instance the rows are keyed on this client's `api:<label>` pipe refs and
         ### live on the server's instance; the client clears them over `/engine/pipes/*`
-        ### (the generic path below: the API connector routes `mrsm:engine_*` pipes there).
-        if getattr(connector, 'type', None) == 'sql' and hasattr(connector, '_rust_method'):
-            connector._rust_method('forget_engine_state')(pipe)
-            return
+        ### (the API connector routes `mrsm:engine_*` pipes there).
 
         def state_pipe(metric: str):
             return mrsm.Pipe(

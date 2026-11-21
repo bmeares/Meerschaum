@@ -467,7 +467,7 @@ impl PythonConnector {
         if let Some((name, df)) = frame {
             msg.insert("frame_arg", name);
             // The library the method is handed the frame in is the host's (`meerschaum:dataframe`
-            // / `MRSM_DATAFRAME`, rc15), not the one the worker read when it started.
+            // / `MRSM_DATAFRAME`), not the one the worker read when it started.
             if let Some(library) = meerschaum_core::config::dataframe::process_library() {
                 msg.insert("dataframe", library);
             }

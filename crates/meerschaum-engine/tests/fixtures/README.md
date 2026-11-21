@@ -2,8 +2,8 @@
 
 These are the acceptance tests for the planner in `docs/design/v5.0.0.md` §5.3–§5.4. Each JSON
 file is a pipe graph, a selection, an engine state and the **expected plan, written by hand from
-the spec** (not generated from the implementation). `tests/golden.rs` runs every file; run it with
-`cargo test -p meerschaum-engine --test golden -- --nocapture` to also print each plan table.
+the spec** (not generated from the implementation). `tests/planner_graph_suite/golden.rs` runs every file; run it with
+`cargo test -p meerschaum-engine --test planner_graph_suite golden:: -- --nocapture` to also print each plan table.
 
 All data is synthetic.
 

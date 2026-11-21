@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The plugin SDK's browser-side behavior (rc15), in Chromium against the Python API host served
+The plugin SDK's browser-side behavior, in Chromium against the Python API host served
 directly by uvicorn (no Rust server needed: the host serves `/dash`, `/static` and `/_pages`):
 
 - `@web_page(theme=..., head=[...])`: the page's stylesheet replaces the console's theme while the

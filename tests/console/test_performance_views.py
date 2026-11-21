@@ -6,7 +6,7 @@ import re
 import pytest
 
 from tests.console.conftest import Tab
-from tests.console.test_rc16_inspection import INSPECTION_PASSWORD, inspection_server  # noqa: F401
+from tests.console.test_inspection_lineage_performance import INSPECTION_PASSWORD, inspection_server  # noqa: F401
 
 pytestmark = pytest.mark.console
 
@@ -74,7 +74,7 @@ def test_performance_complete_window_and_responsive_breakdowns(populated_perform
         page.wait_for_function("document.querySelector('#performance-pipes tbody')?.textContent.includes('rc23_perf_')")
         expected = 5 if width < 768 else 15
         assert page.locator('#performance-pipes tbody tr').count() == expected
-        ### RC25: Pipes read as Python writes them, colored like the Pipes page.
+        ### Pipes read as Python writes them, colored like the Pipes page.
         name = page.locator('#performance-pipes tbody tr .performance-row-name .mrsm-pipe-repr').first
         assert re.fullmatch(r"Pipe\('review', 'rc23_perf_\d\d'\)", name.inner_text()), name.inner_text()
         assert name.locator('.mrsm-repr-connector').inner_text() == "'review'"

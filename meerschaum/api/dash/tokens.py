@@ -56,9 +56,9 @@ def check_token_access(
     import uuid
     from meerschaum.utils.misc import is_uuid
     from meerschaum.api import no_auth
-    from meerschaum.api.dash.access import get_viewer
+    from meerschaum.api.dash.access import resolve_viewer
 
-    viewer = get_viewer(session_store_data)
+    viewer = resolve_viewer(session_store_data)
     if not (viewer.signed_in or viewer.no_auth):
         return False, "You are not authenticated."
 

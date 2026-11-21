@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Wave 18 (FX7, RV2 follow-up): the static-asset routes of the API host cannot be walked out of their
+The static-asset routes of the API host cannot be walked out of their
 directories. Dash's `/dash/assets/*`, the plugin assets (`/dash/_plugin-assets/<plugin>/*`, Flask's
 `send_from_directory`), the console's `/static/*`, and the page-contract assets
 (`/_pages/_assets/*`) are asked for files outside their directories with every spelling of `..`
@@ -11,10 +11,8 @@ directories. Dash's `/dash/assets/*`, the plugin assets (`/dash/_plugin-assets/<
 ASGI server hands the app. A canary file beside each directory must never come back.
 """
 
-import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
-from tests.api_host.test_console_support import _json
+from tests.api_host._helpers import extract_json, run_python, write_plugin
 
 
 ASSET_PLUGIN = '''
@@ -32,7 +30,7 @@ def test_asset_routes_do_not_leave_their_directories(sandbox):
     (plugins / 'assetplug' / 'assets').mkdir(exist_ok=True)
     (plugins / 'assetplug' / 'assets' / 'ok.css').write_text('.ok { color: red }\n')
     (plugins / 'assetplug' / 'CANARY_PLUGIN_SOURCE.txt').write_text('canary-beside-the-assets')
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import asyncio, json, os, pathlib
 from urllib.parse import quote
 from meerschaum.api.host import build_app

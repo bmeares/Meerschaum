@@ -27,7 +27,8 @@
 //! | [`webterm`] | `/webterm/{session_id}` and its websocket: the PTY bridge (`portable-pty`, tmux) |
 //! | [`mcp`] | The MCP server (`/mcp`, stdio) and its federation with the API host |
 //! | [`tls`] | Native HTTPS (`--keyfile` / `--certfile`): rustls, HTTP/2, certificate reloads |
-//! | [`sql_guard`] | What non-administrators may put in a pipe's SQL definition through the API |
+//! | [`sql_guard`] | Unified SQL tokenizer and query/definition guard policies |
+//! | [`sse`] | Shared console-backed SSE stream guard, slots, bearer refresh, and drain |
 //! | [`lifecycle`] | Starting, serving and draining: graceful shutdown, `/healthcheck/ready` |
 //! | [`plugin_tokens`] | Tokens native plugins mint and revoke for their callers (`host::mint_token`) |
 //!
@@ -61,6 +62,7 @@ pub mod redact;
 pub mod routes;
 pub mod serialize;
 pub mod sql_guard;
+pub mod sse;
 pub mod state;
 pub mod team_execution;
 pub mod tls;

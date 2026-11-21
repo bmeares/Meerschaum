@@ -36,7 +36,7 @@ default_meerschaum_config = {
     'instance': 'sql:main',
     'api_instance': 'MRSM{meerschaum:instance}',
     'repository': 'api:mrsm',
-    ### The DataFrame library Meerschaum returns frames in (`polars` or `pandas`; rc15).
+    ### The DataFrame library Meerschaum returns frames in (`polars` or `pandas`).
     ### A root created before 5.0.0rc15 is given `pandas` the first time it is opened.
     'dataframe': 'polars',
     'connectors': {
@@ -220,7 +220,7 @@ default_api_config = {
     ### authentication of its own, because it is served from inside the Dash WSGI
     ### app where the API's token auth does not apply.
     'dash': {
-        ### Console callbacks answer only signed-in visitors unless public (rc15).
+        ### Console callbacks answer only signed-in visitors unless public.
         'callbacks_require_session': True,
         'mcp': {
             'enabled': False,
@@ -232,7 +232,7 @@ default_api_config = {
     },
     'permissions':       {
         ### Self-registration is off: the first account (while there are no users) is an
-        ### administrator, who adds the others (rc15).
+        ### administrator, who adds the others.
         'registration': {
             'users': False,
             'pipes': True,

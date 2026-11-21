@@ -1,9 +1,9 @@
-//! The stack's Grafana reads the main database through a read-only role (5.1).
+//! The stack's Grafana reads the main database through a read-only role.
 //!
 //! The stack provisions a data source named "Meerschaum Main" in Grafana's main organization
 //! (`stack:grafana:datasource`, written to Grafana's provisioning directory). Up to 5.0 it
 //! connected with `sql:main`'s credentials: the database's owner, a superuser in the stack's own
-//! database. Since 5.1, whenever `mrsm stack` writes the stack's files:
+//! database. Whenever `mrsm stack` writes the stack's files:
 //!
 //! - **The data source.** A "Meerschaum Main" whose `user` is `sql:main`'s user (whether the
 //!   config holds the `MRSM{...}` references of the default or the literal values), or has no
@@ -43,7 +43,7 @@ pub const PASSWORD_VARIABLE: &str = "MRSM_READONLY_PASSWORD";
 /// The [`SERVICE`] command when its passwords are in the environment.
 const ENV_COMMAND: &str = "printf '%s\\n' \"$MRSM_READONLY_SQL\" | psql -X -v ro_password=\"$MRSM_READONLY_PASSWORD\" -f -";
 
-/// The [`SERVICE`] command when its two passwords are in files (5.1, [`super::stack_secrets`]):
+/// The [`SERVICE`] command when its two passwords are in files ([`super::stack_secrets`]):
 /// the owner's at `owner_path`, the role's at `password_path`. Neither is in the container's
 /// configuration (`docker inspect`), and a file that cannot be read stops the setup (and so
 /// Grafana) before `psql` runs.

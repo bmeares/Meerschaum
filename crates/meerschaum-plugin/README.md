@@ -208,14 +208,14 @@ reference is used: v4 had no native ABI; the reused connector return shapes and 
 schema are the compatibility surfaces.
 
 Host integration is done (see "Hosting" below). The `mrsm` binary tests in
-`crates/meerschaum-cli/tests/native_plugins.rs` and `native_e2e.rs` drive the examples end to
+`crates/meerschaum-cli/tests/native_plugins_suite/native_plugins.rs` and `native_e2e.rs` drive the examples end to
 end (actions, hooks around a real sync, routes served by `start api`, a native plugin replacing a
 Python plugin of the same name, rejection of corrupt or wrong-ABI libraries, the manifest cache),
 and `tests/console/test_console.py` renders a native page in Chromium. Examples: `native_demo` (source,
 instance, action, hooks, routes, page), `native_probe` (a plain fetch source whose hooks append to
 `NATIVE_PROBE_LOG`, for asserting the built-in sync path), `native_api` (`api_routes` and MCP
-tools, resources and prompts; `tests/api_mcp.rs`, `meerschaum-cli/tests/native_api_mcp.rs`) and `bad_abi`. `tests/source.rs` covers source plugins with a stand-in `cargo`;
-`crates/meerschaum-cli/tests/native_source_plugin.rs` builds a real crate. Not yet available: repository
+tools, resources and prompts; `tests/integration/api_mcp.rs`, `meerschaum-cli/tests/native_api_mcp.rs`) and `bad_abi`. `tests/integration/source.rs` covers source plugins with a stand-in `cargo`;
+`crates/meerschaum-cli/tests/native_plugins_suite/native_source_plugin.rs` builds a real crate. Not yet available: repository
 artifact upload, target-triple selection and installation (the installer's job), and lazy
 (multi-batch) `fetch` streaming. Continuous `subscribe` is the pull-model subscription below. The future wasm contract is sketched in
 `wit/plugin.wit` (not compiled); it replaces native Arrow pointers with Arrow IPC bytes.
@@ -474,15 +474,15 @@ in rc12. The runtime keeps the subscription and log-monitor handle tables
 (`streams` module, one lock per handle) and answers `next_batch`, `ack_batches`,
 `close_subscription`, `executor.next_logs` and `executor.close_logs` before the plugin's
 dispatch, since the host calls them without the plugin's call lock. Tests:
-`tests/single_file_server.rs` (every attribute at the ABI, plus their diagnostics) and
+`tests/integration/single_file_server.rs` (every attribute at the ABI, plus their diagnostics) and
 `meerschaum-cli/tests/single_file_server.rs` (`start api` routes and `/mcp`, an executor running
-a job, and a `subscribe` stream feeding `sync pipes --listen`). `tests/single_file_parity.rs` and
+a job, and a `subscribe` stream feeding `sync pipes --listen`). `tests/integration/single_file_parity.rs` and
 `meerschaum-cli/tests/single_file_parity.rs` cover instance connectors (an instance serving
 `register` / `sync` / `show pipes` / `delete pipes`), console pages (served to the console's
 `/_mrsm/native-pages`), a top-level `subscribe` under `--listen`, the SDK's boxed return types,
 `ChannelSubscription`, `mcp::message` and the helpers named `subscribe`.
 
-Tests: `tests/executor_subscribe.rs` (ABI level, over the `native_executor` and `native_stream`
+Tests: `tests/integration/executor_subscribe.rs` (ABI level, over the `native_executor` and `native_stream`
 examples), `meerschaum-jobs/tests/custom_executor.rs`,
 `meerschaum-cli/tests/native_executor_stream.rs` (`mrsm` end to end: `-e procs:<label>` jobs, the
 shell's `executor` command, a compose project on a plugin executor, and a `--listen` sync into

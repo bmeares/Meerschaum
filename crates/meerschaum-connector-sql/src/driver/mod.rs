@@ -14,7 +14,7 @@
 //! The non-`sqlx` drivers share the pool and operation layer in `native.rs`.
 //!
 //! These methods serve the Rust core, Rust plugins and the Python façade's raw SQL
-//! (`SQLConnector.read` / `exec` / `value` / `to_sql`, rc15 Q53, through [`raw`]: statements with
+//! (`SQLConnector.read` / `exec` / `value` / `to_sql`, through [`raw`]: statements with
 //! bound parameters whose rows keep what each flavor's Python driver returns).
 
 #[cfg(all(test, unix))]
@@ -2106,7 +2106,7 @@ mod future_size_tests {
     /// `ready()` is awaited at the top of every driver method, so whatever state it holds is
     /// embedded in each of those futures and in every future above them. Unoptimized, an
     /// inline first-connection state machine took enough of the 2 MiB runtime worker stack to
-    /// overflow it on a plain `sync pipes` (wave 18 regression): keep the slow path boxed.
+    /// overflow it on a plain `sync pipes`: keep the slow path boxed.
     #[tokio::test]
     async fn ready_future_stays_small() {
         let attrs = crate::uri::ConnectorAttributes {

@@ -5,6 +5,7 @@ Decide which CI jobs a change needs (used by the `changes` job of rust.yaml and 
     python scripts/ci/changes.py --event push --before <sha> --after <sha>
     python scripts/ci/changes.py --event pull_request --base <sha>
     git diff --name-only A B | python scripts/ci/changes.py --event push --files -
+    python scripts/ci/changes.py --event push --before <sha> --after <sha> --list-files PATH
 
 Prints `name=true|false` lines (and appends them to `$GITHUB_OUTPUT` when set):
 
@@ -24,6 +25,9 @@ Rules, in one place:
   on: a docs-only push runs no heavy job.
 * Every other file turns on the jobs whose input it is (the tables below); a file no table claims is an
   unknown input and turns on `rust`, `rust_test` and `pytest` (the safe default).
+
+`--list-files PATH` writes the changed paths that still exist instead (one per line), or every tracked
+file when the event runs everything or the diff is unknown: the input of the public-file hygiene scan.
 
 Keep the tables in step with the workflows: tests/test_ci_changes.py pins the important cases.
 """
@@ -283,12 +287,14 @@ def main(argv: Sequence[str] = None) -> int:
     parser.add_argument('--after', default='HEAD')
     parser.add_argument('--base', default='', help='pull_request: the base commit')
     parser.add_argument('--files', default='', help='read the changed paths from this file (`-`: stdin)')
+    parser.add_argument('--list-files', default='', help='write the changed, existing paths to this file')
     args = parser.parse_args(argv)
 
     full_event = (
         args.event in ('workflow_dispatch', 'schedule', 'workflow_call', 'release')
         or args.ref.startswith('refs/tags/')
     )
+    files = None
     if full_event:
         flags = everything()
     else:
@@ -305,6 +311,16 @@ def main(argv: Sequence[str] = None) -> int:
         except (ValueError, subprocess.CalledProcessError, OSError) as exc:
             print(f'changes.py: cannot tell what changed ({exc}); running everything.', file=sys.stderr)
             flags = everything()
+            files = None
+
+    if args.list_files:
+        if files is None:
+            files = subprocess.run(['git', 'ls-files'], check=True, capture_output=True, text=True).stdout.splitlines()
+        existing = [path for path in files if path.strip() and os.path.isfile(path)]
+        with open(args.list_files, 'w', encoding='utf-8') as handle:
+            handle.write(''.join(path + '\n' for path in existing))
+        print(f'{len(existing)} file(s) listed in {args.list_files}', file=sys.stderr)
+        return 0
 
     lines = [f'{name}={"true" if flags[name] else "false"}' for name in (*NAMES, 'full')]
     print('\n'.join(lines))

@@ -6,20 +6,19 @@
 Who may see and do what in the web console: the access model (permissions, roles, teams, pipe
 access and locks) applied to the person looking at a page.
 
-The rules are `meerschaum.core.access`'s, the same as the API server's (`meerschaum_core::access`):
-this module only finds the **viewer** of a request (the console session's user, with their
-effective permissions and teams) and asks those rules about the pipes, Pipelines, runs, jobs and
-users a page would show. Every page and callback goes through it, and every check runs on the
-server side of the callback: a page hides what the viewer may not do, and the callback refuses it
-again when asked anyway.
+The rules are `meerschaum.core.access`'s, the same as the API server's (`meerschaum_core::access`).
+The **viewer** of a request (the console session's user, with their effective permissions and
+teams) is `meerschaum.api.dash.viewer`'s; this module asks the rules about the pipes, Pipelines,
+runs, jobs and users a page would show. Every page and callback goes through it, and every check
+runs on the server side of the callback: a page hides what the viewer may not do, and the callback
+refuses it again when asked anyway.
 
-- `get_viewer(session_data)` / `current_viewer()`: who is asking (cached for a few seconds per
-  session; `forget()` drops it after a change of rights).
+- `resolve_viewer(session)` / `current_viewer()`: who is asking (`meerschaum.api.dash.viewer`).
 - `can_see_pipe`, `can_edit_pipe`, `can_manage_access`, `can_lock`: a pipe (or its parameters),
   for a viewer.
 - `visible_refs(viewer, instance)`: the `pipe_ref`s a viewer may see on an instance (one read of
   the registered pipes), for filtering runs, statuses, graphs and counts.
-- `can_see_email(viewer, username)`: AC13 (admins, and managers of a team the user is in).
+- `can_see_email(viewer, username)`: admins, and managers of a team the user is in.
 
 Under `--no-auth` the viewer is an administrator. Locally (the CLI, Python) nothing here applies:
 the instance's credentials are the trust boundary; locks are enforced by the core everywhere.
@@ -29,72 +28,52 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
 
 import meerschaum as mrsm
 from typing import Set
 from meerschaum.utils.typing import Any, Dict, Iterable, List, Optional, Tuple, SuccessTuple
+from meerschaum.api.dash.viewer import (
+    ANONYMOUS,
+    EVERYONE,
+    PERMISSION_GROUPS,
+    ROLE_LABELS,
+    SYSTEM,
+    Viewer,
+    all_permissions,
+    core,
+    current_viewer,
+    default_role,
+    forget,
+    make_viewer,
+    register_invalidation_hook,
+    resolve_viewer,
+    role_name,
+    role_permissions,
+    viewer_for,
+)
 
-#: The built-in team every user belongs to (a pipe without a team is Everyone's).
-EVERYONE: str = 'Everyone'
+__all__ = (
+    # The viewer (`meerschaum.api.dash.viewer`).
+    'ANONYMOUS', 'EVERYONE', 'PERMISSION_GROUPS', 'ROLE_LABELS', 'SYSTEM', 'Viewer',
+    'all_permissions', 'core', 'current_viewer', 'default_role', 'forget', 'make_viewer',
+    'resolve_viewer', 'role_permissions', 'viewer_for',
+    # Pipes and their locks.
+    'EDIT_MODES', 'HIDDEN_LABEL', 'LOCKS', 'PIPE_ACTION_LOCK_OPS', 'PIPE_ACTION_PERMISSIONS',
+    'REFS_TTL_SECONDS', 'VISIBILITIES', 'access_fields', 'assignable_teams', 'can_edit_pipe',
+    'can_lock', 'can_manage_access', 'can_see_pipe', 'check_parameters_change', 'hidden_label',
+    'lock_refusal', 'may_run_pipe_action', 'new_pipe_access', 'partition_refs', 'pipe_access',
+    'pipe_locks', 'pipe_ref', 'ref_is_visible', 'registered_pipes', 'resolve_visible_pipe',
+    'sql_definition_changed', 'visible_pipe', 'visible_pipe_from_meta', 'visible_pipes',
+    'visible_ref_subset', 'visible_refs',
+    # Pipelines.
+    'hidden_members', 'may_sync_pipeline', 'pipeline_registry', 'pipeline_registry_parameters',
+    'visible_pipeline', 'visible_pipelines',
+    # Users' rights and jobs.
+    'attributes_with_rights', 'can_see_email', 'filter_jobs', 'user_rights',
+)
 
-#: How long (seconds) a viewer and an instance's visible pipes are reused.
-VIEWER_TTL_SECONDS: float = 5.0
+#: How long (seconds) an instance's visible pipes are reused.
 REFS_TTL_SECONDS: float = 5.0
-
-#: The role presets (`api:permissions:default_role` names one of the first three).
-ROLE_LABELS: Dict[str, str] = {
-    'viewer': 'Viewer',
-    'editor': 'Editor',
-    'operator': 'Operator',
-}
-
-#: The permissions grid of the Users & Teams page: `(group, [(permission, label), ...])`.
-PERMISSION_GROUPS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
-    ('Pipes', (
-        ('pipes:read', 'Read'),
-        ('pipes:register', 'Register'),
-        ('pipes:write', 'Edit and sync'),
-        ('pipes:define_sql', 'Set SQL definitions'),
-        ('pipes:drop', 'Drop'),
-        ('pipes:delete', 'Delete'),
-    )),
-    ('Jobs', (
-        ('jobs:read', 'Read'),
-        ('logs:read', 'Read logs'),
-        ('jobs:execute', 'Start'),
-        ('jobs:write', 'Create and edit'),
-        ('jobs:stop', 'Stop'),
-        ('jobs:pause', 'Pause'),
-        ('jobs:delete', 'Delete'),
-    )),
-    ('Actions', (
-        ('actions:execute', 'Run actions'),
-        ('webterm:use', 'Use the terminal'),
-    )),
-    ('Data', (
-        ('connectors:read', 'List connectors'),
-        ('sql:read', 'Read SQL'),
-        ('instance:read', 'Read the instance'),
-        ('instance:chain', 'Chain instances'),
-    )),
-    ('Plugins', (
-        ('plugins:read', 'Read'),
-        ('plugins:write', 'Publish'),
-        ('plugins:delete', 'Delete'),
-    )),
-    ('Account', (
-        ('users:read', 'Read own account'),
-        ('users:write', 'Edit own account'),
-        ('users:register', 'Register users'),
-        ('users:delete', 'Delete own account'),
-    )),
-)
-
-#: Every permission of the grid, in order.
-GRID_PERMISSIONS: Tuple[str, ...] = tuple(
-    permission for _, items in PERMISSION_GROUPS for permission, _ in items
-)
 
 #: The permission each pipe action needs (the same as its HTTP route's scope).
 PIPE_ACTION_PERMISSIONS: Dict[str, str] = {
@@ -137,696 +116,6 @@ EDIT_MODES: Tuple[Tuple[str, str], ...] = (
     ('team', 'Anyone who can see it'),
     ('owner', 'Owner and team managers'),
 )
-
-
-def core():
-    """`meerschaum.core.access`: the access rules (shared with the API server)."""
-    import meerschaum.core.access as _access
-    return _access
-
-
-# ------------------------------------------------------------------------------------------------
-# The viewer
-# ------------------------------------------------------------------------------------------------
-
-#: The cookie storing the viewer's active "acting as" team (empty / absent = All teams).
-TEAM_COOKIE_NAME: str = 'mrsm-team'
-
-
-@dataclass
-class Viewer:
-    """Who is looking at a console page, with what rights."""
-
-    username: Optional[str] = None
-    signed_in: bool = False
-    is_admin: bool = False
-    permissions: frozenset = field(default_factory=frozenset)
-    teams: Dict[str, str] = field(default_factory=dict)
-    primary_team: Optional[str] = None
-    no_auth: bool = False
-    principal: Any = None
-    #: What the viewer's teams grant and withhold (`meerschaum.core.access.team_grants`).
-    grants: Dict[str, Any] = field(default_factory=dict)
-    #: Fresh Main-only execution projection; never retained in the base Viewer cache.
-    native_execution: Any = None
-    #: When narrowed via the navbar Team switcher (`mrsm-team` cookie), the team being acted as,
-    #: plus the underlying real identity so the switcher always knows what teams may be chosen.
-    acting_team: Optional[str] = None
-    real_is_admin: Optional[bool] = None
-    base_teams: Optional[Dict[str, str]] = None
-    base_is_isolated: Optional[bool] = None
-    base_primary_team: Optional[str] = None
-
-    @property
-    def is_real_admin(self) -> bool:
-        """Whether the underlying signed-in account is an administrator (even when acting as a team)."""
-        return bool(self.is_admin if self.real_is_admin is None else self.real_is_admin)
-
-    @property
-    def real_teams(self) -> Dict[str, str]:
-        """The account's real team memberships before any navbar team narrowing."""
-        return dict(self.teams if self.base_teams is None else self.base_teams)
-
-    @property
-    def real_primary_team(self) -> Optional[str]:
-        """The account's real primary team before any navbar team narrowing."""
-        return self.primary_team if self.acting_team is None else self.base_primary_team
-
-    @property
-    def real_is_isolated(self) -> bool:
-        """Whether the underlying account is isolated before any navbar team narrowing."""
-        return bool(self.is_isolated if self.base_is_isolated is None else self.base_is_isolated)
-
-    @property
-    def is_isolated(self) -> bool:
-        """Whether the viewer is walled off from Everyone (all of their teams are isolated)."""
-        if self.is_admin or self.no_auth:
-            return False
-        return bool((self.grants or {}).get('isolated', False))
-
-    @property
-    def default_instance(self) -> Optional[str]:
-        """The default instance of the viewer's team, if it has one."""
-        instance = (self.grants or {}).get('instance', None)
-        return str(instance) if instance else None
-
-    def can_use_plugin(self, name: str) -> bool:
-        """Whether the viewer may see and use the plugin `name`."""
-        if not self.is_isolated:
-            return True
-        return str(name) in set((self.grants or {}).get('plugins', None) or [])
-
-    @property
-    def can_write_plugins(self) -> bool:
-        """Whether the viewer may install, edit, upload and uninstall plugins."""
-        if self.is_admin or self.no_auth:
-            return True
-        return bool(self.signed_in and (self.grants or {}).get('plugins_write', False))
-
-    def can(self, permission: str) -> bool:
-        """Whether the viewer holds `permission` (administrators hold every permission)."""
-        if self.is_admin or self.no_auth:
-            return True
-        return permission in self.permissions or '*' in self.permissions
-
-    def manages(self, team: Optional[str]) -> bool:
-        """Whether the viewer manages `team` (administrators manage every team)."""
-        if self.is_admin or self.no_auth:
-            return True
-        return bool(team) and self.teams.get(str(team)) == 'manager'
-
-    def in_team(self, team: Optional[str]) -> bool:
-        """Whether the viewer is in `team` (everyone is in Everyone)."""
-        if not team or str(team) == EVERYONE:
-            return (not self.is_isolated) or self.teams.get(EVERYONE) == 'manager'
-        return str(team) in self.teams
-
-    @property
-    def managed_teams(self) -> List[str]:
-        return sorted(team for team, role in self.teams.items() if role == 'manager')
-
-    @property
-    def own_teams(self) -> List[str]:
-        """The viewer's teams other than Everyone, sorted."""
-        return sorted(team for team in self.teams if team != EVERYONE)
-
-    def to_json(self) -> Dict[str, Any]:
-        return {
-            'username': self.username,
-            'signed_in': self.signed_in,
-            'admin': self.is_admin,
-            'permissions': sorted(self.permissions),
-            'teams': dict(self.teams),
-            'primary_team': self.primary_team,
-            'grants': dict(self.grants or {}),
-            'acting_team': self.acting_team,
-        }
-
-
-ANONYMOUS = Viewer()
-
-#: The console itself reading for a check of its own (never shown as is): sees every pipe.
-SYSTEM = Viewer(username=None, signed_in=True, is_admin=True)
-
-_viewer_cache: Dict[str, Tuple[float, Viewer]] = {}
-_teams_cache: Optional[Tuple[float, List[Any]]] = None
-_viewer_lock = threading.Lock()
-
-
-def forget(username: Optional[str] = None) -> None:
-    """Drop the cached viewers (of one user, or all): their rights are read again."""
-    global _teams_cache
-    with _viewer_lock:
-        _teams_cache = None
-        if username is None:
-            _viewer_cache.clear()
-            _refs_cache.clear()
-            return
-        for key in [key for key, (_, viewer) in _viewer_cache.items() if viewer.username == username]:
-            _viewer_cache.pop(key, None)
-        _refs_cache.clear()
-
-
-def _cached_teams(conn: Any = None) -> List[Any]:
-    """Cached team records on the API instance (TTL `VIEWER_TTL_SECONDS`)."""
-    global _teams_cache
-    now = time.monotonic()
-    if conn is None:
-        with _viewer_lock:
-            if _teams_cache is not None and now - _teams_cache[0] < VIEWER_TTL_SECONDS:
-                return list(_teams_cache[1])
-    from meerschaum.api import get_api_connector
-    target = conn if conn is not None else get_api_connector()
-    try:
-        records = list(target.get_teams() or [])
-    except Exception:
-        return []
-    if conn is None:
-        with _viewer_lock:
-            _teams_cache = (now, list(records))
-    return records
-
-
-def _request_acting_team() -> Optional[str]:
-    """
-    The active "acting as" team for the current web request (`mrsm-team` cookie, or an explicit
-    override in `components.console_nav_context`), or `None` for the full All-teams view.
-    """
-    try:
-        from meerschaum.api.dash import components
-        ctx = components._nav_context.get()
-        if isinstance(ctx, dict) and 'acting_team' in ctx:
-            val = ctx.get('acting_team')
-            return str(val).strip() or None if val is not None else None
-    except Exception:
-        pass
-    raw = None
-    try:
-        import dash
-        raw = (dash.callback_context.cookies or {}).get(TEAM_COOKIE_NAME)
-    except Exception:
-        pass
-    if not raw:
-        try:
-            import flask
-            if flask.has_request_context():
-                raw = flask.request.cookies.get(TEAM_COOKIE_NAME)
-        except Exception:
-            return None
-    if not raw:
-        return None
-    from urllib.parse import unquote
-    cleaned = unquote(str(raw)).strip()
-    return cleaned or None
-
-
-def available_acting_teams(viewer: Optional[Viewer], conn: Any = None) -> List[Dict[str, str]]:
-    """
-    The options for the navbar Team switcher (`[{'label': ..., 'value': ...}]`), or `[]` when the
-    viewer has nothing to switch between (`<= 1` choice, anonymous, or `no_auth`).
-    """
-    if viewer is None or not viewer.signed_in or viewer.no_auth:
-        return []
-    if viewer.is_real_admin:
-        try:
-            records = _cached_teams(conn)
-        except Exception:
-            return []
-        names = sorted(
-            {
-                str(getattr(record, 'name', None) or (record.get('name') if isinstance(record, dict) else ''))
-                for record in records
-            }
-            - {'', EVERYONE}
-            - {
-                str(getattr(record, 'name', None) or (record.get('name') if isinstance(record, dict) else ''))
-                for record in records
-                if core().is_everyone(
-                    str(getattr(record, 'name', None) or (record.get('name') if isinstance(record, dict) else ''))
-                )
-            },
-            key=str.lower,
-        )
-        if not names:
-            return []
-        return (
-            [{'label': 'All teams (Admin)', 'value': ''}]
-            + [{'label': name, 'value': name} for name in names]
-            + [{'label': EVERYONE, 'value': EVERYONE}]
-        )
-
-    own = sorted((t for t in viewer.real_teams if t != EVERYONE), key=str.lower)
-    in_everyone = not viewer.real_is_isolated
-    if not own or (len(own) == 1 and not in_everyone):
-        return []
-    options = [{'label': 'All teams', 'value': ''}] + [{'label': name, 'value': name} for name in own]
-    if in_everyone:
-        options.append({'label': EVERYONE, 'value': EVERYONE})
-    return options
-
-
-#: What acting as a team withholds: actions and the terminal run on the server under the
-#: account's real identity, which the team view cannot narrow (switch to All teams to use them).
-ACTING_WITHHELD: frozenset = frozenset({'actions:execute', 'webterm:use'})
-
-
-def _acting_permissions(viewer: Viewer, grants: Dict[str, Any], isolated: bool) -> frozenset:
-    """The permissions of `viewer` acting as a team with `grants` (never more than its own)."""
-    permissions = frozenset(viewer.permissions) - ACTING_WITHHELD
-    if isolated:
-        permissions = permissions - frozenset(core().withheld_permissions(grants))
-    if _secure() and not viewer.no_auth:
-        permissions = permissions - SECURE_WITHHELD
-    return permissions
-
-
-def apply_acting_team(
-    viewer: Viewer,
-    requested_team: Optional[str],
-    conn: Any = None,
-) -> Viewer:
-    """
-    Narrow `viewer` to act as `requested_team` (never widens permissions or grants).
-
-    - Administrators may act as any registered team (with `manager` role in that team and
-      `is_admin=False` so every team restriction applies) or as `Everyone`.
-    - Non-administrators may act as any team they belong to (keeping their real role in that
-      team) or as `Everyone` when they are not isolated.
-    - Unknown or unauthorized team names are ignored safely (returns `viewer` unchanged).
-    """
-    if not requested_team or not viewer.signed_in or viewer.no_auth:
-        return viewer
-    target = str(requested_team).strip()
-    if not target:
-        return viewer
-
-    real_is_admin = viewer.is_real_admin
-    real_teams = viewer.real_teams
-    real_is_isolated = viewer.real_is_isolated
-
-    if core().is_everyone(target):
-        if not real_is_admin and real_is_isolated:
-            return viewer
-        projected = Viewer(
-            username=viewer.username,
-            signed_in=True,
-            is_admin=False,
-            permissions=_acting_permissions(viewer, {}, False),
-            teams={EVERYONE: 'member'},
-            primary_team=EVERYONE,
-            no_auth=False,
-            grants={},
-            acting_team=EVERYONE,
-            real_is_admin=real_is_admin,
-            base_teams=real_teams,
-            base_is_isolated=real_is_isolated,
-            base_primary_team=viewer.real_primary_team,
-        )
-        projected.principal = _principal(projected)
-        return projected
-
-    try:
-        records = _cached_teams(conn)
-    except Exception:
-        return viewer
-    canonical = None
-    for record in records:
-        name = str(
-            getattr(record, 'name', None)
-            or (record.get('name') if isinstance(record, dict) else '')
-        )
-        if name and name.lower() == target.lower() and not core().is_everyone(name):
-            canonical = name
-            break
-
-    if real_is_admin:
-        if canonical is None:
-            return viewer
-        team_name = canonical
-        role = 'manager'
-    else:
-        matched = None
-        for existing_name, existing_role in real_teams.items():
-            if existing_name != EVERYONE and existing_name.lower() == target.lower():
-                matched = (existing_name, existing_role)
-                break
-        ### Fail closed: a team whose record cannot be read now (renamed, deleted, or the
-        ### teams unreadable) is never acted as (its grants would be empty and unisolated).
-        if matched is None or canonical is None:
-            return viewer
-        team_name = canonical
-        role = matched[1]
-
-    try:
-        grants = dict(core().team_grants([(team_name, role)], records, team_name) or {})
-    except Exception:
-        return viewer
-    ### Acting as one of an isolated account's teams never leaves its wall.
-    if not real_is_admin and real_is_isolated:
-        grants['isolated'] = True
-        base_grants = viewer.grants or {}
-        for key in ('connectors', 'plugins'):
-            if key in grants:
-                allowed = set(base_grants.get(key, None) or [])
-                grants[key] = [item for item in (grants[key] or []) if item in allowed]
-        if not base_grants.get('plugins_write', False):
-            grants.pop('plugins_write', None)
-    isolated = bool(grants.get('isolated', False))
-    teams = {team_name: role} if isolated else {EVERYONE: 'member', team_name: role}
-    permissions = _acting_permissions(viewer, grants, isolated)
-
-    projected = Viewer(
-        username=viewer.username,
-        signed_in=True,
-        is_admin=False,
-        permissions=permissions,
-        teams=teams,
-        primary_team=team_name,
-        no_auth=False,
-        grants=grants,
-        acting_team=team_name,
-        real_is_admin=real_is_admin,
-        base_teams=real_teams,
-        base_is_isolated=real_is_isolated,
-        base_primary_team=viewer.real_primary_team,
-    )
-    projected.principal = _principal(projected)
-    return projected
-
-
-#: What a non-administrator may not do from the console on a server started with `--secure`
-#: (`api:permissions:actions:non_admin: false`): run actions, open the terminal, or change
-#: anything (pipes, Pipelines, jobs). They still read what their permissions let them read.
-SECURE_WITHHELD: frozenset = frozenset({
-    'actions:execute', 'webterm:use',
-    'pipes:write', 'pipes:register', 'pipes:define_sql', 'pipes:drop', 'pipes:delete',
-    'jobs:write', 'jobs:execute', 'jobs:stop', 'jobs:pause', 'jobs:delete',
-})
-
-
-def _host_config() -> Dict[str, Any]:
-    """The configuration the server gave this host (`MRSM_API_HOST_CONFIG`), or `{}`."""
-    try:
-        from meerschaum.api import get_uvicorn_config
-        config = get_uvicorn_config()
-        return config if isinstance(config, dict) else {}
-    except Exception:
-        return {}
-
-
-def _secure() -> bool:
-    """
-    Whether non-administrators may not act from the console: the server runs with `--secure`
-    (it passes `actions_non_admin: false`), or `api:permissions:actions:non_admin` is set to
-    `false` in the configuration (the server reads it the same way).
-    """
-    if _host_config().get('actions_non_admin', True) is False:
-        return True
-    try:
-        from meerschaum.config import get_config
-        return get_config('api', 'permissions', 'actions', 'non_admin', warn=False) is False
-    except Exception:
-        return False
-
-
-def default_role() -> str:
-    """
-    The role of users without permissions of their own: the server's (it resolves
-    `api:permissions:default_role`, `editor` by default, or `operator` when Meerschaum 4's
-    `api:permissions:actions:non_admin: true` is set), else the same rule here
-    (`meerschaum.core.access.default_role`).
-    """
-    role = _host_config().get('default_role', None)
-    if role in ROLE_LABELS:
-        return str(role)
-    return str(core().default_role())
-
-
-def role_permissions(role: str) -> Set[str]:
-    """The permissions of a role preset (`viewer`, `editor`, `operator`)."""
-    return {str(permission) for permission in core().role_permissions(str(role))}
-
-
-def all_permissions() -> List[str]:
-    """Every permission (`ALL_PERMISSIONS`), in the grid's order first."""
-    names = [str(permission) for permission in core().ALL_PERMISSIONS]
-    ordered = [permission for permission in GRID_PERMISSIONS if permission in names]
-    return ordered + [permission for permission in names if permission not in ordered]
-
-
-def _session_id_of(session_data: Optional[Dict[str, Any]]) -> Optional[str]:
-    from meerschaum.api.dash.sessions import valid_session_id
-    if isinstance(session_data, dict):
-        session_id = valid_session_id(session_data.get('session-id', None))
-        if session_id:
-            return session_id
-    return None
-
-
-def _in_request() -> bool:
-    """Whether this runs for a web request (a page or a callback)."""
-    try:
-        import flask
-        return bool(flask.has_request_context())
-    except Exception:
-        return False
-
-
-def _request_session_id() -> Optional[str]:
-    """The session of the current request: a callback's `session-store`, else the cookie."""
-    from meerschaum.api.dash.sessions import valid_session_id, SESSION_COOKIE_NAME
-    try:
-        import dash
-        context = dash.callback_context
-        for mapping in (getattr(context, 'states', None) or {}, getattr(context, 'inputs', None) or {}):
-            data = mapping.get('session-store.data', None)
-            session_id = _session_id_of(data)
-            if session_id:
-                return session_id
-    except Exception:
-        pass
-    try:
-        import flask
-        if flask.has_request_context():
-            body = flask.request.get_json(silent=True)
-            if isinstance(body, dict):
-                for key in ('state', 'inputs'):
-                    for item in body.get(key, None) or []:
-                        if isinstance(item, dict) and item.get('id') == 'session-store':
-                            session_id = _session_id_of(item.get('value', None))
-                            if session_id:
-                                return session_id
-            return valid_session_id(flask.request.cookies.get(SESSION_COOKIE_NAME, None))
-    except Exception:
-        pass
-    return None
-
-
-def _user_teams(conn: Any, username: str) -> Dict[str, str]:
-    """`{team: 'member' | 'manager'}` of a user (Everyone included)."""
-    from meerschaum.core import User
-    teams: Dict[str, str] = {EVERYONE: 'member'}
-    for team, role in (conn.get_user_teams(User(username, instance=conn)) or []):
-        if team is None:
-            continue
-        role = str(getattr(role, 'value', role) or 'member').lower()
-        name = EVERYONE if core().is_everyone(str(team)) else str(team)
-        teams[name] = 'manager' if role == 'manager' else teams.get(name, 'member')
-    return teams
-
-
-def _primary_team(user: Any, attributes: Dict[str, Any], teams: Dict[str, str]) -> str:
-    """The user's primary team (`meerschaum.core.access.primary_team`)."""
-    pairs = [(team, role) for team, role in teams.items() if team != EVERYONE]
-    return str(core().primary_team(attributes, pairs))
-
-
-def _effective_permissions(user: Any, user_type: Optional[str], attributes: Dict[str, Any]) -> frozenset:
-    """
-    The user's effective permissions (`meerschaum.core.access.user_permissions`: their own list,
-    else their stored role, else the default role); under `--secure` a non-administrator only
-    reads (`SECURE_WITHHELD`).
-    """
-    names = {
-        str(permission)
-        for permission in core().user_permissions(user_type, attributes, default_role())
-    }
-    if '*' in names:
-        names = set(all_permissions())
-    if _secure() and str(user_type or '').lower() != 'admin':
-        names -= SECURE_WITHHELD
-    return frozenset(names)
-
-
-def _principal(viewer: Viewer) -> Any:
-    """The rules' `Principal` of a viewer (`meerschaum.core.access.Principal`)."""
-    return core().Principal(
-        username=str(viewer.username or ''),
-        is_admin=bool(viewer.is_admin or viewer.no_auth),
-        permissions=sorted(viewer.permissions),
-        teams=[(team, role) for team, role in viewer.teams.items()
-               if team != EVERYONE or role == 'manager'],
-        grants=dict(viewer.grants or {}),
-    )
-
-
-def make_viewer(
-    username: Optional[str],
-    admin: bool = False,
-    role: Optional[str] = None,
-    permissions: Optional[Iterable[str]] = None,
-    teams: Optional[Dict[str, str]] = None,
-    primary_team: Optional[str] = None,
-    grants: Optional[Dict[str, Any]] = None,
-) -> Viewer:
-    """
-    A signed-in viewer with the given rights, without reading the instance (tests, and code that
-    already knows who is asking): an administrator, a role preset's permissions (`role`), or
-    explicit `permissions` (default: the default role's); `teams` is `{team: 'member' |
-    'manager'}` (Everyone is added).
-    """
-    if admin:
-        names = frozenset(all_permissions())
-    elif permissions is not None:
-        names = frozenset(str(permission) for permission in permissions)
-    else:
-        names = frozenset(role_permissions(role or default_role()))
-    if not admin and (grants or {}).get('isolated', False):
-        names = names - frozenset(core().withheld_permissions(grants))
-    team_roles: Dict[str, str] = {EVERYONE: 'member'}
-    for team, team_role in (teams or {}).items():
-        name = EVERYONE if core().is_everyone(str(team)) else str(team)
-        team_roles[name] = 'manager' if str(team_role).lower() == 'manager' else 'member'
-    if primary_team is None:
-        own = sorted(team for team in team_roles if team != EVERYONE)
-        primary_team = own[0] if own else EVERYONE
-    viewer = Viewer(
-        username=(str(username) if username else None),
-        signed_in=True,
-        is_admin=bool(admin),
-        permissions=names,
-        teams=team_roles,
-        primary_team=primary_team,
-        grants=dict(grants or {}),
-    )
-    viewer.principal = _principal(viewer)
-    return viewer
-
-
-def _team_grants(conn: Any, teams: Dict[str, str], primary: Optional[str]) -> Dict[str, Any]:
-    """The grants of a user's teams (`meerschaum.core.access.team_grants`)."""
-    pairs = [(team, role) for team, role in teams.items() if team != EVERYONE]
-    if not pairs:
-        return {}
-    return core().team_grants(pairs, conn.get_teams() or [], primary)
-
-
-def viewer_for(username: Optional[str]) -> Viewer:
-    """The viewer for a username (its type, effective permissions and teams), read now."""
-    from meerschaum.api import get_api_connector, no_auth
-    from meerschaum.core import User
-    ### Connectors another process registered (a team's database) are picked up here: one `stat`.
-    try:
-        from meerschaum.api.dash.team_setup import refresh_connectors
-        refresh_connectors()
-    except Exception:
-        pass
-    if no_auth:
-        viewer = Viewer(username=username, signed_in=True, is_admin=True, no_auth=True,
-                        permissions=frozenset(all_permissions()))
-        viewer.principal = _principal(viewer)
-        return viewer
-    if not username:
-        return ANONYMOUS
-    conn = get_api_connector()
-    user = User(str(username), instance=conn)
-    ### Fail closed: a user whose record cannot be read has no rights.
-    try:
-        user_id = conn.get_user_id(user)
-    except Exception:
-        user_id = None
-    if user_id is None:
-        return Viewer(username=str(username), signed_in=False)
-    user.user_id = user_id
-    try:
-        user_type = conn.get_user_type(user)
-        attributes = conn.get_user_attributes(user) or {}
-    except Exception:
-        return Viewer(username=str(username), signed_in=False)
-    user._attributes = attributes
-    user.type = user_type
-    is_admin = str(user_type or '').lower() == 'admin'
-    ### Fail closed: when the teams cannot be read the viewer is walled off (they see nothing of
-    ### Everyone's) instead of being treated as an ordinary member of Everyone.
-    try:
-        teams = _user_teams(conn, str(username))
-        primary = _primary_team(user, attributes, teams)
-        grants = {} if is_admin else _team_grants(conn, teams, primary)
-    except Exception:
-        teams = {EVERYONE: 'member'}
-        primary = EVERYONE
-        grants = {} if is_admin else {'isolated': True}
-    permissions = frozenset(all_permissions()) if is_admin else _effective_permissions(
-        user, user_type, attributes,
-    )
-    if not is_admin and grants.get('isolated', False):
-        ### Actions and the terminal run with the server's credentials, outside the team's wall
-        ### (5.1: a team that runs code keeps them, as its own sandboxed processes).
-        permissions = permissions - frozenset(core().withheld_permissions(grants))
-    viewer = Viewer(
-        username=str(username),
-        signed_in=True,
-        is_admin=is_admin,
-        permissions=permissions,
-        teams=teams,
-        primary_team=primary,
-        grants=grants,
-    )
-    viewer.principal = _principal(viewer)
-    return viewer
-
-
-def get_viewer(session_data: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Viewer:
-    """
-    The viewer of a console session (`session_data` is the `session-store`'s data; by default the
-    current request's session). The base record is cached for `VIEWER_TTL_SECONDS`; an
-    API-only execution projection is refreshed from Main on every call.
-    """
-    from meerschaum.api import no_auth
-    if no_auth:
-        return viewer_for(None)
-    if session_id is None and session_data is None and not _in_request():
-        ### Not a web request (a script, a test, the host's own work): the instance's
-        ### credentials are the trust boundary, as for the CLI and Python (AC6).
-        return SYSTEM
-    session_id = session_id or _session_id_of(session_data) or _request_session_id()
-    if not session_id:
-        return ANONYMOUS
-    now = time.monotonic()
-    with _viewer_lock:
-        entry = _viewer_cache.get(session_id, None)
-    if entry is not None and now - entry[0] < VIEWER_TTL_SECONDS:
-        base_viewer = entry[1]
-    else:
-        from meerschaum.api.dash.sessions import get_username_from_session
-        username = get_username_from_session(session_id)
-        base_viewer = viewer_for(username) if username else ANONYMOUS
-        with _viewer_lock:
-            if len(_viewer_cache) > 4096:
-                _viewer_cache.clear()
-            _viewer_cache[session_id] = (now, base_viewer)
-    acting_team = _request_acting_team()
-    viewer = apply_acting_team(base_viewer, acting_team) if acting_team else base_viewer
-    from meerschaum.api.dash._native_execution import project
-    return project(viewer, session_id)
-
-
-def current_viewer() -> Viewer:
-    """
-    The viewer of the current request (a callback's or a page's); outside a web request, the
-    local trust boundary (`SYSTEM`: sees every pipe).
-    """
-    return get_viewer()
 
 
 # ------------------------------------------------------------------------------------------------
@@ -1015,9 +304,20 @@ def visible_pipes(viewer: Viewer, pipes: Iterable[Any]) -> List[Any]:
 
 
 _refs_cache: Dict[Tuple[str, str], Tuple[float, Optional[Set[str]]]] = {}
+_refs_lock = threading.Lock()
 
 
-def _ref(instance_keys: str, connector_keys: Any, metric_key: Any, location_key: Any) -> str:
+def _forget_refs(username: Optional[str]) -> None:
+    """Drop every cached visible-pipes set (a change of anyone's rights may change them)."""
+    with _refs_lock:
+        _refs_cache.clear()
+
+
+register_invalidation_hook(_forget_refs)
+
+
+def pipe_ref(instance_keys: str, connector_keys: Any, metric_key: Any, location_key: Any) -> str:
+    """A pipe's `pipe_ref` without its instance's keys parsed (`instance|ck|mk|lk`)."""
     return '|'.join((str(instance_keys), str(connector_keys), str(metric_key), str(location_key)))
 
 
@@ -1081,7 +381,7 @@ def visible_refs(viewer: Viewer, instance: Any) -> Optional[Set[str]]:
     instance_keys = str(instance)
     key = (str(viewer.username), instance_keys)
     now = time.monotonic()
-    with _viewer_lock:
+    with _refs_lock:
         entry = _refs_cache.get(key, None)
     if entry is not None and now - entry[0] < REFS_TTL_SECONDS:
         return entry[1]
@@ -1096,8 +396,8 @@ def visible_refs(viewer: Viewer, instance: Any) -> Optional[Set[str]]:
         pipes = []
     for ck, mk, lk, parameters in pipes:
         if can_see_pipe(viewer, parameters):
-            refs.add(_ref(instance_keys, ck, mk, lk))
-    with _viewer_lock:
+            refs.add(pipe_ref(instance_keys, ck, mk, lk))
+    with _refs_lock:
         if len(_refs_cache) > 2048:
             _refs_cache.clear()
         _refs_cache[key] = (now, refs)
@@ -1130,7 +430,7 @@ def visible_ref_subset(viewer: Viewer, refs: Iterable[str]) -> Set[str]:
                     metric_keys=sorted({member[1] for member in chunk}),
                 )
                 instance_visible.update(
-                    _ref(keys, ck, mk, lk) for ck, mk, lk, parameters in rows
+                    pipe_ref(keys, ck, mk, lk) for ck, mk, lk, parameters in rows
                     if (str(ck), str(mk), str(lk)) in wanted and can_see_pipe(viewer, parameters)
                 )
             visible.update(instance_visible)
@@ -1139,7 +439,7 @@ def visible_ref_subset(viewer: Viewer, refs: Iterable[str]) -> Set[str]:
     return visible
 
 
-def _pipeline_registry(instance: Any) -> List[Tuple[str, Dict[str, Any]]]:
+def pipeline_registry(instance: Any) -> List[Tuple[str, Dict[str, Any]]]:
     """`[(name, registry_parameters)]` of the saved Pipelines of `instance` (one read)."""
     out = []
     for _, _, name, parameters in registered_pipes(instance, connector_keys=['mrsm'], metric_keys=['pipeline']):
@@ -1156,8 +456,8 @@ def visible_pipelines(
     registry_parameters: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    The saved Pipelines of `instance` that `viewer` may see (their registry pipe's `access`,
-    AC7), as `list_pipelines()` reads them (or the `definitions` a caller already read). A
+    The saved Pipelines of `instance` that `viewer` may see (their registry pipe's `access`),
+    as `list_pipelines()` reads them (or the `definitions` a caller already read). A
     Pipeline's members the viewer may not see are left out of its `targets` and counted
     (`hidden_members`). `include_members=False` omits members entirely for list cards, so
     listing saved names does not walk their member instances.
@@ -1170,7 +470,7 @@ def visible_pipelines(
     ### The definitions as every other reader sees them (`list_pipelines`), filtered by their
     ### registry pipes' `access`.
     try:
-        registry = dict(registry_parameters) if registry_parameters is not None else dict(_pipeline_registry(conn))
+        registry = dict(registry_parameters) if registry_parameters is not None else dict(pipeline_registry(conn))
     except Exception:
         if viewer.no_auth or viewer.is_admin:
             raise
@@ -1381,172 +681,20 @@ def assignable_teams(viewer: Viewer) -> List[str]:
     """The teams the viewer may give a pipe: Everyone and their own (every team for admins)."""
     if viewer.is_admin or viewer.no_auth:
         try:
-            return [EVERYONE] + sorted(name for name in team_names() if name != EVERYONE)
+            from meerschaum.api import get_api_connector
+            names = [
+                str(getattr(team, 'name', team))
+                for team in mrsm.get_teams(instance=get_api_connector())
+            ]
+            return [EVERYONE] + sorted(name for name in names if name != EVERYONE)
         except Exception:
             return [EVERYONE]
     return [EVERYONE] + viewer.own_teams
 
 
 # ------------------------------------------------------------------------------------------------
-# Teams and users
+# Users' rights
 # ------------------------------------------------------------------------------------------------
-
-def _conn(conn: Any = None) -> Any:
-    from meerschaum.api import get_api_connector
-    return conn if conn is not None else get_api_connector()
-
-
-def get_teams(conn: Any = None) -> List[Any]:
-    """The instance's teams (`mrsm.get_teams()`), Everyone first."""
-    return list(mrsm.get_teams(instance=_conn(conn)))
-
-
-def team_names(conn: Any = None) -> List[str]:
-    """The names of the instance's teams, Everyone first."""
-    return [str(getattr(team, 'name', team)) for team in get_teams(conn)]
-
-
-def _role_name(role: Any) -> str:
-    role = getattr(role, 'value', None) or getattr(role, 'name', None) or role
-    return str(role or 'member').lower()
-
-
-def team_info(team: Any) -> Dict[str, Any]:
-    """
-    `{name, id, builtin, members: {username: 'member' | 'manager'}, attributes}` of a team (`mrsm.Team`):
-    its listed members (Everyone lists only the users with a role of their own there).
-    """
-    name = str(getattr(team, 'name', team))
-    builtin = core().is_everyone(name)
-    roles = getattr(team, 'roles', None) or {}
-    members = {
-        str(username): ('manager' if _role_name(role) == 'manager' else 'member')
-        for username, role in dict(roles).items()
-    }
-    return {
-        'name': EVERYONE if builtin else name,
-        'id': (str(getattr(team, 'id', None) or '') or None),
-        'builtin': builtin,
-        'members': members,
-        'attributes': dict(getattr(team, 'attributes', None) or {}),
-    }
-
-
-def list_teams(conn: Any = None) -> List[Dict[str, Any]]:
-    """Every team of the instance as `team_info()` dicts (Everyone first, always present)."""
-    teams = [team_info(team) for team in get_teams(conn)]
-    if not any(team['builtin'] for team in teams):
-        teams.insert(0, {'name': EVERYONE, 'id': None, 'builtin': True, 'members': {}})
-    return teams
-
-
-def teams_by_user(teams: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
-    """`{username: {team: role}}` of the teams' listed members (Everyone not included)."""
-    out: Dict[str, Dict[str, str]] = {}
-    for team in teams:
-        if team['builtin']:
-            continue
-        for username, role in team['members'].items():
-            out.setdefault(username, {})[team['name']] = role
-    return out
-
-
-def everyone_managers(teams: List[Dict[str, Any]]) -> List[str]:
-    """The managers of Everyone (they manage every user: AC13)."""
-    for team in teams:
-        if team['builtin']:
-            return sorted(username for username, role in team['members'].items() if role == 'manager')
-    return []
-
-
-def _team(name: str, conn: Any = None) -> Any:
-    return mrsm.Team(str(name), instance=_conn(conn))
-
-
-def _result(value: Any, default_message: str) -> SuccessTuple:
-    if isinstance(value, tuple) and len(value) == 2:
-        return bool(value[0]), str(value[1])
-    return (value is not False), default_message
-
-
-def create_team(name: str, conn: Any = None) -> SuccessTuple:
-    """
-    Register a team (administrators only, checked by the caller). Connectors still reserved for
-    its name are never adopted.
-    """
-    from meerschaum.api.dash import team_setup
-    refused = team_setup.refuse_reserved(str(name))
-    if refused:
-        return False, refused
-    try:
-        return _result(_team(name, conn).register(), f"Created team '{name}'.")
-    except Exception as e:
-        return False, str(e)
-
-
-def rename_team(name: str, new_name: str, conn: Any = None) -> SuccessTuple:
-    """
-    Rename a team (its pipes, jobs and connector reservations follow). A name that connectors
-    are still reserved for is refused.
-    """
-    from meerschaum.api.dash import team_setup
-    if str(name).strip().lower() != str(new_name).strip().lower():
-        try:
-            exists = _team(new_name, conn).exists()
-        except Exception:
-            exists = False
-        refused = None if exists else team_setup.refuse_reserved(str(new_name))
-        if refused:
-            return False, refused
-    try:
-        success, message = _result(
-            _team(name, conn).rename(str(new_name)),
-            f"Renamed team '{name}' to '{new_name}'.",
-        )
-    except Exception as e:
-        return False, str(e)
-    if success:
-        note = team_setup.move_reservations(str(name), str(new_name))
-        if note:
-            message += '\n' + note
-    return success, message
-
-
-def delete_team(name: str, conn: Any = None) -> SuccessTuple:
-    """
-    Delete a team (its pipes and jobs move to Everyone). Its connectors and databases stay, and
-    their reservations are retired so no later team of its name inherits them.
-    """
-    from meerschaum.api.dash import team_setup
-    try:
-        team = _team(name, conn)
-        team_id = None
-        try:
-            team_id = team.id
-        except Exception:
-            team_id = None
-        success, message = _result(team.delete(), f"Deleted team '{name}'.")
-    except Exception as e:
-        return False, str(e)
-    if success:
-        note = team_setup.move_reservations(
-            str(name), team_setup.retired_reservation(str(name), str(team_id) if team_id else None),
-        )
-        if note:
-            message += '\n' + note
-    return success, message
-
-
-def set_team_member(team: str, username: str, role: Optional[str], conn: Any = None) -> SuccessTuple:
-    """Add `username` to `team` as `role` (`member` or `manager`), or remove them (`None`)."""
-    try:
-        team_object = _team(team, conn)
-        if role is None:
-            return _result(team_object.remove_members(username), f"Removed '{username}' from '{team}'.")
-        return _result(team_object.add_members(username, role=role), f"'{username}' is a {role} of '{team}'.")
-    except Exception as e:
-        return False, str(e)
-
 
 def user_rights(user_type: Optional[str], attributes: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -1561,7 +709,7 @@ def user_rights(user_type: Optional[str], attributes: Optional[Dict[str, Any]]) 
     permissions = core().user_permissions(user_type, attributes, default_role())
     explicit = attributes.get('scopes') is not None or bool(attributes.get('role'))
     return {
-        'role': _role_name(role),
+        'role': role_name(role),
         'permissions': {str(permission) for permission in permissions},
         'explicit': explicit,
     }
@@ -1590,7 +738,7 @@ def attributes_with_rights(
 def can_see_email(viewer: Viewer, username: Optional[str], user_teams: Optional[Iterable[Any]] = None) -> bool:
     """
     Whether the viewer may see `username`'s email address: their own, or as an administrator or
-    a manager of a team the user is in (`meerschaum.core.access.can_see_email`, AC13).
+    a manager of a team the user is in (`meerschaum.core.access.can_see_email`).
     """
     if viewer.no_auth or viewer.is_admin:
         return True

@@ -22,11 +22,8 @@ import meerschaum as mrsm
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import dash_app
-from meerschaum.api.dash.sessions import (
-    is_state_authenticated,
-    is_session_authenticated,
-    get_username_from_session,
-)
+from meerschaum.api.dash.sessions import get_username_from_session
+from meerschaum.api.dash.sessions import is_state_authenticated
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.callbacks.dashboard import keys_state
 from meerschaum.api.dash.keys import build_flags_options
@@ -150,8 +147,8 @@ def start_exec(
 
     ### Following a job needs `logs:read` on a job the viewer sees; a pipe card's Manage action
     ### its pipe permission and edit rights; Exec runs any action (`actions:execute`).
-    from meerschaum.api.dash.access import get_viewer
-    viewer = get_viewer(session_store_data)
+    from meerschaum.api.dash.access import resolve_viewer
+    viewer = resolve_viewer(session_store_data)
     if is_follow:
         from meerschaum.api.dash._support import get_job
         from meerschaum.api.dash.jobs import job_visible_to_session
@@ -210,7 +207,8 @@ def start_exec(
 
     if is_follow:
         job_name = trigger_id['index']
-        if not _execute.server_url():
+        from meerschaum.api.host._server_client import get_client
+        if not get_client().available:
             return _failure("The console has no server to follow logs through.")
         return (
             {

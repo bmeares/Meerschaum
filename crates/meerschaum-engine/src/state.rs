@@ -145,7 +145,7 @@ pub trait StateWriter: Send + Sync {
     fn record_run(&self, run: &RunRecord) -> impl Future<Output = Result<(), StateError>> + Send;
 
     /// Record a node's final sync outcome (after every window and retry) in its pipe's sync
-    /// status (rc15 contract C2, [`crate::status`]). Best effort and immediate: an
+    /// status ([`crate::status`]). Best effort and immediate: an
     /// implementation that writes to an instance hands the write to the background (see
     /// [`crate::InstanceState::flush_sync_statuses`]). The default records nothing.
     fn record_sync_status(&self, node: &PipeRef, outcome: SyncOutcome) {

@@ -1,5 +1,5 @@
 """
-Raw SQL through the Rust connector (rc15 Q50 / Q53): `SQLConnector.read`, `exec`,
+Raw SQL through the Rust connector: `SQLConnector.read`, `exec`,
 `exec_queries`, `value` and `to_sql` return what Meerschaum 4's SQLAlchemy path returns (still
 there for `native_sql: false`), value for value and dtype for dtype, on every flavor; they need
 no SQLAlchemy; and a process uses one SQLite library.
@@ -514,7 +514,7 @@ print('NATIVE_OK')
 
 def test_threads_mixing_syncs_reads_and_writes_keep_sqlite_intact(tmp_path):
     """
-    rc15 Q50: `pipe.sync()`, `conn.read()` and `conn.exec()` from threads on one SQLite file run
+    `pipe.sync()`, `conn.read()` and `conn.exec()` from threads on one SQLite file run
     through one SQLite library: no "disk I/O error", and the file passes `PRAGMA integrity_check`.
     """
     pytest.importorskip('pandas')

@@ -2417,7 +2417,7 @@ pub fn check_access_change(
 }
 
 // ---------------------------------------------------------------------------------------------
-// SQL definitions (AC8)
+// SQL definitions
 // ---------------------------------------------------------------------------------------------
 
 /// The fetch parameters of a `sql:` pipe that make up its SQL definition: `fetch` (every key:

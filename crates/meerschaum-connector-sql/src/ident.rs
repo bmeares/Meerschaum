@@ -40,7 +40,7 @@ pub fn clean(substring: &str) -> Result<()> {
 /// `nvarchar`, `clob`, `boolean`, `integer`, `table`, `row`, `date`, `time`) plus Oracle's true
 /// reserved words (every word that cannot be an unquoted column name).
 ///
-/// PARITY (W17O-003 in `crates/meerschaum-py/PARITY.md`): v4 quotes only its ten words, so a column named `uid`, `user`, `level`, `comment`,
+/// PARITY (`crates/meerschaum-py/PARITY.md`, Oracle quoting): v4 quotes only its ten words, so a column named `uid`, `user`, `level`, `comment`,
 /// `size`, `start`, ... fails to create (`ORA-00904`); v5 quotes them on purpose. This cannot
 /// change a name v4 created, because v4 could not create a table with such a name. The extra
 /// words are the Oracle SQL Language Reference's "Oracle SQL Reserved Words" table, verified on

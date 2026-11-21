@@ -604,7 +604,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "No effect; accepted so that older commands keep working.",
         G::Sync,
     ),
-    // v5 (C4): consumers read the `replace` key (`SyncOptions.replace`).
+    // v5: consumers read the `replace` key (`SyncOptions.replace`).
     flag(
         "replace",
         &["--replace"],
@@ -710,7 +710,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         ),
         G::Api,
     ),
-    // v5 (C4, Q34): consumers read the `public` key (`api:permissions:preset: public`).
+    // v5: consumers read the `public` key (`api:permissions:preset: public`).
     flag(
         "public",
         &["--public"],
@@ -905,7 +905,7 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "No effect (actions always run in this process); accepted so that older commands keep working.",
         G::Misc,
     ),
-    // v5 (C4, Q20): consumers read the `allow_protected` key; the flag is forwarded to jobs and
+    // v5: consumers read the `allow_protected` key; the flag is forwarded to jobs and
     // child processes like `--debug`. Listed with the actions options; kept last in the table so
     // the v4 arguments keep their order.
     flag(

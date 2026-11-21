@@ -41,7 +41,7 @@ pub fn login(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             Err(e) => {
                 // `get_connector` warns about the attributes and prints the error (without a
                 // traceback) before `parse_instance_keys` raises. A connector defined nowhere
-                // says where to define it (rc15).
+                // says where to define it.
                 if undefined {
                     warn(
                         rt,

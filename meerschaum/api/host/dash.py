@@ -276,23 +276,18 @@ def _server_get(path: str, user: Optional[str] = None, timeout: float = 15.0):
     `GET` a route of the server that runs this host, as the host (`X-Mrsm-Host-Token`), on behalf
     of `user` if given. Return `(status, body_bytes)`; `(0, b'')` when there is no server.
     """
-    import urllib.error
-    import urllib.request
-    from meerschaum.api.dash.execute import server_url
-    from meerschaum.api.host._auth import mint_internal_token
-    from meerschaum.api.host import TOKEN_HEADER
-    base_url = server_url()
-    if base_url is None:
+    from meerschaum.api.host._server_client import InternalHostAuth, get_client
+    client = get_client()
+    if not client.available:
         return 0, b''
-    headers = {TOKEN_HEADER: mint_internal_token()}
-    if user:
-        headers['X-Mrsm-User'] = user
-    request = urllib.request.Request(base_url + path, headers=headers, method='GET')
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
+        response = client.request(
+            'GET',
+            path,
+            auth=InternalHostAuth(user=user),
+            timeout=timeout,
+        )
+        return response.status, response.body
     except Exception:
         return 0, b''
 

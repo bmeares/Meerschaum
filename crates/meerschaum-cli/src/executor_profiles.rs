@@ -436,7 +436,7 @@ pub(crate) const COMPILER_ANCHOR: &str = "host-owned config-free native compiler
 /// Attach only to this fresh, never-launched generation. Renewal must reuse its material.
 pub(crate) fn prepare_compiler(
     profile: &mut Prepared,
-    compiler: &crate::executor_compiler::Compiler,
+    compiler: &crate::executor::compiler::Compiler,
     deadline: i64,
 ) -> Result<sandbox::runtime::NativeCompilerBinding, String> {
     let state = profile
@@ -503,7 +503,7 @@ pub(crate) fn prepare_compiler(
 pub(crate) fn validate_compiler_material(
     spec: &Spec,
     directory: &Path,
-    prepared: &crate::executor_compiler::Prepared,
+    prepared: &crate::executor::compiler::Prepared,
     binding: &sandbox::runtime::NativeCompilerBinding,
 ) -> Result<(), String> {
     let refuse =

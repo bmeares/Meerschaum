@@ -1,4 +1,4 @@
-//! A pipe's access and locks over HTTP (rc15 access model, AC4, AC5, AC12), in the `pipes` route
+//! A pipe's access and locks over HTTP (the access model), in the `pipes` route
 //! group and the v5 shape (`{"success", "message", ...}`, [`crate::envelope`]):
 //!
 //! | Route | Scopes | What it does |

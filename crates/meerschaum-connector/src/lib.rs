@@ -30,6 +30,7 @@
 pub mod acting_team;
 pub mod api_target;
 pub mod batch_delivery;
+pub mod inplace;
 pub mod locks;
 pub mod models;
 pub mod mutation;
@@ -51,6 +52,7 @@ pub mod traits;
 pub mod windows;
 
 pub use async_trait::async_trait;
+pub use inplace::{InplaceBegin, InplaceObserver, InplaceSyncOptions};
 pub use locks::{edit_refusal, lock_refusal};
 pub use models::TokenModel;
 pub use policy::{

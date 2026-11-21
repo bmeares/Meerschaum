@@ -1,4 +1,4 @@
-//! The API server's record of its isolated teams' scopes (5.1).
+//! The API server's record of its isolated teams' scopes.
 //!
 //! The server keeps `team_scopes/<key>/scope.json` (connector keys and plugins, never
 //! credentials) for every isolated team, so the jobs of those teams are launched with the team's

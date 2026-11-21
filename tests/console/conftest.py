@@ -7,7 +7,7 @@ Fixtures for the console browser tests (v5 design §14 "Console tests", D21).
 
 The console is the Plotly Dash app of v4 (`meerschaum.api.dash`), served by the Python API host
 behind the Rust server. The suite starts real `mrsm start api` servers (the standalone binary:
-`MRSM_TEST_BIN`, or `target/{release,debug}/mrsm` outside CI; its version and age are checked, see
+`MRSM_TEST_BIN`, or `target/{release,ci,debug}/mrsm` outside CI; its version and age are checked, see
 `tests/_binary.py`, including artifact provenance in CI) on free high ports, each with a temporary `MRSM_ROOT_DIR`, an
 empty-but-for-the-test plugins directory, a SQLite instance inside that root and a synthetic user,
 and drives them with Python Playwright's Chromium. It never touches the real configuration,

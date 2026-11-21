@@ -68,6 +68,14 @@ print(programs[0])
 PY
 )"
 chmod +x "$binary"
+# The test CLI is an optimized build of this checkout with no debug assertions, so outside a Cargo
+# target directory it would count as an installed copy, and a job it starts with no configured
+# executor would become a unit of the runner's user systemd (`meerschaum_jobs::job::
+# is_development_install`). Tag the artifact directory as Cargo tags its target directories; the tag
+# sits outside the verified `binary/` payload.
+printf '%s\n' 'Signature: 8a477f597d28d172789f06886806bc55' \
+  '# This file is a cache directory tag created by cargo (prepare_pytest.sh: development test CLI).' \
+  > "$artifact_dir/CACHEDIR.TAG"
 scripts/parity/setup_reference.sh
 if [ -n "${GITHUB_ENV:-}" ]; then
   {

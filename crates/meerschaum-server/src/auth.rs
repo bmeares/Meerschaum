@@ -584,7 +584,7 @@ pub(crate) async fn stored_scopes(
     }
 }
 
-/// What a principal may do (rc15's access model, [`crate::access`]): a user's effective
+/// What a principal may do (the access model, [`crate::access`]): a user's effective
 /// permissions (every permission for an administrator, else its own, else the default role), a
 /// token's scopes capped by its owner's. An administrator's is `['*']`.
 ///
@@ -721,8 +721,8 @@ pub async fn scoped_auth(
 /// `(scope, legacy)` pair of `aliases` accepts a caller who holds `legacy` in place of `scope`.
 /// The 403 still names the current scope.
 ///
-/// The scopes are checked against the caller's effective permissions (rc15,
-/// [`crate::access`]): the credential's scopes capped by its owner's current permissions.
+/// The scopes are checked against the caller's effective permissions
+/// ([`crate::access`]): the credential's scopes capped by its owner's current permissions.
 pub async fn scoped_auth_with_aliases(
     state: &AppState,
     headers: &HeaderMap,
@@ -802,7 +802,7 @@ pub async fn is_admin(state: &AppState, principal: Option<&Principal>) -> bool {
 /// `actions:execute` and `jobs:execute` (the role `operator`, or permissions of their own) unless
 /// the server runs with `--secure` (`api:permissions:actions:non_admin: false`).
 ///
-/// FIX (intentional v4 change, rc15 access model): v4 gated `/actions` and the job routes on
+/// FIX (intentional v4 change, access model): v4 gated `/actions` and the job routes on
 /// `system:api:permissions:actions:non_admin`, a key its default config does not define, and the
 /// console on `api:permissions:actions:non_admin`; both now follow the caller's permissions.
 pub async fn is_user_allowed_to_execute(

@@ -1,4 +1,4 @@
-//! Engine runs, nodes, events and state as a caller may read them (AC7): a run is visible when
+//! Engine runs, nodes, events and state as a caller may read them: a run is visible when
 //! at least one of its pipes is (a run without pipes is visible); the nodes of pipes the caller
 //! cannot see are anonymized (`pipe_ref` `"hidden"`, details dropped), and a run's `targets`
 //! and `selection` lose them. The engine's raw state rows (`/engine/pipes/*`) are filtered the

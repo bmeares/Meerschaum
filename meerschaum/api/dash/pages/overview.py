@@ -69,20 +69,10 @@ def build_tile(key: str, title: str, href: Optional[str], extra: Any = None) -> 
 
 
 def _can_register_pipes(session_id: Optional[str]) -> bool:
-    try:
-        from meerschaum.api.dash.pipes_access import can_register
-        allowed, _ = can_register({'session-id': session_id} if session_id else {})
-        return bool(allowed)
-    except Exception:
-        pass
-    from meerschaum.api import no_auth
-    from meerschaum.config import get_config
-    if not get_config('api', 'permissions', 'registration', 'pipes', warn=False):
-        return False
-    if no_auth:
-        return True
-    from meerschaum.api.dash.sessions import is_session_authenticated
-    return bool(session_id) and is_session_authenticated(str(session_id))
+    from meerschaum.api.dash import access
+    viewer = access.resolve_viewer({'session-id': session_id} if session_id else {})
+    allowed, _ = viewer.can_register_pipes()
+    return bool(allowed)
 
 
 def build_empty_state(state: dict) -> Any:

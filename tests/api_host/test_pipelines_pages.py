@@ -1,9 +1,5 @@
 """The Pipelines pages: routes, the shared instance, the canvas, the stepper and Edit-mode edges."""
-from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stderr[-6000:]
+from tests.api_host._helpers import AS_VIEWER, run_python, check
 
 
 def test_routes_and_legacy_redirects(sandbox):
@@ -232,12 +228,12 @@ save_pipeline('mixed', [public_ref,private_ref], conn,
 save_pipeline('PRIVATE_PIPELINE', [private_ref], conn,
               access={'visibility':'private','owner':'alice'})
 calls = []
-original = access._pipeline_registry
+original = access.pipeline_registry
 def registry(*args, **kwargs):
     calls.append('registry')
     return [(name, params) for name, params in original(*args, **kwargs)
             if name in {'one', 'mixed', 'PRIVATE_PIPELINE'}]
-access._pipeline_registry = registry
+access.pipeline_registry = registry
 pages._engine.get_runs = lambda *args, **kwargs: calls.append(('history',kwargs['limit'])) or []
 meerschaum.jobs.get_jobs = lambda **kwargs: calls.append('jobs') or {}
 viewer = as_viewer('bob', admin=False, role='viewer')

@@ -830,7 +830,7 @@ fn run_line_with(
         sysargs_to_execute.extend(pipeline_args);
     }
 
-    // 5.1: a restricted shell runs a line only when the server says this terminal's user may
+    // A restricted shell runs a line only when the server says this terminal's user may
     // (the decision of `POST /execute`), on exactly what the dispatcher gets.
     if let Err(message) = restricted::authorize(&sysargs_to_execute) {
         print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);

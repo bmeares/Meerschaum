@@ -37,6 +37,53 @@ pub const MAX_RUNS: usize = 1000;
 pub const MAX_NODES: usize = 10000;
 /// Database time budget of one background write.
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
+/// The least time between two warnings about dropped metric writes (the ones in between are
+/// counted into the next warning).
+const DROP_WARNING_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Rate limit of the warnings about dropped metric writes: a slow instance drops every batch,
+/// and one warning per interval says so without flooding the log.
+#[derive(Debug, Default)]
+struct DropWarnings {
+    last: Option<Instant>,
+    suppressed: u64,
+}
+
+impl DropWarnings {
+    /// Count a dropped write at `now`: `Some(n)` when it is to be logged, with the `n` drops
+    /// not logged since the last warning.
+    fn note(&mut self, now: Instant) -> Option<u64> {
+        if self
+            .last
+            .is_some_and(|last| now.duration_since(last) < DROP_WARNING_INTERVAL)
+        {
+            self.suppressed += 1;
+            return None;
+        }
+        self.last = Some(now);
+        Some(std::mem::take(&mut self.suppressed))
+    }
+}
+
+/// Warn (at most once per [`DROP_WARNING_INTERVAL`]) that `count` metrics were not written.
+fn warn_dropped(count: usize, reason: &str) {
+    static WARNINGS: Mutex<DropWarnings> = Mutex::new(DropWarnings {
+        last: None,
+        suppressed: 0,
+    });
+    let noted = WARNINGS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .note(Instant::now());
+    if let Some(suppressed) = noted {
+        let earlier = if suppressed > 0 {
+            format!(" ({suppressed} more dropped writes were not logged.)")
+        } else {
+            String::new()
+        };
+        tracing::warn!("Dropped {count} sync metric(s): {reason}{earlier}");
+    }
+}
 
 /// Stable identity within an instance; aliases of the instance share the same key.
 pub fn pipe_key(connector: &str, metric: &str, location: Option<&str>) -> String {
@@ -913,8 +960,17 @@ fn start_writer() {
                 .await
                 {
                     Ok(Ok(())) => {}
-                    Ok(Err(error)) => tracing::debug!("Cannot record sync metrics: {error}"),
-                    Err(_) => tracing::debug!("Sync metrics write exceeded its time budget."),
+                    Ok(Err(error)) => warn_dropped(
+                        group.metrics.len(),
+                        &format!("cannot record sync metrics: {error}"),
+                    ),
+                    Err(_) => warn_dropped(
+                        group.metrics.len(),
+                        &format!(
+                            "the write exceeded its time budget of {} seconds.",
+                            WRITE_TIMEOUT.as_secs()
+                        ),
+                    ),
                 }
                 // Completed errors keep telemetry best-effort; cancellation, in contrast,
                 // drops the still-owned group and returns it to the bounded queue.

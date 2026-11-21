@@ -1,5 +1,5 @@
 """
-Wave 17c (K1): the stack's database setup and defaults, seen from Python.
+The stack's database setup and defaults, seen from Python.
 
 The setup script (`create-extensions.sql`) has one Rust copy (`meerschaum_core::config::sync::
 CREATE_EXTENSIONS_TEXT`, which `mrsm stack` writes) and the Python façade's

@@ -71,7 +71,7 @@ def _inplace_pipe(conn, metric: str, location: str, definition: str, **parameter
 @pytest.mark.parametrize("flavor", SQL_FLAVORS)
 def test_inplace_rollups_resync_without_duplicates(flavor: str):
     """
-    B1: a rollup whose datetime is computed (`date(ts)`) keeps its 8 keys over re-syncs, and so
+    A rollup whose datetime is computed (`date(ts)`) keeps its 8 keys over re-syncs, and so
     does a chained child of it. On SQLite the computed columns are typed.
     """
     conn = conns[flavor]
@@ -112,7 +112,7 @@ def test_inplace_rollups_resync_without_duplicates(flavor: str):
 @pytest.mark.parametrize("flavor", INSTANCE_FLAVORS)
 def test_upserts_with_null_keys_update_in_place(flavor: str):
     """
-    S3: with the default `null_indices: true`, a row whose ID is NULL upserts in place.
+    With the default `null_indices: true`, a row whose ID is NULL upserts in place.
     """
     conn = conns[flavor]
     kwargs = dict(instance=conn, columns={'datetime': 'ts', 'id': 'id'}, upsert=True)
@@ -135,7 +135,7 @@ def test_upserts_with_null_keys_update_in_place(flavor: str):
 @pytest.mark.parametrize("flavor", INSTANCE_FLAVORS)
 def test_null_like_strings_are_text_on_declared_and_index_columns(flavor: str):
     """
-    Q18: 'None', 'NA', 'nan', '' ... are values in a declared `string` column and an index column;
+    'None', 'NA', 'nan', '' ... are values in a declared `string` column and an index column;
     `params={'col': 'NA'}` matches the text, Python `None` matches nulls.
     """
     conn = conns[flavor]
@@ -184,7 +184,7 @@ def test_null_like_strings_are_text_on_declared_and_index_columns(flavor: str):
 @pytest.mark.parametrize("flavor", INSTANCE_FLAVORS)
 def test_replace_windows(flavor: str):
     """
-    Q19: `pipe.sync(df, begin=..., end=..., replace=True)` replaces the rows of `[begin, end)`.
+    `pipe.sync(df, begin=..., end=..., replace=True)` replaces the rows of `[begin, end)`.
     """
     conn = conns[flavor]
     kwargs = dict(instance=conn, columns={'datetime': 'ts', 'id': 'id'})
@@ -231,7 +231,7 @@ def test_replace_windows(flavor: str):
 @pytest.mark.parametrize("flavor", SQL_FLAVORS)
 def test_replace_failure_keeps_the_old_rows(flavor: str):
     """
-    Q19: the window's rows are deleted and the new rows written in one transaction: a write
+    The window's rows are deleted and the new rows written in one transaction: a write
     that fails leaves the old rows.
     """
     conn = conns[flavor]
@@ -263,7 +263,7 @@ def test_replace_failure_keeps_the_old_rows(flavor: str):
 @pytest.mark.parametrize("flavor", SQL_FLAVORS)
 def test_fetch_replace_makes_fetched_windows_authoritative(flavor: str):
     """
-    Q19: with `fetch: {replace: true}`, rows that leave the source's window leave the pipe.
+    With `fetch: {replace: true}`, rows that leave the source's window leave the pipe.
     """
     conn = conns[flavor]
     src = _source(conn, 'replace')
@@ -291,7 +291,7 @@ def test_fetch_replace_makes_fetched_windows_authoritative(flavor: str):
 @pytest.mark.parametrize("flavor", INSTANCE_FLAVORS)
 def test_replace_without_datetime_replaces_the_table(flavor: str):
     """
-    Q19: a pipe without a datetime column has one window, the whole table.
+    A pipe without a datetime column has one window, the whole table.
     """
     conn = conns[flavor]
     kwargs = dict(instance=conn, columns={'id': 'id'})
@@ -311,7 +311,7 @@ def test_replace_without_datetime_replaces_the_table(flavor: str):
 @pytest.mark.parametrize("flavor", INSTANCE_FLAVORS)
 def test_connector_sync_pipe_replace_takes_the_rows_window(flavor: str):
     """
-    Q19: `instance.sync_pipe(pipe, df, replace=True)` replaces the window of the rows it is
+    `instance.sync_pipe(pipe, df, replace=True)` replaces the window of the rows it is
     given (a bound that is not given comes from the rows), never the whole table, and honors
     `begin`, `end` and `params`.
     """
@@ -346,7 +346,7 @@ def test_connector_sync_pipe_replace_takes_the_rows_window(flavor: str):
 @pytest.mark.parametrize("flavor", INSTANCE_FLAVORS)
 def test_first_replace_with_nothing_to_write_succeeds(flavor: str):
     """
-    Q19: the first replacing sync of a pipe with no rows in its window succeeds.
+    The first replacing sync of a pipe with no rows in its window succeeds.
     """
     conn = conns[flavor]
     kwargs = dict(instance=conn, columns={'datetime': 'ts', 'id': 'id'})
@@ -370,7 +370,7 @@ def test_first_replace_with_nothing_to_write_succeeds(flavor: str):
 )
 def test_repeated_keys_in_one_upsert_keep_the_last_row(flavor: str):
     """
-    S3: a batch that repeats a key (a NULL key included) keeps the last row of each key, as
+    A batch that repeats a key (a NULL key included) keeps the last row of each key, as
     `INSERT ... ON DUPLICATE KEY UPDATE` resolves it.
     """
     conn = conns[flavor]
@@ -400,7 +400,7 @@ def test_repeated_keys_in_one_upsert_keep_the_last_row(flavor: str):
 @pytest.mark.parametrize("flavor", INSTANCE_FLAVORS)
 def test_empty_strings_resync_idempotently(flavor: str):
     """
-    Q18: `''` in a text index column and a declared text column re-syncs without changes. On
+    `''` in a text index column and a declared text column re-syncs without changes. On
     Oracle, which stores `''` as `NULL`, `''` is a null there.
     """
     conn = conns[flavor]

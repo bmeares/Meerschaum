@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The Python Pipeline API (rc15, Q11 / B3 / C7): `mrsm.Pipeline('name')` loads a saved Pipeline,
+The Python Pipeline API: `mrsm.Pipeline('name')` loads a saved Pipeline,
 `save()` returns a `SuccessTuple` and refuses to overwrite a different saved Pipeline, `plan()`
 and `.pipes` never register, the lifecycle methods (`exists`, `delete`, `rename`, `copy`,
 `analyze`, `apply_analysis`, `schedule`), `mrsm.get_pipelines()`, the top-level exports and the
@@ -199,7 +199,7 @@ def test_save_refuses_to_overwrite_a_different_pipeline(instance):
     assert success, message
     assert mrsm.Pipeline(name, instance=conn).definition['revision'] == revision
 
-    ### A different one under the same name is refused (B3: it used to overwrite silently).
+    ### A different one under the same name is refused (it used to overwrite silently).
     other = mrsm.Pipeline(a, name=name, instance=conn)
     success, message = other.save()
     assert not success

@@ -1,5 +1,5 @@
 """
-Wave 18 (PF): the table layout a native sync ends with is the pipe's cached
+The table layout a native sync ends with is the pipe's cached
 `get_columns_types()` (no second reflection on the next read), and the columns of the next
 write show up in it. A fresh `Pipe` reads its metadata and sync time correctly.
 """

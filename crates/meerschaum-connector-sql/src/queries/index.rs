@@ -564,7 +564,7 @@ fn index_queries(
     // INDEX`: ORA-01408; `ADD CONSTRAINT ... UNIQUE`: ORA-02261). v4 emits both anyway and only
     // warns ("Failed to create indices ... Continuing..."), leaving the primary key as the unique
     // key; v5's internal pipes treat an index failure as fatal, so the redundant pair is not
-    // emitted when the primary key already is the whole unique key (W17O-005).
+    // emitted when the primary key already is the whole unique key (see PARITY.md, Oracle primary-key indices).
     let primary_key_is_the_unique_key = flavor == Flavor::Oracle
         && primary_key.as_ref().is_some_and(|pk| {
             indices_cols_str == q(pk) && existing_primary_keys.contains(&pk.to_lowercase())

@@ -885,6 +885,29 @@ pub trait InstanceConnector: Connector {
         pipe_ops::sync_result_from_message(res.success, res.message)
     }
 
+    /// Whether this instance supports syncing a pipe whose source connector is this same instance
+    /// directly inside the backend without pulling rows into memory (e.g. SQL `INSERT ... SELECT`).
+    fn supports_inplace_sync(&self) -> bool {
+        false
+    }
+
+    /// Sync a pipe whose source connector is this same instance directly inside the backend.
+    ///
+    /// When `observer` is provided, the implementation hands over staged rows before committing so
+    /// the engine can record its dirty-range ledger without a frame round trip.
+    async fn sync_pipe_inplace(
+        &self,
+        pipe: &Pipe,
+        opts: &crate::inplace::InplaceSyncOptions,
+        observer: Option<&dyn crate::inplace::InplaceObserver>,
+    ) -> SuccessTuple {
+        let _ = (pipe, opts, observer);
+        SuccessTuple::fail(format!(
+            "`sync_pipe_inplace()` is not implemented for instance connectors of type '{}'.",
+            self.connector_type()
+        ))
+    }
+
     /// Delete rows within `begin`, `end` and `params`.
     ///
     /// `begin`: remove rows `>= begin`; `end`: remove rows `< end`; `params`: only remove rows
@@ -1264,7 +1287,7 @@ pub trait InstanceConnector: Connector {
     }
 
     // ----------------------------------------------------------------------------------------
-    // Per-pipe sync status (rc15 contract C2, [`crate::sync_status`])
+    // Per-pipe sync status ([`crate::sync_status`])
     // ----------------------------------------------------------------------------------------
 
     /// Merge the outcomes of syncs of `pipe` (oldest first) into its sync status on this
@@ -1399,7 +1422,7 @@ pub trait InstanceConnector: Connector {
     async fn delete_user(&self, user: &User) -> SuccessTuple {
         let user_id = match pipe_ops::resolve_user_id(self, user).await {
             Ok(Some(id)) if !id.is_null() => id,
-            // FX1: an unknown user is not deleted (a `user_id IS NULL` filter is nobody's).
+            // An unknown user is not deleted (a `user_id IS NULL` filter is nobody's).
             Ok(_) => {
                 return SuccessTuple::fail(format!(
                     "User '{}' is not registered and cannot be deleted.",
@@ -1503,7 +1526,7 @@ pub trait InstanceConnector: Connector {
     }
 
     /// Get a user's email address from the users table (`None` when unset). An `api:` instance
-    /// answers per the server's privacy rules (AC13): other users' addresses only for
+    /// answers per the server's privacy rules: other users' addresses only for
     /// administrators and the managers of a team they are in.
     async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
         pipe_ops::user_field(self, user, "email").await.map(|v| {

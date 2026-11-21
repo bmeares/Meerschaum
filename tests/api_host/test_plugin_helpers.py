@@ -4,7 +4,7 @@
 
 """
 `from meerschaum.api import session_user, optional_session_user, mount_static` in `@api_plugin`
-routes (rc15): the console session's user as a FastAPI dependency, and static directories served
+routes: the console session's user as a FastAPI dependency, and static directories served
 safely (no path outside the directory, no hidden files, web content types, `nosniff`), behind a
 console session or an API token unless `auth=False`, with browsers sent to the login page.
 """
@@ -12,7 +12,7 @@ console session or an API token unless `auth=False`, with browsers sent to the l
 import json
 import os
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PLUGIN = '''
 import pathlib

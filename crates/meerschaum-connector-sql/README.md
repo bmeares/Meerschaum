@@ -170,7 +170,7 @@ tags, so `enforce_dtypes` reads the declared dtypes instead of detecting them.
 ## Golden fixtures
 
 `tests/fixtures/queries.json` (about 21k cases: every flavor and pipe shape, replayed byte for
-byte by `tests/golden.rs`) and `tests/fixtures/uris.json` are generated from the Python implementation in this repository:
+byte by `tests/queries_drivers_suite/golden.rs`) and `tests/fixtures/uris.json` are generated from the Python implementation in this repository:
 
 ```bash
 PYTHONPATH=$(pwd) MRSM_ROOT_DIR="$(mktemp -d)" MRSM_PLUGINS_DIR="$(mktemp -d)" \
@@ -181,7 +181,7 @@ PYTHONPATH=$(pwd) MRSM_ROOT_DIR="$(mktemp -d)" MRSM_PLUGINS_DIR="$(mktemp -d)" \
 
 `tests/fixtures/instance_queries.json` (the instance methods' query text: `get_pipe_data_query`,
 the `get_sync_time` / `get_pipe_rowcount` / `clear_pipe` queries, `get_add_columns_queries`,
-`get_alter_columns_queries` and the instance tables' DDL, replayed by `tests/instance_golden.rs`)
+`get_alter_columns_queries` and the instance tables' DDL, replayed by `tests/instance_suite/instance_golden.rs`)
 is generated with every database read mocked, so no connection is needed:
 
 ```bash
@@ -195,7 +195,7 @@ real configuration are loaded; all fixture inputs are synthetic. The generators 
 
 ## Cross-implementation test
 
-`tests/instance_cross_impl.rs` syncs the pipes of `tests/fixtures/cross_impl/scenario.json` with
+`tests/instance_suite/instance_cross_impl.rs` syncs the pipes of `tests/fixtures/cross_impl/scenario.json` with
 the Python implementation (`tests/fixtures/cross_impl/cross_impl.py`, run as a subprocess with
 `PYTHONPATH` set to this repository) into one SQLite file and with Rust into another, then
 compares `sqlite_master` DDL, `PRAGMA table_info`, row counts and stored values (with storage
@@ -208,7 +208,7 @@ pipes (except the in-place one) into four fresh `w4sql_xi_*` schemas and compare
 `information_schema` dumps (column types, rows, indices) and both implementations' reads; it
 drops the schemas afterwards.
 
-`tests/instance_geopackage.rs` checks the GeoPackage metadata, binary geometries and R-tree
+`tests/instance_suite/instance_geopackage.rs` checks the GeoPackage metadata, binary geometries and R-tree
 maintenance, and syncs the pipes of `tests/fixtures/geopackage/scenario.json` through v4
 (`tests/fixtures/geopackage/gpkg_parity.py`) and through Rust into two GeoPackages. Both files
 must read the same through GDAL (geopandas / pyogrio: layers, CRS, column dtypes, geometries)
@@ -236,7 +236,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 MRSM_TEST_PG_URI=postgresql://test:test1234@localhost:5559/testdb \
 MRSM_TEST_POSTGIS_URI=postgresql://test:test1234@localhost:5449/testdb \
 MRSM_TEST_MYSQL_URI=mysql://test:test1234@localhost:3309/testdb \
-    cargo test -p meerschaum-connector-sql --test driver_sqlite --test driver_postgres --test driver_mysql
+    cargo test -p meerschaum-connector-sql --test queries_drivers_suite -- driver_sqlite:: driver_postgres:: driver_mysql::
 ```
 
 `MRSM_TEST_MYSQL_URI=mysql://root:my-secret-pw@localhost:3310/mysql` targets the MySQL 5.7
@@ -257,7 +257,7 @@ the `timescaledb://` / `timescaledb-ha://` / `postgis://` schemes (e.g.
 `timescaledb-ha://test:test1234@localhost:5459/testdb`).
 
 `MRSM_TEST_TIMESCALE_HA_URI` separately enables the TimescaleDB-HA geometry SRID tests in
-`tests/w17c_geometry_srid.rs`. Use the `timescaledb-ha://` scheme to exercise the PostGIS
+`tests/queries_drivers_suite/geometry_srid.rs`. Use the `timescaledb-ha://` scheme to exercise the PostGIS
 column types; `timescaledb://` and `postgresql://` use text geometry storage, even on a server
 with PostGIS installed. The tests compare insert and update SRIDs, inferred geometry types,
 and the GeoPackage spatial reference with v4.1.4.
@@ -283,7 +283,7 @@ Without `MRSM_DUCKDB_LIB` (and with no cached or system library) the DuckDB test
 library on first use unless `MRSM_NO_AUTO_INSTALL` is set, in which case they fail with the
 message naming the fix. `tests/duckdb_library.rs` skips without `MRSM_DUCKDB_LIB`.
 
-`tests/driver_native.rs` exercises the MSSQL / DuckDB / Oracle drivers directly. MSSQL's
+`tests/queries_drivers_suite/driver_native.rs` exercises the MSSQL / DuckDB / Oracle drivers directly. MSSQL's
 instance schema must exist (v4 does not create it either); add `?schema=<name>` to the URI to
 use one other than `dbo`.
 
@@ -293,7 +293,7 @@ use one other than `dbo`.
 SHA-256 pipe key arbitrates independent pools, conditional updates renew or take over expired
 leases, and conditional deletes protect a replacement holder. Expiry uses the database clock,
 not the caller's clock. Holder hashes preserve case-sensitive identity on case-insensitive
-MySQL / MSSQL collations. `tests/instance_leases.rs` exercises two independent connections.
+MySQL / MSSQL collations. `tests/instance_suite/instance_leases.rs` exercises two independent connections.
 
 Small upserts (up to 64 rows) to `mrsm` pipes use one bound INSERT / MERGE statement.
 MySQL / MariaDB and SQL Server store internal string keys as bounded VARCHAR / NVARCHAR
@@ -301,7 +301,7 @@ MySQL / MariaDB and SQL Server store internal string keys as bounded VARCHAR / N
 repeated keys retain the general staging path (DuckDB internal writes reject these keys
 explicitly, because v4 has no staged upsert template for DuckDB). Static temporary internal pipes cache their
 metadata after creation; `drop_pipe` invalidates the cache. Warm engine state writes therefore
-need one DML statement. `tests/w5sql.rs` checks this along with cached façade reads, SQLite UTC
+need one DML statement. `tests/queries_drivers_suite/internal_upserts_and_sqlite_docs.rs` checks this along with cached façade reads, SQLite UTC
 sync times, raw document timestamps, and `{SQLITE_DB_PATH}` resolution.
 
 Cold PostgreSQL-family internal pipe writes serialize table and index initialization with a
@@ -318,10 +318,10 @@ including tables whose index creation is still in progress. On SQLite and GeoPac
 temporary `mrsm` tables create missing indexes with `IF NOT EXISTS` so independent writers may
 execute plans from the same stale catalog snapshot. The database still rejects invalid index
 definitions or duplicate rows in a new unique index; failures never mark a table ready.
-`tests/internal_initialization.rs` exercises independent one-connection pools and an existing table
+`tests/instance_suite/internal_initialization.rs` exercises independent one-connection pools and an existing table
 missing its upsert key on PostgreSQL and PostGIS. CockroachDB skips advisory locks, which it does
 not support; cross-process cold initialization there is still a gap.
-`tests/metrics_initialization.rs` covers stale SQLite index plans, explicit initialization racing
+`tests/sync_suite/metrics_initialization.rs` covers stale SQLite index plans, explicit initialization racing
 the first metrics batch, independent writer processes, and unique-key failure recovery.
 
 `facade::sync_pipe_mut_cached` accepts the caller's cached column types, derives the pipe's
@@ -370,7 +370,7 @@ in a separate run.
   MSSQL also passed the server cross-implementation scenario. The strengthened
   `instance_leases` expiry-takeover race was rerun successfully on all those deployments.
 - DuckDB full run with `--release --features duckdb,oracle`: 1,039 passed. The focused
-  `instance_inplace`, `instance_leases`, and `w5sql` run passed 63 tests, including all three
+  `instance_inplace`, `instance_leases`, and `internal_upserts_and_sqlite_docs` run passed 63 tests, including all three
   ICU-sensitive in-place cases, shared-file concurrency, and primary/composite internal MERGE.
 - Oracle (`--features oracle`): the full run reported 935 passed and 7 failed. One failure was
   a test-table collision caused by identifier truncation discarding the random suffix; after
@@ -410,5 +410,5 @@ because their in-memory parameter mutations would discard the snapshot.
 
 Internal (`mrsm`) string keys longer than 255 characters on MySQL / MariaDB / MSSQL fail with a
 clear message instead of a driver error. A DuckDB internal upsert batch that repeats a key keeps
-the last row; null keys are still rejected. `tests/w6b_templates.rs` covers all of this
+the last row; null keys are still rejected. `tests/queries_drivers_suite/cross_pipe_templates.rs` covers all of this
 (`w6b_` table prefix); the cross-implementation scenario gained a templated in-place child.

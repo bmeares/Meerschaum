@@ -5,8 +5,7 @@ from dash import Input, Output, State, ALL, html
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
-from meerschaum.api.dash import dash_app, engine
-from meerschaum.api.dash.sessions import is_state_authenticated
+from meerschaum.api.dash import access, dash_app, engine
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.core.Pipeline._saved import (
     list_pipelines, save_pipeline, delete_pipeline, job_arguments, initialize_pipelines, derivative_job_settings,
@@ -15,20 +14,18 @@ from meerschaum.core.Pipeline._saved import (
 
 def _require_session(data):
     """A Pipeline's page is for viewers who may read pipes (`pipes:read`)."""
-    from meerschaum.api.dash import pipes_access
-    if not pipes_access.can_read(data):
+    if not access.resolve_viewer(data).can_read_pipes:
         raise PreventUpdate
 
 
 def _viewer(session):
-    from meerschaum.api.dash import pipes_access
-    return pipes_access.viewer(session)
+    return access.resolve_viewer(session)
 
 
 def _require_pipeline_rights(session, name, instance, permission='pipes:write'):
     """
     Raise `PermissionError` unless the viewer may change the saved Pipeline `name` (its
-    registry pipe's access, AC7) within `permission`.
+    registry pipe's access) within `permission`.
     """
     from meerschaum.api.dash import access
     viewer = _viewer(session)
@@ -109,7 +106,7 @@ def read_selection(pathname, name, search, refresh, session, current=None, curre
         name = requested
     elif not name and requested:
         name = requested
-    ### Only the Pipelines the viewer may see, without their hidden members (AC7).
+    ### Only the Pipelines the viewer may see, without their hidden members.
     from meerschaum.api.dash import access
     definitions = access.visible_pipelines(
         instance, viewer=_viewer(session), definitions=list_pipelines(instance),
@@ -304,7 +301,7 @@ def manage_jobs(pipeline, ticks, create, starts, stops, name, schedule, workers,
         viewer = _viewer(session)
         if not access.visible_pipeline(pipeline, instance, viewer=viewer):
             raise PermissionError(f"Pipeline '{pipeline}' is not available.")
-        ### The jobs of this Pipeline the viewer may see (AC9).
+        ### The jobs of this Pipeline the viewer may see.
         related = access.filter_jobs(viewer, related)
         if trigger == 'pipeline-job-create' and create:
             if not viewer.can('jobs:write'):
@@ -319,10 +316,10 @@ def manage_jobs(pipeline, ticks, create, starts, stops, name, schedule, workers,
             from meerschaum.utils.schedule import parse_schedule
             parse_schedule(schedule or '')
             args = job_arguments(pipeline, instance, schedule, workers, retries or 0, force)
-            ### The job is the session user's, in their primary team (AC9).
+            ### The job is the session user's, in their primary team.
             from meerschaum.jobs import ownership_properties
-            from meerschaum.api.dash.access import get_viewer
-            viewer = get_viewer(session_data=session)
+            from meerschaum.api.dash.access import resolve_viewer
+            viewer = resolve_viewer(session)
             job = Job(name, args, _properties=ownership_properties(
                 None if viewer.no_auth else viewer.username,
                 None if viewer.no_auth else viewer.primary_team,
@@ -405,7 +402,7 @@ def select_or_run_pipeline(run_clicks, name, search, session):
     try:
         validate_name(name)
         instance = engine.get_instance(parse_qs((search or '').lstrip('?')).get('instance', [None])[0])
-        ### Every member it would sync must be the viewer's to change (AC7).
+        ### Every member it would sync must be the viewer's to change.
         _require_members_rights(session, name, instance, 'pipes:write')
         definition = list_pipelines(instance).get(name)
         if not definition:
@@ -635,9 +632,8 @@ def edit_draft(definition, members, parents, children, discard, undo, redo, cont
                 if context.get('action') == 'remove':
                     new['targets'] = [ref for ref in new['targets'] if ref != context['ref']]
                 elif context.get('action') == 'add':
-                    from meerschaum.api.dash import access, pipes_access
                     ref = context.get('ref')
-                    if not ref or not access.ref_is_visible(pipes_access.viewer(session), ref):
+                    if not ref or not access.ref_is_visible(_viewer(session), ref):
                         raise PreventUpdate
                     new['targets'] = list(dict.fromkeys([*new['targets'], ref]))
                 elif context.get('action') == 'edit_pipe':
@@ -941,7 +937,7 @@ def copy_selection(clicks, new_name, definition, search, session):
         if not viewer.can('pipes:register'):
             raise PermissionError('Your account may not register Pipelines.')
         _require_members_rights(session, definition['name'], _instance(search), 'pipes:read')
-        ### The copy belongs to the viewer from its first registration (AC4).
+        ### The copy belongs to the viewer from its first registration.
         from meerschaum.api.dash import pipe_writes
         copy_pipeline(definition['name'], new_name, _instance(search),
                       access=pipe_writes.new_access(viewer))

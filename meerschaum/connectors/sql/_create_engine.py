@@ -23,7 +23,7 @@ def import_sqlalchemy(*names: str):
     """
     Import SQLAlchemy modules (`sqlalchemy` by default) for what stays SQLAlchemy (`.engine`,
     `exec(..., with_connection=True)`, connectors with `native_sql: false`; raw SQL otherwise
-    runs on the Rust connector, rc15 Q53).
+    runs on the Rust connector).
 
     Raises
     ------

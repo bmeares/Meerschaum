@@ -1,4 +1,4 @@
-//! Team execution's processes on the API server's host (5.1, `meerschaum_server::team_execution`).
+//! Team execution's processes on the API server's host (`meerschaum_server::team_execution`).
 //!
 //! A process of team execution is started the way an isolated team's jobs are: from an empty
 //! environment holding the allowlist ([`meerschaum_core::team_scope::team_env`]), the team's own

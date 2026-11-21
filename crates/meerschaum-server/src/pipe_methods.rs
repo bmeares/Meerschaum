@@ -168,7 +168,7 @@ pub async fn get_rowcount(
         .unwrap_or(0)
 }
 
-/// [`get_rowcount`], with a count the instance fails to read as a `500` (rc15 Q17: the
+/// [`get_rowcount`], with a count the instance fails to read as a `500` (the
 /// `GET .../rowcount` route, so `api:` clients raise instead of counting an outage as `0`). A
 /// pipe without a table counts `0`.
 pub async fn try_get_rowcount(
@@ -415,7 +415,7 @@ pub struct SyncKwargs {
     pub force: bool,
     /// `workers`.
     pub workers: Option<i64>,
-    /// `replace` (rc15): the rows replace the pipe's rows of `[begin, end)` matching `params`
+    /// `replace`: the rows replace the pipe's rows of `[begin, end)` matching `params`
     /// ([`SyncOptions::replace`]).
     pub replace: bool,
     /// The replaced window's `begin`: not given (the rows' earliest datetime), unbounded, or a

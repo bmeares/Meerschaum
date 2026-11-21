@@ -30,5 +30,5 @@ Run `cargo test -p meerschaum-kernel`, crate-scoped fmt/clippy, and the generato
 after `infer_objects()` (`merge_dtype.rs`; PARITY.md rows 17 and 18): `object` columns of
 `int`s, `float`s, `bool`s, strings or datetimes come out native, and a native/`object` pair merges
 to an object column (bytes cast by a `bytes` hint against old `object` bytes stay `object`). Pandas
-backends are not modeled for native columns. `tests/fixtures/gen_w9_merge_dtypes.py` records the
-reference matrix; `w9_merge_dtypes` compares object-versus-native strictly.
+backends are not modeled for native columns. `tests/fixtures/gen_merge_dtypes.py` records the
+reference matrix; `merge_dtypes` compares object-versus-native strictly.

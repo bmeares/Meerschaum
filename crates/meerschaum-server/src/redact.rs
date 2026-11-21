@@ -1,4 +1,4 @@
-//! Redaction of the job metadata that `GET /jobs` and `GET /jobs/{name}` return (wave 18, FX7).
+//! Redaction of the job metadata that `GET /jobs` and `GET /jobs/{name}` return.
 //!
 //! A job's `daemon.properties.env` is the environment of the server's process when the job was
 //! created: every `MRSM_SQL_*` / `MRSM_API_*` connector URI (`postgresql://user:password@host/db`)

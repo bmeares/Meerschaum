@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "5.1.1"
+version = "5.1.2"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/bmeares/Meerschaum"
@@ -30,27 +30,40 @@ authors = ["Bennett Meares <bennett.meares@gmail.com>"]
 # reedline 0.52 and sysinfo 0.39 need 1.95, sqlx 0.9 needs 1.94. Recompute after dependency upgrades.
 rust-version = "1.95"
 
+# Every target of every member inherits these (`[lints] workspace = true`). `unsafe` is denied; the
+# crates that need it (`meerschaum-plugin`, `meerschaum-py`, `meerschaum-jobs`) allow it in their
+# `lib.rs`, everything else on the one item that needs it, with a `// SAFETY:` comment
+# (`scripts/check_architecture.py` rule `cargo-invariants`).
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
+unimplemented = "deny"
+
 # Shared dependency versions. Crates opt in with `foo = { workspace = true }`.
 # Add new shared entries here only when two or more crates need the same dependency;
 # crate-private dependencies go in the crate's own Cargo.toml with an explicit version.
 [workspace.dependencies]
 # Workspace crates are versioned in lockstep: every `version = "=X"` below must equal
 # `[workspace.package] version` (scripts/check_packaging.py checks it; cargo cannot inherit it here).
-meerschaum-core = { path = "crates/meerschaum-core", version = "=5.1.1" }
-meerschaum-kernel = { path = "crates/meerschaum-kernel", version = "=5.1.1" }
-meerschaum-connector = { path = "crates/meerschaum-connector", version = "=5.1.1" }
-meerschaum-connector-sql = { path = "crates/meerschaum-connector-sql", version = "=5.1.1" }
-meerschaum-connector-valkey = { path = "crates/meerschaum-connector-valkey", version = "=5.1.1" }
-meerschaum-connector-api = { path = "crates/meerschaum-connector-api", version = "=5.1.1", default-features = false }
-meerschaum-engine = { path = "crates/meerschaum-engine", version = "=5.1.1" }
-meerschaum-jobs = { path = "crates/meerschaum-jobs", version = "=5.1.1" }
-meerschaum-compose = { path = "crates/meerschaum-compose", version = "=5.1.1" }
-meerschaum-server = { path = "crates/meerschaum-server", version = "=5.1.1" }
-meerschaum-web = { path = "crates/meerschaum-web", version = "=5.1.1" }
-meerschaum-plugin = { path = "crates/meerschaum-plugin", version = "=5.1.1" }
-meerschaum-worker = { path = "crates/meerschaum-worker", version = "=5.1.1" }
+meerschaum-core = { path = "crates/meerschaum-core", version = "=5.1.2" }
+meerschaum-kernel = { path = "crates/meerschaum-kernel", version = "=5.1.2" }
+meerschaum-connector = { path = "crates/meerschaum-connector", version = "=5.1.2" }
+meerschaum-connector-sql = { path = "crates/meerschaum-connector-sql", version = "=5.1.2" }
+meerschaum-connector-valkey = { path = "crates/meerschaum-connector-valkey", version = "=5.1.2" }
+meerschaum-connector-api = { path = "crates/meerschaum-connector-api", version = "=5.1.2", default-features = false }
+meerschaum-engine = { path = "crates/meerschaum-engine", version = "=5.1.2" }
+meerschaum-jobs = { path = "crates/meerschaum-jobs", version = "=5.1.2" }
+meerschaum-compose = { path = "crates/meerschaum-compose", version = "=5.1.2" }
+meerschaum-server = { path = "crates/meerschaum-server", version = "=5.1.2" }
+meerschaum-web = { path = "crates/meerschaum-web", version = "=5.1.2" }
+meerschaum-plugin = { path = "crates/meerschaum-plugin", version = "=5.1.2" }
+meerschaum-worker = { path = "crates/meerschaum-worker", version = "=5.1.2" }
 # The CLI library: the front crate's `cli` feature (`cargo install meerschaum`) and `meerschaum-py`. Its features are chosen by the dependent.
-meerschaum-cli = { path = "crates/meerschaum-cli", version = "=5.1.1", default-features = false }
+meerschaum-cli = { path = "crates/meerschaum-cli", version = "=5.1.2", default-features = false }
 
 anyhow = "1"
 thiserror = "2"
@@ -83,11 +96,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # arrow, polars and pyo3 move together (crates/meerschaum-py/README.md "Dependency pins"): RecordBatches
 # cross between the kernel, the plugin ABI and the extension, and only one pyo3 can link libpython.
 # Arrow 60 needs Rust 1.88.
-arrow = "60"
+arrow = { version = "60", default-features = false, features = ["ipc"] }
 # Only the Polars features a code path needs (17b, sizes in crates/meerschaum-py/PERF.md): the
 # kernel uses eager frames, IPC (its Arrow bridge), string and temporal kernels and time zones.
-polars = { version = "0.55", features = ["dtype-full", "ipc", "strings", "temporal", "timezones"] }
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
+polars = { version = "0.55", default-features = false, features = ["dtype-full", "ipc", "strings", "temporal", "timezones"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "system-proxy"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 # `extension-module` is a feature of meerschaum-py (maturin turns it on), so `cargo test` links libpython.
@@ -133,6 +146,7 @@ sqlx-sqlite = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d0549085
 [profile.release]
 lto = "thin"
 codegen-units = 1
+strip = "symbols"
 
 # CI profile: a working build that is quick to produce, for the jobs that only need the code to run
 # (the pytest job's `_core` extension: `scripts/rust/build_py.sh --profile ci`). It inherits `release`
@@ -146,6 +160,7 @@ opt-level = 1
 lto = false
 codegen-units = 256
 debug = "line-tables-only"
+strip = "none"
 incremental = false
 
 # Dependencies carry no debug info (Polars alone is ~1 GB per feature set with it), as in `[profile.dev]`.

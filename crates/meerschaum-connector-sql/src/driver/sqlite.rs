@@ -18,6 +18,10 @@ use crate::uri::ConnectionSpec;
 
 pub(crate) struct SqliteBackend;
 
+/// A statement that reads the database, so the connection reloads its schema if another
+/// connection changed it (see [`refresh_schema_on_acquire`]).
+const SCHEMA_REFRESH: &str = "SELECT 1 FROM sqlite_master LIMIT 1";
+
 pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOptions> {
     let resolved = spec.resolved_database()?;
     let database = resolved.as_deref().unwrap_or(":memory:");
@@ -49,10 +53,12 @@ pub(crate) fn read_only_connect_options(spec: &ConnectionSpec) -> Result<SqliteC
         .pragma("query_only", "ON"))
 }
 
-/// The pool options: on `geopackage`, every connection gets the GeoPackage SQL functions the
-/// R-tree triggers call.
+/// The pool options: every idle connection reloads a changed schema before it is handed out
+/// ([`refresh_schema_on_acquire`]), and on `geopackage` every connection gets the GeoPackage SQL
+/// functions the R-tree triggers call.
 pub(crate) fn pool_options(spec: &ConnectionSpec) -> SqlitePoolOptions {
-    let pool = SqlitePoolOptions::new().max_connections(spec.max_connections());
+    let pool =
+        refresh_schema_on_acquire(SqlitePoolOptions::new().max_connections(spec.max_connections()));
     if spec.flavor == crate::flavor::Flavor::Geopackage {
         pool.after_connect(|conn, _meta| {
             Box::pin(async move { super::gpkg_functions::register(conn).await })
@@ -60,6 +66,27 @@ pub(crate) fn pool_options(spec: &ConnectionSpec) -> SqlitePoolOptions {
     } else {
         pool
     }
+}
+
+/// Make every idle connection the pool hands out reload the schema if another connection changed
+/// it since.
+///
+/// A SQLite connection prepares a statement against the schema it loaded last and checks the
+/// schema cookie only when a statement runs. On a pooled connection that has not run anything
+/// since another connection committed `ALTER TABLE ... ADD COLUMN "c"`, `SELECT "c"` therefore
+/// prepares `"c"` as a string literal (SQLite's double-quoted string fallback); the step then
+/// re-prepares it against the new schema and returns the column's values, but `sqlx` keeps the
+/// result column names of the first prepare, so the column comes back named `"c"` (quotes
+/// included). Running a statement on checkout reloads the schema first. The statement replaces
+/// `sqlx`'s idle ping: a connection it fails on is closed.
+pub(crate) fn refresh_schema_on_acquire(pool: SqlitePoolOptions) -> SqlitePoolOptions {
+    pool.test_before_acquire(false)
+        .before_acquire(|connection, _meta| {
+            Box::pin(async move {
+                sqlx::Executor::execute(connection, sqlx::raw_sql(SCHEMA_REFRESH)).await?;
+                Ok(true)
+            })
+        })
 }
 
 pub(crate) async fn connect(spec: &ConnectionSpec) -> Result<SqlitePool> {
@@ -137,9 +164,7 @@ fn infer_kind(cells: &[SqlValue]) -> ColumnKind {
 impl Backend for SqliteBackend {
     type DB = Sqlite;
     const DYNAMIC_TYPES: bool = true;
-    // A pooled SQLite connection prepares against its cached schema until a statement runs, so
-    // describing after another connection altered a table returned the old columns.
-    const SCHEMA_REFRESH: Option<&'static str> = Some("SELECT 1 FROM sqlite_master LIMIT 1");
+    const SCHEMA_REFRESH: Option<&'static str> = Some(SCHEMA_REFRESH);
 
     fn plan(columns: &[SqliteColumn]) -> Vec<ColumnPlan> {
         columns
@@ -341,4 +366,63 @@ pub(crate) async fn read_docs_frame(
         }
     }
     Ok(meerschaum_kernel::Frame::from_object_columns(columns)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use meerschaum_kernel::Value;
+
+    use super::super::{Pool, SqlDriver};
+    use crate::uri::ConnectionSpec;
+
+    /// A pooled connection that loaded a table's layout before another connection added a column
+    /// to it, and has run nothing since, still reads the new column under its name.
+    #[tokio::test]
+    async fn idle_connection_reads_a_column_another_connection_added() {
+        let root = tempfile::tempdir().unwrap();
+        let mut spec = ConnectionSpec::from_uri(
+            &format!("sqlite:///{}", root.path().join("layout.db").display()),
+            Some("layout"),
+            None,
+        )
+        .unwrap();
+        spec.pool_size = 2;
+        spec.max_overflow = 0;
+        let driver = SqlDriver::connect(&spec).await.unwrap();
+        let Pool::Sqlite(pool) = &driver.pool else {
+            unreachable!("a sqlite URI makes a SQLite pool")
+        };
+        driver
+            .exec("CREATE TABLE readings (\"key\" INTEGER); INSERT INTO readings VALUES (1)")
+            .await
+            .unwrap();
+        let mut idle = pool.acquire().await.unwrap();
+        let mut writer = pool.acquire().await.unwrap();
+        for connection in [&mut idle, &mut writer] {
+            sqlx::query("SELECT * FROM readings")
+                .fetch_all(&mut **connection)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql(
+            "ALTER TABLE readings ADD COLUMN \"temperature\" INTEGER; \
+             UPDATE readings SET \"temperature\" = 7",
+        )
+        .execute(&mut *writer)
+        .await
+        .unwrap();
+        // With the writer still checked out, the read gets the connection that has not run a
+        // statement since the column was added.
+        drop(idle);
+        let columns = driver
+            .read_frame("SELECT \"key\", \"temperature\" FROM readings")
+            .await
+            .unwrap();
+        drop(writer);
+        assert_eq!(columns.names(), ["key", "temperature"]);
+        assert_eq!(
+            columns.column("temperature").unwrap().data.get(0),
+            Value::Int(7)
+        );
+    }
 }

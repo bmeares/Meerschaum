@@ -148,7 +148,7 @@ def test_python_pipe_pickle_equality_and_core_agree():
 
 
 # ---------------------------------------------------------------------------------------------
-# Wave 7 (task K): `_core.Pipe` is the only store; the Python views are read-through caches.
+# `_core.Pipe` is the only store; the Python views are read-through caches.
 
 def test_raw_views_read_from_rust():
     pipe = mrsm.Pipe('plugin:x', 'views', parameters={'a': {'b': 1}, 'l': [{'k': 1}]}, instance='sql:main')

@@ -11,7 +11,7 @@ directory and SQLite instance.
 
 import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PLUGIN = '''
 from meerschaum.plugins import api_plugin, dash_plugin, web_page
@@ -179,7 +179,7 @@ def test_the_health_check_answers_only_an_internal_token(sandbox):
 import json
 from starlette.testclient import TestClient
 from meerschaum.api.host import build_app, HEALTH_PATH, TOKEN_HEADER
-from meerschaum.api.host._auth import mint_internal_token
+from meerschaum.api.host._server_client import mint_internal_token
 client = TestClient(build_app())
 out = {
     'path': HEALTH_PATH,

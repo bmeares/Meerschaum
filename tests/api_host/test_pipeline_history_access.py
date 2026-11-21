@@ -1,6 +1,6 @@
 """Saved Pipeline identities in history follow the current registration's access."""
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python
 
 
 def test_public_member_does_not_expose_private_or_recreated_pipeline_history(sandbox):

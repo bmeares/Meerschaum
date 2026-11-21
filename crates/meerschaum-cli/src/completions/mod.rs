@@ -1051,8 +1051,8 @@ mod tests {
         let all = run("mrsm ");
         assert!(texts(&all).contains(&"prune"));
         assert!(texts(&all).contains(&"show"));
-        // `instance` and `exit` are shell commands, not program actions; `help` is both (rc15:
-        // `mrsm help`).
+        // `instance` and `exit` are shell commands, not program actions; `help` is both
+        // (`mrsm help`).
         for shell_only in ["instance", "exit", "pass", "debug"] {
             assert!(!texts(&all).contains(&shell_only), "{shell_only}");
         }

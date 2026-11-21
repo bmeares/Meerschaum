@@ -9,7 +9,7 @@
 //!   (`is_session_authenticated(session_id)`); the user name behind it names the terminal.
 //!   An unknown session gets v4's `401` "Unauthorized / Please log in" page (and a websocket
 //!   that is accepted, told why and closed straight away). The terminal needs the permission
-//!   `webterm:use` (rc15's access model, [`crate::access`]): administrators, the role
+//!   `webterm:use` (the access model, [`crate::access`]): administrators, the role
 //!   `operator`, and users given it. Under `start api --secure`
 //!   (`api:permissions:actions:non_admin: false`) only administrators get a shell. An open
 //!   terminal is authorized again every [`REAUTHORIZE_EVERY`]: when the session ends (a logout,
@@ -83,43 +83,45 @@ use tokio::sync::mpsc;
 
 use crate::AppState;
 
+mod api_terminal;
 mod auth;
 mod bridge;
+mod guardian;
 mod launch;
 mod pty;
+pub mod remote;
+pub mod restricted;
+mod session;
+pub mod team;
 mod tmux;
+
+pub use api_terminal::open_api_terminal;
 use auth::*;
 pub use auth::{TermMode, executor_routes, origin_allowed, routes};
 pub use bridge::active_terminals;
 use bridge::*;
+use guardian::NativeGuardian;
 use launch::*;
 pub use launch::{end_executor_terminal, end_tmux_session, tmux_session_name};
 use pty::*;
+pub use restricted::{
+    GRANT_ENV, POLICY_ADDRESS_ENV, Policy, RESTRICTED_ENV, TMUX_RESTRICTED_CONF, restricted_socket,
+};
+use session::*;
+use team::{end_team_sessions_of, start_team_sweeper};
 use tmux::*;
 pub use tmux::{
     TMUX_CONF, TMUX_WINDOW_LIST, TMUX_WINDOW_NAME, owned_server_sockets, refresh_tmux_config,
     stop_owned_server, stop_owned_servers, tmux_available, tmux_config_path, tmux_owner_path,
     tmux_socket_path,
 };
-mod api_terminal;
-mod native_pending;
-pub mod remote;
-pub mod restricted;
-pub use api_terminal::open_api_terminal;
 
 /// Retire only a host-prepared API shell which the caller proves it has never handed to
 /// any process launcher. Claimed, malformed or different-owner pending proofs are refused.
 /// This is host lifecycle cleanup, not authority derived from a request or shell environment.
 pub fn cancel_prepared_api_terminal(shell: &ShellCommand) -> std::io::Result<()> {
-    native_pending::cancel_unspawned(shell)
+    guardian::cancel_unspawned_shell(shell)
 }
-pub mod team;
-
-use team::{end_team_sessions_of, launch_team, start_team_sweeper, team_new_window};
-
-pub use restricted::{
-    GRANT_ENV, POLICY_ADDRESS_ENV, Policy, RESTRICTED_ENV, TMUX_RESTRICTED_CONF, restricted_socket,
-};
 
 /// The most terminals one server runs at once (every tab is a process).
 pub const MAX_TERMINALS: usize = 128;
@@ -163,8 +165,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 /// browser, after its PTY process has already been ended.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Messages from the bridge waiting for the socket's writer (`setup`, pings, `shell_state`
-/// answers, the closing reason). The PTY's output has its own queue ([`spawn_pty`]).
+/// Messages from the bridge waiting for the socket's writer (`pings`, `pongs`, the closing
+/// reason). The backend's output has its own bounded event channel (`remote::QUEUE`).
 const CONTROL_QUEUE: usize = 16;
 
 /// The longest a terminal's tmux command may run (counting or opening windows, reading the
@@ -276,6 +278,18 @@ pub trait SessionLookup: Send + Sync {
     }
 }
 
+/// A [`SessionLookup`] that authorizes no console sessions (for headless/host-API configs and
+/// tests that do not serve interactive console logins).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoSessions;
+
+#[async_trait]
+impl SessionLookup for NoSessions {
+    async fn username(&self, _session_id: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+}
+
 /// Renders the standalone terminal page for a session id.
 pub type PageRenderer = Arc<dyn Fn(&str) -> String + Send + Sync>;
 
@@ -314,6 +328,20 @@ impl ShellCommand {
         args.extend(["-i".into(), instance_keys.into()]);
         shell.args = args;
         Ok(shell)
+    }
+
+    /// Look up the effective (last) value of `key` in [`Self::env`].
+    pub(super) fn env_value(&self, key: &str) -> Option<&str> {
+        self.env
+            .iter()
+            .rev()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Whether this command requests the API-only execution profile (`MRSM_API_EXECUTION=1`).
+    pub(super) fn is_api_execution(&self) -> bool {
+        self.env_value(guardian::API_PROFILE_VAR) == Some("1")
     }
 }
 
@@ -371,25 +399,15 @@ impl WebtermConfig {
         page: PageRenderer,
         mut shell: ShellCommand,
     ) -> WebtermConfig {
-        let state_dir = if shell
-            .env
-            .iter()
-            .any(|(key, value)| key == "MRSM_API_EXECUTION" && value == "1")
-        {
+        let api_shell = shell.is_api_execution();
+        let state_dir = if api_shell {
             shell
-                .env
-                .iter()
-                .rev()
-                .find(|(key, _)| key == "MRSM_WEBTERM_STATE_DIR")
-                .map(|(_, value)| PathBuf::from(value))
+                .env_value("MRSM_WEBTERM_STATE_DIR")
+                .map(PathBuf::from)
                 .unwrap_or_else(|| state.config.webterm_resources_path.join("shell-state"))
         } else {
             state.config.webterm_resources_path.join("shell-state")
         };
-        let api_shell = shell
-            .env
-            .iter()
-            .any(|(key, value)| key == "MRSM_API_EXECUTION" && value == "1");
         let state_ready = if api_shell {
             std::fs::symlink_metadata(&state_dir)
                 .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
@@ -406,14 +424,15 @@ impl WebtermConfig {
             match dedicated_tmux(&state.config) {
                 Ok(tmux) => {
                     // A server left behind by a killed API on this root is this one's to stop.
-                    adopt_orphaned_server(&tmux);
+                    TmuxMux::new(tmux.clone(), TmuxProfile::Full).adopt_orphaned_server();
                     Some(tmux)
                 }
                 Err(error) => {
                     // A terminal without tmux still works; one on the user's own tmux server
                     // must never be started.
                     tracing::warn!(
-                        "The web terminal runs without tmux: its tmux socket or configuration                          could not be prepared ({error})."
+                        "The web terminal runs without tmux: its tmux socket or configuration \
+                         could not be prepared ({error})."
                     );
                     None
                 }
@@ -436,6 +455,17 @@ impl WebtermConfig {
         // The probe runs at start-up when it matters (and again after a team change).
         let _ = config.tmux_refused();
         config
+    }
+
+    /// A configuration without a console session store or HTML page renderer (used by private
+    /// host-API terminals and tests).
+    pub fn headless(state: &AppState, shell: ShellCommand) -> WebtermConfig {
+        Self::new(
+            state,
+            Arc::new(NoSessions),
+            Arc::new(|_| String::new()),
+            shell,
+        )
     }
 
     /// Why terminals run without tmux now, though it is configured (5.1): an isolated team
@@ -525,12 +555,7 @@ impl WebtermConfig {
     }
 
     fn shell_state_directory(&self) -> Option<&str> {
-        self.shell
-            .env
-            .iter()
-            .rev()
-            .find(|(key, _)| key == "MRSM_WEBTERM_STATE_DIR")
-            .map(|(_, value)| value.as_str())
+        self.shell.env_value("MRSM_WEBTERM_STATE_DIR")
     }
 }
 

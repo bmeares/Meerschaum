@@ -137,7 +137,7 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
         )
         .await
         .map_err(|message| ApiError::new(403, message))?;
-        // The pipes the command selects (rc15 access model).
+        // The pipes the command selects (the access model).
         crate::execute_access::check(&ctx.state, &caller, &args).await?;
     }
     // 5.1: a command allowed only as team execution: a job started for it must carry the mark
@@ -155,8 +155,13 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
 /// Retained summaries are owner filtered and redact the same secrets as Job metadata.
 async fn run_summaries(ctx: Ctx) -> ApiResult {
     let access = crate::access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let mut records = Vec::new();
-    if let Ok(files) = std::fs::read_dir(ctx.state.config.root_dir.join("runs")) {
+    let runs = ctx.state.config.root_dir.join("runs");
+    // Every record is a file to read: off the async workers.
+    let mut records = tokio::task::spawn_blocking(move || {
+        let mut records = Vec::new();
+        let Ok(files) = std::fs::read_dir(runs) else {
+            return records;
+        };
         for file in files.flatten() {
             if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
                 continue;
@@ -175,7 +180,10 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
             }
             records.push(record);
         }
-    }
+        records
+    })
+    .await
+    .map_err(|_| ApiError::unavailable("Could not read the retained executions."))?;
     let teams = if records.iter().any(|record| {
         record
             .get("metadata")
@@ -328,8 +336,8 @@ pub fn start_cleanup(state: &AppState) {
 
 /// `POST /execute`. The console's pipe operations (Sync, Verify, Clear, Drop, Delete of pipes
 /// and Pipelines) need `jobs:execute`, the operation's permission and edit rights on the pipes
-/// they select; any other action also needs `actions:execute` and `jobs:write` (rc15,
-/// [`crate::execute_access`]).
+/// they select; any other action also needs `actions:execute` and `jobs:write`
+/// ([`crate::execute_access`]).
 async fn execute(ctx: Ctx, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let caller = crate::access::require(&ctx.state, &ctx.headers, &["jobs:execute"]).await?;

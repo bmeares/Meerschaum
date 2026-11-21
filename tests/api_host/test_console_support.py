@@ -9,7 +9,6 @@ cache and the host's loopback-TCP transport. Everything runs in a subprocess in 
 temporary root, plugins directory and SQLite instance.
 """
 
-import json
 import os
 import sys
 import time
@@ -17,18 +16,12 @@ import socket
 import subprocess
 import http.client
 
-from tests.api_host._helpers import AS_VIEWER, make_env, run_python, write_plugin, sandbox  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-4000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import AS_VIEWER, extract_json, make_env, run_python
 
 
 def test_exec_builds_the_line_the_terminal_used_to_get(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash.execute import build_sysargs, build_pipe_sysargs
 
@@ -82,7 +75,7 @@ print('JSON:' + json.dumps(out))
 def test_exec_posts_to_the_server_with_a_user_bearer(sandbox):
     """`server_url` in the host config: `POST /execute` with a minted bearer, and its stream path."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json, threading, http.server
 import jwt
 from meerschaum.api._oauth2 import SECRET
@@ -113,7 +106,8 @@ import os
 os.environ[HOST_CONFIG_ENV] = json.dumps({'server_url': f'http://127.0.0.1:{server.server_port}/'})
 
 from meerschaum.api.dash import execute
-out = {'url': execute.server_url().startswith('http://127.0.0.1:')}
+from meerschaum.api.host._server_client import server_url
+out = {'url': server_url().startswith('http://127.0.0.1:')}
 result = execute.run_action(['sync', 'pipes'], 'execuser')
 out['result'] = result
 out['seen_path'] = seen['path']
@@ -135,7 +129,7 @@ print('JSON:' + json.dumps(out))
 
 def test_engine_views_of_the_pipelines_page(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from datetime import datetime, timedelta
 import meerschaum as mrsm
@@ -216,7 +210,7 @@ print('JSON:' + json.dumps(out))
 
 def test_layout_handles_cycles_and_isolated_nodes(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash.engine import layered_positions, ref_label, node_status, split_ref
 
@@ -241,7 +235,7 @@ print('JSON:' + json.dumps(out))
 
 def test_pipe_query_helpers(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector
@@ -281,16 +275,16 @@ print('JSON:' + json.dumps(out))
 
 def test_session_lookups_are_cached_for_a_few_seconds(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
-from meerschaum.api.dash import sessions
+from meerschaum.api.dash import sessions, session_store
 
 calls = []
-real = sessions._get_session_data
+real = session_store._get_session_data
 def counting(session_id):
     calls.append(session_id)
     return real(session_id)
-sessions._get_session_data = counting
+session_store._get_session_data = counting
 
 ### Sessions name registered users (each is bound to its user's credential).
 from meerschaum.api import get_api_connector
@@ -319,7 +313,7 @@ sessions.get_username_from_session(unknown); sessions.get_username_from_session(
 out['unknown_reads'] = len(calls) - before
 ### The cache expires.
 sessions.set_session('00000000-0000-4000-8000-0000000cac02', {'username': 'bob'})
-sessions.SESSION_CACHE_SECONDS = 0.0
+session_store.SESSION_CACHE_SECONDS = 0.0
 sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac02'); n = len(calls)
 sessions.get_username_from_session('00000000-0000-4000-8000-0000000cac02')
 out['expired_rereads'] = len(calls) - n
@@ -336,7 +330,7 @@ print('JSON:' + json.dumps(out))
 
 def test_console_status_and_availability(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.host import console_available, dash_enabled
 from meerschaum.api.dash import console_available as probe
@@ -527,7 +521,7 @@ def test_the_host_needs_one_transport(sandbox):
 
 def test_pipe_links_round_trip_each_encoded_key(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from urllib.parse import urlsplit
 import meerschaum as mrsm
@@ -553,7 +547,7 @@ print('JSON:' + json.dumps(seen))
 
 def test_pipeline_focus_keeps_ancestors_and_descendants(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash.engine import focus_graph
 nodes = [{'pipe_ref': ref} for ref in ('source', 'selected', 'output', 'sibling', 'other')]
@@ -568,7 +562,7 @@ print('JSON:' + json.dumps([node['pipe_ref'] for node in focused['nodes']]))
 
 def test_pipeline_groups_and_live_timeline(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from datetime import datetime, timezone, timedelta
 from meerschaum.api.dash import build_dash_app
@@ -607,7 +601,7 @@ print('JSON:' + json.dumps({'groups': len(groups), 'stages': len(stages)}))
 
 def test_pipeline_live_selection_keeps_history_and_rejects_other_pipeline_runs(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from types import SimpleNamespace
 import dash

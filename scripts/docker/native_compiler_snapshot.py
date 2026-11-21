@@ -111,24 +111,67 @@ def read_lock(path: Path) -> bytes:
     return data
 
 
-def pins(path: Path) -> dict:
+def validate_release(release: object) -> str:
+    if (
+        not isinstance(release, str)
+        or len(release) > 128
+        or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", release) is None
+    ):
+        raise ValueError("Invalid compiler release pin.")
+    return release
+
+
+def pins(path: Path, *, require_release: bool = True) -> dict:
     with regular(path) as stream:
         data = stream.read(16 * 1024 + 1)
     if len(data) > 16 * 1024:
         raise ValueError("Compiler input pins exceed their bound.")
     value = json.loads(data)
-    if not isinstance(value, dict) or set(value) != {"schema", "release", "architecture", "toolchain_sha256", "vendor_sha256", "lock_sha256"}:
+    expected_keys = {"schema", "architecture", "toolchain_sha256", "vendor_sha256", "lock_sha256"}
+    if require_release:
+        expected_keys.add("release")
+    if not isinstance(value, dict) or set(value) != expected_keys:
         raise ValueError("Unknown or missing compiler input pin fields.")
-    if type(value["schema"]) is not int or value["schema"] != 1 or not isinstance(value["release"], str) or len(value["release"]) > 128 or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", value["release"]) is None:
+    if type(value["schema"]) is not int or value["schema"] != 1:
         raise ValueError("Invalid compiler release pin.")
+    if require_release:
+        validate_release(value["release"])
     if value["architecture"] not in {"x86_64", "aarch64"} or not all(valid_digest(value[name]) for name in ("toolchain_sha256", "vendor_sha256", "lock_sha256")):
         raise ValueError("Invalid compiler material pin.")
     return value
 
 
-def assemble(toolchain: Path, vendor: Path, lock_path: Path, pin_path: Path, output: Path) -> str:
+def _freeze_tree(stage: Path) -> None:
+    # Modes/mtime and all manifest ordering are independent of builder uid, input mtime,
+    # source cache layout, CARGO_HOME, PATH, timezone, and SOURCE_DATE_EPOCH environment.
+    nodes = 0
+    for directory, dirs, names in os.walk(stage, topdown=False):
+        nodes += len(dirs) + len(names)
+        if nodes > MAX_FILES * 2:
+            raise ValueError("The assembled snapshot exceeds its native entry bound.")
+        for name in names:
+            path = Path(directory) / name
+            path.chmod(0o555 if path.stat().st_mode & 0o111 else 0o444)
+            os.utime(path, (0, 0), follow_symlinks=False)
+        for name in dirs:
+            path = Path(directory) / name
+            path.chmod(0o555)
+            os.utime(path, (0, 0), follow_symlinks=False)
+    stage.chmod(0o555)
+    os.utime(stage, (0, 0))
+
+
+def _assemble(
+    toolchain: Path,
+    vendor: Path,
+    lock_path: Path,
+    pin_path: Path,
+    output: Path,
+    *,
+    include_policy: bool,
+) -> str:
     """Write a new rootfs bundle after all supplied material matches its reviewed pins."""
-    expected = pins(pin_path)
+    expected = pins(pin_path, require_release=include_policy)
     toolchain_files, vendor_files = files(toolchain), files(vendor)
     lock = read_lock(lock_path)
     if not vendor_files:
@@ -180,34 +223,89 @@ def assemble(toolchain: Path, vendor: Path, lock_path: Path, pin_path: Path, out
         installed = stage / PREFIX.relative_to("/") / identity
         installed.parent.mkdir(parents=True)
         snapshot.rename(installed)
-        policy = stage / POLICY
-        policy.parent.mkdir(parents=True)
-        policy.write_bytes(encoded({
-            "schema": 1, "release": expected["release"], "architecture": expected["architecture"],
-            "compiler": {"snapshot": str(PREFIX / identity), "manifest_sha256": identity, "anchor": "/usr/lib"},
-        }))
-        # Modes/mtime and all manifest ordering are independent of builder uid, input mtime,
-        # source cache layout, CARGO_HOME, PATH, timezone, and SOURCE_DATE_EPOCH environment.
-        nodes = 0
-        for directory, dirs, names in os.walk(stage, topdown=False):
-            nodes += len(dirs) + len(names)
-            if nodes > MAX_FILES * 2:
-                raise ValueError("The assembled snapshot exceeds its native entry bound.")
-            for name in names:
-                path = Path(directory) / name
-                path.chmod(0o555 if path.stat().st_mode & 0o111 else 0o444)
-                os.utime(path, (0, 0), follow_symlinks=False)
-            for name in dirs:
-                path = Path(directory) / name
-                path.chmod(0o555)
-                os.utime(path, (0, 0), follow_symlinks=False)
-        stage.chmod(0o555)
-        os.utime(stage, (0, 0))
+        if include_policy:
+            policy = stage / POLICY
+            policy.parent.mkdir(parents=True)
+            policy.write_bytes(encoded({
+                "schema": 1, "release": expected["release"], "architecture": expected["architecture"],
+                "compiler": {"snapshot": str(PREFIX / identity), "manifest_sha256": identity, "anchor": "/usr/lib"},
+            }))
+        _freeze_tree(stage)
         stage.rename(output)
         return identity
     finally:
         if stage.exists():
             # Only this never-published staging bundle is removed on failure.
+            for directory, _, _ in os.walk(stage):
+                Path(directory).chmod(0o700)
+            shutil.rmtree(stage)
+
+
+def assemble(toolchain: Path, vendor: Path, lock_path: Path, pin_path: Path, output: Path) -> str:
+    """Write a new rootfs bundle with both snapshot material and release policy."""
+    return _assemble(toolchain, vendor, lock_path, pin_path, output, include_policy=True)
+
+
+def assemble_material(toolchain: Path, vendor: Path, lock_path: Path, pin_path: Path, output: Path) -> str:
+    """Write a release-independent snapshot rootfs (no /etc/meerschaum/native-runtime.json)."""
+    return _assemble(toolchain, vendor, lock_path, pin_path, output, include_policy=False)
+
+
+def locate_snapshot(snapshot_rootfs: Path) -> tuple[str, Path]:
+    """Return the sole verified (identity, snapshot_dir) under snapshot_rootfs/PREFIX."""
+    prefix_dir = snapshot_rootfs / PREFIX.relative_to("/")
+    if prefix_dir.is_symlink() or not prefix_dir.is_dir():
+        raise ValueError("Snapshot rootfs does not contain a compiler snapshot directory.")
+    entries = sorted(prefix_dir.iterdir())
+    if len(entries) != 1 or entries[0].is_symlink() or not entries[0].is_dir():
+        raise ValueError("Snapshot rootfs must contain exactly one compiler snapshot.")
+    snapshot_dir = entries[0]
+    identity = snapshot_dir.name
+    if not valid_digest(identity):
+        raise ValueError("Compiler snapshot directory name is not a valid SHA-256 identity.")
+    with regular(snapshot_dir / "compiler.json") as stream:
+        manifest_bytes = stream.read(2 * 1024 * 1024 + 1)
+    if len(manifest_bytes) > 2 * 1024 * 1024 or digest(manifest_bytes) != identity:
+        raise ValueError("Compiler snapshot manifest digest does not match its identity.")
+    manifest = json.loads(manifest_bytes)
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"schema", "files"}
+        or manifest["schema"] != 1
+        or not isinstance(manifest["files"], dict)
+        or not {"Cargo.lock", "toolchain/bin/cargo", "toolchain/bin/rustc"}.issubset(manifest["files"])
+    ):
+        raise ValueError("Compiler snapshot manifest is incomplete or malformed.")
+    return identity, snapshot_dir
+
+
+def write_policy(snapshot_rootfs: Path, release: str, architecture_name: str, output: Path) -> str:
+    """Write only /etc/meerschaum/native-runtime.json for an already-sealed compiler snapshot."""
+    validate_release(release)
+    if architecture_name not in {"x86_64", "aarch64"}:
+        raise ValueError("Invalid compiler material pin.")
+    if output.exists() or output.is_symlink() or not output.is_absolute():
+        raise ValueError("Output must be an explicit new absolute rootfs bundle directory.")
+    identity, snapshot_dir = locate_snapshot(snapshot_rootfs)
+    if (
+        architecture(snapshot_dir / "toolchain/bin/cargo") != architecture_name
+        or architecture(snapshot_dir / "toolchain/bin/rustc") != architecture_name
+    ):
+        raise ValueError("Compiler ELF architecture differs from the image input pin.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=".native-compiler-policy-", dir=output.parent))
+    try:
+        policy = stage / POLICY
+        policy.parent.mkdir(parents=True)
+        policy.write_bytes(encoded({
+            "schema": 1, "release": release, "architecture": architecture_name,
+            "compiler": {"snapshot": str(PREFIX / identity), "manifest_sha256": identity, "anchor": "/usr/lib"},
+        }))
+        _freeze_tree(stage)
+        stage.rename(output)
+        return identity
+    finally:
+        if stage.exists():
             for directory, _, _ in os.walk(stage):
                 Path(directory).chmod(0o700)
             shutil.rmtree(stage)

@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Wave 15 (L) test plugin: `fetch()` kills the worker process (a crash, not an exception)."""
+"""Test plugin: `fetch()` kills the worker process (a crash, not an exception)."""
 
 __version__ = '0.1.0'
 

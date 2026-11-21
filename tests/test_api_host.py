@@ -297,7 +297,7 @@ print(json.dumps({
     assert out['plugin_paths'] == [
         '/dash/demo/page', '/dash/demo/other', '/dash/demo', '/dash/demo/demonstration',
     ]
-    ### rc1's per-plugin paths redirect to the v4 paths (the plugin's own pages keep theirs).
+    ### 5.0.0rc1's per-plugin paths redirect to the v4 paths (the plugin's own pages keep theirs).
     assert out['redirects'] == [
         None, '/dash/pipes', '/dash/pipes?a=1', None, None, None,
     ]

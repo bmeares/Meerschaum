@@ -66,3 +66,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "native_host"
 crate-type = ["cdylib"]
+
+[lints]
+workspace = true

@@ -7,7 +7,7 @@ Teams and the Plugins page, in process on the sandbox's SQLite instance (no serv
 a walled-off viewer sees only their teams' plugins; the members of a team that may manage
 plugins (`plugins_write`) install, create, upload, edit, publish and uninstall their team's
 plugins and nobody else's; and an upload is validated before a byte is written
-(`meerschaum.api.dash.plugin_upload`).
+(`meerschaum.api.dash._plugins._archives`).
 """
 
 import json
@@ -17,7 +17,7 @@ import tempfile
 
 import pytest
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json
 
 #: The host configuration of a server that serves the web terminal.
 WEBTERM_ON = {'mrsm_instance': 'sql:apihosttest', 'webterm': True}
@@ -25,12 +25,6 @@ WEBTERM_ON = {'mrsm_instance': 'sql:apihosttest', 'webterm': True}
 AUTHORING_ADMINS = 'Only administrators and team plugin managers can create and edit plugins.'
 AUTHORING_OFF = 'Creating and editing plugins is turned off on this server.'
 MANAGE_REFUSAL = 'Only administrators and team plugin managers can manage plugins.'
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
 
 
 @pytest.fixture
@@ -124,8 +118,8 @@ def test_uploads_install_single_files_archives_and_loose_files(plugins_dir):
     when asked.
     """
     root, plugins = plugins_dir
-    out = _json(_run(root, plugins, ARCHIVES + f'''
-from meerschaum.api.dash import plugin_upload as up
+    out = extract_json(_run(root, plugins, ARCHIVES + f'''
+from meerschaum.api.dash._plugins import _archives as up
 dest = pathlib.Path(os.environ['MRSM_PLUGINS_DIR'])
 INIT = {INIT!r}
 
@@ -214,8 +208,8 @@ def test_uploads_refuse_unsafe_archives_names_and_sizes(plugins_dir):
     and unrecognized layouts are refused with a reason, and nothing is written anywhere.
     """
     root, plugins = plugins_dir
-    out = _json(_run(root, plugins, ARCHIVES + f'''
-from meerschaum.api.dash import plugin_upload as up
+    out = extract_json(_run(root, plugins, ARCHIVES + f'''
+from meerschaum.api.dash._plugins import _archives as up
 dest = pathlib.Path(os.environ['MRSM_PLUGINS_DIR'])
 INIT = {INIT!r}
 
@@ -354,9 +348,10 @@ def test_policy_matrix_for_administrators_team_managers_and_members(plugins_dir)
     walled-off member and a visitor.
     """
     root, plugins = plugins_dir
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json
-from meerschaum.api.dash import access, plugins as mp
+from meerschaum.api.dash import access
+from meerschaum.api.dash._plugins import _policy as mp
 people = {
     'admin': access.make_viewer('admin', admin=True),
     'writer': access.make_viewer('writer', role='editor', teams={'builders': 'member'},
@@ -433,9 +428,10 @@ def test_walled_off_viewers_see_only_their_teams_plugins(plugins_dir):
     root, plugins = plugins_dir
     for name in ('mine', 'foreign', 'other'):
         (plugins / f'{name}.py').write_text(f'"""{name}."""\n__version__ = "1.0"\n')
-    out = _json(_run(root, plugins, '''
+    out = extract_json(_run(root, plugins, '''
 import json
-from meerschaum.api.dash import access, plugins as mp, plugin_sources as ps, plugin_publish as pub
+from meerschaum.api.dash import access, plugins as mp, plugin_publish as pub
+from meerschaum.api.dash._plugins import _lifecycle, _policy
 
 class Repository:
     """The repository's reads the cards make (three published plugins)."""
@@ -469,7 +465,7 @@ def rows(component):
     }
 
 def cards(who, search=None):
-    built, _, pages, total = mp.get_plugins_cards(search_term=search, session_data={}, viewer=who)
+    built, _, pages, total = mp.get_plugins_cards(_policy.resolve_rights(who), search_term=search)
     text = json.dumps([card.to_plotly_json() for card in built], default=lambda o: o.to_plotly_json())
     return {
         'ids': [card.id for card in built], 'pages': pages, 'total': total,
@@ -481,36 +477,37 @@ def cards(who, search=None):
     }
 
 def detail(who, name):
-    text = json.dumps(mp.build_plugin_detail(name, {}, viewer=who).to_plotly_json(),
+    text = json.dumps(mp.build_plugin_detail(name, _policy.resolve_rights(who)).to_plotly_json(),
                       default=lambda o: o.to_plotly_json())
     return '404' in text
 
-ps.source_viewer = pub.source_viewer = lambda session: {
-    'walled': walled, 'writer': writer, 'admin': admin,
-}.get((session or {}).get('who'), access.ANONYMOUS)
+def rights(key):
+    return _policy.resolve_rights(
+        {'walled': walled, 'writer': writer, 'admin': admin}.get(key, access.ANONYMOUS)
+    )
 
 def installed_page(who, name):
-    text = json.dumps(mp.build_installed_plugin_detail(name, {'who': who}).to_plotly_json(),
+    text = json.dumps(mp.build_installed_plugin_detail(name, rights(who)).to_plotly_json(),
                       default=lambda o: o.to_plotly_json())
     return ('missing' if 'This plugin is not installed.' in text
             else 'private' if 'Installed source is available' in text else 'shown')
 
 def source(who, kind, name):
     try:
-        return ps.source_files(kind, name, {'who': who})
+        return _lifecycle.source_files(kind, name, rights(who))
     except PermissionError as e:
         return 'PermissionError: ' + str(e)
     except ValueError as e:
         return 'ValueError: ' + str(e)
 
-mp.remote_plugin_version = lambda name, origin: '9.0'
-real_installed = mp.get_installed_plugins
-mp.get_installed_plugins = lambda check_packages=True: [
+_lifecycle.remote_plugin_version = lambda name, origin: '9.0'
+real_installed = _lifecycle.get_installed_plugins
+_lifecycle.get_installed_plugins = lambda check_packages=True: [
     {**plugin, 'origin': 'api:somewhere', 'version': '1.0'}
     for plugin in real_installed(check_packages=check_packages)
 ]
 out = {
-    'installed': {key: rows(mp.build_installed_plugins_tab(viewer=who))
+    'installed': {key: rows(mp.build_installed_plugins_tab(_policy.resolve_rights(who)))
                   for key, who in (('admin', admin), ('member', member), ('walled', walled), ('writer', writer))},
     'cards': {key: cards(who)
               for key, who in (('admin', admin), ('member', member), ('walled', walled), ('writer', writer))},
@@ -528,9 +525,9 @@ out = {
         'admin foreign': installed_page('admin', 'foreign'),
     },
     'updates': {
-        'admin': sorted(mp.plugin_update_versions(['mine', 'foreign'], viewer=admin)),
-        'writer': sorted(mp.plugin_update_versions(['mine', 'foreign'], viewer=writer)),
-        'walled': sorted(mp.plugin_update_versions(['mine', 'foreign'], viewer=walled)),
+        'admin': sorted(_lifecycle.plugin_update_versions(['mine', 'foreign'], viewer=admin)),
+        'writer': sorted(_lifecycle.plugin_update_versions(['mine', 'foreign'], viewer=writer)),
+        'walled': sorted(_lifecycle.plugin_update_versions(['mine', 'foreign'], viewer=walled)),
     },
     'source': {
         'writer mine': source('writer', 'installed', 'mine'),
@@ -540,11 +537,11 @@ out = {
         'walled repository missing': source('walled', 'repository', 'missing'),
     },
     'publish': {
-        'walled': pub.repositories({'who': 'walled'}, 'mine'),
-        'writer foreign': pub.repositories({'who': 'writer'}, 'foreign'),
-        'writer foreign publish': pub.publish({'name': 'foreign', 'nonce': 'n'}, 'api:mrsm', {'who': 'writer'}),
-        'writer missing publish': pub.publish({'name': 'missing', 'nonce': 'n'}, 'api:mrsm', {'who': 'writer'}),
-        'walled publish': pub.publish({'name': 'mine', 'nonce': 'n'}, 'api:mrsm', {'who': 'walled'}),
+        'walled': pub.repositories(rights('walled'), 'mine'),
+        'writer foreign': pub.repositories(rights('writer'), 'foreign'),
+        'writer foreign publish': pub.publish({'name': 'foreign', 'nonce': 'n'}, 'api:mrsm', rights('writer'), None),
+        'writer missing publish': pub.publish({'name': 'missing', 'nonce': 'n'}, 'api:mrsm', rights('writer'), None),
+        'walled publish': pub.publish({'name': 'mine', 'nonce': 'n'}, 'api:mrsm', rights('walled'), None),
     },
 }
 print('JSON:' + json.dumps(out))
@@ -612,7 +609,7 @@ def test_authoring_matrix(plugins_dir):
     (plugins / 'foreign.py').write_text('VALUE = 1\n')
     code = '''
 import json
-from meerschaum.api.dash import plugin_sources as ps
+from meerschaum.api.dash._plugins._policy import rights_for_session
 admin = sign_in('tp-auth-admin', user_type='admin')
 writer = sign_in('tp-auth-writer', role='editor', teams={'tp-auth-builders': 'member'})
 manager = sign_in('tp-auth-manager', role='editor', teams={'tp-auth-readers': 'manager'})
@@ -620,18 +617,18 @@ viewer = sign_in('tp-auth-viewer', role='viewer')
 team_settings('tp-auth-builders', plugins_write=True, plugins=['mine'])
 team_settings('tp-auth-readers', plugins=['mine'])
 print('JSON:' + json.dumps({
-    'admin': ps.authoring_refusal(admin),
-    'writer': ps.authoring_refusal(writer),
-    'writer mine': ps.authoring_refusal(writer, 'mine'),
-    'writer foreign': ps.authoring_refusal(writer, 'foreign'),
-    'admin foreign': ps.authoring_refusal(admin, 'foreign'),
-    'manager': ps.authoring_refusal(manager),
-    'viewer': ps.authoring_refusal(viewer),
-    'anonymous': ps.authoring_refusal({}),
-    'may_author': [ps.may_author(writer), ps.may_author(writer, 'foreign'), ps.may_author(manager)],
+    'admin': rights_for_session(admin).authoring_refusal(),
+    'writer': rights_for_session(writer).authoring_refusal(),
+    'writer mine': rights_for_session(writer).authoring_refusal('mine'),
+    'writer foreign': rights_for_session(writer).authoring_refusal('foreign'),
+    'admin foreign': rights_for_session(admin).authoring_refusal('foreign'),
+    'manager': rights_for_session(manager).authoring_refusal(),
+    'viewer': rights_for_session(viewer).authoring_refusal(),
+    'anonymous': rights_for_session({}).authoring_refusal(),
+    'may_author': [rights_for_session(writer).can_author(), rights_for_session(writer).can_author('foreign'), rights_for_session(manager).can_author()],
 }))
 '''
-    served = _json(_run(root, plugins, code))
+    served = extract_json(_run(root, plugins, code))
     assert served['admin'] is None and served['admin foreign'] is None
     assert served['writer'] is None and served['writer mine'] is None
     assert served['writer foreign'] == "Plugin 'foreign' does not belong to your team."
@@ -641,25 +638,25 @@ print('JSON:' + json.dumps({
     assert served['may_author'] == [True, False, False]
 
     ### Without the terminal: administrators are gated as it is, the team's switch still stands.
-    no_webterm = _json(_run(root, plugins, code, host_config={'mrsm_instance': 'sql:apihosttest'}))
+    no_webterm = extract_json(_run(root, plugins, code, host_config={'mrsm_instance': 'sql:apihosttest'}))
     assert no_webterm['admin'] == AUTHORING_OFF
     assert no_webterm['writer'] is None and no_webterm['writer mine'] is None
     for who in ('manager', 'viewer', 'anonymous'):
         assert no_webterm[who] == AUTHORING_OFF, who
 
-    refused = _json(_run(root, plugins, code, extra_env={
+    refused = extract_json(_run(root, plugins, code, extra_env={
         'MRSM_CONFIG': json.dumps({'api': {'permissions': {'registration': {'plugins': False}}}}),
     }))
     for who in ('admin', 'writer', 'writer mine', 'manager', 'viewer', 'anonymous'):
         assert refused[who] == AUTHORING_OFF, who
 
-    secure = _json(_run(root, plugins, code, extra_env={
+    secure = extract_json(_run(root, plugins, code, extra_env={
         'MRSM_CONFIG': json.dumps({'api': {'permissions': {'actions': {'non_admin': False}}}}),
     }))
     assert secure['admin'] is None
     assert secure['writer'] == AUTHORING_ADMINS and secure['writer mine'] == AUTHORING_ADMINS
 
-    no_auth = _json(_run(root, plugins, code, host_config={
+    no_auth = extract_json(_run(root, plugins, code, host_config={
         'mrsm_instance': 'sql:apihosttest', 'no_auth': True, 'webterm': False,
     }))
     for who in ('admin', 'writer', 'viewer', 'anonymous'):
@@ -675,9 +672,11 @@ def test_team_managers_create_upload_edit_and_claim_their_plugins(plugins_dir):
     """
     root, plugins = plugins_dir
     (plugins / 'foreign.py').write_text('VALUE = 1\n')
-    out = _json(_run(root, plugins, ARCHIVES + '''
+    out = extract_json(_run(root, plugins, ARCHIVES + '''
 from types import SimpleNamespace
-from meerschaum.api.dash import plugins as mp, plugin_sources as ps, plugin_upload as up
+from meerschaum.api.dash import access
+from meerschaum.api.dash._plugins import _fs, _lifecycle as mp
+from meerschaum.api.dash._plugins._policy import rights_for_session, may_manage_plugin
 dest = pathlib.Path(os.environ['MRSM_PLUGINS_DIR'])
 admin = sign_in('tp-admin', user_type='admin')
 writer = sign_in('tp-writer', role='editor', teams={'tp-builders': 'member', 'tp-aaa': 'member'})
@@ -685,15 +684,17 @@ other = sign_in('tp-other', role='editor', teams={'tp-rivals': 'member'})
 member = sign_in('tp-member', role='editor', teams={'tp-readers': 'member'})
 team_settings('tp-builders', plugins_write=True)
 team_settings('tp-rivals', plugins_write=True)
-out = {'writing_team': mp.writing_team(ps.source_viewer(writer))}
+out = {'writing_team': mp.writing_team(access.resolve_viewer(writer, fresh=True))}
 
 def upload(session, files, name=None, replace=False, directory=None):
     contents = [data_url(data) for _, data in files]
-    return list(up.upload_plugin(contents, [filename for filename, _ in files], name, directory, replace, session))
+    return list(mp.upload_plugin(
+        contents, [filename for filename, _ in files], name, directory, replace, rights_for_session(session),
+    ))
 
-out['create'] = mp.create_new_plugin('made', 'Python', 'file', ['fetch'], '', 'ts', None, writer)
-out['create_foreign'] = mp.create_new_plugin('foreign', 'Python', 'file', ['fetch'], '', 'ts', None, writer)
-out['create_member'] = mp.create_new_plugin('nope', 'Python', 'file', ['fetch'], '', 'ts', None, member)
+out['create'] = mp.create_new_plugin('made', 'Python', 'file', ['fetch'], '', 'ts', None, rights_for_session(writer))
+out['create_foreign'] = mp.create_new_plugin('foreign', 'Python', 'file', ['fetch'], '', 'ts', None, rights_for_session(writer))
+out['create_member'] = mp.create_new_plugin('nope', 'Python', 'file', ['fetch'], '', 'ts', None, rights_for_session(member))
 out['upload'] = upload(writer, [('sent.py', b'VALUE = 1\\n')])
 out['upload_pkg'] = upload(writer, [('pkg.zip', zip_of([('pkg/__init__.py', b'A = 1\\n')]))], name='sentpkg')
 out['upload_foreign'] = upload(writer, [('foreign.py', b'VALUE = 2\\n')], replace=True)
@@ -713,13 +714,13 @@ out['sent'] = (dest / 'sent.py').read_text()
 out['foreign'] = (dest / 'foreign.py').read_text()
 out['tree'] = tree(dest)
 
-text, digest = ps.read_source_with_digest('installed', 'made', 'made.py', writer)
-out['save'] = ps.save_source('made', 'made.py', text + '# mine\\n', digest, writer)[:2]
-out['save_foreign'] = ps.save_source('foreign', 'foreign.py', 'X = 1\\n', ps.source_digest(b'VALUE = 7\\n'), writer)[:2]
-out['save_rival'] = ps.save_source('made', 'made.py', 'X = 1\\n', ps.source_digest((text + '# mine\\n').encode()), other)[:2]
-out['read_rival'] = ps.may_read_source('installed', other, 'made')
-out['read_own'] = ps.may_read_source('installed', writer, 'made')
-out['read_unnamed'] = ps.may_read_source('installed', writer)
+text, digest = mp.read_source_with_digest('installed', 'made', 'made.py', rights_for_session(writer))
+out['save'] = mp.save_source('made', 'made.py', text + '# mine\\n', digest, rights_for_session(writer))[:2]
+out['save_foreign'] = mp.save_source('foreign', 'foreign.py', 'X = 1\\n', _fs.source_digest(b'VALUE = 7\\n'), rights_for_session(writer))[:2]
+out['save_rival'] = mp.save_source('made', 'made.py', 'X = 1\\n', _fs.source_digest((text + '# mine\\n').encode()), rights_for_session(other))[:2]
+out['read_rival'] = rights_for_session(other).can_read_source('installed', 'made')
+out['read_own'] = rights_for_session(writer).can_read_source('installed', 'made')
+out['read_unnamed'] = rights_for_session(writer).can_read_source('installed')
 
 ### The record of a run: read from the job, for its owner only.
 def job(owner, plugin, action, sysargs, origin='console_plugins'):
@@ -739,23 +740,23 @@ out['records'] = {
     'uninstall': mp.plugin_run_record(
         job('tp-writer', 'made', 'uninstall', ['uninstall', 'plugins', 'made', '--yes']), 'tp-writer'),
 }
-who = ps.source_viewer(writer)
+who = access.resolve_viewer(writer, fresh=True)
 out['claim'] = mp.claim_plugin(who, 'fromrepo')
-out['claim_twice'] = mp.claim_plugin(ps.source_viewer(writer), 'fromrepo')
-out['claim_member'] = mp.claim_plugin(ps.source_viewer(member), 'fromrepo')
-out['claim_unsafe'] = mp.claim_plugin(ps.source_viewer(writer), '../x')
-out['claim_admin'] = mp.claim_plugin(ps.source_viewer(admin), 'byadmin')
+out['claim_twice'] = mp.claim_plugin(access.resolve_viewer(writer, fresh=True), 'fromrepo')
+out['claim_member'] = mp.claim_plugin(access.resolve_viewer(member, fresh=True), 'fromrepo')
+out['claim_unsafe'] = mp.claim_plugin(access.resolve_viewer(writer, fresh=True), '../x')
+out['claim_admin'] = mp.claim_plugin(access.resolve_viewer(admin, fresh=True), 'byadmin')
 out['claimed'] = team_plugins('tp-builders')
-out['manage_after'] = mp.may_manage_plugin(ps.source_viewer(writer), 'fromrepo')
-out['release'] = mp.release_plugin(ps.source_viewer(writer), 'fromrepo')
-out['release_member'] = mp.release_plugin(ps.source_viewer(member), 'made')
+out['manage_after'] = may_manage_plugin(access.resolve_viewer(writer, fresh=True), 'fromrepo')
+out['release'] = mp.release_plugin(access.resolve_viewer(writer, fresh=True), 'fromrepo')
+out['release_member'] = mp.release_plugin(access.resolve_viewer(member, fresh=True), 'made')
 out['released'] = team_plugins('tp-builders')
 team_settings('tp-builders', plugins_write=False)
 out['after_switch_off'] = {
-    'manage': mp.may_manage_plugin(ps.source_viewer(writer), 'made'),
-    'authoring': ps.authoring_refusal(writer),
+    'manage': may_manage_plugin(access.resolve_viewer(writer, fresh=True), 'made'),
+    'authoring': rights_for_session(writer).authoring_refusal(),
     'upload': upload(writer, [('late.py', b'VALUE = 1\\n')]),
-    'claim': mp.claim_plugin(ps.source_viewer(writer), 'late'),
+    'claim': mp.claim_plugin(access.resolve_viewer(writer, fresh=True), 'late'),
 }
 print('JSON:' + json.dumps(out))
 '''))
@@ -862,17 +863,17 @@ def test_callbacks_recheck_the_session_for_every_plugin_change(plugins_dir):
     root, plugins = plugins_dir
     (plugins / 'foreign.py').write_text('VALUE = 1\n')
     (plugins / 'mine.py').write_text('VALUE = 1\n')
-    out = _json(_run(root, plugins, ARCHIVES + _fire_code() + '''
-from meerschaum.api.dash import plugins as mp
+    out = extract_json(_run(root, plugins, ARCHIVES + _fire_code() + '''
+from meerschaum.api.dash._plugins import _lifecycle
 from meerschaum.api.dash.callbacks import plugins as callbacks
 dest = pathlib.Path(os.environ['MRSM_PLUGINS_DIR'])
 writer = sign_in('tp-cb-writer', role='editor', teams={'tp-cb-builders': 'member'})
 member = sign_in('tp-cb-member', role='editor', teams={'tp-cb-readers': 'member'})
 team_settings('tp-cb-builders', plugins_write=True, plugins=['mine'])
 started = []
-callbacks.start_plugin_run = lambda sysargs, username, env=None, execution=None: (
+_lifecycle.start_plugin_run = lambda sysargs, username, env=None, execution=None: (
     started.append([sysargs, username, execution]) or ((True, 'Started.'), 'execute-test0001'))
-mp.this_server_env = lambda username=None: {'MRSM_API_THIS_SERVER': 'http://127.0.0.1:1'}
+_lifecycle.this_server_env = lambda username=None: {'MRSM_API_THIS_SERVER': 'http://127.0.0.1:1'}
 
 def text(alert):
     return json.dumps(alert.to_plotly_json(), default=lambda o: o.to_plotly_json())

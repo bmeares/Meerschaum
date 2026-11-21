@@ -13,18 +13,12 @@ import tomllib
 
 import pytest
 
-from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import AS_VIEWER, run_python, extract_json
 
 KEY = 'mrsm-key:YTg1ZTI3NDEtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAwOnMzY3IzdCsvPQ=='
 URL = 'https://your-api-host'
 MCP_URL = 'https://your-api-host/mcp'
 BEARER = f'Bearer {KEY}'
-
-
-def _json(result):
-    lines = [line for line in result.stdout.splitlines() if line.startswith('JSON:')]
-    assert lines, result.stderr[-3000:]
-    return json.loads(lines[-1][len('JSON:'):])
 
 
 @pytest.fixture(scope='module')
@@ -184,7 +178,7 @@ def text(tree):
 
 def test_tokens_page_offers_the_mcp_details(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + WALK + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + WALK + '''
 from types import SimpleNamespace
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.api.dash import dash_app, pages
@@ -299,7 +293,7 @@ print('JSON:' + json.dumps({
 
 def test_agent_scopes_are_clamped_to_the_users_own(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + WALK + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + WALK + '''
 import meerschaum.api.dash.tokens as tokens
 from meerschaum.core import User
 from meerschaum.api import get_api_connector
@@ -316,7 +310,7 @@ print('JSON:' + json.dumps({
 
 def test_mcp_details_are_hidden_when_mcp_is_off(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + WALK + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + WALK + '''
 from meerschaum.api.dash import dash_app, pages
 import meerschaum.api.dash.tokens as tokens
 import meerschaum.api.dash.mcp_details as mcp_details

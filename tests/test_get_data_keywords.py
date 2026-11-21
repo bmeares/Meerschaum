@@ -3,11 +3,11 @@
 # vim:fenc=utf-8
 
 """
-`Pipe.get_data(**kw)` warns once per call about keywords nothing reads, with a did-you-mean
-(rc15, Q11): `start` used to be ignored silently and every row came back. Keywords the SQL
+`Pipe.get_data(**kw)` warns once per call about keywords nothing reads, with a did-you-mean:
+`start` used to be ignored silently and every row came back. Keywords the SQL
 instance reads, the `Pipe.sync()` options `copy_to()` forwards, and the keywords a custom
 instance connector's `get_pipe_data()` names (or any, with `**kwargs`) never warn. Nothing raises.
-Also `Pipe(hypercore=...)` (B7), which was documented but not accepted.
+Also `Pipe(hypercore=...)`, which was documented but not accepted.
 """
 
 import os

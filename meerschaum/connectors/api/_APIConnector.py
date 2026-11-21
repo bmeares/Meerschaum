@@ -129,7 +129,7 @@ class APIConnector(InstanceConnector):
         get_job_paused,
         get_job_status,
     )
-    ### The access model (rc15): teams, permissions, access and locks are the server's. The
+    ### The access model: teams, permissions, access and locks are the server's. The
     ### `InstanceConnector` methods reach its routes through the Rust client; these answer in
     ### one request.
     from ._access import (

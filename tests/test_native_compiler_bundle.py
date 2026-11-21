@@ -231,6 +231,80 @@ class CompilerBundle(unittest.TestCase):
         self.assertFalse(list(self.root.glob('.native-compiler-stage-*')))
         self.assertEqual(survivor.read_text(), 'keep')
 
+    def test_split_snapshot_and_policy_are_identical_and_independent_of_release_bumps(self):
+        combined_out = self.root / 'combined'
+        combined_id = self.build(combined_out)
+
+        snap_out = self.root / 'snapshot-only'
+        policy_out = self.root / 'policy-only'
+        with (
+            mock.patch('subprocess.run', side_effect=AssertionError('No compiler invocation')),
+            mock.patch('subprocess.Popen', side_effect=AssertionError('No compiler invocation')),
+        ):
+            snap_id = bundle.build_snapshot(
+                self.toolchain, self.vendor, self.lock, self.settings, snap_out
+            )
+            policy_id = bundle.build_policy(snap_out / 'rootfs', self.manifest, policy_out)
+
+        self.assertEqual(snap_id, combined_id)
+        self.assertEqual(policy_id, combined_id)
+        self.assertFalse((snap_out / 'rootfs' / snapshot.POLICY).exists())
+        self.assertEqual(
+            (policy_out / snapshot.POLICY).read_bytes(),
+            (combined_out / 'rootfs' / snapshot.POLICY).read_bytes(),
+        )
+        # Snapshot files match combined bundle files byte-for-byte.
+        self.assertEqual(
+            snapshot.tree_digest(snapshot.files(snap_out / 'rootfs' / snapshot.PREFIX.relative_to('/'))),
+            snapshot.tree_digest(snapshot.files(combined_out / 'rootfs' / snapshot.PREFIX.relative_to('/'))),
+        )
+        # Re-binding the exact same snapshot to a bumped workspace version updates only the policy.
+        self.manifest.write_text('[workspace.package]\nversion = "5.1.1"\n')
+        policy_next = self.root / 'policy-next'
+        with (
+            mock.patch('subprocess.run', side_effect=AssertionError('No compiler invocation')),
+            mock.patch('subprocess.Popen', side_effect=AssertionError('No compiler invocation')),
+        ):
+            next_id = bundle.build_policy(snap_out / 'rootfs', self.manifest, policy_next)
+        self.assertEqual(next_id, snap_id)
+        self.assertEqual(json.loads((policy_next / snapshot.POLICY).read_bytes())['release'], '5.1.1')
+
+    def test_cli_snapshot_only_and_policy_only_modes(self):
+        snap_out = self.root / 'cli-snap'
+        policy_out = self.root / 'cli-policy'
+        with (
+            mock.patch('subprocess.run', side_effect=AssertionError('No compiler invocation')),
+            mock.patch('subprocess.Popen', side_effect=AssertionError('No compiler invocation')),
+            mock.patch.object(
+                sys, 'argv', [
+                    'build_native_compiler_bundle.py', '--snapshot-only',
+                    '--toolchain', str(self.toolchain), '--vendor', str(self.vendor),
+                    '--lock', str(self.lock), '--settings', str(self.settings),
+                    '--output', str(snap_out),
+                ],
+            ),
+            mock.patch('builtins.print') as print_snap,
+        ):
+            bundle.main()
+        with (
+            mock.patch('subprocess.run', side_effect=AssertionError('No compiler invocation')),
+            mock.patch('subprocess.Popen', side_effect=AssertionError('No compiler invocation')),
+            mock.patch.object(
+                sys, 'argv', [
+                    'build_native_compiler_bundle.py', '--policy-only',
+                    '--snapshot-rootfs', str(snap_out / 'rootfs'),
+                    '--manifest', str(self.manifest), '--output', str(policy_out),
+                ],
+            ),
+            mock.patch('builtins.print') as print_policy,
+        ):
+            bundle.main()
+        self.assertEqual(print_snap.call_args.args[0], print_policy.call_args.args[0])
+        self.assertEqual(
+            json.loads((policy_out / snapshot.POLICY).read_bytes())['release'],
+            '5.1.0-rc.1',
+        )
+
 
 class GeneratedSourceSeed(unittest.TestCase):
     def test_offline_seed_matches_the_native_generators_dependencies_and_profile(self):

@@ -94,7 +94,7 @@
 
 ## Changelog
 - [Changelog](https://meerschaum.io/changelog/): Meerschaum 5 brings a Rust core, dependency-aware Pipelines, and a new web console.
-- [v5](https://meerschaum.io/changelog/v5/): Maintenance release with console UX improvements, credential handling fixes in stack.yaml, and Docker stack / isolated-team fixes.
+- [v5](https://meerschaum.io/changelog/v5/): Maintenance release: leaner Docker images that share layers, stricter SQL checks for non-administrators, and console, web terminal and sync fixes.
 - [v4](https://meerschaum.io/changelog/v4/): Historical release notes for the 4.x series.
 - [v3](https://meerschaum.io/changelog/v3/): Historical release notes for the 3.x series.
 - [v2](https://meerschaum.io/changelog/v2/): Historical release notes for the 2.x series.

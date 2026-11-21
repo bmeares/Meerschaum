@@ -1,6 +1,6 @@
 """List-shaped instance key results never substitute empty extras for fresh Pipe access."""
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python
 
 
 def test_list_key_extras_refresh_private_parameters_and_current_revocation(sandbox):

@@ -1,4 +1,4 @@
-//! The per-pipe sync status of an `api:` instance (rc15 contract C2): the server keeps the rows
+//! The per-pipe sync status of an `api:` instance: the server keeps the rows
 //! on its own instance, keyed with its instance keys. This client posts its sync outcomes to
 //! `POST /engine/sync-status` and reads `GET /engine/sync-status`, re-keying the rows with its own
 //! `api:<label>` keys ([`meerschaum_connector::sync_status::rekey`]).

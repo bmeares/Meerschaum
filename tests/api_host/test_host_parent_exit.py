@@ -9,7 +9,6 @@ was SIGKILLed or OOM-killed), the pipe closes and the host shuts down instead of
 orphaned, until someone kills it.
 """
 
-import os
 import sys
 import time
 import socket
@@ -20,7 +19,7 @@ import subprocess
 
 import pytest
 
-from tests.api_host._helpers import make_env, sandbox  # noqa: F401
+from tests.api_host._helpers import make_env
 
 if sys.platform == 'win32':
     pytest.skip("The host listens on a Unix socket here.", allow_module_level=True)

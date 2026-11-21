@@ -427,7 +427,7 @@ impl Controller {
                 return Err("Invalid Host source grant set.".into());
             }
             let (mut sources, available) =
-                crate::executor_host_jobs::plugin_sources(&caller, &directories)?;
+                crate::executor::host_jobs::plugin_sources(&caller, &directories)?;
             if !grants.is_subset(&available) {
                 return Err("An exact Host metadata source is unavailable or unauthorized.".into());
             }
@@ -442,7 +442,7 @@ impl Controller {
                 })
             });
             let snapshot =
-                crate::executor_plugin_files::Store::new(&root)?.snapshot(&sources, None)?;
+                crate::executor::plugin_files::Store::new(&root)?.snapshot(&sources, None)?;
             let host = HostIdentity {
                 team_id,
                 generation: host_generation(&root)?,

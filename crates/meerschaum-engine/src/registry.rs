@@ -29,11 +29,6 @@ use crate::sync::{DeltaObserver, SyncArgs, SyncEnv};
 /// method").
 #[async_trait]
 pub trait PluginSync: Send + Sync {
-    /// Whether the connector's ordinary fetch path can replace this optimization.
-    fn is_fetch_optimization(&self) -> bool {
-        false
-    }
-
     /// Run the plugin's `sync()` for `pipe`.
     async fn sync(&self, pipe: &Pipe, args: &SyncArgs) -> SyncResult;
 
@@ -141,6 +136,15 @@ pub trait ConnectorRegistry: Send + Sync {
         None
     }
 
+    /// Whether a pipe whose source is `connector_keys` syncs in place
+    /// (`InstanceConnector::sync_pipe_inplace`) when its instance is that same connector
+    /// (`false` by default; hosts opt in for the source they sync in place, see
+    /// [`with_inplace_sync`]).
+    fn allows_inplace_sync(&self, connector_keys: &str) -> bool {
+        let _ = connector_keys;
+        false
+    }
+
     /// The table reference `{{ Pipe(...) }}` renders to. Python renders the quoted,
     /// schema-qualified name (`sql_item_name`) on SQL instances and `pipe.target` elsewhere;
     /// registries that hold SQL instances override this.
@@ -243,6 +247,7 @@ pub struct StaticRegistry {
     table_refs: Option<TableRefFn>,
     registered: Arc<RegisteredCache>,
     unavailable: HashMap<String, String>,
+    inplace_sync: bool,
 }
 
 impl std::fmt::Debug for StaticRegistry {
@@ -309,6 +314,13 @@ impl StaticRegistry {
         self
     }
 
+    /// Enable or disable same-instance in-place sync (`InstanceConnector::sync_pipe_inplace`)
+    /// for every source of this registry (disabled by default).
+    pub fn with_inplace_sync(mut self, enabled: bool) -> Self {
+        self.inplace_sync = enabled;
+        self
+    }
+
     /// Override how `{{ Pipe(...) }}` renders a table reference.
     pub fn with_table_reference(
         mut self,
@@ -362,12 +374,88 @@ impl ConnectorRegistry for StaticRegistry {
         self.hooks.clone()
     }
 
+    fn allows_inplace_sync(&self, _connector_keys: &str) -> bool {
+        self.inplace_sync
+    }
+
     fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
         let loaded = load_registered(self, pipe, Some(&self.registered));
         match &self.table_refs {
             Some(f) => f(&loaded),
             None => loaded.target(None).map_err(|e| e.to_string()),
         }
+    }
+}
+
+/// Which sources sync in place (see [`ConnectorRegistry::allows_inplace_sync`]).
+pub type InplaceSources = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Wrap any [`ConnectorRegistry`] so that [`ConnectorRegistry::allows_inplace_sync`] answers
+/// `sources(connector_keys)`, delegating every other method to `inner` (all of them: a test
+/// checks that no method of the trait falls back to its default here).
+pub fn with_inplace_sync(
+    inner: Arc<dyn ConnectorRegistry>,
+    sources: InplaceSources,
+) -> Arc<dyn ConnectorRegistry> {
+    Arc::new(InplaceSyncRegistry { inner, sources })
+}
+
+struct InplaceSyncRegistry {
+    inner: Arc<dyn ConnectorRegistry>,
+    sources: InplaceSources,
+}
+
+impl ConnectorRegistry for InplaceSyncRegistry {
+    fn instance(&self, keys: &str) -> Result<Arc<dyn InstanceConnector>, String> {
+        self.inner.instance(keys)
+    }
+
+    fn source(&self, keys: &str) -> Result<Option<Arc<dyn Connector>>, String> {
+        self.inner.source(keys)
+    }
+
+    fn fetch_chunksize(&self, keys: &str) -> usize {
+        self.inner.fetch_chunksize(keys)
+    }
+
+    fn source_for_sync(
+        &self,
+        keys: &str,
+        args: &SyncArgs,
+    ) -> Result<Option<Arc<dyn Connector>>, String> {
+        self.inner.source_for_sync(keys, args)
+    }
+
+    fn plugin_sync(&self, keys: &str) -> Option<Arc<dyn PluginSync>> {
+        self.inner.plugin_sync(keys)
+    }
+
+    fn stream_source(&self, keys: &str) -> Option<Arc<dyn StreamSource>> {
+        self.inner.stream_source(keys)
+    }
+
+    fn legacy_stream(&self, keys: &str) -> Option<Arc<dyn LegacyStream>> {
+        self.inner.legacy_stream(keys)
+    }
+
+    fn register_hook(&self, keys: &str) -> Option<Arc<dyn ConnectorRegisterHook>> {
+        self.inner.register_hook(keys)
+    }
+
+    fn is_python(&self, keys: &str) -> bool {
+        self.inner.is_python(keys)
+    }
+
+    fn hooks(&self) -> Option<Arc<dyn SyncHooks>> {
+        self.inner.hooks()
+    }
+
+    fn allows_inplace_sync(&self, connector_keys: &str) -> bool {
+        (self.sources)(connector_keys)
+    }
+
+    fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
+        self.inner.table_reference(pipe)
     }
 }
 
@@ -384,4 +472,54 @@ impl SyncHooks for NoHooks {
 /// `(True, "Success")` as a [`SyncResult`].
 pub fn success_result() -> SyncResult {
     SuccessTuple::success().into()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    /// The methods declared directly in the block that follows `header` in this file (comments
+    /// skipped, so braces in doc comments do not count).
+    fn methods(source: &str, header: &str) -> BTreeSet<String> {
+        let start = source
+            .find(header)
+            .unwrap_or_else(|| panic!("`{header}` not found"));
+        let mut depth = 0usize;
+        let mut names = BTreeSet::new();
+        for line in source[start..].lines() {
+            let code = line.split("//").next().unwrap_or_default();
+            if depth == 1
+                && let Some(pos) = code.find("fn ")
+                && code[..pos].trim_start().chars().all(char::is_alphanumeric)
+            {
+                let name: String = code[pos + 3..]
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                names.insert(name);
+            }
+            for c in code.chars() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if depth == 0 && code.contains('}') {
+                break;
+            }
+        }
+        names
+    }
+
+    /// A method the in-place wrapper does not forward would silently answer the trait's default
+    /// for every registry it wraps.
+    #[test]
+    fn the_inplace_wrapper_forwards_every_registry_method() {
+        let source = include_str!("registry.rs");
+        let declared = methods(source, "pub trait ConnectorRegistry");
+        let forwarded = methods(source, "impl ConnectorRegistry for InplaceSyncRegistry");
+        assert!(declared.contains("allows_inplace_sync"), "{declared:?}");
+        assert_eq!(declared, forwarded);
+    }
 }

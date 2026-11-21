@@ -1,4 +1,4 @@
-//! Per-pipe sync status (rc15 contract C2) from the engine's side: every sync the engine runs
+//! Per-pipe sync status from the engine's side: every sync the engine runs
 //! records its pipe's outcome through [`meerschaum_connector::sync_status`] (one row per pipe in
 //! `mrsm:engine_sync_status` on the pipe's instance).
 //!

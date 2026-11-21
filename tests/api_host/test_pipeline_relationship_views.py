@@ -1,11 +1,5 @@
 """Readable timestamps, metadata-only relationships, and compact execution views."""
-from tests.api_host._helpers import FAKE_VIEWERS, run_python, sandbox
-
-__all__ = ['sandbox']
-
-
-def check(result):
-    assert result.returncode == 0, result.stderr[-7000:]
+from tests.api_host._helpers import FAKE_VIEWERS, run_python, check
 
 
 def test_integer_sync_times_use_declared_precision_and_keep_raw_values(sandbox):

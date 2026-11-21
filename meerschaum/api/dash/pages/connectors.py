@@ -31,45 +31,6 @@ TYPE_LABELS = {'sql': 'SQL', 'api': 'API', 'valkey': 'Valkey', 'plugin': 'Plugin
 TYPE_ICONS = {'sql': 'fa-database', 'api': 'fa-server', 'valkey': 'fa-bolt', 'plugin': 'fa-puzzle-piece'}
 
 
-def may_view(session_id: Optional[str]) -> bool:
-    """
-    Whether the viewer may see the connectors: a signed-in user with `connectors:read` (only an
-    administrator under `--secure`), or anyone with `--no-auth`.
-    """
-    from meerschaum.api import no_auth
-    if no_auth:
-        return True
-    if not session_id:
-        return False
-    from meerschaum.api.dash.access import get_viewer, _secure
-    try:
-        viewer = get_viewer(session_id=str(session_id))
-    except Exception:
-        return False
-    if not viewer.signed_in or not viewer.can('connectors:read'):
-        return False
-    return viewer.is_admin or not _secure()
-
-
-def may_see_details(session_id: Optional[str]) -> bool:
-    """Whether the viewer sees the connectors' details (administrators, or `--no-auth`)."""
-    return may_test(session_id)
-
-
-def may_test(session_id: Optional[str]) -> bool:
-    """Whether the viewer may test connections (an administrator, or `--no-auth`)."""
-    from meerschaum.api import no_auth
-    if no_auth:
-        return True
-    if not session_id:
-        return False
-    from meerschaum.api.dash.sessions import session_is_admin
-    try:
-        return bool(session_is_admin(str(session_id)))
-    except Exception:
-        return False
-
-
 def _text(value: Any) -> str:
     return '' if value is None else str(value)
 
@@ -271,17 +232,22 @@ def connector_inspection(row, shown=None):
 
 def route(pathname: Optional[str] = None, href: Optional[str] = None) -> List[Any]:
     """The Connectors page."""
+    from meerschaum.api.dash.access import resolve_viewer
     from meerschaum.api.dash.connector_listing import list_connectors, mask_text
     state = get_nav_state()
     session_id = state.get('session_id', None)
-    allowed = may_view(session_id)
+    viewer = resolve_viewer({'session-id': session_id} if session_id else {})
+    allowed = viewer.can_view_connectors
     if not allowed:
         table = html.Div(html.H5('The connectors are not available to your account'), className='console-empty')
     else:
         try:
-            from meerschaum.api.dash.access import get_viewer
-            rows = list_connectors(viewer=get_viewer(session_id=session_id))
-            table = build_table(rows, may_test(session_id), details=may_see_details(session_id))
+            rows = list_connectors(viewer=viewer)
+            table = build_table(
+                rows,
+                viewer.can_test_connectors,
+                details=viewer.can_see_connector_details,
+            )
         except Exception as e:
             table = alert_from_success_tuple((False, f"Could not list the connectors: {mask_text(e)}"))
     header = [html.H1('Connectors', className='connectors-title')]

@@ -34,7 +34,7 @@ use indexmap::IndexMap;
 use meerschaum_connector::pipe_ops::{self, columns_map};
 use meerschaum_connector::{
     ChunkStream, ChunkedFetch, Connector, ConnectorError, DataQuery, DateBound, FetchedKind,
-    InstanceConnector, SyncOptions, async_trait,
+    InplaceBegin, InplaceObserver, InplaceSyncOptions, InstanceConnector, SyncOptions, async_trait,
 };
 use meerschaum_core::pipe::{ChunkInterval, PipeDefaults};
 use meerschaum_core::success::SyncResult;
@@ -544,7 +544,7 @@ pub async fn filter_existing_frame(
         date_bound_only: false,
         enforce_dtypes: false,
         filter_params_index_limit: env.filter_params_index_limit,
-        // Declared text / index columns keep their null-like strings (rc15 Q18).
+        // Declared text / index columns keep their null-like strings.
         literal_null_markers: meerschaum_kernel::diff::literal_null_markers(
             &columns_map(pipe),
             ctx,
@@ -849,9 +849,12 @@ async fn sync_inner(
                 if strategy == Strategy::Backtrack || !strategy::automatic(args) {
                     return ps.sync_native(&pipe, args, env, observer).await;
                 }
-                if !ps.is_fetch_optimization() {
-                    return fail("An automatic sync.strategy requires a connector-managed fetch.");
-                }
+                return fail("An automatic sync.strategy requires a connector-managed fetch.");
+            }
+            if (strategy == Strategy::Backtrack || !strategy::automatic(args))
+                && can_sync_inplace(env, instance, &pipe)
+            {
+                return Box::pin(sync_inplace(instance, &pipe, args, replacing, observer)).await;
             }
             let source = match env.registry.source_for_sync(pipe.connector_keys(), args) {
                 Ok(Some(s)) => s,
@@ -1200,6 +1203,110 @@ async fn sync_inner(
                 end: iv.end.and_then(|e| axis.bound(e)),
             })
             .collect();
+    }
+    result
+}
+
+/// Whether `pipe` syncs in place directly inside `instance`: its source is that same instance,
+/// the instance can, and the host opted in for that source
+/// ([`ConnectorRegistry::allows_inplace_sync`], where hosts apply
+/// `system:experimental:inplace_sync`). Never under delegated node delivery: an in-place write
+/// would bypass the delivery's fenced destination write.
+fn can_sync_inplace(env: &SyncEnv<'_>, instance: &dyn InstanceConnector, pipe: &Pipe) -> bool {
+    let same_instance = pipe.connector_keys() == pipe.instance_keys()
+        || pipe.connector_keys() == instance.connector_keys();
+    env.delivery.is_none()
+        && same_instance
+        && instance.supports_inplace_sync()
+        && env.registry.allows_inplace_sync(pipe.connector_keys())
+}
+
+/// Run an in-place sync through [`InstanceConnector::sync_pipe_inplace`], bridging the engine's
+/// [`DeltaObserver`] (ledger recording with dtype enforcement + `after_commit`) when deltas are
+/// observed. A progress-only observer (`records_deltas() == false`) keeps the direct zero-copy
+/// path without staging delta rows back into memory.
+async fn sync_inplace(
+    instance: &dyn InstanceConnector,
+    pipe: &Pipe,
+    args: &SyncArgs,
+    replacing: bool,
+    observer: Option<&dyn DeltaObserver>,
+) -> SyncResult {
+    struct InplaceLedger<'a> {
+        pipe: &'a Pipe,
+        observer: &'a dyn DeltaObserver,
+        dtypes: std::sync::Mutex<Option<meerschaum_kernel::enforce::PipeDtypesContext>>,
+    }
+
+    impl InplaceLedger<'_> {
+        /// Staged rows arrive with the database's native types (e.g. SQLite returns timestamps as
+        /// text): enforce the pipe's dtypes so the ledger sees datetimes or integers on the axis.
+        fn enforced(&self, delta: &Frame) -> Option<Frame> {
+            let ctx = self
+                .dtypes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()?;
+            pipe_enforce_dtypes(PipeInput::Frame(delta.clone()), &ctx).ok()
+        }
+    }
+
+    #[async_trait]
+    impl InplaceObserver for InplaceLedger<'_> {
+        async fn before_merge(&self, delta: &Frame) -> Result<(), String> {
+            let enforced = self.enforced(delta);
+            self.observer
+                .before_commit(self.pipe, enforced.as_ref().unwrap_or(delta))
+                .await
+        }
+
+        async fn before_replace(
+            &self,
+            delta: &Frame,
+            begin: Option<&DateBound>,
+            end: Option<&DateBound>,
+        ) -> Result<(), String> {
+            let enforced = self.enforced(delta);
+            self.observer
+                .before_replace(self.pipe, enforced.as_ref().unwrap_or(delta), begin, end)
+                .await
+        }
+
+        fn pipe_dtypes(&self, dtypes: &meerschaum_kernel::enforce::PipeDtypesContext) {
+            *self.dtypes.lock().unwrap_or_else(|e| e.into_inner()) = Some(dtypes.clone());
+        }
+    }
+
+    let opts = InplaceSyncOptions {
+        begin: match &args.begin {
+            SyncBegin::Default => InplaceBegin::Default,
+            SyncBegin::Unbounded => InplaceBegin::Unbounded,
+            SyncBegin::At(b) => InplaceBegin::At(b.clone()),
+        },
+        end: args.end.clone(),
+        params: args.params.clone(),
+        check_existing: args.check_existing,
+        replace: replacing,
+    };
+    let delta_observer = observer.filter(|o| o.records_deltas());
+    let ledger = delta_observer.map(|obs| InplaceLedger {
+        pipe,
+        observer: obs,
+        dtypes: std::sync::Mutex::new(None),
+    });
+    let raw = instance
+        .sync_pipe_inplace(
+            pipe,
+            &opts,
+            ledger.as_ref().map(|l| l as &dyn InplaceObserver),
+        )
+        .await;
+    let mut result = result_from_message(raw.success, raw.message);
+    if result.success
+        && let Some(obs) = delta_observer
+        && let Err(e) = obs.after_commit(pipe, &result).await
+    {
+        result = fail(e);
     }
     result
 }

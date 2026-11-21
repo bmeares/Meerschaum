@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-`from meerschaum.utils.cache import cache` (rc15 Q33): the decorator, `get`/`set`/`delete`/`clear`,
+`from meerschaum.utils.cache import cache`: the decorator, `get`/`set`/`delete`/`clear`,
 safe serialization (JSON plus dates, Decimal, UUID, bytes and DataFrames; never pickle), TTLs, a
 bounded memory store, invalidation by a listed pipe's recorded syncs, Valkey when the configured
 connector answers (and a one-time warning in the API host when it does not).

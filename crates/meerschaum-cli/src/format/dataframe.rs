@@ -1,4 +1,4 @@
-//! `show data` for pretty mode: the pandas-style truncated view of a DataFrame (wave 18).
+//! `show data` for pretty mode: the pandas-style truncated view of a DataFrame.
 //!
 //! v4 printed every row, column and cell (`format_dataframe`, a Markdown pipe table). The
 //! truncated view keeps that table and bounds it like `pandas.set_option` does: more than

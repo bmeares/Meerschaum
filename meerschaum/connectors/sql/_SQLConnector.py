@@ -577,7 +577,7 @@ class SQLConnector(InstanceConnector):
         pool and SQLAlchemy both open (`_shared_memory_database`), so `Pipe` methods and
         `read()` / `exec()` / `.engine` see the same tables.
         `read`, `exec`, `exec_queries`, `value` and `to_sql` run on this connector too (raw SQL,
-        rc15 Q53, `_native.NATIVE_SQL_FLAVORS`); only `.engine` (and the calls that hand out or take
+        `_native.NATIVE_SQL_FLAVORS`); only `.engine` (and the calls that hand out or take
         SQLAlchemy objects) stays SQLAlchemy.
 
         The Rust connector (and its pool) is built once per process: a forked child (a job
@@ -699,7 +699,7 @@ class SQLConnector(InstanceConnector):
         return self
 
 
-### The next step when the untouched default `sql:main` cannot be reached (rc15 Q9): the CLI's
+### The next step when the untouched default `sql:main` cannot be reached: the CLI's
 ### `DEFAULT_INSTANCE_HINT` (`crates/meerschaum-cli/src/native/connectors.rs`), for Python.
 DEFAULT_INSTANCE_HINT: str = (
     "Start the database with `mrsm stack up -d db`, or use the built-in SQLite instance "

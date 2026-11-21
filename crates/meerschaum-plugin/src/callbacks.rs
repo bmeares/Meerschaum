@@ -1255,6 +1255,9 @@ pub(crate) unsafe extern "C" fn invoke_host(
         }
         // SAFETY: HostContext and the stream are pinned by invoke_with_host for this call.
         let context = unsafe { &*context.cast::<HostContext<'_>>() };
+        // SAFETY: a non-empty `method` has a non-null pointer (checked above), and the plugin
+        // keeps the borrowed bytes alive through this synchronous call (`Bytes`' contract); the
+        // slice is only read before this call returns.
         let call = HostCall::decode(context.plugin, unsafe { method.as_slice() })?;
         // SAFETY: the stream is moved out once and replaced with an empty stream.
         let data = sdk::frame(unsafe { FFI_ArrowArrayStream::from_raw(stream) })?;
@@ -1279,9 +1282,12 @@ mod tests {
 
     #[test]
     fn validates_the_host_prefix_before_reading_callbacks() {
+        // SAFETY: `enter` checks for null before reading anything.
         assert!(unsafe { enter(std::ptr::null()) }.is_err());
         for prefix in [[99_u32, 8], [1, 8]] {
             // A short prefix is all that may be inspected when its version/size is wrong.
+            // SAFETY: `prefix` is a live 8-byte, u32-aligned array, which is exactly the
+            // two-u32 prefix `enter` reads before refusing a wrong version or a short size.
             assert!(unsafe { enter(prefix.as_ptr().cast()) }.is_err());
         }
     }
@@ -1310,6 +1316,8 @@ mod tests {
             invoke: invoke_host,
             free_bytes: sdk::free_bytes,
         };
+        // SAFETY: `table` is a complete v1 table whose `context` points at the live `context`
+        // above; both outlive `_scope`, which is declared after them and so dropped first.
         let _scope = unsafe { enter(&table) }.unwrap();
         f()
     }
@@ -1335,12 +1343,16 @@ mod tests {
             invoke: invoke_host,
             free_bytes: sdk::free_bytes,
         };
+        // SAFETY: `table` and the `context` it points to are locals that outlive `scope`
+        // (dropped explicitly below).
         let scope = unsafe { enter(&table) }.unwrap();
         let pipe = request.pipe().unwrap();
         assert_eq!(pipe.get_sync_time().unwrap(), Some(Bound::Int(7)));
         drop(scope);
         assert!(pipe.get_sync_time().is_err());
         assert!(crate::host::plugin_config().is_err());
+        // SAFETY: as above; `_next` is declared after `table` and `context`, so it is dropped
+        // before them.
         let _next = unsafe { enter(&table) }.unwrap();
         // Even if the host context has exactly the same address, a prior view is expired.
         assert!(pipe.get_sync_time().is_err());

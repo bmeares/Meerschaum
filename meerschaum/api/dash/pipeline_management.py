@@ -118,7 +118,7 @@ MANAGE_ITEMS = (
 def pipeline_rights(viewer, name, registry):
     """
     What the viewer may do on a Pipeline's page: `sync`, `edit`, and each Manage item (every
-    member visible and theirs to change for the ones that touch members; AC7).
+    member visible and theirs to change for the ones that touch members).
     """
     from meerschaum.api.dash import access
     rights = {key: False for key in ('sync', 'edit') + tuple(item for item, _, _ in MANAGE_ITEMS)}

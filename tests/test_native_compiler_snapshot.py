@@ -127,6 +127,41 @@ class SnapshotAssembly(unittest.TestCase):
             self.assemble()
         self.assertEqual(output.joinpath("operator-file").read_text(), "keep")
 
+    def test_split_material_and_policy_match_combined_assembly(self):
+        combined, combined_id = self.assemble("combined")
+        material_pins = {k: v for k, v in self.pins.items() if k != "release"}
+        material_pinfile = self.root / "material-pins.json"
+        material_pinfile.write_bytes(snapshot.encoded(material_pins))
+        material_out = self.root / "material"
+        material_id = snapshot.assemble_material(
+            self.toolchain, self.vendor, self.lock, material_pinfile, material_out
+        )
+        self.assertEqual(material_id, combined_id)
+        self.assertFalse(material_out.joinpath(snapshot.POLICY).exists())
+
+        policy_out = self.root / "policy"
+        policy_id = snapshot.write_policy(material_out, "5.1.0", "x86_64", policy_out)
+        self.assertEqual(policy_id, combined_id)
+        self.assertEqual(
+            policy_out.joinpath(snapshot.POLICY).read_bytes(),
+            combined.joinpath(snapshot.POLICY).read_bytes(),
+        )
+        self.assertEqual(stat.S_IMODE(policy_out.joinpath(snapshot.POLICY).stat().st_mode), 0o444)
+        self.assertEqual(policy_out.joinpath(snapshot.POLICY).stat().st_mtime_ns, 0)
+
+        # Updating the release version only regenerates the tiny policy, never the snapshot.
+        policy_next = self.root / "policy-next"
+        self.assertEqual(snapshot.write_policy(material_out, "5.1.1", "x86_64", policy_next), combined_id)
+        self.assertEqual(json.loads(policy_next.joinpath(snapshot.POLICY).read_bytes())["release"], "5.1.1")
+
+        # Invalid release or mismatched architecture is refused with no partial output.
+        with self.assertRaisesRegex(ValueError, "release pin"):
+            snapshot.write_policy(material_out, "not-a-release", "x86_64", self.root / "bad-rel")
+        self.assertFalse(self.root.joinpath("bad-rel").exists())
+        with self.assertRaisesRegex(ValueError, "architecture"):
+            snapshot.write_policy(material_out, "5.1.1", "aarch64", self.root / "bad-arch")
+        self.assertFalse(self.root.joinpath("bad-arch").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

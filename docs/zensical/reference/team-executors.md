@@ -95,12 +95,12 @@ execution:
 
 ## Provision a Stack executor
 
-Stack executors require a same-release standalone native `mrsm` image (`bmeares/meerschaum:5.1.1-full` by default). Override in `stack.yaml`:
+Stack executors require a same-release standalone native `mrsm` image (`bmeares/meerschaum:5.1.2-full` by default). Override in `stack.yaml`:
 
 ```yaml
 # Stack configuration: stack.yaml
 executor:
-  image: registry.example/meerschaum-executor:5.1.1
+  image: registry.example/meerschaum-executor:5.1.2
 ```
 
 Register the team with `POST /teams/wetlands/register` (or `PATCH /teams/wetlands/edit`, preserving existing `attributes` keys):

@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-Who a job belongs to, and who may see it (rc15 decision AC9), through `meerschaum.jobs`:
+Who a job belongs to, and who may see it, through `meerschaum.jobs`:
 `job.owner`, `job.team`, `filter_visible_jobs`, `ownership_properties`, `get_team_jobs`,
 `move_team_jobs`, a team rename or deletion moving its jobs (`mrsm.Team`), and a job started by
 another job belonging to that job's owner.
@@ -193,7 +193,7 @@ def test_renaming_or_deleting_a_team_moves_its_jobs(make_job, sqlite_instance):
 
 
 def test_a_job_deleted_right_after_it_was_created_stays_deleted():
-    """The detached supervisor never recreates a deleted job's directory (wave-1 gate)."""
+    """The detached supervisor never recreates a deleted job's directory."""
     names = []
     for _ in range(3):
         job = Job(_name('quick'), ['show', 'version'], executor_keys='local')

@@ -1,4 +1,4 @@
-//! Every rule of the access model (contract K1).
+//! Every rule of the access model.
 
 use super::*;
 

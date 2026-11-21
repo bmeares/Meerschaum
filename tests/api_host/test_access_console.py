@@ -3,8 +3,8 @@
 # vim:fenc=utf-8
 
 """
-The web console's access model (rc15 wave 2: AC1, AC2, AC4, AC5, AC7, AC11, AC13), in process on
-the sandbox's SQLite instance, as real users with real console sessions (`SIGN_IN`):
+The web console's access model, in process on the sandbox's SQLite instance, as real users with
+real console sessions (`SIGN_IN`):
 
 - each role sees the pages, buttons and pipes it may (Viewer, Editor, Operator, a team's manager,
   a team's member, another team's member, an administrator), and a hidden pipe's keys never reach
@@ -13,7 +13,8 @@ the sandbox's SQLite instance, as real users with real console sessions (`SIGN_I
   Sync and says how to unlock;
 - New pipe gives the pipe the viewer's access (owner, primary team) and refuses a team the
   viewer is not in;
-- Users & Teams: the Email column and addresses follow AC13; teams are an administrator's to
+- Users & Teams: the Email column and addresses show only to administrators and a team's
+  managers; teams are an administrator's to
   create, rename and delete, and their managers' to fill;
 - a new instance's login page creates the first account as an administrator, once;
 - Pipelines and runs show only what the viewer may see (hidden members are a count).
@@ -23,13 +24,7 @@ the sandbox's SQLite instance, as real users with real console sessions (`SIGN_I
 
 import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-6000:]
-    line = [line for line in result.stdout.splitlines() if line.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json
 
 
 #: The users and pipes of these tests (registered once per sandbox; every test may run alone).
@@ -76,6 +71,7 @@ def trigger(prop_id, value=1):
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash import access, pipes_table, pipe_detail, components
+from meerschaum.api.dash import teams as team_records
 '''
 
 
@@ -86,7 +82,7 @@ def test_each_viewer_sees_the_pipes_and_pages_its_role_and_teams_allow(sandbox):
     navigation leaves out what a viewer may not use.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from unittest import mock
 import plotly.utils
 from meerschaum.api.dash import overview
@@ -96,7 +92,7 @@ import meerschaum.api.dash.webterm as webterm
 out = {'permissions': {}, 'rows': {}, 'options': {}, 'overview': {}, 'nav': {}, 'leaks': {},
        'team_column': {}}
 for who, session in SESSIONS.items():
-    viewer = access.get_viewer(session)
+    viewer = access.resolve_viewer(session)
     out['permissions'][who] = sorted(viewer.permissions)
     trigger('pipes-location.search', '?connector_keys=ac%3Asrc')
     meta = {'instance': INSTANCE, 'global': INSTANCE}
@@ -160,7 +156,7 @@ def test_a_pipe_page_shows_what_the_viewer_may_do_and_hides_another_teams_pipe(s
     and administrators; a pipe the viewer may not see reads as not registered (no actions).
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash.callbacks import pipes as callbacks
 
 ACTIONS = ('pipe-action-sync', 'pipe-action-verify', 'pipe-edit-toggle', 'pipe-manage-copy',
@@ -186,7 +182,7 @@ def ids(component):
 
 def page(who, name):
     pipe = PIPES[name]
-    viewer = access.get_viewer(SESSIONS[who])
+    viewer = access.resolve_viewer(SESSIONS[who])
     layout = pipe_detail.layout(pipe.connector_keys, pipe.metric_key, pipe.location_key, INSTANCE,
                                 INSTANCE, viewer=viewer)
     return layout
@@ -237,7 +233,7 @@ def test_access_and_locks_are_checked_on_the_server_and_a_lock_says_how_to_unloc
     asks, the administrator included) with the pipe, the lock and Manage > Locks.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash.callbacks import pipes as callbacks
 pipe = make('ac_dialogs', {'team': 'data'})
 meta = pipe_detail.meta_of(pipe)
@@ -319,15 +315,15 @@ def test_new_pipe_belongs_to_its_viewer_and_their_team(sandbox):
     reserved for other teams (`teams:`) is not offered and refused.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import os
 from meerschaum.api.dash import new_pipe
 from meerschaum.api.dash.callbacks import pipes as callbacks
 out = {}
-member = access.get_viewer(SESSIONS['member'])
+member = access.resolve_viewer(SESSIONS['member'])
 options, value = new_pipe.team_options(member)
 out['team_options'] = [[o['value'] for o in options], value]
-out['team_options_editor'] = [o['value'] for o in new_pipe.team_options(access.get_viewer(SESSIONS['editor']))[0]]
+out['team_options_editor'] = [o['value'] for o in new_pipe.team_options(access.resolve_viewer(SESSIONS['editor']))[0]]
 
 def register(who, mk, team, visibility='team', connector='ac:src'):
     trigger('new-pipe-register.n_clicks')
@@ -347,7 +343,7 @@ from meerschaum.connectors import get_connector
 get_connector('sql', 'acopsonly', flavor='sqlite', database=os.path.join(os.getcwd(), 'acops.db'), teams=['ops'])
 out['usable'] = [
     'sql:acopsonly' in new_pipe.usable_connectors(['sql:acopsonly', 'ac:src'], member),
-    'sql:acopsonly' in new_pipe.usable_connectors(['sql:acopsonly', 'ac:src'], access.get_viewer(SESSIONS['other'])),
+    'sql:acopsonly' in new_pipe.usable_connectors(['sql:acopsonly', 'ac:src'], access.resolve_viewer(SESSIONS['other'])),
 ]
 out['teams_refused'] = str(register('member', 'ac_new_teams', 'data', connector='sql:acopsonly')[0])
 print('JSON:' + json.dumps(out, default=str))
@@ -365,13 +361,13 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_users_and_teams_follow_the_email_rule_and_team_roles(sandbox):
     """
-    Users & Teams (AC11, AC13): an administrator sees every user with Type, Role and Email; a
+    Users & Teams: an administrator sees every user with Type, Role and Email; a
     team's manager sees its members with their emails (and nobody else's); a member sees the
     members of their teams without emails; only administrators create, rename and delete teams;
     managers change their team's members; deleting a team says what moves to Everyone.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.core import User
 from meerschaum.api.dash import users
 from meerschaum.api.dash.callbacks import users as cu
@@ -381,7 +377,7 @@ for name, email in (('ac-member', 'member@example.com'), ('ac-other', 'other@exa
 
 import plotly.utils
 def listing(who):
-    info = users.viewer(SESSIONS[who])
+    info = access.resolve_viewer(SESSIONS[who], fresh=True)
     table, _, total = users.build_users_listing('', 1, viewer_info=info)
     return json.dumps(table, cls=plotly.utils.PlotlyJSONEncoder)
 
@@ -405,7 +401,7 @@ def call(fn, *args):
 trigger('teams-new-submit.n_clicks')
 out['create_admin'] = call(cu.submit_new_team, 1, 'ac-crew', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['admin'])[0]
 out['create_manager'] = str(call(cu.submit_new_team, 1, 'ac-crew2', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['manager'])[1])
-out['teams'] = access.team_names(conn)
+out['teams'] = team_records.team_names(conn)
 trigger('teams-new-submit.n_clicks')
 out['create_everyone'] = str(call(cu.submit_new_team, 1, 'everyone', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['admin'])[1])
 ### Members: the manager of `data` adds a member there, not to `ac-crew`.
@@ -445,12 +441,12 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_a_new_instance_creates_its_first_admin_from_the_login_page_once(sandbox):
     """
-    AC1: while the API's user store has no users, the login page is Create admin account, which
+    While the API's user store has no users, the login page is Create admin account, which
     makes the first account an administrator and signs it in; then the page is the login form,
     the form refuses a second first admin, and registration stays closed (no Create account).
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, extra_env={
+    out = extract_json(run_python(root, plugins, extra_env={
         'MRSM_SQL_ACFIRST': 'sqlite:///' + str(root / 'acfirst.db'),
         'MRSM_API_HOST_CONFIG': json.dumps({'mrsm_instance': 'sql:acfirst'}),
     }, code='''
@@ -490,15 +486,15 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_pipelines_and_runs_show_hidden_members_as_a_count(sandbox):
     """
-    AC7: a saved Pipeline with a member the viewer may not see lists that member only as a count,
+    A saved Pipeline with a member the viewer may not see lists that member only as a count,
     may not be run by them, and is hidden altogether when its registry pipe is another team's; the
     engine's views leave out or anonymize the pipes they may not see.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.core.Pipeline._saved import save_pipeline, registration as registry_pipe
 from meerschaum.api.dash import engine
-refs = [access._ref(INSTANCE, 'ac:src', 'ac_every', None), access._ref(INSTANCE, 'ac:src', 'ac_ops', None)]
+refs = [access.pipe_ref(INSTANCE, 'ac:src', 'ac_every', None), access.pipe_ref(INSTANCE, 'ac:src', 'ac_ops', None)]
 if 'ac-mixed' not in access.visible_pipelines(conn, viewer=access.SYSTEM):
     save_pipeline('ac-mixed', refs, INSTANCE)
 if 'ac-ops-only' not in access.visible_pipelines(conn, viewer=access.SYSTEM):
@@ -509,7 +505,7 @@ child = make('ac_ops_child', {'team': 'ops'})
 parent = make('ac_parent', children=["Pipe('ac:src', 'ac_ops_child')"])
 out = {}
 for who in ('member', 'other', 'admin'):
-    viewer = access.get_viewer(SESSIONS[who])
+    viewer = access.resolve_viewer(SESSIONS[who])
     pipelines = access.visible_pipelines(conn, viewer=viewer)
     out[who] = {
         name: [definition.get('targets'), definition.get('hidden_members', 0)]
@@ -541,15 +537,15 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_the_console_sql_guard_refuses_what_the_server_refuses(sandbox):
     """
-    AC8 in the console (`meerschaum.api.dash.sql_guard`, the server's rules): Meerschaum's own
-    tables, text-query functions, config references and the tables of pipes the viewer cannot
+    The SQL guard in the console (`meerschaum.api.dash.sql_guard`, the server's rules):
+    Meerschaum's own tables, text-query functions, config references and the tables of pipes the viewer cannot
     see (bare, quoted, qualified or in a string) are refused for non-administrators; catalog reads
     only while the instance has pipes they cannot see.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import sql_guard
-member = access.get_viewer(SESSIONS['member'])
+member = access.resolve_viewer(SESSIONS['member'])
 other_target = str(PIPES['ops'].target)
 cases = {
     'plain': 'SELECT * FROM my_table',

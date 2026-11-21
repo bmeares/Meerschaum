@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-Ctrl-C while a plugin action runs in a Python worker (wave 18, decision 1), in a real PTY with the
+Ctrl-C while a plugin action runs in a Python worker, in a real PTY with the
 standalone `mrsm`.
 
 The terminal gives Ctrl-C to every process of the foreground process group, so the worker's active

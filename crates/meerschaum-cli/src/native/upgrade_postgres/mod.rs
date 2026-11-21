@@ -933,7 +933,7 @@ pub(crate) fn prologue(rt: &mut Runtime<'_>, editing: bool) -> Result<(Stack, Lo
 mod tests {
     use super::*;
 
-    /// 5.1: the stack writer keeps the file as written and never writes what `MRSM_PATCH` holds.
+    /// The stack writer keeps the file as written and never writes what `MRSM_PATCH` holds.
     #[test]
     fn write_stack_config_never_writes_environment_secrets() {
         let root = tempfile::tempdir().unwrap();

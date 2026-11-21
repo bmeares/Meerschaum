@@ -23,18 +23,18 @@ BACKENDS = {
 BACKEND_PARAMETERS = {'flavor', 'pair', 'instance', 'other_instance', 'chain'}
 LIVE_MODULES = {
     'tests/test_valkey_connector.py': 'mssql-valkey',
-    'tests/test_w9u_pool_reuse.py': 'postgres',
+    'tests/test_connection_pool_reuse.py': 'postgres',
     'tests/test_index_queries.py': 'postgres',
 }
 LIVE_TESTS = {
     'tests/test_access.py::test_valkey_teams_locks_and_users': 'mssql-valkey',
     'tests/test_utils_cache.py::test_valkey_backend_is_shared': 'mssql-valkey',
-    'tests/test_f2_instance_features.py::test_protected_from_valkey_and_api_uris': 'mssql-valkey',
+    'tests/test_instance_features.py::test_protected_from_valkey_and_api_uris': 'mssql-valkey',
     'tests/test_native_sync.py::test_a_valkey_instance_syncs_natively': 'mssql-valkey',
     'tests/test_native_sync.py::test_postgres_numeric_special_values_read_back_like_v4': 'postgres',
     'tests/test_pipe_methods_native.py::test_remote_sync_time_of_a_valkey_source': 'mssql-valkey',
     'tests/test_facade_sql.py::test_a_roles_search_path_is_the_default_schema_without_sqlalchemy': 'postgres',
-    'tests/test_w17b_env_uri.py::test_postgresql_uri_reaches_the_test_container': 'postgres',
+    'tests/test_env_connector_uri.py::test_postgresql_uri_reaches_the_test_container': 'postgres',
 }
 # This deliberate invalid dialect exercises the error path without a database.
 INVALID_BACKENDS = {

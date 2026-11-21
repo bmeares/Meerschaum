@@ -747,7 +747,7 @@ mod tests {
             // Still running, or the config was never edited: nothing to start.
             ((false, false, true, true), false),
             ((false, false, false, false), false),
-            // A restore that began with `db` down: left down (this was the F6 case).
+            // A restore that began with `db` down: left down.
             ((false, true, true, false), false),
             ((false, true, false, false), false),
         ] {

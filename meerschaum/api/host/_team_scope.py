@@ -21,6 +21,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any, Dict, Optional
+from meerschaum.api.dash.viewer import register_invalidation_hook
 
 #: How long the team of a user is reused (the identity cache of the Rust server is as long).
 TTL_SECONDS: float = 5.0
@@ -119,10 +120,17 @@ def team_scope_of_user(username: Optional[str]) -> Optional[Dict[str, Any]]:
     return scope
 
 
-def forget() -> None:
-    """Drop the cached teams."""
+def forget(username: Optional[str] = None) -> None:
+    """Drop cached team scopes (for one user, or all)."""
     with _lock:
-        _cache.clear()
+        if username is None:
+            _cache.clear()
+        else:
+            _cache.pop(str(username), None)
+
+
+### A change of anyone's rights (`meerschaum.api.dash.viewer.forget`) drops their team scope too.
+register_invalidation_hook(forget)
 
 
 class TeamScopeMiddleware:

@@ -2,7 +2,7 @@
 
 import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 
 DYNAMIC_PLUGIN = '''
