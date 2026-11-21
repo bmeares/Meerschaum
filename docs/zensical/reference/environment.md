@@ -1,156 +1,106 @@
 # 🌳 Environment Variables
 
-You can manage the behavior of Meerschaum and emulate multiple installations with environment variables.
-
-The command `mrsm show environment` will print out your current set `MRSM_` variables. For example, running this command in the Web Console reveals how the configuration is managed to subprocesses by the web server.
+Manage Meerschaum's paths, configuration, and runtime behavior with environment variables. Run `mrsm show environment` to list active `MRSM_` variables, or `mrsm show config` to inspect the resolved configuration.
 
 <img src="/assets/screenshots/web-console-environment.png" alt="Meerschaum web console environment variables.">
 
 ## Summary
 
-Nearly all Meerschaum environment variables begin with the prefix `MRSM_`. The most commonly used variables are summarized below; each is described in detail later on this page.
-
 | Variable | Purpose | Default |
 |---|---|---|
-| `MRSM_ROOT_DIR` | Root directory holding all config, plugins, venvs, jobs, and cache. | `~/.config/meerschaum` (Windows: `%APPDATA%\Meerschaum`) |
-| `MRSM_CONFIG_DIR` | Directory for configuration files (isolate secrets from the root). | `$MRSM_ROOT_DIR/config` |
-| `MRSM_PLUGINS_DIR` | Directory (or colon-separated list / JSON list) for plugins. | `$MRSM_ROOT_DIR/plugins` |
-| `MRSM_VENVS_DIR` | Directory for virtual environments. | `$MRSM_ROOT_DIR/venvs` |
-| `MRSM_WORK_DIR` | Base directory under which the root directory is created when `MRSM_ROOT_DIR` is unset. | current working directory |
-| `MRSM_CONFIG` | Inline JSON or simplified-dictionary patch applied to the configuration. | _(unset)_ |
-| `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
-| `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` | A file holding what `MRSM_CONFIG` / `MRSM_PATCH` would hold (see [Secrets in configuration](#secrets-in-configuration)). | _(unset)_ |
-| `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). Only variables of an existing connector type are read. | _(unset)_ |
-| `MRSM_CONNECT_TIMEOUT` | Seconds to wait for the first connection of a SQL, API or Valkey connector; overrides every connector's `connect_timeout` attribute. | `5` |
-| `MRSM_RUNTIME` | Marks a special runtime (e.g. `docker`). | _(unset)_ |
-| `MRSM_NO_AUTO_INSTALL` | Disable every implicit package installation (imports, dependency checks, `uv`/`pip` bootstraps). | _(unset)_ |
+| `MRSM_ROOT_DIR` | Root directory for config, plugins, venvs, jobs, and cache. | `~/.config/meerschaum` (`%APPDATA%\Meerschaum` on Windows) |
+| `MRSM_CONFIG_DIR` | Config directory (isolates secrets from the root). | `$MRSM_ROOT_DIR/config` |
+| `MRSM_PLUGINS_DIR` | Plugin directory, colon-separated paths, or JSON list. | `$MRSM_ROOT_DIR/plugins` |
+| `MRSM_VENVS_DIR` | Virtual environments directory. | `$MRSM_ROOT_DIR/venvs` |
+| `MRSM_WORK_DIR` | Base directory when `MRSM_ROOT_DIR` is unset. | Current directory |
+| `MRSM_CONFIG` | Inline JSON or simplified-dict config patch. | _(unset)_ |
+| `MRSM_PATCH` | Patch applied *after* `MRSM_CONFIG`. | _(unset)_ |
+| `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` | File holding a `MRSM_CONFIG` / `MRSM_PATCH` payload. | _(unset)_ |
+| `MRSM_<TYPE>_<LABEL>` | Connector URI or JSON object (e.g. `MRSM_SQL_MAIN`). | _(unset)_ |
+| `MRSM_CONNECT_TIMEOUT` | First-connection timeout (seconds) for SQL, API, and Valkey. | `5` |
+| `MRSM_NO_AUTO_INSTALL` | Disable all implicit package and driver installs. | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
-| `MRSM_ALLOW_PROTECTED` | `1` allows writes to connectors marked `protected: true` for this process and its children (like `--allow-protected`). | _(unset)_ |
-| `MRSM_DATAFRAME` | `polars` or `pandas`: the DataFrame library Python APIs return, for this process and the jobs and workers it starts (overrides `meerschaum:dataframe`). | _(unset: `dataframe` in `meerschaum.yaml`)_ |
-| `MRSM_DUCKDB_LIB` | Path to DuckDB's shared library; explicitly selects the native C API and prevents mixed Python SQLAlchemy access. | _(unset: Python driver when installed; otherwise native library lookup)_ |
-| `MRSM_BIN` | Run a standalone `mrsm` binary instead of the in-process CLI of the Python package. | _(unset)_ |
-| `MRSM_PYTHON` | The Python interpreter the binary runs plugin workers and `upgrade meerschaum` with. | _(auto-detected)_ |
-| `MRSM_WORKER_STARTUP_TIMEOUT` | Seconds a Python worker may take to connect and say hello before it is killed and refused (for 10 s only). | `60` |
-| `NO_COLOR` | Any non-empty value prints plain text, without colors or other styles (see [Colors and Plain Output](/reference/actions/#colors-and-plain-output)). | _(unset)_ |
-| `FORCE_COLOR` | Style the output even when it does not go to a terminal (any value but `0`, `false` or `no`). | _(unset: styles only on a terminal and in jobs)_ |
+| `MRSM_ALLOW_PROTECTED` | `1` allows writes to `protected: true` connectors. | _(unset)_ |
+| `MRSM_DATAFRAME` | `polars` or `pandas` for Python APIs. | _(config value)_ |
+| `MRSM_DUCKDB_LIB` | Path to `libduckdb`; forces the native C API. | _(auto)_ |
+| `MRSM_BIN` | Standalone `mrsm` binary path for the Python launcher. | _(unset)_ |
+| `MRSM_PYTHON` | Python interpreter for standalone binary workers/upgrades. | _(auto-detected)_ |
+| `MRSM_WORKER_STARTUP_TIMEOUT` | Python worker startup timeout (seconds). | `60` |
+| `MRSM_RUNTIME` | Special runtime marker (e.g. `docker`). | _(unset)_ |
+| `NO_COLOR` / `FORCE_COLOR` | Disable or force terminal styles (`0`/`false`/`no` ignored for `FORCE_COLOR`). | _(unset)_ |
 
-!!! tip "Inspecting your environment"
-    Run `mrsm show environment` to list every currently set `MRSM_` variable. Run `mrsm show config` to inspect the resolved configuration after all patches and connectors have been applied.
+## `MRSM_ROOT_DIR`
 
-## **`MRSM_ROOT_DIR`**
-
-By default, your root Meerschaum directory is located in `~/.config/meerschaum` (Windows: `%APPDATA%\Meerschaum`). This is similar to how your base `pip` environment behaves: with `pip`, you isolate packages in virtual environments, and with Meerschaum, you can create an isolated environment by specifying an alternative root directory. This will recreate your configuration files and virtual environments as if you were running a clean installation.
+Override the default root (`~/.config/meerschaum`, or `%APPDATA%\Meerschaum` on Windows) to isolate configuration, plugins, and virtual environments.
 
 ```bash
 mkdir foo
-MRSM_ROOT_DIR=foo \
-  mrsm show environment
+MRSM_ROOT_DIR=foo mrsm show environment
 ```
 
-## **`MRSM_CONFIG_DIR`**
+## `MRSM_CONFIG_DIR`
 
-Not to be confused with `MRSM_CONFIG`, setting `MRSM_CONFIG_DIR` allows you to designate a separate directory outside of the root to isolate your secrets and segment your configuration. If unset, the default directory is `$MRSM_ROOT_DIR/config`.
+Store configuration files outside `MRSM_ROOT_DIR` to separate secrets from data and venvs. Defaults to `$MRSM_ROOT_DIR/config`.
 
-## **`MRSM_PLUGINS_DIR`**
+## `MRSM_PLUGINS_DIR`
 
-Like `MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR` lets you isolate your plugins, e.g. if you wanted to manage your plugins in a version control system like `git`.
-
-```bash
-mkdir plugins
-touch plugins/example.py
-
-MRSM_PLUGINS_DIR=plugins \
-  mrsm show plugins
-```
-
-### Multiple Plugins Directories
-
-To allow you to group plugins together, Meerschaum supports loading multiple plugins directories at once. Simply separate the paths with a colon like you would for `$PATH`:
+Point Meerschaum at one or more custom plugin directories (handy for keeping plugins in `git`). Separate multiple paths with `:` or pass a JSON array:
 
 ```bash
+MRSM_PLUGINS_DIR=plugins mrsm show plugins
 export MRSM_PLUGINS_DIR='./plugins:/another/plugins/path'
+export MRSM_PLUGINS_DIR='["./plugins", "/another/plugins/path"]'
 ```
 
-You could also set `MRSM_PLUGINS_DIR` to a JSON-encoded list of paths:
+## `MRSM_VENVS_DIR`
 
-```bash
-export MRSM_PLUGINS_DIR='[
-    "./plugins",
-    "/another/plugins/path"
-]'
-```
-
-## **`MRSM_VENVS_DIR`**
-
-Like `MRSM_PLUGINS_DIR`, you can designate a separate directory outside of the Meerschaum root to contain virtual environments. This is useful for sharing virtual environments between deployments as well as separating package data from user data (e.g. Kubernetes deployments).
+Place virtual environments outside `MRSM_ROOT_DIR`, e.g. to share packages across containers.
 
 ```bash
 MRSM_VENVS_DIR='venvs/' mrsm show plugins
 ```
 
-## **`MRSM_WORK_DIR`**
+## `MRSM_WORK_DIR`
 
-`MRSM_WORK_DIR` designates the base working directory under which the root directory is located when `MRSM_ROOT_DIR` is not explicitly set. This is primarily useful for containerized deployments where the process is launched from a known location.
+Base working directory under which the root directory is created when `MRSM_ROOT_DIR` is unset (mainly for containers).
 
-## **`MRSM_<TYPE>_<LABEL>`**
+## `MRSM_<TYPE>_<LABEL>`
 
-You can temporarily register new connectors in a variable in the form `MRSM_<TYPE>_<LABEL>`, where `<TYPE>` is the connector type, and `<LABEL>` is the label for the connector (converted to lower case). Check here for more information about [environment connectors](/reference/connectors/#environment-connectors), but in a nutshell, set the variable to the [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) of your connector.
-
-```bash
-MRSM_SQL_FOO=sqlite:////tmp/temp.db \
-MRSM_API_BAR=http://user:pass@localhost:8000 \
-  mrsm show connectors
-```
-
-Common examples are the default connectors `sql:main` and `api:main`:
+Define a connector from the environment using a [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) or JSON attributes (`<LABEL>` is lowercased). See [Environment Connectors](/reference/connectors/#environment-connectors).
 
 ```bash
 MRSM_SQL_MAIN=postgresql://user:pass@localhost:5432/db \
-MRSM_API_MAIN=https://user:pass@api.example.com \
+MRSM_API_BAR=https://user:pass@api.example.com \
   mrsm show connectors
-```
 
-You may also set the variable to a JSON object of connector attributes instead of a URI:
-
-```bash
 MRSM_SQL_FOO='{"flavor": "sqlite", "database": "/tmp/temp.db"}' \
   mrsm show connectors
 ```
 
-!!! note "Reserved names"
-    Names that match the reserved Meerschaum variables (e.g. `MRSM_ROOT_DIR`, `MRSM_CONFIG`) are *not* interpreted as connectors.
+!!! note "Only real connector types are read"
+    Reserved variables (`MRSM_ROOT_DIR`, `MRSM_CONFIG`, etc.) and unknown `<TYPE>` prefixes (like `MRSM_DUCKDB_LIB`) are ignored. Only built-in types (`sql`, `api`, `valkey`, `plugin`, `systemd`) and `@make_connector` types become connectors.
 
-!!! note "Only real connector types"
-    Only a variable whose `<TYPE>` is a connector type that exists becomes a connector: the built-in types (`sql`, `api`, `valkey`, `plugin`, `systemd`) and the types your plugins register with `@make_connector`. Any other `MRSM_<X>_<Y>` variable (`MRSM_DUCKDB_LIB`, `MRSM_TEST_PG_URI`, a variable a plugin reads itself) is ignored instead of turning into a connector such as `duckdb:lib` (as it did in v4).
+## `MRSM_CONNECT_TIMEOUT`
 
-## **`MRSM_CONNECT_TIMEOUT`**
-
-A SQL, API or Valkey connector fails fast when its server cannot be reached. The first connection a command makes reports a refused connection, an unknown host or rejected credentials at once (`sql:main: cannot connect to localhost:5432 (connection refused). Is the database running?`), and gives up on a host that does not answer after `connect_timeout` seconds (5 by default). Set the `connect_timeout` attribute on a connector to change it for that connector, or `MRSM_CONNECT_TIMEOUT` to change it for all of them:
+SQL, API, and Valkey connectors fail fast on their first connection: refused connections, DNS failures, and rejected credentials error immediately, and silent hosts time out after `connect_timeout` seconds (default `5`). Override globally with `MRSM_CONNECT_TIMEOUT` (established jobs still retry):
 
 ```bash
 MRSM_CONNECT_TIMEOUT=2 mrsm show pipes -i sql:main
 ```
 
-A long-running job that loses a connection it had already established keeps retrying as before.
+## `MRSM_CONFIG`
 
-## **`MRSM_CONFIG`**
-
-You may patch your existing configuration with `MRSM_CONFIG`. Simply set the variable to JSON or a simplified dictionary. Remember you may symlink to other keys in your configuration (see [`MRSM{}` config symlinks](#mrsm-config-symlinks) below).
+Patch configuration inline with JSON or a simplified dictionary. Values support [`MRSM{}` config symlinks](#mrsm-config-symlinks).
 
 ```bash
-MRSM_CONFIG='{"foo": {"bar": 123}}' \
-  mrsm show config foo
-
-MRSM_CONFIG='foo:123' \
-  mrsm show config foo
-
-MRSM_CONFIG='foo:MRSM{meerschaum:connectors:sql:main:password}' \
-  mrsm show config foo
+MRSM_CONFIG='{"foo": {"bar": 123}}' mrsm show config foo
+MRSM_CONFIG='foo:123' mrsm show config foo
+MRSM_CONFIG='foo:MRSM{meerschaum:connectors:sql:main:password}' mrsm show config foo
 ```
 
-## **`MRSM_PATCH`**
+## `MRSM_PATCH`
 
-The variable `MRSM_PATCH` behaves the same way as `MRSM_CONFIG`. The difference is that `MRSM_PATCH` is applied to your configuration *after* `MRSM_CONFIG`, so you may symlink to keys defined in `MRSM_CONFIG`.
+Applied *after* `MRSM_CONFIG` using the same syntax, so it can reference keys defined in `MRSM_CONFIG`:
 
 ```bash
 MRSM_CONFIG='{"foo": {"bar": 123}}' \
@@ -158,9 +108,9 @@ MRSM_PATCH='baz:MRSM{foo:bar}' \
   mrsm show config baz
 ```
 
-## **`MRSM_CONFIG_FILE`** / **`MRSM_PATCH_FILE`**
+## `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`
 
-A path to a file whose contents are what `MRSM_CONFIG` (or `MRSM_PATCH`) would hold, parsed the same way (JSON or a simplified dictionary). A relative path is relative to the working directory. Use them to keep a patch with credentials out of the process environment (`ps e`, `/proc/<pid>/environ`, `docker inspect`), for example in a file only its owner can read:
+Read a `MRSM_CONFIG` or `MRSM_PATCH` payload from a file (relative paths resolve from cwd) to keep secrets out of `ps e`, `/proc/<pid>/environ`, and `docker inspect`:
 
 ```bash
 install -m 600 /dev/null ~/.config/mrsm-patch.json
@@ -169,154 +119,77 @@ echo '{"meerschaum": {"connectors": {"sql": {"main": {"host": "db.example"}}}}}'
 MRSM_CONFIG_FILE=~/.config/mrsm-patch.json mrsm show connectors sql
 ```
 
-- Setting a variable and its `_FILE` form (`MRSM_CONFIG` and `MRSM_CONFIG_FILE`) is an error at startup that names both. An empty `_FILE` variable counts as unset.
-- Jobs, workers and the API server that Meerschaum starts inherit the variable and read the same file.
-- There is no `MRSM_<TYPE>_<LABEL>_FILE`: `MRSM_SQL_MAIN_FILE` defines the connector `sql:main_file`, as it always has. Put a connector's password in its own attribute with an [`MRSM{file:...}`](#secrets-in-configuration) reference instead.
+- Setting both `MRSM_CONFIG` and `MRSM_CONFIG_FILE` (or the `PATCH` pair) is a startup error.
+- Spawned jobs, workers, and API servers inherit the variable and read the same file.
+- There is no `MRSM_<TYPE>_<LABEL>_FILE` (`MRSM_SQL_MAIN_FILE` defines `sql:main_file`). Use [`MRSM{file:...}`](#secrets-in-configuration) on the `password` attribute instead.
 
-## **`MRSM_RUNTIME`**
+## `MRSM_NO_AUTO_INSTALL`
 
-`MRSM_RUNTIME` marks a special runtime context. For example, `MRSM_RUNTIME=docker` is set inside the official Docker image. You typically do not need to set this yourself.
-
-## **`MRSM_NOASK` / `MRSM_NONINTERACTIVE`**
-
-Set either of these to disable interactive prompts. When set, Meerschaum assumes default answers (equivalent to passing `--noask` / `--yes`), which is useful for automation and CI pipelines.
-
-```bash
-MRSM_NOASK=1 mrsm bootstrap pipes
-```
-
-## **`MRSM_ALLOW_PROTECTED`**
-
-Connectors marked `protected: true` refuse every change (see
-[Protected Connectors](/reference/connectors/#protected-connectors)). Set
-`MRSM_ALLOW_PROTECTED=1` to allow writes for a process and the processes it starts, for example
-a server whose instance is protected:
-
-```bash
-MRSM_ALLOW_PROTECTED=1 mrsm start api
-```
-
-For one command, `--allow-protected` does the same. `-y` / `--yes` never does.
-
-## **`MRSM_DATAFRAME`**
-
-Every Python API that returns a DataFrame (`pipe.get_data()`, `conn.read()`, `pipe.fetch()`,
-`Plan.to_dataframe()`, the frames handed to plugin code) returns the library of `dataframe` in
-`meerschaum.yaml`: `polars` for a new root, `pandas` for a root created before 5.0.0rc15 (see
-[DataFrame library](/reference/pipes/reading/#dataframe-library)). `MRSM_DATAFRAME` overrides it
-for a process, the jobs it starts and the Python workers it runs plugins in:
-
-```bash
-MRSM_DATAFRAME=pandas python my_report.py
-```
-
-`as_polars=True` / `as_pandas=True` on a call override both. Any other value is an error that names
-the variable.
-
-## **`MRSM_NO_AUTO_INSTALL`**
-
-Meerschaum normally installs a missing optional dependency when a feature first imports it. Set
-`MRSM_NO_AUTO_INSTALL=1` for locked-down, offline, or reproducible environments. Missing packages
-will be reported instead of downloaded; otherwise Meerschaum warns before the first automatic download
-in each process. Install the dependency group before starting Meerschaum.
-
-The variable covers every implicit installation: `attempt_import()`, the dependency version checks
-(which never install a version parser), creating a virtual environment (no `uv venv --seed`), the
-API host, and the DuckDB library download (see [`MRSM_DUCKDB_LIB`](#mrsm_duckdb_lib)), including
-DuckDB's own extension auto-install. Installs you ask for, such as `mrsm install packages` or `pip_install()` from your
-own code, still run, but never bootstrap `uv`, `pip` or `wheel` for themselves.
+Set `MRSM_NO_AUTO_INSTALL=1` in offline or locked-down environments to block **all** implicit installs—`attempt_import()`, version checks, venv seeding (`uv venv --seed`), API host installs, and DuckDB library/extension downloads. Explicit installs (`mrsm install packages`, `pip_install()`) still run without bootstrapping `uv`, `pip`, or `wheel`.
 
 ```bash
 MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
 ```
 
-## **`MRSM_DUCKDB_LIB`**
+## `MRSM_DUCKDB_LIB`
 
-Python hosts with `meerschaum[sql-duckdb]` installed and this variable unset share the public Python
-DuckDB driver between Rust Pipe operations and SQLAlchemy. An explicit `MRSM_DUCKDB_LIB` selects
-the native C API instead. SQLAlchemy access is refused in that process to prevent separate database
-instances from losing writes. Unset the variable and restart the interpreter to use both interfaces.
-Restart after installing the extra if the process already selected the native driver.
+Python hosts with `meerschaum[sql-duckdb]` and `MRSM_DUCKDB_LIB` unset share the Python DuckDB driver across Rust Pipe operations and SQLAlchemy. Setting `MRSM_DUCKDB_LIB` selects the native C API and blocks mixed SQLAlchemy access (unset and restart to use both).
 
-The standalone binary and Python hosts using the native C API load DuckDB's own shared library
-(`libduckdb.so`, `libduckdb.dylib` or `duckdb.dll`, version 1.4 or newer) at run time.
-Meerschaum looks for it in this order:
-
-1. `MRSM_DUCKDB_LIB`, a path to the file (for air-gapped hosts; a library that fails to load is an error);
-2. the cache under `<root>/drivers/`;
-3. the system library path;
-4. a checksum-verified download of the official release, unless `MRSM_NO_AUTO_INSTALL` is set.
+Standalone binaries and native C API runs locate `libduckdb` (v1.4+) in order: `MRSM_DUCKDB_LIB` → `<root>/drivers/` cache → system library path → checksum-verified download (unless `MRSM_NO_AUTO_INSTALL=1`).
 
 ```bash
 MRSM_DUCKDB_LIB=/opt/duckdb/libduckdb.so mrsm show drivers
 ```
 
-Run `mrsm show drivers` to see where the library comes from, and `mrsm install driver duckdb` /
-`mrsm uninstall driver duckdb` to manage the cached copy.
+Manage the cached library with `mrsm install driver duckdb` and `mrsm uninstall driver duckdb`. For per-connection options the C API cannot honor (like `access_mode=READ_ONLY`), use `meerschaum[sql-duckdb]`.
 
-The native C API path refuses per-connection DuckDB options that it cannot honor, including
-`access_mode=READ_ONLY`. Use the Python `sql-duckdb` extra for connections with these settings.
+## `MRSM_DATAFRAME`
 
-## **`MRSM_BIN`**
+Override the DataFrame library (`polars` or `pandas`) returned by Python APIs (`pipe.get_data()`, `conn.read()`, `pipe.fetch()`, `Plan.to_dataframe()`, and plugin frames) for this process and child jobs/workers. Per-call `as_polars=True` / `as_pandas=True` take precedence. See [DataFrame library](/reference/pipes/reading/#dataframe-library).
 
-By default the `mrsm` and `meerschaum` console scripts of the Python package run the CLI inside the
-installed extension. Set `MRSM_BIN` to the path of a standalone `mrsm` binary (for example one built by
-`cargo install meerschaum`) to run that program instead. The binary must report the same `--version`
-as the installed package. Everything Meerschaum re-launches itself for (jobs, compose, pipeline steps)
-uses the same program.
+```bash
+MRSM_DATAFRAME=pandas python my_report.py
+```
 
-## **`MRSM_PYTHON`**
+## `MRSM_ALLOW_PROTECTED`
 
-The standalone `mrsm` binary runs Python plugins in a worker process. `MRSM_PYTHON` names the Python
-interpreter for those workers, for package installs, and for `mrsm upgrade meerschaum` (which otherwise
-refuses to guess which environment to upgrade). Inside the Python package the interpreter that is already
-running is used and you do not need to set it.
+Connectors with `protected: true` block all writes ([Protected Connectors](/reference/connectors/#protected-connectors)). Set `MRSM_ALLOW_PROTECTED=1` for a process and its children, or pass `--allow-protected` for one command (`-y`/`--yes` never overrides protection).
 
-Before the first worker starts, the binary checks the interpreter once (`python -P -c ...`, 10 s limit):
-it must import a `meerschaum` of the same major version. A missing, stale (v4) or mismatched package, an
-interpreter that cannot start, and a worker that never connects each fail at once with one message that
-names the interpreter, what it found and the fix (`pip install meerschaum==<version>` or `MRSM_PYTHON`);
-the refusal is remembered for a few seconds, so many pipes do not each wait. A worker has
-`MRSM_WORKER_STARTUP_TIMEOUT` seconds (default 60, for connecting and the hello together) before it is
-killed; raise it for a legitimately slow cold start.
+```bash
+MRSM_ALLOW_PROTECTED=1 mrsm start api
+```
+
+## `MRSM_NOASK` / `MRSM_NONINTERACTIVE`
+
+Skip interactive prompts and assume defaults (same as `--noask` / `--yes`), useful in CI and automation.
+
+```bash
+MRSM_NOASK=1 mrsm bootstrap pipes
+```
+
+## `MRSM_BIN`, `MRSM_PYTHON`, and `MRSM_RUNTIME`
+
+- **`MRSM_BIN`**: Path to a standalone `mrsm` binary for the Python launcher to exec (must match `--version`).
+- **`MRSM_PYTHON`**: Python interpreter for the standalone binary's plugin workers, package installs, and `mrsm upgrade meerschaum`. Workers verify a matching `meerschaum` major version (10 s check) and time out after `MRSM_WORKER_STARTUP_TIMEOUT` (default `60` s).
+- **`MRSM_RUNTIME`**: Marks special runtimes (e.g. `docker`); rarely set manually.
 
 ## Internal Variables
 
-The following variables are set automatically by Meerschaum (e.g. for background jobs, the `systemd` executor, and the API server) and are documented here for completeness. You generally should not set them by hand.
+Set automatically by Meerschaum for jobs, `systemd`, and the API server:
 
 | Variable | Purpose |
 |---|---|
-| `MRSM_SERVER_ID` | Identifier of the API server instance. |
-| `MRSM_DAEMON_ID` | Identifier of the running daemon (background job). |
-| `MRSM_JOB` | Marks that the current process is running as a job. |
-| `MRSM_BIN_EXEC` | Set by the Python launcher to the path of `MRSM_BIN` when it hands over to it; guards against a launcher re-executing itself forever. |
-| `MRSM_API_HOST` | Marks the process as the Python API host (plugin routes and Dash apps). |
-| `MRSM_CORE_TRACE` | Set to `1` to print per-stage timings of the native boundary to stderr (diagnostics). |
-| `MRSM_SYSTEMD_LOG_PATH` | Log path used by the `systemd` job executor. |
-| `MRSM_SYSTEMD_STDIN_PATH` | Stdin FIFO path used by the `systemd` job executor. |
-| `MRSM_SYSTEMD_RESULT_PATH` | Result path used by the `systemd` job executor. |
-| `MRSM_SYSTEMD_DELETE_JOB` | Signals the `systemd` executor to delete the job on exit. |
-| `MRSM_TEST_FLAVORS` | Comma-separated DB flavors used by the test suite. |
+| `MRSM_SERVER_ID` / `MRSM_DAEMON_ID` / `MRSM_JOB` | API server ID, job daemon ID, and job process marker. |
+| `MRSM_BIN_EXEC` / `MRSM_API_HOST` | Guards `MRSM_BIN` re-exec loops; marks the Python API host process. |
+| `MRSM_CORE_TRACE` | Set to `1` to log per-stage native boundary timings to stderr. |
+| `MRSM_SYSTEMD_*` | Log, stdin FIFO, result path, and delete-on-exit flags for `systemd` jobs. |
+| `MRSM_TEST_FLAVORS` | Comma-separated SQL flavors for the test suite. |
 
 ---
 
 ## `MRSM{}` Config Symlinks
 
-Anywhere a configuration value (or pipe parameter) is read, you may reference another key in your configuration with the `MRSM{key1:key2:key3}` syntax. The reference is resolved to the target config value **at access time**, so a single source of truth (for example, a database password) can be reused across many keys.
-
-The path inside the braces is a colon-separated sequence of config keys, equivalent to the arguments you would pass to `get_config()`. For example, `MRSM{meerschaum:connectors:sql:main:password}` resolves to `config.meerschaum.connectors.sql.main.password`.
-
-Symlinks are resolved by `search_and_substitute_config()` in `meerschaum/config/_read_config.py` (exported from `meerschaum.config`).
-
-### In configuration
-
-```bash
-# Reuse the SQL main password as a top-level config value.
-MRSM_CONFIG='foo:MRSM{meerschaum:connectors:sql:main:password}' \
-  mrsm show config foo
-```
-
-### In a connector
+Reference any config key with `MRSM{key1:key2:key3}` inside config files, `MRSM_CONFIG`, connectors, or pipe parameters. References resolve at access time via `search_and_substitute_config()` in `meerschaum.config`.
 
 ```yaml
 # config/connectors.yaml
@@ -329,29 +202,26 @@ sql:
     password: MRSM{meerschaum:connectors:sql:main:password}
 ```
 
-Now `sql:reporting` shares credentials with `sql:main`, change them in one place.
-
-### In a pipe parameter
-
 ```python
 import meerschaum as mrsm
 
 pipe = mrsm.Pipe('demo', 'cfg', parameters={
     'username': 'MRSM{meerschaum:connectors:sql:main:username}',
 })
-print(pipe.parameters['username'])  # resolved to the configured username at access time
+print(pipe.parameters['username'])
 ```
+
+!!! warning "`MRSM{}` is not `{{ Pipe() }}`"
+    `MRSM{key1:key2}` references **configuration** values; `{{ Pipe('ck', 'mk', 'lk') }}` references another **pipe**. See [Pipe Parameters](/reference/pipes/parameters/).
 
 ## Secrets in configuration
 
-Two reference sources keep secrets out of your configuration files and out of `MRSM_CONFIG`:
+Keep credentials out of YAML files and `MRSM_CONFIG` with two reserved prefixes:
 
 | Reference | Resolves to |
 |---|---|
-| `MRSM{file:<path>}` | The contents of the file, minus exactly one trailing newline (`\n` or `\r\n`); nothing else is trimmed. The path is absolute, starts with `~` (your home directory), or is relative to `MRSM_ROOT_DIR`. Everything after `file:` up to the closing brace is the path, so it may contain `:` (`MRSM{file:C:\secrets\pg}`), but not `}`. |
-| `MRSM{env:<NAME>}` | The value of the environment variable `NAME`. |
-
-They work wherever `MRSM{}` works: in config files, in values inside `MRSM_CONFIG` / `MRSM_PATCH` (and their `_FILE` forms), in the JSON or URI of an `MRSM_<TYPE>_<LABEL>` connector, in a compose file's `config:` block, alone or inside a longer string. `file` and `env` are reserved: a top-level key with either name can still be read with `get_config('file', ...)`, but `MRSM{file:...}` always means a file (Meerschaum warns once when it loads such a key).
+| `MRSM{file:<path>}` | File contents minus one trailing newline (`\n` or `\r\n`). `<path>` may be absolute, start with `~`, or be relative to `MRSM_ROOT_DIR`. |
+| `MRSM{env:<NAME>}` | Value of environment variable `NAME`. |
 
 ```yaml
 # config/meerschaum.yaml
@@ -369,20 +239,16 @@ connectors:
       password: MRSM{env:UPSTREAM_PASSWORD}
 ```
 
-!!! warning "Keep a password in its own attribute"
-    A reference inside a URI is substituted literally, without percent-encoding: `postgresql://u:MRSM{env:PW}@db/x` breaks if the password contains `@`, `/` or `:`. Give the password its own `password` attribute instead.
+!!! warning "Keep passwords in their own attribute"
+    References inside URIs are substituted literally without percent-encoding, so `@`, `/`, or `:` will break the URI. Always use a separate `password` attribute.
 
-**When they are read.** Like other symlinks, a reference is resolved when its key is loaded, and every `get_config` of a value holding one reads it again: a rotated secret file is picked up by the next connector built (each command, each job run, `mrsm.get_connector(..., refresh=True)`), without restarting the process. A file is read again only when its size, modification time or inode changed, so the cost of an unchanged secret is one `stat`. A connection pool already open keeps the credentials it opened with.
+- **Dynamic rotation:** File references re-read when size, mtime, or inode changes (one `stat` otherwise). New connectors (`refresh=True`) pick up rotated secrets without a restart.
+- **Unreadable secrets:** Missing files or unset vars never break unrelated commands; building the affected connector errors with the key, reference, and reason—never the value.
+- **Masking & config writes:** Resolved secrets print as `******` everywhere. Config writes preserve references and never persist env-only connectors, patches, or secrets.
+- **Permissions:** On Unix, new config files are created `0600` and Meerschaum warns once per process if a config file with inline secrets is group/world-readable (`chmod 600`).
+- **Jobs, stack, and subprocesses:** Jobs receive `MRSM_CONFIG`/`MRSM_PATCH` via owner-only `MRSM_CONFIG_FILE`/`MRSM_PATCH_FILE` files; `mrsm stack` stores secrets under `<root>/stack/secrets/` ([Credentials in files](/reference/stack/#credentials-in-files)). Non-Meerschaum helpers (editors, `pip`/`uv`, `cargo`, `docker`, etc.) strip `MRSM_CONFIG*`, `MRSM_PATCH*`, and connector vars (`meerschaum.config.environment.get_child_env()`), while Meerschaum children and `mrsm sh`/`os` keep them.
 
-**When they cannot be read.** A missing file, an unreadable file or an unset variable does not break anything else: other keys and connectors, `mrsm show config`, `mrsm edit config` and the shell work as usual, and the value reads as the reference's own text. Building the connector that needs it fails with an error that names the reference, the key it sits under and the reason, never the secret (`The secret reference `MRSM{file:/run/secrets/warehouse_password}` under `meerschaum:connectors:sql:warehouse:password` cannot be resolved: the file does not exist.`). Reading another setting that holds one warns once with the same text.
-
-**Masking.** A value a reference produced is a secret whatever its key: `mrsm show config`, `mrsm show connectors`, the web console, job metadata on the API and MCP, debug output and connection errors print it as `******`.
-
-**Never written back.** Every command that writes configuration (`register connectors`, `delete connectors`, `login`, `bootstrap connectors`, `bootstrap teams`, the web console, `write_config()` and `write_plugin_config()` from Python) writes the file as you wrote it plus its own change. References stay references, and nothing that came only from the environment is ever written to a file: not an `MRSM_<TYPE>_<LABEL>` connector, not a value from `MRSM_CONFIG` / `MRSM_PATCH` (or their files), not a resolved secret.
-
-**File permissions.** On Unix, when a file in the config directory holds a secret written inline (a value under a name that ends in a credential's word, such as `password`, `db_pass`, `client_secret`, `access_token`, `api_key`, `private_key` or `credentials`, or a URI with a password; not names such as `allowed_instance_keys` or `session_timeout`) and its group or others may read it, Meerschaum warns once per process with the file and the `chmod 600` that fixes it. Files a `MRSM{file:...}` reference reads are not checked (a Docker secret is world-readable inside its container by design), and nothing is checked on Windows. Files Meerschaum creates are readable by their owner only.
-
-### With Docker secrets
+### Docker secrets and systemd credentials
 
 ```yaml
 # docker-compose.yaml
@@ -392,16 +258,13 @@ services:
     command: start api --production
     environment:
       MRSM_SQL_MAIN: >-
-        {"flavor": "postgresql", "host": "db", "username": "mrsm", "database": "meerschaum",
-         "password": "MRSM{file:/run/secrets/db_password}"}
-    secrets:
-      - db_password
+        {"flavor": "postgresql", "host": "db", "username": "mrsm",
+         "database": "meerschaum", "password": "MRSM{file:/run/secrets/db_password}"}
+    secrets: [db_password]
 secrets:
   db_password:
     file: ./db_password.txt
 ```
-
-### With systemd credentials
 
 ```ini
 # /etc/systemd/system/mrsm-job.service
@@ -410,27 +273,3 @@ LoadCredential=warehouse_password:/etc/meerschaum/warehouse_password
 Environment=MRSM_SQL_WAREHOUSE={"flavor": "postgresql", "host": "db.example", "username": "reporting", "database": "warehouse", "password": "MRSM{file:${CREDENTIALS_DIRECTORY}/warehouse_password}"}
 ExecStart=/usr/local/bin/mrsm sync pipes -i sql:warehouse --loop
 ```
-
-systemd expands `${CREDENTIALS_DIRECTORY}` in `Environment=` lines; the credential file is readable by the service only.
-
-### In jobs
-
-A job started from a process that holds `MRSM_CONFIG` or `MRSM_PATCH` (a [Compose](/reference/compose/) project's `config:` block, or your own patch) gets them in owner-only files in its directory (`$MRSM_ROOT_DIR/jobs/<name>/.mrsm_config.json`, or next to its `systemd` unit), named by `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`. Its environment and its unit file hold no credentials from them; the files are rewritten at every start and removed with the job. A job an API server creates (through `/jobs`, the console's Execute box or a Pipeline run) records the server's environment in its `properties.json`: that file holds `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` instead of the patches' text and is readable by its owner only, since the rest of that environment (connector variables, other programs' credentials) stays in it. A job created by 5.0 gets the same treatment the next time its properties are written. An `api:` executor's jobs run with the server's configuration, as before.
-
-### Processes that are not Meerschaum
-
-The helper processes Meerschaum starts on its own get an environment without `MRSM_CONFIG`, `MRSM_PATCH`, `MRSM_CONFIG_FILE`, `MRSM_PATCH_FILE` and every `MRSM_<TYPE>_<LABEL>` connector variable (one that holds a URI or a JSON object; another `MRSM_...` variable of your own is kept): editors (`edit config`, `edit pipes`, ...), SQL clients (`mrsm sql`, which still get the one connector's password they need), pip, uv, pipx and `python -m venv`, `cargo` (installs, upgrades and source plugins), `systemctl`, `ps`, `docker`, `tmux` and `bcp` checks, interpreter and version probes, `start gui`'s window, completion scripts' probes and `clear`, and the Python package's editor, installers and availability checks. The rest of the environment (`MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR`, `PATH`, ...) is kept, and Meerschaum's own process keeps everything.
-
-What keeps the whole environment: Meerschaum itself (jobs, the Python worker, the API host, `mrsm python`, the web terminal's `mrsm` shell, Compose's commands, a restarted shell), `docker compose` for the stack, whose compose file may interpolate variables, and every command you ask Meerschaum to run: `mrsm sh`, `mrsm os`, `!command` in the shell, a word that is not an action, and a job whose command is one of these. Such a command may run `mrsm` again (`mrsm sh "mrsm show pipes"`) or read `MRSM_SQL_<LABEL>` itself, and it sees the same configuration as the process that started it. Python code can build the helpers' environment with `meerschaum.config.environment.get_child_env()`.
-
-### In the stack
-
-`mrsm stack` keeps the credentials out of `stack/docker-compose.yaml` and `docker inspect`: the `api` service gets `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` pointing at files under `<root>/stack/secrets/` (a directory only you can read), and Grafana and the read-only role's setup read their passwords from files there too. An API image older than 5.1.0 cannot read the files and keeps the environment form, with a warning. See [Credentials in files](/reference/stack/#credentials-in-files).
-
-!!! warning "`MRSM{}` is not `{{ Pipe() }}`"
-    These are two distinct features:
-
-    - **`MRSM{key1:key2:key3}`** references a value in your **configuration**.
-    - **`{{ Pipe('ck', 'mk', 'lk') }}`** references another **pipe** (its target, columns, attributes, etc.) and is resolved when `Pipe.parameters` is accessed.
-
-    See [Pipe Parameters → `{{ Pipe(...) }}` syntax](/reference/pipes/parameters/) for the pipe-reference feature.

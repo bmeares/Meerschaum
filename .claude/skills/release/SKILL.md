@@ -98,10 +98,7 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
    above it). Also re-read `requires-python` (`>=3.11`), the `Programming Language :: Python :: 3.x`
    classifiers (3.11 to 3.15; the smoke matrix covers 3.11 and 3.14), and `license = "Apache-2.0"` with
    `license-files` (PEP 639; `twine check` validates it).
-3. **Changelog.** Edit `docs/zensical/changelog/v5.md` (source of truth). Keep all 5.0.0 development
-   changes under one `v5.0.0` entry explicitly marked **Unreleased** until the final release. Do not add
-   release-candidate changelog entries. Then run `./scripts/docs.sh` (it regenerates root `CHANGELOG.md`, which is committed; `./scripts/build.sh`
-   also runs it). The maintainer owns the 5.0.0 wording.
+3. **Changelog.** Edit `docs/zensical/changelog/v5.md` (source of truth) following `.claude/skills/docs/SKILL.md`: brief 1–2 sentence bullets with bold lead-ins, short code/CLI examples where helpful, concise upgrade callouts, and links to reference pages instead of long prose walls. Collapse older minor series under `<details markdown="1">`. Then run `python3 scripts/generate_changelog.py` and `python3 scripts/gen_llms_txt.py` (or `./scripts/docs.sh`) so root `CHANGELOG.md` and `docs/zensical/llms*.txt` are regenerated and committed.
 4. **Local checks.**
 
    ```bash

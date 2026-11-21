@@ -98,7 +98,16 @@
 .mrsm-home-demo { padding-top: .4rem; }
 .mrsm-home-videos iframe { border: 0; width: 100%; height: auto; aspect-ratio: 16 / 9; }
 .mrsm-caption { color: var(--md-default-fg-color--light); font-size: .7rem; }
-asciinema-player { display: block; max-width: 100%; min-width: 0; overflow: hidden; border-radius: .4rem; }
+asciinema-player {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: .5rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  margin: .75rem 0;
+}
 .ap-player { max-width: 100%; }
 .md-typeset iframe { max-width: 100%; }
 .mrsm-screenshot { border: 1px solid var(--md-default-fg-color--lightest); border-radius: .5rem; }

@@ -47,10 +47,8 @@ mrsm sync pipes -i sql:local -m temperatures
 
 There is still **one row**. Re-reading the same data does not add a duplicate.
 
-??? example "Watch the actual run"
-    <asciinema-player src="/assets/casts/v5-first-pipe.cast" size="small" preload="true" rows="18"></asciinema-player>
-
-    <p class="mrsm-caption">Recorded with 5.0.0rc16. Playback pauses are extended for reading.</p>
+??? example "Watch the run"
+    <asciinema-player src="/assets/casts/v5-first-pipe.cast" preload="true" rows="18" idle-time-limit="2" poster="npt:0:04"></asciinema-player>
 
 ??? example "Use the same Pipe from Python"
     ```python

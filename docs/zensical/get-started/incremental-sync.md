@@ -33,9 +33,7 @@ Already-seen rows stay put. New rows are inserted. Changed rows can update their
     See [Syncing](../reference/pipes/syncing.md) for bounds, backtracking, and update options.
 
 ??? example "Watch a row arrive"
-    <asciinema-player src="/assets/casts/v5-incremental.cast" size="small" preload="true" rows="18"></asciinema-player>
-
-    <p class="mrsm-caption">Recorded with 5.0.0rc16. Playback pauses are extended for reading.</p>
+    <asciinema-player src="/assets/casts/v5-incremental.cast" preload="true" rows="18" idle-time-limit="2" poster="npt:0:04"></asciinema-player>
 
 ## Keep it running
 

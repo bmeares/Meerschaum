@@ -44,9 +44,7 @@ mrsm show data -i sql:local -m fahrenheit
 `plan` shows the work without moving data. `sync` runs the Pipeline and records its results. You should see **70.7°F** and **71.6°F**.
 
 ??? example "Watch the plan become a run"
-    <asciinema-player src="/assets/casts/v5-pipeline.cast" size="small" preload="true" rows="20"></asciinema-player>
-
-    <p class="mrsm-caption">Recorded with 5.0.0rc16. Playback pauses are extended for reading.</p>
+    <asciinema-player src="/assets/casts/v5-pipeline.cast" preload="true" rows="20" idle-time-limit="2" poster="npt:0:04"></asciinema-player>
 
 ??? example "Plan and run from Python"
     ```python

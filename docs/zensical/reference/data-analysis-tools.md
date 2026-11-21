@@ -5,7 +5,7 @@
 
 Meerschaum comes with a [pre-configured data visualization stack](/reference/stack/) so that you can spend your time on analysis rather than configuring servers.
 
-<asciinema-player src="/assets/casts/stack.cast" autoplay="true" loop="true" size="small" preload="true" rows="10"></asciinema-player>
+<asciinema-player src="/assets/casts/stack.cast" loop="true" preload="true" rows="16" idle-time-limit="2" poster="npt:0:04"></asciinema-player>
 
 <img src="/assets/screenshots/grafana-dashboard.png" alt="Example Grafana Dashboard" width="85%" style="display: block; margin-left: auto; margin-right: auto;">
 
@@ -133,7 +133,7 @@ datetime.datetime(2021, 6, 6, 12, 0)
 
 The `sql` command lets you quickly interact with your databases.
 
-<asciinema-player src="/assets/casts/sql-cli.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
+<asciinema-player src="/assets/casts/sql-cli.cast" loop="true" preload="true" rows="18" idle-time-limit="2" poster="npt:0:04"></asciinema-player>
 
 For PostgreSQL, MySQL, SQLite, DuckDB, and Oracle flavors, Meerschaum first looks for
 [Rainfrog](https://github.com/achristmascarl/rainfrog), a Rust terminal interface with a query
@@ -162,4 +162,4 @@ Connection credentials are passed in the child environment rather than command-l
 
 The `sql` command also lets you read from tables or execute queries on any of your databases directly from the command line.
 
-<asciinema-player src="/assets/casts/sql-shell.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
+<asciinema-player src="/assets/casts/sql-shell.cast" loop="true" preload="true" rows="18" idle-time-limit="2" poster="npt:0:04"></asciinema-player>
