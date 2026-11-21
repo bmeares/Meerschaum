@@ -575,7 +575,7 @@ pub(super) fn source_catalog(
     for name in names {
         let bytes = read_regular(
             &path.join(format!("{name}.tar.gz")),
-            crate::executor_plugins::MAX_ARCHIVE_BYTES,
+            crate::executor::plugins::MAX_ARCHIVE_BYTES,
         )?;
         sources.insert(
             name.clone(),

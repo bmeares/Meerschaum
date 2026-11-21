@@ -1,9 +1,9 @@
-//! The stack gives its containers their credentials in files (5.1).
+//! The stack gives its containers their credentials in files.
 //!
 //! Up to 5.0 the compose file `mrsm stack` writes held the `api` service's whole configuration
 //! (`MRSM_CONFIG`: every connector's credentials, and `MRSM_PATCH`: Grafana's administrator
 //! password) in its `environment`, so the credentials were on disk in `stack/docker-compose.yaml`
-//! and in `docker inspect`. Since 5.1, whenever `mrsm stack` writes the compose file:
+//! and in `docker inspect`. Whenever `mrsm stack` writes the compose file:
 //!
 //! - **The files.** What a service's credential variables would hold is written to
 //!   `<root>/stack/secrets/<service>/`, and the service gets the variable's file form pointing at
@@ -552,7 +552,7 @@ pub fn valkey_conf(password: &str) -> String {
     )
 }
 
-/// The `valkey` service's password (5.1): Valkey's images ignore `VALKEY_PASSWORD`, so the stack
+/// The `valkey` service's password: Valkey's images ignore `VALKEY_PASSWORD`, so the stack
 /// starts the server with a configuration file holding `requirepass` (in the service's secrets
 /// subdirectory, mounted read-only like the others) and drops the variable. `password` is what
 /// `VALKEY_PASSWORD` stands for (`valkey:main`'s password, `None` when it has none: the caller

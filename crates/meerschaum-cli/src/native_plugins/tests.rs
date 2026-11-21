@@ -176,7 +176,7 @@ mod host_access_tests {
         }
     }
 
-    /// 5.1: a plugin's `write_plugin_config` keeps the other sections as written (secret
+    /// A plugin's `write_plugin_config` keeps the other sections as written (secret
     /// references included) and never writes what `MRSM_PATCH` holds.
     #[test]
     fn write_plugin_config_never_writes_environment_secrets() {

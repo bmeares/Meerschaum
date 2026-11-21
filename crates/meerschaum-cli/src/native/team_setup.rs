@@ -1,4 +1,4 @@
-//! `bootstrap teams [NAME]` (5.1): create a team step by step, with what makes it self-contained.
+//! `bootstrap teams [NAME]`: create a team step by step, with what makes it self-contained.
 //!
 //! - **Isolation** (`isolated`): the team's members do not see what belongs to Everyone (pipes,
 //!   jobs, connectors without `teams`, plugins the team was not granted).

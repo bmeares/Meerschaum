@@ -24,24 +24,25 @@ Every module named here opens with `//!` docs stating its invariants; read those
 | Recorded team scopes on the server | `crates/meerschaum-cli/src/team_scopes.rs` | `<root>/team_scopes/<key>/` files jobs and workers start from |
 | Team worker pools | `crates/meerschaum-worker/src/team.rs`; sessions in `crates/meerschaum-cli/src/native/session.rs` (`for_team`) | per-team Python workers, retired when the team's fingerprint changes |
 | Team jobs (host placement) | `crates/meerschaum-jobs/src/config_files.rs` (`externalize_team_with`), `daemon.rs` | a team job's config file, environment and sandbox spec |
-| Process-start enforcement | `crates/meerschaum-cli/src/run.rs` (entry modes), `team_sandbox.rs`, `team_python.rs`, `executor_terminal_guard.rs` | the sandbox is installed before any team code or Python starts |
+| Process-start enforcement | `crates/meerschaum-cli/src/run.rs` (entry modes), `team_sandbox/` (`python/` for interpreters), `executor/terminal_guard.rs` | the sandbox is installed before any team code or Python starts |
 | Python-side scoping | `meerschaum/_internal/team_scope.py`, `meerschaum/api/host/_team_scope.py` | `get_connector` / `get_config` refusal inside workers and the shared API host (a guardrail) |
 | Execute policy | `crates/meerschaum-server/src/execute_policy.rs`, `execute_access.rs`, `routes/execute.rs` | what a non-administrator may run, and whether only as team execution |
 | Team execution decision | `crates/meerschaum-server/src/team_execution.rs` (`judge`, `status`); processes in `crates/meerschaum-cli/src/team_execution.rs` | whether a team may run commands on this host now |
 | Access and acting team on requests | `crates/meerschaum-server/src/access/` | per-request `Access`, `acting_team` |
-| Team terminals | `crates/meerschaum-server/src/webterm/team.rs`, `api_terminal.rs`, `remote.rs`; `crates/meerschaum-cli/src/executor_host_terminals.rs` | locked-down tmux per team, API-only and remote terminals |
+| Team terminals | `crates/meerschaum-server/src/webterm/team.rs`, `api_terminal.rs`, `remote.rs`; `crates/meerschaum-cli/src/executor_client/host_terminals.rs` | locked-down tmux per team, API-only and remote terminals |
 | Team executor control (main side) | `crates/meerschaum-server/src/executor/` (`control.rs`, `admission.rs`, `callbacks.rs`, `environment.rs`, `context.rs`) | signed control credentials, admission, callback grants, launch profiles |
-| Team executor client and job catalog (main side) | `crates/meerschaum-cli/src/executor_client.rs`, `executor_client/`, `executor_jobs.rs` (`DelegatingJobs`, `Catalog`), `executor_registry.rs`, `executor_scheduled_jobs.rs`, `executor_recovery.rs` | placement of each job, the canonical job catalog, schedules |
-| Team executor process (executor side) | `crates/meerschaum-cli/src/server_executor.rs` (`mrsm start executor`), `crates/meerschaum-server/src/executor/gateway.rs`, `executor_contexts.rs`, `executor_context_*.rs` | the authenticated outer listener and the team's inner ordinary API |
-| Generated stack executors | `crates/meerschaum-cli/src/executor_stack.rs`, `executor_factory_*.rs`; egress proxy `crates/meerschaum-server/src/executor/egress.rs` | `mrsm stack up` services, networks, Factory provisioning |
-| Plugins under executors | `crates/meerschaum-server/src/executor/plugin_*.rs`, `plugins.rs`, `extensions.rs`; `crates/meerschaum-cli/src/executor_plugin*.rs`, `executor_extensions.rs` | credential-free discovery, sealed catalogs, private handler calls |
-| Confined compiler | `crates/meerschaum-cli/src/executor_compiler*.rs`, `executor_compiler/runner.rs`, `crates/meerschaum-plugin/src/source/compiler.rs` | offline compilation of single-file native plugins |
-| Source fetch (canonical source broker) | `crates/meerschaum-server/src/routes/source_fetch.rs`, `crates/meerschaum-cli/src/source_fetch_*.rs`, `crates/meerschaum-connector-api/src/source_fetch.rs` | bounded native SQL reads for API-only work |
+| Team executor client and job catalog (main side) | `crates/meerschaum-cli/src/executor_client/`, `executor_jobs/` (`DelegatingJobs`, `Catalog`; `schedules.rs`), `executor_registry.rs`, `server/executor/recovery.rs` | placement of each job, the canonical job catalog, schedules |
+| Team executor process (executor side) | `crates/meerschaum-cli/src/server/executor/` (`mrsm start executor`), `crates/meerschaum-server/src/executor/gateway.rs`, `crates/meerschaum-cli/src/executor/contexts/` | the authenticated outer listener and the team's inner ordinary API |
+| Generated stack executors | `crates/meerschaum-cli/src/executor_stack.rs`, `executor/factory/`; egress proxy `crates/meerschaum-server/src/executor/egress.rs` | `mrsm stack up` services, networks, Factory provisioning |
+| Plugins under executors | `crates/meerschaum-server/src/executor/plugin_*.rs`, `plugins.rs`, `extensions.rs`; `crates/meerschaum-cli/src/executor/plugin*.rs`, `executor/extensions.rs` | credential-free discovery, sealed catalogs, private handler calls |
+| Confined compiler | `crates/meerschaum-cli/src/executor/compiler/`, `crates/meerschaum-plugin/src/source/compiler.rs` | offline compilation of single-file native plugins |
+| Source fetch (canonical source broker) | `crates/meerschaum-server/src/routes/source_fetch.rs`, `crates/meerschaum-cli/src/source_fetch_backend/`, `source_fetch_postgres.rs`, `source_fetch_snapshot/`, `crates/meerschaum-connector-api/src/source_fetch.rs` | bounded native SQL reads for API-only work |
 | Console | `meerschaum/api/dash/viewer.py` (`Viewer`, Team switcher), `access.py`, `_native_execution.py`; `crates/meerschaum-web/src/extension_pages.rs`, `stream.rs`, `grafana.rs` | per-session identity, team plugin pages, job-log visibility, Grafana orgs |
 | Team databases | `crates/meerschaum-connector-sql/src/team_database.rs`, `crates/meerschaum-py/src/team_api.rs` | `bootstrap teams` database/schema and roles |
 
-The `executor_*` files of `meerschaum-cli` are stitched into parent modules with `#[path]`
-attributes, so a module path does not always match a file name: search for the file name.
+In `meerschaum-cli` the file layout follows the module tree: `executor/` holds the crate-internal
+executor machinery, the public `executor_*` modules sit beside it, and each directory's `mod.rs`
+says what its children are for.
 
 ## Flow: a console action to a running command
 
@@ -54,7 +55,7 @@ attributes, so a module path does not always match a file name: search for the f
    `may_run_system_commands` answers `Anywhere`, `TeamOnly { team }` or no. `TeamOnly` marks the job
    `team_execution` (`mark_team_execution`).
 3. **Placement.** The job backend of `mrsm start api` is `DelegatingJobs`
-   (`crates/meerschaum-cli/src/executor_jobs.rs`, wired in `crates/meerschaum-cli/src/server.rs`).
+   (`crates/meerschaum-cli/src/executor_jobs/`, wired in `crates/meerschaum-cli/src/server/mod.rs`).
    It consults the job catalog: a team with `execution.mode: host` uses the local backend; a team
    with a container or remote executor gets a catalog record, an execution profile (Team or
    API-only) and a signed launch through `executor_client::Controller`. Lookup or transport
@@ -62,10 +63,10 @@ attributes, so a module path does not always match a file name: search for the f
 4. **Host placement.** The local backend writes the team's config, allowlisted environment and
    sandbox spec into the job directory (`meerschaum-jobs/src/config_files.rs`), and the supervisor
    starts `mrsm`. `run.rs` calls `team_sandbox::enforce_if_team_process` before anything else, so
-   the command runs confined; Python started from it goes through `team_python.rs`.
+   the command runs confined; Python started from it goes through `team_sandbox/python/`.
 5. **Team executor.** The executor's outer listener (`server/src/executor/gateway.rs`) verifies the
    signed control request with the team's public verifier and builds the inner ordinary API from
-   the signed configuration only (`cli/src/server_executor.rs`). The executor runs the job with its
+   the signed configuration only (`cli/src/server/executor/`). The executor runs the job with its
    own local backend; it reports status and logs back, and reaches the main API only through
    short-lived callback credentials (`server/src/executor/callbacks.rs`). API-only work reads data
    through source fetch instead of holding database credentials.
@@ -80,12 +81,12 @@ attributes, so a module path does not always match a file name: search for the f
   default. The process confines itself at start (`run.rs` order matters: the trusted job lifecycle
   wrapper runs before confinement, every other marked process after).
 - **Main API ↔ team executor.** The executor is untrusted: its replies are bounded and never
-  reflected (`executor_configuration_diagnostics.rs`), it holds no signing key, and it cannot pick
-  a job's owner, team, command, retention or paths (`executor_jobs.rs` module docs).
+  reflected (`executor_client/configuration_diagnostics.rs`), it holds no signing key, and it cannot pick
+  a job's owner, team, command, retention or paths (`executor_jobs/mod.rs` module docs).
 - **Shared Python API host.** One process serves every team; scoping there is a guardrail
   (`meerschaum/api/host/_team_scope.py`), not a sandbox. Do not move team-trusted work into it.
 - **Administrator-only inputs.** Compiler policy, Factory material and executor images are read
-  from administrator installation paths (`executor_compiler_provisioning.rs`,
+  from administrator installation paths (`executor/compiler/provisioning.rs`,
   `server/src/executor/factory_*.rs`); no request, job property or environment selects them.
 
 A change that adds an input crossing one of these lines (a new field in a signed context, a new

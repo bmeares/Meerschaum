@@ -1,4 +1,4 @@
-//! Ctrl-C while an action runs (wave 18, decision 1).
+//! Ctrl-C while an action runs.
 //!
 //! The terminal sends SIGINT to the whole foreground process group: `mrsm`, its Python workers
 //! and every program it started. One watcher thread (`signal-hook`, a safe API) turns it into

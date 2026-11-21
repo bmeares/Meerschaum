@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::dispatch::{CommandSpec, Runtime};
 
-/// What a restricted web terminal (5.1) says instead of opening an editor.
+/// What a restricted web terminal says instead of opening an editor.
 pub const EDITOR_UNAVAILABLE: &str = "This terminal does not open an editor. Pass the new values \
      with `--params` / `-P` (for example `edit pipes -c sql:main -m weather -P '{\"tags\": [\"daily\"]}'`), \
      or use the web console's editor.";

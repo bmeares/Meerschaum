@@ -179,7 +179,7 @@ static STATE: Mutex<State> = Mutex::new(State {
 /// a handler leaves the library's in place without restoring the default action). It erases the
 /// line ([`clear_for_signal`]) before it ends the process, cancels the running action or ignores
 /// the signal, depending on what is running. The spinner itself never re-raises a signal: Ctrl-C
-/// belongs to the action (decision 1 of wave 18), which is no longer killed with the last frame on
+/// belongs to the action, which is no longer killed with the last frame on
 /// the screen.
 mod guard {
     /// Start the watcher (once per process).

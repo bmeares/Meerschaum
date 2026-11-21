@@ -21,7 +21,7 @@ pub fn run(sysargs: &[String]) -> i32 {
     // A restricted web terminal's process (and every `mrsm` it starts) is restricted from the
     // start: the environment is read once, before anything runs.
     crate::shell::restricted::init();
-    if let Some(code) = crate::executor_terminal_guard::run_if_requested(sysargs) {
+    if let Some(code) = crate::executor::terminal_guard::run_if_requested(sysargs) {
         return code;
     }
     // A genuine host-created lifecycle wrapper must run before command confinement so it
@@ -46,14 +46,14 @@ pub fn run(sysargs: &[String]) -> i32 {
     if let Some(rc) = crate::completions::print_script_if_requested(sysargs) {
         return rc;
     }
-    // 5.1: the API server's sandbox probe (what a team process would enforce here) restricts
+    // The API server's sandbox probe (what a team process would enforce here) restricts
     // the process started for it and prints its report.
     if let Some(rc) = meerschaum_core::team_scope::sandbox::probe_if_requested(sysargs) {
         return rc;
     }
     meerschaum_jobs::supervisor::run_if_requested_with(sysargs);
     meerschaum_jobs::systemd_job::run_if_requested_with(sysargs);
-    // 5.1: a process started to probe a team's sandbox reports it and exits.
+    // A process started to probe a team's sandbox reports it and exits.
     if let Some(rc) = crate::team_execution::probe_if_requested() {
         return rc;
     }
@@ -175,9 +175,9 @@ pub const RESTART_SHELL: i32 = 75;
 pub fn run_main() -> ExitCode {
     let arguments = process_args();
     if let Some((first, rest)) = arguments.split_first()
-        && first == crate::executor_terminal_guard::TEAM_EXEC_ARG
+        && first == crate::executor::terminal_guard::TEAM_EXEC_ARG
     {
-        let error = crate::executor_terminal_guard::exec_team_shell(rest);
+        let error = crate::executor::terminal_guard::exec_team_shell(rest);
         eprintln!("The Team terminal could not seal its standard streams: {error}");
         return exit_code(1);
     }

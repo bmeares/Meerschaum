@@ -79,7 +79,7 @@ pub fn pipe_show(
     Ok(SuccessTuple::success())
 }
 
-/// One line for each of `pipes` whose latest recorded sync failed (rc15 sync status), e.g.
+/// One line for each of `pipes` whose latest recorded sync failed, e.g.
 /// `Pipe('sql:main', 'weather') failed its last 3 syncs (latest 2026-10-27 12:00:05 UTC): no
 /// such table: raw`. Nothing when every latest sync succeeded or the statuses cannot be read.
 fn failing_pipes_note(rt: &mut Runtime<'_>, inst: &Instance, pipes: &[SelectedPipe]) -> String {

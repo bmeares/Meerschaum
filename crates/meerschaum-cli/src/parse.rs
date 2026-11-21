@@ -456,7 +456,7 @@ pub const ENGINE_OPTIONS: &[EngineOption] = &[
         dest: "run_id",
         flag: "--run-id",
     },
-    // rc15 wave 2 (AC10): the access commands' flags, parsed only for their own commands
+    // The access commands' flags, parsed only for their own commands
     // (`AccessCommand`) so that plugin flags of the same names keep working everywhere else.
     EngineOption {
         dest: "owner",
@@ -598,12 +598,12 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
                     }
                 }
             }
-            // Wave 18 (D23): start jobs without the startup jitter, load wait and slots.
-            // 5.1: `upgrade meerschaum` skips pulling the stack's images without asking.
+            // D23: start jobs without the startup jitter, load wait and slots.
+            // `upgrade meerschaum` skips pulling the stack's images without asking.
             "chunk_pipelining" | "no_stagger" | "no_pull" if attached.is_none() => {
                 Some(PyValue::Bool(true))
             }
-            // Wave 18 (D23): `--startup-jitter 30s` bounds a job's startup delay, `--jitter 30s`
+            // D23: `--startup-jitter 30s` bounds a job's startup delay, `--jitter 30s`
             // its schedule's fixed offset (scoped to a schedule so plugin flags named `--jitter`
             // still parse).
             "startup_jitter" | "jitter"

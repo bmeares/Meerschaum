@@ -343,7 +343,7 @@ pub fn provision_up(
     }
     let desired = Registry::new(root).desired()?;
     let image = executor_image(setting.as_ref())?;
-    crate::executor_factory_stack::provision(
+    crate::executor::factory::stack::provision(
         root,
         &desired,
         image
@@ -670,13 +670,13 @@ pub fn apply_with_image(
     let reference = image
         .as_str()
         .ok_or("Invalid administrator executor image.")?;
-    let selected = crate::executor_factory_docker::selected(root, reference)?;
+    let selected = crate::executor::factory::docker::selected(root, reference)?;
     let selected_image = selected
         .as_ref()
         .map(|selected| Value::Str(selected.image.clone()))
         .unwrap_or(image.clone());
     let compose = apply_desired_with_image(&directory, &desired, compose, &pins, &selected_image)?;
-    crate::executor_factory_stack::render(root, &desired, reference, compose)
+    crate::executor::factory::stack::render(root, &desired, reference, compose)
 }
 
 fn retired_container(

@@ -34,7 +34,7 @@ use crate::value::{ArgsMap, PyValue};
 /// *project's* executor: `meerschaum:executor` of the project's `config:` block or environment
 /// (an `api:<label>` shared by several projects), else `systemd` on a systemd host (whatever the
 /// project's root: its units are named after the project, so they come back after a reboot), else
-/// `local` (`get_jobs()` with no executor keys). A project's `local` jobs from before rc15 move to
+/// `local` (`get_jobs()` with no executor keys). A project's `local` jobs from an earlier 5.0 release candidate move to
 /// `systemd` on the next `up`. The commands compose then
 /// runs (`delete job`, `start job`, ...) are child `mrsm` processes under the same project
 /// environment, so they select the same executor.

@@ -348,7 +348,7 @@ impl JobsBackend for LocalJobsBackend {
                     }
                 }
             }
-            // 5.1: a job of an isolated team records only what its process may receive (an
+            // A job of an isolated team records only what its process may receive (an
             // allowlist and the administrator's passthrough names), never the rest of the
             // server's environment (its launch applies the same allowlist).
             let root = ctx.paths.root.clone();
@@ -651,7 +651,7 @@ impl LocalJobsBackend {
 }
 
 #[cfg(test)]
-mod rc6_tests {
+mod factory_log_tests {
     use super::*;
 
     #[cfg(unix)]
@@ -776,7 +776,7 @@ mod rc6_tests {
     }
 
     /// `GET /jobs` reads every `systemd` job's status, PID and times from one `systemctl show`
-    /// (rc28; a few calls per job before), and lists exactly what each job's getters read.
+    /// (not a few calls per job), and lists exactly what each job's getters read.
     #[tokio::test]
     async fn the_listing_asks_systemctl_once_for_every_unit() {
         use meerschaum_jobs::executor::JobExecutor;

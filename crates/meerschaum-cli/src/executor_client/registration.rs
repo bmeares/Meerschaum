@@ -33,8 +33,8 @@ impl Controller {
                 let caller=caller.clone();
                 let directories=config.paths().plugins_dirs.clone();
                 let hashes=tokio::task::spawn_blocking(move || {
-                    let (sources,_)=crate::executor_host_jobs::plugin_sources(&caller,&directories)?;
-                    crate::executor_registration::source_hashes(&sources)
+                    let (sources,_)=crate::executor::host_jobs::plugin_sources(&caller,&directories)?;
+                    crate::executor::registration::source_hashes(&sources)
                 }).await.map_err(|_|"Registration source preparation was interrupted.")??;
                 Sources::Files{hashes}
             };
@@ -55,8 +55,8 @@ impl Controller {
             if let Sources::Files{hashes}=&registration.sources {
                 let caller=caller.clone(); let directories=config.paths().plugins_dirs.clone(); let expected=hashes.clone();
                 tokio::task::spawn_blocking(move || {
-                    let (sources,_)=crate::executor_host_jobs::plugin_sources(&caller,&directories)?;
-                    if crate::executor_registration::source_hashes(&sources)?!=expected {
+                    let (sources,_)=crate::executor::host_jobs::plugin_sources(&caller,&directories)?;
+                    if crate::executor::registration::source_hashes(&sources)?!=expected {
                         return Err("Registration source content changed before metadata commit.".into());
                     }
                     Ok::<_,String>(())

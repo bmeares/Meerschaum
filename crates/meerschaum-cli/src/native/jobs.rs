@@ -1063,7 +1063,7 @@ pub fn restart_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
                 job.set_start_kind(StartKind::None);
             }
         }
-        // Meerschaum before rc15 ran the jobs of every root but the default one locally; on a
+        // Earlier 5.0 release candidates ran the jobs of every root but the default one locally; on a
         // systemd host they move to systemd now (stopped first, logs kept), so they come back
         // after a reboot. An explicit `-e` keeps them where they are.
         if executor_keys(args).is_none() && moves_local_jobs_to_systemd(&ctx) {
@@ -1295,7 +1295,7 @@ pub fn attach_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     )
     .ok();
     // A job's input is its program's: a restricted terminal forwards it only to a job whose own
-    // command the server would let this user run (5.1).
+    // command the server would let this user run.
     let accept_input = !crate::shell::restricted::active() || {
         let sysargs = job.sysargs();
         match crate::shell::restricted::authorize(&sysargs) {

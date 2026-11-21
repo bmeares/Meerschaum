@@ -271,7 +271,7 @@ impl Registry {
             .get(&id)
             .filter(|r| !r.retired && r.team_id == id && r.verifier.team_id == id)
             .ok_or("The selected executor has not been provisioned or has been retired.")?;
-        crate::executor_factory_local::public_pin(&record.verifier)
+        crate::executor::factory::local::public_pin(&record.verifier)
     }
 
     /// Read only public desired deployment; stack provisioning never needs private authority.

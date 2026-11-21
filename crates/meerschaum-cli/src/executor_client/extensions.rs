@@ -85,7 +85,7 @@ impl Controller {
         let caller_for_sources = caller.clone();
         let directories = self.config()?.paths().plugins_dirs.clone();
         let sources = tokio::task::spawn_blocking(move || {
-            crate::executor_host_jobs::plugin_sources(&caller_for_sources, &directories)
+            crate::executor::host_jobs::plugin_sources(&caller_for_sources, &directories)
                 .map(|(_, names)| names)
         })
         .await
@@ -130,7 +130,7 @@ impl Controller {
                 return Err("The Host extension generation was retired.".into());
             }
             let (mut sources, available) =
-                crate::executor_host_jobs::plugin_sources(&caller, &directories)?;
+                crate::executor::host_jobs::plugin_sources(&caller, &directories)?;
             if !names.is_subset(&available) {
                 return Err("A Host extension source grant was revoked.".into());
             }
@@ -143,7 +143,7 @@ impl Controller {
                     )
                 })
             });
-            let actual = crate::executor_plugin_files::inspect(&root, &sources)?;
+            let actual = crate::executor::plugin_files::inspect(&root, &sources)?;
             if actual.hashes != host.files || actual.view_sha256 != host.view_sha256 {
                 return Err("The exact Host extension source paths or bytes changed.".into());
             }

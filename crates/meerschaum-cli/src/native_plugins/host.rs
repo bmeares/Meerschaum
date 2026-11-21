@@ -657,7 +657,7 @@ impl PluginHost {
             method => {
                 let (scope, what) = match method {
                     m::SYNC => ("pipes:write", "sync pipes"),
-                    // PARITY: wave 2's permission grid supersedes the original host-call
+                    // PARITY: the scoped permission grid supersedes the original host-call
                     // write alias: deleting rows and registering each need their own scope.
                     m::CLEAR => ("pipes:delete", "clear pipes"),
                     m::REGISTER => ("pipes:register", "register pipes"),

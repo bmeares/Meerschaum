@@ -137,8 +137,8 @@ crates/meerschaum-engine/src/engine.rs:523:            rec.parameters
 crates/meerschaum-engine/src/engine.rs:614:                        if let Some(Value::Map(p)) = attrs.get("parameters") {
 crates/meerschaum-engine/src/engine.rs:615:                            rec.parameters = p.clone();
 crates/meerschaum-engine/src/engine.rs:1128:                let config = StreamConfig::from_parameters(pipe.parameters());
-crates/meerschaum-cli/src/native/engine.rs:65:            pipe.target(None).map_err(|e| e.to_string())
-crates/meerschaum-cli/src/native/engine.rs:101:            let ctx = pipe_ops::dtypes_context(self.0.as_ref(), pipe, pipe.parameters())
+crates/meerschaum-cli/src/native/sync/engine.rs:65:            pipe.target(None).map_err(|e| e.to_string())
+crates/meerschaum-cli/src/native/sync/engine.rs:101:            let ctx = pipe_ops::dtypes_context(self.0.as_ref(), pipe, pipe.parameters())
 crates/meerschaum-engine/src/native.rs:270:            .map(|n| (n.pipe_ref.clone(), n.record.parameters.clone()))
 crates/meerschaum-compose/src/subactions.rs:423:/// A resolver over the instance for `pipe.parameters` (`{{ Pipe() }}` references load the
 crates/meerschaum-compose/src/subactions.rs:443:            out.set_parameters(apply_patch_maps(&params, pipe.parameters()));

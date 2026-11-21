@@ -134,8 +134,8 @@ public v4 surface (`mrsm.jobs.Executor`, `--executor-keys`); qualify every other
 | **Job executor** | Where a job runs: `local`, `systemd`, `api:<label>`, or a plugin's custom type | `crates/meerschaum-jobs/src/executor.rs`, `systemd.rs`, `remote.rs` |
 | **Plugin executor type** | A job executor a plugin declares (`executor_types` in its manifest) | `crates/meerschaum-plugin/src/executor.rs`, `crates/meerschaum-cli/src/native_executors.rs` |
 | **Engine executor** | The engine's dynamic ready queue that runs planned nodes (HEFT, leases, retries), and its node runner | `crates/meerschaum-engine/src/executor.rs`, `native.rs` (`NativeExecutor`) |
-| **Team executor** | A separate process (container or remote host) running one isolated team's ordinary API, jobs and terminals under the main API's signed control | `crates/meerschaum-server/src/executor/`, `crates/meerschaum-cli/src/server_executor.rs` |
-| `executor_*` modules | The main-API side (client, job catalog, contexts, stack, factory) and executor side of team executors | `crates/meerschaum-cli/src/executor_*.rs`, `executor_client/`, `executor_compiler/` |
+| **Team executor** | A separate process (container or remote host) running one isolated team's ordinary API, jobs and terminals under the main API's signed control | `crates/meerschaum-server/src/executor/`, `crates/meerschaum-cli/src/server/executor/` |
+| `executor` modules | The main-API side (client, job catalog, contexts, stack, factory) and executor side of team executors | `crates/meerschaum-cli/src/executor/` (crate-internal), `executor_client/`, `executor_jobs/`, `executor_*.rs` |
 
 ## Teams and access
 
@@ -171,7 +171,7 @@ A team's default execution mode (`execution.mode: host`): its workers, jobs and 
 the main API's host inside the team sandbox.
 Owner: `crates/meerschaum-core/src/execution.rs` (`Mode::Host`).
 _Avoid_: host executor (there is no executor process). The API-only job runtime on the main host
-is the **host API-only runtime** (`JobPlacement::HostApi`, `crates/meerschaum-cli/src/executor_host_*.rs`).
+is the **host API-only runtime** (`JobPlacement::HostApi`, `crates/meerschaum-cli/src/executor/host_jobs/`, `executor/host_sources.rs`).
 
 **Execution profile**:
 The credential ceiling the main API records on a launch: Team (the team's own connectors), API-only
@@ -183,7 +183,7 @@ Owner: `crates/meerschaum-server/src/executor/environment.rs` (`Profile`).
 The Linux Landlock rules (plus a seccomp Unix-socket filter where Landlock cannot deny sockets)
 that a team process applies to itself before any team code runs.
 Owner: `crates/meerschaum-core/src/team_scope/sandbox.rs`; enforced at process start by
-`crates/meerschaum-cli/src/team_sandbox.rs`.
+`crates/meerschaum-cli/src/team_sandbox/`.
 
 **Team execution**:
 Running arbitrary commands (`sh`, `python`, plugin actions, terminals) for a team that may write
@@ -200,18 +200,18 @@ Owner: `crates/meerschaum-server/src/execute_policy.rs`, `execute_access.rs`.
 **Source fetch**:
 The main API's canonical source broker: bounded, paged native SQL reads of registered pipes that
 API-only work uses instead of database credentials.
-Owner: `crates/meerschaum-server/src/routes/source_fetch.rs`, `crates/meerschaum-cli/src/source_fetch_*.rs`.
+Owner: `crates/meerschaum-server/src/routes/source_fetch.rs`, `crates/meerschaum-cli/src/source_fetch_*`.
 _Avoid_: proxy read, data relay.
 
 **Confined compiler**:
 The administrator-selected offline Rust toolchain that compiles a team's single-file native plugin
 inside a confined process; no request, job property or environment can select it.
-Owner: `crates/meerschaum-cli/src/executor_compiler*.rs`, `crates/meerschaum-plugin/src/source/compiler.rs`.
+Owner: `crates/meerschaum-cli/src/executor/compiler/`, `crates/meerschaum-plugin/src/source/compiler.rs`.
 
 **Factory**:
 The administrator-installed native material in an executor image (SDK, compiler bundle) whose
 manifest the main API verifies against a pinned public key before trusting its results.
-Owner: `crates/meerschaum-server/src/executor/factory_*.rs`, `crates/meerschaum-cli/src/executor_factory_*.rs`.
+Owner: `crates/meerschaum-server/src/executor/factory_*.rs`, `crates/meerschaum-cli/src/executor/factory/`.
 
 ## Release and verification
 

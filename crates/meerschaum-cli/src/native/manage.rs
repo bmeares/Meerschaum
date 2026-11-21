@@ -325,7 +325,7 @@ pub fn edit_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let force = flag(args, "force");
     let noask = flag(args, "noask");
     let params = super::params(args);
-    // `edit pipes access` (rc15 wave 2, AC10): owner, team, visibility and edit mode.
+    // `edit pipes access`: owner, team, visibility and edit mode.
     if action.first().is_some_and(|a| a == "access") {
         return super::access::edit_pipes_access(args, rt);
     }
@@ -479,7 +479,7 @@ pub fn delete_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if pipes.is_empty() {
         return Ok(SuccessTuple::fail("No pipes to delete."));
     }
-    // Locks (rc15 AC5): deleting drops the tables first, so a `drop` or a `delete` lock refuses
+    // Locks: deleting drops the tables first, so a `drop` or a `delete` lock refuses
     // it before anything changes (one locked pipe stops the command; `-y` and `--force` never
     // get past a lock).
     let checks = session(rt);
@@ -875,7 +875,7 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             continue;
         }
         info(rt, &format!("Copying {} ({} / {n})...", sp.pipe, i + 1));
-        // AC4: a copy keeps the source's locks and never takes its access (owner, team,
+        // A copy keeps the source's locks and never takes its access (owner, team,
         // visibility, edit): a new pipe gets the default access and an existing destination
         // keeps its own. The locks are set last, so a `sync` lock does not refuse the copy's own
         // data sync.

@@ -53,7 +53,7 @@ pub struct CommandSpec {
     pub cwd: Option<PathBuf>,
     /// The program is an incidental child that is not Meerschaum (an installer, an editor, a
     /// probe): it gets no `MRSM_CONFIG`, `MRSM_PATCH`, `_FILE` form or `MRSM_<TYPE>_<LABEL>`
-    /// variable ([`meerschaum_core::child_env`], 5.1). Commands the user asked for (`sh`, `os`)
+    /// variable ([`meerschaum_core::child_env`]). Commands the user asked for (`sh`, `os`)
     /// leave it `false`.
     pub scrub_secrets: bool,
 }
@@ -159,7 +159,7 @@ pub struct CommandOutput {
 #[derive(Debug, Default)]
 pub struct SystemHost;
 
-/// A restricted terminal's process starts no other program (5.1, [`crate::shell::restricted`]).
+/// A restricted terminal's process starts no other program ([`crate::shell::restricted`]).
 fn check_restricted(spec: &CommandSpec) -> std::io::Result<()> {
     if crate::shell::restricted::may_start(&spec.program) {
         Ok(())
@@ -239,7 +239,7 @@ impl Host for SystemHost {
         consume: &mut (dyn FnMut(&mut dyn std::io::Read) -> std::io::Result<()> + Send),
     ) -> std::io::Result<i32> {
         check_restricted(spec)?;
-        crate::executor_factory_process::stream(spec, timeout, maximum_stdout, consume)
+        crate::executor::factory::process::stream(spec, timeout, maximum_stdout, consume)
     }
 
     fn read_line_timeout(&mut self, timeout: std::time::Duration) -> Option<String> {
@@ -569,7 +569,7 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
     // manifest is the cached one (never validated or rebuilt, which imports plugin code).
     let doctor = starts_with_doctor(sysargs, &rt.dates, None).unwrap_or(true);
     if !doctor && rt.config.is_none() {
-        // rc15 (Q54): a root created before rc15 keeps pandas DataFrames: `dataframe: pandas` is
+        // A root created by an earlier 5.0 release candidate keeps pandas DataFrames: `dataframe: pandas` is
         // added to its `meerschaum.yaml` before anything reads its config.
         use meerschaum_core::config::dataframe::{PinOutcome, pin_process_root};
         if let Some(PinOutcome::Pinned { notice } | PinOutcome::Failed { notice }) =
@@ -688,7 +688,7 @@ fn main_inner(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return if result.success { 0 } else { 1 };
     }
     // PARITY: v4 only sets a failing exit code when the tuple is printed, so `--nopretty`
-    // always exited 0 (`meerschaum/__main__.py` `main`). v5 exits 1 on failure (wave 18, D-10)
+    // always exited 0 (`meerschaum/__main__.py` `main`). v5 exits 1 on failure
     // so scripts can rely on the status; nothing is printed, as in v4.
     if nopretty {
         return if result.success { 0 } else { 1 };
@@ -1013,7 +1013,7 @@ fn summarize_chain(
     }
 }
 
-/// What the dispatcher runs for the action words `action` (5.1): a native plugin's action, a
+/// What the dispatcher runs for the action words `action`: a native plugin's action, a
 /// Python plugin's action, a core action, or, for words that name none, the system shell (v4's
 /// fallthrough to `sh`). The dispatcher decides with this function, and the API server asks it
 /// for each step of a non-administrator's command line ([`resolve_sysargs`]), so the server
@@ -1763,7 +1763,7 @@ fn timed_pipeline_step(
         command.env(key, value);
     }
     // The step writes to a pipe this process relays: it styles its output when this process
-    // does (a terminal, a job, `FORCE_COLOR`), so the steps look like the summary (rc15 Q14).
+    // does (a terminal, a job, `FORCE_COLOR`), so the steps look like the summary.
     if let Some((key, value)) = crate::format::relay_env(&rt.settings()) {
         command.env(key, value);
     }

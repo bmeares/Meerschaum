@@ -1,0 +1,2014 @@
+//! CLI hosting of the Rust HTTP and MCP servers, with the supervised Python API host.
+//! The `executor` child hosts a team executor process (`mrsm start executor`).
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use meerschaum_core::config::{Config, ConfigOptions};
+use meerschaum_core::{Map, Pipe, SuccessTuple};
+use meerschaum_server::host::{
+    FileManifest, HostEndpoint, HostLauncher, HostManifest, HostProcess, HostSupervisor,
+    PythonHostLauncher, SupervisorOptions, WithConsole, default_socket_path, probe_console,
+    spawn_manifest_watcher,
+};
+use meerschaum_server::mcp::{ConnectorRegister, McpBackend, McpServer, SqlReadError};
+use meerschaum_server::{AppState, ServerConfig, ServerFlags};
+
+use crate::builtin::{ActionError, ActionResult};
+use crate::dispatch::Runtime;
+use crate::native::{self, Session};
+use crate::value::{ArgsMap, PyValue};
+
+mod executor;
+pub use executor::start_executor;
+
+// Plugin imports may print to stdout. Keep the MCP protocol channel clean even when the
+// supervised API host runs Python plugins with ordinary print() diagnostics.
+// The host is a `HostChild`: its stdin is a pipe this process holds, so a host whose server is
+// killed (SIGKILL, the OOM killer) exits instead of running on as an orphan.
+struct StderrHostLauncher(PythonHostLauncher, Option<Vec<(String, String)>>);
+
+#[async_trait]
+impl HostLauncher for StderrHostLauncher {
+    async fn launch(&self, socket: &std::path::Path) -> std::io::Result<Box<dyn HostProcess>> {
+        self.launch_endpoint(&HostEndpoint::from(socket)).await
+    }
+
+    async fn launch_endpoint(
+        &self,
+        endpoint: &HostEndpoint,
+    ) -> std::io::Result<Box<dyn HostProcess>> {
+        let mut command = tokio::process::Command::new(&self.0.python);
+        if let Some(environment) = &self.1 {
+            command.env_clear().envs(environment.iter().cloned());
+        }
+        let mut child = meerschaum_server::host::HostChild::spawn(
+            command
+                .args([
+                    meerschaum_core::self_exe::PYTHON_SAFE_PATH_FLAG,
+                    "-m",
+                    "meerschaum.api.host",
+                ])
+                .args(PythonHostLauncher::endpoint_args(endpoint))
+                .envs(PythonHostLauncher::endpoint_env(endpoint))
+                .envs(self.0.env.iter().map(|(key, value)| (key, value)))
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit())
+                .kill_on_drop(true),
+        )?;
+        if let Some(mut stdout) = child.child_mut().stdout.take() {
+            tokio::spawn(async move {
+                let _ = tokio::io::copy(&mut stdout, &mut tokio::io::stderr()).await;
+            });
+        }
+        Ok(Box::new(child))
+    }
+}
+
+/// Forwards the events of the engine runs in the server process to its run event streams.
+struct LiveRunEvents(AppState);
+
+impl meerschaum_engine::ProcessEventSink for LiveRunEvents {
+    fn emit(&self, home_instance: &str, event: meerschaum_engine::Event) {
+        if self.0.engine_streams.is_followed()
+            && let Ok(json) = serde_json::to_value(&event)
+        {
+            self.0.engine_streams.publish_json(home_instance, &json);
+        }
+    }
+}
+
+fn io_error(error: impl std::fmt::Display) -> ActionError {
+    ActionError::new("OSError", error.to_string())
+}
+
+/// Translate parsed v4 flags to the server's configuration.
+pub fn flags(args: &ArgsMap) -> Result<ServerFlags, ActionError> {
+    let port = native::int(args, "port")
+        .map(|port| u16::try_from(port).map_err(io_error))
+        .transpose()?;
+    Ok(ServerFlags {
+        instance: native::string(args, "mrsm_instance"),
+        host: native::string(args, "host"),
+        port,
+        production: native::flag(args, "production"),
+        secure: native::flag(args, "secure"),
+        private: native::flag(args, "private"),
+        no_auth: native::flag(args, "no_auth"),
+        debug: native::flag(args, "debug"),
+        no_dash: native::flag(args, "no_dash"),
+        no_webterm: native::flag(args, "no_webterm"),
+        public: native::flag(args, "public"),
+        keyfile: native::string(args, "keyfile"),
+        certfile: native::string(args, "certfile"),
+    })
+}
+
+/// Start the HTTP API and `/mcp` until interrupted.
+pub fn start_api(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    start(args, rt, false)
+}
+
+/// `start webterm`. v4 ran a Tornado terminal process next to the API; v5 serves the terminal
+/// from the API server itself (`/dash/webterm`, `/webterm/<session>`), authenticated through the
+/// console session, so there is nothing to start on its own.
+pub fn start_webterm(_args: &ArgsMap, _rt: &mut Runtime<'_>) -> ActionResult {
+    Ok(SuccessTuple::fail(
+        "The web terminal is part of the API server in v5: run `start api` and open \
+         `/dash/webterm` (or `/webterm/<session id>`). There is no separate terminal process; \
+         `--no-webterm` turns the terminal off.",
+    ))
+}
+
+/// Start newline-delimited MCP on stdio. The dispatcher's final tuple must go to stderr.
+pub fn start_mcp(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    start(args, rt, true)
+}
+
+/// Only repair known dependencies when the Python facade is present. A missing interpreter,
+/// failed probe, or a Rust-only installation must remain a usable standalone API server.
+fn console_dependencies(probe: &meerschaum_server::host::ConsoleProbe) -> Vec<String> {
+    if probe.available || probe.missing.iter().any(|name| name == "meerschaum") {
+        return Vec::new();
+    }
+    if probe
+        .missing
+        .iter()
+        .any(|name| !meerschaum_server::host::CONSOLE_MODULES.contains(&name.as_str()))
+    {
+        return Vec::new();
+    }
+    probe
+        .missing
+        .iter()
+        .filter_map(|name| {
+            native::packages::ALL_PACKAGES
+                .iter()
+                .rev()
+                .find(|(import, _)| import == name)
+                .map(|(_, install)| (*install).to_string())
+        })
+        .collect()
+}
+
+/// HTTPS for `start api` (`--keyfile` / `--certfile`, or `ssl_keyfile` / `ssl_certfile` under
+/// `api:server`, or 4.1's `api:uvicorn`): the key and certificate are checked before anything
+/// else starts, so a missing half, an unreadable file or a bad PEM stops `start api` with the
+/// reason instead of a server that cannot answer `https://` clients. `Ok(None)`: plain HTTP.
+/// The address of the internal listener goes into `config` for the API host.
+pub fn prepare_https(
+    config: &mut ServerConfig,
+) -> Result<Option<meerschaum_server::tls::Https>, String> {
+    meerschaum_server::tls::prepare(config).map_err(|e| e.to_string())
+}
+
+/// Print the server's certificate messages (a reload, a failed reload) the way the CLI prints its
+/// own: information on stdout, warnings on stderr, styled for each stream (`config` gives the
+/// styles; without one the text is plain).
+fn tls_events(rt: &mut Runtime<'_>, config: Option<Config>) -> meerschaum_server::tls::TlsEvents {
+    let (out, err) = (rt.settings(), rt.err_settings());
+    Arc::new(move |event| {
+        use meerschaum_server::tls::TlsEvent;
+        use std::io::Write as _;
+        let render = |settings: &crate::format::FormatSettings| match (&config, &event) {
+            (Some(config), TlsEvent::Info(m)) => {
+                crate::format::Formatter::new(settings.clone(), config).info(m, true)
+            }
+            (Some(config), TlsEvent::Warning(m)) => {
+                crate::format::Formatter::new(settings.clone(), config).warn(m)
+            }
+            (None, event) => format!("{}\n", event.message()),
+        };
+        match &event {
+            TlsEvent::Info(_) => {
+                let mut stdout = std::io::stdout().lock();
+                let _ = stdout.write_all(render(&out).as_bytes());
+                let _ = stdout.flush();
+            }
+            TlsEvent::Warning(_) => {
+                let mut stderr = std::io::stderr().lock();
+                let _ = stderr.write_all(render(&err).as_bytes());
+                let _ = stderr.flush();
+            }
+        }
+    })
+}
+
+fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
+    // The server waits on SIGINT / SIGTERM itself (`ShutdownSignal`): the spinner of its startup
+    // must not take them.
+    crate::native::jobs::own_signals();
+    // A server prints nothing between requests: the API client's warnings go to `tracing`.
+    crate::native::api_warnings::uninstall();
+    let mut config = ServerConfig::from_config(rt.config(), &flags(args)?);
+    // Before anything else starts (the console probe, the API host): MCP over stdio has no
+    // listener, so it never serves HTTPS.
+    let https = if stdio {
+        None
+    } else {
+        match prepare_https(&mut config) {
+            Ok(https) => https,
+            Err(refusal) => return Ok(SuccessTuple::fail(refusal)),
+        }
+    };
+    // Installation policy is loaded before any startup manifest/source discovery. A
+    // configured invalid snapshot never silently becomes ambient/private compilation.
+    let source_compiler = crate::executor::compiler::provisioning::load()
+        .map_err(|message| ActionError::new("ExecutionUnavailable", message))?;
+    let session = native::session(rt);
+    let plugin_manifest = session.manifest(rt.config())?;
+    let instance = session.instance(&config.instance_keys, rt.config())?;
+    let mut options = ConfigOptions::from_process();
+    options.env.retain(|(key, _)| key != "MRSM_ROOT_DIR");
+    options.env.push((
+        "MRSM_ROOT_DIR".into(),
+        config.root_dir.display().to_string(),
+    ));
+    let executors = Arc::new(crate::executor_client::Controller::new(
+        config.root_dir.clone(),
+        instance.conn(),
+        options.clone(),
+        rt.config().snapshot(),
+    ));
+    let backend = Arc::new(NativeBackend {
+        http: !stdio,
+        options,
+        snapshot: rt.config().snapshot(),
+        session: session.clone(),
+        executors: Some(executors.clone()),
+        plugin_actions: plugin_manifest
+            .plugins
+            .values()
+            .flat_map(|plugin| plugin.actions.iter().map(|action| action.name.clone()))
+            .collect(),
+    });
+    let https = https.map(|https| https.with_events(tls_events(rt, backend.config().ok())));
+    let manifest_path = config.root_dir.join("cache/plugins_manifest.json");
+    let python = PythonHostLauncher::python_from_env();
+    // The Dash console is the Python host's (D21): the host runs for it when its modules import.
+    // Repair missing Python dependencies in the shared environment unless installs are
+    // disabled. An unavailable console is one warning, and `/dash` is the pointer page.
+    let console_available = if stdio || config.no_dash {
+        false
+    } else {
+        let mut probe = probe_console(&python, &config.root_dir, &[]);
+        let env = native::pip::PipEnv::new(rt);
+        let missing = console_dependencies(&probe);
+        if env.auto_install && !missing.is_empty() {
+            native::info(
+                rt,
+                "Installing web console dependencies into the shared mrsm environment...",
+            );
+            native::pip::pip_install(
+                &env,
+                rt,
+                &native::pip::PipInstall {
+                    names: missing,
+                    venv: "mrsm".into(),
+                    debug: native::flag(args, "debug"),
+                    // Install missing requirements without upgrading existing dependencies.
+                    args: Some(Vec::new()),
+                    ..Default::default()
+                },
+            );
+            probe = probe_console(&python, &config.root_dir, &[]);
+        }
+        if !probe.available {
+            native::warn(rt, &probe.warning());
+        }
+        probe.available
+    };
+    let manifest = HostManifest::from_file(&manifest_path)
+        .map_err(io_error)?
+        .with_console(console_available);
+    let launcher = PythonHostLauncher::for_config(&config, python);
+    let supervisor = HostSupervisor::new(
+        &manifest,
+        Arc::new(StderrHostLauncher(launcher, None)),
+        default_socket_path(&config.root_dir),
+        SupervisorOptions::default(),
+    );
+    for notice in &config.notices {
+        rt.eprint(&format!("{notice}\n"));
+    }
+    if !stdio && let Some(line) = config.preset_notice() {
+        native::info(rt, &line);
+    }
+    // Where HTTPS is served and with which certificate (a warning when clients will refuse it).
+    if let Some(https) = &https {
+        for message in https.startup_messages(&config) {
+            match message {
+                meerschaum_server::tls::TlsEvent::Info(line) => native::info(rt, &line),
+                meerschaum_server::tls::TlsEvent::Warning(line) => native::warn(rt, &line),
+            }
+        }
+    }
+    if !stdio {
+        for warning in [
+            config.open_terminal_warning(),
+            config.open_no_auth_warning(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            native::warn(rt, &warning);
+        }
+        // v5: one line when the PostgreSQL instance has an extension older than its server's
+        // (bounded probe on its own connection; errors are ignored, startup never waits long).
+        if let Some(sql) = instance.sql()
+            && let Some(hint) = native::extensions::spec_hint(
+                &session,
+                sql.spec(),
+                &instance.keys(),
+                native::extensions::HINT_TIMEOUT,
+            )
+        {
+            native::warn(rt, &hint);
+        }
+    }
+    let jobs_context = executors
+        .bind_host_jobs(crate::native::jobs::jobs_context(rt))
+        .map_err(|message| ActionError::new("ExecutionUnavailable", message))?;
+    executors
+        .bind_host_compiler(source_compiler)
+        .map_err(|message| ActionError::new("ExecutionUnavailable", message))?;
+    executors
+        .bind_host_terminals()
+        .map_err(|message| ActionError::new("ExecutionUnavailable", message))?;
+    let host_jobs = executors
+        .host_jobs()
+        .map_err(|message| ActionError::new("ExecutionUnavailable", message))?;
+    // The isolated teams' scopes, recorded before the restart monitor starts their jobs
+    // (with the team's configuration only), and kept current while the server runs.
+    let team_scopes = {
+        let backend = backend.clone();
+        crate::team_scopes::TeamScopes::new(
+            session.clone(),
+            instance.conn(),
+            Arc::new(move || backend.config().ok()),
+            config.root_dir.clone(),
+            Some(jobs_context.clone()),
+        )
+    };
+    if let Err(error) = session.block_on(team_scopes.refresh()) {
+        native::warn(
+            rt,
+            &format!("The isolated teams' scopes were not recorded: {error}"),
+        );
+    }
+    // Whether isolated teams' processes are sandboxed here, and what the sandbox misses.
+    if let Ok(server_config) = backend.config() {
+        for (warning, line) in crate::team_sandbox::server_status(&server_config, &config.root_dir)
+        {
+            if warning {
+                native::warn(rt, &line);
+            } else {
+                native::info(rt, &line);
+            }
+        }
+        // Whether each code-running team's commands may run here, and why not.
+        for (warning, line) in crate::team_execution::status_lines(&server_config) {
+            if warning {
+                native::warn(rt, &line);
+            } else {
+                native::info(rt, &line);
+            }
+        }
+    }
+    // PARITY: v4's API startup ran `start_check_jobs_thread()`: while the server runs, it
+    // restarts the root's stopped `--restart` jobs that were not stopped by hand (a container or
+    // machine restart), every `check_restart_seconds`. Stops with this function.
+    let _restart_monitor = if stdio {
+        None
+    } else {
+        meerschaum_jobs::monitor::spawn(
+            jobs_context.clone(),
+            meerschaum_jobs::monitor::default_interval(),
+        )
+        .map_err(|error| native::warn(rt, &format!("Cannot monitor job restarts: {error}")))
+        .ok()
+    };
+    let jobs = Arc::new(crate::executor_jobs::DelegatingJobs::new(
+        &config.root_dir,
+        host_jobs.backend(),
+        executors.clone(),
+    ));
+    // Engine state (`/engine/*`, §5.8 R2) persists on the server's own instance, so an API
+    // instance's ledger, cursors, runs and leases survive a restart.
+    let engine_store = Arc::new(meerschaum_server::engine_store::InstanceEngine::new(
+        instance.conn(),
+        &instance.keys(),
+    ));
+    // Resolve extra allowed instances through the process's configured connectors. Native
+    // host calls and ordinary HTTP routes then use the same instance boundary.
+    let plugin_host = crate::native_plugins::HostEnv::new(
+        session.clone(),
+        crate::native_plugins::host_config(rt.config()),
+        session.native_plugins(rt.config())?,
+        Some(instance.keys()),
+    );
+    let grafana_teams = meerschaum_web::grafana::GrafanaTeams::from_section(
+        &config.grafana,
+        &config.grafana_password_path,
+    );
+    if let Some(e) = grafana_teams.error() {
+        native::warn(rt, &format!("The Grafana integration is inactive: {e}"));
+    }
+    // Once at startup: the data sources Grafana's anonymous visitors can query.
+    let anonymous_check = match meerschaum_web::grafana::GrafanaSettings::from_section(
+        &config.grafana,
+        &config.grafana_password_path,
+    ) {
+        Ok(Some(settings)) if !stdio => Some((
+            settings,
+            rt.config()
+                .get(&["meerschaum", "connectors", "sql", "main", "username"])
+                .map(|v| v.py_str())
+                .filter(|u| !u.is_empty() && u != "None"),
+        )),
+        _ => None,
+    };
+    let state = AppState::builder(config, instance.conn())
+        .resolver(Arc::new(plugin_host.clone()))
+        .native_self_api_engines()
+        .team_events(Arc::new(TeamFollowers {
+            config: crate::native_plugins::host_config(rt.config()),
+            grafana: grafana_teams,
+            scopes: team_scopes.clone(),
+        }))
+        .actions(backend.clone())
+        .source_fetch(Arc::new(
+            crate::source_fetch_backend::NativeSqlSources::new(
+                session.clone(),
+                crate::native_plugins::host_config(rt.config()),
+            ),
+        ))
+        .jobs(jobs)
+        .engine(engine_store)
+        .pipelines(backend.clone())
+        .host(Arc::new(meerschaum_server::proxy::HostProxy::supervised(
+            supervisor.clone(),
+        )))
+        .build()
+        .map_err(io_error)?;
+    executors
+        .bind_state(&state)
+        .map_err(|error| ActionError::new("RuntimeError", error))?;
+    let host_proxy = state.host.clone();
+    // Engine runs this process starts (`POST /actions/sync`, MCP action tools) reach
+    // `GET /engine/runs/{run_id}/events/stream` live, not only through the persisted tail.
+    // Registered for as long as this function serves: dropping the registration (on return,
+    // including an early error) releases the sink and the server state it holds.
+    let _live_events =
+        meerschaum_engine::add_process_event_sink(Arc::new(LiveRunEvents(state.clone())));
+    // The syncs this server runs (its sync route, actions, MCP tools) record `api` as their
+    // source in the pipes' sync statuses, for as long as it serves.
+    let _sync_source = meerschaum_connector::sync_status::role_scope(
+        meerschaum_connector::sync_status::SyncSource::Api,
+    );
+    // Native plugins' MCP tools, resources and prompts are served in-process (both transports).
+    let mut mcp_notices = Vec::new();
+    let native_mcp = crate::native_plugins::mcp(
+        &session.native_plugins(rt.config())?,
+        &mut mcp_notices,
+        &plugin_host,
+        &state,
+    );
+    for notice in mcp_notices {
+        rt.eprint(&format!("{notice}\n"));
+    }
+    let mcp = Arc::new(
+        McpServer::for_state(&state)
+            .with_backend(backend)
+            .with_native(native_mcp),
+    );
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    if let Some(workers) = native::int(args, "workers") {
+        if workers < 1 {
+            return Err(ActionError::new(
+                "ValueError",
+                "workers must be greater than zero",
+            ));
+        }
+        builder.worker_threads(workers as usize);
+    }
+    let server_runtime = builder.enable_all().build().map_err(io_error)?;
+    let result = server_runtime.block_on(async {
+        let executor_heartbeat = tokio::spawn(executors.maintain());
+        {
+            let team_scopes = team_scopes.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(crate::team_scopes::REFRESH_INTERVAL);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                interval.tick().await;
+                loop {
+                    interval.tick().await;
+                    match team_scopes.refresh().await {
+                        Ok(done) if !done.restarted.is_empty() || !done.retired.is_empty() => {
+                            tracing::info!(
+                                "Team scopes: restarted jobs {:?}, retired team workers {:?}.",
+                                done.restarted,
+                                done.retired
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => tracing::warn!("The team scopes were not refreshed: {error}"),
+                    }
+                }
+            });
+        }
+        if let Some((settings, owner)) = anonymous_check {
+            tokio::spawn(meerschaum_web::grafana::warn_about_anonymous_datasources(
+                settings,
+                meerschaum_connector_sql::team_database::MAIN_READONLY_ROLE.to_string(),
+                owner,
+            ));
+        }
+        // Register synchronously before either serving future can expose readiness. An async
+        // ctrl_c() constructor would register only when select! first polls that branch.
+        let mut shutdown = ShutdownSignal::new().map_err(io_error)?;
+        let console = if stdio {
+            None
+        } else {
+            // Start the host in the background (it serves the Dash console and the plugins) and
+            // learn whether it mounted the console; serving does not wait for Python.
+            if let Some(host) = host_proxy.clone()
+                && supervisor.is_needed()
+            {
+                let secret = state.secret().to_vec();
+                // `/healthcheck/ready` answers 503 ("starting") until the host answered or
+                // failed to (bounded by `api:host:response_seconds` and the supervisor's
+                // readiness wait), then 503 ("host_unavailable") for as long as the host is not
+                // serving: no timeout makes a server that cannot serve its plugins look ready.
+                let lifecycle = state.lifecycle.clone();
+                lifecycle.set_starting(true);
+                tokio::spawn(async move {
+                    host.refresh_console(&secret).await;
+                    lifecycle.set_starting(false);
+                });
+            }
+            // Native plugin routes (no host process) are merged with the console's routes.
+            let natives = session.native_plugins(rt.config())?;
+            let (routes, notices) =
+                crate::native_plugins::routes(&state, &natives, &plugin_host);
+            for notice in notices {
+                rt.eprint(&format!("{notice}\n"));
+            }
+            Some(match console(&state, &plugin_manifest, rt)? {
+                Some(console) => console.merge(routes),
+                None => routes,
+            })
+        };
+        let watcher = spawn_manifest_watcher(
+            Arc::new(WithConsole(FileManifest(manifest_path), console_available)),
+            supervisor.clone(),
+            mcp.federation.clone(),
+            Duration::from_secs(1),
+        );
+        let result = if stdio {
+            let serve = async {
+                if supervisor.is_needed()
+                    && let Some(federation) = &mcp.federation
+                {
+                    let _ = federation.refresh().await;
+                }
+                meerschaum_server::mcp::stdio::serve_stdio(&mcp, &state).await
+            };
+            tokio::select! {
+                result = serve => Ok(result),
+                result = shutdown.wait() => result.map(|()| SuccessTuple::success()).map_err(io_error),
+            }
+        } else {
+            let grace = state.config.shutdown_grace;
+            let lifecycle = state.lifecycle.clone();
+            let serving = meerschaum_server::serve_with_tls(state.clone(), mcp, console, https);
+            tokio::pin!(serving);
+            let result = tokio::select! {
+                result = &mut serving => result.map(|()| SuccessTuple::success()).map_err(io_error),
+                result = shutdown.wait() => match result {
+                    Err(error) => Err(io_error(error)),
+                    // `api:shutdown:grace_seconds: 0`: stop at once.
+                    Ok(()) if grace.is_zero() => Ok(SuccessTuple::success()),
+                    Ok(()) => {
+                        native::info(
+                            rt,
+                            &format!(
+                                "Shutting down: finishing the requests in progress (up to {} s; \
+                                 interrupt again to stop now).",
+                                format_seconds(grace)
+                            ),
+                        );
+                        drain(&lifecycle, serving.as_mut(), &mut shutdown, grace).await
+                    }
+                },
+            };
+            // A drain closed the web terminals: let them deliver their close frames.
+            let deadline = tokio::time::Instant::now() + TERMINALS_CLOSE_TIMEOUT;
+            while meerschaum_server::webterm::active_terminals() > 0
+                && tokio::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            result
+        };
+        watcher.abort();
+        executor_heartbeat.abort();
+        // The sync statuses this server recorded (written in the background) before its
+        // runtime goes away.
+        meerschaum_connector::sync_status::flush(
+            meerschaum_connector::sync_status::RECORD_TIMEOUT,
+        )
+        .await;
+        supervisor.shutdown().await;
+        // The web terminal's own tmux server, when this server started it.
+        meerschaum_server::webterm::stop_owned_servers();
+        result
+    });
+    // Tokio stdin uses a blocking reader which may still await input after Ctrl-C.
+    server_runtime.shutdown_timeout(Duration::from_millis(100));
+    result
+}
+
+/// The routes the Rust server keeps of the web console (v4 served it unless `--no-dash`): the
+/// web terminal, the job-log stream and native plugin pages as fragments. The Dash console
+/// itself is the Python API host's; the server proxies `/dash` to it (or shows the pointer page).
+/// `None` with `--no-dash`.
+pub fn console(
+    state: &AppState,
+    manifest: &meerschaum_worker::manifest::Manifest,
+    rt: &mut Runtime<'_>,
+) -> Result<Option<axum::Router>, ActionError> {
+    if state.config.no_dash {
+        return Ok(None);
+    }
+    let mut web = meerschaum_web::WebConfig::for_state(state);
+    // PARITY: `--no-webterm` (also implied by `--no-auth`) removes the terminal page.
+    // The terminal runs `<this binary> -i <instance>` on the server's root.
+    if !state.config.no_webterm
+        && let Ok(mut shell) =
+            meerschaum_web::ShellCommand::current_exe_shell(&state.config.instance_keys)
+    {
+        shell.env.push((
+            "MRSM_ROOT_DIR".into(),
+            state.config.root_dir.display().to_string(),
+        ));
+        web.webterm = Some(meerschaum_web::WebtermSettings::new(shell));
+    }
+    let session = native::session(rt);
+    let natives = session.native_plugins(rt.config())?;
+    // The pages' host calls run for their viewer, on the server's own config.
+    let plugin_host = crate::native_plugins::HostEnv::new(
+        session,
+        crate::native_plugins::host_config(rt.config()),
+        natives.clone(),
+        Some(state.config.instance_keys.clone()),
+    );
+    web.pages = crate::native_plugins::pages(manifest, &natives, &plugin_host, state);
+    match meerschaum_web::router(state.clone(), web.clone()) {
+        Ok(router) => Ok(Some(router)),
+        Err(error) => {
+            // A native page with a bad path must not take the terminal down.
+            rt.eprint(&format!("Native plugin pages are disabled: {error}\n"));
+            web.pages.clear();
+            meerschaum_web::router(state.clone(), web)
+                .map(Some)
+                .map_err(io_error)
+        }
+    }
+}
+
+/// How long a stopping server lets its web terminals deliver their close frames.
+const TERMINALS_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// `8`, `0.5`: a grace period as its config value reads.
+fn format_seconds(duration: Duration) -> String {
+    let seconds = duration.as_secs_f64();
+    if seconds.fract() == 0.0 {
+        format!("{}", seconds as u64)
+    } else {
+        format!("{seconds}")
+    }
+}
+
+/// Drain the server (`api:shutdown:grace_seconds`): its listeners stop accepting, long-lived
+/// responses end, and the requests in progress finish, for at most `grace`. A second signal
+/// stops at once.
+async fn drain<F>(
+    lifecycle: &meerschaum_server::lifecycle::Lifecycle,
+    serving: std::pin::Pin<&mut F>,
+    shutdown: &mut ShutdownSignal,
+    grace: Duration,
+) -> ActionResult
+where
+    F: std::future::Future<Output = std::io::Result<()>>,
+{
+    lifecycle.begin_drain();
+    tokio::select! {
+        result = serving => result.map(|()| SuccessTuple::success()).map_err(io_error),
+        () = tokio::time::sleep(grace) => {
+            tracing::warn!(
+                "The requests still in progress after {} s were cut off.",
+                format_seconds(grace)
+            );
+            Ok(SuccessTuple::success())
+        }
+        _ = shutdown.wait() => Ok(SuccessTuple::success()),
+    }
+}
+
+/// Own the subscriptions through serving and supervisor cleanup, independently of which
+/// select! branch is polled first or completes. Construction requires the entered runtime.
+struct ShutdownSignal {
+    #[cfg(unix)]
+    interrupt: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    interrupt: tokio::signal::windows::CtrlC,
+}
+
+impl ShutdownSignal {
+    fn new() -> std::io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Ok(Self {
+                interrupt: signal(SignalKind::interrupt())?,
+                terminate: signal(SignalKind::terminate())?,
+            })
+        }
+        #[cfg(windows)]
+        {
+            Ok(Self {
+                interrupt: tokio::signal::windows::ctrl_c()?,
+            })
+        }
+    }
+
+    async fn wait(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        tokio::select! {
+            _ = self.interrupt.recv() => Ok(()),
+            _ = self.terminate.recv() => Ok(()),
+        }
+        #[cfg(windows)]
+        {
+            self.interrupt.recv().await;
+            Ok(())
+        }
+    }
+}
+
+// Native actions synchronously drive the shared Session runtime. Run them on a blocking
+// thread so they never nest block_on inside the server's async executor.
+#[derive(Clone)]
+struct NativeBackend {
+    http: bool,
+    options: ConfigOptions,
+    snapshot: Map,
+    session: Session,
+    plugin_actions: Vec<String>,
+    executors: Option<Arc<crate::executor_client::Controller>>,
+}
+
+impl NativeBackend {
+    async fn api_worker(
+        &self,
+        caller: Option<&Arc<meerschaum_server::access::Access>>,
+    ) -> Result<bool, String> {
+        match caller {
+            Some(caller) if caller.no_auth || caller.full_admin() => Ok(false),
+            Some(caller) if caller.auth.is_none() => {
+                Err("This HTTP execution has no authenticated original source.".into())
+            }
+            Some(caller) => {
+                Ok(meerschaum_server::team_execution::code_running_team(caller).is_none())
+            }
+            None if !self.http => Ok(false),
+            None => {
+                if let Some(executors) = &self.executors
+                    && executors.allow_unattributed_jobs()?
+                {
+                    return Ok(false);
+                }
+                Err("This HTTP execution lost its original source; retry the authenticated request.".into())
+            }
+        }
+    }
+    fn config(&self) -> Result<Config, ActionError> {
+        let config = Config::new(self.options.clone()).map_err(io_error)?;
+        config.set_config(self.snapshot.clone());
+        Ok(config)
+    }
+
+    /// The session and configuration a call runs with: the team's own (its workers and
+    /// connectors, built from its configuration only) when the request acts for an isolated
+    /// team, else the server's.
+    fn scoped(
+        &self,
+        acting: Option<&meerschaum_connector::acting_team::ActingTeam>,
+    ) -> Result<(Session, Config), ActionError> {
+        let config = self.config()?;
+        let Some(team) = acting else {
+            return Ok((self.session.clone(), config));
+        };
+        let (session, _) =
+            self.session
+                .for_team(&team.scope, Some(team.member.clone()), &config)?;
+        let team_config = match session.team() {
+            Some(binding) => binding.new_config()?,
+            None => return Err(ActionError::new("RuntimeError", "No team session.")),
+        };
+        Ok((session, team_config))
+    }
+
+    async fn sync(
+        &self,
+        pipe: &Pipe,
+        begin: Option<String>,
+        end: Option<String>,
+        verify: bool,
+    ) -> SuccessTuple {
+        let caller = meerschaum_server::executor::context::current();
+        let api_worker = match self.api_worker(caller.as_ref()).await {
+            Ok(api_worker) => api_worker,
+            Err(error) => return SuccessTuple::fail(error),
+        };
+        if let Some(executors) = &self.executors {
+            if api_worker {
+                let operation = meerschaum_server::executor::pipe_operation::PipeOperation {
+                    row_params: None,
+                    pipe_ref: format!(
+                        "{}|{}|{}|{}",
+                        pipe.instance_keys(),
+                        pipe.connector_keys(),
+                        pipe.metric_key(),
+                        pipe.location_key().unwrap_or("None")
+                    ),
+                    registration: meerschaum_core::Value::Null,
+                    verify,
+                    begin,
+                    end,
+                    parents: None,
+                    children: None,
+                    metadata: None,
+                };
+                return meerschaum_server::executor::context::scope(
+                    caller,
+                    executors.run_pipe_operation(operation, &self.session),
+                )
+                .await
+                .map(|(result, _)| result)
+                .unwrap_or_else(SuccessTuple::fail);
+            }
+            let mut keywords = Map::from_iter([
+                (
+                    "connector_keys".into(),
+                    meerschaum_core::Value::List(vec![pipe.connector_keys().to_string().into()]),
+                ),
+                (
+                    "metric_keys".into(),
+                    meerschaum_core::Value::List(vec![pipe.metric_key().to_string().into()]),
+                ),
+                (
+                    "location_keys".into(),
+                    meerschaum_core::Value::List(vec![
+                        pipe.location_key().unwrap_or("[None]").to_string().into(),
+                    ]),
+                ),
+                (
+                    "mrsm_instance".into(),
+                    pipe.instance_keys().to_string().into(),
+                ),
+            ]);
+            for (key, value) in [("begin", begin.clone()), ("end", end.clone())] {
+                if let Some(value) = value {
+                    keywords.insert(key.into(), value.into());
+                }
+            }
+            keywords.insert(
+                "action".into(),
+                meerschaum_core::Value::List(vec!["pipes".into()]),
+            );
+            let argv = meerschaum_server::execute_access::sysargs_of_keywords(
+                if verify { "verify" } else { "sync" },
+                &keywords,
+            );
+            match executors.command_team(&argv, &self.session).await {
+                Err(error) => return SuccessTuple::fail(error),
+                Ok(Some(team)) => {
+                    return executors
+                        .run(&team, argv)
+                        .await
+                        .map(|(result, _)| result)
+                        .unwrap_or_else(SuccessTuple::fail);
+                }
+                Ok(None) => {}
+            }
+        } else if api_worker {
+            return SuccessTuple::fail("The canonical API execution runtime is unavailable.");
+        }
+        let backend = self.clone();
+        let pipe = pipe.clone();
+        let acting = meerschaum_connector::acting_team::current();
+        tokio::task::spawn_blocking(move || {
+            let mut stderr = std::io::stderr();
+            let mut runtime = Runtime::system(&mut stderr);
+            // A server console is not a terminal session: no spinners, no colored graphs.
+            runtime.progress = crate::format::progress::ProgressSink::Off;
+            runtime.live = false;
+            let (scoped_session, config) = match backend.scoped(acting.as_deref()) {
+                Ok(scoped) => scoped,
+                Err(error) => return SuccessTuple::fail(error.message),
+            };
+            runtime.native = Some(scoped_session);
+            runtime.config = Some(config);
+            let session = native::session(&mut runtime);
+            let instance = match session.instance(pipe.instance_keys(), runtime.config()) {
+                Ok(instance) => instance,
+                Err(error) => return SuccessTuple::fail(error.message),
+            };
+            let mut argv = vec!["sync".to_string(), "pipes".to_string()];
+            for (flag, bound) in [("--begin", begin), ("--end", end)] {
+                if let Some(bound) = bound {
+                    argv.extend([flag.to_string(), bound]);
+                }
+            }
+            let args = match crate::parse::parse_arguments(&argv, &runtime.dates) {
+                Ok(args) => args,
+                Err(error) => return SuccessTuple::fail(error.message),
+            };
+            let sync_args = native::sync::SyncArgs::from_args(&args);
+            let mut selected = native::pipes::SelectedPipe {
+                pipe,
+                id: None,
+                hydrated: false,
+            };
+            if verify {
+                native::verify::verify_pipe(
+                    &mut runtime,
+                    &session,
+                    &instance,
+                    &mut selected,
+                    &args,
+                    &sync_args,
+                )
+            } else {
+                native::sync::sync_pipe(
+                    &mut runtime,
+                    &session,
+                    &instance,
+                    &mut selected,
+                    &sync_args,
+                )
+            }
+        })
+        .await
+        .unwrap_or_else(|error| SuccessTuple::fail(error.to_string()))
+    }
+
+    /// Run a command line (`["plan", "pipelines", ...]`) the way the server runs actions, with
+    /// what it prints captured: the action's result and its output.
+    async fn run_captured(&self, argv: Vec<String>) -> Result<(SuccessTuple, String), String> {
+        meerschaum_server::executor::context::action_request_scope(async {
+            let caller = meerschaum_server::executor::context::current();
+            let api_worker = self.api_worker(caller.as_ref()).await?;
+            if let Some(executors) = &self.executors
+                && let Some(team) = executors.command_team(&argv, &self.session).await?
+            {
+                return executors.run(&team, argv).await;
+            }
+            if api_worker {
+                let executors = self
+                    .executors
+                    .as_ref()
+                    .ok_or("The canonical API execution runtime is unavailable.")?;
+                return meerschaum_server::executor::context::scope(
+                    caller,
+                    executors.run_host_api(argv),
+                )
+                .await;
+            }
+            let backend = self.clone();
+            let acting = meerschaum_connector::acting_team::current();
+            tokio::task::spawn_blocking(move || {
+                let mut out: Vec<u8> = Vec::new();
+                let result = {
+                    let mut runtime = Runtime::system(&mut out);
+                    // A server console is not a terminal session: no spinners, no colored graphs.
+                    runtime.progress = crate::format::progress::ProgressSink::Off;
+                    runtime.live = false;
+                    let (session, config) =
+                        backend.scoped(acting.as_deref()).map_err(|e| e.message)?;
+                    runtime.native = Some(session);
+                    runtime.config = Some(config);
+                    let args = crate::parse::parse_arguments(&argv, &runtime.dates)
+                        .map_err(|e| e.message)?;
+                    meerschaum_core::debug::without_scopes(|| {
+                        crate::dispatch::entry_with_args(args, &mut runtime, 0)
+                    })
+                };
+                Ok((result, String::from_utf8_lossy(&out).into_owned()))
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        })
+        .await
+    }
+}
+
+#[async_trait]
+impl meerschaum_server::backends::PipelinesBackend for NativeBackend {
+    /// `plan pipelines NAME -i REGISTRY --nopretty`: the engine's static plan of the saved
+    /// Pipeline, which moves no data and registers nothing.
+    async fn plan(
+        &self,
+        name: &str,
+        registry: &str,
+        options: &meerschaum_server::backends::PlanOptions,
+    ) -> Result<serde_json::Value, meerschaum_server::backends::PlanError> {
+        use meerschaum_server::backends::PlanError;
+        let caller = meerschaum_server::executor::context::current();
+        if self
+            .api_worker(caller.as_ref())
+            .await
+            .map_err(PlanError::Failed)?
+        {
+            let executors = self.executors.as_ref().ok_or(PlanError::Unavailable)?;
+            return meerschaum_server::executor::context::scope(
+                caller,
+                Box::pin(executors.plan_metadata(name, registry, options)),
+            )
+            .await;
+        }
+        let mut argv: Vec<String> = ["plan", "pipelines", name, "-i", registry, "--nopretty"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        for (flag, value) in [("--begin", &options.begin), ("--end", &options.end)] {
+            if let Some(value) = value {
+                argv.push(flag.into());
+                argv.push(value.clone());
+            }
+        }
+        let (result, output) = self.run_captured(argv).await.map_err(PlanError::Failed)?;
+        // A plan that cannot be made (a missing member, a cycle, a bad bound) is the
+        // Pipeline's problem, not the server's.
+        if !result.success {
+            return Err(PlanError::Invalid(result.message));
+        }
+        let line = output
+            .lines()
+            .rev()
+            .find(|l| l.trim_start().starts_with('{'))
+            .ok_or_else(|| PlanError::Failed("The planner printed no plan.".into()))?;
+        let plan: meerschaum_engine::Plan = serde_json::from_str(line.trim())
+            .map_err(|e| PlanError::Failed(format!("The planner printed an invalid plan: {e}")))?;
+        Ok(serde_json::json!({
+            "plan": plan,
+            "text": plan.to_string(),
+            "warnings": plan.warnings,
+        }))
+    }
+}
+
+pub(crate) fn argument(value: meerschaum_core::Value) -> PyValue {
+    use meerschaum_core::Value;
+    match value {
+        Value::Null => PyValue::None,
+        Value::Bool(value) => PyValue::Bool(value),
+        Value::Int(value) => PyValue::Int(value.into()),
+        Value::Float(value) => PyValue::Float(value),
+        Value::Str(value) => PyValue::Str(value),
+        Value::List(values) => PyValue::List(values.into_iter().map(argument).collect()),
+        Value::Map(values) => PyValue::Dict(
+            values
+                .into_iter()
+                .map(|(key, value)| (PyValue::Str(key), argument(value)))
+                .collect(),
+        ),
+    }
+}
+
+#[async_trait]
+impl meerschaum_server::backends::ActionsBackend for NativeBackend {
+    fn api_execution(&self) -> meerschaum_server::backends::ApiExecution {
+        use meerschaum_server::backends::ApiExecution;
+        if self.http
+            && self.executors.is_some()
+            && cfg!(target_os = "linux")
+            && meerschaum_core::self_exe::native_executable().is_some()
+        {
+            ApiExecution::Tracked {
+                terminals: meerschaum_server::executor::terminal::API_TERMINALS_AVAILABLE,
+            }
+        } else {
+            ApiExecution::Unavailable
+        }
+    }
+
+    async fn accept_pipe_inference(
+        &self,
+        caller: &meerschaum_server::access::Access,
+        change: meerschaum_connector::mutation::MetadataInference,
+    ) -> Result<bool, String> {
+        match &self.executors {
+            Some(controller) => controller.accept_pipe_inference(caller, change).await,
+            None => Ok(false),
+        }
+    }
+
+    async fn extension_catalog(
+        &self,
+    ) -> Result<Option<meerschaum_server::executor::plugins::Validated>, String> {
+        match &self.executors {
+            Some(controller) => controller.extension_catalog().await,
+            None => Ok(None),
+        }
+    }
+    async fn extension_invoke(
+        &self,
+        invocation: meerschaum_server::executor::plugin_handlers::Invocation,
+    ) -> Result<meerschaum_server::executor::plugin_handlers::Reply, String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API is not an executor controller.")?
+            .extension_invoke(invocation)
+            .await
+    }
+    async fn ready_pipe_operation(
+        &self,
+        caller: &meerschaum_server::access::Access,
+        reference: &str,
+    ) -> Result<(), String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API has no native parent-window controller.")?
+            .ready_prepared_child(caller, reference)
+            .await
+    }
+
+    async fn pipe_operation_read(
+        &self,
+        caller: &meerschaum_server::access::Access,
+    ) -> Result<Option<meerschaum_server::executor::pipe_operation::ReadAccess>, String> {
+        match &self.executors {
+            Some(controller) => controller.pipe_operation_read(caller).await,
+            None => Ok(None),
+        }
+    }
+
+    async fn graph_batch(
+        &self,
+        caller: &meerschaum_server::access::Access,
+        request: &meerschaum_connector_api::client::BatchRequest,
+    ) -> Result<Option<meerschaum_connector_api::client::BatchReply>, String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API is not a canonical batch controller.")?
+            .graph_batch(caller, request)
+            .await
+    }
+
+    async fn claim_pipe_batch(
+        &self,
+        caller: &meerschaum_server::access::Access,
+        reference: &str,
+        selector: &meerschaum_connector_api::client::BatchSelector,
+        actual_request_sha256: &str,
+    ) -> Result<meerschaum_connector::mutation::BatchClaimOutcome, String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API is not a native batch controller.")?
+            .claim_pipe_batch(caller, reference, selector, actual_request_sha256)
+            .await
+    }
+
+    async fn confirm_pipe_batch(
+        &self,
+        caller: &meerschaum_server::access::Access,
+        batch: &meerschaum_connector::mutation::NativeBatch,
+    ) -> Result<(), String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API has no native batch controller.")?
+            .confirm_pipe_batch(caller, batch)
+            .await
+    }
+
+    async fn accepted_pipe_batch(
+        &self,
+        caller: &meerschaum_server::access::Access,
+        batch: &meerschaum_connector::mutation::NativeBatch,
+    ) -> Result<meerschaum_connector::mutation::NativeBatchReceipt, String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API has no native batch controller.")?
+            .accepted_pipe_batch(caller, batch)
+            .await
+    }
+
+    async fn prepare_pipe_commit(
+        &self,
+        caller: &meerschaum_server::access::Access,
+        effect: meerschaum_connector::mutation::NativeDataEffect,
+    ) -> Result<Arc<dyn meerschaum_connector::mutation::PendingDataCommit>, String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API is not a canonical commit controller.")?
+            .prepare_pipe_commit(caller, effect)
+            .await
+    }
+
+    fn list(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        crate::actions::CORE_ACTIONS
+            .iter()
+            .map(|action| action.name.to_string())
+            .chain(self.plugin_actions.iter().cloned())
+            .filter(|name| seen.insert(name.clone()))
+            .collect()
+    }
+
+    async fn execute(&self, action: &str, keywords: Map) -> SuccessTuple {
+        meerschaum_server::executor::context::action_request_scope(async {
+            let caller = meerschaum_server::executor::context::current();
+            let api_worker = match self.api_worker(caller.as_ref()).await {
+                Ok(api_worker) => api_worker,
+                Err(error) => return SuccessTuple::fail(error),
+            };
+            if let Some(executors) = &self.executors {
+                if caller
+                    .as_ref()
+                    .is_some_and(|caller| !caller.no_auth && !caller.full_admin())
+                {
+                    use meerschaum_server::executor::pipe_operation::DirectAction;
+                    match DirectAction::capture(action, &keywords) {
+                        Ok(Some(input)) => {
+                            return executors
+                                .run_direct_action(input, &self.session)
+                                .await
+                                .map(|(result, _)| result)
+                                .unwrap_or_else(SuccessTuple::fail);
+                        }
+                        Err(error) => return SuccessTuple::fail(error.detail_text()),
+                        Ok(None) => {}
+                    }
+                }
+                let mut remote_keywords = keywords.clone();
+                for key in ["noask", "yes"] {
+                    remote_keywords
+                        .entry(key.into())
+                        .or_insert(meerschaum_core::Value::Bool(true));
+                }
+                let argv = meerschaum_server::execute_access::sysargs_of_keywords(
+                    action,
+                    &remote_keywords,
+                );
+                match executors.command_team(&argv, &self.session).await {
+                    Err(error) => return SuccessTuple::fail(error),
+                    Ok(Some(team)) => {
+                        return executors
+                            .run(&team, argv)
+                            .await
+                            .map(|(result, _)| result)
+                            .unwrap_or_else(SuccessTuple::fail);
+                    }
+                    Ok(None) => {}
+                }
+                if api_worker {
+                    return meerschaum_server::executor::context::scope(
+                        caller,
+                        executors.run_host_api(argv),
+                    )
+                    .await
+                    .map(|(result, _)| result)
+                    .unwrap_or_else(SuccessTuple::fail);
+                }
+            } else if api_worker {
+                return SuccessTuple::fail("The canonical API execution runtime is unavailable.");
+            }
+            let backend = self.clone();
+            let action = action.to_string();
+            let acting = meerschaum_connector::acting_team::current();
+            tokio::task::spawn_blocking(move || {
+                let mut stderr = std::io::stderr();
+                let mut runtime = Runtime::system(&mut stderr);
+                // A server console is not a terminal session: no spinners, no colored graphs.
+                runtime.progress = crate::format::progress::ProgressSink::Off;
+                runtime.live = false;
+                let (session, config) = match backend.scoped(acting.as_deref()) {
+                    Ok(scoped) => scoped,
+                    Err(error) => return SuccessTuple::fail(error.message),
+                };
+                runtime.native = Some(session);
+                runtime.config = Some(config);
+                let mut args: ArgsMap = keywords
+                    .into_iter()
+                    .map(|(key, value)| (key, argument(value)))
+                    .collect();
+                let mut words = vec![action];
+                words.extend(native::words(&args, "action"));
+                args.insert("action".into(), PyValue::str_list(&words));
+                // A client's `debug` reaches the action, but does not switch on debug output (and
+                // `debug=True` for worker calls) for every request the server is handling.
+                meerschaum_core::debug::without_scopes(|| {
+                    crate::dispatch::entry_with_args(args, &mut runtime, 0)
+                })
+            })
+            .await
+            .unwrap_or_else(|error| SuccessTuple::fail(error.to_string()))
+        })
+        .await
+    }
+
+    /// The dispatcher's own resolution of the step ([`crate::dispatch::resolve_sysargs`]), so a
+    /// word it would hand to the shell is never mistaken for an action.
+    async fn team_execution_probe(
+        &self,
+        team: &meerschaum_core::access::Team,
+    ) -> Option<meerschaum_server::team_execution::HostFacts> {
+        let config = self.config().ok()?;
+        let name = team.name.clone();
+        tokio::task::spawn_blocking(move || crate::team_execution::probe(&config, &name))
+            .await
+            .ok()
+    }
+
+    async fn executor_ready(&self, team: &meerschaum_core::access::Team) -> Result<(), String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API is not an executor controller.")?
+            .prepare(team)
+            .await
+            .map(|_| ())
+    }
+
+    async fn executor_terminal(
+        &self,
+        team: &meerschaum_core::access::Team,
+        caller: &meerschaum_server::access::Access,
+    ) -> Result<meerschaum_server::webterm::remote::Terminal, String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API is not an executor controller.")?
+            .terminal(team, caller)
+            .await
+    }
+
+    async fn revoke_executor_terminal(&self, team_id: uuid::Uuid, owner: &str) {
+        if let Some(controller) = &self.executors {
+            // Revocation is a main control operation, never a request for host execution.
+            meerschaum_server::executor::context::scope(
+                None,
+                controller.revoke_terminal(team_id, owner),
+            )
+            .await;
+        }
+    }
+
+    async fn host_api_terminal(
+        &self,
+        team_id: Option<uuid::Uuid>,
+        caller: &meerschaum_server::access::Access,
+    ) -> Result<meerschaum_server::webterm::remote::Terminal, String> {
+        self.executors
+            .as_ref()
+            .ok_or("This API has no private host terminal runtime.")?
+            .host_terminal(team_id, caller)
+            .await
+    }
+
+    async fn revoke_host_api_terminal(
+        &self,
+        team_id: Option<uuid::Uuid>,
+        owner: &str,
+        credential: &str,
+    ) {
+        if let Some(controller) = &self.executors {
+            meerschaum_server::executor::context::scope(
+                None,
+                controller.revoke_host_terminal(team_id, owner, credential),
+            )
+            .await;
+        }
+    }
+
+    fn team_shell(
+        &self,
+        team: &meerschaum_core::access::Team,
+    ) -> Result<meerschaum_server::webterm::ShellCommand, String> {
+        let config = self.config().map_err(|e| e.message)?;
+        crate::team_execution::team_shell(&config, &team.name)
+    }
+
+    async fn resolve(&self, step: &[String]) -> meerschaum_server::backends::ActionTarget {
+        use crate::dispatch::ActionTarget as Target;
+        use meerschaum_server::backends::ActionTarget;
+        let backend = self.clone();
+        let step = step.to_vec();
+        let target = tokio::task::spawn_blocking(move || {
+            let mut stderr = std::io::sink();
+            let mut runtime = Runtime::system(&mut stderr);
+            runtime.progress = crate::format::progress::ProgressSink::Off;
+            runtime.live = false;
+            runtime.native = Some(backend.session.clone());
+            runtime.config = Some(backend.config().ok()?);
+            Some(meerschaum_core::debug::without_scopes(|| {
+                crate::dispatch::resolve_sysargs(&step, &mut runtime)
+            }))
+        })
+        .await
+        .ok()
+        .flatten();
+        // Anything that cannot be resolved is refused (fail closed).
+        match target {
+            Some(Target::Core(resolved)) => ActionTarget::Action {
+                name: resolved.action.name.to_string(),
+                plugin: None,
+                sub: resolved.sub.map(|sub| sub.name.to_string()),
+            },
+            Some(Target::NativePlugin { plugin, name }) => ActionTarget::Action {
+                name,
+                plugin: Some(plugin),
+                sub: None,
+            },
+            Some(Target::PythonPlugin { plugin, name }) => ActionTarget::Action {
+                plugin: Some(plugin.unwrap_or_else(|| name.clone())),
+                name,
+                sub: None,
+            },
+            Some(Target::Shell) | None => ActionTarget::Shell,
+        }
+    }
+}
+
+#[async_trait]
+impl McpBackend for NativeBackend {
+    /// `Pipe.register()`'s connector half through the session's Python worker (the same ask as
+    /// `register pipes`), so the MCP `register_pipe` tool and `mrsm register pipes` agree.
+    async fn connector_register(&self, pipe: &Pipe) -> ConnectorRegister {
+        let caller = meerschaum_server::executor::context::current();
+        match self.api_worker(caller.as_ref()).await {
+            Err(error) => return ConnectorRegister::Unavailable(error),
+            Ok(true) if !native::pipes::is_python_connector(pipe.connector_keys()) => {
+                return ConnectorRegister::Undefined;
+            }
+            Ok(true) => {
+                let Some(controller) = &self.executors else {
+                    return ConnectorRegister::Unavailable(
+                        "The confined registration runtime is unavailable.".into(),
+                    );
+                };
+                return meerschaum_server::executor::context::scope(
+                    caller,
+                    controller.connector_registration(pipe),
+                )
+                .await
+                .unwrap_or_else(ConnectorRegister::Unavailable);
+            }
+            Ok(false) => {}
+        }
+        let backend = self.clone();
+        let pipe = pipe.clone();
+        let acting = meerschaum_connector::acting_team::current();
+        tokio::task::spawn_blocking(move || {
+            let Ok((session, config)) = backend.scoped(acting.as_deref()) else {
+                return ConnectorRegister::Undefined;
+            };
+            match native::manage::ask_connector_register(&session, &config, &pipe) {
+                None => ConnectorRegister::Undefined,
+                Some(Ok(outcome)) if outcome.valid => {
+                    ConnectorRegister::Parameters(outcome.parameters)
+                }
+                Some(Ok(outcome)) => ConnectorRegister::Invalid(outcome.repr),
+                Some(Err(error)) => {
+                    tracing::warn!("`register()` failed for {pipe}: {error}");
+                    ConnectorRegister::Undefined
+                }
+            }
+        })
+        .await
+        .unwrap_or(ConnectorRegister::Undefined)
+    }
+
+    async fn sync_pipe(
+        &self,
+        pipe: &Pipe,
+        begin: Option<String>,
+        end: Option<String>,
+    ) -> SuccessTuple {
+        self.sync(pipe, begin, end, false).await
+    }
+
+    /// `sync pipes -c CK -m MK -l LK -i IK --parents [N] --children [N]`: the pipe with its
+    /// upstream or downstream pipes, in dependency order (the Syncing Engine).
+    async fn sync_pipe_graph(
+        &self,
+        pipe: &Pipe,
+        begin: Option<String>,
+        end: Option<String>,
+        parents: Option<meerschaum_core::Value>,
+        children: Option<meerschaum_core::Value>,
+    ) -> SuccessTuple {
+        if parents.is_none() && children.is_none() {
+            return self.sync(pipe, begin, end, false).await;
+        }
+        let caller = meerschaum_server::executor::context::current();
+        let api_worker = match self.api_worker(caller.as_ref()).await {
+            Ok(value) => value,
+            Err(error) => return SuccessTuple::fail(error),
+        };
+        if api_worker {
+            let Some(executors) = &self.executors else {
+                return SuccessTuple::fail("The canonical API execution runtime is unavailable.");
+            };
+            let operation = meerschaum_server::executor::pipe_operation::PipeOperation {
+                row_params: None,
+                pipe_ref: format!(
+                    "{}|{}|{}|{}",
+                    pipe.instance_keys(),
+                    pipe.connector_keys(),
+                    pipe.metric_key(),
+                    pipe.location_key().unwrap_or("None")
+                ),
+                registration: meerschaum_core::Value::Null,
+                verify: false,
+                begin,
+                end,
+                parents,
+                children,
+                metadata: None,
+            };
+            return meerschaum_server::executor::context::scope(
+                caller,
+                executors.run_pipe_operation(operation, &self.session),
+            )
+            .await
+            .map(|(result, _)| result)
+            .unwrap_or_else(SuccessTuple::fail);
+        }
+        let mut argv: Vec<String> = vec![
+            "sync".into(),
+            "pipes".into(),
+            "-c".into(),
+            pipe.connector_keys().into(),
+            "-m".into(),
+            pipe.metric_key().into(),
+            "-l".into(),
+            pipe.location_key().unwrap_or("None").into(),
+            "-i".into(),
+            pipe.instance_keys().into(),
+        ];
+        for (flag, depth) in [("--parents", parents), ("--children", children)] {
+            match depth {
+                Some(meerschaum_core::Value::Int(n)) => argv.push(format!("{flag}={n}")),
+                Some(_) => argv.push(flag.into()),
+                None => {}
+            }
+        }
+        for (flag, bound) in [("--begin", begin), ("--end", end)] {
+            if let Some(bound) = bound {
+                argv.extend([flag.to_string(), bound]);
+            }
+        }
+        match self.run_captured(argv).await {
+            Ok((result, _)) => result,
+            Err(error) => SuccessTuple::fail(error),
+        }
+    }
+
+    async fn verify_pipe(
+        &self,
+        pipe: &Pipe,
+        begin: Option<String>,
+        end: Option<String>,
+    ) -> SuccessTuple {
+        self.sync(pipe, begin, end, true).await
+    }
+
+    async fn read_sql(
+        &self,
+        connector_keys: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<meerschaum_core::Value>, SqlReadError> {
+        let backend = self.clone();
+        let keys = connector_keys.to_string();
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || {
+            let config = backend.config().map_err(|_| SqlReadError::Unsupported)?;
+            let session = backend.session.clone();
+            let instance = session
+                .instance(&keys, &config)
+                .map_err(|_| SqlReadError::Unsupported)?;
+            let sql = instance.sql().ok_or(SqlReadError::Unsupported)?;
+            let frame = session
+                // A protected connector runs only a read statement, read-only.
+                .block_on(sql.read_raw(&query))
+                .map_err(|_| SqlReadError::Failed)?;
+            let json = meerschaum_server::serialize::data_to_json(
+                &frame,
+                &meerschaum_server::serialize::DataJsonOptions {
+                    epoch: false,
+                    date_unit: meerschaum_server::serialize::DateUnit::Ms,
+                    double_precision: 10,
+                    geometry_format: meerschaum_kernel::serialize::GeometryFormat::WkbHex,
+                },
+            );
+            let mut rows: Vec<meerschaum_core::Value> =
+                serde_json::from_str(&json).map_err(|_| SqlReadError::Failed)?;
+            rows.truncate(limit);
+            Ok(rows)
+        })
+        .await
+        .map_err(|_| SqlReadError::Failed)?
+    }
+}
+
+/// What follows a team's rename or deletion through the API server: its connector
+/// reservations (`teams: [<name>]`) move to the new name or are retired (no later team of the
+/// deleted team's name inherits its connector or database), then its Grafana organization.
+struct TeamFollowers {
+    config: Arc<meerschaum_core::config::Config>,
+    grafana: meerschaum_web::grafana::GrafanaTeams,
+    scopes: crate::team_scopes::TeamScopes,
+}
+
+impl TeamFollowers {
+    fn reservations(&self, from: &str, to: &str) -> Result<(), String> {
+        self.config
+            .move_team_reservations(from, to)
+            .map(|_| ())
+            .map_err(|e| format!("The connectors reserved for team '{from}' were not updated: {e}"))
+    }
+}
+
+#[async_trait::async_trait]
+impl meerschaum_server::backends::TeamEvents for TeamFollowers {
+    async fn renamed(&self, team: &meerschaum_core::access::Team, old: &str) -> Result<(), String> {
+        let notes: Vec<String> = [
+            self.reservations(old, &team.name),
+            self.grafana.renamed(team, old).await,
+            self.scopes.refresh().await.map(|_| ()),
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if notes.is_empty() {
+            Ok(())
+        } else {
+            Err(notes.join("\n"))
+        }
+    }
+
+    async fn changed(&self) -> Result<(), String> {
+        self.scopes.refresh().await.map(|_| ())
+    }
+
+    async fn deleted(&self, team: &meerschaum_core::access::Team) -> Result<(), String> {
+        let retired = meerschaum_core::access::retired_reservation(&team.name, team.id.as_deref());
+        let notes: Vec<String> = [
+            self.reservations(&team.name, &retired),
+            self.grafana.deleted(team).await,
+            self.scopes.refresh().await.map(|_| ()),
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if notes.is_empty() {
+            Ok(())
+        } else {
+            Err(notes.join("\n"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn tracked_api_requires_native_provenance_in_a_fresh_host_process() {
+        use meerschaum_server::backends::{ActionsBackend, ApiExecution};
+        const CHILD: &str = "MRSM_TEST_TRACKED_API_CAPABILITY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "server::tests::tracked_api_requires_native_provenance_in_a_fresh_host_process",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        assert!(meerschaum_core::self_exe::native_executable().is_none());
+        meerschaum_core::self_exe::set_self_command(vec![
+            "python3".into(),
+            "-P".into(),
+            "-m".into(),
+            "meerschaum".into(),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let mut options = ConfigOptions::with_env(vec![
+            ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+            (
+                "MRSM_PLUGINS_DIR".into(),
+                root.path().join("plugins").display().to_string(),
+            ),
+        ]);
+        options.home = root.path().into();
+        options.allow_writes = false;
+        let session = Session::new();
+        let instance = session
+            .block_on(meerschaum_connector_sql::SqlConnector::from_uri(
+                "main",
+                &format!("sqlite:///{}", root.path().join("main.db").display()),
+            ))
+            .unwrap();
+        let controller = Arc::new(crate::executor_client::Controller::new(
+            root.path().into(),
+            Arc::new(instance),
+            options.clone(),
+            Map::new(),
+        ));
+        let mut backend = NativeBackend {
+            http: true,
+            options,
+            snapshot: Map::new(),
+            session,
+            plugin_actions: Vec::new(),
+            executors: Some(controller),
+        };
+        assert_eq!(
+            backend.api_execution(),
+            ApiExecution::Unavailable,
+            "A configured Python entry point claimed native confinement."
+        );
+        meerschaum_core::self_exe::register_native_current_executable().unwrap();
+        assert_eq!(
+            backend.api_execution(),
+            ApiExecution::Tracked {
+                terminals: meerschaum_server::executor::terminal::API_TERMINALS_AVAILABLE,
+            }
+        );
+        backend.http = false;
+        assert_eq!(backend.api_execution(), ApiExecution::Unavailable);
+        backend.http = true;
+        backend.executors = None;
+        assert_eq!(backend.api_execution(), ApiExecution::Unavailable);
+    }
+
+    #[test]
+    fn console_repairs_only_missing_dependencies_with_python_package_present() {
+        use meerschaum_server::host::ConsoleProbe;
+        let probe = |names: &[&str]| ConsoleProbe {
+            available: names.is_empty(),
+            missing: names.iter().map(|s| (*s).into()).collect(),
+        };
+        assert_eq!(
+            console_dependencies(&probe(&["dash", "jwt"])),
+            vec!["dash>=4.1.0", "PyJWT>=2.15.0"]
+        );
+        assert!(console_dependencies(&probe(&["meerschaum", "dash"])).is_empty());
+        assert!(console_dependencies(&probe(&["no Python interpreter"])).is_empty());
+        assert!(console_dependencies(&probe(&[])).is_empty());
+        for name in meerschaum_server::host::CONSOLE_MODULES
+            .iter()
+            .filter(|n| **n != "meerschaum")
+        {
+            assert_eq!(console_dependencies(&probe(&[name])).len(), 1, "{name}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_signals_are_registered_before_wait_is_polled() {
+        const CHILD_SIGNAL: &str = "MRSM_TEST_SERVER_REGISTRATION_SIGNAL";
+        const TEST: &str = "server::tests::shutdown_signals_are_registered_before_wait_is_polled";
+        if let Some(signum) = std::env::var_os(CHILD_SIGNAL) {
+            let signum: i32 = signum.to_str().unwrap().parse().unwrap();
+            assert!(matches!(
+                signum,
+                signal_hook::consts::SIGINT | signal_hook::consts::SIGTERM
+            ));
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let mut shutdown = ShutdownSignal::new().unwrap();
+                // Deliver only to this owned child, before wait() has even been constructed.
+                signal_hook::low_level::raise(signum).unwrap();
+                tokio::time::timeout(Duration::from_secs(5), shutdown.wait())
+                    .await
+                    .expect("registered signal was lost before the first wait poll")
+                    .unwrap();
+            });
+            return;
+        }
+        for signum in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", TEST, "--nocapture"])
+                .env(CHILD_SIGNAL, signum.to_string())
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        assert!(
+                            status.success(),
+                            "registration child for {signum} exited {status}"
+                        );
+                        break;
+                    }
+                    Ok(None) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    result => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        panic!("registration child for {signum} did not finish: {result:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn server_flags_preserve_cli_values() {
+        let args = ArgsMap::from_iter([
+            ("port".into(), PyValue::Int(8123)),
+            ("production".into(), PyValue::Bool(true)),
+            ("secure".into(), PyValue::Bool(true)),
+            ("no_dash".into(), PyValue::Bool(true)),
+            ("mrsm_instance".into(), PyValue::Str("sql:wiring".into())),
+        ]);
+        let flags = flags(&args).unwrap();
+        assert_eq!(flags.port, Some(8123));
+        assert_eq!(flags.instance.as_deref(), Some("sql:wiring"));
+        assert!(flags.production && flags.secure && flags.no_dash);
+    }
+
+    #[test]
+    fn invalid_port_is_rejected() {
+        let args = ArgsMap::from_iter([("port".into(), PyValue::Int(65536))]);
+        assert!(flags(&args).is_err());
+    }
+
+    /// `--keyfile` / `--certfile` (and the `ssl_*` keys under `api:server`, or 4.1's
+    /// `api:uvicorn`) serve HTTPS; half a pair or a bad file stops `start api` with the reason.
+    #[test]
+    fn https_options_prepare_or_refuse() {
+        let root = tempfile::tempdir().unwrap();
+        let config_with = |patch: &str| {
+            let mut env = vec![("MRSM_ROOT_DIR".into(), root.path().display().to_string())];
+            if !patch.is_empty() {
+                env.push(("MRSM_CONFIG".into(), patch.to_string()));
+            }
+            Config::new(ConfigOptions::with_env(env)).unwrap()
+        };
+        let server = |args: &ArgsMap, config: &Config| {
+            ServerConfig::from_config(config, &flags(args).unwrap())
+        };
+        let plain = config_with("");
+        let mut cfg = server(&ArgsMap::new(), &plain);
+        assert!(prepare_https(&mut cfg).unwrap().is_none());
+        assert!(cfg.internal_addr.is_none());
+
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let key = root.path().join("key.pem");
+        let cert = root.path().join("cert.pem");
+        std::fs::write(&key, certified.signing_key.serialize_pem()).unwrap();
+        std::fs::write(&cert, certified.cert.pem()).unwrap();
+        let path = |p: &std::path::Path| PyValue::Str(p.display().to_string());
+        let both = ArgsMap::from_iter([
+            ("keyfile".into(), path(&key)),
+            ("certfile".into(), path(&cert)),
+        ]);
+        let mut cfg = server(&both, &plain);
+        let https = prepare_https(&mut cfg).unwrap().expect("HTTPS");
+        // The API host calls back on the loopback-only plain listener.
+        let internal = cfg.internal_addr.expect("the internal listener");
+        assert!(internal.ip().is_loopback());
+        assert_eq!(https.internal_addr(), Some(internal));
+        assert_eq!(
+            meerschaum_server::tls::internal_url(&cfg),
+            format!("http://{internal}")
+        );
+
+        let one = ArgsMap::from_iter([("certfile".into(), path(&cert))]);
+        let text = prepare_https(&mut server(&one, &plain)).unwrap_err();
+        assert!(
+            text.contains("only the certificate is set") && text.contains("`--certfile`"),
+            "{text}"
+        );
+        // The certificate as the key: the files are swapped.
+        let swapped = ArgsMap::from_iter([
+            ("keyfile".into(), path(&cert)),
+            ("certfile".into(), path(&key)),
+        ]);
+        let text = prepare_https(&mut server(&swapped, &plain)).unwrap_err();
+        assert!(text.contains("swapped"), "{text}");
+
+        for section in ["server", "uvicorn"] {
+            let config = config_with(&format!(
+                r#"{{"api": {{"{section}": {{"ssl_keyfile": "/etc/ssl/key.pem"}}}}}}"#
+            ));
+            let mut cfg = server(&ArgsMap::new(), &config);
+            let text = prepare_https(&mut cfg).unwrap_err();
+            assert!(
+                text.contains(&format!("`api:{section}:ssl_keyfile`")),
+                "{text}"
+            );
+            assert_eq!(
+                cfg.notices
+                    .iter()
+                    .any(|n| n.contains("'api:uvicorn:ssl_keyfile' is deprecated")),
+                section == "uvicorn",
+                "{:?}",
+                cfg.notices
+            );
+        }
+        let empty = config_with(r#"{"api": {"uvicorn": {"ssl_certfile": ""}}}"#);
+        assert!(
+            prepare_https(&mut server(&ArgsMap::new(), &empty))
+                .unwrap()
+                .is_none()
+        );
+        // Empty flags turn off the configured pair (`start gui` serves plain HTTP on loopback).
+        let configured = config_with(
+            &serde_json::json!({"api": {"server": {
+                "ssl_keyfile": key.display().to_string(),
+                "ssl_certfile": cert.display().to_string(),
+            }}})
+            .to_string(),
+        );
+        assert!(
+            prepare_https(&mut server(&ArgsMap::new(), &configured))
+                .unwrap()
+                .is_some()
+        );
+        let off = ArgsMap::from_iter([
+            ("keyfile".into(), PyValue::Str(String::new())),
+            ("certfile".into(), PyValue::Str(String::new())),
+        ]);
+        assert!(
+            prepare_https(&mut server(&off, &configured))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn mcp_reads_sqlite_with_row_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = tempfile::tempdir().unwrap();
+        let options = ConfigOptions::with_env(vec![
+            ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+            (
+                "MRSM_PLUGINS_DIR".into(),
+                plugins.path().display().to_string(),
+            ),
+        ]);
+        let config = Config::new(options.clone()).unwrap();
+        let session = Session::new();
+        let backend = NativeBackend {
+            http: false,
+            options,
+            snapshot: config.snapshot(),
+            session: session.clone(),
+            plugin_actions: Vec::new(),
+            executors: None,
+        };
+        let rows = session
+            .block_on(backend.read_sql("sql:local", "SELECT 1 AS n UNION ALL SELECT 2 AS n", 1))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(rows).unwrap(),
+            serde_json::json!([{ "n": 1 }])
+        );
+        let invalid = session.block_on(backend.read_sql(
+            "sql:local",
+            "SELECT * FROM wiring_missing_table",
+            1,
+        ));
+        assert_eq!(invalid, Err(SqlReadError::Failed));
+    }
+}

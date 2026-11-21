@@ -509,7 +509,7 @@ fn decoded_views(text: &str) -> BTreeSet<String> {
 
 /// `text` with what looks like a secret ([`mask_text`]) and every known secret value masked.
 pub fn scrub(text: &str, secrets: &[String]) -> String {
-    // 5.1: every value a secret reference produced is a secret, whatever its name.
+    // Every value a secret reference produced is a secret, whatever its name.
     let known = meerschaum_core::config::secrets::known_values();
     let with_known;
     let secrets = if known.is_empty() {

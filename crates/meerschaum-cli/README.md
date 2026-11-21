@@ -83,7 +83,7 @@ contents for the parity fixtures.
   with the Gantt chart; on a terminal (`Runtime::live`, set only by `Runtime::system`) it also
   shows the run inline while it goes (below). Flat runs and `--nopretty` keep v4's output.
 
-### Inline live view of graph runs (`src/format/live.rs`, `src/native/sync_live.rs`)
+### Inline live view of graph runs (`src/format/live.rs`, `src/native/sync/live.rs`)
 
 Graph `sync pipes` runs and `sync pipelines` on an ANSI terminal (not `--nopretty` / `--debug`)
 keep a region at the bottom of the terminal: a header and one row per running node (chunks, rows so
@@ -180,20 +180,22 @@ worker limits and continuous/listening mode. `native/engine.rs` resolves native 
 wraps them in `PythonRegistry`. Same-instance SQL uses a compatibility adapter which preserves
 v4's in-place output and writes the engine's delta ledger around the commit.
 
-`server.rs` hosts `start api` and `start mcp`: native HTTP/MCP backends, a shared worker session,
+`server/` hosts `start api` and `start mcp`: native HTTP/MCP backends, a shared worker session,
 and a supervised Python API host selected by the manifest. MCP stdout contains protocol messages
 only. Every standard action is native (`src/native/`); Python runs only a plugin's own code,
 through the worker. `python` keeps its native interpreter launch.
 
-### Teams and team executors (`executor_*`, `team_*`, `source_fetch_*`, `server_executor.rs`)
+### Teams and team executors (`executor/`, `executor_*`, `team_*`, `source_fetch_*`, `server/executor/`)
 
 Both sides of team executors live here: the main API's client, job catalog and placement
-(`executor_client*`, `executor_jobs.rs`, `executor_registry.rs`, `executor_stack.rs`), the executor
-process of `mrsm start executor` (`server_executor.rs`, `executor_context*.rs`), sandbox enforcement
-at process start (`team_sandbox.rs`, `team_python.rs`, `executor_terminal_guard.rs`, called first
-from `run.rs`), team execution's probe and shells (`team_execution.rs`), and the canonical source
-broker (`source_fetch_*`). Many of these files are attached to a parent module with `#[path]`, so
-search by file name. The map of the subsystem, its trust boundaries and its tests is
+(`executor_client/`, `executor_jobs/`, `executor_registry.rs`, `executor_stack.rs`,
+`executor_profiles.rs`), the executor process of `mrsm start executor` (`server/executor/`,
+`executor/contexts/`), the crate-internal executor machinery (`executor/`: confined compiler,
+Factory, host API-only runtime, plugin objects), sandbox enforcement at process start
+(`team_sandbox/`, `executor/terminal_guard.rs`, called first from `run.rs`), team execution's probe
+and shells (`team_execution.rs`), and the canonical source broker (`source_fetch_backend/`,
+`source_fetch_postgres.rs`, `source_fetch_snapshot/`). The file layout follows the module tree, and
+each directory's `mod.rs` says what its children are for. The map of the subsystem, its trust boundaries and its tests is
 `docs/agents/teams-and-executors.md`.
 
 ### Tests and fixtures

@@ -63,8 +63,8 @@ impl Controller {
             let root = self.root.clone();
             let hashes = tokio::task::spawn_blocking(move || {
                 let (sources, _) =
-                    crate::executor_host_jobs::plugin_sources(&caller, &directories)?;
-                crate::executor_plugin_files::Store::new(&root)?
+                    crate::executor::host_jobs::plugin_sources(&caller, &directories)?;
+                crate::executor::plugin_files::Store::new(&root)?
                     .snapshot(&sources, None)
                     .map(|snapshot| snapshot.hashes)
             })
@@ -152,8 +152,8 @@ impl Controller {
                 let root = self.root.clone();
                 let expected = hashes.clone();
                 tokio::task::spawn_blocking(move || {
-                    let (sources, _) = crate::executor_host_jobs::plugin_sources(&caller, &directories)?;
-                    let snapshot = crate::executor_plugin_files::Store::new(&root)?.snapshot(&sources, None)?;
+                    let (sources, _) = crate::executor::host_jobs::plugin_sources(&caller, &directories)?;
+                    let snapshot = crate::executor::plugin_files::Store::new(&root)?.snapshot(&sources, None)?;
                     if snapshot.hashes != expected {
                         return Err("The original Host plugin content or grant set changed. Recreate the job explicitly.".into());
                     }

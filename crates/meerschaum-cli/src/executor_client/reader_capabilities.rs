@@ -49,7 +49,7 @@ struct Inputs {
     caller: Access,
     team: Option<Team>,
     generation: Option<Uuid>,
-    host_jobs: Option<std::sync::Arc<crate::executor_host_jobs::HostJobs>>,
+    host_jobs: Option<std::sync::Arc<crate::executor::host_jobs::HostJobs>>,
 }
 impl Controller {
     /// A saved graph may reread the evidence created for its original submission.
@@ -208,12 +208,12 @@ fn seed(inputs: &Inputs) -> Result<plugins::Validated, String> {
         )
     } else {
         let (sources, grants) =
-            crate::executor_host_jobs::plugin_sources(&inputs.caller, &inputs.directories)
+            crate::executor::host_jobs::plugin_sources(&inputs.caller, &inputs.directories)
                 .map_err(|_| UNAVAILABLE)?;
         if grants.is_empty() {
             return Err(UNAVAILABLE.into());
         }
-        let files = crate::executor_plugin_files::inspect(&inputs.root, &sources)
+        let files = crate::executor::plugin_files::inspect(&inputs.root, &sources)
             .map_err(|_| UNAVAILABLE)?;
         let generation =
             std::str::from_utf8(&regular(&inputs.root.join("executor-host-identity"), 64)?)

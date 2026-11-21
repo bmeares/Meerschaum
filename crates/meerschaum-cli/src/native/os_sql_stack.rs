@@ -51,7 +51,7 @@ pub fn os(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .config()
         .get(&["shell", "timeout"])
         .and_then(|v| pyfmt::py_int(&v).map(|n| (n, v.py_str())));
-    // The user's own command: it keeps the whole environment, like `sh` (5.1).
+    // The user's own command: it keeps the whole environment, like `sh`.
     let spec = CommandSpec {
         scrub_secrets: false,
         program: command[0].clone(),
@@ -839,7 +839,7 @@ pub(crate) fn stack_env_dict() -> Map {
     env
 }
 
-/// The network between the stack's API server and its Grafana (`api:grafana`, 5.1): Grafana
+/// The network between the stack's API server and its Grafana (`api:grafana`): Grafana
 /// trusts the auth-proxy header from the API server's fixed address on it only.
 pub const GRAFANA_PROXY_NETWORK: &str = "grafana_auth";
 
@@ -873,8 +873,8 @@ pub fn grafana_proxy_addresses(
     ))
 }
 
-/// What the stack's Grafana is given for the API server to sign its users in (`api:grafana`,
-/// 5.1). `forced`: set over whatever the stack config has (the auth proxy and the server
+/// What the stack's Grafana is given for the API server to sign its users in (`api:grafana`).
+/// `forced`: set over whatever the stack config has (the auth proxy and the server
 /// administrator); `defaults`: set only when missing (served under `/grafana`). Anonymous access
 /// is left as the stack config has it.
 ///
@@ -1006,7 +1006,7 @@ fn patched_api_patch(existing: Option<&str>, admin_password: &str) -> Option<Str
     serde_json::to_string_pretty(&patch).ok()
 }
 
-/// The compose file's config with what `api:grafana:enabled` needs (5.1): the `grafana` service
+/// The compose file's config with what `api:grafana:enabled` needs: the `grafana` service
 /// gets [`grafana_sign_in_environment`] (security settings forced, the others only when
 /// missing); when the stack has an `api` service, both join [`GRAFANA_PROXY_NETWORK`] at fixed
 /// addresses, the API server reaches `grafana` there (`extra_hosts`), and it is given the
@@ -1166,7 +1166,7 @@ fn with_grafana_sign_in(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value) -
 }
 
 /// The stack's provisioned "Meerschaum Main" data source reads through the main read-only role
-/// (5.1, [`super::stack_readonly`]): the data source file gets the role's credentials, the
+/// ([`super::stack_readonly`]): the data source file gets the role's credentials, the
 /// compose file the one-shot service that sets the role up before Grafana starts. `warn`: tell
 /// the user what could not be done (once per command).
 fn with_main_readonly(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value, warn_: bool) -> Value {
@@ -1286,8 +1286,8 @@ fn with_main_readonly(rt: &mut Runtime<'_>, keys: &[&str], mut value: Value, war
     value
 }
 
-/// The compose file's config with the services' credentials in files (5.1,
-/// [`super::stack_secrets`]): the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (when its image
+/// The compose file's config with the services' credentials in files
+/// ([`super::stack_secrets`]): the `api` service's `MRSM_CONFIG` / `MRSM_PATCH` (when its image
 /// reads `MRSM_CONFIG_FILE`, see [`super::stack_secrets::api_form`]), Grafana's administrator
 /// password and the `grafana_readonly` service's passwords. The files are written here; when
 /// they cannot be, the config is returned as it was (a container never starts without its
@@ -1347,7 +1347,7 @@ fn with_secret_files(rt: &mut Runtime<'_>, keys: &[&str], value: Value, warn_: b
     }
 }
 
-/// The password the stack's Valkey requires (5.1, [`super::stack_secrets::externalize_valkey`])
+/// The password the stack's Valkey requires ([`super::stack_secrets::externalize_valkey`])
 /// and what to tell the user: `valkey:main`'s password. When it has none, one is generated once
 /// (owner-only, in the secrets directory, as Grafana's administrator password is when unset) and
 /// given to the `api` service through its `MRSM_PATCH`, with a warning saying how to point
@@ -1493,7 +1493,7 @@ fn sync_yaml_config(
     if let Some(parent) = sub_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    // 5.1: a compose file that still holds a credential (an image that keeps the environment
+    // A compose file that still holds a credential (an image that keeps the environment
     // form, a service of the user's own) is readable by its owner only.
     let owner_only = keys == ["stack", "docker-compose.yaml"]
         && meerschaum_core::config::sync::compose_holds_credentials(&value);
@@ -1961,13 +1961,13 @@ mod compose_writer_tests {
     }
 
     /// A stack without a `grafana` service and without the `api` service's configuration is
-    /// still written by the core sync (nothing to harden). 5.1: with the `api` service's
+    /// still written by the core sync (nothing to harden). With the `api` service's
     /// `MRSM_CONFIG`, the core sync leaves it to `mrsm stack`, which moves it to a file.
     #[test]
     fn the_core_sync_writes_a_compose_file_without_grafana() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("config")).unwrap();
-        // 5.1: nor a `valkey` service (`mrsm stack` gives it its password in a file).
+        // Nor a `valkey` service (`mrsm stack` gives it its password in a file).
         let patch = r#"{"stack": {"docker-compose.yaml": {"services":
             {"grafana": null, "api": null, "valkey": null}}}}"#;
         let (by_stack, by_core) = compose_after(dir.path(), &[("MRSM_CONFIG", patch)], false);
@@ -2012,7 +2012,7 @@ mod compose_writer_tests {
         }
     }
 
-    /// 5.1: the default stack's compose file holds paths, not credentials; the `api` service
+    /// The default stack's compose file holds paths, not credentials; the `api` service
     /// reads them from files only its owner's directory reaches.
     #[test]
     fn the_stack_passes_the_api_its_configuration_by_file() {
@@ -2100,7 +2100,7 @@ docker-compose.yaml:
         }
     }
 
-    /// 5.1: the stack's Valkey requires `valkey:main`'s password (its images ignore
+    /// The stack's Valkey requires `valkey:main`'s password (its images ignore
     /// `VALKEY_PASSWORD`): a configuration file in its own secrets subdirectory, mounted
     /// read-only, and no password in the compose file.
     #[test]
@@ -2132,7 +2132,7 @@ docker-compose.yaml:
         }
     }
 
-    /// 5.1: `valkey:main` without a password: one is generated once (owner-only), the stack's
+    /// `valkey:main` without a password: one is generated once (owner-only), the stack's
     /// Valkey requires it and the `api` service is given it; the next write keeps it.
     #[test]
     fn a_stack_without_a_valkey_password_gets_a_generated_one() {
@@ -2194,7 +2194,7 @@ docker-compose.yaml:
         let (compose, secrets) =
             stack_files(dir.path(), &[("MRSM_CONFIG", SECRET_CONFIG)], Some(old));
         assert!(compose.contains("MRSM_CONFIG: "), "{compose}");
-        // 5.1: the environment form holds the credentials: the file is owner-only.
+        // The environment form holds the credentials: the file is owner-only.
         #[cfg(unix)]
         assert_eq!(mode(&compose_path), 0o600);
         assert!(!compose.contains("MRSM_CONFIG_FILE"), "{compose}");

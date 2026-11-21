@@ -62,7 +62,7 @@ impl HostEnv {
 
     /// The connector `keys` from the session (built on first use).
     pub(super) fn connector(&self, keys: &str) -> Result<crate::native::Instance, String> {
-        // 5.1: a Python instance connector (a plugin's type) built for a request of an isolated
+        // A Python instance connector (a plugin's type) built for a request of an isolated
         // team runs in that team's workers, with its configuration. Rust connectors are the
         // server's (the routes check the team's access to them).
         if !matches!(keys.split(':').next(), Some("sql" | "api" | "valkey"))

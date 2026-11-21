@@ -129,13 +129,13 @@ pub struct Session {
     manifests: Arc<Mutex<ManifestState>>,
     /// Trusted host attachment; frozen before any manifest/discovery, shared by all children.
     source_compiler: Arc<OnceLock<CompilerPolicy>>,
-    /// The isolated teams' pools and sessions of this process (5.1), shared by clones.
+    /// The isolated teams' pools and sessions of this process, shared by clones.
     teams: Arc<TeamSessions>,
     /// The team this session runs for (a team's session, [`Session::for_team`]).
     team: Option<Arc<TeamBinding>>,
 }
 
-/// The isolated teams' sessions of a process (5.1): one per team, rebuilt when the team's
+/// The isolated teams' sessions of a process: one per team, rebuilt when the team's
 /// configuration changes, with the pools under one limit.
 #[derive(Default)]
 struct TeamSessions {
@@ -295,7 +295,7 @@ impl Session {
         self.team.as_ref()
     }
 
-    /// The isolated teams' pools of this process (5.1), created with the limit of `config`
+    /// The isolated teams' pools of this process, created with the limit of `config`
     /// (`system.engine.python_team_workers`) on first use.
     pub fn team_pools(&self, config: &Config) -> TeamPools {
         self.teams
@@ -304,7 +304,7 @@ impl Session {
             .clone()
     }
 
-    /// The session of an isolated team (5.1): its own connectors and worker pool, built from the
+    /// The session of an isolated team: its own connectors and worker pool, built from the
     /// team's configuration only ([`meerschaum_core::team_scope::team_config`] of the server's
     /// `config`). Python code the session runs starts in workers that never receive the
     /// server's configuration (`MRSM_CONFIG`, `MRSM_PATCH`, connector variables, config files)
@@ -369,7 +369,7 @@ impl Session {
         let passthrough = ts::Passthrough::from_config(config);
         passthrough.warn_refused();
         let mut team_env = ts::team_env(&base, &[], &files, scope, &fingerprint, &passthrough);
-        // 5.1: the team's filesystem sandbox: each worker restricts itself to these rules before
+        // The team's filesystem sandbox: each worker restricts itself to these rules before
         // it imports anything of the team's (`system.engine.python_team_sandbox`). In `require`
         // mode on a system without Landlock, nothing of the team's starts.
         let sandbox = ts::sandbox::prepare(
@@ -506,7 +506,7 @@ impl Session {
         Ok((child, lookup))
     }
 
-    /// Retire the sessions (and workers) of the teams `keep` refuses (5.1: a deleted team's, or
+    /// Retire the sessions (and workers) of the teams `keep` refuses (a deleted team's, or
     /// one whose configuration changed). Returns the retired teams' keys.
     pub fn retire_teams(&self, keep: impl Fn(&str, &str) -> bool) -> Vec<String> {
         let mut retired = Vec::new();
@@ -1066,7 +1066,7 @@ impl Session {
                 {
                     self.block_on(pool.recycle());
                 }
-                // Team workers hold plugin modules too (5.1).
+                // Team workers hold plugin modules too.
                 if previous.as_ref().is_some_and(|p| **p != manifest)
                     && let Some(pools) = self.teams.pools.get().cloned()
                 {
@@ -1288,7 +1288,7 @@ impl Session {
                         self.pool(config),
                     ))
                     .map_err(|e| {
-                        // A type no plugin declares: say where connectors come from (rc15).
+                        // A type no plugin declares: say where connectors come from.
                         use meerschaum_core::config::connector_types;
                         let paths = config.paths();
                         let known = connector_types::is_builtin_connector_type(&typ)
@@ -1379,7 +1379,7 @@ pub fn sql_spec(label: &str, config: &Config) -> Result<ConnectionSpec, ActionEr
         }
     }
     if attrs.is_empty() {
-        // v4 raised "Missing flavor" here; the connector is defined nowhere (rc15, S4).
+        // v4 raised "Missing flavor" here; the connector is defined nowhere.
         return Err(ActionError::new(
             "ValueError",
             super::connectors::undefined_connector_message("sql", label),
@@ -1484,7 +1484,7 @@ fn sql_attributes(label: &str, attrs: &Map) -> Result<ConnectorAttributes, Actio
     Ok(ca)
 }
 
-/// What a callback from a team's plugin code may do to a pipe (5.1): what a member of the team
+/// What a callback from a team's plugin code may do to a pipe: what a member of the team
 /// may change through the API ([`meerschaum_core::access::can_edit`] of the pipe's stored
 /// access). A pipe that is not registered yet, or on an instance the session has not built, is
 /// left to the team's instance check.
